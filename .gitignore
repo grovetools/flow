@@ -1,0 +1,8 @@
+# Binaries
+bin/
+
+# Go test binary
+*.test
+
+# Go coverage
+*.out
