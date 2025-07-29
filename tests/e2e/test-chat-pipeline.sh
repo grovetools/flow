@@ -1,36 +1,51 @@
 #!/bin/bash
 set -e
 
-# Find grove binary or use go run
-if command -v grove &> /dev/null; then
-    GROVE="grove"
-elif [ -x "../../grove" ]; then
-    GROVE="$(cd ../.. && pwd)/grove"
-elif [ -x "../../../grove" ]; then
-    GROVE="$(cd ../../.. && pwd)/grove"
-elif [ -f "../../cmd/grove/main.go" ]; then
-    GROVE="go run $(cd ../.. && pwd)/cmd/grove/main.go"
+# Use the job binary provided by JOB_CMD or fallback to ../bin/job
+if [ -n "$JOB_CMD" ]; then
+    JOB="$JOB_CMD"
+elif [ -x "../bin/job" ]; then
+    JOB="$(cd .. && pwd)/bin/job"
 else
-    echo "Error: grove binary not found and cannot find main.go"
-    echo "Please build grove first: go build -o grove cmd/grove/main.go"
+    echo "Error: job binary not found"
+    echo "Please build job first: make build"
     exit 1
 fi
 
 echo "=== Grove Orchestration Chat Demo ==="
 echo
 
-# Clean up any previous runs
-rm -rf user-profile-api
+# Create a temporary directory for the test
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
+
+# Save the original directory
+ORIG_DIR=$(pwd)
+
+# Copy test files to temp directory
+cp -r "$ORIG_DIR/fixtures/orchestration-chat-demo/spec.md" "$TEMP_DIR/"
+cp -r "$ORIG_DIR/fixtures/orchestration-chat-demo/mocks" "$TEMP_DIR/"
+cp -r "$ORIG_DIR/fixtures/orchestration-chat-demo/grove.yml" "$TEMP_DIR/"
+
+# Change to temp directory for test execution
+cd "$TEMP_DIR"
+
+# Initialize a git repository for the test
+git init -q
+git config user.email "test@example.com"
+git config user.name "Test User"
+git add .
+git commit -q -m "Initial test setup"
 
 # Step 1: Initialize with chat template
 echo "Step 1: Initializing chat-based plan..."
-$GROVE jobs init ./user-profile-api --spec-file spec.md --template chat
+$JOB jobs init ./user-profile-api --spec-file spec.md --template chat --force
 
 # Step 2: Run initial plan generation
 echo -e "\nStep 2: Generating initial plan..."
 export GROVE_MOCK_LLM_RESPONSE_FILE="$(pwd)/mocks/initial-plan-response.md"
 cd user-profile-api
-$GROVE jobs run plan.md --yes
+$JOB jobs run plan.md --yes
 cd ..
 
 # Step 3: Add user feedback
@@ -51,7 +66,7 @@ EOF
 echo -e "\nStep 4: Refining plan based on feedback..."
 export GROVE_MOCK_LLM_RESPONSE_FILE="$(pwd)/mocks/refine-schema-response.md"
 cd user-profile-api
-$GROVE jobs run plan.md --yes
+$JOB jobs run plan.md --yes
 cd ..
 
 # Step 5: Add final user approval
@@ -69,14 +84,14 @@ EOF
 echo -e "\nStep 6: Transforming chat into executable jobs..."
 export GROVE_MOCK_LLM_RESPONSE_FILE="$(pwd)/mocks/generate-jobs-response.json"
 cd user-profile-api
-$GROVE jobs add-step . --title "Generate Implementation Jobs" --template generate-plan --prompt-file plan.md
-$GROVE jobs run 01-generate-implementation-jobs.md --yes
+$JOB jobs add-step . --title "Generate Implementation Jobs" --template generate-plan --prompt-file plan.md
+$JOB jobs run 01-generate-implementation-jobs.md --yes
 cd ..
 
 # Step 7: Show final status
 echo -e "\nStep 7: Final plan status..."
 cd user-profile-api
-$GROVE jobs status .
+$JOB jobs status .
 cd ..
 
 echo -e "\n=== Demo Complete ==="
@@ -93,7 +108,7 @@ if [ -d "user-profile-api" ]; then
     echo "2. Refined it based on user feedback about database schema"
     echo "3. Generated executable job files"
     echo
-    echo "You can now run 'cd user-profile-api && $GROVE jobs run --all' to execute the implementation."
+    echo "You can now run 'cd user-profile-api && $JOB jobs run --all' to execute the implementation."
 else
     echo "✗ Demo failed - no output directory created"
     exit 1

@@ -1,0 +1,4 @@
+name: reference-prompts-demo
+orchestration:
+  oneshot_model: gemini-2.5-pro
+  # No plans_directory set, so plans will be created relative to current directory

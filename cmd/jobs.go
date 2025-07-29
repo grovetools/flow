@@ -159,12 +159,6 @@ func GetJobsCommand() *cobra.Command {
 	jobsCleanupWorktreesCmd.Flags().DurationVar(&jobsCleanupAge, "age", 24*time.Hour, "Remove worktrees older than this")
 	jobsCleanupWorktreesCmd.Flags().BoolVarP(&jobsCleanupForce, "force", "f", false, "Skip confirmation prompts")
 
-	// Run command flags
-	jobsRunCmd.Flags().BoolVarP(&jobsRunAll, "all", "a", false, "Run all pending jobs")
-	jobsRunCmd.Flags().BoolVar(&jobsRunNext, "next", false, "Run the next available job")
-	jobsRunCmd.Flags().StringVarP(&jobsRunDir, "dir", "d", "", "Plan directory (uses active job if not specified)")
-	jobsRunCmd.Flags().StringVar(&jobsRunModel, "model", "", "Override model for this run")
-
 	// Initialize status command flags
 	InitJobsStatusFlags()
 

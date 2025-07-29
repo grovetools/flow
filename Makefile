@@ -30,8 +30,19 @@ test:
 test-e2e: build
 	@echo "Running jobs end-to-end tests..."
 	@chmod +x tests/e2e/*.sh
-	@# Run the test from the root of the tests directory
-	@cd tests && JOB_CMD=../bin/job ./e2e/test-chat-pipeline.sh
+	@chmod +x tests/e2e/orchestration-tests/*.sh
+	@# Run basic functionality test
+	@cd tests && JOB_CMD=$$(cd .. && pwd)/bin/job ./e2e/test-basic-functionality.sh
+	@echo ""
+	@echo "Running advanced orchestration tests..."
+	@cd tests/e2e/orchestration-tests && JOB_CMD=$$(cd ../../.. && pwd)/bin/job ./test-orchestration-e2e.sh
+	@echo ""
+	@echo "Running reference prompts tests..."
+	@cd tests/e2e/orchestration-tests && JOB_CMD=$$(cd ../../.. && pwd)/bin/job ./test-reference-prompts-e2e.sh
+	@echo ""
+	@echo "Note: Full pipeline test (test-chat-pipeline.sh) is disabled due to git worktree"
+	@echo "      limitations when running in temporary directories. To run it manually:"
+	@echo "      cd tests && ./e2e/test-chat-pipeline.sh"
 
 clean:
 	@echo "Cleaning..."
