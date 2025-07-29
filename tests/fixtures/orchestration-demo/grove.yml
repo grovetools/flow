@@ -1,0 +1,21 @@
+version: "1.0"
+networks: {}
+services: {}
+volumes: {}
+profiles: {}
+agent:
+    enabled: true
+    image: grove-claude-agent:latest
+    logs_path: /Users/solom4/.cache/grove/logs
+    extra_volumes:
+    - /Users/solom4/Documents/nb:/Users/solom4/Documents/nb
+    args: ["--dangerously-skip-permissions"]
+    output_format: text
+settings:
+    project_name: ""
+    default_profile: ""
+    network_name: ""
+    domain_suffix: ""
+
+orchestration:
+  oneshot_model: gemini-2.5-pro

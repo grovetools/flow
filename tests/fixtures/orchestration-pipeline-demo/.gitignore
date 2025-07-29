@@ -1,0 +1,32 @@
+# Git repository files (created at runtime)
+.git/
+.grove-worktrees/
+
+# Plan directories
+todo-plan/
+todo-app/
+my-feature-plan/
+
+# Logs
+.logs/
+*.log
+
+# Node modules (if any get created)
+node_modules/
+packages/*/node_modules/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

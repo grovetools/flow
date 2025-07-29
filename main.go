@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/spf13/cobra"
+	"github.com/grovepm/grove-jobs/cmd"
 )
 
 func main() {
@@ -12,9 +12,8 @@ func main() {
 		"Job orchestration and workflows",
 	)
 
-	rootCmd.Run = func(cmd *cobra.Command, args []string) {
-		cmd.Println("TODO: Implement job")
-	}
+	// Add the jobs command and all its subcommands
+	rootCmd.AddCommand(cmd.GetJobsCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -4,7 +4,7 @@ BINARY_NAME=job
 INSTALL_PATH=/usr/local/bin
 BIN_DIR=bin
 
-.PHONY: all build install uninstall test clean fmt vet lint run
+.PHONY: all build install uninstall test test-e2e clean fmt vet lint run
 
 all: build
 
@@ -26,6 +26,12 @@ uninstall:
 test:
 	@echo "Running tests..."
 	@go test -v ./...
+
+test-e2e: build
+	@echo "Running jobs end-to-end tests..."
+	@chmod +x tests/e2e/*.sh
+	@# Run the test from the root of the tests directory
+	@cd tests && JOB_CMD=../bin/job ./e2e/test-chat-pipeline.sh
 
 clean:
 	@echo "Cleaning..."
@@ -70,6 +76,7 @@ help:
 	@echo "  make install     - Build and install to $(INSTALL_PATH)"
 	@echo "  make uninstall   - Remove from $(INSTALL_PATH)"
 	@echo "  make test        - Run tests"
+	@echo "  make test-e2e    - Run end-to-end tests"
 	@echo "  make clean       - Clean build artifacts"
 	@echo "  make fmt         - Format code"
 	@echo "  make vet         - Run go vet"
