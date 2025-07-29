@@ -346,8 +346,8 @@ func (wm *WorktreeManager) formatWorktreePath(planName, worktreeName string) str
 }
 
 func (wm *WorktreeManager) formatBranchName(planName, worktreeName string) string {
-	// Pattern: grove-jobs/{plan-name}/{worktree-name}
-	return fmt.Sprintf("grove-jobs/%s/%s", sanitizeForPath(planName), worktreeName)
+	// Pattern: grove-flow/{plan-name}/{worktree-name}
+	return fmt.Sprintf("grove-flow/%s/%s", sanitizeForPath(planName), worktreeName)
 }
 
 func (wm *WorktreeManager) getLockPath(name string) string {

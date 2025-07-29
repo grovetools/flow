@@ -5,7 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/grovepm/grove-jobs/pkg/orchestration"
+	"github.com/grovepm/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 

@@ -1,4 +1,4 @@
-module github.com/grovepm/grove-jobs
+module github.com/grovepm/grove-flow
 
 go 1.24.4
 

@@ -1,5 +1,5 @@
-name: grove-jobs
+name: grove-flow
 description: Job orchestration and workflows
 binary:
-  name: job
-  path: ./bin/job
+  name: flow
+  path: ./bin/flow

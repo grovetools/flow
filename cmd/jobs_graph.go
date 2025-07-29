@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/config"
-	"github.com/grovepm/grove-jobs/pkg/orchestration"
+	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
 type JobsGraphCmd struct {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grovepm/grove-jobs/pkg/orchestration"
+	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
 type JobsCleanupWorktreesCmd struct {

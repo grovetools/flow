@@ -1,6 +1,6 @@
-# Makefile for job
+# Makefile for flow
 
-BINARY_NAME=job
+BINARY_NAME=flow
 INSTALL_PATH=/usr/local/bin
 BIN_DIR=bin
 
@@ -32,13 +32,13 @@ test-e2e: build
 	@chmod +x tests/e2e/*.sh
 	@chmod +x tests/e2e/orchestration-tests/*.sh
 	@# Run basic functionality test
-	@cd tests && JOB_CMD=$$(cd .. && pwd)/bin/job ./e2e/test-basic-functionality.sh
+	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-basic-functionality.sh
 	@echo ""
 	@echo "Running advanced orchestration tests..."
-	@cd tests/e2e/orchestration-tests && JOB_CMD=$$(cd ../../.. && pwd)/bin/job ./test-orchestration-e2e.sh
+	@cd tests/e2e/orchestration-tests && FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-orchestration-e2e.sh
 	@echo ""
 	@echo "Running reference prompts tests..."
-	@cd tests/e2e/orchestration-tests && JOB_CMD=$$(cd ../../.. && pwd)/bin/job ./test-reference-prompts-e2e.sh
+	@cd tests/e2e/orchestration-tests && FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-reference-prompts-e2e.sh
 	@echo ""
 	@echo "Note: Full pipeline test (test-chat-pipeline.sh) is disabled due to git worktree"
 	@echo "      limitations when running in temporary directories. To run it manually:"

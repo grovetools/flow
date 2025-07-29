@@ -27,7 +27,7 @@ func NewTestMockLLMClient() *TestMockLLMClient {
 	}
 }
 
-func (m *TestMockLLMClient) Complete(ctx context.Context, prompt string, opts ...CompleteOption) (string, error) {
+func (m *TestMockLLMClient) Complete(ctx context.Context, prompt string, opts LLMOptions) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	

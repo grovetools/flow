@@ -1,14 +1,14 @@
 #!/bin/bash
 set -e
 
-# Use the job binary provided by JOB_CMD or fallback to ../bin/job
-if [ -n "$JOB_CMD" ]; then
-    JOB="$JOB_CMD"
-elif [ -x "../bin/job" ]; then
-    JOB="$(cd .. && pwd)/bin/job"
+# Use the flow binary provided by FLOW_CMD or fallback to ../bin/flow
+if [ -n "$FLOW_CMD" ]; then
+    JOB="$FLOW_CMD"
+elif [ -x "../bin/flow" ]; then
+    JOB="$(cd .. && pwd)/bin/flow"
 else
-    echo "Error: job binary not found"
-    echo "Please build job first: make build"
+    echo "Error: flow binary not found"
+    echo "Please build flow first: make build"
     exit 1
 fi
 

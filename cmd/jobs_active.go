@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/grovepm/grove-jobs/pkg/state"
+	"github.com/grovepm/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
 )
 

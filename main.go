@@ -3,12 +3,12 @@ package main
 import (
 	"os"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/grovepm/grove-jobs/cmd"
+	"github.com/grovepm/grove-flow/cmd"
 )
 
 func main() {
 	rootCmd := cli.NewStandardCommand(
-		"job",
+		"flow",
 		"Job orchestration and workflows",
 	)
 
