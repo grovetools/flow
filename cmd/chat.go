@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -43,7 +44,16 @@ Example:
 	}
 	chatListCmd.Flags().StringVar(&chatStatus, "status", "", "Filter chats by status (e.g., pending_user, completed, running)")
 	
+	chatRunCmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run all outstanding chat jobs that are waiting for an LLM response",
+		Long: `Scans the configured chat directory for all chats where the last turn is from a user
+and executes them sequentially to generate the next LLM response.`,
+		RunE: runChatRun,
+	}
+	
 	chatCmd.AddCommand(chatListCmd)
+	chatCmd.AddCommand(chatRunCmd)
 	return chatCmd
 }
 
@@ -172,8 +182,106 @@ func runChatList(cmd *cobra.Command, args []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "TITLE\tSTATUS\tMODEL\tFILE")
 	for _, chat := range chats {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", chat.Title, chat.Status, chat.Model, filepath.Base(chat.FilePath))
+		// Show relative path from chat directory
+		relPath, err := filepath.Rel(chatDir, chat.FilePath)
+		if err != nil {
+			relPath = filepath.Base(chat.FilePath)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", chat.Title, chat.Status, chat.Model, relPath)
 	}
 	w.Flush()
+	return nil
+}
+
+func runChatRun(cmd *cobra.Command, args []string) error {
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		return err
+	}
+	if flowCfg.ChatDirectory == "" {
+		return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
+	}
+
+	chatDir := flowCfg.ChatDirectory
+	var runnableChats []*orchestration.Job // Store job objects
+
+	// Find all runnable chats by walking the directory
+	err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil // Skip directories or inaccessible files
+		}
+		
+		// Look for all .md files
+		if !strings.HasSuffix(info.Name(), ".md") {
+			return nil
+		}
+
+		// First, load the job to ensure it's a chat type
+		job, loadErr := orchestration.LoadJob(path)
+		if loadErr != nil || job.Type != "chat" {
+			return nil // Skip non-chat files or files that fail to load
+		}
+
+		// Only check chats that are in pending_user status
+		if job.Status != orchestration.JobStatusPendingUser {
+			return nil // Skip chats that are completed, failed, etc.
+		}
+
+		// Read the raw content to check the last turn
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil // Skip unreadable files
+		}
+
+		// With the new parser, we can reliably check the last turn
+		turns, parseErr := orchestration.ParseChatFile(content)
+		if parseErr == nil && len(turns) > 0 {
+			// A chat is runnable if the last turn was from the user
+			if turns[len(turns)-1].Speaker == "user" {
+				// Keep the original file path for execution
+				job.FilePath = path
+				runnableChats = append(runnableChats, job)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to scan for runnable chats in %s: %w", chatDir, err)
+	}
+
+	if len(runnableChats) == 0 {
+		fmt.Println("No runnable chats found.")
+		return nil
+	}
+
+	fmt.Printf("Found %d runnable chat(s). Executing sequentially...\n\n", len(runnableChats))
+
+	var executionErrors []error
+	for _, job := range runnableChats {
+		fmt.Printf("--- Running Chat: %s ---\n", job.Title)
+
+		// Execute the job using os/exec to call flow plan run
+		// This avoids recursion issues and correctly uses the command-line interface.
+		flowBinary := os.Args[0] // Get the path to the current flow binary
+		// Pass the FILE path directly to flow plan run, as per our updated design
+		runCmd := exec.Command(flowBinary, "plan", "run", job.FilePath, "--yes")
+		runCmd.Stdout = os.Stdout
+		runCmd.Stderr = os.Stderr
+		runCmd.Stdin = os.Stdin
+
+		if err := runCmd.Run(); err != nil {
+			errorMsg := fmt.Sprintf("✗ Error running chat '%s': %v\n", job.Title, err)
+			fmt.Print(errorMsg)
+			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
+		}
+		fmt.Printf("--- Finished Chat: %s ---\n\n", job.Title)
+	}
+
+	if len(executionErrors) > 0 {
+		return fmt.Errorf("%d chat(s) failed to execute", len(executionErrors))
+	}
+
+	fmt.Println("All runnable chats processed successfully.")
 	return nil
 }

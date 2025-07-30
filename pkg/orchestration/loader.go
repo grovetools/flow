@@ -47,8 +47,8 @@ func LoadPlan(dir string) (*Plan, error) {
 		}
 
 		filename := entry.Name()
-		// Check for job files (01-*.md) or plan.md for chat jobs
-		if !jobFilePattern.MatchString(filename) && filename != "plan.md" {
+		// Check for markdown files
+		if !strings.HasSuffix(filename, ".md") {
 			continue
 		}
 
@@ -142,6 +142,7 @@ func LoadJob(filepath string) (*Job, error) {
 
 	return job, nil
 }
+
 
 // ResolveDependencies converts dependency IDs to Job pointers and checks for cycles.
 func (p *Plan) ResolveDependencies() error {

@@ -10,109 +10,72 @@ import (
 
 var groveDirectiveRegex = regexp.MustCompile(`(?m)^<!-- grove: (.+?) -->`)
 
-// ParseChatFile parses a chat notebook file into a slice of ChatTurn structs
+// ParseChatFile parses a chat notebook file into a slice of ChatTurn structs.
+// This is the corrected, more robust implementation.
 func ParseChatFile(content []byte) ([]*ChatTurn, error) {
-	// Split content by the --- separator
-	rawContent := string(content)
-	cells := strings.Split(rawContent, "\n---\n")
-	
-	if len(cells) == 0 {
-		return nil, fmt.Errorf("empty chat file")
+	_, bodyBytes, err := ParseFrontmatter(content)
+	if err != nil {
+		// If frontmatter is malformed, we can't proceed.
+		return nil, fmt.Errorf("could not parse frontmatter: %w", err)
 	}
 
+	body := strings.TrimSpace(string(bodyBytes))
+	if body == "" {
+		// No content after frontmatter, so no turns.
+		return []*ChatTurn{}, nil
+	}
+
+	// Split the body (everything AFTER the frontmatter) by the turn separator.
+	cells := strings.Split(body, "\n---\n")
+
 	var turns []*ChatTurn
-	
-	// The first cell contains frontmatter and initial user prompt
-	if len(cells) > 0 {
-		firstCell := cells[0]
-		
-		// Find the end of frontmatter (second ---)
-		frontmatterEnd := strings.Index(firstCell, "---\n")
-		if frontmatterEnd != -1 {
-			// Skip past the closing --- of frontmatter
-			endIdx := frontmatterEnd + 4
-			if endIdx < len(firstCell) {
-				initialContent := strings.TrimSpace(firstCell[endIdx:])
-				if initialContent != "" {
-					turn := &ChatTurn{
-						Speaker:   "user",
-						Content:   initialContent,
-						Timestamp: time.Now(),
-					}
-					turns = append(turns, turn)
-				}
-			}
+	for i, cell := range cells {
+		trimmedCell := strings.TrimSpace(cell)
+		if trimmedCell == "" {
+			continue // Skip empty turns
 		}
-	}
-	
-	// Process remaining cells
-	for i := 1; i < len(cells); i++ {
-		cell := strings.TrimSpace(cells[i])
-		if cell == "" {
-			continue
-		}
-		
-		turn, err := parseChatCell(cell)
+
+		turn, err := parseChatCell(trimmedCell)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing cell %d: %w", i+1, err)
+			return nil, fmt.Errorf("error parsing turn %d: %w", i+1, err)
 		}
-		
-		turns = append(turns, turn)
+
+		if turn != nil && strings.TrimSpace(turn.Content) != "" {
+			turns = append(turns, turn)
+		}
 	}
-	
+
 	return turns, nil
 }
 
+// parseChatCell determines the speaker and content for a single turn.
 func parseChatCell(cell string) (*ChatTurn, error) {
-	lines := strings.Split(cell, "\n")
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("empty cell")
+	// Extract directive first to check its content
+	directive, cleanContent := extractDirective(cell)
+	
+	// Determine speaker based on content and directive
+	speaker := "llm" // Default to LLM
+	
+	// User turns are identified by:
+	// 1. Starting with a blockquote (>)
+	// 2. Having a directive with "template" field (user directives specify template)
+	if strings.HasPrefix(cell, ">") || (directive != nil && directive.Template != "") {
+		speaker = "user"
 	}
 	
-	firstLine := lines[0]
-	
-	// Determine speaker based on first line
-	var speaker string
-	var contentStartIdx int
-	
-	if strings.HasPrefix(firstLine, "> ") {
-		speaker = "user"
-		contentStartIdx = 0
-	} else if strings.HasPrefix(firstLine, "## LLM Response") {
+	// LLM responses have directives with only "id" field
+	// If we have a directive with only ID and no template, it's an LLM response
+	if directive != nil && directive.ID != "" && directive.Template == "" {
 		speaker = "llm"
-		// Skip the header line
-		if len(lines) > 1 {
-			contentStartIdx = 1
-		} else {
-			return &ChatTurn{
-				Speaker:   speaker,
-				Content:   "",
-				Timestamp: time.Now(),
-			}, nil
-		}
-	} else {
-		// Default to user if no clear marker
-		speaker = "user"
-		contentStartIdx = 0
 	}
-	
-	// Extract content
-	contentLines := lines[contentStartIdx:]
-	content := strings.Join(contentLines, "\n")
-	
+
 	turn := &ChatTurn{
 		Speaker:   speaker,
-		Content:   content,
+		Content:   cleanContent,
+		Directive: directive,
 		Timestamp: time.Now(),
 	}
-	
-	// Look for directive in both user and LLM turns
-	directive, cleanContent := extractDirective(content)
-	if directive != nil {
-		turn.Directive = directive
-		turn.Content = cleanContent
-	}
-	
+
 	return turn, nil
 }
 

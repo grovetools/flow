@@ -887,23 +887,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		return nil
 	}
 
-	// Prepare worktree - default to plan name if not specified
+	// Determine the working directory for the job
 	var worktreePath string
-	worktreeName := job.Worktree
-	if worktreeName == "" {
-		worktreeName = plan.Name
-	}
-	
-	if worktreeName != "" {
-		// Temporarily set job.Worktree for prepareWorktree function
-		originalWorktree := job.Worktree
-		job.Worktree = worktreeName
-		
+	if job.Worktree != "" {
+		// Prepare git worktree only if explicitly specified
 		path, err := e.prepareWorktree(ctx, job, plan)
-		
-		// Restore original value
-		job.Worktree = originalWorktree
-		
 		if err != nil {
 			return fmt.Errorf("prepare worktree: %w", err)
 		}
@@ -913,6 +901,21 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		if err := e.regenerateContextInWorktree(worktreePath, "chat"); err != nil {
 			// Log warning but don't fail the job
 			fmt.Printf("Warning: failed to regenerate context in worktree: %v\n", err)
+		}
+	} else {
+		// No worktree specified, default to the git repository root.
+		var err error
+		worktreePath, err = GetGitRootSafe(plan.Directory)
+		if err != nil {
+			// Fallback to the plan's directory if not in a git repo
+			worktreePath = plan.Directory
+			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", worktreePath)
+		}
+		
+		// Also regenerate context for non-worktree case if .grovectx exists
+		if err := e.regenerateContextInWorktree(worktreePath, "chat"); err != nil {
+			// Log warning but don't fail the job
+			fmt.Printf("Warning: failed to regenerate context: %v\n", err)
 		}
 	}
 
@@ -988,18 +991,24 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		fmt.Println("⚠️  No context files included in chat prompt")
 	}
 
-	// Create LLM options
+	// Create LLM options - prioritize job model from frontmatter
 	llmOpts := LLMOptions{
-		Model:      directive.Model,
+		Model:      job.Model, // Start with job model from frontmatter
 		WorkingDir: worktreePath,
 	}
 	
-	// Apply model override from CLI or job
+	// Allow directive to override job model (for specific turns that need different models)
+	if directive.Model != "" {
+		llmOpts.Model = directive.Model
+	}
+	
+	// CLI model override has highest priority (for testing/debugging)
 	if e.config.ModelOverride != "" {
 		llmOpts.Model = e.config.ModelOverride
-	} else if llmOpts.Model == "" && job.Model != "" {
-		llmOpts.Model = job.Model
-	} else if llmOpts.Model == "" {
+	}
+	
+	// Final fallback if no model specified anywhere
+	if llmOpts.Model == "" {
 		llmOpts.Model = "claude-3-5-sonnet-20241022" // Default
 	}
 
@@ -1020,20 +1029,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	newCell := fmt.Sprintf("\n---\n\n<!-- grove: {\"id\": \"%s\"} -->\n## LLM Response (%s)\n\n%s\n", blockID, timestamp, response)
 	
-	// Auto-append a new user section with the same template for easy continuation
-	// This makes it convenient for users to continue the conversation
-	userSection := fmt.Sprintf("\n---\n\n<!-- grove: {\"template\": \"%s\"} -->\n", directive.Template)
-	
-	// Combine both the LLM response and the new user section
-	fullAppend := newCell + userSection
-	
 	// Append atomically
-	if err := os.WriteFile(job.FilePath, append(content, []byte(fullAppend)...), 0644); err != nil {
+	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0644); err != nil {
 		return fmt.Errorf("appending LLM response: %w", err)
 	}
 
 	fmt.Printf("✓ Added LLM response to chat: %s\n", job.FilePath)
-	fmt.Printf("✓ Ready for next user input with template: %s\n", directive.Template)
+	fmt.Printf("✓ Chat job is now waiting for user input\n")
 	
 	// Update job status - chat jobs always go to pending_user (not completed)
 	job.Status = JobStatusPendingUser

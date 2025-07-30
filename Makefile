@@ -43,6 +43,9 @@ test-e2e: build
 	@echo "Running chat functionality tests..."
 	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-functionality.sh
 	@echo ""
+	@echo "Running chat run command tests..."
+	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-run.sh
+	@echo ""
 	@echo "Note: Full pipeline test (test-chat-pipeline.sh) is disabled due to git worktree"
 	@echo "      limitations when running in temporary directories. To run it manually:"
 	@echo "      cd tests && ./e2e/test-chat-pipeline.sh"
@@ -96,6 +99,15 @@ test-chat-interactive: build
 	@echo "Running chat functionality tests in interactive mode..."
 	@cd tests && GROVE_TEST_STEP_THROUGH=true FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-functionality.sh
 
+# Test individual e2e test files
+test-chat-run: build
+	@echo "Running chat run command tests..."
+	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-run.sh
+
+test-chat-run-interactive: build
+	@echo "Running chat run command tests in interactive mode..."
+	@cd tests && GROVE_TEST_STEP_THROUGH=true FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-run.sh
+
 # Show available targets
 help:
 	@echo "Available targets:"
@@ -117,3 +129,7 @@ help:
 	@echo "  make test-orchestration-interactive    - Run orchestration tests interactively"
 	@echo "  make test-reference-prompts-interactive - Run reference prompts tests interactively"
 	@echo "  make test-chat-interactive             - Run chat tests interactively"
+	@echo ""
+	@echo "Individual test targets:"
+	@echo "  make test-chat-run                     - Run chat run command tests only"
+	@echo "  make test-chat-run-interactive         - Run chat run tests in interactive mode"
