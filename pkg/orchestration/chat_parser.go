@@ -35,7 +35,7 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 			continue // Skip empty turns
 		}
 
-		turn, err := parseChatCell(trimmedCell)
+		turn, err := parseChatCell(trimmedCell, i == 0 && len(cells) == 1)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing turn %d: %w", i+1, err)
 		}
@@ -49,7 +49,7 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 }
 
 // parseChatCell determines the speaker and content for a single turn.
-func parseChatCell(cell string) (*ChatTurn, error) {
+func parseChatCell(cell string, isOnlyCell bool) (*ChatTurn, error) {
 	// Extract directive first to check its content
 	directive, cleanContent := extractDirective(cell)
 	
@@ -57,10 +57,21 @@ func parseChatCell(cell string) (*ChatTurn, error) {
 	speaker := "llm" // Default to LLM
 	
 	// User turns are identified by:
-	// 1. Starting with a blockquote (>)
-	// 2. Having a directive with "template" field (user directives specify template)
-	if strings.HasPrefix(cell, ">") || (directive != nil && directive.Template != "") {
+	// 1. Having a directive with "template" field (user directives specify template)
+	// 2. Starting with a blockquote (>)
+	// 3. Containing any blockquote in the content
+	// 4. Being the only cell with mixed content (context + question)
+	if directive != nil && directive.Template != "" {
 		speaker = "user"
+	} else if strings.Contains(cell, ">") {
+		// If the cell contains any blockquote marker, it's likely a user turn
+		speaker = "user"
+	} else if isOnlyCell {
+		// Special case: if this is the only cell and it doesn't have an LLM directive,
+		// it's likely an initial user prompt
+		if directive == nil || directive.ID == "" {
+			speaker = "user"
+		}
 	}
 	
 	// LLM responses have directives with only "id" field

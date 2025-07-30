@@ -194,60 +194,104 @@ func runChatList(cmd *cobra.Command, args []string) error {
 }
 
 func runChatRun(cmd *cobra.Command, args []string) error {
-	flowCfg, err := loadFlowConfig()
-	if err != nil {
-		return err
-	}
-	if flowCfg.ChatDirectory == "" {
-		return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
-	}
-
-	chatDir := flowCfg.ChatDirectory
 	var runnableChats []*orchestration.Job // Store job objects
 
-	// Find all runnable chats by walking the directory
-	err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil // Skip directories or inaccessible files
+	// Check if a specific file was provided
+	if len(args) > 0 {
+		// Run specific chat file
+		chatPath := args[0]
+		
+		// Verify file exists
+		info, err := os.Stat(chatPath)
+		if err != nil {
+			return fmt.Errorf("chat file not found: %s", chatPath)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("expected a file, got directory: %s", chatPath)
 		}
 		
-		// Look for all .md files
-		if !strings.HasSuffix(info.Name(), ".md") {
-			return nil
+		// Load and check if it's a runnable chat
+		job, err := orchestration.LoadJob(chatPath)
+		if err != nil {
+			return fmt.Errorf("failed to load job: %w", err)
+		}
+		if job.Type != "chat" {
+			return fmt.Errorf("file is not a chat job: %s", chatPath)
+		}
+		
+		// Check if it's runnable
+		content, err := os.ReadFile(chatPath)
+		if err != nil {
+			return fmt.Errorf("failed to read file: %w", err)
+		}
+		
+		turns, err := orchestration.ParseChatFile(content)
+		if err != nil {
+			return fmt.Errorf("failed to parse chat: %w", err)
+		}
+		
+		if len(turns) == 0 || turns[len(turns)-1].Speaker != "user" {
+			return fmt.Errorf("chat is not runnable (last turn is not from user)")
+		}
+		
+		job.FilePath = chatPath
+		runnableChats = append(runnableChats, job)
+	} else {
+		// Scan chat directory
+		flowCfg, err := loadFlowConfig()
+		if err != nil {
+			return err
+		}
+		if flowCfg.ChatDirectory == "" {
+			return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
 		}
 
-		// First, load the job to ensure it's a chat type
-		job, loadErr := orchestration.LoadJob(path)
-		if loadErr != nil || job.Type != "chat" {
-			return nil // Skip non-chat files or files that fail to load
-		}
+		chatDir := flowCfg.ChatDirectory
 
-		// Only check chats that are in pending_user status
-		if job.Status != orchestration.JobStatusPendingUser {
-			return nil // Skip chats that are completed, failed, etc.
-		}
-
-		// Read the raw content to check the last turn
-		content, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil // Skip unreadable files
-		}
-
-		// With the new parser, we can reliably check the last turn
-		turns, parseErr := orchestration.ParseChatFile(content)
-		if parseErr == nil && len(turns) > 0 {
-			// A chat is runnable if the last turn was from the user
-			if turns[len(turns)-1].Speaker == "user" {
-				// Keep the original file path for execution
-				job.FilePath = path
-				runnableChats = append(runnableChats, job)
+		// Find all runnable chats by walking the directory
+		err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil // Skip directories or inaccessible files
 			}
-		}
-		return nil
-	})
+			
+			// Look for all .md files
+			if !strings.HasSuffix(info.Name(), ".md") {
+				return nil
+			}
 
-	if err != nil {
-		return fmt.Errorf("failed to scan for runnable chats in %s: %w", chatDir, err)
+			// First, load the job to ensure it's a chat type
+			job, loadErr := orchestration.LoadJob(path)
+			if loadErr != nil || job.Type != "chat" {
+				return nil // Skip non-chat files or files that fail to load
+			}
+
+			// Only check chats that are in pending_user status
+			if job.Status != orchestration.JobStatusPendingUser {
+				return nil // Skip chats that are completed, failed, etc.
+			}
+
+			// Read the raw content to check the last turn
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil // Skip unreadable files
+			}
+
+			// With the new parser, we can reliably check the last turn
+			turns, parseErr := orchestration.ParseChatFile(content)
+			if parseErr == nil && len(turns) > 0 {
+				// A chat is runnable if the last turn was from the user
+				if turns[len(turns)-1].Speaker == "user" {
+					// Keep the original file path for execution
+					job.FilePath = path
+					runnableChats = append(runnableChats, job)
+				}
+			}
+			return nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("failed to scan for runnable chats in %s: %w", chatDir, err)
+		}
 	}
 
 	if len(runnableChats) == 0 {
