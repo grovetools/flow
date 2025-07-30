@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
+	"github.com/mattsolo1/grove-core/git"
 	"github.com/spf13/cobra"
 )
 
@@ -55,6 +56,33 @@ and executes them sequentially to generate the next LLM response.`,
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatRunCmd)
 	return chatCmd
+}
+
+// expandChatPath expands home directory and git variables in a path.
+func expandChatPath(path string) (string, error) {
+	// 1. Expand home directory character '~'.
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("could not get user home directory: %w", err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+
+	// 2. Expand git-related variables.
+	repo, branch, err := git.GetRepoInfo(".")
+	if err != nil {
+		// Don't fail, just proceed without these variables.
+		fmt.Printf("Warning: could not get git info for path expansion: %v\n", err)
+	} else {
+		// Support both ${VAR} and {{VAR}} patterns
+		path = strings.ReplaceAll(path, "${REPO}", repo)
+		path = strings.ReplaceAll(path, "${BRANCH}", branch)
+		path = strings.ReplaceAll(path, "{{REPO}}", repo)
+		path = strings.ReplaceAll(path, "{{BRANCH}}", branch)
+	}
+
+	return filepath.Abs(path)
 }
 
 func runChatInit(cmd *cobra.Command, args []string) error {
@@ -150,7 +178,10 @@ func runChatList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
 	}
 
-	chatDir := flowCfg.ChatDirectory
+	chatDir, err := expandChatPath(flowCfg.ChatDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to expand chat directory path: %w", err)
+	}
 	
 	// Recursively find all .md files in the chat directory
 	var chats []*orchestration.Job
@@ -246,7 +277,10 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
 		}
 
-		chatDir := flowCfg.ChatDirectory
+		chatDir, err := expandChatPath(flowCfg.ChatDirectory)
+		if err != nil {
+			return fmt.Errorf("failed to expand chat directory path: %w", err)
+		}
 
 		// Find all runnable chats by walking the directory
 		err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
