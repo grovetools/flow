@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"gopkg.in/yaml.v3"
 )
 
@@ -102,8 +103,9 @@ func LoadJob(filepath string) (*Job, error) {
 	}
 
 	// Convert frontmatter map to Job struct
+	// Sanitize UTF-8 to prevent encoding errors in LLM client
 	job := &Job{
-		PromptBody: string(body),
+		PromptBody: sanitize.UTF8(body),
 	}
 
 	// Marshal frontmatter to YAML and unmarshal to Job struct

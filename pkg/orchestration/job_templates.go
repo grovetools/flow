@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/mattsolo1/grove-core/util/sanitize"
 )
 
 // JobTemplate represents a predefined job structure.
@@ -57,7 +59,7 @@ func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
 			Path:        "builtin:" + name,
 			Source:      "builtin",
 			Frontmatter: fm,
-			Prompt:      string(body),
+			Prompt:      sanitize.UTF8(body),
 		}
 
 		if desc, ok := fm["description"].(string); ok {
@@ -115,7 +117,7 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 			Path:        "builtin:" + name,
 			Source:      "builtin",
 			Frontmatter: fm,
-			Prompt:      string(body),
+			Prompt:      sanitize.UTF8(body),
 		}
 
 		if desc, ok := fm["description"].(string); ok {

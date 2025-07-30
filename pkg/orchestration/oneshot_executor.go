@@ -15,6 +15,7 @@ import (
 	
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"gopkg.in/yaml.v3"
 )
 
@@ -343,8 +344,10 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 		for _, contextPath := range contextPaths {
 			if content, err := os.ReadFile(contextPath); err == nil {
+				// Sanitize UTF-8 to prevent encoding errors in LLM client
+				sanitizedContent := sanitize.UTF8(content)
 				parts = append(parts, fmt.Sprintf("=== Grove Context from %s ===\n%s", 
-					contextPath, string(content)))
+					contextPath, sanitizedContent))
 			}
 		}
 	}
