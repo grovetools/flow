@@ -10,14 +10,14 @@ import (
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
-type JobsCleanupWorktreesCmd struct {
-	Dir   string        `arg:"" help:"Plan directory"`
+type PlanCleanupWorktreesCmd struct {
+	Directory string        `arg:"" help:"Plan directory"`
 	Age   time.Duration `flag:"" default:"24h" help:"Remove worktrees older than this"`
 	Force bool          `flag:"f" help:"Skip confirmation prompts"`
 }
 
-func (c *JobsCleanupWorktreesCmd) Run() error {
-	return RunJobsCleanupWorktrees(c)
+func (c *PlanCleanupWorktreesCmd) Run() error {
+	return RunPlanCleanupWorktrees(c)
 }
 
 // NullLogger implements the Logger interface with no-op methods.
@@ -27,9 +27,9 @@ func (n NullLogger) Info(msg string, keysAndValues ...interface{})  {}
 func (n NullLogger) Error(msg string, keysAndValues ...interface{}) {}
 func (n NullLogger) Debug(msg string, keysAndValues ...interface{}) {}
 
-func RunJobsCleanupWorktrees(cmd *JobsCleanupWorktreesCmd) error {
+func RunPlanCleanupWorktrees(cmd *PlanCleanupWorktreesCmd) error {
 	// Get repository root
-	repoRoot, err := findGitRoot(cmd.Dir)
+	repoRoot, err := findGitRoot(cmd.Directory)
 	if err != nil {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}

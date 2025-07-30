@@ -9,12 +9,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var jobsTemplatesCmd = &cobra.Command{
+var planTemplatesCmd = &cobra.Command{
 	Use:   "templates",
 	Short: "Manage job templates",
 }
 
-var jobsTemplatesListCmd = &cobra.Command{
+var planTemplatesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available job templates",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,4 +39,4 @@ var jobsTemplatesListCmd = &cobra.Command{
 	},
 }
 
-// This command is now registered in jobs.go GetJobsCommand function
+// This command is now registered in plan.go GetPlanCommand function

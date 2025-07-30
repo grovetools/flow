@@ -40,6 +40,9 @@ test-e2e: build
 	@echo "Running reference prompts tests..."
 	@cd tests/e2e/orchestration-tests && FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-reference-prompts-e2e.sh
 	@echo ""
+	@echo "Running chat functionality tests..."
+	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-functionality.sh
+	@echo ""
 	@echo "Note: Full pipeline test (test-chat-pipeline.sh) is disabled due to git worktree"
 	@echo "      limitations when running in temporary directories. To run it manually:"
 	@echo "      cd tests && ./e2e/test-chat-pipeline.sh"
@@ -80,6 +83,19 @@ dev:
 	@echo "Building $(BINARY_NAME) with race detector..."
 	@go build -race -o $(BIN_DIR)/$(BINARY_NAME) .
 
+# Interactive e2e tests
+test-orchestration-interactive: build
+	@echo "Running orchestration tests in interactive mode..."
+	@cd tests/e2e/orchestration-tests && GROVE_TEST_STEP_THROUGH=true FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-orchestration-e2e.sh
+
+test-reference-prompts-interactive: build
+	@echo "Running reference prompts tests in interactive mode..."
+	@cd tests/e2e/orchestration-tests && GROVE_TEST_STEP_THROUGH=true FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-reference-prompts-e2e.sh
+
+test-chat-interactive: build
+	@echo "Running chat functionality tests in interactive mode..."
+	@cd tests && GROVE_TEST_STEP_THROUGH=true FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-functionality.sh
+
 # Show available targets
 help:
 	@echo "Available targets:"
@@ -96,3 +112,8 @@ help:
 	@echo "  make check       - Run all checks"
 	@echo "  make dev         - Build with race detector"
 	@echo "  make help        - Show this help"
+	@echo ""
+	@echo "Interactive test targets:"
+	@echo "  make test-orchestration-interactive    - Run orchestration tests interactively"
+	@echo "  make test-reference-prompts-interactive - Run reference prompts tests interactively"
+	@echo "  make test-chat-interactive             - Run chat tests interactively"

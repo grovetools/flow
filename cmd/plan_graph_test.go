@@ -9,7 +9,7 @@ import (
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
-func TestRunJobsGraph(t *testing.T) {
+func TestRunPlanGraph(t *testing.T) {
 	tests := []struct {
 		name      string
 		setupPlan func(t *testing.T, dir string)
@@ -146,7 +146,7 @@ func TestRunJobsGraph(t *testing.T) {
 			os.Stdout = w
 			
 			// Run command
-			err := RunJobsGraph(tt.cmd)
+			err := RunPlanGraph(tt.cmd)
 			
 			// Restore stdout
 			w.Close()
@@ -159,7 +159,7 @@ func TestRunJobsGraph(t *testing.T) {
 			
 			// Check error
 			if (err != nil) != tt.wantErr {
-				t.Errorf("RunJobsGraph() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("RunPlanGraph() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			
 			// Check output

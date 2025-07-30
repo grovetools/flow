@@ -22,7 +22,7 @@ type AgentRunner interface {
 // AgentExecutor executes agent jobs in isolated git worktrees.
 type AgentExecutor struct {
 	llmClient       LLMClient
-	config          *Config
+	config          *ExecutorConfig
 	worktreeManager *git.WorktreeManager
 	agentRunner     AgentRunner
 	dockerClient    docker.Client
@@ -30,14 +30,14 @@ type AgentExecutor struct {
 
 // defaultAgentRunner implements AgentRunner using grove agent subprocess.
 type defaultAgentRunner struct {
-	config       *Config
+	config       *ExecutorConfig
 	dockerClient docker.Client
 }
 
 // NewAgentExecutor creates a new agent executor.
-func NewAgentExecutor(llmClient LLMClient, config *Config, dockerClient docker.Client) *AgentExecutor {
+func NewAgentExecutor(llmClient LLMClient, config *ExecutorConfig, dockerClient docker.Client) *AgentExecutor {
 	if config == nil {
-		config = &Config{
+		config = &ExecutorConfig{
 			MaxPromptLength: 1000000,
 			Timeout:         30 * time.Minute,
 			RetryCount:      1,
@@ -65,12 +65,26 @@ func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
 
-	// Prepare worktree
-	worktreePath, err := e.prepareWorktree(ctx, job, plan)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("prepare worktree: %w", err)
+	// Determine the working directory for the job
+	var workDir string
+	if job.Worktree != "" {
+		var err error
+		// Existing logic to prepare a git worktree
+		workDir, err = e.prepareWorktree(ctx, job, plan)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("prepare worktree: %w", err)
+		}
+	} else {
+		// NEW: No worktree specified, default to the git repository root.
+		var err error
+		workDir, err = GetGitRootSafe(plan.Directory)
+		if err != nil {
+			// Fallback to the plan's directory if not in a git repo
+			workDir = plan.Directory
+			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", workDir)
+		}
 	}
 
 	// Build agent prompt from sources
@@ -81,17 +95,17 @@ func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		return fmt.Errorf("build prompt: %w", err)
 	}
 
-	// Execute agent in worktree context
-	if err := e.runAgentInWorktree(ctx, worktreePath, prompt, job, plan); err != nil {
+	// Execute agent in working directory context
+	if err := e.runAgentInWorktree(ctx, workDir, prompt, job, plan); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("run agent: %w", err)
 	}
 
-	// Automatically update context within the worktree if .grovectx exists
-	fmt.Println("Checking for context update in worktree...")
-	ctxMgr := grovecontext.NewManager(worktreePath)
-	groveCtxPath := filepath.Join(worktreePath, ".grovectx")
+	// Automatically update context within the working directory if .grovectx exists
+	fmt.Println("Checking for context update in working directory...")
+	ctxMgr := grovecontext.NewManager(workDir)
+	groveCtxPath := filepath.Join(workDir, ".grovectx")
 
 	if _, err := os.Stat(groveCtxPath); err == nil {
 		fmt.Println("Found .grovectx, updating context...")

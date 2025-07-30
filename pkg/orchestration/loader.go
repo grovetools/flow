@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	"gopkg.in/yaml.v3"
 )
@@ -27,13 +26,6 @@ func LoadPlan(dir string) (*Plan, error) {
 		Directory: dir,
 		Jobs:      []*Job{},
 		JobsByID:  make(map[string]*Job),
-	}
-
-	// Try to load grove.yml config to get orchestration settings
-	if configPath, err := config.FindConfigFile(dir); err == nil {
-		if cfg, err := config.Load(configPath); err == nil {
-			plan.Orchestration = &cfg.Orchestration
-		}
 	}
 
 	// Check for spec.md

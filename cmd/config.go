@@ -1,0 +1,39 @@
+package cmd
+
+import (
+	"fmt"
+	"github.com/mattsolo1/grove-core/config"
+)
+
+// FlowConfig defines the structure for the 'flow' section in grove.yml.
+type FlowConfig struct {
+	ChatDirectory        string `yaml:"chat_directory"`
+	OneshotModel         string `yaml:"oneshot_model"`
+	TargetAgentContainer string `yaml:"target_agent_container"`
+	PlansDirectory       string `yaml:"plans_directory"`
+	MaxConsecutiveSteps  int    `yaml:"max_consecutive_steps"`
+}
+
+// loadFlowConfig loads the core grove config and unmarshals the 'flow' extension.
+func loadFlowConfig() (*FlowConfig, error) {
+	// Find the config file
+	configFile, err := config.FindConfigFile(".")
+	if err != nil {
+		// It's okay if the core config doesn't exist, we'll just use defaults.
+		return &FlowConfig{}, nil
+	}
+
+	// Load the config with overrides
+	coreCfg, err := config.LoadWithOverrides(configFile)
+	if err != nil {
+		// It's okay if the core config doesn't exist, we'll just use an empty one.
+		coreCfg = &config.Config{}
+	}
+
+	var flowCfg FlowConfig
+	if err := coreCfg.UnmarshalExtension("flow", &flowCfg); err != nil {
+		return nil, fmt.Errorf("failed to parse 'flow' configuration from grove.yml: %w", err)
+	}
+	
+	return &flowCfg, nil
+}

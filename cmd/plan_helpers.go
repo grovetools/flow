@@ -6,22 +6,25 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/grovepm/grove-flow/pkg/state"
 )
 
 // resolvePlanPath determines the absolute path for a plan directory.
-// If config.Orchestration.PlansDirectory is set, it's used as the base.
-// Otherwise, the planName is treated as a path relative to the current directory.
-func resolvePlanPath(planName string, cfg *config.Config) (string, error) {
-	if cfg == nil || cfg.Orchestration.PlansDirectory == "" {
+func resolvePlanPath(planName string) (string, error) {
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		// It's okay if config doesn't exist, we just won't use PlansDirectory.
+		flowCfg = &FlowConfig{}
+	}
+
+	if flowCfg.PlansDirectory == "" {
 		// No custom directory configured, use the provided name as-is.
 		return filepath.Abs(planName)
 	}
 
 	// A custom plans directory is configured.
-	basePath := cfg.Orchestration.PlansDirectory
+	basePath := flowCfg.PlansDirectory
 
 	// 1. Expand home directory character '~'.
 	if strings.HasPrefix(basePath, "~/") {
@@ -52,7 +55,7 @@ func resolvePlanPath(planName string, cfg *config.Config) (string, error) {
 }
 
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.
-func resolvePlanPathWithActiveJob(planName string, cfg *config.Config) (string, error) {
+func resolvePlanPathWithActiveJob(planName string) (string, error) {
 	// If no plan name provided, try to use active job
 	if planName == "" {
 		activeJob, err := state.GetActiveJob()
@@ -60,10 +63,10 @@ func resolvePlanPathWithActiveJob(planName string, cfg *config.Config) (string, 
 			return "", fmt.Errorf("get active job: %w", err)
 		}
 		if activeJob == "" {
-			return "", fmt.Errorf("no plan directory specified and no active job set (use 'grove jobs set <plan-directory>' to set one)")
+			return "", fmt.Errorf("no plan directory specified and no active job set (use 'flow plan set <plan-directory>' to set one)")
 		}
 		planName = activeJob
 	}
 	
-	return resolvePlanPath(planName, cfg)
+	return resolvePlanPath(planName)
 }

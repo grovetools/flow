@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -22,35 +21,22 @@ var (
 	statusFormat  string
 )
 
-// InitJobsStatusFlags initializes the flags for the status command
-func InitJobsStatusFlags() {
-	jobsStatusCmd.Flags().BoolVarP(&statusVerbose, "verbose", "v", false, "Show detailed job information")
-	jobsStatusCmd.Flags().BoolVarP(&statusGraph, "graph", "g", false, "Show dependency graph")
-	jobsStatusCmd.Flags().StringVarP(&statusFormat, "format", "f", "tree", "Output format: tree, list, json")
+// InitPlanStatusFlags initializes the flags for the status command
+func InitPlanStatusFlags() {
+	planStatusCmd.Flags().BoolVarP(&statusVerbose, "verbose", "v", false, "Show detailed job information")
+	planStatusCmd.Flags().BoolVarP(&statusGraph, "graph", "g", false, "Show dependency graph")
+	planStatusCmd.Flags().StringVarP(&statusFormat, "format", "f", "tree", "Output format: tree, list, json")
 }
 
-// runJobsStatus implements the status command.
-func runJobsStatus(cmd *cobra.Command, args []string) error {
+// RunPlanStatus implements the status command.
+func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	var dir string
 	if len(args) > 0 {
 		dir = args[0]
 	}
 
-	// Load config to check for PlansDirectory setting
-	cwd, _ := os.Getwd()
-	configFile, err := config.FindConfigFile(cwd)
-	var cfg *config.Config
-	if err == nil {
-		cfg, err = config.LoadWithOverrides(configFile)
-		if err != nil {
-			cfg = &config.Config{}
-		}
-	} else {
-		cfg = &config.Config{}
-	}
-
 	// Resolve the plan path with active job support
-	planPath, err := resolvePlanPathWithActiveJob(dir, cfg)
+	planPath, err := resolvePlanPathWithActiveJob(dir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var jobsCompleteCmd = &cobra.Command{
+var planCompleteCmd = &cobra.Command{
 	Use:   "complete <job-file>",
 	Short: "Mark a job as completed",
 	Long: `Mark a job as completed. This is especially useful for chat jobs 
@@ -17,15 +17,15 @@ that would otherwise remain in pending_user status indefinitely.
 
 Examples:
   # Complete a chat job
-  grove jobs complete my-project/plan.md
+  flow plan complete my-project/plan.md
   
   # Complete any job by its filename
-  grove jobs complete my-project/01-design-api.md`,
+  flow plan complete my-project/01-design-api.md`,
 	Args: cobra.ExactArgs(1),
-	RunE: runJobsComplete,
+	RunE: runPlanComplete,
 }
 
-func runJobsComplete(cmd *cobra.Command, args []string) error {
+func runPlanComplete(cmd *cobra.Command, args []string) error {
 	jobPath := args[0]
 
 	// Determine if it's a file or needs to be resolved

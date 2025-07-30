@@ -8,33 +8,18 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
-// RunJobsInit implements the jobs init command.
-func RunJobsInit(cmd *JobsInitCmd) error {
+// RunPlanInit implements the plan init command.
+func RunPlanInit(cmd *PlanInitCmd) error {
 	// If template is specified, automatically enable CreateInitial
 	if cmd.Template != "" && !cmd.CreateInitial {
 		cmd.CreateInitial = true
 	}
 
-	// Load config to check for PlansDirectory setting
-	cwd, _ := os.Getwd()
-	configFile, err := config.FindConfigFile(cwd)
-	var cfg *config.Config
-	if err == nil {
-		cfg, err = config.LoadWithOverrides(configFile)
-		if err != nil {
-			// It's okay if config doesn't exist, we'll use defaults.
-			cfg = &config.Config{}
-		}
-	} else {
-		cfg = &config.Config{}
-	}
-
 	// Resolve the full path for the new plan directory.
-	planPath, err := resolvePlanPath(cmd.Dir, cfg)
+	planPath, err := resolvePlanPath(cmd.Dir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
@@ -69,14 +54,10 @@ func RunJobsInit(cmd *JobsInitCmd) error {
 		// Load config to get default model if not specified
 		model := cmd.Model
 		if model == "" {
-			// Try to load grove.yml from current directory
-			cwd, _ := os.Getwd()
-			configFile, err := config.FindConfigFile(cwd)
-			if err == nil {
-				cfg, err := config.LoadWithOverrides(configFile)
-				if err == nil && cfg.Orchestration.OneshotModel != "" {
-					model = cfg.Orchestration.OneshotModel
-				}
+			// Try to load flow config
+			flowCfg, err := loadFlowConfig()
+			if err == nil && flowCfg.OneshotModel != "" {
+				model = flowCfg.OneshotModel
 			}
 		}
 
@@ -108,7 +89,7 @@ func RunJobsInit(cmd *JobsInitCmd) error {
 }
 
 // validateInitInputs validates the command inputs.
-func validateInitInputs(cmd *JobsInitCmd, resolvedPath string) error {
+func validateInitInputs(cmd *PlanInitCmd, resolvedPath string) error {
 	// Check spec file exists if provided
 	if cmd.Spec != "" {
 		if _, err := os.Stat(cmd.Spec); err != nil {

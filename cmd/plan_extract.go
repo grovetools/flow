@@ -6,13 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 
-// NewJobsExtractCmd creates the jobs extract command.
-func NewJobsExtractCmd() *cobra.Command {
+// NewPlanExtractCmd creates the jobs extract command.
+func NewPlanExtractCmd() *cobra.Command {
 	var title string
 	var file string
 
@@ -41,21 +40,8 @@ Examples:
 }
 
 func runJobsExtract(title string, file string, blockIDs []string) error {
-	// Load config
-	cwd, _ := os.Getwd()
-	configFile, err := config.FindConfigFile(cwd)
-	var cfg *config.Config
-	if err == nil {
-		cfg, err = config.LoadWithOverrides(configFile)
-		if err != nil {
-			cfg = &config.Config{}
-		}
-	} else {
-		cfg = &config.Config{}
-	}
-
 	// Get the current plan directory
-	currentPlanPath, err := resolvePlanPathWithActiveJob("", cfg)
+	currentPlanPath, err := resolvePlanPathWithActiveJob("")
 	if err != nil {
 		return fmt.Errorf("could not resolve current plan path: %w", err)
 	}

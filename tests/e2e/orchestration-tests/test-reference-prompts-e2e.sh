@@ -245,7 +245,7 @@ test_init_plan() {
     
     # Capture Grove's output to find where it actually creates the plan
     local init_output
-    init_output=$( (cd "$DEMO_DIR" && "$FLOW_CMD" jobs init --spec-file feature-spec.md --create-initial-job my-feature-plan 2>&1) )
+    init_output=$( (cd "$DEMO_DIR" && "$FLOW_CMD" plan init --spec-file feature-spec.md --create-initial-job my-feature-plan 2>&1) )
     local init_status=$?
     
     echo "$init_output"
@@ -288,7 +288,7 @@ test_create_reference_job_with_template() {
     
     # Create the job using the actual plan directory
     (cd "$DEMO_DIR" && echo "Focus on performance issues and error handling" | \
-        "$FLOW_CMD" jobs add-step "$ACTUAL_PLAN_DIR" \
+        "$FLOW_CMD" plan add "$ACTUAL_PLAN_DIR" \
             --template code-review \
             --source-files src/calculator.py,src/main.py \
             --title "Review Calculator Implementation" \
@@ -346,7 +346,7 @@ test_create_reference_job_without_template() {
     
     # Create job with just source files (no template)
     (cd "$DEMO_DIR" && echo "Analyze the performance of the multiply function" | \
-        "$FLOW_CMD" jobs add-step "$ACTUAL_PLAN_DIR" \
+        "$FLOW_CMD" plan add "$ACTUAL_PLAN_DIR" \
             --source-files src/calculator.py \
             --title "Analyze Calculator Performance" \
             --type oneshot \
@@ -386,7 +386,7 @@ test_create_traditional_job() {
     
     # Create traditional job
     (cd "$DEMO_DIR" && echo "Write comprehensive unit tests for the calculator module" | \
-        "$FLOW_CMD" jobs add-step "$ACTUAL_PLAN_DIR" \
+        "$FLOW_CMD" plan add "$ACTUAL_PLAN_DIR" \
             --title "Write Unit Tests" \
             --type agent \
             --prompt-file /dev/stdin)
@@ -436,7 +436,7 @@ test_template_listing() {
     pause_if_interactive "About to list available templates"
     
     # Change to demo directory so grove can find project templates
-    (cd "$DEMO_DIR" && "$FLOW_CMD" jobs templates list > /tmp/templates.out 2>&1)
+    (cd "$DEMO_DIR" && "$FLOW_CMD" plan templates list > /tmp/templates.out 2>&1)
     
     if grep -q "code-review" /tmp/templates.out; then
         log_success "List available templates - found code-review"
@@ -459,7 +459,7 @@ test_error_handling() {
     
     # Test with non-existent source file
     if (cd "$DEMO_DIR" && echo "This should fail" | \
-        "$FLOW_CMD" jobs add-step "$ACTUAL_PLAN_DIR" \
+        "$FLOW_CMD" plan add "$ACTUAL_PLAN_DIR" \
             --source-files src/nonexistent.py \
             --title "Should Fail" \
             --type agent \
@@ -471,7 +471,7 @@ test_error_handling() {
     
     # Test with non-existent template
     if (cd "$DEMO_DIR" && echo "This should also fail" | \
-        "$FLOW_CMD" jobs add-step "$ACTUAL_PLAN_DIR" \
+        "$FLOW_CMD" plan add "$ACTUAL_PLAN_DIR" \
             --template nonexistent-template \
             --source-files src/calculator.py \
             --title "Should Also Fail" \

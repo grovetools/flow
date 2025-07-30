@@ -20,8 +20,8 @@ import (
 )
 
 
-// Config holds configuration for executors.
-type Config struct {
+// ExecutorConfig holds configuration for executors.
+type ExecutorConfig struct {
 	MaxPromptLength int
 	Timeout         time.Duration
 	RetryCount      int
@@ -32,12 +32,12 @@ type Config struct {
 // OneShotExecutor executes oneshot jobs.
 type OneShotExecutor struct {
 	llmClient       LLMClient
-	config          *Config
+	config          *ExecutorConfig
 	worktreeManager *git.WorktreeManager
 }
 
 // NewOneShotExecutor creates a new oneshot executor.
-func NewOneShotExecutor(config *Config) *OneShotExecutor {
+func NewOneShotExecutor(config *ExecutorConfig) *OneShotExecutor {
 	var llmClient LLMClient
 	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
 		llmClient = NewMockLLMClient()
@@ -46,7 +46,7 @@ func NewOneShotExecutor(config *Config) *OneShotExecutor {
 	}
 
 	if config == nil {
-		config = &Config{
+		config = &ExecutorConfig{
 			MaxPromptLength: 1000000,
 			Timeout:         5 * time.Minute,
 			RetryCount:      3,
@@ -80,35 +80,32 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// Prepare worktree - default to plan name if not specified
-	var worktreePath string
-	worktreeName := job.Worktree
-	if worktreeName == "" {
-		worktreeName = plan.Name
-	}
-	
-	if worktreeName != "" {
-		// Temporarily set job.Worktree for prepareWorktree function
-		originalWorktree := job.Worktree
-		job.Worktree = worktreeName
-		
+	// Determine the working directory for the job
+	var workDir string
+	if job.Worktree != "" {
+		// Prepare git worktree
 		path, err := e.prepareWorktree(ctx, job, plan)
-		
-		// Restore original value
-		job.Worktree = originalWorktree
-		
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			updateJobFile(job)
 			return fmt.Errorf("prepare worktree: %w", err)
 		}
-		worktreePath = path
+		workDir = path
 		
 		// Regenerate context in the worktree to ensure oneshot has latest view
-		if err := e.regenerateContextInWorktree(worktreePath, "oneshot"); err != nil {
+		if err := e.regenerateContextInWorktree(workDir, "oneshot"); err != nil {
 			// Log warning but don't fail the job
 			fmt.Printf("Warning: failed to regenerate context in worktree: %v\n", err)
+		}
+	} else {
+		// No worktree specified, default to the git repository root.
+		var err error
+		workDir, err = GetGitRootSafe(plan.Directory)
+		if err != nil {
+			// Fallback to the plan's directory if not in a git repo
+			workDir = plan.Directory
+			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", workDir)
 		}
 	}
 
@@ -116,7 +113,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 
 	// Build prompt
-	prompt, err := e.buildPrompt(job, plan, worktreePath)
+	prompt, err := e.buildPrompt(job, plan, workDir)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -131,7 +128,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Create LLM options from job
 	llmOpts := LLMOptions{
 		Model:      job.Model,
-		WorkingDir: worktreePath, // Set working directory to worktree if available
+		WorkingDir: workDir, // Set working directory to worktree if available
 	}
 	
 	// Apply model override from CLI if specified

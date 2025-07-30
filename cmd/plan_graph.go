@@ -8,38 +8,24 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
-type JobsGraphCmd struct {
-	Dir    string `arg:"" help:"Plan directory"`
+type PlanGraphCmd struct {
+	Directory string `arg:"" help:"Plan directory"`
 	Format string `flag:"f" default:"mermaid" help:"Output format: mermaid, dot, ascii"`
 	Serve  bool   `flag:"s" help:"Serve interactive HTML visualization"`
 	Port   int    `flag:"p" default:"8080" help:"Port for web server"`
 	Output string `flag:"o" help:"Output file (stdout if not specified)"`
 }
 
-func (c *JobsGraphCmd) Run() error {
-	return RunJobsGraph(c)
+func (c *PlanGraphCmd) Run() error {
+	return RunPlanGraph(c)
 }
 
-func RunJobsGraph(cmd *JobsGraphCmd) error {
-	// Load config to check for PlansDirectory setting
-	cwd, _ := os.Getwd()
-	configFile, err := config.FindConfigFile(cwd)
-	var cfg *config.Config
-	if err == nil {
-		cfg, err = config.LoadWithOverrides(configFile)
-		if err != nil {
-			cfg = &config.Config{}
-		}
-	} else {
-		cfg = &config.Config{}
-	}
-
+func RunPlanGraph(cmd *PlanGraphCmd) error {
 	// Resolve the plan path with active job support
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir, cfg)
+	planPath, err := resolvePlanPathWithActiveJob(cmd.Directory)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

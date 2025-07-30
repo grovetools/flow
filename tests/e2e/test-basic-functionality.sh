@@ -12,7 +12,7 @@ else
     exit 1
 fi
 
-echo "=== Grove Jobs Basic Functionality Test ==="
+echo "=== Grove Flow Basic Functionality Test ==="
 echo
 
 # Create a temporary directory for the test
@@ -27,7 +27,7 @@ cd "$TEMP_DIR"
 
 # Test 1: Check help output
 echo "Test 1: Checking help output..."
-if $JOB jobs --help > /dev/null 2>&1; then
+if $JOB plan --help > /dev/null 2>&1; then
     echo "✓ Help command works"
 else
     echo "✗ Help command failed"
@@ -37,11 +37,11 @@ fi
 # Test 2: Check subcommands
 echo
 echo "Test 2: Checking available subcommands..."
-HELP_OUTPUT=$($JOB jobs --help 2>&1)
+HELP_OUTPUT=$($JOB plan --help 2>&1)
 if echo "$HELP_OUTPUT" | grep -q "init" && \
    echo "$HELP_OUTPUT" | grep -q "status" && \
    echo "$HELP_OUTPUT" | grep -q "run" && \
-   echo "$HELP_OUTPUT" | grep -q "add-step"; then
+   echo "$HELP_OUTPUT" | grep -q "add"; then
     echo "✓ All expected subcommands are available"
 else
     echo "✗ Missing expected subcommands"
@@ -71,7 +71,7 @@ This is a test specification for the E2E test.
 EOF
 
 # Try to initialize a plan with chat template
-INIT_OUTPUT=$($JOB jobs init test-plan --spec-file spec.md --template chat --force 2>&1)
+INIT_OUTPUT=$($JOB plan init test-plan --spec-file spec.md --template chat --force 2>&1)
 if echo "$INIT_OUTPUT" | grep -q "Created plan"; then
     echo "✓ Init command creates plan successfully"
     echo "  Output: $INIT_OUTPUT"
@@ -102,7 +102,7 @@ fi
 # Test 5: Status command
 echo
 echo "Test 5: Testing status command..."
-STATUS_OUTPUT=$($JOB jobs status test-plan 2>&1)
+STATUS_OUTPUT=$($JOB plan status test-plan 2>&1)
 if echo "$STATUS_OUTPUT" | grep -q "Plan:"; then
     echo "✓ Status command works"
     echo "  Output: $STATUS_OUTPUT"

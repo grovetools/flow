@@ -9,7 +9,7 @@ import (
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
-func TestRunJobsAddStep(t *testing.T) {
+func TestRunPlanAddStep(t *testing.T) {
 	tests := []struct {
 		name      string
 		setupPlan func(t *testing.T, dir string)
@@ -244,11 +244,11 @@ func TestRunJobsAddStep(t *testing.T) {
 			tt.cmd.Dir = dir
 
 			// Run command
-			err := RunJobsAddStep(tt.cmd)
+			err := RunPlanAddStep(tt.cmd)
 
 			// Check error
 			if (err != nil) != tt.wantErr {
-				t.Errorf("RunJobsAddStep() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("RunPlanAddStep() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			// Additional checks

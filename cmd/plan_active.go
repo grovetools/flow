@@ -7,16 +7,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewJobsSetCmd creates the jobs set command.
-func NewJobsSetCmd() *cobra.Command {
+// NewPlanSetCmd creates the plan set command.
+func NewPlanSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <plan-directory>",
 		Short: "Set the active job plan directory",
 		Long: `Set the active job plan directory to avoid specifying it in every command.
 
 Examples:
-  grove jobs set user-profile-api
-  grove jobs set ./plans/feature-x`,
+  flow plan set user-profile-api
+  flow plan set ./plans/feature-x`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planDir := args[0]
@@ -29,8 +29,8 @@ Examples:
 	}
 }
 
-// NewJobsCurrentCmd creates the jobs current command.
-func NewJobsCurrentCmd() *cobra.Command {
+// NewPlanCurrentCmd creates the plan current command.
+func NewPlanCurrentCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "current",
 		Short: "Show the current active job plan directory",
@@ -53,8 +53,8 @@ If no active job is set, this command will indicate that.`,
 	}
 }
 
-// NewJobsUnsetCmd creates the jobs unset command.
-func NewJobsUnsetCmd() *cobra.Command {
+// NewPlanUnsetCmd creates the plan unset command.
+func NewPlanUnsetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unset",
 		Short: "Clear the active job plan directory",

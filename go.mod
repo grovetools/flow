@@ -2,9 +2,9 @@ module github.com/grovepm/grove-flow
 
 go 1.24.4
 
-replace github.com/mattsolo1/grove-core => ../grove-core
+replace github.com/mattsolo1/grove-core => /Users/solom4/Code/grove-ecosystem/grove-core
 
-replace github.com/mattsolo1/grove-context => ../grove-context
+replace github.com/mattsolo1/grove-context => /Users/solom4/Code/grove-ecosystem/grove-context
 
 require (
 	github.com/charmbracelet/lipgloss v0.13.0
@@ -38,6 +38,7 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
+	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect

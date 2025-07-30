@@ -116,7 +116,7 @@ func (o *Orchestrator) ValidatePrerequisites() error {
 // registerExecutors sets up the available executors.
 func (o *Orchestrator) registerExecutors() {
 	// Create shared config for executors
-	execConfig := &Config{
+	execConfig := &ExecutorConfig{
 		MaxPromptLength: 1000000,
 		Timeout:         30 * time.Minute,
 		RetryCount:      2,

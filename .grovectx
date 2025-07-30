@@ -1,0 +1,6 @@
+*
+/Users/solom4/Code/grove-ecosystem/grove-core/
+
+!pkg/orchestration/builtin_templates/
+!tests/
+

@@ -9,11 +9,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 )
 
-type JobsAddStepCmd struct {
+type PlanAddStepCmd struct {
 	Dir         string   `arg:"" help:"Plan directory"`
 	Template    string   `flag:"" help:"Name of the job template to use"`
 	Type        string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, or shell"`
@@ -26,26 +25,13 @@ type JobsAddStepCmd struct {
 	Interactive bool     `flag:"i" help:"Interactive mode"`
 }
 
-func (c *JobsAddStepCmd) Run() error {
-	return RunJobsAddStep(c)
+func (c *PlanAddStepCmd) Run() error {
+	return RunPlanAddStep(c)
 }
 
-func RunJobsAddStep(cmd *JobsAddStepCmd) error {
-	// Load config to check for PlansDirectory setting
-	cwd, _ := os.Getwd()
-	configFile, err := config.FindConfigFile(cwd)
-	var cfg *config.Config
-	if err == nil {
-		cfg, err = config.LoadWithOverrides(configFile)
-		if err != nil {
-			cfg = &config.Config{}
-		}
-	} else {
-		cfg = &config.Config{}
-	}
-
+func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	// Resolve the plan path with active job support
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir, cfg)
+	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
@@ -100,7 +86,7 @@ func RunJobsAddStep(cmd *JobsAddStepCmd) error {
 	return nil
 }
 
-func collectJobDetails(cmd *JobsAddStepCmd, plan *orchestration.Plan) (*orchestration.Job, error) {
+func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan) (*orchestration.Job, error) {
 	if cmd.Interactive {
 		return interactiveJobCreation(plan)
 	}
@@ -431,7 +417,7 @@ func selectDependencies(plan *orchestration.Plan, reader *bufio.Reader) ([]strin
 	return deps, nil
 }
 
-func collectJobDetailsFromTemplate(cmd *JobsAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate) (*orchestration.Job, error) {
+func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate) (*orchestration.Job, error) {
 	// Title is required even with template
 	if cmd.Title == "" {
 		return nil, fmt.Errorf("title is required (use --title)")

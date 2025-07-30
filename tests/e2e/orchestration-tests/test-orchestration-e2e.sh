@@ -128,7 +128,7 @@ EOF
 test_init_command() {
     log_info "Testing init command..."
     
-    "$FLOW_CMD" jobs init "$PLAN_DIR" -s "$DEMO_DIR/feature-spec.md" --create-initial-job
+    "$FLOW_CMD" plan init "$PLAN_DIR" -s "$DEMO_DIR/feature-spec.md" --create-initial-job
     
     # Check for any initial job file
     if ! ls "$PLAN_DIR"/*.md >/dev/null 2>&1; then
@@ -144,7 +144,7 @@ test_init_command() {
 test_status_command() {
     log_info "Testing status command..."
     
-    local output=$("$FLOW_CMD" jobs status "$PLAN_DIR" 2>&1)
+    local output=$("$FLOW_CMD" plan status "$PLAN_DIR" 2>&1)
     
     # Check for expected output - look for the initial job file
     if ! echo "$output" | grep -q "01-initial-job.md"; then
@@ -162,7 +162,7 @@ test_status_command() {
     # Show status in interactive mode
     if [ "$INTERACTIVE" = "true" ]; then
         echo -e "\n${YELLOW}Current status:${NC}"
-        "$FLOW_CMD" jobs status "$PLAN_DIR"
+        "$FLOW_CMD" plan status "$PLAN_DIR"
         pause_if_interactive "Review the job status"
     fi
 }
@@ -190,7 +190,7 @@ EOF
     
     # Run the job (in real scenario, this would use LLM)
     # For now, we'll just verify the command runs
-    if "$FLOW_CMD" jobs run "$PLAN_DIR/02-design-api.md" --yes 2>&1 | grep -q "Error"; then
+    if "$FLOW_CMD" plan run "$PLAN_DIR/02-design-api.md" --yes 2>&1 | grep -q "Error"; then
         log_error "Job execution failed"
         return 1
     fi
@@ -269,13 +269,13 @@ EOF
 }
 
 test_add_step_command() {
-    log_info "Testing add-step command..."
+    log_info "Testing add command..."
     
-    pause_if_interactive "About to test add-step command"
+    pause_if_interactive "About to test add command"
     
     # Test non-interactive mode
     assert_command_success "add step via CLI args" \
-        "$FLOW_CMD" jobs add-step "$PLAN_DIR" \
+        "$FLOW_CMD" plan add "$PLAN_DIR" \
             --title "Add Database Health Check" \
             --type agent \
             -d 03-implement-backend.md \
@@ -283,7 +283,7 @@ test_add_step_command() {
     
     # Verify job was created
     if ! ls "$PLAN_DIR"/*-add-database-health-check.md >/dev/null 2>&1; then
-        log_error "Job file not created by add-step"
+        log_error "Job file not created by add"
         return 1
     fi
     
@@ -296,7 +296,7 @@ test_graph_command() {
     log_info "Testing graph command..."
     
     # Test mermaid output
-    local output=$("$FLOW_CMD" jobs graph "$PLAN_DIR" -f mermaid 2>&1)
+    local output=$("$FLOW_CMD" plan graph "$PLAN_DIR" -f mermaid 2>&1)
     
     if ! echo "$output" | grep -q "graph TD"; then
         log_error "Graph output missing mermaid syntax"
@@ -304,7 +304,7 @@ test_graph_command() {
     fi
     
     # Test ASCII output
-    output=$("$FLOW_CMD" jobs graph "$PLAN_DIR" -f ascii 2>&1)
+    output=$("$FLOW_CMD" plan graph "$PLAN_DIR" -f ascii 2>&1)
     
     if ! echo "$output" | grep -q "Job Dependency Graph"; then
         log_error "Graph output missing ASCII header"
@@ -320,9 +320,9 @@ test_graph_command() {
     # Show graph in interactive mode
     if [ "$INTERACTIVE" = "true" ]; then
         echo -e "\n${YELLOW}Dependency Graph (ASCII):${NC}"
-        "$FLOW_CMD" jobs graph "$PLAN_DIR" -f ascii
+        "$FLOW_CMD" plan graph "$PLAN_DIR" -f ascii
         echo -e "\n${YELLOW}Dependency Graph (Mermaid):${NC}"
-        "$FLOW_CMD" jobs graph "$PLAN_DIR" -f mermaid
+        "$FLOW_CMD" plan graph "$PLAN_DIR" -f mermaid
         pause_if_interactive "Review the dependency graph"
     fi
 }
@@ -334,7 +334,7 @@ test_cleanup_worktrees() {
     # For now, just verify the command runs
     
     assert_command_success "cleanup worktrees command" \
-        "$FLOW_CMD" jobs cleanup-worktrees "$PLAN_DIR" --age 0s --force
+        "$FLOW_CMD" plan cleanup-worktrees "$PLAN_DIR" --age 0s --force
     
     log_success "Cleanup worktrees test passed"
 }
@@ -347,7 +347,7 @@ test_full_workflow() {
     # Show final status
     if [ "$INTERACTIVE" = "true" ]; then
         echo -e "\n${YELLOW}Final status:${NC}"
-        "$FLOW_CMD" jobs status "$PLAN_DIR"
+        "$FLOW_CMD" plan status "$PLAN_DIR"
     fi
     
     log_success "Full workflow test passed"

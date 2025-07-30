@@ -12,8 +12,9 @@ func main() {
 		"Job orchestration and workflows",
 	)
 
-	// Add the jobs command and all its subcommands
-	rootCmd.AddCommand(cmd.GetJobsCommand())
+	// Add the plan (formerly jobs) and chat commands
+	rootCmd.AddCommand(cmd.GetPlanCommand())
+	rootCmd.AddCommand(cmd.GetChatCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

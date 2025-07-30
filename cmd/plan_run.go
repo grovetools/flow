@@ -10,28 +10,20 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/docker"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
 	"github.com/grovepm/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
 )
 
-// runJobsRun implements the run command.
-func runJobsRun(cmd *cobra.Command, args []string) error {
+// runPlanRun implements the run command.
+func runPlanRun(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	// Load config first to check for PlansDirectory setting
-	cwd, _ := os.Getwd()
-	configFile, err := config.FindConfigFile(cwd)
-	var cfg *config.Config
-	if err == nil {
-		cfg, err = config.LoadWithOverrides(configFile)
-		if err != nil {
-			cfg = &config.Config{}
-		}
-	} else {
-		cfg = &config.Config{}
+	// Load flow config
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		return err
 	}
 
 	// Determine target - either a job file or plan directory
@@ -40,50 +32,26 @@ func runJobsRun(cmd *cobra.Command, args []string) error {
 
 	if len(args) > 0 {
 		target := args[0]
-		
-		// Check if target contains a slash, indicating plan/job format
-		if strings.Contains(target, "/") {
-			parts := strings.SplitN(target, "/", 2)
-			planName := parts[0]
-			targetJob = parts[1]
-			
-			// Resolve the plan directory
-			resolvedPath, err := resolvePlanPath(planName, cfg)
+		info, err := os.Stat(target)
+		if err != nil {
+			// It might be a plan name in a configured plans_directory, try resolving it.
+			resolvedPath, resolveErr := resolvePlanPath(target)
+			if resolveErr != nil {
+				 return fmt.Errorf("target not found: %s", target)
+			}
+			info, err = os.Stat(resolvedPath)
 			if err != nil {
-				return fmt.Errorf("could not resolve plan path: %w", err)
+				return fmt.Errorf("target not found: %s", resolvedPath)
 			}
-			
-			// Check if the plan directory exists
-			if info, err := os.Stat(resolvedPath); err != nil || !info.IsDir() {
-				return fmt.Errorf("plan directory not found: %s", planName)
-			}
-			
-			planDir = resolvedPath
-		} else {
-			// Original logic: could be a plan directory or file path
-			resolvedPath, err := resolvePlanPath(target, cfg)
-			if err != nil {
-				return fmt.Errorf("could not resolve plan path: %w", err)
-			}
-			
-			// Check if resolved path exists
-			info, err := os.Stat(resolvedPath)
-			if err != nil {
-				// If resolved path doesn't exist, try the original target
-				info, err = os.Stat(target)
-				if err != nil {
-					return fmt.Errorf("invalid target: %w", err)
-				}
-				resolvedPath = target
-			}
+			target = resolvedPath // Use the resolved path from now on
+		}
 
-			if info.IsDir() {
-				planDir = resolvedPath
-			} else {
-				// It's a file - extract the plan directory
-				planDir = filepath.Dir(resolvedPath)
-				targetJob = filepath.Base(resolvedPath)
-			}
+		if info.IsDir() {
+			planDir = target
+		} else {
+			// It's a single file (like a chat job)
+			planDir = filepath.Dir(target)
+			targetJob = filepath.Base(target)
 		}
 	} else {
 		// No target specified, try to use active job
@@ -93,7 +61,7 @@ func runJobsRun(cmd *cobra.Command, args []string) error {
 		}
 		if activeJob != "" {
 			// Use active job
-			resolvedPath, err := resolvePlanPath(activeJob, cfg)
+			resolvedPath, err := resolvePlanPath(activeJob)
 			if err != nil {
 				return fmt.Errorf("could not resolve active job path: %w", err)
 			}
@@ -110,14 +78,12 @@ func runJobsRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load plan: %w", err)
 	}
 	
-	// If the plan doesn't have orchestration config or it's missing target_agent_container
-	// (e.g., when using plans_directory), use the config from the current project
-	if cfg != nil && (plan.Orchestration == nil || plan.Orchestration.TargetAgentContainer == "") {
-		plan.Orchestration = &config.OrchestrationConfig{
-			OneshotModel:         cfg.Orchestration.OneshotModel,
-			TargetAgentContainer: cfg.Orchestration.TargetAgentContainer,
-			PlansDirectory:       cfg.Orchestration.PlansDirectory,
-		}
+	// Inject the loaded configuration into the plan object
+	plan.Orchestration = &orchestration.Config{
+		OneshotModel:         flowCfg.OneshotModel,
+		TargetAgentContainer: flowCfg.TargetAgentContainer,
+		PlansDirectory:       flowCfg.PlansDirectory,
+		MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
 	}
 	
 
@@ -138,18 +104,18 @@ func runJobsRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Load grove config to get default model if no override specified
-	modelOverride := jobsRunModel
-	if modelOverride == "" && cfg.Orchestration.OneshotModel != "" {
-		modelOverride = cfg.Orchestration.OneshotModel
+	modelOverride := planRunModel
+	if modelOverride == "" && flowCfg.OneshotModel != "" {
+		modelOverride = flowCfg.OneshotModel
 	}
 
 	// Create orchestrator config
 	maxSteps := 20 // Default
-	if cfg.Orchestration.MaxConsecutiveSteps > 0 {
-		maxSteps = cfg.Orchestration.MaxConsecutiveSteps
+	if flowCfg.MaxConsecutiveSteps > 0 {
+		maxSteps = flowCfg.MaxConsecutiveSteps
 	}
 	orchConfig := &orchestration.OrchestratorConfig{
-		MaxParallelJobs:     jobsRunParallel,
+		MaxParallelJobs:     planRunParallel,
 		CheckInterval:       5 * time.Second,
 		ModelOverride:       modelOverride,
 		MaxConsecutiveSteps: maxSteps,
@@ -171,25 +137,25 @@ func runJobsRun(cmd *cobra.Command, args []string) error {
 	if targetJob != "" {
 		// Run single job
 		return runSingleJob(ctx, orch, plan, targetJob)
-	} else if jobsRunAll {
+	} else if planRunAll {
 		// Check if this is a chat-style plan
 		planMDPath := filepath.Join(plan.Directory, "plan.md")
 		if _, err := os.Stat(planMDPath); err == nil {
 			// plan.md exists, check if it's a chat job
 			for _, job := range plan.Jobs {
 				if job.FilePath == planMDPath && job.Type == orchestration.JobTypeChat {
-					return fmt.Errorf("grove jobs run --all is disabled for chat-style plans to prevent infinite loops. Please run chat turns one by one")
+					return fmt.Errorf("flow plan run --all is disabled for chat-style plans to prevent infinite loops. Please run chat turns one by one")
 				}
 			}
 		}
 		// Run all jobs
 		return runAllJobs(ctx, orch, plan, cmd)
-	} else if jobsRunNext {
+	} else if planRunNext {
 		// Run next available jobs
 		return runNextJobs(ctx, orch, plan, cmd)
 	} else {
 		// Default to running next if no flags specified
-		jobsRunNext = true
+		planRunNext = true
 		return runNextJobs(ctx, orch, plan, cmd)
 	}
 }
@@ -230,7 +196,7 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 	fmt.Printf("Dependencies: %s All satisfied\n", color.GreenString("✓"))
 
 	// Confirm execution unless --yes
-	if !jobsRunYes {
+	if !planRunYes {
 		fmt.Print("\nExecute this job? [Y/n]: ")
 		var response string
 		fmt.Scanln(&response)
@@ -287,7 +253,7 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 	}
 
 	// Confirm unless --yes
-	if !jobsRunYes {
+	if !planRunYes {
 		fmt.Printf("\nRun %d job(s)? [Y/n]: ", len(runnable))
 		var response string
 		fmt.Scanln(&response)
@@ -330,7 +296,7 @@ func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orc
 		status.Total, status.Completed, remaining)
 
 	// Confirm unless --yes
-	if !jobsRunYes {
+	if !planRunYes {
 		fmt.Print("\nThis will run all remaining jobs. Continue? [Y/n]: ")
 		var response string
 		fmt.Scanln(&response)
@@ -344,7 +310,7 @@ func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orc
 	fmt.Println("\nStarting orchestration...")
 	
 	// Set up progress monitoring if --watch
-	if jobsRunWatch {
+	if planRunWatch {
 		go monitorProgress(ctx, orch)
 	}
 
@@ -412,7 +378,7 @@ func monitorProgress(ctx context.Context, orch *orchestration.Orchestrator) {
 
 // Command flags specific to run (defined in jobs.go)
 var (
-	jobsRunParallel int
-	jobsRunWatch    bool
-	jobsRunYes      bool
+	planRunParallel int
+	planRunWatch    bool
+	planRunYes      bool
 )
