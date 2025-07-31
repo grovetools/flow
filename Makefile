@@ -46,6 +46,9 @@ test-e2e: build
 	@echo "Running chat run command tests..."
 	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-run.sh
 	@echo ""
+	@echo "Running chat title filtering tests..."
+	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-title-filtering.sh
+	@echo ""
 	@echo "Note: Full pipeline test (test-chat-pipeline.sh) is disabled due to git worktree"
 	@echo "      limitations when running in temporary directories. To run it manually:"
 	@echo "      cd tests && ./e2e/test-chat-pipeline.sh"
@@ -107,6 +110,14 @@ test-chat-run: build
 test-chat-run-interactive: build
 	@echo "Running chat run command tests in interactive mode..."
 	@cd tests && GROVE_TEST_STEP_THROUGH=true FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-run.sh
+
+test-chat-title-filtering: build
+	@echo "Running chat title filtering tests..."
+	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-title-filtering.sh
+
+test-chat-title-filtering-interactive: build
+	@echo "Running chat title filtering tests in interactive mode..."
+	@cd tests && GROVE_TEST_STEP_THROUGH=true FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-title-filtering.sh
 
 # Show available targets
 help:
