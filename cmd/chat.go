@@ -261,6 +261,21 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to parse chat: %w", err)
 		}
 		
+		// Debug output
+		if v, _ := cmd.Flags().GetBool("verbose"); v {
+			fmt.Printf("DEBUG: Found %d turns\n", len(turns))
+			for i, turn := range turns {
+				fmt.Printf("DEBUG: Turn %d - Speaker: %s, Content preview: %.50s...\n", i+1, turn.Speaker, strings.ReplaceAll(turn.Content, "\n", " "))
+			}
+			if len(turns) > 0 {
+				lastTurn := turns[len(turns)-1]
+				fmt.Printf("DEBUG: Last turn - Speaker: %s, Has directive: %v\n", lastTurn.Speaker, lastTurn.Directive != nil)
+				if lastTurn.Directive != nil {
+					fmt.Printf("DEBUG: Last turn directive - Template: %s, ID: %s\n", lastTurn.Directive.Template, lastTurn.Directive.ID)
+				}
+			}
+		}
+		
 		if len(turns) == 0 || turns[len(turns)-1].Speaker != "user" {
 			return fmt.Errorf("chat is not runnable (last turn is not from user)")
 		}

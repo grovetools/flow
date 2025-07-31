@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,6 +56,11 @@ func LoadPlan(dir string) (*Plan, error) {
 		filepath := filepath.Join(dir, filename)
 		job, err := LoadJob(filepath)
 		if err != nil {
+			// Skip files that are not jobs
+			var notAJob ErrNotAJob
+			if errors.As(err, &notAJob) {
+				continue
+			}
 			return nil, fmt.Errorf("loading job %s: %w", filename, err)
 		}
 
@@ -81,6 +87,15 @@ func LoadPlan(dir string) (*Plan, error) {
 	return plan, nil
 }
 
+// ErrNotAJob is returned when a file is not a valid job file
+type ErrNotAJob struct {
+	Reason string
+}
+
+func (e ErrNotAJob) Error() string {
+	return e.Reason
+}
+
 // LoadJob loads a single job from a markdown file.
 func LoadJob(filepath string) (*Job, error) {
 	content, err := os.ReadFile(filepath)
@@ -92,6 +107,11 @@ func LoadJob(filepath string) (*Job, error) {
 	frontmatter, body, err := ParseFrontmatter(content)
 	if err != nil {
 		return nil, fmt.Errorf("parsing frontmatter: %w", err)
+	}
+
+	// Check if this file has a type field - if not, it's not a job
+	if typeField, ok := frontmatter["type"]; !ok || typeField == nil {
+		return nil, ErrNotAJob{Reason: "no 'type' field in frontmatter"}
 	}
 
 	// Convert frontmatter map to Job struct
@@ -111,6 +131,11 @@ func LoadJob(filepath string) (*Job, error) {
 		return nil, fmt.Errorf("unmarshaling to job struct: %w", err)
 	}
 
+	// Validate job type first - only job types are processed
+	if job.Type != JobTypeOneshot && job.Type != JobTypeAgent && job.Type != JobTypeShell && job.Type != JobTypeChat {
+		return nil, ErrNotAJob{Reason: fmt.Sprintf("not a job type: %s", job.Type)}
+	}
+
 	// Validate required fields
 	if job.ID == "" {
 		return nil, fmt.Errorf("job missing required field: id")
@@ -123,11 +148,6 @@ func LoadJob(filepath string) (*Job, error) {
 	}
 	if job.Type == "" {
 		return nil, fmt.Errorf("job missing required field: type")
-	}
-
-	// Validate job type
-	if job.Type != JobTypeOneshot && job.Type != JobTypeAgent && job.Type != JobTypeShell && job.Type != JobTypeChat {
-		return nil, fmt.Errorf("invalid job type: %s (must be 'oneshot', 'agent', 'shell', or 'chat')", job.Type)
 	}
 
 	// Validate job status

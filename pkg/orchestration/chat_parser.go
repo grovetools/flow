@@ -10,8 +10,8 @@ import (
 
 var groveDirectiveRegex = regexp.MustCompile(`(?m)^<!-- grove: (.+?) -->`)
 
-// ParseChatFile parses a chat notebook file into a slice of ChatTurn structs.
-// This is the corrected, more robust implementation.
+// ParseChatFile parses a chat notebook file to determine the speaker of each turn.
+// It returns a simplified list of turns for determining runnability.
 func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 	_, bodyBytes, err := ParseFrontmatter(content)
 	if err != nil {
@@ -25,98 +25,70 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 		return []*ChatTurn{}, nil
 	}
 
-	// Split the body (everything AFTER the frontmatter) by the turn separator.
-	cells := strings.Split(body, "\n---\n")
-
+	// Find all grove directives in the content
+	matches := groveDirectiveRegex.FindAllStringSubmatch(body, -1)
+	matchIndices := groveDirectiveRegex.FindAllStringIndex(body, -1)
+	
+	// If no directives found, assume entire content is initial user prompt
+	if len(matches) == 0 {
+		return []*ChatTurn{{
+			Speaker:   "user",
+			Content:   body,
+			Timestamp: time.Now(),
+		}}, nil
+	}
+	
 	var turns []*ChatTurn
-	for i, cell := range cells {
-		trimmedCell := strings.TrimSpace(cell)
-		if trimmedCell == "" {
-			continue // Skip empty turns
-		}
-
-		turn, err := parseChatCell(trimmedCell, i == 0 && len(cells) == 1)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing turn %d: %w", i+1, err)
-		}
-
-		if turn != nil && strings.TrimSpace(turn.Content) != "" {
-			turns = append(turns, turn)
+	
+	// Check if there's content before the first directive
+	if matchIndices[0][0] > 0 {
+		initialContent := strings.TrimSpace(body[:matchIndices[0][0]])
+		if initialContent != "" {
+			turns = append(turns, &ChatTurn{
+				Speaker:   "user",
+				Content:   initialContent,
+				Timestamp: time.Now(),
+			})
 		}
 	}
-
-	return turns, nil
-}
-
-// parseChatCell determines the speaker and content for a single turn.
-func parseChatCell(cell string, isOnlyCell bool) (*ChatTurn, error) {
-	// Extract directive first to check its content
-	directive, cleanContent := extractDirective(cell)
 	
-	// Determine speaker based on content and directive
-	speaker := "llm" // Default to LLM
-	
-	// User turns are identified by:
-	// 1. Having a directive with "template" field (user directives specify template)
-	// 2. Starting with a blockquote (>)
-	// 3. Containing any blockquote in the content
-	// 4. Being the only cell with mixed content (context + question)
-	if directive != nil && directive.Template != "" {
-		speaker = "user"
-	} else if strings.Contains(cell, ">") {
-		// If the cell contains any blockquote marker, it's likely a user turn
-		speaker = "user"
-	} else if isOnlyCell {
-		// Special case: if this is the only cell and it doesn't have an LLM directive,
-		// it's likely an initial user prompt
-		if directive == nil || directive.ID == "" {
+	// Process each directive
+	for i, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		
+		// Parse the directive JSON
+		var directive ChatDirective
+		if err := json.Unmarshal([]byte(match[1]), &directive); err != nil {
+			continue
+		}
+		
+		// Determine speaker from directive
+		speaker := "llm"
+		if directive.Template != "" {
 			speaker = "user"
 		}
-	}
-	
-	// LLM responses have directives with only "id" field
-	// If we have a directive with only ID and no template, it's an LLM response
-	if directive != nil && directive.ID != "" && directive.Template == "" {
-		speaker = "llm"
-	}
-
-	turn := &ChatTurn{
-		Speaker:   speaker,
-		Content:   cleanContent,
-		Directive: directive,
-		Timestamp: time.Now(),
-	}
-
-	return turn, nil
-}
-
-func extractDirective(content string) (*ChatDirective, string) {
-	matches := groveDirectiveRegex.FindStringSubmatch(content)
-	if len(matches) < 2 {
-		return nil, content
-	}
-	
-	// Parse the JSON from the comment
-	var directive ChatDirective
-	if err := json.Unmarshal([]byte(matches[1]), &directive); err != nil {
-		// If parsing fails, return original content
-		return nil, content
-	}
-	
-	// Remove the directive from content
-	cleanContent := groveDirectiveRegex.ReplaceAllString(content, "")
-	cleanContent = strings.TrimSpace(cleanContent)
-	
-	// Handle quoted user messages
-	if strings.HasPrefix(cleanContent, "> ") {
-		lines := strings.Split(cleanContent, "\n")
-		for i, line := range lines {
-			if strings.HasPrefix(line, "> ") {
-				lines[i] = strings.TrimPrefix(line, "> ")
-			}
+		
+		// Extract content after this directive until next directive or end
+		startIdx := matchIndices[i][1]
+		var endIdx int
+		if i+1 < len(matchIndices) {
+			endIdx = matchIndices[i+1][0]
+		} else {
+			endIdx = len(body)
 		}
-		cleanContent = strings.Join(lines, "\n")
+		
+		content := strings.TrimSpace(body[startIdx:endIdx])
+		if content != "" {
+			turns = append(turns, &ChatTurn{
+				Speaker:   speaker,
+				Content:   content,
+				Directive: &directive,
+				Timestamp: time.Now(),
+			})
+		}
 	}
 	
-	return &directive, cleanContent
+	return turns, nil
 }
