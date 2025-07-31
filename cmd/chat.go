@@ -46,10 +46,15 @@ Example:
 	chatListCmd.Flags().StringVar(&chatStatus, "status", "", "Filter chats by status (e.g., pending_user, completed, running)")
 	
 	chatRunCmd := &cobra.Command{
-		Use:   "run",
-		Short: "Run all outstanding chat jobs that are waiting for an LLM response",
-		Long: `Scans the configured chat directory for all chats where the last turn is from a user
-and executes them sequentially to generate the next LLM response.`,
+		Use:   "run [title...]",
+		Short: "Run outstanding chat jobs that are waiting for an LLM response",
+		Long: `Scans the configured chat directory for chats where the last turn is from a user
+and executes them sequentially to generate the next LLM response.
+
+You can optionally specify chat titles to run only specific chats:
+  flow chat run                     # Run all pending chats
+  flow chat run testing-situation   # Run only the chat titled "testing-situation"
+  flow chat run chat1 chat2         # Run multiple specific chats`,
 		RunE: runChatRun,
 	}
 	
@@ -226,40 +231,43 @@ func runChatList(cmd *cobra.Command, args []string) error {
 
 func runChatRun(cmd *cobra.Command, args []string) error {
 	var runnableChats []*orchestration.Job // Store job objects
+	var titleFilter map[string]bool
 
-	// Check if a specific file was provided
+	// Check if specific titles were provided
 	if len(args) > 0 {
-		// Run specific chat file
-		chatPath := args[0]
-		
-		// Verify file exists
-		info, err := os.Stat(chatPath)
-		if err != nil {
-			return fmt.Errorf("chat file not found: %s", chatPath)
-		}
-		if info.IsDir() {
-			return fmt.Errorf("expected a file, got directory: %s", chatPath)
-		}
-		
-		// Load and check if it's a runnable chat
-		job, err := orchestration.LoadJob(chatPath)
-		if err != nil {
-			return fmt.Errorf("failed to load job: %w", err)
-		}
-		if job.Type != "chat" {
-			return fmt.Errorf("file is not a chat job: %s", chatPath)
-		}
-		
-		// Check if it's runnable
-		content, err := os.ReadFile(chatPath)
-		if err != nil {
-			return fmt.Errorf("failed to read file: %w", err)
-		}
-		
-		turns, err := orchestration.ParseChatFile(content)
-		if err != nil {
-			return fmt.Errorf("failed to parse chat: %w", err)
-		}
+		// Check if the first argument looks like a file path
+		if strings.Contains(args[0], "/") || strings.HasSuffix(args[0], ".md") {
+			// Legacy behavior: Run specific chat file
+			chatPath := args[0]
+			
+			// Verify file exists
+			info, err := os.Stat(chatPath)
+			if err != nil {
+				return fmt.Errorf("chat file not found: %s", chatPath)
+			}
+			if info.IsDir() {
+				return fmt.Errorf("expected a file, got directory: %s", chatPath)
+			}
+			
+			// Load and check if it's a runnable chat
+			job, err := orchestration.LoadJob(chatPath)
+			if err != nil {
+				return fmt.Errorf("failed to load job: %w", err)
+			}
+			if job.Type != "chat" {
+				return fmt.Errorf("file is not a chat job: %s", chatPath)
+			}
+			
+			// Check if it's runnable
+			content, err := os.ReadFile(chatPath)
+			if err != nil {
+				return fmt.Errorf("failed to read file: %w", err)
+			}
+			
+			turns, err := orchestration.ParseChatFile(content)
+			if err != nil {
+				return fmt.Errorf("failed to parse chat: %w", err)
+			}
 		
 		// Debug output
 		if v, _ := cmd.Flags().GetBool("verbose"); v {
@@ -276,13 +284,23 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 		
-		if len(turns) == 0 || turns[len(turns)-1].Speaker != "user" {
-			return fmt.Errorf("chat is not runnable (last turn is not from user)")
+			if len(turns) == 0 || turns[len(turns)-1].Speaker != "user" {
+				return fmt.Errorf("chat is not runnable (last turn is not from user)")
+			}
+			
+			job.FilePath = chatPath
+			runnableChats = append(runnableChats, job)
+		} else {
+			// New behavior: Filter by titles
+			titleFilter = make(map[string]bool)
+			for _, title := range args {
+				titleFilter[title] = true
+			}
 		}
-		
-		job.FilePath = chatPath
-		runnableChats = append(runnableChats, job)
-	} else {
+	}
+	
+	// If we don't have specific file paths, scan the chat directory
+	if len(runnableChats) == 0 {
 		// Scan chat directory
 		flowCfg, err := loadFlowConfig()
 		if err != nil {
@@ -312,6 +330,11 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			job, loadErr := orchestration.LoadJob(path)
 			if loadErr != nil || job.Type != "chat" {
 				return nil // Skip non-chat files or files that fail to load
+			}
+
+			// If title filter is active, check if this chat's title matches
+			if titleFilter != nil && !titleFilter[job.Title] {
+				return nil // Skip chats not in the filter
 			}
 
 			// Only check chats that are in pending_user status
@@ -344,7 +367,27 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(runnableChats) == 0 {
-		fmt.Println("No runnable chats found.")
+		if titleFilter != nil {
+			// User specified titles but none were found
+			fmt.Printf("No runnable chats found with the specified title(s): %s\n", strings.Join(args, ", "))
+			fmt.Println("\nAvailable chats:")
+			// Show available chats by running list logic
+			flowCfg, _ := loadFlowConfig()
+			if flowCfg != nil && flowCfg.ChatDirectory != "" {
+				chatDir, _ := expandChatPath(flowCfg.ChatDirectory)
+				filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
+					if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
+						return nil
+					}
+					if job, err := orchestration.LoadJob(path); err == nil && job.Type == "chat" {
+						fmt.Printf("  - %s (status: %s)\n", job.Title, job.Status)
+					}
+					return nil
+				})
+			}
+		} else {
+			fmt.Println("No runnable chats found.")
+		}
 		return nil
 	}
 
