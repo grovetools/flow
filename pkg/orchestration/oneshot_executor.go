@@ -1012,13 +1012,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	}
 
-	// Combine conversation history and template as the main prompt
-	// Context files will be passed separately to the llm command
+	// Build prompt with conversation history and template
+	// Context files will be passed separately as attachments
 	fullPrompt := fmt.Sprintf("%s\n\n---\n\n## System Instructions\n\n%s", 
 		conversationHistory, string(templateContent))
 	
 	if len(validContextPaths) > 0 {
-		fmt.Printf("✓ Including %d context file(s) in chat prompt\n", len(validContextPaths))
+		fmt.Printf("✓ Including %d context file(s) as attachments\n", len(validContextPaths))
 	} else {
 		fmt.Println("⚠️  No context files included in chat prompt")
 	}
@@ -1027,7 +1027,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	llmOpts := LLMOptions{
 		Model:        job.Model, // Start with job model from frontmatter
 		WorkingDir:   worktreePath,
-		ContextFiles: validContextPaths, // Pass context files directly
+		ContextFiles: validContextPaths, // Pass context file paths
 	}
 	
 	// Allow directive to override job model (for specific turns that need different models)

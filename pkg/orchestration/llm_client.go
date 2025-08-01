@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -56,10 +58,51 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 	fmt.Printf("[LLM DEBUG] Context files: %d\n", len(opts.ContextFiles))
 	fmt.Printf("[LLM DEBUG] Prompt length: %d bytes\n", len(prompt))
 	
-	// Add context files as arguments to llm command
-	for _, contextFile := range opts.ContextFiles {
-		fmt.Printf("[LLM DEBUG] Adding context file: %s\n", contextFile)
-		args = append(args, contextFile)
+	// If we have context files, concatenate them into a single temp file
+	var tempContextFile string
+	if len(opts.ContextFiles) > 0 {
+		// Create a temporary file for combined context
+		// Use .txt extension to ensure it's recognized as text/plain
+		tempFile, err := os.CreateTemp("", "grove-context-*.txt")
+		if err != nil {
+			return "", fmt.Errorf("creating temp context file: %w", err)
+		}
+		tempContextFile = tempFile.Name()
+		defer os.Remove(tempContextFile) // Clean up when done
+		
+		fmt.Printf("[LLM DEBUG] Creating combined context file: %s\n", tempContextFile)
+		
+		// Concatenate all context files
+		for i, contextFile := range opts.ContextFiles {
+			fmt.Printf("[LLM DEBUG] Adding context from: %s\n", contextFile)
+			
+			// Write header
+			if i > 0 {
+				tempFile.WriteString("\n\n")
+			}
+			tempFile.WriteString(fmt.Sprintf("=== Context from %s ===\n", contextFile))
+			
+			// Stream the context file to avoid loading into memory
+			srcFile, err := os.Open(contextFile)
+			if err != nil {
+				tempFile.Close()
+				return "", fmt.Errorf("opening context file %s: %w", contextFile, err)
+			}
+			
+			// Copy file content
+			_, err = io.Copy(tempFile, srcFile)
+			srcFile.Close()
+			if err != nil {
+				tempFile.Close()
+				return "", fmt.Errorf("copying context file %s: %w", contextFile, err)
+			}
+		}
+		
+		tempFile.Close()
+		
+		// Add the combined context file as an attachment with explicit text/plain mimetype
+		fmt.Printf("[LLM DEBUG] Adding combined context as attachment: %s\n", tempContextFile)
+		args = append(args, "--at", tempContextFile, "text/plain")
 	}
 
 	// Log full command being executed
@@ -71,6 +114,9 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 	}
 
 	execCmd := cmd.Exec()
+	
+	// Log the actual command that will be executed
+	fmt.Printf("[LLM DEBUG] Actual exec command: %s %s\n", execCmd.Path, strings.Join(execCmd.Args[1:], " "))
 	
 	// Set working directory if specified
 	if opts.WorkingDir != "" {
