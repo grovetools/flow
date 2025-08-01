@@ -3,14 +3,16 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/grovepm/grove-flow/pkg/exec"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
+	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/spf13/cobra"
 )
@@ -58,8 +60,22 @@ You can optionally specify chat titles to run only specific chats:
 		RunE: runChatRun,
 	}
 	
+	chatLaunchCmd := &cobra.Command{
+		Use:   "launch [title-or-file]",
+		Short: "Launch an interactive agent session from a chat file",
+		Long: `Launches a chat in a new detached tmux session, pre-filling the agent prompt with the chat content.
+This allows you to quickly jump from an idea in a markdown file into an interactive session.
+
+Example:
+  flow chat launch issue123             # Launch by title (searches in chat directory)
+  flow chat launch /path/to/issue.md    # Launch by file path`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runChatLaunch,
+	}
+	
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatRunCmd)
+	chatCmd.AddCommand(chatLaunchCmd)
 	return chatCmd
 }
 
@@ -401,7 +417,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		// This avoids recursion issues and correctly uses the command-line interface.
 		flowBinary := os.Args[0] // Get the path to the current flow binary
 		// Pass the FILE path directly to flow plan run, as per our updated design
-		runCmd := exec.Command(flowBinary, "plan", "run", job.FilePath, "--yes")
+		runCmd := osexec.Command(flowBinary, "plan", "run", job.FilePath, "--yes")
 		runCmd.Stdout = os.Stdout
 		runCmd.Stderr = os.Stderr
 		runCmd.Stdin = os.Stdin
@@ -420,4 +436,243 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("All runnable chats processed successfully.")
 	return nil
+}
+
+func runChatLaunch(cmd *cobra.Command, args []string) error {
+	var chatPath string
+	var chatTitle string
+	
+	// Determine if we have a file path or a title
+	if len(args) > 0 {
+		arg := args[0]
+		// Check if it looks like a file path
+		if strings.Contains(arg, "/") || strings.HasSuffix(arg, ".md") {
+			// Direct file path
+			chatPath = arg
+		} else {
+			// Title - we'll search for it
+			chatTitle = arg
+		}
+	} else {
+		return fmt.Errorf("please specify a chat title or file path")
+	}
+	
+	// If we have a title, search for the file
+	if chatTitle != "" {
+		flowCfg, err := loadFlowConfig()
+		if err != nil {
+			return err
+		}
+		if flowCfg.ChatDirectory == "" {
+			return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
+		}
+		
+		chatDir, err := expandChatPath(flowCfg.ChatDirectory)
+		if err != nil {
+			return fmt.Errorf("failed to expand chat directory path: %w", err)
+		}
+		
+		// Search for the chat by title
+		var found bool
+		err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
+				return nil
+			}
+			
+			job, err := orchestration.LoadJob(path)
+			if err == nil && job.Type == "chat" && job.Title == chatTitle {
+				chatPath = path
+				found = true
+				return filepath.SkipDir // Stop searching
+			}
+			return nil
+		})
+		
+		if err != nil && err != filepath.SkipDir {
+			return fmt.Errorf("failed to search chat directory: %w", err)
+		}
+		
+		if !found {
+			return fmt.Errorf("chat not found with title: %s", chatTitle)
+		}
+	}
+	
+	// Verify the file exists
+	info, err := os.Stat(chatPath)
+	if err != nil {
+		return fmt.Errorf("chat file not found: %s", chatPath)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("expected a file, got directory: %s", chatPath)
+	}
+	
+	// Read the chat content
+	content, err := os.ReadFile(chatPath)
+	if err != nil {
+		return fmt.Errorf("failed to read chat file: %w", err)
+	}
+	
+	// Parse to extract the body (without frontmatter)
+	_, body, _ := orchestration.ParseFrontmatter(content)
+	
+	// Load configuration
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		return err
+	}
+	container := flowCfg.TargetAgentContainer
+	if container == "" {
+		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
+	}
+	
+	// Pre-flight check: verify container is running
+	dockerClient, err := docker.NewSDKClient()
+	if err != nil {
+		return fmt.Errorf("failed to create docker client: %w", err)
+	}
+	
+	ctx := cmd.Context()
+	if !dockerClient.IsContainerRunning(ctx, container) {
+		return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
+	}
+	
+	// Get git root
+	gitRoot, err := git.GetGitRoot(".")
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+	
+	// Load the job to get the title from frontmatter
+	job, err := orchestration.LoadJob(chatPath)
+	if err != nil {
+		return fmt.Errorf("failed to load chat job: %w", err)
+	}
+	
+	// Derive worktree name from the chat title/filename
+	worktreeName := deriveWorktreeName(chatPath)
+	
+	// Prepare the worktree
+	wm := git.NewWorktreeManager()
+	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "interactive")
+	if err != nil {
+		return fmt.Errorf("failed to prepare worktree: %w", err)
+	}
+	
+	// Load full config to get agent args
+	fullCfg, err := loadFullConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	
+	// Build the agent command with the entire chat body as the prompt
+	agentCommand := buildAgentCommandFromChat(string(body), fullCfg.Agent.Args)
+	
+	// Prepare launch parameters
+	repoName := filepath.Base(gitRoot)
+	// Use the title from frontmatter for the session name
+	sessionTitle := sanitizeForTmuxSession(job.Title)
+	sessionName := fmt.Sprintf("%s__%s", repoName, sessionTitle)
+	
+	params := launchParameters{
+		sessionName:      sessionName,
+		container:        container,
+		hostWorktreePath: worktreePath,
+		agentCommand:     agentCommand,
+	}
+	
+	// Calculate container work directory
+	relPath, err := filepath.Rel(gitRoot, worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate relative path: %w", err)
+	}
+	params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
+	
+	// Launch the session using the same logic as plan launch
+	executor := &exec.RealCommandExecutor{}
+	return launchTmuxSession(executor, params)
+}
+
+// deriveWorktreeName creates a valid worktree name from a file path or title
+func deriveWorktreeName(chatPath string) string {
+	base := filepath.Base(chatPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	
+	// Sanitize the name to be a valid worktree name
+	// Replace spaces and special characters with hyphens
+	name = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || 
+		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, name)
+	
+	// Remove consecutive hyphens
+	for strings.Contains(name, "--") {
+		name = strings.ReplaceAll(name, "--", "-")
+	}
+	
+	// Trim hyphens from start and end
+	name = strings.Trim(name, "-")
+	
+	// Ensure it's not empty
+	if name == "" {
+		name = "chat-" + uuid.New().String()[:8]
+	}
+	
+	// Ensure it's not too long (max 100 chars)
+	if len(name) > 100 {
+		name = name[:100]
+	}
+	
+	return name
+}
+
+// buildAgentCommandFromChat creates the agent command from chat content
+func buildAgentCommandFromChat(content string, agentArgs []string) string {
+	// Basic shell escaping: wrap in single quotes and escape internal single quotes
+	escapedContent := "'" + strings.ReplaceAll(content, "'", "'\\''") + "'"
+	
+	// Build command with args
+	cmdParts := []string{"claude"}
+	cmdParts = append(cmdParts, agentArgs...)
+	cmdParts = append(cmdParts, escapedContent)
+	
+	return strings.Join(cmdParts, " ")
+}
+
+// sanitizeForTmuxSession creates a valid tmux session name from a title
+func sanitizeForTmuxSession(title string) string {
+	// Replace spaces and special characters with hyphens
+	sanitized := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || 
+		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, title)
+	
+	// Convert to lowercase for consistency
+	sanitized = strings.ToLower(sanitized)
+	
+	// Remove consecutive hyphens
+	for strings.Contains(sanitized, "--") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	}
+	
+	// Trim hyphens from start and end
+	sanitized = strings.Trim(sanitized, "-")
+	
+	// Ensure it's not empty
+	if sanitized == "" {
+		sanitized = "session"
+	}
+	
+	// Tmux session names should not be too long
+	if len(sanitized) > 50 {
+		sanitized = sanitized[:50]
+	}
+	
+	return sanitized
 }

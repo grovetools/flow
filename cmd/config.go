@@ -30,3 +30,13 @@ func loadFlowConfig() (*FlowConfig, error) {
 	
 	return &flowCfg, nil
 }
+
+// loadFullConfig loads the entire grove config including agent settings
+func loadFullConfig() (*config.Config, error) {
+	coreCfg, err := config.LoadFrom(".")
+	if err != nil {
+		// It's okay if the core config doesn't exist, we'll just use an empty one.
+		coreCfg = &config.Config{}
+	}
+	return coreCfg, nil
+}

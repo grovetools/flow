@@ -3,3 +3,13 @@ description: Job orchestration and workflows
 binary:
   name: flow
   path: ./bin/flow
+agent:
+    enabled: true
+    image: grove-claude-agent:latest
+    logs_path: /Users/solom4/.cache/grove/logs    
+    extra_volumes:
+    - /Users/solom4/Documents/nb:/Users/solom4/Documents/nb
+    args: ["--dangerously-skip-permissions"]
+    output_format: text
+flow:
+    target_agent_container: grove_flow-main-grove-agent

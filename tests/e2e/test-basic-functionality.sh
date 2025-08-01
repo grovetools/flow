@@ -60,7 +60,7 @@ git config user.name "Test User"
 
 # Create a minimal grove.yml
 cat > grove.yml << 'EOF'
-orchestration:
+flow:
   plans_directory: .
 EOF
 

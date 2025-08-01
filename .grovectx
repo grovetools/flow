@@ -1,6 +1,8 @@
 *
 /Users/solom4/Code/grove-ecosystem/grove-core/
+/Users/solom4/Code/grove-ecosystem/grove-sandbox/
 
 !pkg/orchestration/builtin_templates/
 !tests/
 
+!/Users/solom4/Code/grove-ecosystem/grove-sandbox/bin/

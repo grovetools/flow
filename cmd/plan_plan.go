@@ -84,6 +84,15 @@ By default, removes worktrees older than 24 hours.`,
 	RunE: runPlanCleanupWorktrees,
 }
 
+var planLaunchCmd = &cobra.Command{
+	Use:   "launch <job-file>",
+	Short: "Launch an interactive agent session for a job",
+	Long: `Launches a job in a new detached tmux session, pre-filling the agent prompt.
+This is useful for starting long-running or interactive agent tasks that you can check on later.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPlanLaunch,
+}
+
 // Command flags
 var (
 	planInitForce          bool
@@ -174,6 +183,7 @@ func GetPlanCommand() *cobra.Command {
 	planCmd.AddCommand(planCompleteCmd)
 	planCmd.AddCommand(planGraphCmd)
 	planCmd.AddCommand(planCleanupWorktreesCmd)
+	planCmd.AddCommand(planLaunchCmd)
 	planCmd.AddCommand(planTemplatesCmd)
 	planCmd.AddCommand(NewPlanSetCmd())
 	planCmd.AddCommand(NewPlanCurrentCmd())
@@ -225,6 +235,10 @@ func runPlanCleanupWorktrees(cmd *cobra.Command, args []string) error {
 		Force:     planCleanupForce,
 	}
 	return RunPlanCleanupWorktrees(cleanupCmd)
+}
+
+func runPlanLaunch(cmd *cobra.Command, args []string) error {
+	return RunPlanLaunch(args[0])
 }
 
 func runPlanAddStep(cmd *cobra.Command, args []string) error {
