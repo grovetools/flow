@@ -783,7 +783,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 	}
 	
 	// Get and display context statistics
-	stats, err := ctxMgr.GetStats(10) // Show top 10 files
+	stats, err := ctxMgr.GetStats([]string{}, 10) // Show top 10 files
 	if err != nil {
 		fmt.Printf("Warning: failed to get context stats: %v\n", err)
 	} else {

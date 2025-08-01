@@ -558,6 +558,25 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
 	
+	// Add Canopy Hook Configuration
+	claudeDir := filepath.Join(worktreePath, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .claude directory in worktree: %w", err)
+	}
+	
+	// Find the grove ecosystem root to locate the hook settings
+	ecosystemRoot := findGroveEcosystemRoot()
+	if ecosystemRoot != "" {
+		sourceHookSettings := filepath.Join(ecosystemRoot, "grove-canopy", "configs", "claude-hooks-settings.json")
+		destHookSettings := filepath.Join(claudeDir, "settings.local.json")
+		
+		if sourceBytes, err := os.ReadFile(sourceHookSettings); err == nil {
+			if err := os.WriteFile(destHookSettings, sourceBytes, 0644); err == nil {
+				fmt.Printf("✓ Configured canopy hooks in new worktree.\n")
+			}
+		}
+	}
+	
 	// Load full config to get agent args
 	fullCfg, err := loadFullConfig()
 	if err != nil {
