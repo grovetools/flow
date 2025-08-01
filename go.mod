@@ -1,6 +1,7 @@
 module github.com/grovepm/grove-flow
 
-go 1.23
+go 1.24
+
 
 replace github.com/mattsolo1/grove-core => /Users/solom4/Code/grove-ecosystem/grove-core
 

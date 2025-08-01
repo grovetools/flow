@@ -195,6 +195,14 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 	}
 	defer log.Close()
 
+	// Load grove config to check mount_workspace_at_host_path setting
+	coreCfg, err := config.LoadFrom(".") // Use grove-core's loader
+	if err != nil {
+		// Proceed with default behavior if config can't be loaded
+		coreCfg = &config.Config{}
+		fmt.Printf("Warning: could not load grove.yml for agent execution: %v\n", err)
+	}
+
 	// Get git root for targeted mode
 	// First try from the plan directory
 	var gitRoot string
@@ -232,14 +240,6 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 
 	// Get repo name from git root
 	repoName := filepath.Base(gitRoot)
-
-	// Load grove config to check mount_workspace_at_host_path setting
-	coreCfg, err := config.LoadFrom(".") // Use grove-core's loader
-	if err != nil {
-		// Proceed with default behavior if config can't be loaded
-		coreCfg = &config.Config{}
-		fmt.Printf("Warning: could not load grove.yml for agent execution: %v\n", err)
-	}
 
 	// Convert host worktree path to container path
 	// The container mounts the git root at its host path.

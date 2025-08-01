@@ -71,6 +71,12 @@ func RunPlanLaunch(jobPath string) error {
 		return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
 	}
 	
+	// Load full config to get agent args
+	fullCfg, err := loadFullConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	
 	// Get git root
 	gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
 	if err != nil {
@@ -95,12 +101,6 @@ func RunPlanLaunch(jobPath string) error {
 	// Configure Canopy hooks for the worktree
 	if err := configureCanopyHooks(worktreePath); err != nil {
 		return fmt.Errorf("failed to configure canopy hooks: %w", err)
-	}
-	
-	// Load full config to get agent args
-	fullCfg, err := loadFullConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
 	}
 	
 	// Debug: Log config status
