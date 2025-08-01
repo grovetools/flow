@@ -569,6 +569,11 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	
+	// Debug: Log config status
+	if verbose := os.Getenv("GROVE_DEBUG"); verbose != "" {
+		fmt.Printf("Debug: Agent.MountWorkspaceAtHostPath = %v\n", fullCfg.Agent.MountWorkspaceAtHostPath)
+	}
+	
 	// Build the agent command with the entire chat body as the prompt
 	agentCommand := buildAgentCommandFromChat(string(body), fullCfg.Agent.Args)
 	

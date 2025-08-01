@@ -95,6 +95,11 @@ func RunPlanLaunch(jobPath string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	
+	// Debug: Log config status
+	if verbose := os.Getenv("GROVE_DEBUG"); verbose != "" {
+		fmt.Printf("Debug: Agent.MountWorkspaceAtHostPath = %v\n", fullCfg.Agent.MountWorkspaceAtHostPath)
+	}
+	
 	// Build the agent command
 	agentCommand, err := buildAgentCommand(job, plan, worktreePath, fullCfg.Agent.Args)
 	if err != nil {
