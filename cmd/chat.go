@@ -590,7 +590,11 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to calculate relative path: %w", err)
 	}
-	params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
+	if fullCfg.Agent.MountWorkspaceAtHostPath {
+		params.containerWorkDir = filepath.Join(gitRoot, relPath)
+	} else {
+		params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
+	}
 	
 	// Launch the session using the same logic as plan launch
 	executor := &exec.RealCommandExecutor{}

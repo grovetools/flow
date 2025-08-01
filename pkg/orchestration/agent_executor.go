@@ -10,6 +10,7 @@ import (
 	"time"
 
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 )
@@ -210,16 +211,29 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 	// Get repo name from git root
 	repoName := filepath.Base(gitRoot)
 
+	// Load grove config to check mount_workspace_at_host_path setting
+	coreCfg, err := config.LoadFrom(".") // Use grove-core's loader
+	if err != nil {
+		// Proceed with default behavior if config can't be loaded
+		coreCfg = &config.Config{}
+		fmt.Printf("Warning: could not load grove.yml for agent execution: %v\n", err)
+	}
+
 	// Convert host worktree path to container path
-	// The container mounts the git root at /workspace/<repo-name>
-	// We need to preserve the full path structure from git root
+	// The container mounts the git root at its host path.
 	relPath, err := filepath.Rel(gitRoot, worktreePath)
 	if err != nil {
 		return fmt.Errorf("failed to get relative worktree path: %w", err)
 	}
 
-	// The container path should mirror the structure from git root
-	containerWorkDir := fmt.Sprintf("/workspace/%s/%s", repoName, relPath)
+	var containerWorkDir string
+	if coreCfg.Agent.MountWorkspaceAtHostPath {
+		// Path inside container matches host path
+		containerWorkDir = filepath.Join(gitRoot, relPath)
+	} else {
+		// Default behavior: path is under /workspace
+		containerWorkDir = fmt.Sprintf("/workspace/%s/%s", repoName, relPath)
+	}
 
 	// For non-interactive orchestration, we need to skip permission prompts
 	shellCommand := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", containerWorkDir)

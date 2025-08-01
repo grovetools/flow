@@ -117,7 +117,11 @@ func RunPlanLaunch(jobPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to calculate relative path: %w", err)
 	}
-	params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
+	if fullCfg.Agent.MountWorkspaceAtHostPath {
+		params.containerWorkDir = filepath.Join(gitRoot, relPath)
+	} else {
+		params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
+	}
 	
 	// Launch the session
 	executor := &exec.RealCommandExecutor{}
@@ -167,6 +171,12 @@ func launchTmuxSession(executor exec.CommandExecutor, params launchParameters) e
 	
 	// Command to run inside docker for the agent window
 	dockerCmdStr := fmt.Sprintf("docker exec -it -w %s %s sh", params.containerWorkDir, params.container)
+	
+	// Debug: Log the docker command
+	if verbose := os.Getenv("GROVE_DEBUG"); verbose != "" {
+		fmt.Printf("Debug: Docker command for agent window: %s\n", dockerCmdStr)
+		fmt.Printf("Debug: Container working directory: %s\n", params.containerWorkDir)
+	}
 	
 	// --- Execute Tmux Sequence ---
 	fmt.Printf("🚀 Launching interactive session '%s'...\n", params.sessionName)
