@@ -15,37 +15,59 @@ func configureCanopyHooks(worktreePath string) error {
 	}
 	
 	// Find the grove ecosystem root to locate the hook settings
-	ecosystemRoot := findGroveEcosystemRoot()
-	if ecosystemRoot == "" {
-		// No ecosystem root found, skip hook configuration
+	ecosystemRoot, err := findGroveEcosystemRoot()
+	if err != nil {
+		// Log warning but don't fail - hooks are optional
+		fmt.Printf("⚠️  Warning: Could not find grove ecosystem root: %v\n", err)
+		fmt.Printf("   Canopy hooks will not be configured.\n")
 		return nil
 	}
 	
 	sourceHookSettings := filepath.Join(ecosystemRoot, "grove-canopy", "configs", "claude-hooks-settings.json")
 	destHookSettings := filepath.Join(claudeDir, "settings.local.json")
 	
-	// Copy hook settings if source exists
-	if sourceBytes, err := os.ReadFile(sourceHookSettings); err == nil {
-		if err := os.WriteFile(destHookSettings, sourceBytes, 0644); err == nil {
-			fmt.Printf("✓ Configured canopy hooks in new worktree.\n")
-		} else {
-			return fmt.Errorf("failed to write hook settings: %w", err)
+	// Check if source file exists
+	if _, err := os.Stat(sourceHookSettings); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("⚠️  Warning: Hook settings file not found at %s\n", sourceHookSettings)
+			fmt.Printf("   Canopy hooks will not be configured.\n")
+			return nil
 		}
+		return fmt.Errorf("failed to check hook settings file: %w", err)
 	}
 	
+	// Copy hook settings
+	sourceBytes, err := os.ReadFile(sourceHookSettings)
+	if err != nil {
+		return fmt.Errorf("failed to read hook settings from %s: %w", sourceHookSettings, err)
+	}
+	
+	if err := os.WriteFile(destHookSettings, sourceBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write hook settings to %s: %w", destHookSettings, err)
+	}
+	
+	fmt.Printf("✓ Configured canopy hooks in worktree.\n")
 	return nil
 }
 
 // findGroveEcosystemRoot attempts to find the Grove ecosystem repository root directory
-func findGroveEcosystemRoot() string {
+func findGroveEcosystemRoot() (string, error) {
 	// Start from current directory and walk up
-	dir, _ := os.Getwd()
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current directory: %w", err)
+	}
+	
+	startDir := dir // Remember where we started for error message
 	
 	for dir != "" {
 		// Check if this is the Grove ecosystem root (has grove-canopy, grove-core, etc. as subdirectories)
-		if _, err := os.Stat(filepath.Join(dir, "grove-canopy")); err == nil {
-			if _, err := os.Stat(filepath.Join(dir, "grove-core")); err == nil {
-				return dir
+		canopyPath := filepath.Join(dir, "grove-canopy")
+		corePath := filepath.Join(dir, "grove-core")
+		
+		if _, err := os.Stat(canopyPath); err == nil {
+			if _, err := os.Stat(corePath); err == nil {
+				return dir, nil
 			}
 		}
 		
@@ -57,13 +79,39 @@ func findGroveEcosystemRoot() string {
 		dir = parent
 	}
 	
-	// If not found from current directory, check the specific known location
-	knownPath := "/Users/solom4/Code/grove-ecosystem"
-	if _, err := os.Stat(filepath.Join(knownPath, "grove-canopy")); err == nil {
-		if _, err := os.Stat(filepath.Join(knownPath, "grove-core")); err == nil {
-			return knownPath
+	// If not found from current directory, check environment variable
+	if envPath := os.Getenv("GROVE_ECOSYSTEM_ROOT"); envPath != "" {
+		canopyPath := filepath.Join(envPath, "grove-canopy")
+		corePath := filepath.Join(envPath, "grove-core")
+		
+		if _, err := os.Stat(canopyPath); err == nil {
+			if _, err := os.Stat(corePath); err == nil {
+				return envPath, nil
+			}
 		}
 	}
 	
-	return ""
+	// Check common locations
+	homeDir, _ := os.UserHomeDir()
+	commonPaths := []string{
+		filepath.Join(homeDir, "Code", "grove-ecosystem"),
+		filepath.Join(homeDir, "code", "grove-ecosystem"),
+		filepath.Join(homeDir, "src", "grove-ecosystem"),
+		filepath.Join(homeDir, "projects", "grove-ecosystem"),
+		"/opt/grove-ecosystem",
+		"/usr/local/grove-ecosystem",
+	}
+	
+	for _, path := range commonPaths {
+		canopyPath := filepath.Join(path, "grove-canopy")
+		corePath := filepath.Join(path, "grove-core")
+		
+		if _, err := os.Stat(canopyPath); err == nil {
+			if _, err := os.Stat(corePath); err == nil {
+				return path, nil
+			}
+		}
+	}
+	
+	return "", fmt.Errorf("grove ecosystem root not found (started from %s)", startDir)
 }
