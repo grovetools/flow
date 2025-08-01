@@ -167,6 +167,15 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", fmt.Errorf("could not find git root: %w", err)
 	}
 
+	// If UseSuperprojectRoot is enabled, get the superproject root
+	coreCfg, err := config.LoadFrom(".")
+	if err == nil && coreCfg.Agent.UseSuperprojectRoot {
+		superRoot, err := git.GetSuperprojectRoot(gitRoot)
+		if err == nil && superRoot != "" {
+			gitRoot = superRoot
+		}
+	}
+
 	// Use the shared method to get or prepare the worktree
 	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "agent")
 }
@@ -188,13 +197,26 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 
 	// Get git root for targeted mode
 	// First try from the plan directory
-	gitRoot, err := git.GetGitRoot(plan.Directory)
-	if err != nil {
-		// If that fails (e.g., when using plans_directory), try from current working directory
-		cwd, _ := os.Getwd()
-		gitRoot, err = git.GetGitRoot(cwd)
+	var gitRoot string
+	if coreCfg.Agent.UseSuperprojectRoot {
+		gitRoot, err = git.GetSuperprojectRoot(plan.Directory)
 		if err != nil {
-			return fmt.Errorf("could not find git root from plan directory or current directory: %w", err)
+			// If that fails (e.g., when using plans_directory), try from current working directory
+			cwd, _ := os.Getwd()
+			gitRoot, err = git.GetSuperprojectRoot(cwd)
+			if err != nil {
+				return fmt.Errorf("could not find superproject root from plan directory or current directory: %w", err)
+			}
+		}
+	} else {
+		gitRoot, err = git.GetGitRoot(plan.Directory)
+		if err != nil {
+			// If that fails (e.g., when using plans_directory), try from current working directory
+			cwd, _ := os.Getwd()
+			gitRoot, err = git.GetGitRoot(cwd)
+			if err != nil {
+				return fmt.Errorf("could not find git root from plan directory or current directory: %w", err)
+			}
 		}
 	}
 

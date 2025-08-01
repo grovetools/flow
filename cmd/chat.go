@@ -542,6 +542,14 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 	
+	// If UseSuperprojectRoot is enabled, get the superproject root
+	if fullCfg.Agent.UseSuperprojectRoot {
+		superRoot, err := git.GetSuperprojectRoot(gitRoot)
+		if err == nil && superRoot != "" {
+			gitRoot = superRoot
+		}
+	}
+	
 	// Load the job to get the title from frontmatter
 	job, err := orchestration.LoadJob(chatPath)
 	if err != nil {

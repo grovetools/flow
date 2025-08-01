@@ -77,6 +77,14 @@ func RunPlanLaunch(jobPath string) error {
 		return err
 	}
 	
+	// If UseSuperprojectRoot is enabled, get the superproject root
+	if fullCfg.Agent.UseSuperprojectRoot {
+		superRoot, err := git.GetSuperprojectRoot(gitRoot)
+		if err == nil && superRoot != "" {
+			gitRoot = superRoot
+		}
+	}
+	
 	// Prepare the worktree
 	wm := git.NewWorktreeManager()
 	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive")

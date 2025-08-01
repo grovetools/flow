@@ -11,5 +11,7 @@ agent:
     - /Users/solom4/Documents/nb:/Users/solom4/Documents/nb
     args: ["--dangerously-skip-permissions"]
     output_format: text
+    mount_workspace_at_host_path: true
 flow:
     target_agent_container: grove_flow-main-grove-agent
+
