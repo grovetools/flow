@@ -102,7 +102,7 @@ func TestOneShotExecutor_BuildPrompt(t *testing.T) {
 	}
 
 	executor := NewOneShotExecutor(nil)
-	prompt, err := executor.buildPrompt(job, plan)
+	prompt, _, err := executor.buildPrompt(job, plan, "")
 	if err != nil {
 		t.Fatalf("buildPrompt() error = %v", err)
 	}
@@ -141,7 +141,7 @@ func TestOneShotExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
 	}
 
 	executor := NewOneShotExecutor(nil)
-	prompt, err := executor.buildPrompt(job, plan)
+	prompt, _, err := executor.buildPrompt(job, plan, "")
 	if err != nil {
 		// The test might fail if the template doesn't exist, but we can check
 		// if it's trying to use the reference-based path

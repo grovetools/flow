@@ -15,7 +15,6 @@ import (
 	
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/util/sanitize"
 	"gopkg.in/yaml.v3"
 )
 
@@ -113,7 +112,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 
 	// Build prompt
-	prompt, err := e.buildPrompt(job, plan, workDir)
+	prompt, contextFiles, err := e.buildPrompt(job, plan, workDir)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -127,8 +126,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// Create LLM options from job
 	llmOpts := LLMOptions{
-		Model:      job.Model,
-		WorkingDir: workDir, // Set working directory to worktree if available
+		Model:        job.Model,
+		WorkingDir:   workDir, // Set working directory to worktree if available
+		ContextFiles: contextFiles, // Pass context files directly
 	}
 	
 	// Apply model override from CLI if specified
@@ -198,8 +198,8 @@ func (e *OneShotExecutor) completeWithSchema(ctx context.Context, prompt string,
 	return e.llmClient.Complete(ctx, prompt, opts)
 }
 
-// buildPrompt constructs the prompt from job sources.
-func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, error) {
+// buildPrompt constructs the prompt from job sources and returns context file paths separately.
+func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, []string, error) {
 	var parts []string
 	
 	// Check if this is a reference-based prompt (has template and prompt_source)
@@ -210,7 +210,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		templateManager := NewTemplateManager()
 		template, err := templateManager.FindTemplate(job.Template)
 		if err != nil {
-			return "", fmt.Errorf("resolving template %s: %w", job.Template, err)
+			return "", nil, fmt.Errorf("resolving template %s: %w", job.Template, err)
 		}
 		
 		// Add template content as system instructions
@@ -227,7 +227,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		// Get project root for resolving paths
 		projectRoot, err := GetProjectRoot()
 		if err != nil {
-			return "", fmt.Errorf("failed to get project root: %w", err)
+			return "", nil, fmt.Errorf("failed to get project root: %w", err)
 		}
 		
 		for _, source := range job.PromptSource {
@@ -246,13 +246,13 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				// Try alternative resolution strategies
 				sourcePath, err = ResolvePromptSource(source, plan)
 				if err != nil {
-					return "", fmt.Errorf("could not find source file %s: %w", source, err)
+					return "", nil, fmt.Errorf("could not find source file %s: %w", source, err)
 				}
 			}
 			
 			content, err := os.ReadFile(sourcePath)
 			if err != nil {
-				return "", fmt.Errorf("reading source file %s: %w", sourcePath, err)
+				return "", nil, fmt.Errorf("reading source file %s: %w", sourcePath, err)
 			}
 			
 			parts = append(parts, fmt.Sprintf("\n--- START OF %s ---\n%s\n--- END OF %s ---", source, string(content), source))
@@ -276,6 +276,44 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				parts = append(parts, "\n"+strings.Join(additionalInstructions, "\n"))
 			}
 		}
+		
+		// Add Grove context files for reference-based prompts
+		var contextPaths []string
+		
+		if worktreePath != "" {
+			// When using a worktree, ONLY use context from the worktree
+			// Check for .grove/context in worktree
+			worktreeContextPath := filepath.Join(worktreePath, ".grove", "context")
+			if _, err := os.Stat(worktreeContextPath); err == nil {
+				contextPaths = append(contextPaths, worktreeContextPath)
+			}
+			
+			// Check for CLAUDE.md in worktree
+			worktreeClaudePath := filepath.Join(worktreePath, "CLAUDE.md")
+			if _, err := os.Stat(worktreeClaudePath); err == nil {
+				contextPaths = append(contextPaths, worktreeClaudePath)
+			}
+		} else {
+			// No worktree, use the default context search
+			contextPaths = FindContextFiles(plan)
+		}
+
+		// Verify context files exist
+		var validContextPaths []string
+		for _, contextPath := range contextPaths {
+			if _, err := os.Stat(contextPath); err == nil {
+				validContextPaths = append(validContextPaths, contextPath)
+			}
+		}
+		
+		prompt := strings.Join(parts, "\n\n")
+
+		// Check prompt length (without context files which will be passed separately)
+		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
+			return "", nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
+		}
+
+		return prompt, validContextPaths, nil
 	} else {
 		// Traditional prompt assembly (backward compatibility)
 		
@@ -302,13 +340,13 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			if sourcePath == "" {
 				sourcePath, err = ResolvePromptSource(source, plan)
 				if err != nil {
-					return "", fmt.Errorf("could not find prompt source %s: %w", source, err)
+					return "", nil, fmt.Errorf("could not find prompt source %s: %w", source, err)
 				}
 			}
 			
 			content, err := os.ReadFile(sourcePath)
 			if err != nil {
-				return "", fmt.Errorf("reading prompt source %s: %w", sourcePath, err)
+				return "", nil, fmt.Errorf("reading prompt source %s: %w", sourcePath, err)
 			}
 			parts = append(parts, fmt.Sprintf("=== Content from %s ===\n%s", source, string(content)))
 		}
@@ -339,27 +377,23 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			contextPaths = FindContextFiles(plan)
 		}
 
+		// Verify context files exist
+		var validContextPaths []string
 		for _, contextPath := range contextPaths {
-			if content, err := os.ReadFile(contextPath); err == nil {
-				// Sanitize UTF-8 to prevent encoding errors in LLM client
-				sanitizedContent := sanitize.UTF8(content)
-				parts = append(parts, fmt.Sprintf("=== Grove Context from %s ===\n%s", 
-					contextPath, sanitizedContent))
+			if _, err := os.Stat(contextPath); err == nil {
+				validContextPaths = append(validContextPaths, contextPath)
 			}
 		}
+		
+		prompt := strings.Join(parts, "\n\n")
+
+		// Check prompt length (without context files which will be passed separately)
+		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
+			return "", nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
+		}
+
+		return prompt, validContextPaths, nil
 	}
-
-	prompt := strings.Join(parts, "\n\n")
-
-	// Check prompt length
-	if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
-		return "", fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
-	}
-
-	// The generate_jobs instructions are now included in the template itself,
-	// so we don't need special logic here anymore
-
-	return prompt, nil
 }
 
 // processOutput handles the job output based on configuration.
@@ -938,7 +972,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	templateContent := []byte(template.Prompt)
 
 	// Add Grove context files
-	var contextParts []string
 	var contextPaths []string
 	
 	fmt.Printf("DEBUG: Worktree path for chat job: %s\n", worktreePath)
@@ -968,33 +1001,33 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		contextPaths = FindContextFiles(plan)
 	}
 
+	// Verify context files exist and collect valid paths
+	var validContextPaths []string
 	for _, contextPath := range contextPaths {
-		if content, err := os.ReadFile(contextPath); err == nil {
-			contextParts = append(contextParts, fmt.Sprintf("=== Grove Context from %s ===\n%s", 
-				contextPath, string(content)))
-			fmt.Printf("  Successfully read context from: %s (%d bytes)\n", contextPath, len(content))
+		if info, err := os.Stat(contextPath); err == nil {
+			fmt.Printf("  Successfully found context file: %s (%d bytes)\n", contextPath, info.Size())
+			validContextPaths = append(validContextPaths, contextPath)
 		} else {
-			fmt.Printf("  Failed to read context from: %s (error: %v)\n", contextPath, err)
+			fmt.Printf("  Failed to access context file: %s (error: %v)\n", contextPath, err)
 		}
 	}
 
-	// Combine conversation history, context, and template as the full prompt
-	var fullPrompt string
-	if len(contextParts) > 0 {
-		contextSection := strings.Join(contextParts, "\n\n")
-		fullPrompt = fmt.Sprintf("%s\n\n---\n\n%s\n\n---\n\n## System Instructions\n\n%s", 
-			conversationHistory, contextSection, string(templateContent))
-		fmt.Printf("✓ Including %d context file(s) in chat prompt\n", len(contextParts))
+	// Combine conversation history and template as the main prompt
+	// Context files will be passed separately to the llm command
+	fullPrompt := fmt.Sprintf("%s\n\n---\n\n## System Instructions\n\n%s", 
+		conversationHistory, string(templateContent))
+	
+	if len(validContextPaths) > 0 {
+		fmt.Printf("✓ Including %d context file(s) in chat prompt\n", len(validContextPaths))
 	} else {
-		fullPrompt = fmt.Sprintf("%s\n\n---\n\n## System Instructions\n\n%s", 
-			conversationHistory, string(templateContent))
 		fmt.Println("⚠️  No context files included in chat prompt")
 	}
 
 	// Create LLM options - prioritize job model from frontmatter
 	llmOpts := LLMOptions{
-		Model:      job.Model, // Start with job model from frontmatter
-		WorkingDir: worktreePath,
+		Model:        job.Model, // Start with job model from frontmatter
+		WorkingDir:   worktreePath,
+		ContextFiles: validContextPaths, // Pass context files directly
 	}
 	
 	// Allow directive to override job model (for specific turns that need different models)
@@ -1012,11 +1045,22 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		llmOpts.Model = "claude-3-5-sonnet-20241022" // Default
 	}
 
+	// Log memory usage before LLM call
+	fmt.Printf("[DEBUG] About to call LLM with:\n")
+	fmt.Printf("[DEBUG]   - Prompt length: %d bytes\n", len(fullPrompt))
+	fmt.Printf("[DEBUG]   - Context files: %d\n", len(llmOpts.ContextFiles))
+	for i, cf := range llmOpts.ContextFiles {
+		fmt.Printf("[DEBUG]   - Context file %d: %s\n", i+1, cf)
+	}
+	
 	// Call LLM
+	fmt.Printf("[DEBUG] Calling LLM...\n")
 	response, err := e.llmClient.Complete(ctx, fullPrompt, llmOpts)
 	if err != nil {
+		fmt.Printf("[DEBUG] LLM call failed with error: %v\n", err)
 		return fmt.Errorf("LLM completion: %w", err)
 	}
+	fmt.Printf("[DEBUG] LLM call succeeded, response length: %d bytes\n", len(response))
 
 	// Generate a unique ID for this response
 	bytes := make([]byte, 3)
