@@ -43,26 +43,28 @@ type CommitConfig struct {
 // Job represents a single orchestration job.
 type Job struct {
 	// From frontmatter
-	ID                   string       `yaml:"id"`
-	Title                string       `yaml:"title"`
-	Status               JobStatus    `yaml:"status"`
-	Type                 JobType      `yaml:"type"`
-	Model                string       `yaml:"model,omitempty"`
-	DependsOn            []string     `yaml:"depends_on,omitempty"`
-	PromptSource         []string     `yaml:"prompt_source,omitempty"`
-	Template             string       `yaml:"template,omitempty"`
-	Worktree             string       `yaml:"worktree"`
-	TargetAgentContainer string       `yaml:"target_agent_container,omitempty"`
-	Output               OutputConfig `yaml:"output"`
+	ID                   string       `yaml:"id" json:"id"`
+	Title                string       `yaml:"title" json:"title"`
+	Status               JobStatus    `yaml:"status" json:"status"`
+	Type                 JobType      `yaml:"type" json:"type"`
+	Model                string       `yaml:"model,omitempty" json:"model,omitempty"`
+	DependsOn            []string     `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	PromptSource         []string     `yaml:"prompt_source,omitempty" json:"prompt_source,omitempty"`
+	Template             string       `yaml:"template,omitempty" json:"template,omitempty"`
+	Worktree             string       `yaml:"worktree" json:"worktree,omitempty"`
+	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
+	Output               OutputConfig `yaml:"output" json:"output,omitempty"`
+	CreatedAt            time.Time    `yaml:"created_at,omitempty" json:"created_at,omitempty"`
+	UpdatedAt            time.Time    `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 
 	// Derived fields
-	Filename     string    // The markdown filename
-	FilePath     string    // Full path to the file
-	PromptBody   string    // Content after frontmatter
-	Dependencies []*Job    // Resolved job references
-	StartTime    time.Time // When job started
-	EndTime      time.Time // When job completed
-	Metadata     JobMetadata
+	Filename     string      `json:"filename,omitempty"`     // The markdown filename
+	FilePath     string      `json:"file_path,omitempty"`    // Full path to the file
+	PromptBody   string      `json:"-"`                       // Content after frontmatter
+	Dependencies []*Job      `json:"-"`                       // Resolved job references
+	StartTime    time.Time   `json:"start_time,omitempty"`   // When job started
+	EndTime      time.Time   `json:"end_time,omitempty"`     // When job completed
+	Metadata     JobMetadata `json:"metadata,omitempty"`
 }
 
 // JobMetadata holds additional job metadata.

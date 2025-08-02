@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	osexec "os/exec"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/grovepm/grove-flow/pkg/exec"
 	"github.com/grovepm/grove-flow/pkg/orchestration"
+	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/spf13/cobra"
@@ -231,6 +233,16 @@ func runChatList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Check if JSON output is requested
+	opts := cli.GetOptions(cmd)
+	if opts.JSONOutput {
+		// Output as JSON array
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(chats)
+	}
+
+	// Table output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "TITLE\tSTATUS\tMODEL\tFILE")
 	for _, chat := range chats {

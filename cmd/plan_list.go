@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/grovepm/grove-flow/pkg/orchestration"
+	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/spf13/cobra"
 )
@@ -15,6 +18,19 @@ import (
 var (
 	planListVerbose bool
 )
+
+// PlanSummary represents a plan in the JSON output
+type PlanSummary struct {
+	ID         string                 `json:"id"`
+	Title      string                 `json:"title"`
+	Path       string                 `json:"path"`
+	Status     string                 `json:"status"`
+	JobCount   int                    `json:"job_count"`
+	Jobs       []*orchestration.Job   `json:"jobs,omitempty"`
+	CreatedAt  time.Time             `json:"created_at"`
+	UpdatedAt  time.Time             `json:"updated_at"`
+	Repository string                 `json:"repository,omitempty"`
+}
 
 // newPlanListCmd creates the `plan list` command.
 func newPlanListCmd() *cobra.Command {
@@ -66,6 +82,12 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 	if len(plans) == 0 {
 		fmt.Printf("No plans found in %s.\n", basePath)
 		return nil
+	}
+
+	// Check if JSON output is requested
+	opts := cli.GetOptions(cmd)
+	if opts.JSONOutput {
+		return outputPlansJSON(plans)
 	}
 
 	if planListVerbose {
@@ -155,4 +177,69 @@ func expandPath(path string) (string, error) {
 	}
 
 	return filepath.Abs(path)
+}
+
+// outputPlansJSON outputs the plans in JSON format
+func outputPlansJSON(plans []*orchestration.Plan) error {
+	summaries := make([]PlanSummary, 0, len(plans))
+	
+	for _, plan := range plans {
+		// Calculate status summary
+		statusCounts := make(map[orchestration.JobStatus]int)
+		for _, job := range plan.Jobs {
+			statusCounts[job.Status]++
+		}
+		
+		// Build a summary string showing job status counts
+		var statusParts []string
+		if c := statusCounts[orchestration.JobStatusCompleted]; c > 0 {
+			statusParts = append(statusParts, fmt.Sprintf("%d completed", c))
+		}
+		if c := statusCounts[orchestration.JobStatusRunning]; c > 0 {
+			statusParts = append(statusParts, fmt.Sprintf("%d running", c))
+		}
+		if c := statusCounts[orchestration.JobStatusPending] + statusCounts[orchestration.JobStatusPendingUser]; c > 0 {
+			statusParts = append(statusParts, fmt.Sprintf("%d pending", c))
+		}
+		if c := statusCounts[orchestration.JobStatusFailed]; c > 0 {
+			statusParts = append(statusParts, fmt.Sprintf("%d failed", c))
+		}
+		if c := statusCounts[orchestration.JobStatusBlocked]; c > 0 {
+			statusParts = append(statusParts, fmt.Sprintf("%d blocked", c))
+		}
+		
+		status := "no jobs"
+		if len(statusParts) > 0 {
+			status = strings.Join(statusParts, ", ")
+		}
+
+		// Get creation and modification times from the first job if available
+		var createdAt, updatedAt time.Time
+		if len(plan.Jobs) > 0 {
+			// For now, use the first job's metadata as a proxy for plan metadata
+			createdAt = plan.Jobs[0].CreatedAt
+			updatedAt = plan.Jobs[0].UpdatedAt
+		}
+
+		summary := PlanSummary{
+			ID:        plan.Name,
+			Title:     plan.Name,
+			Path:      plan.Directory,
+			Status:    status,
+			JobCount:  len(plan.Jobs),
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		}
+		
+		// Include job details if verbose
+		if planListVerbose {
+			summary.Jobs = plan.Jobs
+		}
+		
+		summaries = append(summaries, summary)
+	}
+	
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(summaries)
 }
