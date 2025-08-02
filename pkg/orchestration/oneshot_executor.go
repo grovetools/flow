@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -1051,6 +1052,17 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	fmt.Printf("[DEBUG]   - Context files: %d\n", len(llmOpts.ContextFiles))
 	for i, cf := range llmOpts.ContextFiles {
 		fmt.Printf("[DEBUG]   - Context file %d: %s\n", i+1, cf)
+	}
+	
+	// Run cx generate before LLM submission
+	fmt.Printf("Running cx generate before submission...\n")
+	cxCmd := exec.CommandContext(ctx, "grove", "cx", "generate")
+	cxCmd.Dir = worktreePath
+	cxCmd.Stdout = os.Stdout
+	cxCmd.Stderr = os.Stderr
+	if err := cxCmd.Run(); err != nil {
+		// Log warning but don't fail the job
+		fmt.Printf("Warning: failed to run cx generate: %v\n", err)
 	}
 	
 	// Call LLM
