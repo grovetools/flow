@@ -161,23 +161,8 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// Get the git repository root to ensure worktrees are created in a consistent location
-	gitRoot, err := GetGitRootSafe(plan.Directory)
-	if err != nil {
-		return "", fmt.Errorf("could not find git root: %w", err)
-	}
-
-	// If UseSuperprojectRoot is enabled, get the superproject root
-	coreCfg, err := config.LoadFrom(".")
-	if err == nil && coreCfg.Agent.UseSuperprojectRoot {
-		superRoot, err := git.GetSuperprojectRoot(gitRoot)
-		if err == nil && superRoot != "" {
-			gitRoot = superRoot
-		}
-	}
-
-	// Use the shared method to get or prepare the worktree
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "agent")
+	// Use the shared method to get or prepare the worktree in the plan's directory
+	return e.worktreeManager.GetOrPrepareWorktree(ctx, plan.Directory, job.Worktree, "agent")
 }
 
 // runAgentInWorktree executes the agent in the worktree context.

@@ -86,12 +86,6 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// Get the git repository root to ensure worktrees are created in a consistent location
-	gitRoot, err := GetGitRootSafe(plan.Directory)
-	if err != nil {
-		return "", fmt.Errorf("could not find git root: %w", err)
-	}
-
-	// Use the shared method to get or prepare the worktree
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "agent")
+	// Use the shared method to get or prepare the worktree in the plan's directory
+	return e.worktreeManager.GetOrPrepareWorktree(ctx, plan.Directory, job.Worktree, "agent")
 }

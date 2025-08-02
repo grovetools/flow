@@ -542,6 +542,12 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	
+	// Get current working directory for worktree creation
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+	
 	// Get git root
 	gitRoot, err := git.GetGitRoot(".")
 	if err != nil {
@@ -565,9 +571,9 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	// Derive worktree name from the chat title/filename
 	worktreeName := deriveWorktreeName(chatPath)
 	
-	// Prepare the worktree
+	// Prepare the worktree in the current directory
 	wm := git.NewWorktreeManager()
-	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "interactive")
+	worktreePath, err := wm.GetOrPrepareWorktree(ctx, cwd, worktreeName, "interactive")
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}

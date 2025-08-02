@@ -77,6 +77,7 @@ func RunPlanLaunch(jobPath string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	
+	
 	// Get git root
 	gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
 	if err != nil {
@@ -91,9 +92,9 @@ func RunPlanLaunch(jobPath string) error {
 		}
 	}
 	
-	// Prepare the worktree
+	// Prepare the worktree in the plan's directory
 	wm := git.NewWorktreeManager()
-	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive")
+	worktreePath, err := wm.GetOrPrepareWorktree(ctx, planDir, job.Worktree, "interactive")
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
