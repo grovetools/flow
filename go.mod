@@ -2,11 +2,6 @@ module github.com/grovepm/grove-flow
 
 go 1.24
 
-
-replace github.com/mattsolo1/grove-core => /Users/solom4/Code/grove-ecosystem/grove-core
-
-replace github.com/mattsolo1/grove-context => /Users/solom4/Code/grove-ecosystem/grove-context
-
 require (
 	github.com/charmbracelet/lipgloss v0.13.0
 	github.com/fatih/color v1.17.0
