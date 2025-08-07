@@ -1056,13 +1056,29 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	
 	// Run cx generate before LLM submission
 	fmt.Printf("Running cx generate before submission...\n")
+	
+	// Try grove cx generate first (capture stderr to suppress error if fallback works)
+	var stderrBuf strings.Builder
 	cxCmd := exec.CommandContext(ctx, "grove", "cx", "generate")
 	cxCmd.Dir = worktreePath
 	cxCmd.Stdout = os.Stdout
-	cxCmd.Stderr = os.Stderr
-	if err := cxCmd.Run(); err != nil {
-		// Log warning but don't fail the job
-		fmt.Printf("Warning: failed to run cx generate: %v\n", err)
+	cxCmd.Stderr = &stderrBuf
+	groveErr := cxCmd.Run()
+	
+	if groveErr != nil {
+		// Try cx generate directly as fallback
+		cxCmd = exec.CommandContext(ctx, "cx", "generate")
+		cxCmd.Dir = worktreePath
+		cxCmd.Stdout = os.Stdout
+		cxCmd.Stderr = os.Stderr
+		if err := cxCmd.Run(); err != nil {
+			// Both commands failed, show the errors
+			if stderrBuf.Len() > 0 {
+				fmt.Fprintf(os.Stderr, "%s", stderrBuf.String())
+			}
+			fmt.Printf("Warning: failed to run cx generate: %v\n", err)
+		}
+		// If cx generate succeeded, we don't show the grove cx error
 	}
 	
 	// Call LLM
