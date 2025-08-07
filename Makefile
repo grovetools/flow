@@ -1,10 +1,9 @@
 # Makefile for flow
 
 BINARY_NAME=flow
-INSTALL_PATH=/usr/local/bin
 BIN_DIR=bin
 
-.PHONY: all build install uninstall test test-e2e clean fmt vet lint run
+.PHONY: all build test clean fmt vet lint run check dev build-all help
 
 all: build
 
@@ -12,16 +11,6 @@ build:
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME)..."
 	@go build -o $(BIN_DIR)/$(BINARY_NAME) .
-
-install: build
-	@echo "Installing $(BINARY_NAME) to $(INSTALL_PATH)..."
-	@sudo cp $(BIN_DIR)/$(BINARY_NAME) $(INSTALL_PATH)/
-	@echo "Installed successfully!"
-
-uninstall:
-	@echo "Uninstalling $(BINARY_NAME)..."
-	@sudo rm -f $(INSTALL_PATH)/$(BINARY_NAME)
-	@echo "Uninstalled successfully!"
 
 test:
 	@echo "Running tests..."
@@ -134,8 +123,6 @@ test-launch-interactive: build
 help:
 	@echo "Available targets:"
 	@echo "  make build       - Build the binary"
-	@echo "  make install     - Build and install to $(INSTALL_PATH)"
-	@echo "  make uninstall   - Remove from $(INSTALL_PATH)"
 	@echo "  make test        - Run tests"
 	@echo "  make test-e2e    - Run end-to-end tests"
 	@echo "  make clean       - Clean build artifacts"
