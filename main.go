@@ -15,6 +15,7 @@ func main() {
 	// Add the plan (formerly jobs) and chat commands
 	rootCmd.AddCommand(cmd.GetPlanCommand())
 	rootCmd.AddCommand(cmd.GetChatCommand())
+	rootCmd.AddCommand(cmd.NewVersionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

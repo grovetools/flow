@@ -2,6 +2,25 @@
 
 BINARY_NAME=flow
 BIN_DIR=bin
+VERSION_PKG=github.com/mattsolo1/grove-core/version
+
+# --- Versioning ---
+# For dev builds, we construct a version string from git info.
+# For release builds, VERSION is passed in by the CI/CD pipeline (e.g., VERSION=v1.2.3)
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD)
+GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
+GIT_DIRTY  ?= $(shell test -n "`git status --porcelain`" && echo "-dirty")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# If VERSION is not set, default to a dev version string
+VERSION ?= $(GIT_BRANCH)-$(GIT_COMMIT)$(GIT_DIRTY)
+
+# Go LDFLAGS to inject version info at compile time
+LDFLAGS = -ldflags="\
+-X '$(VERSION_PKG).Version=$(VERSION)' \
+-X '$(VERSION_PKG).Commit=$(GIT_COMMIT)' \
+-X '$(VERSION_PKG).Branch=$(GIT_BRANCH)' \
+-X '$(VERSION_PKG).BuildDate=$(BUILD_DATE)'"
 
 .PHONY: all build test clean fmt vet lint run check dev build-all help
 
@@ -9,8 +28,8 @@ all: build
 
 build:
 	@mkdir -p $(BIN_DIR)
-	@echo "Building $(BINARY_NAME)..."
-	@go build -o $(BIN_DIR)/$(BINARY_NAME) .
+	@echo "Building $(BINARY_NAME) version $(VERSION)..."
+	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 test:
 	@echo "Running tests..."
@@ -78,8 +97,8 @@ check: fmt vet test
 # Development build with race detector
 dev:
 	@mkdir -p $(BIN_DIR)
-	@echo "Building $(BINARY_NAME) with race detector..."
-	@go build -race -o $(BIN_DIR)/$(BINARY_NAME) .
+	@echo "Building $(BINARY_NAME) version $(VERSION) with race detector..."
+	@go build -race $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 # Interactive e2e tests
 test-orchestration-interactive: build
