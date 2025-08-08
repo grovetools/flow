@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/grovepm/grove-flow/pkg/state"
+	"github.com/mattsolo1/grove-flow/pkg/state"
 )
 
 // resolvePlanPath determines the absolute path for a plan directory.

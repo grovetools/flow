@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/grovepm/grove-flow/cmd"
+	"github.com/mattsolo1/grove-flow/cmd"
 )
 
 func main() {
