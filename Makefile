@@ -100,6 +100,21 @@ dev:
 	@echo "Building $(BINARY_NAME) version $(VERSION) with race detector..."
 	@go build -race $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
+# Cross-compilation targets
+PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+DIST_DIR ?= dist
+
+build-all:
+	@echo "Building for multiple platforms into $(DIST_DIR)..."
+	@mkdir -p $(DIST_DIR)
+	@for platform in $(PLATFORMS); do \
+		os=$$(echo $$platform | cut -d'/' -f1); \
+		arch=$$(echo $$platform | cut -d'/' -f2); \
+		output_name="$(BINARY_NAME)-$${os}-$${arch}"; \
+		echo "  -> Building $${output_name} version $(VERSION)"; \
+		GOOS=$$os GOARCH=$$arch go build $(LDFLAGS) -o $(DIST_DIR)/$${output_name} .; \
+	done
+
 # Interactive e2e tests
 test-orchestration-interactive: build
 	@echo "Running orchestration tests in interactive mode..."
