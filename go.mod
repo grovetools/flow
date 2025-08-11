@@ -1,6 +1,6 @@
 module github.com/mattsolo1/grove-flow
 
-go 1.24
+go 1.24.4
 
 require (
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -36,6 +36,7 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/mattsolo1/grove-tend v0.2.5 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
@@ -56,3 +57,5 @@ require (
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 )
+
+replace github.com/mattsolo1/grove-tend => ../grove-tend

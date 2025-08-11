@@ -35,6 +35,19 @@ test:
 	@echo "Running tests..."
 	@go test -v ./...
 
+# --- Grove-tend E2E Testing ---
+E2E_BINARY_NAME=tend-flow
+
+# Build the custom tend binary for grove-flow E2E tests.
+test-tend-build:
+	@echo "Building E2E test binary $(E2E_BINARY_NAME)..."
+	@go build -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e/tend
+
+# Run grove-tend E2E tests.
+test-tend: build test-tend-build
+	@echo "Running grove-tend E2E tests..."
+	@FLOW_BINARY=$$(cd . && pwd)/$(BIN_DIR)/$(BINARY_NAME) $(BIN_DIR)/$(E2E_BINARY_NAME) run --very-verbose
+
 test-e2e: build
 	@echo "Running jobs end-to-end tests..."
 	@chmod +x tests/e2e/*.sh
