@@ -361,3 +361,86 @@ flow:
 		},
 	}
 }
+// PlanWorktreeInheritanceScenario tests smart worktree inheritance feature
+func PlanWorktreeInheritanceScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "flow-plan-worktree-inheritance",
+		Description: "Tests that flow plan add --depends-on correctly inherits the worktree from dependencies",
+		Tags:        []string{"plan", "worktree"},
+		Steps: []harness.Step{
+			harness.NewStep("Setup git repository and config", func(ctx *harness.Context) error {
+				git.Init(ctx.RootDir)
+				git.SetupTestConfig(ctx.RootDir)
+				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
+				git.Add(ctx.RootDir, ".")
+				git.Commit(ctx.RootDir, "Initial commit")
+				
+				// Create a test-specific grove.yml with local plans_directory
+				groveConfig := `name: test-project
+flow:
+  plans_directory: ./plans
+`
+				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
+				return nil
+			}),
+			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "init", "inheritance-plan").Dir(ctx.RootDir)
+				result := cmd.Run()
+				if result.Error != nil {
+					return fmt.Errorf("failed to init plan: %w", result.Error)
+				}
+				return nil
+			}),
+			harness.NewStep("Add first agent job", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				// Add the agent job - it should get worktree=inheritance-plan by default
+				cmd := command.New(flow, "plan", "add", "inheritance-plan", 
+					"--title", "Implement API", 
+					"--type", "agent", 
+					"-p", "Implement the API").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				
+				// Verify the job has the default worktree
+				jobPath := filepath.Join(ctx.RootDir, "plans", "inheritance-plan", "01-implement-api.md")
+				content, err := fs.ReadString(jobPath)
+				if err != nil {
+					return err
+				}
+				if !strings.Contains(content, "worktree: inheritance-plan") {
+					return fmt.Errorf("first job should have worktree: inheritance-plan")
+				}
+				return nil
+			}),
+			harness.NewStep("Add dependent job without specifying worktree", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				// Add dependent job - it should inherit worktree from dependency
+				cmd := command.New(flow, "plan", "add", "inheritance-plan", 
+					"--title", "Review API", 
+					"--type", "oneshot",
+					"--depends-on", "01-implement-api.md",
+					"-p", "Review the API code").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				
+				// Verify the job inherited the worktree
+				jobPath := filepath.Join(ctx.RootDir, "plans", "inheritance-plan", "02-review-api.md")
+				content, err := fs.ReadString(jobPath)
+				if err != nil {
+					return err
+				}
+				if !strings.Contains(content, "worktree: inheritance-plan") {
+					return fmt.Errorf("dependent job should inherit worktree: inheritance-plan from its dependency")
+				}
+				return nil
+			}),
+		},
+	}
+}

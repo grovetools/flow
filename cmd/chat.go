@@ -1,10 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -421,20 +421,54 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Found %d runnable chat(s). Executing sequentially...\n\n", len(runnableChats))
 
+	// Load flow config for orchestrator
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		return err
+	}
+
+	// Create orchestrator config
+	orchConfig := &orchestration.OrchestratorConfig{
+		MaxParallelJobs:     1, // Chat jobs run sequentially
+		CheckInterval:       5 * time.Second,
+		ModelOverride:       "", // Use job's model
+		MaxConsecutiveSteps: 20,
+	}
+
+	// Create Docker client for the orchestrator
+	dockerClient, err := docker.NewSDKClient()
+	if err != nil {
+		return fmt.Errorf("failed to create Docker client: %w", err)
+	}
+
 	var executionErrors []error
 	for _, job := range runnableChats {
 		fmt.Printf("--- Running Chat: %s ---\n", job.Title)
 
-		// Execute the job using os/exec to call flow plan run
-		// This avoids recursion issues and correctly uses the command-line interface.
-		flowBinary := os.Args[0] // Get the path to the current flow binary
-		// Pass the FILE path directly to flow plan run, as per our updated design
-		runCmd := osexec.Command(flowBinary, "plan", "run", job.FilePath, "--yes")
-		runCmd.Stdout = os.Stdout
-		runCmd.Stderr = os.Stderr
-		runCmd.Stdin = os.Stdin
+		// Create a minimal plan for this chat job
+		plan := &orchestration.Plan{
+			Directory: filepath.Dir(job.FilePath),
+			Jobs:      []*orchestration.Job{job},
+			Orchestration: &orchestration.Config{
+				OneshotModel:         flowCfg.OneshotModel,
+				TargetAgentContainer: flowCfg.TargetAgentContainer,
+				PlansDirectory:       flowCfg.PlansDirectory,
+				MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
+			},
+		}
 
-		if err := runCmd.Run(); err != nil {
+		// Create orchestrator
+		orch, err := orchestration.NewOrchestrator(plan, orchConfig, dockerClient)
+		if err != nil {
+			errorMsg := fmt.Sprintf("✗ Error creating orchestrator for chat '%s': %v\n", job.Title, err)
+			fmt.Print(errorMsg)
+			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
+			continue
+		}
+
+		// Use the orchestrator to run the specific job
+		ctx := context.Background()
+		if err := orch.RunJob(ctx, job.FilePath); err != nil {
 			errorMsg := fmt.Sprintf("✗ Error running chat '%s': %v\n", job.Title, err)
 			fmt.Print(errorMsg)
 			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
@@ -518,14 +552,11 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("expected a file, got directory: %s", chatPath)
 	}
 	
-	// Read the chat content
-	content, err := os.ReadFile(chatPath)
-	if err != nil {
-		return fmt.Errorf("failed to read chat file: %w", err)
+	// We no longer need to read the full content here since we're passing the file path
+	// Just verify the file is readable
+	if _, err := os.Stat(chatPath); err != nil {
+		return fmt.Errorf("failed to access chat file: %w", err)
 	}
-	
-	// Parse to extract the body (without frontmatter)
-	_, body, _ := orchestration.ParseFrontmatter(content)
 	
 	// Load configuration
 	flowCfg, err := loadFlowConfig()
@@ -596,8 +627,8 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Debug: Agent.MountWorkspaceAtHostPath = %v\n", fullCfg.Agent.MountWorkspaceAtHostPath)
 	}
 	
-	// Build the agent command with the entire chat body as the prompt
-	agentCommand := buildAgentCommandFromChat(string(body), fullCfg.Agent.Args)
+	// Build the agent command with the chat file path
+	agentCommand := buildAgentCommandFromChat(chatPath, fullCfg.Agent.Args)
 	
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
@@ -666,14 +697,15 @@ func deriveWorktreeName(chatPath string) string {
 }
 
 // buildAgentCommandFromChat creates the agent command from chat content
-func buildAgentCommandFromChat(content string, agentArgs []string) string {
-	// Basic shell escaping: wrap in single quotes and escape internal single quotes
-	escapedContent := "'" + strings.ReplaceAll(content, "'", "'\\''") + "'"
+func buildAgentCommandFromChat(chatPath string, agentArgs []string) string {
+	// Instead of passing the entire content, instruct claude to read the file
+	instruction := fmt.Sprintf("Read the file %s and respond to the latest user message in the conversation", chatPath)
+	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"
 	
 	// Build command with args
 	cmdParts := []string{"claude"}
 	cmdParts = append(cmdParts, agentArgs...)
-	cmdParts = append(cmdParts, escapedContent)
+	cmdParts = append(cmdParts, escapedInstruction)
 	
 	return strings.Join(cmdParts, " ")
 }

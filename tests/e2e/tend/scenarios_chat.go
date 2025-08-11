@@ -67,10 +67,11 @@ flow:
 				return nil
 			}),
 			setupTestEnvironment(),
-			harness.NewStep("Run the chat", func(ctx *harness.Context) error {
+			harness.NewStep("Run the chat using 'flow plan run'", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				// The title of the chat job is derived from the filename 'my-idea'.
-				cmd := command.New(flow, "chat", "run", "my-idea").Dir(ctx.RootDir)
+				// Run the chat file directly using flow plan run
+				chatPath := filepath.Join(ctx.RootDir, "chats", "my-idea.md")
+				cmd := command.New(flow, "plan", "run", chatPath, "--yes").Dir(ctx.RootDir)
 				// Add test bin directory to PATH if it exists
 				binDir := ctx.GetString("test_bin_dir")
 				if binDir != "" {

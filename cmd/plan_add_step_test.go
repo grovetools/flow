@@ -13,7 +13,7 @@ func TestRunPlanAddStep(t *testing.T) {
 	tests := []struct {
 		name      string
 		setupPlan func(t *testing.T, dir string)
-		cmd       *JobsAddStepCmd
+		cmd       *PlanAddStepCmd
 		wantErr   bool
 		checkJob  func(t *testing.T, dir string)
 	}{
@@ -37,7 +37,7 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:       "oneshot",
 				Title:      "API Design",
 				DependsOn:  []string{"01-initial-plan.md"},
@@ -66,7 +66,7 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:       "agent",
 				Title:      "Implementation",
 				PromptFile: createTempFile(t, "Implement the feature"),
@@ -81,7 +81,7 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:       "oneshot",
 				PromptFile: createTempFile(t, "Some prompt"),
 			},
@@ -95,7 +95,7 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:       "invalid",
 				Title:      "Test Job",
 				PromptFile: createTempFile(t, "Some prompt"),
@@ -110,7 +110,7 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:       "oneshot",
 				Title:      "Test Job",
 				DependsOn:  []string{"nonexistent.md"},
@@ -126,7 +126,7 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:  "oneshot",
 				Title: "Test Job",
 			},
@@ -143,7 +143,7 @@ func TestRunPlanAddStep(t *testing.T) {
 				os.WriteFile(filepath.Join(dir, "source1.txt"), []byte("Source 1 content"), 0644)
 				os.WriteFile(filepath.Join(dir, "source2.txt"), []byte("Source 2 content"), 0644)
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:        "oneshot",
 				Title:       "Reference-based Step",
 				Template:    "agent-run", // Assuming this built-in template exists
@@ -193,7 +193,7 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Type:       "oneshot",
 				Title:      "Legacy Conversion",
 				Template:   "agent-run",
@@ -327,7 +327,7 @@ func TestCollectJobDetails(t *testing.T) {
 	}{
 		{
 			name: "valid non-interactive",
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Title:      "Test Job",
 				Type:       "oneshot",
 				PromptFile: createTempFile(t, "Test prompt"),
@@ -348,7 +348,7 @@ func TestCollectJobDetails(t *testing.T) {
 		},
 		{
 			name: "with dependencies",
-			cmd: &JobsAddStepCmd{
+			cmd: &PlanAddStepCmd{
 				Title:      "Test Job",
 				Type:       "agent",
 				DependsOn:  []string{"01-initial.md"},

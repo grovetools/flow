@@ -20,6 +20,8 @@ func main() {
 		PlanActiveJobScenario(),
 		AgentJobLaunchScenario(), // Fixed with path resolution helpers
 		PlanGraphScenario(),
+		PlanWorktreeInheritanceScenario(), // Tests smart worktree inheritance
+		PlanStepCommandScenario(), // Tests interactive plan step command
 
 		// Chat Scenarios
 		BasicChatWorkflowScenario(),

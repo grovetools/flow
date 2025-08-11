@@ -146,11 +146,13 @@ func RunPlanLaunch(jobPath string) error {
 
 // buildAgentCommand constructs the shell-escaped agent command string
 func buildAgentCommand(job *orchestration.Job, plan *orchestration.Plan, worktreePath string, agentArgs []string) (string, error) {
-	var promptBuilder strings.Builder
-	promptBuilder.WriteString(job.PromptBody)
+	// Instead of passing the entire content, instruct claude to read the job file
+	instruction := fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath)
 	
+	// Add any relevant context files
 	if len(job.PromptSource) > 0 {
-		promptBuilder.WriteString("\n\nRelevant files for context:\n")
+		instruction += "Also read these context files: "
+		var contextFiles []string
 		for _, source := range job.PromptSource {
 			// Resolve source to make path relative to worktree for clarity
 			resolved, err := orchestration.ResolvePromptSource(source, plan)
@@ -162,18 +164,18 @@ func buildAgentCommand(job *orchestration.Job, plan *orchestration.Plan, worktre
 					relPath = resolved
 				}
 			}
-			promptBuilder.WriteString(fmt.Sprintf("- %s\n", relPath))
+			contextFiles = append(contextFiles, relPath)
 		}
+		instruction += strings.Join(contextFiles, ", ")
 	}
 	
-	finalPrompt := promptBuilder.String()
 	// Basic shell escaping: wrap in single quotes and escape internal single quotes
-	escapedPrompt := "'" + strings.ReplaceAll(finalPrompt, "'", "'\\''") + "'"
+	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"
 	
 	// Build command with args
 	cmdParts := []string{"claude"}
 	cmdParts = append(cmdParts, agentArgs...)
-	cmdParts = append(cmdParts, escapedPrompt)
+	cmdParts = append(cmdParts, escapedInstruction)
 	
 	return strings.Join(cmdParts, " "), nil
 }

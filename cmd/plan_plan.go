@@ -93,6 +93,16 @@ This is useful for starting long-running or interactive agent tasks that you can
 	RunE: runPlanLaunch,
 }
 
+var planStepCmd = &cobra.Command{
+	Use:   "step [directory]",
+	Short: "Step through plan execution interactively",
+	Long: `Provides an interactive wizard for executing a plan step by step.
+Shows runnable jobs and allows you to run, launch, skip, or quit.
+If no directory is specified, uses the current directory.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runPlanStep,
+}
+
 // Command flags
 var (
 	planInitForce          bool
@@ -184,6 +194,7 @@ func GetPlanCommand() *cobra.Command {
 	planCmd.AddCommand(planGraphCmd)
 	planCmd.AddCommand(planCleanupWorktreesCmd)
 	planCmd.AddCommand(planLaunchCmd)
+	planCmd.AddCommand(planStepCmd)
 	planCmd.AddCommand(planTemplatesCmd)
 	planCmd.AddCommand(NewPlanSetCmd())
 	planCmd.AddCommand(NewPlanCurrentCmd())

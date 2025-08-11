@@ -47,6 +47,31 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
+	// Smart worktree inheritance logic
+	var inheritedWorktree string
+	if len(cmd.DependsOn) > 0 {
+		// Check worktrees of dependencies
+		worktrees := make(map[string]bool)
+		for _, depFilename := range cmd.DependsOn {
+			// Find the dependency job
+			for _, depJob := range plan.Jobs {
+				if depJob.Filename == depFilename && depJob.Worktree != "" {
+					worktrees[depJob.Worktree] = true
+				}
+			}
+		}
+		
+		// If all dependencies share the same worktree, inherit it
+		if len(worktrees) == 1 {
+			for wt := range worktrees {
+				inheritedWorktree = wt
+			}
+		} else if len(worktrees) > 1 {
+			// Multiple different worktrees found
+			fmt.Printf("⚠️  Warning: Dependencies have conflicting worktrees. Please specify --worktree manually.\n")
+		}
+	}
+
 	var job *orchestration.Job
 
 	if cmd.Template != "" {
@@ -56,10 +81,10 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		if err != nil {
 			return err
 		}
-		job, err = collectJobDetailsFromTemplate(cmd, plan, template)
+		job, err = collectJobDetailsFromTemplate(cmd, plan, template, inheritedWorktree)
 	} else {
 		// Existing logic
-		job, err = collectJobDetails(cmd, plan)
+		job, err = collectJobDetails(cmd, plan, inheritedWorktree)
 	}
 	
 	if err != nil {
@@ -86,7 +111,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	return nil
 }
 
-func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan) (*orchestration.Job, error) {
+func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedWorktree string) (*orchestration.Job, error) {
 	if cmd.Interactive {
 		return interactiveJobCreation(plan)
 	}
@@ -177,9 +202,13 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan) (*orchestr
 			return nil, fmt.Errorf("prompt is required when no source files are provided")
 		}
 		
-		// Set worktree to the plan name for all job types
+		// Set worktree: use inherited worktree if available, otherwise default to plan name
 		if job.Worktree == "" {
-			job.Worktree = filepath.Base(plan.Directory)
+			if inheritedWorktree != "" {
+				job.Worktree = inheritedWorktree
+			} else {
+				job.Worktree = filepath.Base(plan.Directory)
+			}
 		}
 		
 		return job, nil
@@ -235,10 +264,14 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan) (*orchestr
 		},
 	}
 
-	// Set worktree to the plan name for all job types
+	// Set worktree: use inherited worktree if available, otherwise default to plan name
 	// The plan name is the base name of the plan directory
 	if job.Worktree == "" {
-		job.Worktree = filepath.Base(plan.Directory)
+		if inheritedWorktree != "" {
+			job.Worktree = inheritedWorktree
+		} else {
+			job.Worktree = filepath.Base(plan.Directory)
+		}
 	}
 
 	return job, nil
@@ -417,7 +450,7 @@ func selectDependencies(plan *orchestration.Plan, reader *bufio.Reader) ([]strin
 	return deps, nil
 }
 
-func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate) (*orchestration.Job, error) {
+func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate, inheritedWorktree string) (*orchestration.Job, error) {
 	// Title is required even with template
 	if cmd.Title == "" {
 		return nil, fmt.Errorf("title is required (use --title)")
@@ -587,10 +620,14 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// Generate job ID
 	job.ID = generateJobIDFromTitle(plan, job.Title)
 
-	// Set worktree to the plan name for all job types
+	// Set worktree: use inherited worktree if available, otherwise default to plan name
 	// The plan name is the base name of the plan directory
 	if job.Worktree == "" {
-		job.Worktree = filepath.Base(plan.Directory)
+		if inheritedWorktree != "" {
+			job.Worktree = inheritedWorktree
+		} else {
+			job.Worktree = filepath.Base(plan.Directory)
+		}
 	}
 
 	return job, nil
