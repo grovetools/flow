@@ -33,7 +33,7 @@ func BasicChatWorkflowScenario() *harness.Scenario {
 				configContent := `name: test-project
 flow:
   chat_directory: ./chats
-  # No plans_directory configured
+  plans_directory: ./plans
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				return fs.WriteString(filepath.Join(chatDir, "my-idea.md"), "# My Idea\n\nLet's build a thing.")
@@ -116,7 +116,7 @@ func ChatLaunchScenario() *harness.Scenario {
 				configContent := `name: test-project
 flow:
   target_agent_container: fake-container
-  # No plans_directory configured
+  plans_directory: ./plans
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
@@ -130,11 +130,18 @@ flow:
 				flow, _ := getFlowBinary()
 				chatFile := filepath.Join(ctx.RootDir, "dev-task.md")
 				cmd := command.New(flow, "chat", "launch", chatFile).Dir(ctx.RootDir)
+				// Set environment variables for testing
+				envVars := []string{"GROVE_FLOW_SKIP_DOCKER_CHECK=true"}
+				
 				// Add test bin directory to PATH if it exists
 				binDir := ctx.GetString("test_bin_dir")
 				if binDir != "" {
 					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
+					envVars = append(envVars, fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
+				}
+				
+				for _, env := range envVars {
+					cmd.Env(env)
 				}
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)

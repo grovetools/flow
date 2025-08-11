@@ -60,15 +60,17 @@ func RunPlanLaunch(jobPath string) error {
 		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
 	}
 	
-	// Pre-flight check: verify container is running
-	dockerClient, err := docker.NewSDKClient()
-	if err != nil {
-		return fmt.Errorf("failed to create docker client: %w", err)
-	}
-	
+	// Pre-flight check: verify container is running (unless skipped for testing)
 	ctx := context.Background()
-	if !dockerClient.IsContainerRunning(ctx, container) {
-		return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
+	if !shouldSkipDockerCheck() {
+		dockerClient, err := docker.NewSDKClient()
+		if err != nil {
+			return fmt.Errorf("failed to create docker client: %w", err)
+		}
+		
+		if !dockerClient.IsContainerRunning(ctx, container) {
+			return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
+		}
 	}
 	
 	// Load full config to get agent args
@@ -92,9 +94,9 @@ func RunPlanLaunch(jobPath string) error {
 		}
 	}
 	
-	// Prepare the worktree in the plan's directory
+	// Prepare the worktree at the git root
 	wm := git.NewWorktreeManager()
-	worktreePath, err := wm.GetOrPrepareWorktree(ctx, planDir, job.Worktree, "interactive")
+	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive")
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
@@ -214,7 +216,20 @@ func launchTmuxSession(executor exec.CommandExecutor, params launchParameters) e
 	time.Sleep(300 * time.Millisecond) // Give shell time to start
 	
 	// 2. Create a second window for the agent command
+	// Note: dockerCmdStr must be passed as a single argument to tmux
 	if err := executor.Execute("tmux", "new-window", "-t", params.sessionName, "-n", "agent", dockerCmdStr); err != nil {
+		// Log more details about the failure
+		fmt.Printf("⚠️  Failed to create agent window in tmux session '%s'\n", params.sessionName)
+		fmt.Printf("   Docker command was: %s\n", dockerCmdStr)
+		fmt.Printf("   Error: %v\n", err)
+		
+		// Common issues and solutions
+		if strings.Contains(err.Error(), "can't find session") {
+			fmt.Println("   💡 The tmux session may have been closed. Try running the command again.")
+		} else if strings.Contains(err.Error(), "duplicate window") {
+			fmt.Println("   💡 A window named 'agent' already exists. Try killing the session first.")
+		}
+		
 		// Cleanup on failure
 		executor.Execute("tmux", "kill-session", "-t", params.sessionName)
 		return fmt.Errorf("failed to create agent window: %w", err)
@@ -224,6 +239,12 @@ func launchTmuxSession(executor exec.CommandExecutor, params launchParameters) e
 	
 	// 3. Send pre-filled prompt to the agent window and execute it
 	if err := executor.Execute("tmux", "send-keys", "-t", params.sessionName+":agent", params.agentCommand, "C-m"); err != nil {
+		// Log details about the failure
+		fmt.Printf("⚠️  Failed to send claude-code command to agent window\n")
+		fmt.Printf("   Target: %s:agent\n", params.sessionName)
+		fmt.Printf("   Command length: %d characters\n", len(params.agentCommand))
+		fmt.Printf("   Error: %v\n", err)
+		
 		// Cleanup on failure
 		executor.Execute("tmux", "kill-session", "-t", params.sessionName)
 		return fmt.Errorf("failed to send prompt to tmux session: %w", err)

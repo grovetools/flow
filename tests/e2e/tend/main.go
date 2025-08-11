@@ -18,14 +18,19 @@ func main() {
 		// Plan Scenarios
 		BasicPlanLifecycleScenario(),
 		PlanActiveJobScenario(),
-		// TODO: Fix AgentJobLaunchScenario() - needs to handle plan directory location
-		// AgentJobLaunchScenario(),
+		AgentJobLaunchScenario(), // Fixed with path resolution helpers
 		PlanGraphScenario(),
 
 		// Chat Scenarios
 		BasicChatWorkflowScenario(),
-		// TODO: Fix ChatLaunchScenario() - needs Docker SDK mock
-		// ChatLaunchScenario(),
+		ChatLaunchScenario(), // Fixed with docker check skip
+		
+		// Debug Scenarios (optional - can be run individually)
+		LaunchDebugScenario(),
+		LaunchErrorHandlingScenario(),
+		LaunchDockerExecFailureScenario(),
+		LaunchContainerNotRunningScenario(),
+		LaunchSilentFailureScenario(),
 	}
 
 	// Setup signal handling for graceful shutdown.

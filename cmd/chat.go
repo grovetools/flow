@@ -537,27 +537,23 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
 	}
 	
-	// Pre-flight check: verify container is running
-	dockerClient, err := docker.NewSDKClient()
-	if err != nil {
-		return fmt.Errorf("failed to create docker client: %w", err)
-	}
-	
+	// Pre-flight check: verify container is running (unless skipped for testing)
 	ctx := cmd.Context()
-	if !dockerClient.IsContainerRunning(ctx, container) {
-		return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
+	if !shouldSkipDockerCheck() {
+		dockerClient, err := docker.NewSDKClient()
+		if err != nil {
+			return fmt.Errorf("failed to create docker client: %w", err)
+		}
+		
+		if !dockerClient.IsContainerRunning(ctx, container) {
+			return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
+		}
 	}
 	
 	// Load full config to get agent args
 	fullCfg, err := loadFullConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
-	}
-	
-	// Get current working directory for worktree creation
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 	
 	// Get git root
@@ -583,9 +579,9 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	// Derive worktree name from the chat title/filename
 	worktreeName := deriveWorktreeName(chatPath)
 	
-	// Prepare the worktree in the current directory
+	// Prepare the worktree at the git root
 	wm := git.NewWorktreeManager()
-	worktreePath, err := wm.GetOrPrepareWorktree(ctx, cwd, worktreeName, "interactive")
+	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "interactive")
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
