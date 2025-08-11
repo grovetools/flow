@@ -81,7 +81,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	fmt.Println(successStyle.Render("✓") + " Created " + filename)
 	fmt.Println("\nNext steps:")
 	fmt.Println("- Review the job file")
-	fmt.Printf("- Run with: grove jobs run %s/%s\n", cmd.Dir, filename)
+	fmt.Printf("- Run with: flow plan run %s/%s\n", cmd.Dir, filename)
 
 	return nil
 }

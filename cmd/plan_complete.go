@@ -78,7 +78,7 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 	// Special message for chat jobs
 	if job.Type == orchestration.JobTypeChat {
 		fmt.Printf("\nChat conversation ended. You can transform this chat into executable jobs using:\n")
-		fmt.Printf("  grove jobs add-step %s --template generate-plan --prompt-file %s\n", 
+		fmt.Printf("  flow plan add %s --template generate-plan --prompt-file %s\n", 
 			planDir, jobFile)
 	}
 

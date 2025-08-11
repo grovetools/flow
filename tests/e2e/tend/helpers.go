@@ -51,64 +51,92 @@ func getCommandWithTestBin(ctx *harness.Context) func(program string, args ...st
 	}
 }
 
-// setupMockLLM creates a mock 'llm' command and adds it to the PATH.
-func setupMockLLM() harness.Step {
-	return harness.NewStep("Setup mock LLM command", func(ctx *harness.Context) error {
-		scriptContent := `#!/bin/bash
-# Mock 'llm' command for testing
-# Real LLM commands return just the response text, not frontmatter
-echo "This is a mock LLM response. Based on your idea, I suggest we start by creating a basic project structure with the following components:
 
-1. A main application file
-2. Configuration management
-3. Basic tests
-
-Would you like me to help you set up the initial project structure?"
-`
+// setupTestEnvironment creates a comprehensive test environment with all necessary mocks.
+// Options can be passed to customize the setup:
+// - mockLLMResponse: Custom LLM response (default is a generic helpful response)
+// - mockDockerContainer: Container name for docker mock (default is "fake-container")
+// - additionalMocks: Map of additional mock commands to create
+func setupTestEnvironment(options ...map[string]interface{}) harness.Step {
+	return harness.NewStep("Setup test environment", func(ctx *harness.Context) error {
+		// Parse options
+		opts := make(map[string]interface{})
+		if len(options) > 0 {
+			opts = options[0]
+		}
+		
+		// Create test bin directory
 		binDir := filepath.Join(ctx.RootDir, "test_bin")
 		if err := fs.CreateDir(binDir); err != nil {
 			return err
 		}
-		scriptPath := filepath.Join(binDir, "llm")
-		if err := fs.WriteString(scriptPath, scriptContent); err != nil {
+		
+		// Mock LLM
+		llmResponse := "This is a mock LLM response. Based on your idea, I suggest we start by creating a basic project structure with the following components:\n\n1. A main application file\n2. Configuration management\n3. Basic tests\n\nWould you like me to help you set up the initial project structure?"
+		if customResponse, ok := opts["mockLLMResponse"].(string); ok {
+			llmResponse = customResponse
+		}
+		
+		llmScript := fmt.Sprintf(`#!/bin/bash
+# Mock 'llm' command for testing
+# Real LLM commands return just the response text, not frontmatter
+echo "%s"
+`, llmResponse)
+		
+		if err := fs.WriteString(filepath.Join(binDir, "llm"), llmScript); err != nil {
 			return err
 		}
-		if err := os.Chmod(scriptPath, 0755); err != nil {
+		if err := os.Chmod(filepath.Join(binDir, "llm"), 0755); err != nil {
 			return err
 		}
-
-		// Store the bin directory in context for later use
-		ctx.Set("test_bin_dir", binDir)
-		return nil
-	})
-}
-
-// setupMocks creates mock 'tmux' and 'docker' commands.
-func setupMocks() harness.Step {
-	return harness.NewStep("Setup mock tmux and docker", func(ctx *harness.Context) error {
-		// Mock for `tmux`
+		
+		// Mock tmux
 		tmuxScript := "#!/bin/bash\necho \"Mock tmux called with: $@\""
-
-		// Mock for `docker`. We need to mock `docker ps` to show the container is running.
-		dockerScript := `#!/bin/bash
+		if err := fs.WriteString(filepath.Join(binDir, "tmux"), tmuxScript); err != nil {
+			return err
+		}
+		if err := os.Chmod(filepath.Join(binDir, "tmux"), 0755); err != nil {
+			return err
+		}
+		
+		// Mock docker
+		containerName := "fake-container"
+		if customContainer, ok := opts["mockDockerContainer"].(string); ok {
+			containerName = customContainer
+		}
+		
+		dockerScript := fmt.Sprintf(`#!/bin/bash
 # Handle docker ps with various flag combinations
 if [[ "$1" == "ps" ]]; then
-  # Check if we're filtering for fake-container
+  # Check if we're filtering for %s
   for arg in "$@"; do
-    if [[ "$arg" == *"fake-container"* ]]; then
-      echo "fake-container" # Simulate container is running
+    if [[ "$arg" == *"%s"* ]]; then
+      echo "%s" # Simulate container is running
       exit 0
     fi
   done
 fi
-`
-		binDir := filepath.Join(ctx.RootDir, "test_bin")
-		fs.CreateDir(binDir)
-		fs.WriteString(filepath.Join(binDir, "tmux"), tmuxScript)
-		os.Chmod(filepath.Join(binDir, "tmux"), 0755)
-		fs.WriteString(filepath.Join(binDir, "docker"), dockerScript)
-		os.Chmod(filepath.Join(binDir, "docker"), 0755)
-
+`, containerName, containerName, containerName)
+		
+		if err := fs.WriteString(filepath.Join(binDir, "docker"), dockerScript); err != nil {
+			return err
+		}
+		if err := os.Chmod(filepath.Join(binDir, "docker"), 0755); err != nil {
+			return err
+		}
+		
+		// Add any additional mocks
+		if additionalMocks, ok := opts["additionalMocks"].(map[string]string); ok {
+			for name, script := range additionalMocks {
+				if err := fs.WriteString(filepath.Join(binDir, name), script); err != nil {
+					return err
+				}
+				if err := os.Chmod(filepath.Join(binDir, name), 0755); err != nil {
+					return err
+				}
+			}
+		}
+		
 		// Store the bin directory in context for later use
 		ctx.Set("test_bin_dir", binDir)
 		return nil

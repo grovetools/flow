@@ -56,7 +56,7 @@ Examples:
   flow plan add myplan -t agent --title "Implementation" -d 01-plan.md -f prompt.md
   
   # Add a job with prompt from stdin
-  echo "Implement feature X" | grove jobs add-step myplan -t agent --title "Implementation" -d 01-plan.md
+  echo "Implement feature X" | flow plan add myplan -t agent --title "Implementation" -d 01-plan.md
   
   # Use active job
   flow plan set myplan

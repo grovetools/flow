@@ -24,6 +24,13 @@ func main() {
 		// Chat Scenarios
 		BasicChatWorkflowScenario(),
 		ChatLaunchScenario(), // Fixed with docker check skip
+		ChatRunFilteringScenario(),
+		ChatPipelineScenario(),
+		
+		// Phase 3: Complex Orchestration
+		SimpleOrchestrationScenario(),
+		// ComplexOrchestrationScenario(), // Tests generate_jobs - needs investigation on how flow processes job output
+		ReferencePromptScenario(), // Fixed using flow plan add
 		
 		// Debug Scenarios (optional - can be run individually)
 		LaunchDebugScenario(),

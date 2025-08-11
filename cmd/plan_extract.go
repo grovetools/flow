@@ -24,8 +24,8 @@ This command creates a new chat job containing only the selected LLM responses,
 allowing you to continue working with specific parts of a larger conversation.
 
 Examples:
-  grove jobs extract --title "Database Schema Refinement" f3b9a2 a1c2d4
-  grove jobs extract --file chat-session.md --title "API Design" d4e5f6`,
+  flow plan extract --title "Database Schema Refinement" f3b9a2 a1c2d4
+  flow plan extract --file chat-session.md --title "API Design" d4e5f6`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobsExtract(title, file, args)
@@ -112,7 +112,7 @@ func runJobsExtract(title string, file string, blockIDs []string) error {
 	}
 
 	fmt.Printf("✓ Extracted %d blocks to new chat job: %s\n", foundBlocks, filename)
-	fmt.Printf("✓ You can now run: grove jobs run %s\n", filename)
+	fmt.Printf("✓ You can now run: flow plan run %s\n", filename)
 
 	return nil
 }

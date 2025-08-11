@@ -66,7 +66,7 @@ flow:
 				}
 				return nil
 			}),
-			setupMockLLM(),
+			setupTestEnvironment(),
 			harness.NewStep("Run the chat", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// The title of the chat job is derived from the filename 'my-idea'.
@@ -125,7 +125,7 @@ flow:
 				flow, _ := getFlowBinary()
 				return command.New(flow, "chat", "-s", chatFile).Dir(ctx.RootDir).Run().Error
 			}),
-			setupMocks(),
+			setupTestEnvironment(),
 			harness.NewStep("Launch the chat", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				chatFile := filepath.Join(ctx.RootDir, "dev-task.md")

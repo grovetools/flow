@@ -77,12 +77,12 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 		fmt.Printf("✓ Created %s\n", jobFilename)
 		fmt.Println("\nNext steps:")
 		fmt.Printf("1. Review the job file\n")
-		fmt.Printf("2. Run: grove jobs run %s\n", cmd.Dir)
-		fmt.Printf("3. Check status: grove jobs status %s\n", cmd.Dir)
+		fmt.Printf("2. Run: flow plan run %s\n", cmd.Dir)
+		fmt.Printf("3. Check status: flow plan status %s\n", cmd.Dir)
 	} else {
 		fmt.Println("\nNext steps:")
-		fmt.Printf("1. Add your first job: grove jobs add-step %s\n", cmd.Dir)
-		fmt.Printf("2. Check status: grove jobs status %s\n", cmd.Dir)
+		fmt.Printf("1. Add your first job: flow plan add %s\n", cmd.Dir)
+		fmt.Printf("2. Check status: flow plan status %s\n", cmd.Dir)
 	}
 
 	return nil

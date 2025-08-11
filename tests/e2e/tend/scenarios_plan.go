@@ -268,7 +268,7 @@ func AgentJobLaunchScenario() *harness.Scenario {
 				ctx.ShowCommandOutput(cmdAdd.String(), resultAdd.Stdout, resultAdd.Stderr)
 				return resultAdd.Error
 			}),
-			setupMocks(),
+			setupTestEnvironment(),
 			harness.NewStep("Launch the agent job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Plans are in ./plans/agent-plan as configured
