@@ -55,5 +55,3 @@ require (
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 )
-
-replace github.com/mattsolo1/grove-tend => ../grove-tend
