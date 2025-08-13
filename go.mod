@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mattsolo1/grove-context v0.2.11
 	github.com/mattsolo1/grove-core v0.2.10
-	github.com/mattsolo1/grove-tend v0.2.6
+	github.com/mattsolo1/grove-tend v0.2.7
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	gopkg.in/yaml.v3 v3.0.1

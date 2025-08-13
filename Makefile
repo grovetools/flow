@@ -36,7 +36,7 @@ test:
 	@go test -v ./...
 
 # --- Grove-tend E2E Testing ---
-E2E_BINARY_NAME=tend-flow
+E2E_BINARY_NAME=tend
 
 # Build the custom tend binary for grove-flow E2E tests.
 test-tend-build:
@@ -46,7 +46,7 @@ test-tend-build:
 # Run grove-tend E2E tests.
 test-tend: build test-tend-build
 	@echo "Running grove-tend E2E tests..."
-	@FLOW_BINARY=$$(cd . && pwd)/$(BIN_DIR)/$(BINARY_NAME) $(BIN_DIR)/$(E2E_BINARY_NAME) run --very-verbose
+	@$(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
 
 # Run only the shell-based e2e tests that haven't been migrated to grove-tend
 test-e2e-legacy: build

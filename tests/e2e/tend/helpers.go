@@ -13,29 +13,7 @@ import (
 
 // getFlowBinary is a helper to find the `flow` binary path for tests.
 func getFlowBinary() (string, error) {
-	flowBinary := os.Getenv("FLOW_BINARY")
-	if flowBinary != "" {
-		return flowBinary, nil
-	}
-
-	// Try to find the binary relative to the test execution directory
-	candidates := []string{
-		"./bin/flow",
-		"../bin/flow",
-		"../../bin/flow",
-		"../../../bin/flow",
-		"../../../../bin/flow",
-	}
-
-	for _, candidate := range candidates {
-		if absPath, err := filepath.Abs(candidate); err == nil {
-			if _, err := os.Stat(absPath); err == nil {
-				return absPath, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("flow binary not found. Build it with 'make build' or set FLOW_BINARY env var")
+	return FindProjectBinary()
 }
 
 // getCommandWithTestBin returns a function that prepends the test bin directory to PATH.
