@@ -121,10 +121,21 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		MaxConsecutiveSteps: maxSteps,
 	}
 
-	// Create Docker client for the orchestrator
-	dockerClient, err := docker.NewSDKClient()
-	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
+	// Check if we need Docker (only for agent jobs)
+	var dockerClient docker.Client
+	hasAgentJobs := false
+	for _, job := range plan.Jobs {
+		if job.Type == orchestration.JobTypeAgent {
+			hasAgentJobs = true
+			break
+		}
+	}
+	
+	if hasAgentJobs {
+		dockerClient, err = docker.NewSDKClient()
+		if err != nil {
+			return fmt.Errorf("failed to create Docker client: %w", err)
+		}
 	}
 	
 	// Create orchestrator
