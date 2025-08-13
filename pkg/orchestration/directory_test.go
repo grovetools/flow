@@ -207,7 +207,7 @@ func TestAddJob(t *testing.T) {
 	// Create a test plan
 	plan := &Plan{
 		Directory: tmpDir,
-		Jobs:      make(map[string]*Job),
+		Jobs:      []*Job{},
 		JobsByID:  make(map[string]*Job),
 	}
 
@@ -220,7 +220,7 @@ func TestAddJob(t *testing.T) {
 		PromptBody: "Do something",
 	}
 
-	if err := AddJob(plan, job1); err != nil {
+	if _, err := AddJob(plan, job1); err != nil {
 		t.Fatalf("AddJob() error = %v", err)
 	}
 
@@ -250,7 +250,7 @@ func TestAddJob(t *testing.T) {
 		PromptBody: "Implement the feature",
 	}
 
-	if err := AddJob(plan, job2); err != nil {
+	if _, err := AddJob(plan, job2); err != nil {
 		t.Fatalf("AddJob() second job error = %v", err)
 	}
 
@@ -274,7 +274,7 @@ func TestAddJobErrors(t *testing.T) {
 
 	plan := &Plan{
 		Directory: tmpDir,
-		Jobs:      make(map[string]*Job),
+		Jobs:      []*Job{},
 		JobsByID:  make(map[string]*Job),
 	}
 
@@ -283,7 +283,7 @@ func TestAddJobErrors(t *testing.T) {
 		ID:    "existing-id",
 		Title: "Existing Job",
 	}
-	AddJob(plan, existingJob)
+	_, _ = AddJob(plan, existingJob)
 
 	tests := []struct {
 		name    string
@@ -316,7 +316,7 @@ func TestAddJobErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := AddJob(plan, tt.job)
+			_, err := AddJob(plan, tt.job)
 			if err == nil {
 				t.Errorf("AddJob() expected error containing %q, got nil", tt.wantErr)
 			} else if !strings.Contains(err.Error(), tt.wantErr) {

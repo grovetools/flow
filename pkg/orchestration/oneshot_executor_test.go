@@ -16,7 +16,7 @@ func TestOneShotExecutor_Execute(t *testing.T) {
 	// Create test plan
 	plan := &Plan{
 		Directory: tmpDir,
-		Jobs:      make(map[string]*Job),
+		Jobs:      []*Job{},
 		JobsByID:  make(map[string]*Job),
 	}
 
@@ -54,7 +54,7 @@ Create a plan based on the spec.`
 	job.FilePath = jobPath
 
 	// Create executor
-	config := &Config{
+	config := &ExecutorConfig{
 		MaxPromptLength: 10000,
 		Timeout:         1 * time.Minute,
 	}
@@ -269,7 +269,7 @@ Body`
 	}
 }
 
-func TestMockLLMClient(t *testing.T) {
+func TestMockLLMClientFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create mock response file
@@ -282,7 +282,7 @@ func TestMockLLMClient(t *testing.T) {
 	defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 	client := NewMockLLMClient()
-	response, err := client.Complete(context.Background(), "test prompt")
+	response, err := client.Complete(context.Background(), "test prompt", LLMOptions{})
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
@@ -333,7 +333,7 @@ Implement the second part.`
 	}()
 
 	client := NewMockLLMClient()
-	response, err := client.Complete(context.Background(), "test prompt")
+	response, err := client.Complete(context.Background(), "test prompt", LLMOptions{})
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
@@ -419,7 +419,7 @@ Body`
 		t.Run(tt.name, func(t *testing.T) {
 			job, plan := tt.setup()
 
-			config := &Config{
+			config := &ExecutorConfig{
 				MaxPromptLength: 100, // Small limit for testing
 			}
 			executor := NewOneShotExecutor(config)

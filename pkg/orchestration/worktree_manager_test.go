@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,7 +37,7 @@ func (m *mockGitClient) WorktreeRemove(name string, force bool) error {
 	m.removeCalled = true
 	var updated []Worktree
 	for _, wt := range m.worktrees {
-		if wt.Name != name && !filepath.HasSuffix(wt.Path, name) {
+		if wt.Name != name && !strings.HasSuffix(wt.Path, name) {
 			updated = append(updated, wt)
 		}
 	}

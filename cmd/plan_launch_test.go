@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	
 	"github.com/mattsolo1/grove-flow/pkg/exec"

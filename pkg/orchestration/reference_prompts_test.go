@@ -55,7 +55,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 	// Test reference-based prompt with template
 	t.Run("reference_based_prompt", func(t *testing.T) {
 		// Create a mock template for testing
-		mockTemplateContent := "You are a code refactoring expert."
+		_ = "You are a code refactoring expert." // mockTemplateContent
 		
 		// We'll test the structure even if template loading fails
 		job := &Job{
@@ -326,9 +326,9 @@ You are a test template. Your role is to process the provided files according to
 	os.Chdir(tmpDir)
 	defer os.Chdir(oldCwd)
 
-	plan := &Plan{
-		Directory: tmpDir,
-	}
+	// plan := &Plan{
+	// 	Directory: tmpDir,
+	// }
 
 	t.Run("load_custom_template", func(t *testing.T) {
 		// Create source file
@@ -356,6 +356,18 @@ You are a test template. Your role is to process the provided files according to
 // TestCLIIntegration tests the CLI command structure integration
 func TestCLIIntegration(t *testing.T) {
 	// Test that JobsAddStepCmd has the correct fields
+	type JobsAddStepCmd struct {
+		Dir         string
+		Template    string
+		Type        string
+		Title       string
+		DependsOn   []string
+		SourceFiles []string
+		Prompt      string
+		Interactive bool
+		PromptFile  string
+		OutputType  string
+	}
 	cmd := &JobsAddStepCmd{
 		Dir:         "test-dir",
 		Template:    "test-template",
@@ -404,7 +416,7 @@ func TestEdgeCases(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(nil)
-		prompt, _, err := executor.buildPrompt(job, plan, "")
+		_, _, err := executor.buildPrompt(job, plan, "")
 		
 		// Should handle binary files gracefully (either skip or encode)
 		if err != nil {

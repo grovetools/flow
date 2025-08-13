@@ -84,8 +84,14 @@ Implement the feature.`,
 	}
 
 	// Verify job 1
-	job1, exists := plan.Jobs["01-initial-plan.md"]
-	if !exists {
+	var job1 *Job
+	for _, j := range plan.Jobs {
+		if j.Filename == "01-initial-plan.md" {
+			job1 = j
+			break
+		}
+	}
+	if job1 == nil {
 		t.Fatal("Job 01-initial-plan.md not found")
 	}
 	if job1.ID != "initial-plan-123" {
@@ -99,8 +105,14 @@ Implement the feature.`,
 	}
 
 	// Verify job 2
-	job2, exists := plan.Jobs["02-implement-feature.md"]
-	if !exists {
+	var job2 *Job
+	for _, j := range plan.Jobs {
+		if j.Filename == "02-implement-feature.md" {
+			job2 = j
+			break
+		}
+	}
+	if job2 == nil {
 		t.Fatal("Job 02-implement-feature.md not found")
 	}
 	if job2.Type != JobTypeAgent {
@@ -294,21 +306,24 @@ func TestJobIsRunnable(t *testing.T) {
 func TestGetRunnableJobs(t *testing.T) {
 	// Create a simple plan
 	plan := &Plan{
-		Jobs: map[string]*Job{
-			"01-completed.md": {
-				ID:     "completed",
-				Status: JobStatusCompleted,
+		Jobs: []*Job{
+			{
+				ID:       "completed",
+				Filename: "01-completed.md",
+				Status:   JobStatusCompleted,
 			},
-			"02-runnable.md": {
-				ID:     "runnable",
-				Status: JobStatusPending,
+			{
+				ID:       "runnable",
+				Filename: "02-runnable.md",
+				Status:   JobStatusPending,
 				Dependencies: []*Job{
 					{ID: "completed", Status: JobStatusCompleted},
 				},
 			},
-			"03-blocked.md": {
-				ID:     "blocked",
-				Status: JobStatusPending,
+			{
+				ID:       "blocked",
+				Filename: "03-blocked.md",
+				Status:   JobStatusPending,
 				Dependencies: []*Job{
 					{ID: "runnable", Status: JobStatusPending},
 				},

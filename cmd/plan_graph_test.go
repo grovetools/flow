@@ -13,7 +13,7 @@ func TestRunPlanGraph(t *testing.T) {
 	tests := []struct {
 		name      string
 		setupPlan func(t *testing.T, dir string)
-		cmd       *JobsGraphCmd
+		cmd       *PlanGraphCmd
 		wantErr   bool
 		checkOut  func(t *testing.T, output string)
 	}{
@@ -25,7 +25,7 @@ func TestRunPlanGraph(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsGraphCmd{
+			cmd: &PlanGraphCmd{
 				Format: "mermaid",
 			},
 			wantErr: false,
@@ -46,7 +46,7 @@ func TestRunPlanGraph(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsGraphCmd{
+			cmd: &PlanGraphCmd{
 				Format: "dot",
 			},
 			wantErr: false,
@@ -67,7 +67,7 @@ func TestRunPlanGraph(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsGraphCmd{
+			cmd: &PlanGraphCmd{
 				Format: "ascii",
 			},
 			wantErr: false,
@@ -88,7 +88,7 @@ func TestRunPlanGraph(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsGraphCmd{
+			cmd: &PlanGraphCmd{
 				Format: "invalid",
 			},
 			wantErr: true,
@@ -104,7 +104,7 @@ func TestRunPlanGraph(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsGraphCmd{
+			cmd: &PlanGraphCmd{
 				Format: "mermaid",
 			},
 			wantErr: true,
@@ -117,7 +117,7 @@ func TestRunPlanGraph(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			cmd: &JobsGraphCmd{
+			cmd: &PlanGraphCmd{
 				Format: "mermaid",
 			},
 			wantErr: false,
@@ -133,7 +133,7 @@ func TestRunPlanGraph(t *testing.T) {
 			tt.setupPlan(t, dir)
 			
 			// Set directory in command
-			tt.cmd.Dir = dir
+			tt.cmd.Directory = dir
 			
 			// Set output file if needed
 			if tt.name == "output to file" {

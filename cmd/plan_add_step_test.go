@@ -320,7 +320,7 @@ func TestGenerateJobIDFromTitle(t *testing.T) {
 func TestCollectJobDetails(t *testing.T) {
 	tests := []struct {
 		name    string
-		cmd     *JobsAddStepCmd
+		cmd     *PlanAddStepCmd
 		plan    *orchestration.Plan
 		wantErr bool
 		check   func(t *testing.T, job *orchestration.Job)
@@ -373,7 +373,7 @@ func TestCollectJobDetails(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			job, err := collectJobDetails(tt.cmd, tt.plan)
+			job, err := collectJobDetails(tt.cmd, tt.plan, "")
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("collectJobDetails() error = %v, wantErr %v", err, tt.wantErr)

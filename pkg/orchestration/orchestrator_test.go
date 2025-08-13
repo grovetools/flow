@@ -43,7 +43,7 @@ func TestNewOrchestrator(t *testing.T) {
 		CheckInterval:   1 * time.Second,
 	}
 
-	orch, err := NewOrchestrator(plan, config)
+	orch, err := NewOrchestrator(plan, config, nil)
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestOrchestrator_GetStatus(t *testing.T) {
 		},
 	}
 
-	orch, err := NewOrchestrator(plan, nil)
+	orch, err := NewOrchestrator(plan, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestOrchestrator_RunJob(t *testing.T) {
 		},
 	}
 
-	orch, err := NewOrchestrator(plan, nil)
+	orch, err := NewOrchestrator(plan, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestOrchestrator_RunNext(t *testing.T) {
 		MaxParallelJobs: 2,
 	}
 
-	orch, err := NewOrchestrator(plan, config)
+	orch, err := NewOrchestrator(plan, config, nil)
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestOrchestrator_RunAll(t *testing.T) {
 		CheckInterval:   10 * time.Millisecond,
 	}
 
-	orch, err := NewOrchestrator(plan, config)
+	orch, err := NewOrchestrator(plan, config, nil)
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestOrchestrator_UpdateJobStatus(t *testing.T) {
 		},
 	}
 
-	orch, err := NewOrchestrator(plan, nil)
+	orch, err := NewOrchestrator(plan, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestOrchestrator_HandleFailures(t *testing.T) {
 		},
 	}
 
-	orch, err := NewOrchestrator(plan, nil)
+	orch, err := NewOrchestrator(plan, nil, nil)
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}

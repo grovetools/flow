@@ -46,10 +46,10 @@ func TestAgentExecutor_Execute(t *testing.T) {
 	}
 
 	// Create executor with mock
-	config := &Config{
+	config := &ExecutorConfig{
 		Timeout: 5 * time.Second,
 	}
-	executor := NewAgentExecutor(NewMockLLMClient(), config)
+	executor := NewAgentExecutor(NewMockLLMClient(), config, nil)
 	
 	// Use mock agent runner
 	mockRunner := &mockAgentRunner{}
@@ -71,7 +71,7 @@ func TestAgentExecutor_Execute(t *testing.T) {
 }
 
 func TestAgentExecutor_Name(t *testing.T) {
-	executor := NewAgentExecutor(nil, nil)
+	executor := NewAgentExecutor(nil, nil, nil)
 	if executor.Name() != "agent" {
 		t.Errorf("Expected name 'agent', got %s", executor.Name())
 	}
@@ -81,7 +81,7 @@ func TestAgentExecutor_PrepareWorktree(t *testing.T) {
 	// This test would require a real git repository
 	// For now, we'll just test the error cases
 
-	executor := NewAgentExecutor(nil, nil)
+	executor := NewAgentExecutor(nil, nil, nil)
 	ctx := context.Background()
 
 	// Test missing worktree in job
