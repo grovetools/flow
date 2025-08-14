@@ -763,15 +763,20 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 	// Create context manager for the worktree
 	ctxMgr := grovecontext.NewManager(worktreePath)
 	
-	// Check if .grovectx exists
-	groveCtxPath := filepath.Join(worktreePath, ".grovectx")
-	if _, err := os.Stat(groveCtxPath); err != nil {
+	// Check if .grove/rules exists
+	rulesPath := filepath.Join(worktreePath, ".grove", "rules")
+	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
-			// No .grovectx file, but still display context info if context files exist
+			// No rules file, but still display context info if context files exist
 			return e.displayContextInfo(worktreePath)
 		}
-		return fmt.Errorf("checking .grovectx: %w", err)
+		return fmt.Errorf("checking .grove/rules: %w", err)
 	}
+	
+	// Display absolute path of rules file being used
+	absRulesPath, _ := filepath.Abs(rulesPath)
+	fmt.Printf("Found context rules file, regenerating context in worktree...\n")
+	fmt.Printf("  Rules File: %s\n", absRulesPath)
 	
 	// Update context from rules
 	if err := ctxMgr.UpdateFromRules(); err != nil {
@@ -947,7 +952,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", worktreePath)
 		}
 		
-		// Also regenerate context for non-worktree case if .grovectx exists
+		// Also regenerate context for non-worktree case if .grove/rules exists
 		if err := e.regenerateContextInWorktree(worktreePath, "chat"); err != nil {
 			// Log warning but don't fail the job
 			fmt.Printf("Warning: failed to regenerate context: %v\n", err)

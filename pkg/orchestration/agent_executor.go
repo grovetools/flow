@@ -103,13 +103,15 @@ func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		return fmt.Errorf("run agent: %w", err)
 	}
 
-	// Automatically update context within the working directory if .grovectx exists
+	// Automatically update context within the working directory if .grove/rules exists
 	fmt.Println("Checking for context update in working directory...")
 	ctxMgr := grovecontext.NewManager(workDir)
-	groveCtxPath := filepath.Join(workDir, ".grovectx")
+	rulesPath := filepath.Join(workDir, ".grove", "rules")
 
-	if _, err := os.Stat(groveCtxPath); err == nil {
-		fmt.Println("Found .grovectx, updating context...")
+	if _, err := os.Stat(rulesPath); err == nil {
+		absRulesPath, _ := filepath.Abs(rulesPath)
+		fmt.Printf("Found context rules file, updating context...\n")
+		fmt.Printf("  Rules File: %s\n", absRulesPath)
 		if err := ctxMgr.UpdateFromRules(); err != nil {
 			// Log a warning, but don't fail the job for a context update failure.
 			fmt.Printf("Warning: failed to update context file list in worktree: %v\n", err)
@@ -134,7 +136,7 @@ func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 			}
 		}
 	} else {
-		fmt.Println("No .grovectx file found in worktree, skipping context update.")
+		fmt.Println("No .grove/rules file found in worktree, skipping context update.")
 	}
 
 	// Update job status on completion

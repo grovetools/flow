@@ -156,14 +156,15 @@ func WorktreeContextRegenerationScenario() *harness.Scenario {
 		Description: "Test that context is regenerated in worktrees before oneshot jobs",
 		Tags:        []string{"worktree", "context", "regeneration"},
 		Steps: []harness.Step{
-			harness.NewStep("Setup git repository with grovectx", func(ctx *harness.Context) error {
+			harness.NewStep("Setup git repository with grove rules", func(ctx *harness.Context) error {
 				// Initialize git repo
 				git.Init(ctx.RootDir)
 				git.SetupTestConfig(ctx.RootDir)
 
 				// Create initial files
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "# Test Project\n")
-				fs.WriteString(filepath.Join(ctx.RootDir, ".grovectx"), `
+				os.MkdirAll(filepath.Join(ctx.RootDir, ".grove"), 0755)
+				fs.WriteString(filepath.Join(ctx.RootDir, ".grove", "rules"), `
 includes:
   - "*.go"
 excludes:
@@ -188,8 +189,9 @@ flow:
 				worktreeDir := filepath.Join(ctx.RootDir, ".grove-worktrees", "test-worktree")
 				os.MkdirAll(worktreeDir, 0755)
 
-				// Copy .grovectx to worktree
-				fs.WriteString(filepath.Join(worktreeDir, ".grovectx"), `
+				// Copy .grove/rules to worktree
+				os.MkdirAll(filepath.Join(worktreeDir, ".grove"), 0755)
+				fs.WriteString(filepath.Join(worktreeDir, ".grove", "rules"), `
 includes:
   - "*.go"
 excludes:
