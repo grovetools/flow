@@ -133,6 +133,35 @@ func TestRunPlanAddStep(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "auto-create plan directory",
+			setupPlan: func(t *testing.T, dir string) {
+				// Don't create the plan directory - it should be auto-created
+				// Remove the directory if it exists
+				os.RemoveAll(dir)
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "oneshot",
+				Title:      "Test Auto-Create",
+				PromptFile: createTempFile(t, "Test prompt"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				// Verify the directory was created
+				if _, err := os.Stat(dir); os.IsNotExist(err) {
+					t.Error("Plan directory was not created")
+				}
+				
+				// Verify job was created
+				files, err := filepath.Glob(filepath.Join(dir, "*.md"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(files) != 1 {
+					t.Errorf("expected 1 job file, got %d", len(files))
+				}
+			},
+		},
+		{
 			name: "reference-based prompt with template and source files",
 			setupPlan: func(t *testing.T, dir string) {
 				plan := &orchestration.Plan{Name: "test-plan"}
