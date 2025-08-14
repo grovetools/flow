@@ -44,67 +44,10 @@ test-tend-build:
 	@go build -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e/tend
 
 # Run grove-tend E2E tests.
-test-tend: build test-tend-build
+test-e2e: build test-tend-build
 	@echo "Running grove-tend E2E tests..."
 	@$(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
 
-# Run only the shell-based e2e tests that haven't been migrated to grove-tend
-test-e2e-legacy: build
-	@echo "Running jobs end-to-end tests..."
-	@chmod +x tests/e2e/*.sh
-	@chmod +x tests/e2e/orchestration-tests/*.sh
-	@# Run basic functionality test
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-basic-functionality.sh
-	@echo ""
-	@echo "Running advanced orchestration tests..."
-	@cd tests/e2e/orchestration-tests && FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-orchestration-e2e.sh
-	@echo ""
-	@echo "Running reference prompts tests..."
-	@cd tests/e2e/orchestration-tests && FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-reference-prompts-e2e.sh
-	@echo ""
-	@echo "Running chat functionality tests..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-functionality.sh
-	@echo ""
-	@echo "Running chat run command tests..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-run.sh
-	@echo ""
-	@echo "Running chat title filtering tests..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-title-filtering.sh
-	@echo ""
-	@echo "Running launch feature tests..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-launch.sh
-	@echo ""
-	@echo "Note: Full pipeline test (test-chat-pipeline.sh) is disabled due to git worktree"
-	@echo "      limitations when running in temporary directories. To run it manually:"
-	@echo "      cd tests && ./e2e/test-chat-pipeline.sh"
-
-# Run all e2e tests (both grove-tend and legacy shell tests)
-test-e2e: test-tend
-	@echo ""
-	@echo "Running remaining shell-based e2e tests..."
-	@chmod +x tests/e2e/*.sh
-	@chmod +x tests/e2e/orchestration-tests/*.sh
-	@echo ""
-	@echo "Running advanced orchestration tests..."
-	@cd tests/e2e/orchestration-tests && FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-orchestration-e2e.sh
-	@echo ""
-	@echo "Running reference prompts tests..."
-	@cd tests/e2e/orchestration-tests && FLOW_CMD=$$(cd ../../.. && pwd)/bin/flow ./test-reference-prompts-e2e.sh
-	@echo ""
-	@echo "Running chat pipeline test..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-pipeline.sh || echo "Note: Pipeline test may fail in temp directories"
-	@echo ""
-	@echo "Running chat run command tests..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-run.sh
-	@echo ""
-	@echo "Running chat title filtering tests..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-title-filtering.sh
-	@echo ""
-	@echo "Running chat template injection tests..."
-	@cd tests && FLOW_CMD=$$(cd .. && pwd)/bin/flow ./e2e/test-chat-template-injection.sh
-	@echo ""
-	@echo "Note: Skipping test-basic-functionality.sh and test-chat-functionality.sh (migrated to grove-tend)"
-	@echo "Note: Skipping test-launch.sh (partially migrated to grove-tend)"
 
 clean:
 	@echo "Cleaning..."
