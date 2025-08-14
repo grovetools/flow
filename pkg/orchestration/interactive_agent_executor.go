@@ -275,20 +275,43 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 
 // generateSessionName creates a unique session name for the interactive job.
 func (e *InteractiveAgentExecutor) generateSessionName(plan *Plan, job *Job) string {
-	// Sanitize job title for tmux
-	sanitized := strings.Map(func(r rune) rune {
+	// Use worktree name if available, otherwise fall back to plan name and job title
+	var sessionName string
+	if job.Worktree != "" {
+		// Use just the worktree name
+		sessionName = job.Worktree
+	} else {
+		// Fall back to original behavior: plan name + job title
+		sanitized := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				return r
+			}
+			return '-'
+		}, job.Title)
+
+		// Limit length and remove leading/trailing dashes
+		if len(sanitized) > 50 {
+			sanitized = sanitized[:50]
+		}
+		sanitized = strings.Trim(sanitized, "-")
+
+		sessionName = fmt.Sprintf("%s__%s", plan.Name, sanitized)
+	}
+
+	// Sanitize the final session name for tmux compatibility
+	sessionName = strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
 			return r
 		}
 		return '-'
-	}, job.Title)
+	}, sessionName)
 
 	// Limit length and remove leading/trailing dashes
-	if len(sanitized) > 50 {
-		sanitized = sanitized[:50]
+	if len(sessionName) > 100 {
+		sessionName = sessionName[:100]
 	}
-	sanitized = strings.Trim(sanitized, "-")
+	sessionName = strings.Trim(sessionName, "-")
 
-	return fmt.Sprintf("%s__%s", plan.Name, sanitized)
+	return sessionName
 }
 
