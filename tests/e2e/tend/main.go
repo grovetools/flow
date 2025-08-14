@@ -39,6 +39,9 @@ func main() {
 		InteractiveAgentSkipScenario(),
 		InteractiveAgentWorkflowScenario(),
 		
+		// Worktree Context Isolation Scenarios
+		SimpleWorktreeContextTestScenario(),
+		
 		// Debug Scenarios (optional - can be run individually)
 		LaunchDebugScenario(),
 		LaunchErrorHandlingScenario(),
