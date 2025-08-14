@@ -34,6 +34,11 @@ func main() {
 		// ComplexOrchestrationScenario(), // Tests generate_jobs - needs investigation on how flow processes job output
 		ReferencePromptScenario(), // Fixed using flow plan add
 		
+		// Interactive Agent Scenarios
+		InteractiveAgentBasicScenario(),
+		InteractiveAgentSkipScenario(),
+		InteractiveAgentWorkflowScenario(),
+		
 		// Debug Scenarios (optional - can be run individually)
 		LaunchDebugScenario(),
 		LaunchErrorHandlingScenario(),

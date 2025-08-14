@@ -24,6 +24,7 @@ type OrchestratorConfig struct {
 	StateFile           string
 	ModelOverride       string // Override model for all jobs
 	MaxConsecutiveSteps int    // Maximum consecutive steps before halting
+	SkipInteractive     bool   // Skip interactive agent jobs
 }
 
 // Orchestrator coordinates job execution and manages state.
@@ -91,10 +92,10 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig, dockerClient docker
 
 // ValidatePrerequisites ensures all requirements are met before running jobs.
 func (o *Orchestrator) ValidatePrerequisites() error {
-	// Check if we have any agent jobs
+	// Check if we have any agent jobs (including interactive)
 	hasAgentJobs := false
 	for _, job := range o.plan.Jobs {
-		if job.Type == JobTypeAgent {
+		if job.Type == JobTypeAgent || job.Type == JobTypeInteractiveAgent {
 			hasAgentJobs = true
 			break
 		}
@@ -131,6 +132,9 @@ func (o *Orchestrator) registerExecutors() {
 
 	// Register agent executor with mock LLM client
 	o.executors[JobTypeAgent] = NewAgentExecutor(NewMockLLMClient(), execConfig, o.dockerClient)
+
+	// Register interactive agent executor
+	o.executors[JobTypeInteractiveAgent] = NewInteractiveAgentExecutor(o.dockerClient, o.config.SkipInteractive)
 
 	// Register shell executor
 	o.executors[JobTypeShell] = NewShellExecutor()
@@ -323,7 +327,12 @@ func (o *Orchestrator) runJobsConcurrently(ctx context.Context, jobs []*Job) err
 
 // executeJob runs a single job with the appropriate executor.
 func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
-	o.logger.Info("Executing job", "id", job.ID, "type", job.Type)
+	// Special logging for interactive jobs
+	if job.Type == JobTypeInteractiveAgent {
+		o.logger.Info("Starting interactive job", "id", job.ID, "title", job.Title)
+	} else {
+		o.logger.Info("Executing job", "id", job.ID, "type", job.Type)
+	}
 
 	// Update status to running
 	if err := o.UpdateJobStatus(job, JobStatusRunning); err != nil {

@@ -88,7 +88,7 @@ const AgentJobTemplate = `---
 id: {{ .ID }}
 title: "{{ .Title }}"
 status: pending
-type: agent{{ if .DependsOn }}
+type: {{ .Type }}{{ if .DependsOn }}
 depends_on:{{ range .DependsOn }}
   - {{ . }}{{ end }}{{ end }}{{ if .PromptSource }}
 prompt_source:{{ range .PromptSource }}

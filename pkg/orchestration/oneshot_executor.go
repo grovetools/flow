@@ -745,15 +745,15 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// For demos and isolated projects, create worktrees in the current directory
-	// This allows demos to be self-contained
-	cwd, err := os.Getwd()
+	// Get git root for worktree creation
+	gitRoot, err := GetGitRootSafe(plan.Directory)
 	if err != nil {
-		return "", fmt.Errorf("could not get working directory: %w", err)
+		// Fallback to plan directory if not in a git repo
+		gitRoot = plan.Directory
 	}
 
-	// Use the shared method to get or prepare the worktree
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, cwd, job.Worktree, "oneshot")
+	// Use the shared method to get or prepare the worktree at the git root
+	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "oneshot")
 }
 
 // regenerateContextInWorktree regenerates the context within a worktree.

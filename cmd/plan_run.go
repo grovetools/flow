@@ -119,19 +119,20 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		CheckInterval:       5 * time.Second,
 		ModelOverride:       modelOverride,
 		MaxConsecutiveSteps: maxSteps,
+		SkipInteractive:     planRunSkipInteractive,
 	}
 
-	// Check if we need Docker (only for agent jobs)
+	// Check if we need Docker (only for agent and interactive_agent jobs)
 	var dockerClient docker.Client
 	hasAgentJobs := false
 	for _, job := range plan.Jobs {
-		if job.Type == orchestration.JobTypeAgent {
+		if job.Type == orchestration.JobTypeAgent || job.Type == orchestration.JobTypeInteractiveAgent {
 			hasAgentJobs = true
 			break
 		}
 	}
 	
-	if hasAgentJobs {
+	if hasAgentJobs && !shouldSkipDockerCheck() {
 		dockerClient, err = docker.NewSDKClient()
 		if err != nil {
 			return fmt.Errorf("failed to create Docker client: %w", err)
@@ -392,4 +393,5 @@ var (
 	planRunParallel int
 	planRunWatch    bool
 	planRunYes      bool
+	planRunSkipInteractive bool
 )

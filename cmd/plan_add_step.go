@@ -15,7 +15,7 @@ import (
 type PlanAddStepCmd struct {
 	Dir         string   `arg:"" help:"Plan directory"`
 	Template    string   `flag:"" help:"Name of the job template to use"`
-	Type        string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, or shell"`
+	Type        string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, interactive_agent, or shell"`
 	Title       string   `flag:"" help:"Job title"`
 	DependsOn   []string `flag:"d" help:"Dependencies (job filenames)"`
 	PromptFile  string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
@@ -121,8 +121,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 		return nil, fmt.Errorf("title is required (use --title or -i for interactive mode)")
 	}
 
-	if cmd.Type != "oneshot" && cmd.Type != "agent" && cmd.Type != "shell" {
-		return nil, fmt.Errorf("invalid job type: must be oneshot, agent, or shell")
+	if cmd.Type != "oneshot" && cmd.Type != "agent" && cmd.Type != "shell" && cmd.Type != "interactive_agent" {
+		return nil, fmt.Errorf("invalid job type: must be oneshot, agent, shell, or interactive_agent")
 	}
 
 	// Validate dependencies
@@ -297,7 +297,8 @@ func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error
 	fmt.Println("\nJob Type:")
 	fmt.Println("1. oneshot - Single LLM call")
 	fmt.Println("2. agent - Long-running agent")
-	fmt.Print("Choice [1-2]: ")
+	fmt.Println("3. interactive_agent - Interactive agent session")
+	fmt.Print("Choice [1-3]: ")
 	
 	choice, err := reader.ReadString('\n')
 	if err != nil {
@@ -306,8 +307,11 @@ func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error
 	choice = strings.TrimSpace(choice)
 	
 	jobType := "oneshot"
-	if choice == "2" {
+	switch choice {
+	case "2":
 		jobType = "agent"
+	case "3":
+		jobType = "interactive_agent"
 	}
 
 	// Select dependencies

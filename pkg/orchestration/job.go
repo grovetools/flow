@@ -20,10 +20,11 @@ const (
 type JobType string
 
 const (
-	JobTypeOneshot JobType = "oneshot"
-	JobTypeAgent   JobType = "agent"
-	JobTypeShell   JobType = "shell"
-	JobTypeChat    JobType = "chat"
+	JobTypeOneshot          JobType = "oneshot"
+	JobTypeAgent            JobType = "agent"
+	JobTypeShell            JobType = "shell"
+	JobTypeChat             JobType = "chat"
+	JobTypeInteractiveAgent JobType = "interactive_agent"
 )
 
 // OutputConfig defines how job output should be handled.

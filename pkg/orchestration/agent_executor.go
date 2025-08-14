@@ -161,8 +161,15 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// Use the shared method to get or prepare the worktree in the plan's directory
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, plan.Directory, job.Worktree, "agent")
+	// Get git root for worktree creation
+	gitRoot, err := GetGitRootSafe(plan.Directory)
+	if err != nil {
+		// Fallback to plan directory if not in a git repo
+		gitRoot = plan.Directory
+	}
+
+	// Use the shared method to get or prepare the worktree at the git root
+	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "agent")
 }
 
 // runAgentInWorktree executes the agent in the worktree context.

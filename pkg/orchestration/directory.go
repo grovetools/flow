@@ -118,7 +118,7 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 
 	// Generate job content
 	var content []byte
-	if job.Type == JobTypeAgent {
+	if job.Type == JobTypeAgent || job.Type == JobTypeInteractiveAgent {
 		content, err = generateAgentJobContent(job)
 	} else {
 		content, err = generateJobContent(job)
@@ -283,6 +283,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 	data := struct {
 		ID           string
 		Title        string
+		Type         string
 		DependsOn    []string
 		PromptSource []string
 		Worktree     string
@@ -291,6 +292,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 	}{
 		ID:           job.ID,
 		Title:        job.Title,
+		Type:         string(job.Type),
 		DependsOn:    job.DependsOn,
 		PromptSource: job.PromptSource,
 		Worktree:     job.Worktree,

@@ -156,10 +156,11 @@ func GetPlanCommand() *cobra.Command {
 	planRunCmd.Flags().BoolVarP(&planRunWatch, "watch", "w", false, "Watch progress in real-time")
 	planRunCmd.Flags().BoolVarP(&planRunYes, "yes", "y", false, "Skip confirmation prompts")
 	planRunCmd.Flags().StringVar(&planRunModel, "model", "", "Override model for jobs (e.g., claude-3-5-sonnet-20240620, gpt-4)")
+	planRunCmd.Flags().BoolVar(&planRunSkipInteractive, "skip-interactive", false, "Skip interactive agent jobs (useful for CI/automation)")
 
 	// Add-step command flags
 	planAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
-	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, agent, or shell")
+	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, agent, shell, or interactive_agent")
 	planAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	planAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
