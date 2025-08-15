@@ -13,12 +13,12 @@ import (
 
 // JobTemplate represents a predefined job structure.
 type JobTemplate struct {
-	Name        string
-	Path        string
-	Source      string // "project", "user", "builtin"
-	Description string `yaml:"description,omitempty"`
-	Frontmatter map[string]interface{}
-	Prompt      string
+	Name        string                 `json:"name"`
+	Path        string                 `json:"path"`
+	Source      string                 `json:"source"` // "project", "user", "builtin"
+	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
+	Frontmatter map[string]interface{} `json:"frontmatter,omitempty"`
+	Prompt      string                 `json:"prompt,omitempty"`
 }
 
 // TemplateManager finds and loads job templates.

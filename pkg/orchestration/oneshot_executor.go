@@ -73,11 +73,21 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return e.executeChatJob(ctx, job, plan)
 	}
 
+	// Notify grove-hooks about job start
+	notifyJobStart(job, plan)
+
+	// Ensure we notify completion/failure when we exit
+	var execErr error
+	defer func() {
+		notifyJobComplete(job, execErr)
+	}()
+
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
 	if err := updateJobFile(job); err != nil {
-		return fmt.Errorf("updating job status: %w", err)
+		execErr = fmt.Errorf("updating job status: %w", err)
+		return execErr
 	}
 
 	// Determine the working directory for the job
@@ -89,7 +99,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			updateJobFile(job)
-			return fmt.Errorf("prepare worktree: %w", err)
+			execErr = fmt.Errorf("prepare worktree: %w", err)
+			return execErr
 		}
 		workDir = path
 		
@@ -118,7 +129,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		updateJobFile(job)
-		return fmt.Errorf("building prompt: %w", err)
+		execErr = fmt.Errorf("building prompt: %w", err)
+		return execErr
 	}
 
 	// Set environment for mock LLM if needed
@@ -154,7 +166,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		updateJobFile(job)
-		return fmt.Errorf("LLM completion: %w", err)
+		execErr = fmt.Errorf("LLM completion: %w", err)
+		return execErr
 	}
 
 	// Process output
@@ -162,14 +175,16 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		updateJobFile(job)
-		return fmt.Errorf("processing output: %w", err)
+		execErr = fmt.Errorf("processing output: %w", err)
+		return execErr
 	}
 
 	// Update job status to completed
 	job.Status = JobStatusCompleted
 	job.EndTime = time.Now()
 	if err := updateJobFile(job); err != nil {
-		return fmt.Errorf("updating job status to completed: %w", err)
+		execErr = fmt.Errorf("updating job status to completed: %w", err)
+		return execErr
 	}
 
 	return nil
@@ -876,21 +891,40 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
+	// Update job status to running FIRST
+	job.Status = JobStatusRunning
+	job.StartTime = time.Now()
+	if err := updateJobFile(job); err != nil {
+		return fmt.Errorf("updating job status: %w", err)
+	}
+
+	// Notify grove-hooks about job start AFTER status is set
+	notifyJobStart(job, plan)
+
+	// Ensure we notify completion/failure when we exit
+	var execErr error
+	defer func() {
+		notifyJobComplete(job, execErr)
+	}()
+
 	// Read the job file content
 	content, err := os.ReadFile(job.FilePath)
 	if err != nil {
-		return fmt.Errorf("reading chat file: %w", err)
+		execErr = fmt.Errorf("reading chat file: %w", err)
+		return execErr
 	}
 
 	// Parse the chat file
 	turns, err := ParseChatFile(content)
 	if err != nil {
-		return fmt.Errorf("parsing chat file: %w", err)
+		execErr = fmt.Errorf("parsing chat file: %w", err)
+		return execErr
 	}
 
 	// Determine if the job is runnable
 	if len(turns) == 0 {
-		return fmt.Errorf("chat file has no turns")
+		execErr = fmt.Errorf("chat file has no turns")
+		return execErr
 	}
 
 	lastTurn := turns[len(turns)-1]
@@ -899,11 +933,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		fmt.Printf("Chat job '%s' is waiting for user input.\n", job.Title)
 		job.Status = JobStatusPendingUser
 		updateJobFile(job)
+		fmt.Printf("[DEBUG] Early return: job waiting for user input\n")
 		return nil
 	}
 
 	if lastTurn.Speaker != "user" {
-		return fmt.Errorf("unexpected last speaker: %s", lastTurn.Speaker)
+		execErr = fmt.Errorf("unexpected last speaker: %s", lastTurn.Speaker)
+		return execErr
 	}
 
 	// Process the active directive
@@ -933,7 +969,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Prepare git worktree only if explicitly specified
 		path, err := e.prepareWorktree(ctx, job, plan)
 		if err != nil {
-			return fmt.Errorf("prepare worktree: %w", err)
+			execErr = fmt.Errorf("prepare worktree: %w", err)
+			return execErr
 		}
 		worktreePath = path
 		
@@ -972,7 +1009,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	templateManager := NewTemplateManager()
 	template, err := templateManager.FindTemplate(directive.Template)
 	if err != nil {
-		return fmt.Errorf("resolving template %s: %w", directive.Template, err)
+		execErr = fmt.Errorf("resolving template %s: %w", directive.Template, err)
+		return execErr
 	}
 
 	templateContent := []byte(template.Prompt)
@@ -1091,14 +1129,16 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	response, err := e.llmClient.Complete(ctx, fullPrompt, llmOpts)
 	if err != nil {
 		fmt.Printf("[DEBUG] LLM call failed with error: %v\n", err)
-		return fmt.Errorf("LLM completion: %w", err)
+		execErr = fmt.Errorf("LLM completion: %w", err)
+		return execErr
 	}
 	fmt.Printf("[DEBUG] LLM call succeeded, response length: %d bytes\n", len(response))
 
 	// Generate a unique ID for this response
 	bytes := make([]byte, 3)
 	if _, err := rand.Read(bytes); err != nil {
-		return fmt.Errorf("generate block ID: %w", err)
+		execErr = fmt.Errorf("generate block ID: %w", err)
+		return execErr
 	}
 	blockID := hex.EncodeToString(bytes)
 	
@@ -1108,7 +1148,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	
 	// Append atomically
 	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0644); err != nil {
-		return fmt.Errorf("appending LLM response: %w", err)
+		execErr = fmt.Errorf("appending LLM response: %w", err)
+		return execErr
 	}
 
 	fmt.Printf("✓ Added LLM response to chat: %s\n", job.FilePath)

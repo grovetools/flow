@@ -11,6 +11,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/mattsolo1/grove-core/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -57,6 +58,15 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("build dependency graph: %w", err)
 	}
 
+	// Check if JSON output is requested via --json flag
+	opts := cli.GetOptions(cmd)
+	isJSONRequested := opts.JSONOutput || statusFormat == "json"
+
+	// If --json flag is used, override the format to json
+	if opts.JSONOutput && statusFormat != "json" {
+		statusFormat = "json"
+	}
+
 	// Generate status display based on format
 	var output string
 	switch statusFormat {
@@ -74,15 +84,18 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("format output: %w", err)
 	}
 
-	// Display summary statistics first
-	fmt.Print(formatStatusSummary(plan))
-	fmt.Println()
+	// Only display human-readable output if not in JSON mode
+	if !isJSONRequested {
+		// Display summary statistics first
+		fmt.Print(formatStatusSummary(plan))
+		fmt.Println()
+	}
 
 	// Display the main output
 	fmt.Print(output)
 
-	// Display dependency graph if requested
-	if statusGraph {
+	// Display dependency graph if requested (but not in JSON mode)
+	if statusGraph && !isJSONRequested {
 		fmt.Println("\nDependency Graph:")
 		fmt.Println(graph.ToMermaid())
 	}

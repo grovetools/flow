@@ -39,7 +39,7 @@ func resolvePlanPath(planName string) (string, error) {
 	repo, branch, err := git.GetRepoInfo(".")
 	if err != nil {
 		// Don't fail, just proceed without these variables.
-		fmt.Printf("Warning: could not get git info for path expansion: %v\n", err)
+		// Note: Do not print warnings here as it interferes with JSON output
 	} else {
 		// Support both ${VAR} and {{VAR}} patterns
 		basePath = strings.ReplaceAll(basePath, "${REPO}", repo)

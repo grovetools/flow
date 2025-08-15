@@ -556,6 +556,9 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		fmt.Printf("--- Finished Chat: %s ---\n\n", job.Title)
 	}
 
+	// Wait for any pending hooks to complete
+	orchestration.WaitForHooks()
+	
 	if len(executionErrors) > 0 {
 		return fmt.Errorf("%d chat(s) failed to execute", len(executionErrors))
 	}
