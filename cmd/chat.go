@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +109,88 @@ func expandChatPath(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
+// ensureChatJob ensures a file is initialized as a chat job, initializing it if necessary
+func ensureChatJob(filePath string) (*orchestration.Job, error) {
+	// Try to load as a job first
+	job, err := orchestration.LoadJob(filePath)
+	if err == nil && job.Type == "chat" {
+		// Already a valid chat job
+		return job, nil
+	}
+	
+	// If it's not a job (or not a chat), initialize it
+	var notAJob orchestration.ErrNotAJob
+	if err != nil && !errors.As(err, &notAJob) {
+		// Some other error occurred
+		return nil, fmt.Errorf("failed to load job: %w", err)
+	}
+	
+	// Read the file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
+	}
+	
+	// Parse existing frontmatter if any
+	frontmatter, body, _ := orchestration.ParseFrontmatter(content)
+	if frontmatter == nil {
+		frontmatter = make(map[string]interface{})
+		body = content // If parsing fails, treat all content as body
+	}
+	
+	// Check if it's already a different type of job
+	if jobType, ok := frontmatter["type"].(string); ok && jobType != "" && jobType != "chat" {
+		return nil, fmt.Errorf("file %s is already initialized as a %s job, not a chat", filePath, jobType)
+	}
+	
+	// Initialize as chat job
+	if _, ok := frontmatter["id"]; !ok {
+		frontmatter["id"] = "job-" + uuid.New().String()[:8]
+	}
+	if _, ok := frontmatter["title"]; !ok {
+		base := filepath.Base(filePath)
+		ext := filepath.Ext(base)
+		frontmatter["title"] = strings.TrimSuffix(base, ext)
+	}
+	
+	frontmatter["type"] = "chat"
+	
+	// Set model - use config default or fallback
+	flowCfg, _ := loadFlowConfig()
+	model := "gemini-2.5-pro" // Default fallback
+	if flowCfg != nil && flowCfg.OneshotModel != "" {
+		model = flowCfg.OneshotModel
+	}
+	frontmatter["model"] = model
+	
+	frontmatter["status"] = "pending_user"
+	frontmatter["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+	
+	// Ensure aliases and tags are present
+	if _, ok := frontmatter["aliases"]; !ok {
+		frontmatter["aliases"] = []interface{}{}
+	}
+	if _, ok := frontmatter["tags"]; !ok {
+		frontmatter["tags"] = []interface{}{}
+	}
+	
+	// Rebuild the file with frontmatter
+	newContent, err := orchestration.RebuildMarkdownWithFrontmatter(frontmatter, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build new file content: %w", err)
+	}
+	
+	// Write the updated file
+	if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write updated file: %w", err)
+	}
+	
+	fmt.Printf("✓ Initialized chat job: %s\n", filePath)
+	
+	// Load and return the newly created job
+	return orchestration.LoadJob(filePath)
+}
+
 func runChatInit(cmd *cobra.Command, args []string) error {
 	filePath := chatSpecFile
 	
@@ -188,7 +271,7 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("✓ Initialized chat job: %s\n", filePath)
-	fmt.Printf("  You can now start the conversation with: flow plan run %s\n", filePath)
+	fmt.Printf("  You can now start the conversation with: flow chat run %s\n", filePath)
 	return nil
 }
 
@@ -277,13 +360,10 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("expected a file, got directory: %s", chatPath)
 			}
 			
-			// Load and check if it's a runnable chat
-			job, err := orchestration.LoadJob(chatPath)
+			// Use ensureChatJob to load or initialize the chat
+			job, err := ensureChatJob(chatPath)
 			if err != nil {
-				return fmt.Errorf("failed to load job: %w", err)
-			}
-			if job.Type != "chat" {
-				return fmt.Errorf("file is not a chat job: %s", chatPath)
+				return fmt.Errorf("failed to ensure chat job: %w", err)
 			}
 			
 			// Check if it's runnable
