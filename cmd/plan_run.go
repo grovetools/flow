@@ -146,9 +146,10 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Handle different run modes
+	var runErr error
 	if targetJob != "" {
 		// Run single job
-		return runSingleJob(ctx, orch, plan, targetJob)
+		runErr = runSingleJob(ctx, orch, plan, targetJob)
 	} else if planRunAll {
 		// Check if this is a chat-style plan
 		planMDPath := filepath.Join(plan.Directory, "plan.md")
@@ -161,15 +162,20 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 		// Run all jobs
-		return runAllJobs(ctx, orch, plan, cmd)
+		runErr = runAllJobs(ctx, orch, plan, cmd)
 	} else if planRunNext {
 		// Run next available jobs
-		return runNextJobs(ctx, orch, plan, cmd)
+		runErr = runNextJobs(ctx, orch, plan, cmd)
 	} else {
 		// Default to running next if no flags specified
 		planRunNext = true
-		return runNextJobs(ctx, orch, plan, cmd)
+		runErr = runNextJobs(ctx, orch, plan, cmd)
 	}
+
+	// Wait for any pending hooks to complete. This is the crucial addition.
+	orchestration.WaitForHooks()
+
+	return runErr
 }
 
 // runSingleJob executes a specific job.

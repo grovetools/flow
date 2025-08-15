@@ -170,5 +170,5 @@ func notifyJobComplete(job *Job, jobErr error) {
 		Error:  errorMsg,
 	}
 
-	callGroveHook("stop", payload)
+	callGroveHookWithSync("stop", payload, true)
 }
