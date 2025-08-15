@@ -6,9 +6,9 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/fatih/color v1.17.0
 	github.com/google/uuid v1.6.0
-	github.com/mattsolo1/grove-context v0.2.12
+	github.com/mattsolo1/grove-context v0.2.13
 	github.com/mattsolo1/grove-core v0.2.11
-	github.com/mattsolo1/grove-tend v0.2.7
+	github.com/mattsolo1/grove-tend v0.2.8
 	github.com/mattsolo1/grove-tmux v0.0.4
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
