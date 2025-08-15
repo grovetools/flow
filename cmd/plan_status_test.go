@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -165,12 +163,13 @@ func TestRunPlanStatus(t *testing.T) {
 			statusGraph = false
 			statusFormat = "tree"
 
-			// Create command
-			cmd := &cobra.Command{}
+			// Create command with standard flags
+			cmd := cli.NewStandardCommand("status", "Show plan status")
 			
 			// Set up CLI options if JSON output is requested
 			if tt.jsonOutput {
-				cli.SetOptions(cmd, &cli.Options{JSONOutput: true})
+				// Set the json flag directly on the command
+				require.NoError(t, cmd.Flags().Set("json", "true"))
 			}
 
 			// Apply test flags
@@ -271,8 +270,8 @@ func TestJSONOutputSuppressesHumanReadableText(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test with --json flag
-	cmd := &cobra.Command{}
-	cli.SetOptions(cmd, &cli.Options{JSONOutput: true})
+	cmd := cli.NewStandardCommand("status", "Show plan status")
+	require.NoError(t, cmd.Flags().Set("json", "true"))
 
 	// Capture output
 	oldStdout := os.Stdout
@@ -330,8 +329,8 @@ func TestJSONFlagOverridesFormatFlag(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test with --json flag AND --format tree (json should win)
-	cmd := &cobra.Command{}
-	cli.SetOptions(cmd, &cli.Options{JSONOutput: true})
+	cmd := cli.NewStandardCommand("status", "Show plan status")
+	require.NoError(t, cmd.Flags().Set("json", "true"))
 	
 	// Set format to tree, but JSON should override it
 	statusFormat = "tree"
@@ -414,8 +413,8 @@ func TestPlanStatusJSONOutputWithNonEmptyPlan(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test with --json flag
-	cmd := &cobra.Command{}
-	cli.SetOptions(cmd, &cli.Options{JSONOutput: true})
+	cmd := cli.NewStandardCommand("status", "Show plan status")
+	require.NoError(t, cmd.Flags().Set("json", "true"))
 
 	// Capture output
 	oldStdout := os.Stdout
