@@ -388,7 +388,8 @@ func (sp *StatePersister) updateFrontmatter(content []byte, updates map[string]i
 func isValidStatus(status JobStatus) bool {
 	switch status {
 	case JobStatusPending, JobStatusRunning, JobStatusCompleted,
-		JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview:
+		JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview,
+		JobStatusPendingUser, JobStatusPendingLLM:
 		return true
 	}
 	return false
