@@ -136,12 +136,8 @@ echo "Test response from mock LLM"
 				flow, _ := getFlowBinary()
 				
 				// Run without arguments - should process all pending_user chats
-				binDir := ctx.GetString("test_bin_dir")
-				cmd := command.New(flow, "chat", "run").Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmdFunc := getCommandWithTestBin(ctx)
+				cmd := cmdFunc(flow, "chat", "run").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -188,12 +184,8 @@ echo "Test response from mock LLM"
 				flow, _ := getFlowBinary()
 				
 				// Run with specific titles (using filenames which become the titles)
-				binDir := ctx.GetString("test_bin_dir")
-				cmd := command.New(flow, "chat", "run", "chat1", "chat4").Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmdFunc := getCommandWithTestBin(ctx)
+				cmd := cmdFunc(flow, "chat", "run", "chat1", "chat4").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

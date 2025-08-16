@@ -3,7 +3,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -71,13 +70,8 @@ flow:
 				flow, _ := getFlowBinary()
 				// Run the chat file directly using flow plan run
 				chatPath := filepath.Join(ctx.RootDir, "chats", "my-idea.md")
-				cmd := command.New(flow, "plan", "run", chatPath, "--yes").Dir(ctx.RootDir)
-				// Add test bin directory to PATH if it exists
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmdFunc := getCommandWithTestBin(ctx)
+				cmd := cmdFunc(flow, "plan", "run", chatPath, "--yes").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -130,20 +124,10 @@ flow:
 			harness.NewStep("Launch the chat", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				chatFile := filepath.Join(ctx.RootDir, "dev-task.md")
-				cmd := command.New(flow, "chat", "launch", chatFile).Dir(ctx.RootDir)
+				cmdFunc := getCommandWithTestBin(ctx)
+				cmd := cmdFunc(flow, "chat", "launch", chatFile).Dir(ctx.RootDir)
 				// Set environment variables for testing
-				envVars := []string{"GROVE_FLOW_SKIP_DOCKER_CHECK=true"}
-				
-				// Add test bin directory to PATH if it exists
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					envVars = append(envVars, fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
-				
-				for _, env := range envVars {
-					cmd.Env(env)
-				}
+				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error

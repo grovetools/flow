@@ -54,9 +54,11 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 	}
 	
 	// Log debug info
-	fmt.Printf("[LLM DEBUG] Model: %s\n", opts.Model)
-	fmt.Printf("[LLM DEBUG] Context files: %d\n", len(opts.ContextFiles))
-	fmt.Printf("[LLM DEBUG] Prompt length: %d bytes\n", len(prompt))
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("[LLM DEBUG] Model: %s\n", opts.Model)
+		fmt.Printf("[LLM DEBUG] Context files: %d\n", len(opts.ContextFiles))
+		fmt.Printf("[LLM DEBUG] Prompt length: %d bytes\n", len(prompt))
+	}
 	
 	// If we have context files, concatenate them into a single temp file
 	var tempContextFile string
@@ -70,11 +72,15 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 		tempContextFile = tempFile.Name()
 		defer os.Remove(tempContextFile) // Clean up when done
 		
-		fmt.Printf("[LLM DEBUG] Creating combined context file: %s\n", tempContextFile)
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Printf("[LLM DEBUG] Creating combined context file: %s\n", tempContextFile)
+		}
 		
 		// Concatenate all context files
 		for i, contextFile := range opts.ContextFiles {
-			fmt.Printf("[LLM DEBUG] Adding context from: %s\n", contextFile)
+			if os.Getenv("GROVE_DEBUG") != "" {
+				fmt.Printf("[LLM DEBUG] Adding context from: %s\n", contextFile)
+			}
 			
 			// Write header
 			if i > 0 {
@@ -101,12 +107,16 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 		tempFile.Close()
 		
 		// Add the combined context file as an attachment with explicit text/plain mimetype
-		fmt.Printf("[LLM DEBUG] Adding combined context as attachment: %s\n", tempContextFile)
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Printf("[LLM DEBUG] Adding combined context as attachment: %s\n", tempContextFile)
+		}
 		args = append(args, "--at", tempContextFile, "text/plain")
 	}
 
 	// Log full command being executed
-	fmt.Printf("[LLM DEBUG] Building command: llm %s\n", strings.Join(args, " "))
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("[LLM DEBUG] Building command: llm %s\n", strings.Join(args, " "))
+	}
 	
 	cmd, err := c.cmdBuilder.Build(ctx, "llm", args...)
 	if err != nil {
@@ -116,17 +126,23 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 	execCmd := cmd.Exec()
 	
 	// Log the actual command that will be executed
-	fmt.Printf("[LLM DEBUG] Actual exec command: %s %s\n", execCmd.Path, strings.Join(execCmd.Args[1:], " "))
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("[LLM DEBUG] Actual exec command: %s %s\n", execCmd.Path, strings.Join(execCmd.Args[1:], " "))
+	}
 	
 	// Set working directory if specified
 	if opts.WorkingDir != "" {
 		execCmd.Dir = opts.WorkingDir
-		fmt.Printf("[LLM DEBUG] Working directory: %s\n", opts.WorkingDir)
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Printf("[LLM DEBUG] Working directory: %s\n", opts.WorkingDir)
+		}
 	}
 
 	// Pipe prompt to stdin
 	execCmd.Stdin = strings.NewReader(prompt)
-	fmt.Printf("[LLM DEBUG] Starting LLM command execution...\n")
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("[LLM DEBUG] Starting LLM command execution...\n")
+	}
 	
 	// Log start time
 	startTime := time.Now()
@@ -138,15 +154,19 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 
 	if err := execCmd.Run(); err != nil {
 		duration := time.Since(startTime)
-		fmt.Printf("[LLM DEBUG] Command failed after %v\n", duration)
-		fmt.Printf("[LLM DEBUG] Error: %v\n", err)
-		fmt.Printf("[LLM DEBUG] Stderr: %s\n", stderr.String())
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Printf("[LLM DEBUG] Command failed after %v\n", duration)
+			fmt.Printf("[LLM DEBUG] Error: %v\n", err)
+			fmt.Printf("[LLM DEBUG] Stderr: %s\n", stderr.String())
+		}
 		return "", fmt.Errorf("llm command failed: %s: %w", stderr.String(), err)
 	}
 
 	duration := time.Since(startTime)
-	fmt.Printf("[LLM DEBUG] Command succeeded after %v\n", duration)
-	fmt.Printf("[LLM DEBUG] Response length: %d bytes\n", stdout.Len())
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("[LLM DEBUG] Command succeeded after %v\n", duration)
+		fmt.Printf("[LLM DEBUG] Response length: %d bytes\n", stdout.Len())
+	}
 	
 	return stdout.String(), nil
 }

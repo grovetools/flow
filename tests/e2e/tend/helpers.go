@@ -103,6 +103,29 @@ fi
 			return err
 		}
 		
+		// Mock grove-hooks to prevent sessions from being created during tests
+		groveHooksScript := `#!/bin/bash
+# Mock 'grove-hooks' command for testing
+# This prevents actual sessions from being created during e2e tests
+# Simply acknowledge the command was called
+echo "[MOCK] grove-hooks called with: $@" >&2
+# Log to a file for debugging
+MOCK_LOG="/tmp/grove-hooks-mock.log"
+echo "$(date): grove-hooks $@" >> "$MOCK_LOG"
+echo "PATH=$PATH" >> "$MOCK_LOG"
+echo "PWD=$PWD" >> "$MOCK_LOG"
+echo "STDIN:" >> "$MOCK_LOG"
+cat >> "$MOCK_LOG"
+echo -e "\n---" >> "$MOCK_LOG"
+exit 0
+`
+		if err := fs.WriteString(filepath.Join(binDir, "grove-hooks"), groveHooksScript); err != nil {
+			return err
+		}
+		if err := os.Chmod(filepath.Join(binDir, "grove-hooks"), 0755); err != nil {
+			return err
+		}
+		
 		// Add any additional mocks
 		if additionalMocks, ok := opts["additionalMocks"].(map[string]string); ok {
 			for name, script := range additionalMocks {

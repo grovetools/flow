@@ -55,6 +55,7 @@ type Job struct {
 	Worktree             string       `yaml:"worktree" json:"worktree,omitempty"`
 	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
 	Output               OutputConfig `yaml:"output" json:"output,omitempty"`
+	OnCompleteStatus     string       `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty"`
 	CreatedAt            time.Time    `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	UpdatedAt            time.Time    `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 

@@ -93,12 +93,8 @@ esac
 			harness.NewStep("Run chat for first LLM response", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				binDir := ctx.GetString("test_bin_dir")
-				cmd := command.New(flow, "chat", "run", "pipeline-test").Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmdFunc := getCommandWithTestBin(ctx)
+				cmd := cmdFunc(flow, "chat", "run", "pipeline-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -139,12 +135,8 @@ esac
 			harness.NewStep("Run chat for second LLM response", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				binDir := ctx.GetString("test_bin_dir")
-				cmd := command.New(flow, "chat", "run", "pipeline-test").Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmdFunc := getCommandWithTestBin(ctx)
+				cmd := cmdFunc(flow, "chat", "run", "pipeline-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
