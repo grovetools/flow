@@ -16,6 +16,7 @@ import (
 	
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-flow/pkg/gemini"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,6 +35,7 @@ type OneShotExecutor struct {
 	llmClient       LLMClient
 	config          *ExecutorConfig
 	worktreeManager *git.WorktreeManager
+	geminiClient    *gemini.Client
 }
 
 // NewOneShotExecutor creates a new oneshot executor.
@@ -54,10 +56,21 @@ func NewOneShotExecutor(config *ExecutorConfig) *OneShotExecutor {
 		}
 	}
 
+	// Initialize Gemini client if API key is available
+	var geminiClient *gemini.Client
+	if os.Getenv("GEMINI_API_KEY") != "" {
+		ctx := context.Background()
+		if gc, err := gemini.NewClient(ctx); err == nil {
+			geminiClient = gc
+		}
+		// Silently ignore errors - Gemini will only be used when explicitly requested
+	}
+
 	return &OneShotExecutor{
 		llmClient:       llmClient,
 		config:          config,
 		worktreeManager: git.NewWorktreeManager(),
+		geminiClient:    geminiClient,
 	}
 }
 
@@ -137,30 +150,36 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 	defer os.Unsetenv("GROVE_CURRENT_JOB_PATH")
 
-	// Create LLM options from job
-	llmOpts := LLMOptions{
-		Model:        job.Model,
-		WorkingDir:   workDir, // Set working directory to worktree if available
-		ContextFiles: contextFiles, // Pass context files directly
-	}
-	
-	// Apply model override from CLI if specified
+	// Determine the effective model to use
+	effectiveModel := job.Model
 	if e.config.ModelOverride != "" {
-		llmOpts.Model = e.config.ModelOverride
-	} else if llmOpts.Model == "" {
+		effectiveModel = e.config.ModelOverride
+	} else if effectiveModel == "" {
 		// No model specified in job or CLI override
 		// The config default was already applied in the CLI layer
 		// This is a fallback if all else fails
-		llmOpts.Model = "claude-3-5-sonnet-20241022" // Default model
+		effectiveModel = "claude-3-5-sonnet-20241022" // Default model
 	}
 
-	// Call LLM
+	// Call LLM based on model type
 	var response string
-	if job.Output.Type == "generate_jobs" {
-		// Use schema for structured output
-		response, err = e.completeWithSchema(ctx, prompt, llmOpts)
+	if strings.HasPrefix(effectiveModel, "gemini") {
+		// Use first-party Gemini API with caching
+		response, err = e.executeWithGemini(ctx, job, plan, workDir, prompt, effectiveModel)
 	} else {
-		response, err = e.llmClient.Complete(ctx, prompt, llmOpts)
+		// Use traditional llm command for other models
+		llmOpts := LLMOptions{
+			Model:        effectiveModel,
+			WorkingDir:   workDir,
+			ContextFiles: contextFiles,
+		}
+		
+		if job.Output.Type == "generate_jobs" {
+			// Use schema for structured output
+			response, err = e.completeWithSchema(ctx, prompt, llmOpts)
+		} else {
+			response, err = e.llmClient.Complete(ctx, prompt, llmOpts)
+		}
 	}
 	if err != nil {
 		job.Status = JobStatusFailed
@@ -1126,13 +1145,25 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// If cx generate succeeded, we don't show the grove cx error
 	}
 	
-	// Call LLM
-	fmt.Printf("[DEBUG] Calling LLM...\n")
-	response, err := e.llmClient.Complete(ctx, fullPrompt, llmOpts)
-	if err != nil {
-		fmt.Printf("[DEBUG] LLM call failed with error: %v\n", err)
-		execErr = fmt.Errorf("LLM completion: %w", err)
-		return execErr
+	// Call LLM based on model type
+	fmt.Printf("[DEBUG] Calling LLM with model: %s...\n", llmOpts.Model)
+	var response string
+	if strings.HasPrefix(llmOpts.Model, "gemini") {
+		// Use Gemini API for chat
+		response, err = e.executeWithGemini(ctx, job, plan, worktreePath, fullPrompt, llmOpts.Model)
+		if err != nil {
+			fmt.Printf("[DEBUG] Gemini API call failed with error: %v\n", err)
+			execErr = fmt.Errorf("Gemini API completion: %w", err)
+			return execErr
+		}
+	} else {
+		// Use traditional llm command
+		response, err = e.llmClient.Complete(ctx, fullPrompt, llmOpts)
+		if err != nil {
+			fmt.Printf("[DEBUG] LLM call failed with error: %v\n", err)
+			execErr = fmt.Errorf("LLM completion: %w", err)
+			return execErr
+		}
 	}
 	fmt.Printf("[DEBUG] LLM call succeeded, response length: %d bytes\n", len(response))
 
@@ -1163,4 +1194,51 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	updateJobFile(job)
 	
 	return nil
+}
+
+// executeWithGemini executes a job using the Gemini API with caching support
+func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan *Plan, workDir string, prompt string, model string) (string, error) {
+	// Check if Gemini client is available
+	if e.geminiClient == nil {
+		return "", fmt.Errorf("GEMINI_API_KEY environment variable is required for Gemini models")
+	}
+
+	// Identify context files
+	coldContextFile := filepath.Join(workDir, ".grove", "cached-context")
+	hotContextFile := filepath.Join(workDir, ".grove", "context")
+
+	// Initialize cache manager
+	cacheManager := gemini.NewCacheManager(workDir)
+
+	// Get or create cache for cold context (if it exists)
+	var cacheInfo *gemini.CacheInfo
+	if _, err := os.Stat(coldContextFile); err == nil {
+		// Default TTL of 1 hour for cache
+		ttl := 1 * time.Hour
+		var err error
+		cacheInfo, err = cacheManager.GetOrCreateCache(ctx, e.geminiClient, model, coldContextFile, ttl)
+		if err != nil {
+			return "", fmt.Errorf("managing cache: %w", err)
+		}
+	}
+
+	// Prepare dynamic files (hot context)
+	var dynamicFiles []string
+	if _, err := os.Stat(hotContextFile); err == nil {
+		dynamicFiles = append(dynamicFiles, hotContextFile)
+	}
+
+	// Determine cache ID
+	var cacheID string
+	if cacheInfo != nil {
+		cacheID = cacheInfo.CacheID
+	}
+
+	// Call Gemini API with cache
+	response, err := e.geminiClient.GenerateContentWithCache(ctx, model, prompt, cacheID, dynamicFiles)
+	if err != nil {
+		return "", fmt.Errorf("Gemini API call failed: %w", err)
+	}
+
+	return response, nil
 }
