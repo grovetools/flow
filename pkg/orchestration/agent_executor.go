@@ -126,7 +126,9 @@ func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 				fmt.Println("✓ Context updated successfully in worktree.")
 
 				// Check token count after successful context generation
-				stats, err := ctxMgr.GetStats([]string{}, 0)
+				// Read the files list that was just generated
+				files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
+				stats, err := ctxMgr.GetStats("agent", files, 10)
 				if err != nil {
 					fmt.Printf("Warning: failed to get context stats: %v\n", err)
 				} else if stats.TotalTokens > 500000 {

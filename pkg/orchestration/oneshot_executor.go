@@ -804,7 +804,9 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 	}
 	
 	// Get and display context statistics
-	stats, err := ctxMgr.GetStats([]string{}, 10) // Show top 10 files
+	// Read the files list that was just generated
+	files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
+	stats, err := ctxMgr.GetStats("oneshot", files, 10) // Show top 10 files
 	if err != nil {
 		fmt.Printf("Warning: failed to get context stats: %v\n", err)
 	} else {
