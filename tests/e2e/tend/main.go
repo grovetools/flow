@@ -23,6 +23,7 @@ func main() {
 		PlanWorktreeInheritanceScenario(), // Tests smart worktree inheritance
 		PlanStepCommandScenario(), // Tests interactive plan step command
 		PlanConfigScenario(), // Tests plan-level configuration with .grove-plan.yml
+		PlanConfigPropagationScenario(), // Tests plan config propagation to job frontmatter
 
 		// Chat Scenarios
 		BasicChatWorkflowScenario(),

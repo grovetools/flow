@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -255,5 +256,71 @@ func setConfigValues(configPath string, pairs []string) error {
 	}
 
 	fmt.Printf("✓ Updated %s\n", configPath)
+	
+	// Propagate non-blank values to job files that don't have them set
+	updatesToPropagate := make(map[string]interface{})
+	for _, pair := range pairs {
+		parts := strings.SplitN(pair, "=", 2)
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if value != "" {
+			updatesToPropagate[key] = value
+		}
+	}
+	
+	if len(updatesToPropagate) > 0 {
+		planPath := filepath.Dir(configPath)
+		plan, err := orchestration.LoadPlan(planPath)
+		if err != nil {
+			fmt.Printf("Warning: could not load plan to propagate config: %v\n", err)
+			return nil
+		}
+		
+		updatedJobs := 0
+		for _, job := range plan.Jobs {
+			jobContent, err := os.ReadFile(job.FilePath)
+			if err != nil {
+				fmt.Printf("Warning: could not read job file %s: %v\n", job.Filename, err)
+				continue
+			}
+			
+			frontmatter, _, _ := orchestration.ParseFrontmatter(jobContent)
+			
+			jobUpdates := make(map[string]interface{})
+			for key, value := range updatesToPropagate {
+				if _, ok := frontmatter[key]; !ok {
+					// Check if this field is appropriate for this job type
+					jobType, _ := frontmatter["type"].(string)
+					if key == "worktree" && jobType == "shell" {
+						// Shell jobs don't use worktrees
+						continue
+					}
+					if key == "target_agent_container" && jobType != "agent" && jobType != "interactive_agent" {
+						// Only agent jobs use containers
+						continue
+					}
+					jobUpdates[key] = value
+				}
+			}
+			
+			if len(jobUpdates) > 0 {
+				newContent, err := orchestration.UpdateFrontmatter(jobContent, jobUpdates)
+				if err != nil {
+					fmt.Printf("Warning: could not update frontmatter for %s: %v\n", job.Filename, err)
+					continue
+				}
+				if err := os.WriteFile(job.FilePath, newContent, 0644); err != nil {
+					fmt.Printf("Warning: could not write updated job file %s: %v\n", job.Filename, err)
+					continue
+				}
+				updatedJobs++
+			}
+		}
+		
+		if updatedJobs > 0 {
+			fmt.Printf("✓ Propagated config changes to %d job(s)\n", updatedJobs)
+		}
+	}
+	
 	return nil
 }
