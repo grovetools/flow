@@ -83,6 +83,11 @@ func (e *OneShotExecutor) Name() string {
 func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
 	// Handle chat jobs differently
 	if job.Type == JobTypeChat {
+		// Check if this is a chat job in a multi-job plan
+		if len(plan.Jobs) > 1 {
+			// This is a mixed plan, so this chat job is for context only
+			return fmt.Errorf("chat job '%s' found in a multi-job plan. Chat jobs are for context only and must be manually marked complete: `flow plan complete %s`", job.Title, job.FilePath)
+		}
 		return e.executeChatJob(ctx, job, plan)
 	}
 
@@ -236,6 +241,33 @@ func (e *OneShotExecutor) completeWithSchema(ctx context.Context, prompt string,
 // buildPrompt constructs the prompt from job sources and returns context file paths separately.
 func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, []string, error) {
 	var parts []string
+	
+	// Add content from dependencies first
+	if len(job.Dependencies) > 0 {
+		var depParts []string
+		depParts = append(depParts, "=== Context from previous steps ===")
+		includedDeps := make(map[string]bool)
+
+		for _, dep := range job.Dependencies {
+			if dep == nil || dep.FilePath == "" {
+				continue
+			}
+			if _, alreadyIncluded := includedDeps[dep.FilePath]; alreadyIncluded {
+				continue
+			}
+
+			content, err := os.ReadFile(dep.FilePath)
+			if err != nil {
+				fmt.Printf("Warning: could not read dependency file for context %s: %v\n", dep.FilePath, err)
+				continue
+			}
+			depParts = append(depParts, fmt.Sprintf("\n--- START OF %s ---\n%s\n--- END OF %s ---", dep.Filename, string(content), dep.Filename))
+			includedDeps[dep.FilePath] = true
+		}
+		if len(depParts) > 1 { // Only add if we have more than just the header
+			parts = append(parts, strings.Join(depParts, "\n"))
+		}
+	}
 	
 	// Check if this is a reference-based prompt (has template and prompt_source)
 	if job.Template != "" && len(job.PromptSource) > 0 {

@@ -16,6 +16,7 @@ func main() {
 	rootCmd.AddCommand(cmd.GetPlanCommand())
 	rootCmd.AddCommand(cmd.GetChatCommand())
 	rootCmd.AddCommand(cmd.NewVersionCmd())
+	rootCmd.AddCommand(cmd.NewModelsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

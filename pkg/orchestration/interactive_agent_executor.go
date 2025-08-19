@@ -200,6 +200,8 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 	fmt.Printf("🚀 Interactive session '%s' launched.\n", sessionName)
 	fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
 	fmt.Printf("\n👉 Close the session (type 'exit' in all panes) to continue the plan.\n")
+	fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
+	fmt.Printf("   flow plan complete %s\n", job.FilePath)
 
 	// Block and wait for session to close
 	err = tmuxClient.WaitForSessionClose(ctx, sessionName, 2*time.Second)
@@ -453,6 +455,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	fmt.Printf("🚀 Interactive host session launched in window '%s'.\n", windowName)
 	fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
 	fmt.Printf("\n👉 Exit the tmux session when done to continue the plan.\n")
+	fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
+	fmt.Printf("   flow plan complete %s\n", job.FilePath)
 
 	// Block and wait for window to close
 	// We'll wait for the specific window to be closed, not the entire session
