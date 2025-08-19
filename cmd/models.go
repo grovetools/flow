@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -23,9 +24,9 @@ While other models supported by the 'llm' tool may work, these are the primary m
 
 func runModelsList(cmd *cobra.Command, args []string) error {
 	models := []struct {
-		Name     string
-		Provider string
-		Note     string
+		ID       string `json:"id"`
+		Provider string `json:"provider"`
+		Note     string `json:"note"`
 	}{
 		{"gemini-2.5-pro", "Google", "Latest Gemini Pro model"},
 		{"gemini-2.5-flash", "Google", "Fast, efficient model"},
@@ -35,11 +36,31 @@ func runModelsList(cmd *cobra.Command, args []string) error {
 		{"claude-3-haiku", "Anthropic", "Fast, lightweight model"},
 	}
 
+	// Check if JSON output is requested via global flag
+	jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
+	
+	if jsonOutput {
+		// JSON output
+		output := struct {
+			Models []struct {
+				ID       string `json:"id"`
+				Provider string `json:"provider"`
+				Note     string `json:"note"`
+			} `json:"models"`
+		}{
+			Models: models,
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(output)
+	}
+
+	// Table output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "MODEL ID\tPROVIDER\tNOTE")
 	fmt.Fprintln(w, "--------\t--------\t----")
 	for _, model := range models {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", model.Name, model.Provider, model.Note)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", model.ID, model.Provider, model.Note)
 	}
 	w.Flush()
 	
