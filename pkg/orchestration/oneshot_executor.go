@@ -116,12 +116,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			return execErr
 		}
 		workDir = path
-		
-		// Regenerate context in the worktree to ensure oneshot has latest view
-		if err := e.regenerateContextInWorktree(workDir, "oneshot"); err != nil {
-			// Log warning but don't fail the job
-			fmt.Printf("Warning: failed to regenerate context in worktree: %v\n", err)
-		}
 	} else {
 		// No worktree specified, default to the git repository root.
 		var err error
@@ -131,6 +125,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			workDir = plan.Directory
 			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", workDir)
 		}
+	}
+	
+	// Always regenerate context to ensure oneshot has latest view
+	if err := e.regenerateContextInWorktree(workDir, "oneshot"); err != nil {
+		// Log warning but don't fail the job
+		fmt.Printf("Warning: failed to regenerate context: %v\n", err)
 	}
 
 	// Set environment for mock testing
@@ -1210,9 +1210,9 @@ func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan 
 	// Initialize cache manager
 	cacheManager := gemini.NewCacheManager(workDir)
 
-	// Get or create cache for cold context (if it exists)
+	// Get or create cache for cold context (if it exists and is not empty)
 	var cacheInfo *gemini.CacheInfo
-	if _, err := os.Stat(coldContextFile); err == nil {
+	if info, err := os.Stat(coldContextFile); err == nil && info.Size() > 0 {
 		// Default TTL of 1 hour for cache
 		ttl := 1 * time.Hour
 		var err error
@@ -1220,6 +1220,9 @@ func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan 
 		if err != nil {
 			return "", fmt.Errorf("managing cache: %w", err)
 		}
+		// Note: cacheInfo may be nil if the file is too small for caching
+	} else if err == nil && info.Size() == 0 {
+		fmt.Fprintf(os.Stderr, "⚠️  Cached context file is empty, skipping cache\n")
 	}
 
 	// Prepare dynamic files (hot context)

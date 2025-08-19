@@ -88,16 +88,32 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 
 	// Create new cache if needed
 	if needNewCache {
+		// First, check if the file is large enough for caching
+		content, err := os.ReadFile(coldContextFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", coldContextFilePath, err)
+		}
+		
+		estimatedTokens := estimateTokens(content)
+		minTokensForCache := 4096
+		
+		if estimatedTokens < minTokensForCache {
+			fmt.Fprintf(os.Stderr, "\n⚠️  Cached context is too small for Gemini caching\n")
+			fmt.Fprintf(os.Stderr, "   Estimated tokens: %d (minimum required: %d)\n", estimatedTokens, minTokensForCache)
+			fmt.Fprintf(os.Stderr, "   Suggestion: Move all content to hot context (.grove/context) for better performance\n")
+			fmt.Fprintf(os.Stderr, "   Proceeding without cache...\n")
+			return nil, nil // Return nil to indicate no cache should be used
+		}
+		
 		fmt.Fprintf(os.Stderr, "\n📤 Uploading files for cache...\n")
+		fmt.Fprintf(os.Stderr, "   Estimated tokens: %d\n", estimatedTokens)
 		
 		fileHashes := make(map[string]string)
 		var parts []*genai.Part
 		
 		// Calculate hash
-		hash, err := hashFile(coldContextFilePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to hash %s: %w", coldContextFilePath, err)
-		}
+		hashArray := sha256.Sum256(content)
+		hash := hex.EncodeToString(hashArray[:])
 		fileHashes[coldContextFilePath] = hash
 		
 		// Upload file
@@ -163,6 +179,12 @@ func generateCacheKey(files []string) string {
 		h.Write([]byte(filepath.Clean(f)))
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// estimateTokens provides a rough estimate of token count for a file
+// Using a simple heuristic: ~1 token per 4 characters (common for code/text)
+func estimateTokens(content []byte) int {
+	return len(content) / 4
 }
 
 // hasFilesChanged checks if any files have changed and returns the changed files

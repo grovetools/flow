@@ -136,6 +136,9 @@ var (
 	// Cleanup worktrees flags
 	planCleanupAge   time.Duration
 	planCleanupForce bool
+	
+	// Launch flags
+	planLaunchHost bool
 )
 
 // GetPlanCommand returns the plan command with all subcommands configured
@@ -178,6 +181,9 @@ func GetPlanCommand() *cobra.Command {
 	// Cleanup worktrees command flags
 	planCleanupWorktreesCmd.Flags().DurationVar(&planCleanupAge, "age", 24*time.Hour, "Remove worktrees older than this")
 	planCleanupWorktreesCmd.Flags().BoolVarP(&planCleanupForce, "force", "f", false, "Skip confirmation prompts")
+
+	// Launch command flags
+	planLaunchCmd.Flags().BoolVar(&planLaunchHost, "host", false, "Launch agent on the host in the main git repo, not in a container worktree")
 
 	// Initialize status command flags
 	InitPlanStatusFlags()
@@ -250,7 +256,7 @@ func runPlanCleanupWorktrees(cmd *cobra.Command, args []string) error {
 }
 
 func runPlanLaunch(cmd *cobra.Command, args []string) error {
-	return RunPlanLaunch(args[0])
+	return RunPlanLaunch(cmd, args[0])
 }
 
 func runPlanAddStep(cmd *cobra.Command, args []string) error {

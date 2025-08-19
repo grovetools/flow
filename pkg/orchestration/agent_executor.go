@@ -229,15 +229,21 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 	}
 
 	targetContainer := getTargetContainer(job, plan)
-	if targetContainer == "" {
-		return fmt.Errorf("no target agent container specified for job %s", job.ID)
+	
+	// Determine execution mode based on container presence
+	if targetContainer != "" {
+		// Container mode - existing behavior
+		fmt.Fprintf(os.Stdout, "Running job in targeted agent container: %s\n", targetContainer)
+		return e.runInContainer(ctx, worktreePath, prompt, job, plan, targetContainer, log, coreCfg, gitRoot)
+	} else {
+		// Host mode - run directly on the host
+		fmt.Fprintf(os.Stdout, "Running job in host mode (no container)\n")
+		return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, coreCfg)
 	}
+}
 
-	// --- Targeted Mode is now the ONLY mode ---
-	// The agent needs to be started with the entire repo mounted.
-	// Worktrees are created under the repo so they're accessible in the container
-	fmt.Fprintf(os.Stdout, "Running job in targeted agent container: %s\n", targetContainer)
-
+// runInContainer executes the agent in a Docker container
+func (e *AgentExecutor) runInContainer(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, targetContainer string, log *os.File, coreCfg *config.Config, gitRoot string) error {
 	// Get repo name from git root
 	repoName := filepath.Base(gitRoot)
 
@@ -282,6 +288,76 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 	}
 
 	// Handle output based on configuration
+	if job.Output.Type == "commit" && job.Output.Commit.Enabled {
+		// Create commit in worktree
+		commitCmd := exec.CommandContext(ctx, "git", "add", "-A")
+		commitCmd.Dir = worktreePath
+		if err := commitCmd.Run(); err != nil {
+			return fmt.Errorf("git add: %w", err)
+		}
+
+		commitMsg := job.Output.Commit.Message
+		if commitMsg == "" {
+			commitMsg = fmt.Sprintf("Agent execution for job %s", job.ID)
+		}
+
+		commitCmd = exec.CommandContext(ctx, "git", "commit", "-m", commitMsg)
+		commitCmd.Dir = worktreePath
+		if err := commitCmd.Run(); err != nil {
+			// No changes to commit is not an error
+			if !strings.Contains(err.Error(), "nothing to commit") {
+				return fmt.Errorf("git commit: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// runOnHost executes the agent directly on the host machine
+func (e *AgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, coreCfg *config.Config) error {
+	// Change to the worktree directory
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+	defer os.Chdir(originalDir)
+	
+	if err := os.Chdir(worktreePath); err != nil {
+		return fmt.Errorf("failed to change to worktree directory: %w", err)
+	}
+	
+	// Prepare the claude command
+	args := []string{"--dangerously-skip-permissions"}
+	if coreCfg.Agent.Args != nil {
+		args = append(args, coreCfg.Agent.Args...)
+	}
+	
+	// Create the command
+	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd.Dir = worktreePath
+	cmd.Stdin = strings.NewReader(prompt)
+	
+	// Capture output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Write any output we got even if there was an error
+		if len(output) > 0 {
+			fmt.Print(string(output))
+			if _, writeErr := log.Write(output); writeErr != nil {
+				fmt.Printf("Warning: failed to write output to log: %v\n", writeErr)
+			}
+		}
+		return fmt.Errorf("agent execution failed: %w", err)
+	}
+	
+	// Write output to both log file and console
+	fmt.Print(string(output))
+	if _, writeErr := log.Write(output); writeErr != nil {
+		fmt.Printf("Warning: failed to write output to log: %v\n", writeErr)
+	}
+	
+	// Handle output based on configuration (commit, etc.)
 	if job.Output.Type == "commit" && job.Output.Commit.Enabled {
 		// Create commit in worktree
 		commitCmd := exec.CommandContext(ctx, "git", "add", "-A")

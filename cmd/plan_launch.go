@@ -13,6 +13,7 @@ import (
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/spf13/cobra"
 )
 
 // launchParameters holds all the necessary information for launching a tmux session
@@ -25,7 +26,11 @@ type launchParameters struct {
 }
 
 // RunPlanLaunch implements the plan launch command
-func RunPlanLaunch(jobPath string) error {
+func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
+	// Check if --host flag was used
+	if planLaunchHost {
+		return runPlanLaunchHost(jobPath)
+	}
 	// Parse the job path
 	planDir := filepath.Dir(jobPath)
 	jobFile := filepath.Base(jobPath)
@@ -263,3 +268,98 @@ func launchTmuxSession(executor exec.CommandExecutor, params launchParameters) e
 	return nil
 }
 
+// runPlanLaunchHost launches a job in host mode (without container)
+func runPlanLaunchHost(jobPath string) error {
+	// Parse the job path
+	planDir := filepath.Dir(jobPath)
+	jobFile := filepath.Base(jobPath)
+	
+	// Load the plan
+	plan, err := orchestration.LoadPlan(planDir)
+	if err != nil {
+		return fmt.Errorf("failed to load plan: %w", err)
+	}
+	
+	// Find the job
+	job, found := plan.GetJobByFilename(jobFile)
+	if !found {
+		return fmt.Errorf("job not found in plan: %s", jobFile)
+	}
+	
+	// Validate job type
+	if job.Type != orchestration.JobTypeAgent && job.Type != orchestration.JobTypeInteractiveAgent {
+		return fmt.Errorf("launch command only supports 'agent' or 'interactive_agent' type jobs, got '%s'", job.Type)
+	}
+	
+	// Get git root
+	gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+	
+	// Determine working directory
+	var workDir string
+	if job.Worktree != "" {
+		// A worktree is specified, so create/use it on the host
+		wm := git.NewWorktreeManager()
+		ctx := context.Background()
+		worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive-host")
+		if err != nil {
+			return fmt.Errorf("failed to prepare host worktree: %w", err)
+		}
+		workDir = worktreePath
+		
+		// Configure Canopy hooks for the worktree
+		if err := configureCanopyHooks(worktreePath); err != nil {
+			return fmt.Errorf("failed to configure canopy hooks: %w", err)
+		}
+	} else {
+		// No worktree, use the main git repository root
+		workDir = gitRoot
+	}
+	
+	// Get repo name and create session/window names
+	repoName := filepath.Base(gitRoot)
+	sessionName := sanitizeForTmuxSession(repoName)
+	windowName := "job-" + sanitizeForTmuxSession(job.Title)
+	
+	executor := &exec.RealCommandExecutor{}
+	
+	// Ensure tmux session exists
+	err = executor.Execute("tmux", "has-session", "-t", sessionName)
+	if err != nil { // has-session returns error if session doesn't exist
+		fmt.Printf("✓ Tmux session '%s' not found, creating it...\n", sessionName)
+		if createErr := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-c", gitRoot); createErr != nil {
+			return fmt.Errorf("failed to create tmux session '%s': %w", sessionName, createErr)
+		}
+	}
+	
+	// Create new window
+	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir); err != nil {
+		return fmt.Errorf("failed to create new tmux window: %w", err)
+	}
+	
+	// Load full config to get agent args
+	fullCfg, err := loadFullConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	
+	// Build agent command
+	agentCommand, err := buildAgentCommand(job, plan, workDir, fullCfg.Agent.Args)
+	if err != nil {
+		return fmt.Errorf("failed to build agent command: %w", err)
+	}
+	
+	// Send command to the new window
+	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+		return fmt.Errorf("failed to send command to tmux: %w", err)
+	}
+	
+	// Provide user feedback
+	fmt.Printf("✓ Launched job in new window '%s' within session '%s'.\n", windowName, sessionName)
+	fmt.Printf("  Working directory: %s\n", workDir)
+	fmt.Printf("  Attach with: tmux attach -t %s\n", sessionName)
+	return nil
+}

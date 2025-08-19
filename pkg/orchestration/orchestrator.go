@@ -92,23 +92,30 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig, dockerClient docker
 
 // ValidatePrerequisites ensures all requirements are met before running jobs.
 func (o *Orchestrator) ValidatePrerequisites() error {
-	// Check if we have any agent jobs (including interactive)
-	hasAgentJobs := false
+	// Check if we have any agent jobs that require a container
+	hasContainerAgentJobs := false
 	for _, job := range o.plan.Jobs {
 		if job.Type == JobTypeAgent || job.Type == JobTypeInteractiveAgent {
-			hasAgentJobs = true
-			break
+			// Check if this specific job or the plan has a container specified
+			container := job.TargetAgentContainer
+			if container == "" && o.plan.Orchestration != nil {
+				container = o.plan.Orchestration.TargetAgentContainer
+			}
+			
+			// If a container is specified, we need to ensure it's configured properly
+			if container != "" {
+				hasContainerAgentJobs = true
+				break
+			}
 		}
 	}
 
-	// If we have agent jobs, ensure target_agent_container is configured
-	if hasAgentJobs {
-		if o.plan.Orchestration == nil || o.plan.Orchestration.TargetAgentContainer == "" {
-			return fmt.Errorf("orchestration with agent jobs requires 'orchestration.target_agent_container' to be set in grove.yml")
+	// Only validate container configuration if we have jobs that actually need containers
+	if hasContainerAgentJobs {
+		if o.plan.Orchestration != nil && o.plan.Orchestration.TargetAgentContainer != "" {
+			o.logger.Info("Using target agent container", "container", o.plan.Orchestration.TargetAgentContainer)
 		}
-		// TODO: Add logic to check if the container is running via Docker client
-		// For now, we'll just log a warning
-		o.logger.Info("Using target agent container", "container", o.plan.Orchestration.TargetAgentContainer)
+		// Note: Individual jobs may override the container, so we don't fail here
 	}
 
 	return nil

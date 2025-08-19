@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -60,23 +59,12 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 		fmt.Printf("[LLM DEBUG] Prompt length: %d bytes\n", len(prompt))
 	}
 	
-	// If we have context files, concatenate them into a single temp file
-	var tempContextFile string
+	// If we have context files, prepend them to the prompt
+	var fullPrompt string
 	if len(opts.ContextFiles) > 0 {
-		// Create a temporary file for combined context
-		// Use .txt extension to ensure it's recognized as text/plain
-		tempFile, err := os.CreateTemp("", "grove-context-*.txt")
-		if err != nil {
-			return "", fmt.Errorf("creating temp context file: %w", err)
-		}
-		tempContextFile = tempFile.Name()
-		defer os.Remove(tempContextFile) // Clean up when done
+		var contextContent strings.Builder
 		
-		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Printf("[LLM DEBUG] Creating combined context file: %s\n", tempContextFile)
-		}
-		
-		// Concatenate all context files
+		// Add all context files to the beginning of the prompt
 		for i, contextFile := range opts.ContextFiles {
 			if os.Getenv("GROVE_DEBUG") != "" {
 				fmt.Printf("[LLM DEBUG] Adding context from: %s\n", contextFile)
@@ -84,33 +72,26 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 			
 			// Write header
 			if i > 0 {
-				tempFile.WriteString("\n\n")
+				contextContent.WriteString("\n\n")
 			}
-			tempFile.WriteString(fmt.Sprintf("=== Context from %s ===\n", contextFile))
+			contextContent.WriteString(fmt.Sprintf("=== Context from %s ===\n", contextFile))
 			
-			// Stream the context file to avoid loading into memory
-			srcFile, err := os.Open(contextFile)
+			// Read context file
+			content, err := os.ReadFile(contextFile)
 			if err != nil {
-				tempFile.Close()
-				return "", fmt.Errorf("opening context file %s: %w", contextFile, err)
+				return "", fmt.Errorf("reading context file %s: %w", contextFile, err)
 			}
-			
-			// Copy file content
-			_, err = io.Copy(tempFile, srcFile)
-			srcFile.Close()
-			if err != nil {
-				tempFile.Close()
-				return "", fmt.Errorf("copying context file %s: %w", contextFile, err)
-			}
+			contextContent.Write(content)
 		}
 		
-		tempFile.Close()
+		// Prepend context to the original prompt
+		fullPrompt = contextContent.String() + "\n\n=== User Request ===\n\n" + prompt
 		
-		// Add the combined context file as an attachment with explicit text/plain mimetype
 		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Printf("[LLM DEBUG] Adding combined context as attachment: %s\n", tempContextFile)
+			fmt.Printf("[LLM DEBUG] Full prompt length with context: %d bytes\n", len(fullPrompt))
 		}
-		args = append(args, "--at", tempContextFile, "text/plain")
+	} else {
+		fullPrompt = prompt
 	}
 
 	// Log full command being executed
@@ -138,8 +119,8 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 		}
 	}
 
-	// Pipe prompt to stdin
-	execCmd.Stdin = strings.NewReader(prompt)
+	// Pipe full prompt (with context) to stdin
+	execCmd.Stdin = strings.NewReader(fullPrompt)
 	if os.Getenv("GROVE_DEBUG") != "" {
 		fmt.Printf("[LLM DEBUG] Starting LLM command execution...\n")
 	}

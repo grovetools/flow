@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
@@ -42,20 +43,27 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		return fmt.Errorf("interactive agent job skipped due to --skip-interactive flag")
 	}
 
-	// Update job status to running
-	job.Status = JobStatusRunning
-	job.StartTime = time.Now()
-
 	// Get the container from job or plan orchestration config
 	container := job.TargetAgentContainer
 	if container == "" && plan.Orchestration != nil {
 		container = plan.Orchestration.TargetAgentContainer
 	}
-	if container == "" {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("no target agent container specified")
+	
+	// Determine execution mode based on container presence
+	if container != "" {
+		// Container is specified, run in sandboxed mode
+		return e.executeContainerMode(ctx, job, plan, container)
+	} else {
+		// No container specified, run in host mode
+		return e.executeHostMode(ctx, job, plan)
 	}
+}
+
+// executeContainerMode runs the job in a Docker container with tmux
+func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job *Job, plan *Plan, container string) error {
+	// Update job status to running
+	job.Status = JobStatusRunning
+	job.StartTime = time.Now()
 
 	// Verify container is running (skip if dockerClient is nil for testing)
 	skipDockerCheck := os.Getenv("GROVE_FLOW_SKIP_DOCKER_CHECK") == "true"
@@ -243,6 +251,22 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 	// Build instruction for the agent
 	instruction := fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath)
 
+	// Add dependency files if the job has dependencies
+	if len(job.DependsOn) > 0 {
+		instruction += "\n\nFor additional context from previous jobs, also read: "
+		var depFiles []string
+		for _, dep := range job.DependsOn {
+			// Convert dependency to absolute path
+			depPath := dep
+			if !filepath.IsAbs(dep) {
+				depPath = filepath.Join(plan.Directory, dep)
+			}
+			depFiles = append(depFiles, depPath)
+		}
+		instruction += strings.Join(depFiles, ", ")
+		instruction += "\n"
+	}
+
 	// Add context files if specified
 	if len(job.PromptSource) > 0 {
 		instruction += "Also read these context files: "
@@ -313,5 +337,200 @@ func (e *InteractiveAgentExecutor) generateSessionName(plan *Plan, job *Job) str
 	sessionName = strings.Trim(sessionName, "-")
 
 	return sessionName
+}
+
+// executeHostMode runs the job directly on the host machine with tmux
+func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job, plan *Plan) error {
+	// Update job status to running
+	job.Status = JobStatusRunning
+	job.StartTime = time.Now()
+
+	// Determine the working directory for the job on the host
+	var workDir string
+	gitRoot, err := GetGitRootSafe(plan.Directory)
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+
+	if job.Worktree != "" {
+		// A worktree is specified, so create/use it on the host
+		wm := git.NewWorktreeManager()
+		worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive-host")
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to prepare host worktree: %w", err)
+		}
+		workDir = worktreePath
+	} else {
+		// No worktree, use the main git repository root
+		workDir = gitRoot
+	}
+
+	// Create tmux client
+	tmuxClient, err := tmux.NewClient()
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("tmux not available: %w", err)
+	}
+
+	// Generate session name based on repository
+	repoName := filepath.Base(gitRoot)
+	sessionName := sanitizeForTmuxSession(repoName)
+	windowName := "job-" + sanitizeForTmuxSession(job.Title)
+
+	// Ensure session exists
+	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+	if !sessionExists {
+		fmt.Printf("✓ Tmux session '%s' not found, creating it...\n", sessionName)
+		opts := tmux.LaunchOptions{
+			SessionName:      sessionName,
+			WorkingDirectory: gitRoot,
+		}
+		if err := tmuxClient.Launch(ctx, opts); err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+	}
+
+	// Create new window using RealCommandExecutor pattern (like chat and plan launch)
+	fmt.Printf("Creating tmux window: session=%s, window=%s, workdir=%s\n", sessionName, windowName, workDir)
+	
+	// Create a RealCommandExecutor like chat/plan launch do
+	executor := &exec.RealCommandExecutor{}
+	
+	// Create the window with the same pattern as chat/plan launch
+	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir); err != nil {
+		// Check if it's because window already exists
+		if strings.Contains(err.Error(), "duplicate window") {
+			fmt.Printf("Window '%s' already exists, attempting to kill it first\n", windowName)
+			// Kill the existing window
+			executor.Execute("tmux", "kill-window", "-t", fmt.Sprintf("%s:%s", sessionName, windowName))
+			time.Sleep(100 * time.Millisecond)
+			
+			// Try again
+			if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir); err != nil {
+				job.Status = JobStatusFailed
+				job.EndTime = time.Now()
+				return fmt.Errorf("failed to create new tmux window after killing existing: %w", err)
+			}
+		} else {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to create new tmux window: %w", err)
+		}
+	}
+
+	// Build and send command
+	fullCfg, err := config.LoadFrom(".")
+	if err != nil {
+		// Proceed with minimal config
+		fullCfg = &config.Config{}
+	}
+	
+	agentCommand, err := e.buildAgentCommand(job, plan, workDir, fullCfg.Agent.Args)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("failed to build agent command: %w", err)
+	}
+
+	// Small delay to ensure window is ready
+	time.Sleep(300 * time.Millisecond)
+
+	// Send agent command to the window using executor pattern
+	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+	fmt.Printf("Sending command to tmux pane: %s\n", targetPane)
+	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
+	}
+
+	// Print user instructions
+	fmt.Printf("🚀 Interactive host session launched in window '%s'.\n", windowName)
+	fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
+	fmt.Printf("\n👉 Exit the tmux session when done to continue the plan.\n")
+
+	// Block and wait for window to close
+	// We'll wait for the specific window to be closed, not the entire session
+	err = e.waitForWindowClose(ctx, tmuxClient, sessionName, windowName, 2*time.Second)
+
+	// Handle interruption
+	if err != nil {
+		if ctx.Err() != nil {
+			fmt.Printf("\n⚠️  Interrupted. Job marked as failed.\n")
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("interrupted by user")
+		}
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("wait for window failed: %w", err)
+	}
+
+	// Capture pane output for logging (optional)
+	output, _ := tmuxClient.CapturePane(context.Background(), targetPane)
+	if output != "" {
+		outputFormatted := fmt.Sprintf("\n## Session Output\n\n```\n%s\n```\n", output)
+		
+		// Get state persister to append output
+		persister := NewStatePersister()
+		if err := persister.AppendJobOutput(job, outputFormatted); err != nil {
+			// Non-fatal error, just log it
+			fmt.Printf("Warning: failed to save session output: %v\n", err)
+		}
+	}
+
+	// Success
+	fmt.Printf("✅ Window '%s' closed. Continuing plan...\n", windowName)
+	job.Status = JobStatusCompleted
+	job.EndTime = time.Now()
+	return nil
+}
+
+// waitForWindowClose waits for a specific tmux window to close
+func (e *InteractiveAgentExecutor) waitForWindowClose(ctx context.Context, client *tmux.Client, sessionName, windowName string, pollInterval time.Duration) error {
+	// For now, we'll use a simple approach: wait for the user to close the window
+	// In the future, we could enhance this to check specific window status
+	// But for now, we'll instruct the user to close the entire session when done
+	return client.WaitForSessionClose(ctx, sessionName, pollInterval)
+}
+
+// sanitizeForTmuxSession creates a valid tmux session name from a string
+func sanitizeForTmuxSession(name string) string {
+	// Replace spaces and special characters with hyphens
+	sanitized := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || 
+		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, name)
+	
+	// Convert to lowercase for consistency
+	sanitized = strings.ToLower(sanitized)
+	
+	// Remove consecutive hyphens
+	for strings.Contains(sanitized, "--") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	}
+	
+	// Trim hyphens from start and end
+	sanitized = strings.Trim(sanitized, "-")
+	
+	// Ensure it's not empty
+	if sanitized == "" {
+		sanitized = "session"
+	}
+	
+	// Tmux session names should not be too long
+	if len(sanitized) > 50 {
+		sanitized = sanitized[:50]
+	}
+	
+	return sanitized
 }
 
