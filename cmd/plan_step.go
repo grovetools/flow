@@ -58,7 +58,7 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 			allCompleted := true
 			blockedJobs := 0
 			failedJobs := 0
-			
+
 			for _, job := range plan.Jobs {
 				switch job.Status {
 				case orchestration.JobStatusPending:
@@ -82,10 +82,10 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 			if allCompleted {
 				fmt.Println(color.GreenString("✓") + " All jobs in the plan have been completed!")
 			} else if failedJobs > 0 {
-				fmt.Printf("%s %d job(s) failed. Fix and re-run failed jobs or skip them to continue.\n", 
+				fmt.Printf("%s %d job(s) failed. Fix and re-run failed jobs or skip them to continue.\n",
 					color.RedString("✗"), failedJobs)
 			} else if blockedJobs > 0 {
-				fmt.Printf("%s %d job(s) are blocked by dependencies.\n", 
+				fmt.Printf("%s %d job(s) are blocked by dependencies.\n",
 					color.YellowString("⚠"), blockedJobs)
 			} else {
 				fmt.Println("No runnable jobs found.")
@@ -113,98 +113,97 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("read user input: %w", err)
 		}
-		
+
 		choice := strings.TrimSpace(strings.ToLower(input))
-		
+
 		switch choice {
 		case "r", "run":
 			// Run the first job non-interactively
 			if len(runnableJobs) > 0 {
 				jobToRun := runnableJobs[0]
 				fmt.Printf("\nRunning job: %s\n", color.CyanString(jobToRun.Title))
-				
+
 				// Execute using flow plan run
 				flowBinary := os.Args[0]
 				runCmd := exec.Command(flowBinary, "plan", "run", filepath.Join(planDir, jobToRun.Filename), "--yes")
 				runCmd.Stdout = os.Stdout
 				runCmd.Stderr = os.Stderr
 				runCmd.Stdin = os.Stdin
-				
+
 				if err := runCmd.Run(); err != nil {
 					fmt.Printf("%s Error running job: %v\n", color.RedString("✗"), err)
 				}
 			}
-			
+
 		case "l", "launch":
 			// Launch the first job interactively (for agent jobs)
 			if len(runnableJobs) > 0 {
 				jobToLaunch := runnableJobs[0]
 				if jobToLaunch.Type != orchestration.JobTypeAgent {
-					fmt.Printf("%s Job '%s' is not an agent job. Use 'Run' instead.\n", 
+					fmt.Printf("%s Job '%s' is not an agent job. Use 'Run' instead.\n",
 						color.YellowString("⚠"), jobToLaunch.Title)
 					continue
 				}
-				
+
 				fmt.Printf("\nLaunching interactive session for: %s\n", color.CyanString(jobToLaunch.Title))
-				
+
 				// Execute using flow plan launch
 				flowBinary := os.Args[0]
 				launchCmd := exec.Command(flowBinary, "plan", "launch", filepath.Join(planDir, jobToLaunch.Filename))
 				launchCmd.Stdout = os.Stdout
 				launchCmd.Stderr = os.Stderr
 				launchCmd.Stdin = os.Stdin
-				
+
 				if err := launchCmd.Run(); err != nil {
 					fmt.Printf("%s Error launching job: %v\n", color.RedString("✗"), err)
 				}
 			}
-			
+
 		case "s", "skip":
 			// Skip the first job
 			if len(runnableJobs) > 0 {
 				jobToSkip := runnableJobs[0]
 				fmt.Printf("\nSkipping job: %s\n", color.YellowString(jobToSkip.Title))
-				
+
 				// Update job status to skipped
 				// Note: We might need to add a "skipped" status to the JobStatus enum
 				jobToSkip.Status = orchestration.JobStatusCompleted // For now, mark as completed
-				
+
 				// Update the job file with the new status
 				updates := map[string]interface{}{
 					"status": string(jobToSkip.Status),
 				}
-				
+
 				content, err := os.ReadFile(jobToSkip.FilePath)
 				if err != nil {
 					fmt.Printf("%s Error reading job file: %v\n", color.RedString("✗"), err)
 					continue
 				}
-				
+
 				newContent, err := orchestration.UpdateFrontmatter(content, updates)
 				if err != nil {
 					fmt.Printf("%s Error updating frontmatter: %v\n", color.RedString("✗"), err)
 					continue
 				}
-				
+
 				if err := os.WriteFile(jobToSkip.FilePath, newContent, 0644); err != nil {
 					fmt.Printf("%s Error writing job file: %v\n", color.RedString("✗"), err)
 					continue
 				}
 			}
-			
+
 		case "q", "quit":
 			fmt.Println("\nExiting plan step mode.")
 			return nil
-			
+
 		default:
 			fmt.Printf("%s Invalid choice. Please enter R, L, S, or Q.\n", color.RedString("✗"))
 			continue
 		}
-		
+
 		// Add a small delay before next iteration to allow file system to sync
 		time.Sleep(500 * time.Millisecond)
 	}
 
 	return nil
 }
-

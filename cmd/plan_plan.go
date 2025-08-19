@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"time"
-	
+
 	"github.com/spf13/cobra"
 )
 
@@ -25,10 +25,10 @@ Otherwise, an empty spec.md file will be created.`,
 var planStatusCmd = &cobra.Command{
 	Use:   "status [directory]",
 	Short: "Show plan status",
-	Long:  `Show the status of all jobs in an orchestration plan.
+	Long: `Show the status of all jobs in an orchestration plan.
 If no directory is specified, uses the active job if set.`,
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runPlanStatus,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runPlanStatus,
 }
 
 var planRunCmd = &cobra.Command{
@@ -105,17 +105,17 @@ If no directory is specified, uses the current directory.`,
 
 // Command flags
 var (
-	planInitForce          bool
-	planInitModel          string
-	planInitCreateInitial  bool
-	planInitOutputType     string
-	planInitSpecFile       string
-	planInitTemplate       string
-	planRunDir    string
-	planRunAll    bool
-	planRunNext   bool
-	planRunModel  string
-	
+	planInitForce         bool
+	planInitModel         string
+	planInitCreateInitial bool
+	planInitOutputType    string
+	planInitSpecFile      string
+	planInitTemplate      string
+	planRunDir            string
+	planRunAll            bool
+	planRunNext           bool
+	planRunModel          string
+
 	// Add flags
 	planAddTemplate    string
 	planAddType        string
@@ -126,17 +126,18 @@ var (
 	planAddOutputType  string
 	planAddInteractive bool
 	planAddSourceFiles []string
-	
+	planAddWorktree    string
+
 	// Graph flags
 	planGraphFormat string
 	planGraphServe  bool
 	planGraphPort   int
 	planGraphOutput string
-	
+
 	// Cleanup worktrees flags
 	planCleanupAge   time.Duration
 	planCleanupForce bool
-	
+
 	// Launch flags
 	planLaunchHost bool
 )
@@ -171,6 +172,7 @@ func GetPlanCommand() *cobra.Command {
 	planAddCmd.Flags().StringVar(&planAddOutputType, "output-type", "file", "Output type: file, commit, none, or generate_jobs")
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
 	planAddCmd.Flags().StringSliceVar(&planAddSourceFiles, "source-files", nil, "Comma-separated list of source files for reference-based prompts")
+	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 
 	// Graph command flags
 	planGraphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
@@ -203,6 +205,7 @@ func GetPlanCommand() *cobra.Command {
 	planCmd.AddCommand(planLaunchCmd)
 	planCmd.AddCommand(planStepCmd)
 	planCmd.AddCommand(planTemplatesCmd)
+	planCmd.AddCommand(planWorktreeCmd)
 	planCmd.AddCommand(NewPlanSetCmd())
 	planCmd.AddCommand(NewPlanCurrentCmd())
 	planCmd.AddCommand(NewPlanUnsetCmd())
@@ -275,10 +278,10 @@ func runPlanAddStep(cmd *cobra.Command, args []string) error {
 		OutputType:  planAddOutputType,
 		Interactive: planAddInteractive,
 		SourceFiles: planAddSourceFiles,
+		Worktree:    planAddWorktree,
 	}
 	return RunPlanAddStep(addStepCmd)
 }
-
 
 // PlanInitCmd holds the parameters for the init command.
 type PlanInitCmd struct {

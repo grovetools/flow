@@ -9,9 +9,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 
@@ -21,15 +21,15 @@ var (
 
 // PlanSummary represents a plan in the JSON output
 type PlanSummary struct {
-	ID         string                 `json:"id"`
-	Title      string                 `json:"title"`
-	Path       string                 `json:"path"`
-	Status     string                 `json:"status"`
-	JobCount   int                    `json:"job_count"`
-	Jobs       []*orchestration.Job   `json:"jobs,omitempty"`
-	CreatedAt  time.Time             `json:"created_at"`
-	UpdatedAt  time.Time             `json:"updated_at"`
-	Repository string                 `json:"repository,omitempty"`
+	ID         string               `json:"id"`
+	Title      string               `json:"title"`
+	Path       string               `json:"path"`
+	Status     string               `json:"status"`
+	JobCount   int                  `json:"job_count"`
+	Jobs       []*orchestration.Job `json:"jobs,omitempty"`
+	CreatedAt  time.Time            `json:"created_at"`
+	UpdatedAt  time.Time            `json:"updated_at"`
+	Repository string               `json:"repository,omitempty"`
 }
 
 // newPlanListCmd creates the `plan list` command.
@@ -99,7 +99,7 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Plan: %s\n", plan.Name)
 			fmt.Printf("Path: %s\n", plan.Directory)
 			fmt.Printf("Jobs: %d\n", len(plan.Jobs))
-			
+
 			if len(plan.Jobs) > 0 {
 				fmt.Println("  Jobs:")
 				for _, job := range plan.Jobs {
@@ -126,7 +126,7 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 			for _, job := range plan.Jobs {
 				statusCounts[job.Status]++
 			}
-			
+
 			// Build a summary string showing job status counts
 			var statusParts []string
 			if c := statusCounts[orchestration.JobStatusCompleted]; c > 0 {
@@ -144,7 +144,7 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 			if c := statusCounts[orchestration.JobStatusBlocked]; c > 0 {
 				statusParts = append(statusParts, fmt.Sprintf("%d blocked", c))
 			}
-			
+
 			status := "no jobs"
 			if len(statusParts) > 0 {
 				status = strings.Join(statusParts, ", ")
@@ -182,14 +182,14 @@ func expandPath(path string) (string, error) {
 // outputPlansJSON outputs the plans in JSON format
 func outputPlansJSON(plans []*orchestration.Plan) error {
 	summaries := make([]PlanSummary, 0, len(plans))
-	
+
 	for _, plan := range plans {
 		// Calculate status summary
 		statusCounts := make(map[orchestration.JobStatus]int)
 		for _, job := range plan.Jobs {
 			statusCounts[job.Status]++
 		}
-		
+
 		// Build a summary string showing job status counts
 		var statusParts []string
 		if c := statusCounts[orchestration.JobStatusCompleted]; c > 0 {
@@ -207,7 +207,7 @@ func outputPlansJSON(plans []*orchestration.Plan) error {
 		if c := statusCounts[orchestration.JobStatusBlocked]; c > 0 {
 			statusParts = append(statusParts, fmt.Sprintf("%d blocked", c))
 		}
-		
+
 		status := "no jobs"
 		if len(statusParts) > 0 {
 			status = strings.Join(statusParts, ", ")
@@ -230,15 +230,15 @@ func outputPlansJSON(plans []*orchestration.Plan) error {
 			CreatedAt: createdAt,
 			UpdatedAt: updatedAt,
 		}
-		
+
 		// Include job details if verbose
 		if planListVerbose {
 			summary.Jobs = plan.Jobs
 		}
-		
+
 		summaries = append(summaries, summary)
 	}
-	
+
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(summaries)

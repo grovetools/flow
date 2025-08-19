@@ -54,25 +54,25 @@ This is a test job.
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		
+
 		err := cmd.Run()
 		require.NoError(t, err, "Command failed: %s", stderr.String())
-		
+
 		output := stdout.String()
-		
+
 		// Check that output is pure JSON
 		assert.NotEmpty(t, output)
-		
+
 		// Should start with { (allowing for whitespace)
 		trimmed := bytes.TrimSpace([]byte(output))
-		assert.True(t, bytes.HasPrefix(trimmed, []byte("{")), 
+		assert.True(t, bytes.HasPrefix(trimmed, []byte("{")),
 			"Output should start with {, but got: %s", string(trimmed[:min(100, len(trimmed))]))
-		
+
 		// Parse JSON
 		var result map[string]interface{}
 		err = json.Unmarshal(trimmed, &result)
 		assert.NoError(t, err, "Failed to parse JSON: %s", output)
-		
+
 		// Verify structure
 		assert.Contains(t, result, "plan")
 		assert.Contains(t, result, "jobs")
@@ -85,20 +85,20 @@ This is a test job.
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		
+
 		err := cmd.Run()
 		require.NoError(t, err, "Command failed: %s", stderr.String())
-		
+
 		output := stdout.String()
-		
+
 		// Check that output is pure JSON
 		assert.NotEmpty(t, output)
-		
+
 		// Should start with { (allowing for whitespace)
 		trimmed := bytes.TrimSpace([]byte(output))
-		assert.True(t, bytes.HasPrefix(trimmed, []byte("{")), 
+		assert.True(t, bytes.HasPrefix(trimmed, []byte("{")),
 			"Output should start with {, but got: %s", string(trimmed[:min(100, len(trimmed))]))
-		
+
 		// Parse JSON
 		var result map[string]interface{}
 		err = json.Unmarshal(trimmed, &result)

@@ -13,10 +13,10 @@ import (
 
 type PlanGraphCmd struct {
 	Directory string `arg:"" help:"Plan directory"`
-	Format string `flag:"f" default:"mermaid" help:"Output format: mermaid, dot, ascii"`
-	Serve  bool   `flag:"s" help:"Serve interactive HTML visualization"`
-	Port   int    `flag:"p" default:"8080" help:"Port for web server"`
-	Output string `flag:"o" help:"Output file (stdout if not specified)"`
+	Format    string `flag:"f" default:"mermaid" help:"Output format: mermaid, dot, ascii"`
+	Serve     bool   `flag:"s" help:"Serve interactive HTML visualization"`
+	Port      int    `flag:"p" default:"8080" help:"Port for web server"`
+	Output    string `flag:"o" help:"Output file (stdout if not specified)"`
 }
 
 func (c *PlanGraphCmd) Run() error {
@@ -97,7 +97,7 @@ func buildDependencyGraph(plan *orchestration.Plan) *DependencyGraph {
 		if len(job.Dependencies) == 0 {
 			graph.Roots = append(graph.Roots, job.ID)
 		}
-		
+
 		// For each dependency, add an edge from dependency to this job
 		for _, dep := range job.Dependencies {
 			if dep != nil {
@@ -111,18 +111,18 @@ func buildDependencyGraph(plan *orchestration.Plan) *DependencyGraph {
 
 func generateMermaidGraph(plan *orchestration.Plan, graph *DependencyGraph) string {
 	var buf strings.Builder
-	
+
 	buf.WriteString("graph TD\n")
-	
+
 	// Add nodes
 	for _, job := range plan.Jobs {
 		nodeID := strings.ReplaceAll(job.ID, "-", "_")
 		label := fmt.Sprintf("%s<br/>%s", job.Filename, getStatusSymbol(job.Status))
 		buf.WriteString(fmt.Sprintf("    %s[%s]\n", nodeID, label))
 	}
-	
+
 	buf.WriteString("\n")
-	
+
 	// Add edges
 	for _, job := range plan.Jobs {
 		nodeID := strings.ReplaceAll(job.ID, "-", "_")
@@ -133,9 +133,9 @@ func generateMermaidGraph(plan *orchestration.Plan, graph *DependencyGraph) stri
 			}
 		}
 	}
-	
+
 	buf.WriteString("\n")
-	
+
 	// Add style classes
 	buf.WriteString("    classDef completed fill:#90EE90,stroke:#228B22\n")
 	buf.WriteString("    classDef running fill:#FFD700,stroke:#FFA500\n")
@@ -143,43 +143,43 @@ func generateMermaidGraph(plan *orchestration.Plan, graph *DependencyGraph) stri
 	buf.WriteString("    classDef failed fill:#FFB6C1,stroke:#DC143C\n")
 	buf.WriteString("    classDef blocked fill:#DDA0DD,stroke:#8B008B\n")
 	buf.WriteString("    classDef needs_review fill:#87CEEB,stroke:#4682B4\n")
-	
+
 	buf.WriteString("\n")
-	
+
 	// Apply classes to nodes
 	statusGroups := make(map[orchestration.JobStatus][]string)
 	for _, job := range plan.Jobs {
 		nodeID := strings.ReplaceAll(job.ID, "-", "_")
 		statusGroups[job.Status] = append(statusGroups[job.Status], nodeID)
 	}
-	
+
 	for status, nodes := range statusGroups {
 		if len(nodes) > 0 {
 			className := getStatusClass(status)
 			buf.WriteString(fmt.Sprintf("    class %s %s\n", strings.Join(nodes, ","), className))
 		}
 	}
-	
+
 	return buf.String()
 }
 
 func generateDotGraph(plan *orchestration.Plan, graph *DependencyGraph) string {
 	var buf strings.Builder
-	
+
 	buf.WriteString("digraph jobs {\n")
 	buf.WriteString("    rankdir=TD;\n")
 	buf.WriteString("    node [shape=box, style=rounded];\n\n")
-	
+
 	// Add nodes
 	for _, job := range plan.Jobs {
 		label := fmt.Sprintf("%s\\n%s", job.Filename, string(job.Status))
 		color := getStatusColor(job.Status)
-		buf.WriteString(fmt.Sprintf("    \"%s\" [label=\"%s\", fillcolor=%s, style=filled];\n", 
+		buf.WriteString(fmt.Sprintf("    \"%s\" [label=\"%s\", fillcolor=%s, style=filled];\n",
 			job.ID, label, color))
 	}
-	
+
 	buf.WriteString("\n")
-	
+
 	// Add edges
 	for _, job := range plan.Jobs {
 		for _, dep := range job.Dependencies {
@@ -188,22 +188,22 @@ func generateDotGraph(plan *orchestration.Plan, graph *DependencyGraph) string {
 			}
 		}
 	}
-	
+
 	buf.WriteString("}\n")
-	
+
 	return buf.String()
 }
 
 func generateASCIIGraph(plan *orchestration.Plan, graph *DependencyGraph) string {
 	var buf strings.Builder
-	
+
 	// Simple ASCII representation
 	buf.WriteString("Job Dependency Graph\n")
 	buf.WriteString("===================\n\n")
-	
+
 	// Print jobs grouped by level
 	levels := computeJobLevels(plan, graph)
-	
+
 	for level := 0; level <= getMaxLevel(levels); level++ {
 		buf.WriteString(fmt.Sprintf("Level %d:\n", level))
 		for jobID, jobLevel := range levels {
@@ -211,7 +211,7 @@ func generateASCIIGraph(plan *orchestration.Plan, graph *DependencyGraph) string
 				job := graph.Nodes[jobID]
 				status := getStatusSymbol(job.Status)
 				buf.WriteString(fmt.Sprintf("  [%s] %s %s\n", status, job.Filename, job.Title))
-				
+
 				// Show dependencies
 				if len(job.Dependencies) > 0 {
 					buf.WriteString("      └─ depends on: ")
@@ -228,7 +228,7 @@ func generateASCIIGraph(plan *orchestration.Plan, graph *DependencyGraph) string
 		}
 		buf.WriteString("\n")
 	}
-	
+
 	// Add legend
 	buf.WriteString("Legend:\n")
 	buf.WriteString("  [✓] Completed\n")
@@ -237,37 +237,37 @@ func generateASCIIGraph(plan *orchestration.Plan, graph *DependencyGraph) string
 	buf.WriteString("  [✗] Failed\n")
 	buf.WriteString("  [⊘] Blocked\n")
 	buf.WriteString("  [?] Needs Review\n")
-	
+
 	return buf.String()
 }
 
 func computeJobLevels(plan *orchestration.Plan, graph *DependencyGraph) map[string]int {
 	levels := make(map[string]int)
-	
+
 	// Initialize all jobs to level -1
 	for _, job := range plan.Jobs {
 		levels[job.ID] = -1
 	}
-	
+
 	// Compute levels using BFS
 	var computeLevel func(jobID string) int
 	computeLevel = func(jobID string) int {
 		if level, ok := levels[jobID]; ok && level >= 0 {
 			return level
 		}
-		
+
 		job := graph.Nodes[jobID]
 		if job == nil {
 			// This shouldn't happen, but handle gracefully
 			levels[jobID] = 0
 			return 0
 		}
-		
+
 		if len(job.Dependencies) == 0 {
 			levels[jobID] = 0
 			return 0
 		}
-		
+
 		maxDepLevel := -1
 		for _, dep := range job.Dependencies {
 			if dep == nil {
@@ -278,16 +278,16 @@ func computeJobLevels(plan *orchestration.Plan, graph *DependencyGraph) map[stri
 				maxDepLevel = depLevel
 			}
 		}
-		
+
 		levels[jobID] = maxDepLevel + 1
 		return levels[jobID]
 	}
-	
+
 	// Compute level for each job
 	for _, job := range plan.Jobs {
 		computeLevel(job.ID)
 	}
-	
+
 	return levels
 }
 
@@ -363,7 +363,7 @@ func serveInteractiveGraph(plan *orchestration.Plan, graph *DependencyGraph, por
 
 	fmt.Printf("Serving graph at http://localhost:%d\n", port)
 	fmt.Println("Press Ctrl+C to stop...")
-	
+
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
 }
 

@@ -12,19 +12,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mattsolo1/grove-flow/pkg/exec"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-flow/pkg/exec"
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 
 var (
-	chatSpecFile string
-	chatTitle    string
-	chatModel    string
-	chatStatus   string
+	chatSpecFile   string
+	chatTitle      string
+	chatModel      string
+	chatStatus     string
 	chatLaunchHost bool
 )
 
@@ -50,7 +50,7 @@ Example:
 		RunE:  runChatList,
 	}
 	chatListCmd.Flags().StringVar(&chatStatus, "status", "", "Filter chats by status (e.g., pending_user, completed, running)")
-	
+
 	chatRunCmd := &cobra.Command{
 		Use:   "run [title...]",
 		Short: "Run outstanding chat jobs that are waiting for an LLM response",
@@ -63,7 +63,7 @@ You can optionally specify chat titles to run only specific chats:
   flow chat run chat1 chat2         # Run multiple specific chats`,
 		RunE: runChatRun,
 	}
-	
+
 	chatLaunchCmd := &cobra.Command{
 		Use:   "launch [title-or-file]",
 		Short: "Launch an interactive agent session from a chat file",
@@ -77,7 +77,7 @@ Example:
 		RunE: runChatLaunch,
 	}
 	chatLaunchCmd.Flags().BoolVar(&chatLaunchHost, "host", false, "Launch agent on the host in the main git repo, not in a container worktree")
-	
+
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatRunCmd)
 	chatCmd.AddCommand(chatLaunchCmd)
@@ -119,32 +119,32 @@ func ensureChatJob(filePath string) (*orchestration.Job, error) {
 		// Already a valid chat job
 		return job, nil
 	}
-	
+
 	// If it's not a job (or not a chat), initialize it
 	var notAJob orchestration.ErrNotAJob
 	if err != nil && !errors.As(err, &notAJob) {
 		// Some other error occurred
 		return nil, fmt.Errorf("failed to load job: %w", err)
 	}
-	
+
 	// Read the file content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
-	
+
 	// Parse existing frontmatter if any
 	frontmatter, body, _ := orchestration.ParseFrontmatter(content)
 	if frontmatter == nil {
 		frontmatter = make(map[string]interface{})
 		body = content // If parsing fails, treat all content as body
 	}
-	
+
 	// Check if it's already a different type of job
 	if jobType, ok := frontmatter["type"].(string); ok && jobType != "" && jobType != "chat" {
 		return nil, fmt.Errorf("file %s is already initialized as a %s job, not a chat", filePath, jobType)
 	}
-	
+
 	// Initialize as chat job
 	if _, ok := frontmatter["id"]; !ok {
 		frontmatter["id"] = "job-" + uuid.New().String()[:8]
@@ -154,9 +154,9 @@ func ensureChatJob(filePath string) (*orchestration.Job, error) {
 		ext := filepath.Ext(base)
 		frontmatter["title"] = strings.TrimSuffix(base, ext)
 	}
-	
+
 	frontmatter["type"] = "chat"
-	
+
 	// Set model - use config default or fallback
 	flowCfg, _ := loadFlowConfig()
 	model := "gemini-2.5-pro" // Default fallback
@@ -164,10 +164,10 @@ func ensureChatJob(filePath string) (*orchestration.Job, error) {
 		model = flowCfg.OneshotModel
 	}
 	frontmatter["model"] = model
-	
+
 	frontmatter["status"] = "pending_user"
 	frontmatter["updated_at"] = time.Now().UTC().Format(time.RFC3339)
-	
+
 	// Ensure aliases and tags are present
 	if _, ok := frontmatter["aliases"]; !ok {
 		frontmatter["aliases"] = []interface{}{}
@@ -175,27 +175,27 @@ func ensureChatJob(filePath string) (*orchestration.Job, error) {
 	if _, ok := frontmatter["tags"]; !ok {
 		frontmatter["tags"] = []interface{}{}
 	}
-	
+
 	// Rebuild the file with frontmatter
 	newContent, err := orchestration.RebuildMarkdownWithFrontmatter(frontmatter, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build new file content: %w", err)
 	}
-	
+
 	// Write the updated file
 	if err := os.WriteFile(filePath, newContent, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write updated file: %w", err)
 	}
-	
+
 	fmt.Printf("✓ Initialized chat job: %s\n", filePath)
-	
+
 	// Load and return the newly created job
 	return orchestration.LoadJob(filePath)
 }
 
 func runChatInit(cmd *cobra.Command, args []string) error {
 	filePath := chatSpecFile
-	
+
 	// Check if path exists
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -204,7 +204,7 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("failed to stat file: %s: %w", filePath, err)
 	}
-	
+
 	// Check if it's a directory
 	if info.IsDir() {
 		return fmt.Errorf("path is a directory, not a file: %s", filePath)
@@ -220,7 +220,7 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 		frontmatter = make(map[string]interface{})
 		body = content // If parsing fails, treat all content as body
 	}
-	
+
 	// Check if already initialized as a chat
 	if jobType, ok := frontmatter["type"].(string); ok && jobType == "chat" {
 		return fmt.Errorf("file %s is already initialized as a chat job", filePath)
@@ -239,7 +239,7 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 	}
 
 	frontmatter["type"] = "chat"
-	
+
 	// Set model - use flag value, or config default, or fallback
 	model := chatModel
 	if model == "" {
@@ -251,10 +251,10 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 	frontmatter["model"] = model
-	
+
 	frontmatter["status"] = "pending_user" // Start as pending_user, waiting for the first run command
 	frontmatter["updated_at"] = time.Now().UTC().Format(time.RFC3339)
-	
+
 	// Ensure aliases and tags are present
 	if _, ok := frontmatter["aliases"]; !ok {
 		frontmatter["aliases"] = []interface{}{}
@@ -290,14 +290,14 @@ func runChatList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to expand chat directory path: %w", err)
 	}
-	
+
 	// Recursively find all .md files in the chat directory
 	var chats []*orchestration.Job
 	err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip files we can't access
 		}
-		
+
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
 			job, err := orchestration.LoadJob(path)
 			if err == nil && job.Type == "chat" {
@@ -308,7 +308,7 @@ func runChatList(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to walk chat directory %s: %w", chatDir, err)
 	}
@@ -352,7 +352,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		if strings.Contains(args[0], "/") || strings.HasSuffix(args[0], ".md") {
 			// Legacy behavior: Run specific chat file
 			chatPath := args[0]
-			
+
 			// Verify file exists
 			info, err := os.Stat(chatPath)
 			if err != nil {
@@ -361,43 +361,43 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			if info.IsDir() {
 				return fmt.Errorf("expected a file, got directory: %s", chatPath)
 			}
-			
+
 			// Use ensureChatJob to load or initialize the chat
 			job, err := ensureChatJob(chatPath)
 			if err != nil {
 				return fmt.Errorf("failed to ensure chat job: %w", err)
 			}
-			
+
 			// Check if it's runnable
 			content, err := os.ReadFile(chatPath)
 			if err != nil {
 				return fmt.Errorf("failed to read file: %w", err)
 			}
-			
+
 			turns, err := orchestration.ParseChatFile(content)
 			if err != nil {
 				return fmt.Errorf("failed to parse chat: %w", err)
 			}
-		
-		// Debug output
-		if v, _ := cmd.Flags().GetBool("verbose"); v {
-			fmt.Printf("DEBUG: Found %d turns\n", len(turns))
-			for i, turn := range turns {
-				fmt.Printf("DEBUG: Turn %d - Speaker: %s, Content preview: %.50s...\n", i+1, turn.Speaker, strings.ReplaceAll(turn.Content, "\n", " "))
-			}
-			if len(turns) > 0 {
-				lastTurn := turns[len(turns)-1]
-				fmt.Printf("DEBUG: Last turn - Speaker: %s, Has directive: %v\n", lastTurn.Speaker, lastTurn.Directive != nil)
-				if lastTurn.Directive != nil {
-					fmt.Printf("DEBUG: Last turn directive - Template: %s, ID: %s\n", lastTurn.Directive.Template, lastTurn.Directive.ID)
+
+			// Debug output
+			if v, _ := cmd.Flags().GetBool("verbose"); v {
+				fmt.Printf("DEBUG: Found %d turns\n", len(turns))
+				for i, turn := range turns {
+					fmt.Printf("DEBUG: Turn %d - Speaker: %s, Content preview: %.50s...\n", i+1, turn.Speaker, strings.ReplaceAll(turn.Content, "\n", " "))
+				}
+				if len(turns) > 0 {
+					lastTurn := turns[len(turns)-1]
+					fmt.Printf("DEBUG: Last turn - Speaker: %s, Has directive: %v\n", lastTurn.Speaker, lastTurn.Directive != nil)
+					if lastTurn.Directive != nil {
+						fmt.Printf("DEBUG: Last turn directive - Template: %s, ID: %s\n", lastTurn.Directive.Template, lastTurn.Directive.ID)
+					}
 				}
 			}
-		}
-		
+
 			if len(turns) == 0 || turns[len(turns)-1].Speaker != "user" {
 				return fmt.Errorf("chat is not runnable (last turn is not from user)")
 			}
-			
+
 			job.FilePath = chatPath
 			runnableChats = append(runnableChats, job)
 		} else {
@@ -408,7 +408,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-	
+
 	// If we don't have specific file paths, scan the chat directory
 	if len(runnableChats) == 0 {
 		// Scan chat directory
@@ -430,7 +430,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			if err != nil || info.IsDir() {
 				return nil // Skip directories or inaccessible files
 			}
-			
+
 			// Look for all .md files
 			if !strings.HasSuffix(info.Name(), ".md") {
 				return nil
@@ -560,7 +560,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 
 	// Wait for any pending hooks to complete
 	orchestration.WaitForHooks()
-	
+
 	if len(executionErrors) > 0 {
 		return fmt.Errorf("%d chat(s) failed to execute", len(executionErrors))
 	}
@@ -574,9 +574,9 @@ func resolveChatPath(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("please specify a chat title or file path")
 	}
-	
+
 	arg := args[0]
-	
+
 	// Check if it looks like a file path
 	if strings.Contains(arg, "/") || strings.HasSuffix(arg, ".md") {
 		// Direct file path - verify it exists
@@ -589,7 +589,7 @@ func resolveChatPath(args []string) (string, error) {
 		}
 		return arg, nil
 	}
-	
+
 	// Otherwise, it's a title - search for it
 	chatTitle := arg
 	flowCfg, err := loadFlowConfig()
@@ -599,12 +599,12 @@ func resolveChatPath(args []string) (string, error) {
 	if flowCfg.ChatDirectory == "" {
 		return "", fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
 	}
-	
+
 	chatDir, err := expandChatPath(flowCfg.ChatDirectory)
 	if err != nil {
 		return "", fmt.Errorf("failed to expand chat directory path: %w", err)
 	}
-	
+
 	// Search for the chat by title
 	var chatPath string
 	var found bool
@@ -612,7 +612,7 @@ func resolveChatPath(args []string) (string, error) {
 		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
 			return nil
 		}
-		
+
 		job, err := orchestration.LoadJob(path)
 		if err == nil && job.Type == "chat" && job.Title == chatTitle {
 			chatPath = path
@@ -621,15 +621,15 @@ func resolveChatPath(args []string) (string, error) {
 		}
 		return nil
 	})
-	
+
 	if err != nil && err != filepath.SkipDir {
 		return "", fmt.Errorf("failed to search chat directory: %w", err)
 	}
-	
+
 	if !found {
 		return "", fmt.Errorf("chat not found with title: %s", chatTitle)
 	}
-	
+
 	return chatPath, nil
 }
 
@@ -638,19 +638,19 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	if chatLaunchHost {
 		return runChatLaunchHost(cmd, args)
 	}
-	
+
 	// Resolve the chat file path
 	chatPath, err := resolveChatPath(args)
 	if err != nil {
 		return err
 	}
-	
+
 	// We no longer need to read the full content here since we're passing the file path
 	// Just verify the file is readable
 	if _, err := os.Stat(chatPath); err != nil {
 		return fmt.Errorf("failed to access chat file: %w", err)
 	}
-	
+
 	// Load configuration
 	flowCfg, err := loadFlowConfig()
 	if err != nil {
@@ -660,7 +660,7 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	if container == "" {
 		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
 	}
-	
+
 	// Pre-flight check: verify container is running (unless skipped for testing)
 	ctx := cmd.Context()
 	if !shouldSkipDockerCheck() {
@@ -668,24 +668,24 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create docker client: %w", err)
 		}
-		
+
 		if !dockerClient.IsContainerRunning(ctx, container) {
 			return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
 		}
 	}
-	
+
 	// Load full config to get agent args
 	fullCfg, err := loadFullConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	
+
 	// Get git root
 	gitRoot, err := git.GetGitRoot(".")
 	if err != nil {
 		return fmt.Errorf("could not find git root: %w", err)
 	}
-	
+
 	// If UseSuperprojectRoot is enabled, get the superproject root
 	if fullCfg.Agent.UseSuperprojectRoot {
 		superRoot, err := git.GetSuperprojectRoot(gitRoot)
@@ -693,49 +693,54 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 			gitRoot = superRoot
 		}
 	}
-	
+
 	// Load the job to get the title from frontmatter
 	job, err := orchestration.LoadJob(chatPath)
 	if err != nil {
 		return fmt.Errorf("failed to load chat job: %w", err)
 	}
-	
-	// Derive worktree name from the chat title/filename
-	worktreeName := deriveWorktreeName(chatPath)
-	
+
+	// Prioritize worktree from frontmatter, fall back to deriving from filename
+	var worktreeName string
+	if job.Worktree != "" {
+		worktreeName = job.Worktree
+	} else {
+		worktreeName = deriveWorktreeName(chatPath)
+	}
+
 	// Prepare the worktree at the git root
 	wm := git.NewWorktreeManager()
 	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "interactive")
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
-	
+
 	// Configure Canopy hooks for the worktree
 	if err := configureCanopyHooks(worktreePath); err != nil {
 		return fmt.Errorf("failed to configure canopy hooks: %w", err)
 	}
-	
+
 	// Debug: Log config status
 	if verbose := os.Getenv("GROVE_DEBUG"); verbose != "" {
 		fmt.Printf("Debug: Agent.MountWorkspaceAtHostPath = %v\n", fullCfg.Agent.MountWorkspaceAtHostPath)
 	}
-	
+
 	// Build the agent command with the chat file path
 	agentCommand := buildAgentCommandFromChat(chatPath, fullCfg.Agent.Args)
-	
+
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
 	// Use the title from frontmatter for the session name
 	sessionTitle := sanitizeForTmuxSession(job.Title)
 	sessionName := fmt.Sprintf("%s__%s", repoName, sessionTitle)
-	
+
 	params := launchParameters{
 		sessionName:      sessionName,
 		container:        container,
 		hostWorktreePath: worktreePath,
 		agentCommand:     agentCommand,
 	}
-	
+
 	// Calculate container work directory
 	relPath, err := filepath.Rel(gitRoot, worktreePath)
 	if err != nil {
@@ -746,7 +751,7 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	} else {
 		params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
 	}
-	
+
 	// Launch the session using the same logic as plan launch
 	executor := &exec.RealCommandExecutor{}
 	return launchTmuxSession(executor, params)
@@ -757,35 +762,35 @@ func deriveWorktreeName(chatPath string) string {
 	base := filepath.Base(chatPath)
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
-	
+
 	// Sanitize the name to be a valid worktree name
 	// Replace spaces and special characters with hyphens
 	name = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || 
-		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' {
 			return r
 		}
 		return '-'
 	}, name)
-	
+
 	// Remove consecutive hyphens
 	for strings.Contains(name, "--") {
 		name = strings.ReplaceAll(name, "--", "-")
 	}
-	
+
 	// Trim hyphens from start and end
 	name = strings.Trim(name, "-")
-	
+
 	// Ensure it's not empty
 	if name == "" {
 		name = "chat-" + uuid.New().String()[:8]
 	}
-	
+
 	// Ensure it's not too long (max 100 chars)
 	if len(name) > 100 {
 		name = name[:100]
 	}
-	
+
 	return name
 }
 
@@ -794,12 +799,12 @@ func buildAgentCommandFromChat(chatPath string, agentArgs []string) string {
 	// Instead of passing the entire content, instruct claude to read the file
 	instruction := fmt.Sprintf("Read the file %s and respond to the latest user message in the conversation", chatPath)
 	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"
-	
+
 	// Build command with args
 	cmdParts := []string{"claude"}
 	cmdParts = append(cmdParts, agentArgs...)
 	cmdParts = append(cmdParts, escapedInstruction)
-	
+
 	return strings.Join(cmdParts, " ")
 }
 
@@ -837,7 +842,7 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 	// 4. Create New Window
 	chatFileName := strings.TrimSuffix(filepath.Base(chatPath), filepath.Ext(chatPath))
 	windowName := "chat-" + sanitizeForTmuxSession(chatFileName)
-	
+
 	// Create the window and set its working directory to the git root
 	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", gitRoot); err != nil {
 		return fmt.Errorf("failed to create new tmux window: %w", err)
@@ -850,7 +855,7 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 	}
 	// Use the absolute path for the chat file
 	agentCommand := buildAgentCommandFromChat(absChatPath, fullCfg.Agent.Args)
-	
+
 	// Target the new window precisely
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
@@ -867,33 +872,33 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 func sanitizeForTmuxSession(title string) string {
 	// Replace spaces and special characters with hyphens
 	sanitized := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || 
-		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' {
 			return r
 		}
 		return '-'
 	}, title)
-	
+
 	// Convert to lowercase for consistency
 	sanitized = strings.ToLower(sanitized)
-	
+
 	// Remove consecutive hyphens
 	for strings.Contains(sanitized, "--") {
 		sanitized = strings.ReplaceAll(sanitized, "--", "-")
 	}
-	
+
 	// Trim hyphens from start and end
 	sanitized = strings.Trim(sanitized, "-")
-	
+
 	// Ensure it's not empty
 	if sanitized == "" {
 		sanitized = "session"
 	}
-	
+
 	// Tmux session names should not be too long
 	if len(sanitized) > 50 {
 		sanitized = sanitized[:50]
 	}
-	
+
 	return sanitized
 }

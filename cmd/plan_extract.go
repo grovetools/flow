@@ -98,10 +98,10 @@ func runJobsExtract(title string, file string, blockIDs []string) error {
 
 	// Create a new chat job
 	job := &orchestration.Job{
-		Title:  title,
-		Type:   orchestration.JobTypeChat,
-		Status: orchestration.JobStatusPending,
-		ID:     sanitizeForFilename(title),
+		Title:      title,
+		Type:       orchestration.JobTypeChat,
+		Status:     orchestration.JobStatusPending,
+		ID:         sanitizeForFilename(title),
 		PromptBody: extractedContent.String(),
 	}
 
@@ -122,7 +122,7 @@ func sanitizeForFilename(s string) string {
 	// Convert to lowercase and replace spaces with hyphens
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, " ", "-")
-	
+
 	// Remove any characters that aren't alphanumeric, hyphens, or underscores
 	var result strings.Builder
 	for _, r := range s {
@@ -130,20 +130,20 @@ func sanitizeForFilename(s string) string {
 			result.WriteRune(r)
 		}
 	}
-	
+
 	// Ensure we don't have multiple consecutive hyphens
 	cleaned := result.String()
 	for strings.Contains(cleaned, "--") {
 		cleaned = strings.ReplaceAll(cleaned, "--", "-")
 	}
-	
+
 	// Trim hyphens from start and end
 	cleaned = strings.Trim(cleaned, "-")
-	
+
 	// If empty, use a default
 	if cleaned == "" {
 		cleaned = "extracted-chat"
 	}
-	
+
 	return cleaned
 }

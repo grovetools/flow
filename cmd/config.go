@@ -27,7 +27,7 @@ func loadFlowConfig() (*FlowConfig, error) {
 	if err := coreCfg.UnmarshalExtension("flow", &flowCfg); err != nil {
 		return nil, fmt.Errorf("failed to parse 'flow' configuration from grove.yml: %w", err)
 	}
-	
+
 	return &flowCfg, nil
 }
 

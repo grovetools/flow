@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 
@@ -118,8 +118,8 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 	overallStatus := "Complete"
 	if statusCounts[orchestration.JobStatusRunning] > 0 {
 		overallStatus = "In Progress"
-	} else if statusCounts[orchestration.JobStatusPending] > 0 || 
-		statusCounts[orchestration.JobStatusPendingUser] > 0 || 
+	} else if statusCounts[orchestration.JobStatusPending] > 0 ||
+		statusCounts[orchestration.JobStatusPendingUser] > 0 ||
 		statusCounts[orchestration.JobStatusPendingLLM] > 0 {
 		overallStatus = "Ready"
 	} else if statusCounts[orchestration.JobStatusFailed] > 0 {
@@ -128,7 +128,7 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 
 	fmt.Fprintf(writer, "Plan: %s\n", color.CyanString(plan.Name))
 	fmt.Fprintf(writer, "Status: %s\n", overallStatus)
-	
+
 	// Check for Grove context files
 	contextFiles := []string{
 		filepath.Join(plan.Directory, ".grove", "context"),
@@ -144,48 +144,48 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 		fmt.Fprintf(writer, "Context: %s\n", strings.Join(foundContext, ", "))
 	}
 	fmt.Fprintln(writer)
-	
+
 	fmt.Fprintf(writer, "Jobs: %d total\n", len(plan.Jobs))
-	
+
 	if statusCounts[orchestration.JobStatusCompleted] > 0 {
-		fmt.Fprintf(writer, "%s Completed: %d\n", 
-			colorizeStatus(orchestration.JobStatusCompleted), 
+		fmt.Fprintf(writer, "%s Completed: %d\n",
+			colorizeStatus(orchestration.JobStatusCompleted),
 			statusCounts[orchestration.JobStatusCompleted])
 	}
-	
+
 	if statusCounts[orchestration.JobStatusRunning] > 0 {
-		fmt.Fprintf(writer, "%s Running: %d\n", 
-			colorizeStatus(orchestration.JobStatusRunning), 
+		fmt.Fprintf(writer, "%s Running: %d\n",
+			colorizeStatus(orchestration.JobStatusRunning),
 			statusCounts[orchestration.JobStatusRunning])
 	}
-	
+
 	if statusCounts[orchestration.JobStatusPending] > 0 {
-		fmt.Fprintf(writer, "%s Pending: %d\n", 
-			colorizeStatus(orchestration.JobStatusPending), 
+		fmt.Fprintf(writer, "%s Pending: %d\n",
+			colorizeStatus(orchestration.JobStatusPending),
 			statusCounts[orchestration.JobStatusPending])
 	}
-	
+
 	if statusCounts[orchestration.JobStatusFailed] > 0 {
-		fmt.Fprintf(writer, "%s Failed: %d\n", 
-			colorizeStatus(orchestration.JobStatusFailed), 
+		fmt.Fprintf(writer, "%s Failed: %d\n",
+			colorizeStatus(orchestration.JobStatusFailed),
 			statusCounts[orchestration.JobStatusFailed])
 	}
-	
+
 	if statusCounts[orchestration.JobStatusBlocked] > 0 {
-		fmt.Fprintf(writer, "%s Blocked: %d\n", 
-			colorizeStatus(orchestration.JobStatusBlocked), 
+		fmt.Fprintf(writer, "%s Blocked: %d\n",
+			colorizeStatus(orchestration.JobStatusBlocked),
 			statusCounts[orchestration.JobStatusBlocked])
 	}
-	
+
 	if statusCounts[orchestration.JobStatusPendingUser] > 0 {
-		fmt.Fprintf(writer, "%s Pending User: %d\n", 
-			colorizeStatus(orchestration.JobStatusPendingUser), 
+		fmt.Fprintf(writer, "%s Pending User: %d\n",
+			colorizeStatus(orchestration.JobStatusPendingUser),
 			statusCounts[orchestration.JobStatusPendingUser])
 	}
-	
+
 	if statusCounts[orchestration.JobStatusPendingLLM] > 0 {
-		fmt.Fprintf(writer, "%s Pending LLM: %d\n", 
-			colorizeStatus(orchestration.JobStatusPendingLLM), 
+		fmt.Fprintf(writer, "%s Pending LLM: %d\n",
+			colorizeStatus(orchestration.JobStatusPendingLLM),
 			statusCounts[orchestration.JobStatusPendingLLM])
 	}
 
@@ -215,7 +215,7 @@ func formatStatusTree(plan *orchestration.Plan, graph *orchestration.DependencyG
 	// Print any jobs not yet printed (in case of disconnected components)
 	for _, job := range plan.Jobs {
 		if !printed[job.ID] {
-			fmt.Fprintf(writer, "└── %s %s (orphaned)\n", 
+			fmt.Fprintf(writer, "└── %s %s (orphaned)\n",
 				colorizeStatus(job.Status), job.Filename)
 		}
 	}
@@ -253,7 +253,7 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 	if statusVerbose && job.Title != "" {
 		jobInfo = fmt.Sprintf("%s (%s)", job.Filename, job.Title)
 	}
-	
+
 	fmt.Fprintf(w, "%s%s%s %s\n", prefix, connector, statusIcon, jobInfo)
 
 	// Update prefix for children
@@ -295,9 +295,9 @@ func formatStatusList(plan *orchestration.Plan) string {
 
 	for _, job := range jobs {
 		statusIcon := colorizeStatus(job.Status)
-		
+
 		if statusVerbose {
-			fmt.Fprintf(writer, "%s %-30s %-20s %s\n", 
+			fmt.Fprintf(writer, "%s %-30s %-20s %s\n",
 				statusIcon, job.Filename, job.Status, job.Title)
 			if job.ID != "" {
 				fmt.Fprintf(writer, "    ID: %s\n", job.ID)
@@ -321,12 +321,12 @@ func formatStatusList(plan *orchestration.Plan) string {
 func formatStatusJSON(plan *orchestration.Plan) (string, error) {
 	// Create a structure for JSON output
 	output := struct {
-		Plan   string                   `json:"plan"`
-		Jobs   []*orchestration.Job     `json:"jobs"`
-		Stats  map[string]int           `json:"statistics"`
+		Plan  string               `json:"plan"`
+		Jobs  []*orchestration.Job `json:"jobs"`
+		Stats map[string]int       `json:"statistics"`
 	}{
-		Plan: plan.Name,
-		Jobs: plan.Jobs,
+		Plan:  plan.Name,
+		Jobs:  plan.Jobs,
 		Stats: make(map[string]int),
 	}
 

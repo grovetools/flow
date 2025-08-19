@@ -11,5 +11,6 @@ type: "oneshot"
 - The job should be achievable by an LLM coding agent in one session/PR
 - Use direct, technical language - no timelines or corporate speak  
 - Do NOT include large code blocks - just describe what to create (small snippets are enouraged though)
-- Be specific about file paths (e.g., "backend/src/routes/todos.ts")
+- IMPORTANT: Be specific about file paths (e.g., "backend/src/routes/todos.ts"). Tell the agent which files it should read for context.
+- If files are located outside the current project/repo, list the full path to that file.
 

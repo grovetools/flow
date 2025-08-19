@@ -241,9 +241,21 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 		}
 	}
 
-	// Success
-	fmt.Printf("✅ Session '%s' closed. Continuing plan...\n", sessionName)
-	job.Status = JobStatusCompleted
+	// Success - prompt for job status
+	status := e.promptForJobStatus(sessionName)
+	
+	switch status {
+	case "c":
+		fmt.Printf("✅ Session '%s' marked as completed. Continuing plan...\n", sessionName)
+		job.Status = JobStatusCompleted
+	case "f":
+		fmt.Printf("❌ Session '%s' marked as failed.\n", sessionName)
+		job.Status = JobStatusFailed
+	case "q":
+		fmt.Printf("⏸️  Session '%s' closed with no status change.\n", sessionName)
+		// Keep current status (should still be Running)
+	}
+	
 	job.EndTime = time.Now()
 	return nil
 }
@@ -488,9 +500,21 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		}
 	}
 
-	// Success
-	fmt.Printf("✅ Window '%s' closed. Continuing plan...\n", windowName)
-	job.Status = JobStatusCompleted
+	// Success - prompt for job status
+	status := e.promptForJobStatus(windowName)
+	
+	switch status {
+	case "c":
+		fmt.Printf("✅ Window '%s' marked as completed. Continuing plan...\n", windowName)
+		job.Status = JobStatusCompleted
+	case "f":
+		fmt.Printf("❌ Window '%s' marked as failed.\n", windowName)
+		job.Status = JobStatusFailed
+	case "q":
+		fmt.Printf("⏸️  Window '%s' closed with no status change.\n", windowName)
+		// Keep current status (should still be Running)
+	}
+	
 	job.EndTime = time.Now()
 	return nil
 }
@@ -536,5 +560,31 @@ func sanitizeForTmuxSession(name string) string {
 	}
 	
 	return sanitized
+}
+
+// promptForJobStatus prompts the user to select the job status after tmux session ends
+func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string) string {
+	fmt.Printf("\n💭 Session '%s' has ended. What's the job status?\n", sessionOrWindowName)
+	fmt.Println("   c - Mark as completed")
+	fmt.Println("   f - Mark as failed")
+	fmt.Println("   q - No status change (keep as running)")
+	fmt.Print("\nChoice [c/f/q]: ")
+	
+	var response string
+	fmt.Scanln(&response)
+	response = strings.ToLower(strings.TrimSpace(response))
+	
+	// Default to "c" if user just presses enter
+	if response == "" {
+		response = "c"
+	}
+	
+	// Validate response
+	if response != "c" && response != "f" && response != "q" {
+		fmt.Printf("Invalid choice '%s'. Defaulting to completed.\n", response)
+		response = "c"
+	}
+	
+	return response
 }
 

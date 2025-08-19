@@ -38,7 +38,7 @@ func runModelsList(cmd *cobra.Command, args []string) error {
 
 	// Check if JSON output is requested via global flag
 	jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
-	
+
 	if jsonOutput {
 		// JSON output
 		output := struct {
@@ -63,9 +63,9 @@ func runModelsList(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", model.ID, model.Provider, model.Note)
 	}
 	w.Flush()
-	
+
 	fmt.Println("\nUsage: Specify the model in your job or chat frontmatter:")
 	fmt.Println("  model: gemini-2.5-pro")
-	
+
 	return nil
 }

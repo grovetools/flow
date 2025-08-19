@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 	"testing"
-	
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +32,7 @@ func TestRunPlanStatus(t *testing.T) {
 				Status:   orchestration.JobStatusCompleted,
 			},
 			{
-				ID:       "job2", 
+				ID:       "job2",
 				Filename: "02_build.md",
 				Title:    "Build application",
 				Status:   orchestration.JobStatusRunning,
@@ -42,7 +42,7 @@ func TestRunPlanStatus(t *testing.T) {
 			},
 			{
 				ID:       "job3",
-				Filename: "03_test.md", 
+				Filename: "03_test.md",
 				Title:    "Run tests",
 				Status:   orchestration.JobStatusPending,
 				Dependencies: []*orchestration.Job{
@@ -104,13 +104,13 @@ func TestRunPlanStatus(t *testing.T) {
 				var result map[string]interface{}
 				err := json.Unmarshal([]byte(output), &result)
 				assert.NoError(t, err)
-				
+
 				// Check structure
 				assert.Equal(t, "test-plan", result["plan"])
 				jobs, ok := result["jobs"].([]interface{})
 				assert.True(t, ok)
 				assert.Len(t, jobs, 3)
-				
+
 				stats, ok := result["statistics"].(map[string]interface{})
 				assert.True(t, ok)
 				assert.Equal(t, float64(3), stats["total"])
@@ -127,15 +127,15 @@ func TestRunPlanStatus(t *testing.T) {
 			checkOutput: func(t *testing.T, output string) {
 				// Should be ONLY JSON without any status summary
 				lines := strings.Split(strings.TrimSpace(output), "\n")
-				
+
 				// First line should start with { (beginning of JSON)
 				assert.True(t, strings.HasPrefix(lines[0], "{"))
-				
+
 				// Should NOT contain the status summary text
 				assert.NotContains(t, output, "Plan: test-plan")
 				assert.NotContains(t, output, "Status:")
 				assert.NotContains(t, output, "Jobs: 3 total")
-				
+
 				// Should be valid JSON
 				var result map[string]interface{}
 				err := json.Unmarshal([]byte(output), &result)
@@ -146,7 +146,7 @@ func TestRunPlanStatus(t *testing.T) {
 			name:           "Verbose mode",
 			args:           []string{tmpDir},
 			flags:          map[string]interface{}{"verbose": true, "format": "list"},
-			expectedFormat: "list", 
+			expectedFormat: "list",
 			checkOutput: func(t *testing.T, output string) {
 				// Should contain IDs in verbose mode
 				assert.Contains(t, output, "ID: job1")
@@ -165,7 +165,7 @@ func TestRunPlanStatus(t *testing.T) {
 
 			// Create command with standard flags
 			cmd := cli.NewStandardCommand("status", "Show plan status")
-			
+
 			// Set up CLI options if JSON output is requested
 			if tt.jsonOutput {
 				// Set the json flag directly on the command
@@ -194,7 +194,7 @@ func TestRunPlanStatus(t *testing.T) {
 			// Restore stdout and get output
 			w.Close()
 			os.Stdout = oldStdout
-			
+
 			var buf bytes.Buffer
 			io.Copy(&buf, r)
 			output := buf.String()
@@ -217,7 +217,7 @@ func TestFormatStatusJSON(t *testing.T) {
 			},
 			{
 				ID:       "job2",
-				Filename: "02_build.md", 
+				Filename: "02_build.md",
 				Title:    "Build",
 				Status:   orchestration.JobStatusPending,
 			},
@@ -234,7 +234,7 @@ func TestFormatStatusJSON(t *testing.T) {
 
 	// Verify structure
 	assert.Equal(t, "test-plan", result["plan"])
-	
+
 	jobs, ok := result["jobs"].([]interface{})
 	assert.True(t, ok)
 	assert.Len(t, jobs, 2)
@@ -283,7 +283,7 @@ func TestJSONOutputSuppressesHumanReadableText(t *testing.T) {
 
 	w.Close()
 	os.Stdout = oldStdout
-	
+
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
@@ -291,13 +291,13 @@ func TestJSONOutputSuppressesHumanReadableText(t *testing.T) {
 	// Output should be pure JSON
 	assert.True(t, strings.HasPrefix(output, "{"))
 	assert.True(t, strings.HasSuffix(output, "}"))
-	
+
 	// Should NOT contain any human-readable text
 	assert.NotContains(t, output, "Plan:")
 	assert.NotContains(t, output, "Status:")
 	assert.NotContains(t, output, "Jobs:")
 	assert.NotContains(t, output, "total")
-	
+
 	// But should be valid JSON with the right content
 	var result map[string]interface{}
 	err = json.Unmarshal([]byte(output), &result)
@@ -331,7 +331,7 @@ func TestJSONFlagOverridesFormatFlag(t *testing.T) {
 	// Test with --json flag AND --format tree (json should win)
 	cmd := cli.NewStandardCommand("status", "Show plan status")
 	require.NoError(t, cmd.Flags().Set("json", "true"))
-	
+
 	// Set format to tree, but JSON should override it
 	statusFormat = "tree"
 
@@ -345,7 +345,7 @@ func TestJSONFlagOverridesFormatFlag(t *testing.T) {
 
 	w.Close()
 	os.Stdout = oldStdout
-	
+
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
@@ -353,7 +353,7 @@ func TestJSONFlagOverridesFormatFlag(t *testing.T) {
 	// Output should still be pure JSON despite format flag
 	assert.True(t, strings.HasPrefix(output, "{"))
 	assert.True(t, strings.HasSuffix(output, "}"))
-	
+
 	// Verify it's valid JSON
 	var result map[string]interface{}
 	err = json.Unmarshal([]byte(output), &result)
@@ -426,26 +426,26 @@ func TestPlanStatusJSONOutputWithNonEmptyPlan(t *testing.T) {
 
 	w.Close()
 	os.Stdout = oldStdout
-	
+
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
 
 	// First character should be { (start of JSON)
-	assert.True(t, strings.HasPrefix(output, "{"), "Output should start with {, but got: " + output[:min(100, len(output))])
-	
+	assert.True(t, strings.HasPrefix(output, "{"), "Output should start with {, but got: "+output[:min(100, len(output))])
+
 	// Parse and validate JSON structure
 	var result map[string]interface{}
 	err = json.Unmarshal([]byte(output), &result)
 	require.NoError(t, err, "Failed to parse JSON output")
-	
+
 	// Verify structure
 	assert.Equal(t, "realistic-plan", result["plan"])
-	
+
 	jobs, ok := result["jobs"].([]interface{})
 	assert.True(t, ok)
 	assert.Len(t, jobs, 3)
-	
+
 	// Check statistics
 	stats, ok := result["statistics"].(map[string]interface{})
 	assert.True(t, ok)

@@ -128,40 +128,40 @@ func TestRunPlanGraph(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temp directory
 			dir := t.TempDir()
-			
+
 			// Setup plan
 			tt.setupPlan(t, dir)
-			
+
 			// Set directory in command
 			tt.cmd.Directory = dir
-			
+
 			// Set output file if needed
 			if tt.name == "output to file" {
 				tt.cmd.Output = filepath.Join(dir, "graph.mermaid")
 			}
-			
+
 			// Capture output
 			oldStdout := os.Stdout
 			r, w, _ := os.Pipe()
 			os.Stdout = w
-			
+
 			// Run command
 			err := RunPlanGraph(tt.cmd)
-			
+
 			// Restore stdout
 			w.Close()
 			os.Stdout = oldStdout
-			
+
 			// Read output
 			buf := make([]byte, 4096)
 			n, _ := r.Read(buf)
 			output := string(buf[:n])
-			
+
 			// Check error
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RunPlanGraph() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			
+
 			// Check output
 			if !tt.wantErr && tt.checkOut != nil {
 				if tt.cmd.Output != "" {

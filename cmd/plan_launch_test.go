@@ -3,7 +3,7 @@ package cmd
 import (
 	"errors"
 	"testing"
-	
+
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/stretchr/testify/assert"
@@ -14,14 +14,14 @@ func TestBuildAgentCommand(t *testing.T) {
 	plan := &orchestration.Plan{
 		Directory: "/test/plan",
 	}
-	
+
 	tests := []struct {
-		name        string
-		job         *orchestration.Job
+		name         string
+		job          *orchestration.Job
 		worktreePath string
-		agentArgs   []string
-		expectedCmd string
-		wantErr     bool
+		agentArgs    []string
+		expectedCmd  string
+		wantErr      bool
 	}{
 		{
 			name: "Simple prompt",
@@ -79,7 +79,7 @@ func TestBuildAgentCommand(t *testing.T) {
 			expectedCmd:  "claude --dangerously-skip-permissions --verbose 'Hello world'",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd, err := buildAgentCommand(tt.job, plan, tt.worktreePath, tt.agentArgs)
@@ -222,16 +222,16 @@ func TestLaunchTmuxSession(t *testing.T) {
 			errorContains: "failed to send prompt to tmux session",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockExec := &exec.MockCommandExecutor{}
 			if tt.setupMock != nil {
 				tt.setupMock(mockExec)
 			}
-			
+
 			err := launchTmuxSession(mockExec, tt.params)
-			
+
 			if tt.expectError {
 				require.Error(t, err)
 				if tt.errorContains != "" {
@@ -240,7 +240,7 @@ func TestLaunchTmuxSession(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			
+
 			// Verify the expected commands were executed
 			assert.Equal(t, tt.expectedCmds, mockExec.Commands)
 		})
@@ -254,15 +254,15 @@ func TestCommandStructure(t *testing.T) {
 1. User's authentication
 2. It's important to handle edge cases
 3. Don't forget error handling`
-	
+
 	job := &orchestration.Job{
 		PromptBody: complexPrompt,
 	}
 	plan := &orchestration.Plan{}
-	
+
 	cmd, err := buildAgentCommand(job, plan, "/test", []string{})
 	require.NoError(t, err)
-	
+
 	// The command should be properly escaped
 	expected := "claude 'Implement the following:\n1. User'\\''s authentication\n2. It'\\''s important to handle edge cases\n3. Don'\\''t forget error handling'"
 	assert.Equal(t, expected, cmd)

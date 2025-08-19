@@ -67,6 +67,6 @@ func resolvePlanPathWithActiveJob(planName string) (string, error) {
 		}
 		planName = activeJob
 	}
-	
+
 	return resolvePlanPath(planName)
 }

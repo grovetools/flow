@@ -12,8 +12,8 @@ import (
 
 type PlanCleanupWorktreesCmd struct {
 	Directory string        `arg:"" help:"Plan directory"`
-	Age   time.Duration `flag:"" default:"24h" help:"Remove worktrees older than this"`
-	Force bool          `flag:"f" help:"Skip confirmation prompts"`
+	Age       time.Duration `flag:"" default:"24h" help:"Remove worktrees older than this"`
+	Force     bool          `flag:"f" help:"Skip confirmation prompts"`
 }
 
 func (c *PlanCleanupWorktreesCmd) Run() error {
@@ -40,7 +40,7 @@ func RunPlanCleanupWorktrees(cmd *PlanCleanupWorktreesCmd) error {
 	// Create worktree manager
 	baseDir := filepath.Join(repoRoot, ".grove-worktrees")
 	logger := NullLogger{} // Use null logger for CLI
-	
+
 	wm, err := orchestration.NewWorktreeManager(baseDir, gitClient, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create worktree manager: %w", err)
@@ -60,7 +60,7 @@ func RunPlanCleanupWorktrees(cmd *PlanCleanupWorktreesCmd) error {
 	// Find stale worktrees
 	var staleWorktrees []orchestration.Worktree
 	now := time.Now()
-	
+
 	for _, wt := range worktrees {
 		// Check if locked
 		if locked, lock := wm.IsLocked(wt.Name); locked {

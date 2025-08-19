@@ -64,7 +64,7 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 	// Update status
 	oldStatus := job.Status
 	job.Status = orchestration.JobStatusCompleted
-	
+
 	// Use the state persister to update the job file
 	persister := orchestration.NewStatePersister()
 	if err := persister.UpdateJobStatus(job, orchestration.JobStatusCompleted); err != nil {
@@ -78,7 +78,7 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 	// Special message for chat jobs
 	if job.Type == orchestration.JobTypeChat {
 		fmt.Printf("\nChat conversation ended. You can transform this chat into executable jobs using:\n")
-		fmt.Printf("  flow plan add %s --template generate-plan --prompt-file %s\n", 
+		fmt.Printf("  flow plan add %s --template generate-plan --prompt-file %s\n",
 			planDir, jobFile)
 	}
 

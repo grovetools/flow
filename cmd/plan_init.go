@@ -227,7 +227,7 @@ func createInitialPlanJob(dir string, model string, outputType string, templateN
 		frontmatter["id"] = jobID
 		frontmatter["status"] = "pending"
 		frontmatter["model"] = model
-		frontmatter["template"] = templateName  // Store template reference
+		frontmatter["template"] = templateName // Store template reference
 
 		// Only set prompt_source if spec file was provided
 		if specContent != "" && specContent != "# Spec\n\n" {

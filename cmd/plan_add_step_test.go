@@ -150,7 +150,7 @@ func TestRunPlanAddStep(t *testing.T) {
 				if _, err := os.Stat(dir); os.IsNotExist(err) {
 					t.Error("Plan directory was not created")
 				}
-				
+
 				// Verify job was created
 				files, err := filepath.Glob(filepath.Join(dir, "*.md"))
 				if err != nil {
@@ -185,7 +185,7 @@ func TestRunPlanAddStep(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				
+
 				// Find the created job
 				var job *orchestration.Job
 				for _, j := range plan.Jobs {
@@ -194,20 +194,20 @@ func TestRunPlanAddStep(t *testing.T) {
 						break
 					}
 				}
-				
+
 				if job == nil {
 					t.Fatal("Created job not found")
 				}
-				
+
 				// Verify job has template and prompt sources
 				if job.Template != "agent-run" {
 					t.Errorf("Expected template 'agent-run', got '%s'", job.Template)
 				}
-				
+
 				if len(job.PromptSource) != 2 {
 					t.Errorf("Expected 2 prompt sources, got %d", len(job.PromptSource))
 				}
-				
+
 				// Check that prompt body contains reference comment
 				if !strings.Contains(job.PromptBody, "Template will be resolved at execution time") {
 					t.Error("Expected reference comment in prompt body")
@@ -235,7 +235,7 @@ func TestRunPlanAddStep(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				
+
 				// Find the created job
 				var job *orchestration.Job
 				for _, j := range plan.Jobs {
@@ -244,16 +244,16 @@ func TestRunPlanAddStep(t *testing.T) {
 						break
 					}
 				}
-				
+
 				if job == nil {
 					t.Fatal("Created job not found")
 				}
-				
+
 				// Verify job has template and one prompt source
 				if job.Template != "agent-run" {
 					t.Errorf("Expected template 'agent-run', got '%s'", job.Template)
 				}
-				
+
 				if len(job.PromptSource) != 1 {
 					t.Errorf("Expected 1 prompt source, got %d", len(job.PromptSource))
 				}
@@ -430,4 +430,3 @@ func createTempFile(t *testing.T, content string) string {
 
 	return f.Name()
 }
-

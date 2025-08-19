@@ -23,6 +23,8 @@ type PlanAddStepCmd struct {
 	Prompt      string   `flag:"p" help:"Inline prompt text"`
 	OutputType  string   `flag:"" default:"file" help:"Output type: file, commit, none, or generate_jobs"`
 	Interactive bool     `flag:"i" help:"Interactive mode"`
+	Worktree    string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
+	Model       string   `flag:"" help:"LLM model to use for this job"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -35,7 +37,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
-	
+
 	// For absolute paths, use them directly (important for tests)
 	if filepath.IsAbs(cmd.Dir) {
 		planPath = cmd.Dir
@@ -54,30 +56,8 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
-	// Smart worktree inheritance logic
-	var inheritedWorktree string
-	if len(cmd.DependsOn) > 0 {
-		// Check worktrees of dependencies
-		worktrees := make(map[string]bool)
-		for _, depFilename := range cmd.DependsOn {
-			// Find the dependency job
-			for _, depJob := range plan.Jobs {
-				if depJob.Filename == depFilename && depJob.Worktree != "" {
-					worktrees[depJob.Worktree] = true
-				}
-			}
-		}
-		
-		// If all dependencies share the same worktree, inherit it
-		if len(worktrees) == 1 {
-			for wt := range worktrees {
-				inheritedWorktree = wt
-			}
-		} else if len(worktrees) > 1 {
-			// Multiple different worktrees found
-			fmt.Printf("⚠️  Warning: Dependencies have conflicting worktrees. Please specify --worktree manually.\n")
-		}
-	}
+	// Use explicit worktree from command line flag only
+	worktreeToUse := cmd.Worktree
 
 	var job *orchestration.Job
 
@@ -88,16 +68,16 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		if err != nil {
 			return err
 		}
-		job, err = collectJobDetailsFromTemplate(cmd, plan, template, inheritedWorktree)
+		job, err = collectJobDetailsFromTemplate(cmd, plan, template, worktreeToUse)
 	} else {
 		// Existing logic
-		job, err = collectJobDetails(cmd, plan, inheritedWorktree)
+		job, err = collectJobDetails(cmd, plan, worktreeToUse)
 	}
-	
+
 	if err != nil {
 		return err
 	}
-	
+
 	if job == nil {
 		return fmt.Errorf("failed to create job: no job details collected")
 	}
@@ -118,9 +98,9 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	return nil
 }
 
-func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedWorktree string) (*orchestration.Job, error) {
+func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeToUse string) (*orchestration.Job, error) {
 	if cmd.Interactive {
-		return interactiveJobCreation(plan)
+		return interactiveJobCreation(plan, cmd.Worktree)
 	}
 
 	// Validate non-interactive inputs
@@ -153,7 +133,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 		if err != nil {
 			return nil, fmt.Errorf("failed to get project root: %w", err)
 		}
-		
+
 		// Convert to relative paths
 		var relativeSourceFiles []string
 		for _, file := range cmd.SourceFiles {
@@ -162,7 +142,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve source file %s: %w", file, err)
 			}
-			
+
 			// If the file is in the plan directory, use just the relative path from plan
 			if strings.HasPrefix(resolvedPath, plan.Directory+string(filepath.Separator)) {
 				relPath, _ := filepath.Rel(plan.Directory, resolvedPath)
@@ -177,10 +157,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 				relativeSourceFiles = append(relativeSourceFiles, relPath)
 			}
 		}
-		
+
 		// Generate job ID
 		jobID := generateJobIDFromTitle(plan, cmd.Title)
-		
+
 		// Build job structure
 		job := &orchestration.Job{
 			ID:           jobID,
@@ -189,14 +169,15 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 			Status:       "pending",
 			DependsOn:    cmd.DependsOn,
 			PromptSource: relativeSourceFiles,
+			Model:        cmd.Model,
 			Output: orchestration.OutputConfig{
 				Type: cmd.OutputType,
 			},
 		}
-		
+
 		// Initialize empty prompt body - no comments needed since info is in frontmatter
 		job.PromptBody = ""
-		
+
 		// Add user-provided prompt if any
 		if cmd.Prompt != "" {
 			if job.PromptBody == "" {
@@ -208,19 +189,15 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 			// If no source files and no prompt, this is an error
 			return nil, fmt.Errorf("prompt is required when no source files are provided")
 		}
-		
-		// Set worktree: use inherited worktree if available, otherwise default to plan name
-		if job.Worktree == "" {
-			if inheritedWorktree != "" {
-				job.Worktree = inheritedWorktree
-			} else {
-				job.Worktree = filepath.Base(plan.Directory)
-			}
+
+		// Set worktree only if explicitly provided
+		if worktreeToUse != "" {
+			job.Worktree = worktreeToUse
 		}
-		
+
 		return job, nil
 	}
-	
+
 	// Traditional prompt handling (non-reference based)
 	prompt := ""
 	if cmd.Prompt != "" {
@@ -232,7 +209,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve prompt file %s: %w", cmd.PromptFile, err)
 		}
-		
+
 		// Read from resolved file
 		content, err := os.ReadFile(resolvedPath)
 		if err != nil {
@@ -260,31 +237,27 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 
 	// Build job structure
 	job := &orchestration.Job{
-		ID:        jobID,
-		Title:     cmd.Title,
-		Type:      orchestration.JobType(cmd.Type),
-		Status:    "pending",
-		DependsOn: cmd.DependsOn,
+		ID:         jobID,
+		Title:      cmd.Title,
+		Type:       orchestration.JobType(cmd.Type),
+		Status:     "pending",
+		DependsOn:  cmd.DependsOn,
 		PromptBody: strings.TrimSpace(prompt),
+		Model:      cmd.Model,
 		Output: orchestration.OutputConfig{
 			Type: cmd.OutputType,
 		},
 	}
 
-	// Set worktree: use inherited worktree if available, otherwise default to plan name
-	// The plan name is the base name of the plan directory
-	if job.Worktree == "" {
-		if inheritedWorktree != "" {
-			job.Worktree = inheritedWorktree
-		} else {
-			job.Worktree = filepath.Base(plan.Directory)
-		}
+	// Set worktree only if explicitly provided
+	if worktreeToUse != "" {
+		job.Worktree = worktreeToUse
 	}
 
 	return job, nil
 }
 
-func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error) {
+func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (*orchestration.Job, error) {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("\n=== Add New Job ===")
@@ -306,13 +279,13 @@ func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error
 	fmt.Println("2. agent - Long-running agent")
 	fmt.Println("3. interactive_agent - Interactive agent session")
 	fmt.Print("Choice [1-3]: ")
-	
+
 	choice, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read choice: %w", err)
 	}
 	choice = strings.TrimSpace(choice)
-	
+
 	jobType := "oneshot"
 	switch choice {
 	case "2":
@@ -328,12 +301,27 @@ func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error
 	}
 
 	// Get worktree name (optional)
-	fmt.Print("\nWorktree name (optional): ")
-	worktree, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read worktree: %w", err)
+	var worktree string
+	if explicitWorktree != "" {
+		// If worktree was provided via flag, use it and show it to user
+		worktree = explicitWorktree
+		fmt.Printf("\nWorktree: %s (set via --worktree flag)\n", worktree)
+	} else {
+		fmt.Print("\nWorktree name (optional, leave empty to run in main repository): ")
+		worktree, err = reader.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("failed to read worktree: %w", err)
+		}
+		worktree = strings.TrimSpace(worktree)
 	}
-	worktree = strings.TrimSpace(worktree)
+
+	// Get model name (optional)
+	fmt.Print("\nModel name (optional, leave empty for default): ")
+	model, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read model: %w", err)
+	}
+	model = strings.TrimSpace(model)
 
 	// Select output type
 	fmt.Println("\nOutput type:")
@@ -342,13 +330,13 @@ func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error
 	fmt.Println("3. none - No output")
 	fmt.Println("4. generate_jobs - Generate new job files")
 	fmt.Print("Choice [1-4]: ")
-	
+
 	choice, err = reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read choice: %w", err)
 	}
 	choice = strings.TrimSpace(choice)
-	
+
 	outputType := "file"
 	switch choice {
 	case "2":
@@ -382,14 +370,10 @@ func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error
 		DependsOn:  deps,
 		PromptBody: prompt,
 		Worktree:   worktree,
+		Model:      model,
 		Output: orchestration.OutputConfig{
 			Type: outputType,
 		},
-	}
-	
-	// Set worktree to the plan name if not provided
-	if job.Worktree == "" {
-		job.Worktree = filepath.Base(plan.Directory)
 	}
 
 	// Show summary
@@ -401,6 +385,9 @@ func interactiveJobCreation(plan *orchestration.Plan) (*orchestration.Job, error
 	}
 	if job.Worktree != "" {
 		fmt.Printf("Worktree: %s\n", job.Worktree)
+	}
+	if job.Model != "" {
+		fmt.Printf("Model: %s\n", job.Model)
 	}
 	fmt.Printf("Output: %s\n", job.Output.Type)
 
@@ -424,7 +411,7 @@ func selectDependencies(plan *orchestration.Plan, reader *bufio.Reader) ([]strin
 	}
 
 	fmt.Println("\nDependencies (enter job numbers separated by commas, or press enter for none):")
-	
+
 	// List available jobs
 	jobMap := make(map[int]*orchestration.Job)
 	i := 1
@@ -440,7 +427,7 @@ func selectDependencies(plan *orchestration.Plan, reader *bufio.Reader) ([]strin
 		return nil, fmt.Errorf("failed to read selection: %w", err)
 	}
 	selection = strings.TrimSpace(selection)
-	
+
 	if selection == "" {
 		return nil, nil
 	}
@@ -461,7 +448,7 @@ func selectDependencies(plan *orchestration.Plan, reader *bufio.Reader) ([]strin
 	return deps, nil
 }
 
-func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate, inheritedWorktree string) (*orchestration.Job, error) {
+func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate, worktreeToUse string) (*orchestration.Job, error) {
 	// Title is required even with template
 	if cmd.Title == "" {
 		return nil, fmt.Errorf("title is required (use --title)")
@@ -472,7 +459,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		Title:  cmd.Title,
 		Status: "pending",
 	}
-	
+
 	// Use reflection or a helper to merge template.Frontmatter into the job struct
 	// For simplicity, let's do it manually for key fields:
 	if typ, ok := template.Frontmatter["type"].(string); ok {
@@ -500,6 +487,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 			}
 		}
 	}
+	if model, ok := template.Frontmatter["model"].(string); ok {
+		job.Model = model
+	}
 
 	// CLI flags override template defaults
 	if cmd.Type != "" && cmd.Type != "agent" { // "agent" is the default, so only override if explicitly set
@@ -510,6 +500,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if len(cmd.DependsOn) > 0 {
 		job.DependsOn = cmd.DependsOn
+	}
+	if cmd.Model != "" {
+		job.Model = cmd.Model
 	}
 
 	// Validate dependencies
@@ -530,16 +523,16 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if true { // Always use reference-based prompts with templates
 		// Reference-based prompt handling
 		var sourceFiles []string
-		
+
 		// Only use source files, not prompt files
 		sourceFiles = cmd.SourceFiles
-		
+
 		// Get project root
 		projectRoot, err := orchestration.GetProjectRoot()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get project root: %w", err)
 		}
-		
+
 		// Convert to relative paths
 		var relativeSourceFiles []string
 		for _, file := range sourceFiles {
@@ -548,7 +541,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve source file %s: %w", file, err)
 			}
-			
+
 			// If the file is in the plan directory, use just the relative path from plan
 			if strings.HasPrefix(resolvedPath, plan.Directory+string(filepath.Separator)) {
 				relPath, _ := filepath.Rel(plan.Directory, resolvedPath)
@@ -563,16 +556,16 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 				relativeSourceFiles = append(relativeSourceFiles, relPath)
 			}
 		}
-		
+
 		// Store template name and source files as metadata
 		if len(relativeSourceFiles) > 0 {
 			job.PromptSource = relativeSourceFiles
 		}
 		job.Template = template.Name
-		
+
 		// Initialize empty prompt body - no comments needed since info is in frontmatter
 		job.PromptBody = ""
-		
+
 		// Add user-provided prompt if any
 		userPrompt := ""
 		if cmd.Prompt != "" {
@@ -583,7 +576,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve prompt file %s: %w", cmd.PromptFile, err)
 			}
-			
+
 			// Read prompt from resolved file
 			content, err := os.ReadFile(resolvedPath)
 			if err != nil {
@@ -601,7 +594,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 				userPrompt = string(content)
 			}
 		}
-		
+
 		if userPrompt != "" {
 			if job.PromptBody == "" {
 				job.PromptBody = strings.TrimSpace(userPrompt)
@@ -611,7 +604,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		}
 	} else {
 		// Traditional template rendering approach
-		
+
 		// Render the prompt
 		promptData := map[string]string{
 			"Title": cmd.Title,
@@ -631,14 +624,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// Generate job ID
 	job.ID = generateJobIDFromTitle(plan, job.Title)
 
-	// Set worktree: use inherited worktree if available, otherwise default to plan name
-	// The plan name is the base name of the plan directory
-	if job.Worktree == "" {
-		if inheritedWorktree != "" {
-			job.Worktree = inheritedWorktree
-		} else {
-			job.Worktree = filepath.Base(plan.Directory)
-		}
+	// Command line --worktree flag overrides template worktree
+	if worktreeToUse != "" {
+		job.Worktree = worktreeToUse
 	}
 
 	return job, nil
@@ -649,7 +637,7 @@ func generateJobIDFromTitle(plan *orchestration.Plan, title string) string {
 	base := strings.ToLower(title)
 	base = strings.ReplaceAll(base, " ", "-")
 	base = strings.ReplaceAll(base, "_", "-")
-	
+
 	// Remove non-alphanumeric characters
 	var cleaned strings.Builder
 	for _, r := range base {
@@ -657,9 +645,9 @@ func generateJobIDFromTitle(plan *orchestration.Plan, title string) string {
 			cleaned.WriteRune(r)
 		}
 	}
-	
+
 	id := cleaned.String()
-	
+
 	// Ensure uniqueness
 	exists := false
 	for _, job := range plan.Jobs {
@@ -668,7 +656,7 @@ func generateJobIDFromTitle(plan *orchestration.Plan, title string) string {
 			break
 		}
 	}
-	
+
 	if exists {
 		// Add number suffix
 		for i := 2; ; i++ {
@@ -685,6 +673,6 @@ func generateJobIDFromTitle(plan *orchestration.Plan, title string) string {
 			}
 		}
 	}
-	
+
 	return id
 }

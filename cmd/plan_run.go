@@ -37,7 +37,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			// It might be a plan name in a configured plans_directory, try resolving it.
 			resolvedPath, resolveErr := resolvePlanPath(target)
 			if resolveErr != nil {
-				 return fmt.Errorf("target not found: %s", target)
+				return fmt.Errorf("target not found: %s", target)
 			}
 			info, err = os.Stat(resolvedPath)
 			if err != nil {
@@ -77,7 +77,30 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load plan: %w", err)
 	}
-	
+
+	// Check for multiple worktrees
+	worktrees := make(map[string]bool)
+	hasMainRepo := false
+	for _, job := range plan.Jobs {
+		if job.Worktree == "" {
+			hasMainRepo = true
+		} else {
+			worktrees[job.Worktree] = true
+		}
+	}
+
+	// Warn if multiple different worktrees or a mix of worktree and non-worktree jobs
+	if (len(worktrees) > 1) || (len(worktrees) > 0 && hasMainRepo) {
+		fmt.Printf("%s Warning: This plan uses multiple worktrees and/or the main repository:\n", color.YellowString("⚠️"))
+		if hasMainRepo {
+			fmt.Println("  - <main-repo>")
+		}
+		for wt := range worktrees {
+			fmt.Printf("  - %s\n", wt)
+		}
+		fmt.Println()
+	}
+
 	// Inject the loaded configuration into the plan object
 	plan.Orchestration = &orchestration.Config{
 		OneshotModel:         flowCfg.OneshotModel,
@@ -85,7 +108,6 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		PlansDirectory:       flowCfg.PlansDirectory,
 		MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
 	}
-	
 
 	// Check if any oneshot jobs need to be run
 	hasOneShot := false
@@ -131,14 +153,14 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			break
 		}
 	}
-	
+
 	if hasAgentJobs && !shouldSkipDockerCheck() {
 		dockerClient, err = docker.NewSDKClient()
 		if err != nil {
 			return fmt.Errorf("failed to create Docker client: %w", err)
 		}
 	}
-	
+
 	// Create orchestrator
 	orch, err := orchestration.NewOrchestrator(plan, orchConfig, dockerClient)
 	if err != nil {
@@ -204,7 +226,7 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 	// Check dependencies
 	unmetDeps := getUnmetDependencies(job, plan)
 	if len(unmetDeps) > 0 {
-		return fmt.Errorf("dependencies not satisfied for job %s: %s", 
+		return fmt.Errorf("dependencies not satisfied for job %s: %s",
 			jobFile, strings.Join(unmetDeps, ", "))
 	}
 
@@ -225,12 +247,12 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 	}
 
 	// Execute the job
-	fmt.Printf("\n%s Running job %s...\n", 
+	fmt.Printf("\n%s Running job %s...\n",
 		color.YellowString("⚡"), jobFile)
 
 	jobPath := filepath.Join(plan.Directory, jobFile)
 	err := orch.RunJob(ctx, jobPath)
-	
+
 	if err != nil {
 		fmt.Printf("%s Job failed: %v\n", color.RedString("✗"), err)
 		return err
@@ -244,7 +266,7 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orchestration.Plan, cmd *cobra.Command) error {
 	// Get current status
 	status := orch.GetStatus()
-	
+
 	if status.Pending == 0 && status.Running == 0 {
 		if status.Failed > 0 {
 			return fmt.Errorf("no runnable jobs - %d jobs failed", status.Failed)
@@ -282,7 +304,7 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 	}
 
 	// Execute jobs
-	fmt.Printf("\n%s Running %d job(s)...\n", 
+	fmt.Printf("\n%s Running %d job(s)...\n",
 		color.YellowString("⚡"), len(runnable))
 
 	err := orch.RunNext(ctx)
@@ -298,7 +320,7 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orchestration.Plan, cmd *cobra.Command) error {
 	// Get initial status
 	status := orch.GetStatus()
-	
+
 	remaining := status.Pending + status.Running
 	if remaining == 0 {
 		if status.Failed > 0 {
@@ -310,7 +332,7 @@ func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orc
 
 	// Show plan overview
 	fmt.Printf("Plan: %s\n", color.CyanString(plan.Name))
-	fmt.Printf("Total jobs: %d (%d completed, %d remaining)\n", 
+	fmt.Printf("Total jobs: %d (%d completed, %d remaining)\n",
 		status.Total, status.Completed, remaining)
 
 	// Confirm unless --yes
@@ -326,7 +348,7 @@ func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orc
 
 	// Run all jobs
 	fmt.Println("\nStarting orchestration...")
-	
+
 	// Set up progress monitoring if --watch
 	if planRunWatch {
 		go monitorProgress(ctx, orch)
@@ -340,7 +362,7 @@ func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orc
 	// Final status
 	finalStatus := orch.GetStatus()
 	fmt.Printf("\n%s Orchestration complete!\n", color.GreenString("✓"))
-	fmt.Printf("Completed: %d, Failed: %d\n", 
+	fmt.Printf("Completed: %d, Failed: %d\n",
 		finalStatus.Completed, finalStatus.Failed)
 
 	return nil
@@ -349,7 +371,7 @@ func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orc
 // getUnmetDependencies returns the IDs of unmet dependencies.
 func getUnmetDependencies(job *orchestration.Job, plan *orchestration.Plan) []string {
 	var unmet []string
-	
+
 	for _, depRef := range job.DependsOn {
 		// Try to find by ID first
 		dep, found := plan.GetJobByID(depRef)
@@ -361,12 +383,12 @@ func getUnmetDependencies(job *orchestration.Job, plan *orchestration.Plan) []st
 				continue
 			}
 		}
-		
+
 		if dep.Status != orchestration.JobStatusCompleted {
 			unmet = append(unmet, fmt.Sprintf("%s (%s)", depRef, dep.Status))
 		}
 	}
-	
+
 	return unmet
 }
 
@@ -384,9 +406,9 @@ func monitorProgress(ctx context.Context, orch *orchestration.Orchestrator) {
 			return
 		case <-ticker.C:
 			status := orch.GetStatus()
-			fmt.Printf("\r%s Progress: %d/%d completed, %d running", 
-				spinner[i%len(spinner)], 
-				status.Completed, 
+			fmt.Printf("\r%s Progress: %d/%d completed, %d running",
+				spinner[i%len(spinner)],
+				status.Completed,
 				status.Total,
 				status.Running)
 			i++
@@ -396,8 +418,8 @@ func monitorProgress(ctx context.Context, orch *orchestration.Orchestrator) {
 
 // Command flags specific to run (defined in jobs.go)
 var (
-	planRunParallel int
-	planRunWatch    bool
-	planRunYes      bool
+	planRunParallel        int
+	planRunWatch           bool
+	planRunYes             bool
 	planRunSkipInteractive bool
 )
