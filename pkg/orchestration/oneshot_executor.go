@@ -1215,8 +1215,17 @@ func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan 
 	if info, err := os.Stat(coldContextFile); err == nil && info.Size() > 0 {
 		// Default TTL of 1 hour for cache
 		ttl := 1 * time.Hour
-		var err error
-		cacheInfo, err = cacheManager.GetOrCreateCache(ctx, e.geminiClient, model, coldContextFile, ttl)
+		
+		// Check for @freeze-cache directive
+		ctxMgr := grovecontext.NewManager(workDir)
+		ignoreChanges, err := ctxMgr.ShouldFreezeCache()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Warning: could not check for @freeze-cache directive: %v\n", err)
+		} else if ignoreChanges {
+			fmt.Fprintf(os.Stderr, "❄️  Cache is frozen by @freeze-cache directive in rules file.\n")
+		}
+
+		cacheInfo, err = cacheManager.GetOrCreateCache(ctx, e.geminiClient, model, coldContextFile, ttl, ignoreChanges)
 		if err != nil {
 			return "", fmt.Errorf("managing cache: %w", err)
 		}

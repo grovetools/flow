@@ -39,7 +39,7 @@ func NewCacheManager(workingDir string) *CacheManager {
 }
 
 // GetOrCreateCache returns an existing valid cache or creates a new one
-func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, model string, coldContextFilePath string, ttl time.Duration) (*CacheInfo, error) {
+func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, model string, coldContextFilePath string, ttl time.Duration, ignoreChanges bool) (*CacheInfo, error) {
 	// Check if the cold context file exists
 	if _, err := os.Stat(coldContextFilePath); err != nil {
 		if os.IsNotExist(err) {
@@ -71,6 +71,10 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 				fmt.Fprintf(os.Stderr, "⏰ Cache expired at %s\n", cacheInfo.ExpiresAt.Format(time.RFC3339))
 				needNewCache = true
 			} else if changed, changedFiles := hasFilesChanged(cacheInfo.CachedFileHashes, []string{coldContextFilePath}); changed {
+				if ignoreChanges {
+					fmt.Fprintf(os.Stderr, "⚠️  Ignoring file changes and using stale cache due to directive\n")
+					return &cacheInfo, nil
+				}
 				fmt.Fprintf(os.Stderr, "🔄 Cached files have changed:\n")
 				for _, file := range changedFiles {
 					fmt.Fprintf(os.Stderr, "   • %s\n", file)
