@@ -1,0 +1,259 @@
+package cmd
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+)
+
+// PlanConfigCmd represents the plan config command
+type PlanConfigCmd struct {
+	Dir  string
+	Set  []string
+	Get  string
+	JSON bool
+}
+
+// NewPlanConfigCmd creates a new plan config command
+func NewPlanConfigCmd() *cobra.Command {
+	var setFlags []string
+	var getFlag string
+	var jsonFlag bool
+
+	cmd := &cobra.Command{
+		Use:   "config [directory]",
+		Short: "Get or set plan configuration values",
+		Long: `Get or set configuration values in the plan's .grove-plan.yml file.
+
+Examples:
+  # Set a single value
+  flow plan config myplan --set model=gemini-2.0-flash
+  
+  # Set multiple values
+  flow plan config myplan --set model=gemini-2.0-flash --set worktree=feature/new
+  
+  # Get a value
+  flow plan config myplan --get model
+  
+  # Show all configuration
+  flow plan config myplan`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var dir string
+			if len(args) > 0 {
+				dir = args[0]
+			}
+
+			configCmd := &PlanConfigCmd{
+				Dir:  dir,
+				Set:  setFlags,
+				Get:  getFlag,
+				JSON: jsonFlag,
+			}
+			return RunPlanConfig(configCmd)
+		},
+	}
+
+	cmd.Flags().StringArrayVar(&setFlags, "set", nil, "Set a configuration value (format: key=value)")
+	cmd.Flags().StringVar(&getFlag, "get", "", "Get a configuration value")
+	cmd.Flags().BoolVar(&jsonFlag, "json", false, "Output in JSON format")
+
+	return cmd
+}
+
+// RunPlanConfig executes the plan config command
+func RunPlanConfig(cmd *PlanConfigCmd) error {
+	// Resolve the plan path
+	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir)
+	if err != nil {
+		return fmt.Errorf("could not resolve plan path: %w", err)
+	}
+
+	// For absolute paths, use them directly
+	if filepath.IsAbs(cmd.Dir) {
+		planPath = cmd.Dir
+	}
+
+	// Check if plan directory exists
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
+		return fmt.Errorf("plan directory does not exist: %s", planPath)
+	}
+
+	configPath := filepath.Join(planPath, ".grove-plan.yml")
+
+	// If no flags, show current configuration
+	if len(cmd.Set) == 0 && cmd.Get == "" {
+		return showConfig(configPath, cmd.JSON)
+	}
+
+	// Handle get operation
+	if cmd.Get != "" {
+		return getConfigValue(configPath, cmd.Get, cmd.JSON)
+	}
+
+	// Handle set operations
+	if len(cmd.Set) > 0 {
+		return setConfigValues(configPath, cmd.Set)
+	}
+
+	return nil
+}
+
+// showConfig displays the current configuration
+func showConfig(configPath string, jsonOutput bool) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if jsonOutput {
+				fmt.Println("{}")
+			} else {
+				fmt.Println("No .grove-plan.yml file found")
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	if jsonOutput {
+		// Parse YAML and convert to JSON
+		var config map[string]interface{}
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("failed to parse config file: %w", err)
+		}
+		
+		// Filter out nil values
+		filtered := make(map[string]interface{})
+		for k, v := range config {
+			if v != nil {
+				filtered[k] = v
+			}
+		}
+		
+		jsonData, err := json.MarshalIndent(filtered, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to convert to JSON: %w", err)
+		}
+		fmt.Println(string(jsonData))
+	} else {
+		fmt.Println(string(data))
+	}
+	return nil
+}
+
+// getConfigValue retrieves a specific configuration value
+func getConfigValue(configPath string, key string, jsonOutput bool) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no .grove-plan.yml file found")
+		}
+		return fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	value, exists := config[key]
+	if !exists {
+		return fmt.Errorf("key '%s' not found in configuration", key)
+	}
+
+	if jsonOutput {
+		// Output as JSON object with the key
+		result := map[string]interface{}{key: value}
+		jsonData, err := json.Marshal(result)
+		if err != nil {
+			return fmt.Errorf("failed to convert to JSON: %w", err)
+		}
+		fmt.Println(string(jsonData))
+	} else {
+		fmt.Println(value)
+	}
+	return nil
+}
+
+// setConfigValues updates configuration values
+func setConfigValues(configPath string, pairs []string) error {
+	// Read existing config or create new one
+	var config map[string]interface{}
+	
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+		// File doesn't exist, create new config
+		config = make(map[string]interface{})
+	} else {
+		// Parse existing config
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("failed to parse config file: %w", err)
+		}
+		if config == nil {
+			config = make(map[string]interface{})
+		}
+	}
+
+	// Parse and apply key=value pairs
+	for _, pair := range pairs {
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid format for set flag: %s (expected key=value)", pair)
+		}
+		
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		
+		// Validate key
+		switch key {
+		case "model", "worktree", "target_agent_container":
+			config[key] = value
+		default:
+			return fmt.Errorf("unknown configuration key: %s", key)
+		}
+	}
+
+	// Generate YAML with comments
+	var output strings.Builder
+	
+	// Model
+	output.WriteString("# Default model for jobs in this plan\n")
+	if model, ok := config["model"].(string); ok && model != "" {
+		output.WriteString(fmt.Sprintf("model: %s\n", model))
+	} else {
+		output.WriteString("# model: gemini-2.5-pro\n")
+	}
+	output.WriteString("\n")
+	
+	// Worktree
+	output.WriteString("# Default worktree for agent jobs\n")
+	if worktree, ok := config["worktree"].(string); ok && worktree != "" {
+		output.WriteString(fmt.Sprintf("worktree: %s\n", worktree))
+	} else {
+		output.WriteString("# worktree: feature-branch\n")
+	}
+	output.WriteString("\n")
+	
+	// Container
+	output.WriteString("# Default container for agent jobs\n")
+	if container, ok := config["target_agent_container"].(string); ok && container != "" {
+		output.WriteString(fmt.Sprintf("target_agent_container: %s\n", container))
+	} else {
+		output.WriteString("# target_agent_container: grove-agent-ide\n")
+	}
+
+	// Write the file
+	if err := os.WriteFile(configPath, []byte(output.String()), 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	fmt.Printf("✓ Updated %s\n", configPath)
+	return nil
+}

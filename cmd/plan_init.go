@@ -13,11 +13,6 @@ import (
 
 // RunPlanInit implements the plan init command.
 func RunPlanInit(cmd *PlanInitCmd) error {
-	// If template is specified, automatically enable CreateInitial
-	if cmd.Template != "" && !cmd.CreateInitial {
-		cmd.CreateInitial = true
-	}
-
 	// Resolve the full path for the new plan directory.
 	planPath, err := resolvePlanPath(cmd.Dir)
 	if err != nil {
@@ -34,72 +29,26 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 		return err
 	}
 
-	// Read spec content if provided
-	var specContent string
-	if cmd.Spec != "" {
-		// Read provided spec file
-		data, err := os.ReadFile(cmd.Spec)
-		if err != nil {
-			return fmt.Errorf("read spec file: %w", err)
-		}
-		specContent = string(data)
-	} else {
-		// Use default spec content
-		specContent = "# Spec\n\n"
-	}
-
-	// Only create initial job if explicitly requested
-	var jobFilename string
-	if cmd.CreateInitial {
-		// Load config to get default model if not specified
-		model := cmd.Model
-		if model == "" {
-			// Try to load flow config
-			flowCfg, err := loadFlowConfig()
-			if err == nil && flowCfg.OneshotModel != "" {
-				model = flowCfg.OneshotModel
-			}
-		}
-
-		// Create initial job
-		var err error
-		jobFilename, err = createInitialPlanJob(planPath, model, cmd.OutputType, cmd.Template, specContent)
-		if err != nil {
-			return fmt.Errorf("create initial job: %w", err)
-		}
+	// Create default .grove-plan.yml
+	if err := createDefaultPlanConfig(planPath, cmd.Model, cmd.Worktree, cmd.Container); err != nil {
+		// Log a warning but don't fail the init command
+		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	}
 
 	// Print success message
 	fmt.Printf("Initializing orchestration plan in:\n  %s\n\n", planPath)
 	fmt.Println("✓ Created plan directory")
+	fmt.Println("✓ Created .grove-plan.yml with default configuration")
 
-	if cmd.CreateInitial {
-		fmt.Printf("✓ Created %s\n", jobFilename)
-		fmt.Println("\nNext steps:")
-		fmt.Printf("1. Review the job file\n")
-		fmt.Printf("2. Run: flow plan run %s\n", cmd.Dir)
-		fmt.Printf("3. Check status: flow plan status %s\n", cmd.Dir)
-	} else {
-		fmt.Println("\nNext steps:")
-		fmt.Printf("1. Add your first job: flow plan add %s\n", cmd.Dir)
-		fmt.Printf("2. Check status: flow plan status %s\n", cmd.Dir)
-	}
+	fmt.Println("\nNext steps:")
+	fmt.Printf("1. Add your first job: flow plan add %s\n", cmd.Dir)
+	fmt.Printf("2. Check status: flow plan status %s\n", cmd.Dir)
 
 	return nil
 }
 
 // validateInitInputs validates the command inputs.
 func validateInitInputs(cmd *PlanInitCmd, resolvedPath string) error {
-	// Check spec file exists if provided
-	if cmd.Spec != "" {
-		if _, err := os.Stat(cmd.Spec); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("specification file not found: %s", cmd.Spec)
-			}
-			return fmt.Errorf("check spec file: %w", err)
-		}
-	}
-
 	// Validate directory name
 	if err := validateDirectoryName(cmd.Dir); err != nil {
 		return err
@@ -143,6 +92,37 @@ func createPlanDirectory(dir string, force bool) error {
 	}
 
 	return nil
+}
+
+// createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
+func createDefaultPlanConfig(planPath, model, worktree, container string) error {
+	var configContent strings.Builder
+
+	configContent.WriteString("# Default model for jobs in this plan\n")
+	if model != "" {
+		configContent.WriteString(fmt.Sprintf("model: %s\n", model))
+	} else {
+		configContent.WriteString("# model: gemini-2.5-pro\n")
+	}
+	configContent.WriteString("\n")
+
+	configContent.WriteString("# Default worktree for agent jobs\n")
+	if worktree != "" {
+		configContent.WriteString(fmt.Sprintf("worktree: %s\n", worktree))
+	} else {
+		configContent.WriteString("# worktree: feature-branch\n")
+	}
+	configContent.WriteString("\n")
+
+	configContent.WriteString("# Default container for agent jobs\n")
+	if container != "" {
+		configContent.WriteString(fmt.Sprintf("target_agent_container: %s\n", container))
+	} else {
+		configContent.WriteString("# target_agent_container: grove-agent-ide\n")
+	}
+
+	configPath := filepath.Join(planPath, ".grove-plan.yml")
+	return os.WriteFile(configPath, []byte(configContent.String()), 0644)
 }
 
 // createInitialPlanJob creates the first job file and returns the filename.

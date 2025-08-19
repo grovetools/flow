@@ -157,6 +157,9 @@ func getTargetContainer(job *Job, plan *Plan) string {
 	if job.TargetAgentContainer != "" {
 		return job.TargetAgentContainer
 	}
+	if plan.Config != nil && plan.Config.TargetAgentContainer != "" {
+		return plan.Config.TargetAgentContainer
+	}
 	if plan.Orchestration != nil {
 		return plan.Orchestration.TargetAgentContainer
 	}
@@ -229,7 +232,7 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 	}
 
 	targetContainer := getTargetContainer(job, plan)
-	
+
 	// Determine execution mode based on container presence
 	if targetContainer != "" {
 		// Container mode - existing behavior
@@ -265,13 +268,13 @@ func (e *AgentExecutor) runInContainer(ctx context.Context, worktreePath string,
 
 	// For non-interactive orchestration, we need to skip permission prompts
 	shellCommand := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", containerWorkDir)
-	
+
 	// Execute the command using the Docker client
 	stdout, stderr, err := e.dockerClient.ExecInContainer(ctx, targetContainer, []string{"bash", "-c", shellCommand}, strings.NewReader(prompt))
 	if err != nil {
 		return fmt.Errorf("agent execution failed: %w", err)
 	}
-	
+
 	// Write output to both log file and console
 	if stdout != "" {
 		fmt.Print(stdout)
@@ -279,7 +282,7 @@ func (e *AgentExecutor) runInContainer(ctx context.Context, worktreePath string,
 			fmt.Printf("Warning: failed to write stdout to log: %v\n", writeErr)
 		}
 	}
-	
+
 	if stderr != "" {
 		fmt.Fprint(os.Stderr, stderr)
 		if _, writeErr := log.WriteString(stderr); writeErr != nil {
@@ -322,22 +325,22 @@ func (e *AgentExecutor) runOnHost(ctx context.Context, worktreePath string, prom
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 	defer os.Chdir(originalDir)
-	
+
 	if err := os.Chdir(worktreePath); err != nil {
 		return fmt.Errorf("failed to change to worktree directory: %w", err)
 	}
-	
+
 	// Prepare the claude command
 	args := []string{"--dangerously-skip-permissions"}
 	if coreCfg.Agent.Args != nil {
 		args = append(args, coreCfg.Agent.Args...)
 	}
-	
+
 	// Create the command
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = worktreePath
 	cmd.Stdin = strings.NewReader(prompt)
-	
+
 	// Capture output
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -350,13 +353,13 @@ func (e *AgentExecutor) runOnHost(ctx context.Context, worktreePath string, prom
 		}
 		return fmt.Errorf("agent execution failed: %w", err)
 	}
-	
+
 	// Write output to both log file and console
 	fmt.Print(string(output))
 	if _, writeErr := log.Write(output); writeErr != nil {
 		fmt.Printf("Warning: failed to write output to log: %v\n", writeErr)
 	}
-	
+
 	// Handle output based on configuration (commit, etc.)
 	if job.Output.Type == "commit" && job.Output.Commit.Enabled {
 		// Create commit in worktree
@@ -395,7 +398,7 @@ func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree string, prom
 func buildPromptFromSources(job *Job, plan *Plan) (string, error) {
 	var promptFiles []string
 	var systemMessage strings.Builder
-	
+
 	// Check if this is a reference-based prompt (has template and prompt_source)
 	if job.Template != "" && len(job.PromptSource) > 0 {
 		// Reference-based prompt - load template
@@ -404,30 +407,30 @@ func buildPromptFromSources(job *Job, plan *Plan) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolving template %s: %w", job.Template, err)
 		}
-		
+
 		// Start with template content
 		systemMessage.WriteString(template.Prompt)
 		systemMessage.WriteString("\n\n")
 		systemMessage.WriteString("The following files are relevant to your task. Please read their contents before proceeding:\n\n")
-		
+
 		// Get project root for resolving paths
 		projectRoot, err := GetProjectRoot()
 		if err != nil {
 			return "", fmt.Errorf("failed to get project root: %w", err)
 		}
-		
+
 		// Collect paths from prompt sources
 		for _, source := range job.PromptSource {
 			// Resolve the source file path
 			var sourcePath string
-			
+
 			// If it's a relative path, make it absolute from project root
 			if !filepath.IsAbs(source) {
 				sourcePath = filepath.Join(projectRoot, source)
 			} else {
 				sourcePath = source
 			}
-			
+
 			// Check if file exists
 			if _, err := os.Stat(sourcePath); err == nil {
 				promptFiles = append(promptFiles, sourcePath)

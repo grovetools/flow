@@ -16,8 +16,7 @@ var planInitCmd = &cobra.Command{
 	Use:   "init <directory>",
 	Short: "Initialize a new orchestration plan directory",
 	Long: `Initialize a new orchestration plan in the specified directory.
-If a specification file is provided with --spec-file, it will be copied to the plan directory.
-Otherwise, an empty spec.md file will be created.`,
+Creates a .grove-plan.yml file with default configuration options.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPlanInit,
 }
@@ -107,10 +106,8 @@ If no directory is specified, uses the current directory.`,
 var (
 	planInitForce         bool
 	planInitModel         string
-	planInitCreateInitial bool
-	planInitOutputType    string
-	planInitSpecFile      string
-	planInitTemplate      string
+	planInitWorktree      string
+	planInitContainer     string
 	planRunDir            string
 	planRunAll            bool
 	planRunNext           bool
@@ -147,10 +144,8 @@ func GetPlanCommand() *cobra.Command {
 	// Init command flags
 	planInitCmd.Flags().BoolVarP(&planInitForce, "force", "f", false, "Overwrite existing directory")
 	planInitCmd.Flags().StringVar(&planInitModel, "model", "", "Default model for jobs (e.g., claude-3-5-sonnet-20241022, gpt-4)")
-	planInitCmd.Flags().BoolVar(&planInitCreateInitial, "create-initial-job", false, "Create an initial job file")
-	planInitCmd.Flags().StringVar(&planInitOutputType, "output-type", "file", "Output type for initial job: file, commit, none, or generate_jobs")
-	planInitCmd.Flags().StringVarP(&planInitSpecFile, "spec-file", "s", "", "Path to specification file (creates empty spec.md if not provided)")
-	planInitCmd.Flags().StringVar(&planInitTemplate, "template", "", "Name of the job template to use for initial job")
+	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Default worktree for agent jobs in the plan")
+	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -210,6 +205,7 @@ func GetPlanCommand() *cobra.Command {
 	planCmd.AddCommand(NewPlanCurrentCmd())
 	planCmd.AddCommand(NewPlanUnsetCmd())
 	planCmd.AddCommand(NewPlanExtractCmd())
+	planCmd.AddCommand(NewPlanConfigCmd())
 
 	// Return the configured jobs command
 	return planCmd
@@ -217,13 +213,11 @@ func GetPlanCommand() *cobra.Command {
 
 func runPlanInit(cmd *cobra.Command, args []string) error {
 	initCmd := &PlanInitCmd{
-		Spec:          planInitSpecFile,
-		Dir:           args[0],
-		Force:         planInitForce,
-		Model:         planInitModel,
-		CreateInitial: planInitCreateInitial,
-		OutputType:    planInitOutputType,
-		Template:      planInitTemplate,
+		Dir:       args[0],
+		Force:     planInitForce,
+		Model:     planInitModel,
+		Worktree:  planInitWorktree,
+		Container: planInitContainer,
 	}
 	return RunPlanInit(initCmd)
 }
@@ -285,11 +279,9 @@ func runPlanAddStep(cmd *cobra.Command, args []string) error {
 
 // PlanInitCmd holds the parameters for the init command.
 type PlanInitCmd struct {
-	Spec          string
-	Dir           string
-	Force         bool
-	Model         string
-	CreateInitial bool
-	OutputType    string
-	Template      string
+	Dir       string
+	Force     bool
+	Model     string
+	Worktree  string
+	Container string
 }

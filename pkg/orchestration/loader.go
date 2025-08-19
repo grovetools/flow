@@ -35,6 +35,18 @@ func LoadPlan(dir string) (*Plan, error) {
 		plan.SpecFile = specPath
 	}
 
+	// Load .grove-plan.yml if it exists
+	planConfigPath := filepath.Join(dir, ".grove-plan.yml")
+	if _, err := os.Stat(planConfigPath); err == nil {
+		yamlFile, err := os.ReadFile(planConfigPath)
+		if err == nil {
+			var planConfig PlanConfig
+			if yaml.Unmarshal(yamlFile, &planConfig) == nil {
+				plan.Config = &planConfig
+			}
+		}
+	}
+
 	// Read all files in directory
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -72,7 +84,7 @@ func LoadPlan(dir string) (*Plan, error) {
 		plan.Jobs = append(plan.Jobs, job)
 		if job.ID != "" {
 			if existing, exists := plan.JobsByID[job.ID]; exists {
-				return nil, fmt.Errorf("duplicate job ID %q in files %s and %s", 
+				return nil, fmt.Errorf("duplicate job ID %q in files %s and %s",
 					job.ID, existing.Filename, job.Filename)
 			}
 			plan.JobsByID[job.ID] = job
@@ -153,8 +165,8 @@ func LoadJob(filepath string) (*Job, error) {
 	// Validate job status
 	switch job.Status {
 	case JobStatusPending, JobStatusRunning, JobStatusCompleted,
-		 JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview,
-		 JobStatusPendingUser, JobStatusPendingLLM:
+		JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview,
+		JobStatusPendingUser, JobStatusPendingLLM:
 		// Valid status
 	default:
 		return nil, fmt.Errorf("invalid job status: %s", job.Status)
@@ -162,7 +174,6 @@ func LoadJob(filepath string) (*Job, error) {
 
 	return job, nil
 }
-
 
 // ResolveDependencies converts dependency IDs to Job pointers and checks for cycles.
 func (p *Plan) ResolveDependencies() error {
@@ -180,7 +191,7 @@ func (p *Plan) ResolveDependencies() error {
 			continue
 		}
 		job.Dependencies = make([]*Job, 0, len(job.DependsOn))
-		
+
 		for _, depRef := range job.DependsOn {
 			// Try to resolve by job ID first
 			depJob, exists := p.JobsByID[depRef]
@@ -198,7 +209,7 @@ func (p *Plan) ResolveDependencies() error {
 	// Check for circular dependencies
 	visited := make(map[string]bool)
 	recStack := make(map[string]bool)
-	
+
 	for _, job := range p.Jobs {
 		if job == nil || job.ID == "" {
 			continue
@@ -220,7 +231,7 @@ func (p *Plan) checkCycles(jobID string, visited, recStack map[string]bool) erro
 	if job == nil {
 		return fmt.Errorf("job with ID %s not found", jobID)
 	}
-	
+
 	// Check dependencies using the resolved job references
 	for _, dep := range job.Dependencies {
 		if dep == nil || dep.ID == "" {
@@ -244,13 +255,13 @@ func (p *Plan) checkCycles(jobID string, visited, recStack map[string]bool) erro
 // GetRunnableJobs returns all jobs that can currently be executed.
 func (p *Plan) GetRunnableJobs() []*Job {
 	var runnable []*Job
-	
+
 	for _, job := range p.Jobs {
 		if job.IsRunnable() {
 			runnable = append(runnable, job)
 		}
 	}
-	
+
 	return runnable
 }
 
@@ -275,7 +286,7 @@ func (p *Plan) GetJobsSortedByFilename() []*Job {
 	// Create a copy of the jobs slice
 	jobs := make([]*Job, len(p.Jobs))
 	copy(jobs, p.Jobs)
-	
+
 	// Sort by filename
 	for i := 0; i < len(jobs)-1; i++ {
 		for j := i + 1; j < len(jobs); j++ {
@@ -284,7 +295,7 @@ func (p *Plan) GetJobsSortedByFilename() []*Job {
 			}
 		}
 	}
-	
+
 	return jobs
 }
 
@@ -304,7 +315,7 @@ func SavePlan(dir string, plan *Plan) error {
 		if job.Filename == "" {
 			continue
 		}
-		
+
 		// Generate job content
 		content, err := generateJobContent(job)
 		if err != nil {
@@ -320,3 +331,4 @@ func SavePlan(dir string, plan *Plan) error {
 
 	return nil
 }
+

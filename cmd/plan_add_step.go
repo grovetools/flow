@@ -195,6 +195,14 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			job.Worktree = worktreeToUse
 		}
 
+		// Apply plan-level defaults if not set
+		if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+			job.Model = plan.Config.Model
+		}
+		if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
+			job.Worktree = plan.Config.Worktree
+		}
+
 		return job, nil
 	}
 
@@ -254,6 +262,14 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		job.Worktree = worktreeToUse
 	}
 
+	// Apply plan-level defaults if not set
+	if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+		job.Model = plan.Config.Model
+	}
+	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
+		job.Worktree = plan.Config.Worktree
+	}
+
 	return job, nil
 }
 
@@ -307,21 +323,41 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 		worktree = explicitWorktree
 		fmt.Printf("\nWorktree: %s (set via --worktree flag)\n", worktree)
 	} else {
-		fmt.Print("\nWorktree name (optional, leave empty to run in main repository): ")
+		worktreePrompt := "\nWorktree name (optional, leave empty "
+		if plan.Config != nil && plan.Config.Worktree != "" {
+			worktreePrompt += fmt.Sprintf("for default [%s]", plan.Config.Worktree)
+		} else {
+			worktreePrompt += "to run in main repository"
+		}
+		worktreePrompt += "): "
+		fmt.Print(worktreePrompt)
 		worktree, err = reader.ReadString('\n')
 		if err != nil {
 			return nil, fmt.Errorf("failed to read worktree: %w", err)
 		}
 		worktree = strings.TrimSpace(worktree)
+		// Apply plan default if empty
+		if worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
+			worktree = plan.Config.Worktree
+		}
 	}
 
 	// Get model name (optional)
-	fmt.Print("\nModel name (optional, leave empty for default): ")
+	modelPrompt := "\nModel name (optional, leave empty for default"
+	if plan.Config != nil && plan.Config.Model != "" {
+		modelPrompt += fmt.Sprintf(" [%s]", plan.Config.Model)
+	}
+	modelPrompt += "): "
+	fmt.Print(modelPrompt)
 	model, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read model: %w", err)
 	}
 	model = strings.TrimSpace(model)
+	// Apply plan default if empty
+	if model == "" && plan.Config != nil && plan.Config.Model != "" {
+		model = plan.Config.Model
+	}
 
 	// Select output type
 	fmt.Println("\nOutput type:")
@@ -627,6 +663,14 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// Command line --worktree flag overrides template worktree
 	if worktreeToUse != "" {
 		job.Worktree = worktreeToUse
+	}
+
+	// Apply plan-level defaults if not set (CLI > Template > Plan config)
+	if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+		job.Model = plan.Config.Model
+	}
+	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
+		job.Worktree = plan.Config.Worktree
 	}
 
 	return job, nil
