@@ -86,7 +86,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		// Check if this is a chat job in a multi-job plan
 		if len(plan.Jobs) > 1 {
 			// This is a mixed plan, so this chat job is for context only
-			return fmt.Errorf("chat job '%s' found in a multi-job plan. Chat jobs are for context only and must be manually marked complete: `flow plan complete %s`", job.Title, job.FilePath)
+			// Automatically mark it as completed
+			fmt.Printf("Chat job '%s' found in multi-job plan - marking as completed (context-only).\n", job.Title)
+			job.Status = JobStatusCompleted
+			job.StartTime = time.Now()
+			job.EndTime = time.Now()
+			return updateJobFile(job)
 		}
 		return e.executeChatJob(ctx, job, plan)
 	}
