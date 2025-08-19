@@ -70,8 +70,11 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 			if time.Now().After(cacheInfo.ExpiresAt) {
 				fmt.Fprintf(os.Stderr, "⏰ Cache expired at %s\n", cacheInfo.ExpiresAt.Format(time.RFC3339))
 				needNewCache = true
-			} else if hasFilesChanged(cacheInfo.CachedFileHashes, []string{coldContextFilePath}) {
-				fmt.Fprintf(os.Stderr, "🔄 Cached files have changed\n")
+			} else if changed, changedFiles := hasFilesChanged(cacheInfo.CachedFileHashes, []string{coldContextFilePath}); changed {
+				fmt.Fprintf(os.Stderr, "🔄 Cached files have changed:\n")
+				for _, file := range changedFiles {
+					fmt.Fprintf(os.Stderr, "   • %s\n", file)
+				}
 				needNewCache = true
 			} else {
 				fmt.Fprintf(os.Stderr, "✅ Cache is valid until %s\n", cacheInfo.ExpiresAt.Format(time.RFC3339))
@@ -162,16 +165,23 @@ func generateCacheKey(files []string) string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// hasFilesChanged checks if any files have changed
-func hasFilesChanged(oldHashes map[string]string, files []string) bool {
+// hasFilesChanged checks if any files have changed and returns the changed files
+func hasFilesChanged(oldHashes map[string]string, files []string) (bool, []string) {
+	var changedFiles []string
+	
 	for _, file := range files {
 		newHash, err := hashFile(file)
 		if err != nil {
-			return true // Assume changed if can't read
+			changedFiles = append(changedFiles, fmt.Sprintf("%s (error reading file: %v)", file, err))
+			continue
 		}
-		if oldHash, exists := oldHashes[file]; !exists || oldHash != newHash {
-			return true
+		
+		if oldHash, exists := oldHashes[file]; !exists {
+			changedFiles = append(changedFiles, fmt.Sprintf("%s (new file)", file))
+		} else if oldHash != newHash {
+			changedFiles = append(changedFiles, file)
 		}
 	}
-	return false
+	
+	return len(changedFiles) > 0, changedFiles
 }
