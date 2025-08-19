@@ -262,8 +262,12 @@ func AgentJobLaunchScenario() *harness.Scenario {
 				// Plans are in ./plans/agent-plan as configured
 				planPath := filepath.Join(ctx.RootDir, "plans", "agent-plan")
 				
-				// Add the agent job
-				cmdAdd := command.New(flow, "plan", "add", planPath, "--title", "Refactor Code", "--type", "agent", "-p", "Refactor everything.").Dir(ctx.RootDir)
+				// Add the agent job with a worktree for launch
+				cmdAdd := command.New(flow, "plan", "add", planPath, 
+					"--title", "Refactor Code", 
+					"--type", "agent", 
+					"--worktree", "refactor-code",
+					"-p", "Refactor everything.").Dir(ctx.RootDir)
 				resultAdd := cmdAdd.Run()
 				ctx.ShowCommandOutput(cmdAdd.String(), resultAdd.Stdout, resultAdd.Stderr)
 				return resultAdd.Error
@@ -385,7 +389,8 @@ flow:
 			}),
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "inheritance-plan").Dir(ctx.RootDir)
+				// Initialize plan with a default worktree
+				cmd := command.New(flow, "plan", "init", "inheritance-plan", "--worktree", "inheritance-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to init plan: %w", result.Error)

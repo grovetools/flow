@@ -173,7 +173,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// Call LLM based on model type
 	var response string
-	if strings.HasPrefix(effectiveModel, "gemini") {
+	if effectiveModel == "mock" {
+		// Use mock response for testing
+		response = "This is a mock LLM response for testing purposes."
+		err = nil
+	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Use first-party Gemini API with caching
 		response, err = e.executeWithGemini(ctx, job, plan, workDir, prompt, effectiveModel)
 	} else {

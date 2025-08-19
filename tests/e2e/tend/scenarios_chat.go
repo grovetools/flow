@@ -33,6 +33,7 @@ func BasicChatWorkflowScenario() *harness.Scenario {
 flow:
   chat_directory: ./chats
   plans_directory: ./plans
+  oneshot_model: mock
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				return fs.WriteString(filepath.Join(chatDir, "my-idea.md"), "# My Idea\n\nLet's build a thing.")
@@ -71,7 +72,7 @@ flow:
 				// Run the chat file directly using flow plan run
 				chatPath := filepath.Join(ctx.RootDir, "chats", "my-idea.md")
 				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "plan", "run", chatPath, "--yes").Dir(ctx.RootDir)
+				cmd := cmdFunc(flow, "plan", "run", chatPath, "--yes", "--model", "mock").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -112,6 +113,7 @@ func ChatLaunchScenario() *harness.Scenario {
 flow:
   target_agent_container: fake-container
   plans_directory: ./plans
+  oneshot_model: mock
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
