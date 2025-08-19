@@ -253,7 +253,7 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 
 	// Add dependency files if the job has dependencies
 	if len(job.DependsOn) > 0 {
-		instruction += "\n\nFor additional context from previous jobs, also read: "
+		instruction += "For additional context from previous jobs, also read: "
 		var depFiles []string
 		for _, dep := range job.DependsOn {
 			// Convert dependency to absolute path
@@ -264,7 +264,7 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 			depFiles = append(depFiles, depPath)
 		}
 		instruction += strings.Join(depFiles, ", ")
-		instruction += "\n"
+		instruction += ". "
 	}
 
 	// Add context files if specified
