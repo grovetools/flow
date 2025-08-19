@@ -25,6 +25,7 @@ var (
 	chatTitle    string
 	chatModel    string
 	chatStatus   string
+	chatLaunchHost bool
 )
 
 func GetChatCommand() *cobra.Command {
@@ -75,6 +76,7 @@ Example:
 		Args: cobra.MaximumNArgs(1),
 		RunE: runChatLaunch,
 	}
+	chatLaunchCmd.Flags().BoolVar(&chatLaunchHost, "host", false, "Launch agent on the host in the main git repo, not in a container worktree")
 	
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatRunCmd)
@@ -567,72 +569,80 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runChatLaunch(cmd *cobra.Command, args []string) error {
-	var chatPath string
-	var chatTitle string
-	
-	// Determine if we have a file path or a title
-	if len(args) > 0 {
-		arg := args[0]
-		// Check if it looks like a file path
-		if strings.Contains(arg, "/") || strings.HasSuffix(arg, ".md") {
-			// Direct file path
-			chatPath = arg
-		} else {
-			// Title - we'll search for it
-			chatTitle = arg
-		}
-	} else {
-		return fmt.Errorf("please specify a chat title or file path")
+// resolveChatPath finds the chat file from a title or file path argument
+func resolveChatPath(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("please specify a chat title or file path")
 	}
 	
-	// If we have a title, search for the file
-	if chatTitle != "" {
-		flowCfg, err := loadFlowConfig()
+	arg := args[0]
+	
+	// Check if it looks like a file path
+	if strings.Contains(arg, "/") || strings.HasSuffix(arg, ".md") {
+		// Direct file path - verify it exists
+		info, err := os.Stat(arg)
 		if err != nil {
-			return err
+			return "", fmt.Errorf("chat file not found: %s", arg)
 		}
-		if flowCfg.ChatDirectory == "" {
-			return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
+		if info.IsDir() {
+			return "", fmt.Errorf("expected a file, got directory: %s", arg)
 		}
-		
-		chatDir, err := expandChatPath(flowCfg.ChatDirectory)
-		if err != nil {
-			return fmt.Errorf("failed to expand chat directory path: %w", err)
-		}
-		
-		// Search for the chat by title
-		var found bool
-		err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
-				return nil
-			}
-			
-			job, err := orchestration.LoadJob(path)
-			if err == nil && job.Type == "chat" && job.Title == chatTitle {
-				chatPath = path
-				found = true
-				return filepath.SkipDir // Stop searching
-			}
-			return nil
-		})
-		
-		if err != nil && err != filepath.SkipDir {
-			return fmt.Errorf("failed to search chat directory: %w", err)
-		}
-		
-		if !found {
-			return fmt.Errorf("chat not found with title: %s", chatTitle)
-		}
+		return arg, nil
 	}
 	
-	// Verify the file exists
-	info, err := os.Stat(chatPath)
+	// Otherwise, it's a title - search for it
+	chatTitle := arg
+	flowCfg, err := loadFlowConfig()
 	if err != nil {
-		return fmt.Errorf("chat file not found: %s", chatPath)
+		return "", err
 	}
-	if info.IsDir() {
-		return fmt.Errorf("expected a file, got directory: %s", chatPath)
+	if flowCfg.ChatDirectory == "" {
+		return "", fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
+	}
+	
+	chatDir, err := expandChatPath(flowCfg.ChatDirectory)
+	if err != nil {
+		return "", fmt.Errorf("failed to expand chat directory path: %w", err)
+	}
+	
+	// Search for the chat by title
+	var chatPath string
+	var found bool
+	err = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
+			return nil
+		}
+		
+		job, err := orchestration.LoadJob(path)
+		if err == nil && job.Type == "chat" && job.Title == chatTitle {
+			chatPath = path
+			found = true
+			return filepath.SkipDir // Stop searching
+		}
+		return nil
+	})
+	
+	if err != nil && err != filepath.SkipDir {
+		return "", fmt.Errorf("failed to search chat directory: %w", err)
+	}
+	
+	if !found {
+		return "", fmt.Errorf("chat not found with title: %s", chatTitle)
+	}
+	
+	return chatPath, nil
+}
+
+func runChatLaunch(cmd *cobra.Command, args []string) error {
+	// Check if --host flag was used
+	if chatLaunchHost {
+		return runChatLaunchHost(cmd, args)
+	}
+	
+	// Resolve the chat file path
+	chatPath, err := resolveChatPath(args)
+	if err != nil {
+		return err
 	}
 	
 	// We no longer need to read the full content here since we're passing the file path
@@ -791,6 +801,66 @@ func buildAgentCommandFromChat(chatPath string, agentArgs []string) string {
 	cmdParts = append(cmdParts, escapedInstruction)
 	
 	return strings.Join(cmdParts, " ")
+}
+
+// runChatLaunchHost launches a chat in host mode (without container/worktree)
+func runChatLaunchHost(cmd *cobra.Command, args []string) error {
+	// 1. Resolve Chat Path
+	chatPath, err := resolveChatPath(args)
+	if err != nil {
+		return err
+	}
+	absChatPath, err := filepath.Abs(chatPath)
+	if err != nil {
+		return fmt.Errorf("could not get absolute path for chat file: %w", err)
+	}
+
+	// 2. Determine Git Root & Session Name
+	gitRoot, err := git.GetGitRoot(".")
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+	repoName := filepath.Base(gitRoot)
+	sessionName := sanitizeForTmuxSession(repoName)
+
+	executor := &exec.RealCommandExecutor{}
+
+	// 3. Ensure Tmux Session Exists
+	err = executor.Execute("tmux", "has-session", "-t", sessionName)
+	if err != nil { // has-session returns error if session doesn't exist
+		fmt.Printf("✓ Tmux session '%s' not found, creating it...\n", sessionName)
+		if createErr := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-c", gitRoot); createErr != nil {
+			return fmt.Errorf("failed to create tmux session '%s': %w", sessionName, createErr)
+		}
+	}
+
+	// 4. Create New Window
+	chatFileName := strings.TrimSuffix(filepath.Base(chatPath), filepath.Ext(chatPath))
+	windowName := "chat-" + sanitizeForTmuxSession(chatFileName)
+	
+	// Create the window and set its working directory to the git root
+	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", gitRoot); err != nil {
+		return fmt.Errorf("failed to create new tmux window: %w", err)
+	}
+
+	// 5. Build and Send Agent Command
+	fullCfg, err := loadFullConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	// Use the absolute path for the chat file
+	agentCommand := buildAgentCommandFromChat(absChatPath, fullCfg.Agent.Args)
+	
+	// Target the new window precisely
+	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+		return fmt.Errorf("failed to send command to tmux: %w", err)
+	}
+
+	// 6. Provide User Feedback
+	fmt.Printf("✓ Launched chat in new window '%s' within session '%s'.\n", windowName, sessionName)
+	fmt.Printf("  Attach with: tmux attach -t %s\n", sessionName)
+	return nil
 }
 
 // sanitizeForTmuxSession creates a valid tmux session name from a title
