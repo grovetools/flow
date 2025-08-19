@@ -15,7 +15,7 @@ import (
 type PlanAddStepCmd struct {
 	Dir         string   `arg:"" help:"Plan directory"`
 	Template    string   `flag:"" help:"Name of the job template to use"`
-	Type        string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, interactive_agent, or shell"`
+	Type        string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, chat, interactive_agent, or shell"`
 	Title       string   `flag:"" help:"Job title"`
 	DependsOn   []string `flag:"d" help:"Dependencies (job filenames)"`
 	PromptFile  string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
@@ -128,8 +128,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, inheritedW
 		return nil, fmt.Errorf("title is required (use --title or -i for interactive mode)")
 	}
 
-	if cmd.Type != "oneshot" && cmd.Type != "agent" && cmd.Type != "shell" && cmd.Type != "interactive_agent" {
-		return nil, fmt.Errorf("invalid job type: must be oneshot, agent, shell, or interactive_agent")
+	if cmd.Type != "oneshot" && cmd.Type != "agent" && cmd.Type != "chat" && cmd.Type != "shell" && cmd.Type != "interactive_agent" {
+		return nil, fmt.Errorf("invalid job type: must be oneshot, agent, chat, shell, or interactive_agent")
 	}
 
 	// Validate dependencies

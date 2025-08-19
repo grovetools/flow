@@ -163,7 +163,7 @@ func GetPlanCommand() *cobra.Command {
 
 	// Add-step command flags
 	planAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
-	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, agent, shell, or interactive_agent")
+	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, agent, chat, shell, or interactive_agent")
 	planAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	planAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
