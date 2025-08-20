@@ -185,9 +185,6 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			} else {
 				job.PromptBody = job.PromptBody + "\n\n## Additional Instructions\n\n" + cmd.Prompt
 			}
-		} else if len(relativeSourceFiles) == 0 {
-			// If no source files and no prompt, this is an error
-			return nil, fmt.Errorf("prompt is required when no source files are provided")
 		}
 
 		// Set worktree only if explicitly provided
@@ -236,9 +233,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		}
 	}
 
-	if prompt == "" {
-		return nil, fmt.Errorf("prompt is required (use --prompt, --prompt-file, stdin, or -i for interactive mode)")
-	}
+	// Allow empty prompts
 
 	// Generate job ID
 	jobID := generateJobIDFromTitle(plan, cmd.Title)
@@ -390,9 +385,7 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 		return nil, fmt.Errorf("failed to read prompt: %w", err)
 	}
 	prompt := strings.TrimSpace(string(promptBytes))
-	if prompt == "" {
-		return nil, fmt.Errorf("prompt cannot be empty")
-	}
+	// Allow empty prompts
 
 	// Generate job ID
 	jobID := generateJobIDFromTitle(plan, title)
