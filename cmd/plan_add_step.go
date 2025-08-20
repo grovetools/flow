@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
@@ -269,168 +270,43 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 }
 
 func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (*orchestration.Job, error) {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Println("\n=== Add New Job ===")
-
-	// Get title
-	fmt.Print("Title: ")
-	title, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read title: %w", err)
+	// Create the initial TUI model
+	model := initialModel(plan)
+	
+	// Set explicit worktree if provided
+	if explicitWorktree != "" {
+		model.worktreeInput.SetValue(explicitWorktree)
 	}
-	title = strings.TrimSpace(title)
-	if title == "" {
+	
+	// Run the TUI
+	p := tea.NewProgram(model)
+	finalModel, err := p.Run()
+	if err != nil {
+		return nil, fmt.Errorf("error running TUI for job creation: %w", err)
+	}
+
+	// Cast the final model and check if the user quit
+	finalTUIModel := finalModel.(tuiModel)
+	if finalTUIModel.quitting && finalTUIModel.jobTitle == "" {
+		return nil, fmt.Errorf("job creation cancelled")
+	}
+
+	// Convert the final TUI state into a Job object
+	job := finalTUIModel.toJob(plan)
+	
+	// Validate the job
+	if job.Title == "" {
 		return nil, fmt.Errorf("title cannot be empty")
 	}
-
-	// Select job type
-	fmt.Println("\nJob Type:")
-	fmt.Println("1. oneshot - Single LLM call")
-	fmt.Println("2. agent - Long-running agent")
-	fmt.Println("3. interactive_agent - Interactive agent session")
-	fmt.Print("Choice [1-3]: ")
-
-	choice, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read choice: %w", err)
+	
+	// Apply plan defaults if not set by user
+	if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+		job.Model = plan.Config.Model
 	}
-	choice = strings.TrimSpace(choice)
-
-	jobType := "oneshot"
-	switch choice {
-	case "2":
-		jobType = "agent"
-	case "3":
-		jobType = "interactive_agent"
+	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
+		job.Worktree = plan.Config.Worktree
 	}
-
-	// Select dependencies
-	deps, err := selectDependencies(plan, reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to select dependencies: %w", err)
-	}
-
-	// Get worktree name (optional)
-	var worktree string
-	if explicitWorktree != "" {
-		// If worktree was provided via flag, use it and show it to user
-		worktree = explicitWorktree
-		fmt.Printf("\nWorktree: %s (set via --worktree flag)\n", worktree)
-	} else {
-		worktreePrompt := "\nWorktree name (optional, leave empty "
-		if plan.Config != nil && plan.Config.Worktree != "" {
-			worktreePrompt += fmt.Sprintf("for default [%s]", plan.Config.Worktree)
-		} else {
-			worktreePrompt += "to run in main repository"
-		}
-		worktreePrompt += "): "
-		fmt.Print(worktreePrompt)
-		worktree, err = reader.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("failed to read worktree: %w", err)
-		}
-		worktree = strings.TrimSpace(worktree)
-		// Apply plan default if empty
-		if worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
-			worktree = plan.Config.Worktree
-		}
-	}
-
-	// Get model name (optional)
-	modelPrompt := "\nModel name (optional, leave empty for default"
-	if plan.Config != nil && plan.Config.Model != "" {
-		modelPrompt += fmt.Sprintf(" [%s]", plan.Config.Model)
-	}
-	modelPrompt += "): "
-	fmt.Print(modelPrompt)
-	model, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read model: %w", err)
-	}
-	model = strings.TrimSpace(model)
-	// Apply plan default if empty
-	if model == "" && plan.Config != nil && plan.Config.Model != "" {
-		model = plan.Config.Model
-	}
-
-	// Select output type
-	fmt.Println("\nOutput type:")
-	fmt.Println("1. file - Save to file")
-	fmt.Println("2. commit - Create git commit")
-	fmt.Println("3. none - No output")
-	fmt.Println("4. generate_jobs - Generate new job files")
-	fmt.Print("Choice [1-4]: ")
-
-	choice, err = reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read choice: %w", err)
-	}
-	choice = strings.TrimSpace(choice)
-
-	outputType := "file"
-	switch choice {
-	case "2":
-		outputType = "commit"
-	case "3":
-		outputType = "none"
-	case "4":
-		outputType = "generate_jobs"
-	}
-
-	// Get prompt
-	fmt.Println("\nEnter prompt (Ctrl+D to finish):")
-	promptBytes, err := io.ReadAll(reader)
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read prompt: %w", err)
-	}
-	prompt := strings.TrimSpace(string(promptBytes))
-	// Allow empty prompts
-
-	// Generate job ID
-	jobID := generateJobIDFromTitle(plan, title)
-
-	// Build job
-	job := &orchestration.Job{
-		ID:         jobID,
-		Title:      title,
-		Type:       orchestration.JobType(jobType),
-		Status:     "pending",
-		DependsOn:  deps,
-		PromptBody: prompt,
-		Worktree:   worktree,
-		Model:      model,
-		Output: orchestration.OutputConfig{
-			Type: outputType,
-		},
-	}
-
-	// Show summary
-	fmt.Println("\n--- Job Summary ---")
-	fmt.Printf("Title: %s\n", job.Title)
-	fmt.Printf("Type: %s\n", job.Type)
-	if len(job.DependsOn) > 0 {
-		fmt.Printf("Dependencies: %s\n", strings.Join(job.DependsOn, ", "))
-	}
-	if job.Worktree != "" {
-		fmt.Printf("Worktree: %s\n", job.Worktree)
-	}
-	if job.Model != "" {
-		fmt.Printf("Model: %s\n", job.Model)
-	}
-	fmt.Printf("Output: %s\n", job.Output.Type)
-
-	// Confirm
-	fmt.Print("\nCreate job? [Y/n]: ")
-	confirm, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read confirmation: %w", err)
-	}
-	confirm = strings.TrimSpace(strings.ToLower(confirm))
-	if confirm != "" && confirm != "y" && confirm != "yes" {
-		return nil, fmt.Errorf("cancelled by user")
-	}
-
+	
 	return job, nil
 }
 

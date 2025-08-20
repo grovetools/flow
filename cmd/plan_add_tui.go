@@ -28,8 +28,14 @@ type tuiModel struct {
 	modelInput      textinput.Model
 	promptInput     textarea.Model
 	
-	// Store selected dependencies
-	dependencies    []string
+	// Fields to store the final job data
+	jobTitle        string
+	jobType         string
+	jobDependencies []string
+	jobTemplate     string
+	jobWorktree     string
+	jobModel        string
+	jobPrompt       string
 }
 
 type item string
@@ -134,23 +140,217 @@ func (m tuiModel) Init() tea.Cmd {
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Placeholder logic
+	var cmd tea.Cmd
+	
+	// Handle dependency selection message
+	switch msg := msg.(type) {
+	case dependenciesSelectedMsg:
+		m.jobDependencies = msg.deps
+		m.focusIndex++ // Move to the next field
+		return m, nil
+	}
+	
+	// Handle keyboard input
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quitting = true
 			return m, tea.Quit
+			
+		case "tab", "down":
+			m.focusIndex++
+			if m.focusIndex > 6 {
+				m.focusIndex = 0
+			}
+			return m.updateFocus(), nil
+			
+		case "shift+tab", "up":
+			m.focusIndex--
+			if m.focusIndex < 0 {
+				m.focusIndex = 6
+			}
+			return m.updateFocus(), nil
+			
+		case "enter":
+			// Special handling for certain fields
+			if m.focusIndex == 2 && len(m.plan.Jobs) > 0 {
+				// Don't process enter on dependency tree - let it handle its own enter
+			} else if m.focusIndex == 6 {
+				// On the last field (prompt), enter confirms the form
+				// Extract values from all inputs
+				m.extractValues()
+				m.quitting = true
+				return m, tea.Quit
+			}
 		}
 	}
-	return m, nil
+	
+	// Delegate to the focused component
+	switch m.focusIndex {
+	case 0: // Title input
+		m.titleInput, cmd = m.titleInput.Update(msg)
+	case 1: // Job type list
+		m.jobTypeList, cmd = m.jobTypeList.Update(msg)
+	case 2: // Dependency tree
+		var updatedTree tea.Model
+		updatedTree, cmd = m.depTree.Update(msg)
+		m.depTree = updatedTree.(dependencyTreeModel)
+	case 3: // Template list
+		m.templateList, cmd = m.templateList.Update(msg)
+	case 4: // Worktree input
+		m.worktreeInput, cmd = m.worktreeInput.Update(msg)
+	case 5: // Model input
+		m.modelInput, cmd = m.modelInput.Update(msg)
+	case 6: // Prompt textarea
+		m.promptInput, cmd = m.promptInput.Update(msg)
+	}
+	
+	return m, cmd
+}
+
+// updateFocus updates focus state for all components
+func (m tuiModel) updateFocus() tuiModel {
+	// Blur all inputs
+	m.titleInput.Blur()
+	m.worktreeInput.Blur()
+	m.modelInput.Blur()
+	m.promptInput.Blur()
+	
+	// Focus the current one
+	switch m.focusIndex {
+	case 0:
+		m.titleInput.Focus()
+	case 4:
+		m.worktreeInput.Focus()
+	case 5:
+		m.modelInput.Focus()
+	case 6:
+		m.promptInput.Focus()
+	}
+	
+	return m
+}
+
+// extractValues gets the final values from all components
+func (m *tuiModel) extractValues() {
+	m.jobTitle = m.titleInput.Value()
+	
+	// Get selected job type
+	if selected := m.jobTypeList.SelectedItem(); selected != nil {
+		m.jobType = string(selected.(item))
+	}
+	
+	// Dependencies are already stored in m.jobDependencies
+	
+	// Get selected template
+	if selected := m.templateList.SelectedItem(); selected != nil {
+		template := string(selected.(item))
+		if template != "none" {
+			m.jobTemplate = template
+		}
+	}
+	
+	m.jobWorktree = m.worktreeInput.Value()
+	m.jobModel = m.modelInput.Value()
+	m.jobPrompt = m.promptInput.Value()
 }
 
 func (m tuiModel) View() string {
 	if m.quitting {
 		return "Aborted.\n"
 	}
-	return "TUI is running...\n" // Placeholder view
+
+	var b strings.Builder
+	
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
+	focusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	
+	b.WriteString(titleStyle.Render("=== Add New Job ==="))
+	b.WriteString("\n\n")
+
+	// Helper to render each field
+	renderField := func(index int, label string, view string) {
+		if m.focusIndex == index {
+			b.WriteString(focusedStyle.Render("▸ " + label))
+		} else {
+			b.WriteString("  " + label)
+		}
+		b.WriteString("\n")
+		b.WriteString("  " + view)
+		b.WriteString("\n\n")
+	}
+
+	// 1. Title
+	renderField(0, "Title:", m.titleInput.View())
+	
+	// 2. Job Type
+	renderField(1, "Job Type:", m.jobTypeList.View())
+	
+	// 3. Dependencies
+	if m.focusIndex == 2 {
+		// When focused, show the full tree view
+		b.WriteString(focusedStyle.Render("▸ Dependencies:"))
+		b.WriteString("\n")
+		b.WriteString(m.depTree.View())
+		b.WriteString("\n")
+	} else {
+		// When not focused, show selected dependencies
+		depLabel := "Dependencies:"
+		if len(m.jobDependencies) > 0 {
+			depLabel = fmt.Sprintf("Dependencies: %s", strings.Join(m.jobDependencies, ", "))
+		}
+		renderField(2, depLabel, "(Press Enter to select)")
+	}
+	
+	// 4. Template
+	renderField(3, "Template:", m.templateList.View())
+	
+	// 5. Worktree
+	renderField(4, "Worktree:", m.worktreeInput.View())
+	
+	// 6. Model
+	renderField(5, "Model:", m.modelInput.View())
+	
+	// 7. Prompt
+	renderField(6, "Prompt:", m.promptInput.View())
+
+	// Help text
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("tab: next field • shift+tab: prev field • ctrl+c: quit"))
+
+	return b.String()
+}
+
+// toJob converts the TUI model data into a Job struct
+func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
+	// Generate job ID from title
+	jobID := generateJobIDFromTitle(plan, m.jobTitle)
+	
+	// Default job type if none selected
+	jobType := m.jobType
+	if jobType == "" {
+		jobType = "agent"
+	}
+	
+	// Default output type
+	outputType := "file"
+	
+	return &orchestration.Job{
+		ID:           jobID,
+		Title:        m.jobTitle,
+		Type:         orchestration.JobType(jobType),
+		Status:       "pending",
+		DependsOn:    m.jobDependencies,
+		Worktree:     m.jobWorktree,
+		Model:        m.jobModel,
+		PromptBody:   m.jobPrompt,
+		Template:     m.jobTemplate,
+		Output: orchestration.OutputConfig{
+			Type: outputType,
+		},
+	}
 }
 
 // The helper functions findRootJobs and findDependents are already defined in plan_status.go
@@ -191,11 +391,18 @@ func initialDependencyTreeModel(plan *orchestration.Plan) dependencyTreeModel {
 
 		dependents := findDependents(job, plan)
 		for i, dep := range dependents {
-			connector := "│   "
-			if i == len(dependents)-1 {
-				connector = "    "
+			newPrefix := prefix
+			if strings.HasSuffix(prefix, "└── ") {
+				newPrefix = strings.TrimSuffix(prefix, "└── ") + "    "
+			} else if strings.HasSuffix(prefix, "├── ") {
+				newPrefix = strings.TrimSuffix(prefix, "├── ") + "│   "
 			}
-			buildDisplayJobs(dep, prefix+connector, printed)
+			
+			childConnector := "├── "
+			if i == len(dependents)-1 {
+				childConnector = "└── "
+			}
+			buildDisplayJobs(dep, newPrefix+childConnector, printed)
 		}
 	}
 
