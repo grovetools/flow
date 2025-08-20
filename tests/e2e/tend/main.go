@@ -24,6 +24,7 @@ func main() {
 		PlanStepCommandScenario(), // Tests interactive plan step command
 		PlanConfigScenario(), // Tests plan-level configuration with .grove-plan.yml
 		PlanConfigPropagationScenario(), // Tests plan config propagation to job frontmatter
+		GoWorkspaceWorktreeScenario(), // Tests go.work file creation in worktrees
 
 		// Chat Scenarios
 		BasicChatWorkflowScenario(),

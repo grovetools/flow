@@ -90,6 +90,12 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 			return fmt.Errorf("failed to prepare worktree: %w", err)
 		}
 
+		// Set up Go workspace if this is a Go project
+		if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
+			// Log a warning but don't fail the job, as this is a convenience feature
+			fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
+		}
+
 		// Automatically initialize state within the new worktree for a better UX.
 		groveDir := filepath.Join(worktreePath, ".grove")
 		if err := os.MkdirAll(groveDir, 0755); err != nil {
@@ -425,6 +431,12 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 					} else {
 						fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
 					}
+				}
+				
+				// Set up Go workspace if this is a Go project
+				if err := SetupGoWorkspaceForWorktree(workDir, realGitRoot); err != nil {
+					// Log a warning but don't fail the job, as this is a convenience feature
+					fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
 				}
 			}
 		}

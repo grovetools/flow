@@ -154,6 +154,12 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		}
 	}
 
+	// Set up Go workspace if this is a Go project
+	if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
+		// Log a warning but don't fail the job, as this is a convenience feature
+		fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
+	}
+
 	// Automatically initialize state within the new worktree for a better UX.
 	groveDir := filepath.Join(worktreePath, ".grove")
 	if err := os.MkdirAll(groveDir, 0755); err != nil {

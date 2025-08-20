@@ -549,6 +549,12 @@ func createOrSwitchToWorktreeSession(ctx context.Context, plan *orchestration.Pl
 					fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
 				}
 			}
+			
+			// Set up Go workspace if this is a Go project
+			if err := orchestration.SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
+				// Log a warning but don't fail the worktree creation
+				fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
+			}
 		}
 	}
 

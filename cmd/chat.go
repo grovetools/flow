@@ -715,6 +715,12 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
 
+	// Set up Go workspace if this is a Go project
+	if err := orchestration.SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
+		// Log a warning but don't fail the job, as this is a convenience feature
+		fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
+	}
+
 	// Configure Canopy hooks for the worktree
 	if err := configureCanopyHooks(worktreePath); err != nil {
 		return fmt.Errorf("failed to configure canopy hooks: %w", err)
