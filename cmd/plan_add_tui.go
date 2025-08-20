@@ -410,42 +410,13 @@ func initialDependencyTreeModel(plan *orchestration.Plan) dependencyTreeModel {
 		height:   10,
 	}
 
-	// Use a helper function to recursively build the flattened tree
-	var buildDisplayJobs func(*orchestration.Job, string, map[string]bool)
-	buildDisplayJobs = func(job *orchestration.Job, prefix string, printed map[string]bool) {
-		if printed[job.ID] {
-			return
-		}
-		printed[job.ID] = true
-
-		m.displayJobs = append(m.displayJobs, dependencyJob{job: job, prefix: prefix})
-
-		dependents := findDependents(job, plan)
-		for i, dep := range dependents {
-			newPrefix := prefix
-			if strings.HasSuffix(prefix, "└── ") {
-				newPrefix = strings.TrimSuffix(prefix, "└── ") + "    "
-			} else if strings.HasSuffix(prefix, "├── ") {
-				newPrefix = strings.TrimSuffix(prefix, "├── ") + "│   "
-			}
-			
-			childConnector := "├── "
-			if i == len(dependents)-1 {
-				childConnector = "└── "
-			}
-			buildDisplayJobs(dep, newPrefix+childConnector, printed)
-		}
-	}
-
-	// Start building from the root jobs
-	roots := findRootJobs(plan)
-	printed := make(map[string]bool)
-	for i, root := range roots {
-		connector := "├── "
-		if i == len(roots)-1 {
-			connector = "└── "
-		}
-		buildDisplayJobs(root, connector, printed)
+	// Build a simple flat list of jobs for now to avoid complex tree logic
+	// This makes selection easier and avoids indentation issues
+	for _, job := range plan.Jobs {
+		m.displayJobs = append(m.displayJobs, dependencyJob{
+			job:    job,
+			prefix: "", // No tree prefixes for simplicity
+		})
 	}
 	
 	return m
@@ -499,28 +470,39 @@ func (m dependencyTreeModel) View() string {
 	var b strings.Builder
 	b.WriteString("Select dependencies (space to toggle, enter to confirm):\n\n")
 
+	// Style for the list
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
 	for i, dj := range m.displayJobs {
-		cursor := " "
+		// Cursor
 		if m.cursor == i {
-			cursor = ">" // Indicates the cursor position
+			b.WriteString(selectedStyle.Render("▸ "))
+		} else {
+			b.WriteString("  ")
 		}
 
-		checked := " "
+		// Checkbox
 		if _, ok := m.selected[dj.job.Filename]; ok {
-			checked = "x" // Indicates a selected dependency
+			b.WriteString(selectedStyle.Render("[✓] "))
+		} else {
+			b.WriteString("[ ] ")
 		}
 
-		// Build the line
-		line := fmt.Sprintf("%s [%s] %s%s (%s)\n", cursor, checked, dj.prefix, dj.job.Filename, dj.job.Title)
+		// Job info
+		jobInfo := fmt.Sprintf("%-20s %s", dj.job.Filename, dj.job.Title)
 		
 		if m.cursor == i {
-			// Apply a style for the selected line
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line))
+			b.WriteString(selectedStyle.Render(jobInfo))
+		} else if _, ok := m.selected[dj.job.Filename]; ok {
+			b.WriteString(normalStyle.Render(jobInfo))
 		} else {
-			b.WriteString(line)
+			b.WriteString(dimStyle.Render(jobInfo))
 		}
+		
+		b.WriteString("\n")
 	}
 
-	b.WriteString("\n(Press q to quit)")
 	return b.String()
 }
