@@ -70,8 +70,9 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 			speaker = "user"
 		}
 		
-		// Extract content after this directive until next directive or end
-		startIdx := matchIndices[i][1]
+		// Extract content from the start of the directive line until next directive or end
+		// This ensures we capture any content on the same line as the directive
+		startIdx := matchIndices[i][0]
 		var endIdx int
 		if i+1 < len(matchIndices) {
 			endIdx = matchIndices[i+1][0]
@@ -79,7 +80,13 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 			endIdx = len(body)
 		}
 		
-		content := strings.TrimSpace(body[startIdx:endIdx])
+		// Get the full content including the directive line
+		fullContent := body[startIdx:endIdx]
+		
+		// Remove the directive comment itself from the content
+		content := groveDirectiveRegex.ReplaceAllString(fullContent, "")
+		content = strings.TrimSpace(content)
+		
 		if content != "" {
 			turns = append(turns, &ChatTurn{
 				Speaker:   speaker,

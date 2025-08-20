@@ -31,6 +31,8 @@ func main() {
 		ChatRunFilteringScenario(),
 		ChatPipelineScenario(),
 		ChatInteractivePromptScenario(), // Tests interactive prompt for chat jobs in plans
+		ChatExtractBasicScenario(), // Tests basic chat block extraction
+		ChatExtractErrorScenario(), // Tests extract command error handling
 		
 		// Phase 3: Complex Orchestration
 		SimpleOrchestrationScenario(),

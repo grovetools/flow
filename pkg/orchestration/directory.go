@@ -228,6 +228,9 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if job.Worktree != "" {
 		frontmatter["worktree"] = job.Worktree
 	}
+	if job.Model != "" {
+		frontmatter["model"] = job.Model
+	}
 	if job.Output.Type != "" {
 		output := map[string]interface{}{
 			"type": job.Output.Type,

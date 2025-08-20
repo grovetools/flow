@@ -14,6 +14,4 @@ agent:
     output_format: text
     mount_workspace_at_host_path: true
     use_superproject_root: true
-flow:
-    target_agent_container: grove_flow-main-grove-agent
 

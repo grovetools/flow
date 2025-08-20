@@ -14,6 +14,10 @@ import (
 func NewPlanExtractCmd() *cobra.Command {
 	var title string
 	var file string
+	var dependsOn []string
+	var worktree string
+	var model string
+	var outputType string
 
 	cmd := &cobra.Command{
 		Use:   "extract <block-id-1> [block-id-2...]",
@@ -28,18 +32,22 @@ Examples:
   flow plan extract --file chat-session.md --title "API Design" d4e5f6`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobsExtract(title, file, args)
+			return runJobsExtract(title, file, args, dependsOn, worktree, model, outputType)
 		},
 	}
 
 	cmd.Flags().StringVar(&title, "title", "", "Title for the new chat job (required)")
 	cmd.Flags().StringVar(&file, "file", "plan.md", "Chat file to extract from (default: plan.md)")
+	cmd.Flags().StringSliceVarP(&dependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
+	cmd.Flags().StringVar(&worktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
+	cmd.Flags().StringVar(&model, "model", "", "LLM model to use for this job")
+	cmd.Flags().StringVar(&outputType, "output", "file", "Output type: file, commit, none, or generate_jobs")
 	cmd.MarkFlagRequired("title")
 
 	return cmd
 }
 
-func runJobsExtract(title string, file string, blockIDs []string) error {
+func runJobsExtract(title string, file string, blockIDs []string, dependsOn []string, worktree string, model string, outputType string) error {
 	// Get the current plan directory
 	currentPlanPath, err := resolvePlanPathWithActiveJob("")
 	if err != nil {
@@ -96,6 +104,20 @@ func runJobsExtract(title string, file string, blockIDs []string) error {
 		return fmt.Errorf("no valid blocks found to extract")
 	}
 
+	// Validate dependencies if provided
+	for _, dep := range dependsOn {
+		found := false
+		for _, job := range currentPlan.Jobs {
+			if job.Filename == dep {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("dependency not found: %s", dep)
+		}
+	}
+
 	// Create a new chat job
 	job := &orchestration.Job{
 		Title:      title,
@@ -103,6 +125,31 @@ func runJobsExtract(title string, file string, blockIDs []string) error {
 		Status:     orchestration.JobStatusPending,
 		ID:         sanitizeForFilename(title),
 		PromptBody: extractedContent.String(),
+		DependsOn:  dependsOn,
+		Output: orchestration.OutputConfig{
+			Type: outputType,
+		},
+	}
+
+	// Apply explicit parameters (override plan defaults)
+	if worktree != "" {
+		job.Worktree = worktree
+	}
+	if model != "" {
+		job.Model = model
+	}
+
+	// Inherit values from plan config (only if not explicitly set)
+	if currentPlan.Config != nil {
+		if job.Model == "" && currentPlan.Config.Model != "" {
+			job.Model = currentPlan.Config.Model
+		}
+		if job.Worktree == "" && currentPlan.Config.Worktree != "" {
+			job.Worktree = currentPlan.Config.Worktree
+		}
+		if currentPlan.Config.TargetAgentContainer != "" {
+			job.TargetAgentContainer = currentPlan.Config.TargetAgentContainer
+		}
 	}
 
 	// Add the job to the current plan
