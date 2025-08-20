@@ -30,6 +30,7 @@ func main() {
 		ChatLaunchScenario(), // Fixed with docker check skip
 		ChatRunFilteringScenario(),
 		ChatPipelineScenario(),
+		ChatInteractivePromptScenario(), // Tests interactive prompt for chat jobs in plans
 		
 		// Phase 3: Complex Orchestration
 		SimpleOrchestrationScenario(),
