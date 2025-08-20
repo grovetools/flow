@@ -265,20 +265,40 @@ func (m tuiModel) View() string {
 	
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
 	focusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	borderStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1).
+		Width(60)
+	focusedBorderStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(0, 1).
+		Width(60)
 	
 	b.WriteString(titleStyle.Render("=== Add New Job ==="))
 	b.WriteString("\n\n")
 
-	// Helper to render each field
+	// Helper to render each field with borders
 	renderField := func(index int, label string, view string) {
+		var fieldContent strings.Builder
+		
 		if m.focusIndex == index {
-			b.WriteString(focusedStyle.Render("▸ " + label))
+			fieldContent.WriteString(focusedStyle.Render("▸ " + label))
 		} else {
-			b.WriteString("  " + label)
+			fieldContent.WriteString("  " + label)
 		}
+		fieldContent.WriteString("\n")
+		fieldContent.WriteString(view)
+		
+		// Apply border style
+		style := borderStyle
+		if m.focusIndex == index {
+			style = focusedBorderStyle
+		}
+		
+		b.WriteString(style.Render(fieldContent.String()))
 		b.WriteString("\n")
-		b.WriteString("  " + view)
-		b.WriteString("\n\n")
 	}
 
 	// 1. Title
@@ -290,17 +310,21 @@ func (m tuiModel) View() string {
 	// 3. Dependencies
 	if m.focusIndex == 2 {
 		// When focused, show the full tree view
-		b.WriteString(focusedStyle.Render("▸ Dependencies:"))
-		b.WriteString("\n")
-		b.WriteString(m.depTree.View())
+		var depContent strings.Builder
+		depContent.WriteString(focusedStyle.Render("▸ Dependencies:"))
+		depContent.WriteString("\n")
+		depContent.WriteString(m.depTree.View())
+		
+		b.WriteString(focusedBorderStyle.Render(depContent.String()))
 		b.WriteString("\n")
 	} else {
 		// When not focused, show selected dependencies
 		depLabel := "Dependencies:"
+		depValue := "(Press Enter to select)"
 		if len(m.jobDependencies) > 0 {
-			depLabel = fmt.Sprintf("Dependencies: %s", strings.Join(m.jobDependencies, ", "))
+			depValue = strings.Join(m.jobDependencies, ", ")
 		}
-		renderField(2, depLabel, "(Press Enter to select)")
+		renderField(2, depLabel, depValue)
 	}
 	
 	// 4. Template
@@ -316,9 +340,16 @@ func (m tuiModel) View() string {
 	renderField(6, "Prompt:", m.promptInput.View())
 
 	// Help text
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderTop(true).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(1, 0, 0, 0)
+	
+	helpText := "tab/↓: next field • shift+tab/↑: prev field • space: select • enter: confirm • ctrl+c: quit"
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("tab: next field • shift+tab: prev field • ctrl+c: quit"))
+	b.WriteString(helpStyle.Render(helpText))
 
 	return b.String()
 }
