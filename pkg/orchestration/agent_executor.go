@@ -208,10 +208,10 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		// Log a warning but don't fail the job, as this is a convenience feature.
 		fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
 	} else {
-		// For the active_job value, store just the plan name (not the full path)
+		// For the active_plan value, store just the plan name (not the full path)
 		// This allows 'flow plan status' to work correctly from within the worktree
 		planName := filepath.Base(plan.Directory)
-		stateContent := fmt.Sprintf("active_job: %s\n", planName)
+		stateContent := fmt.Sprintf("active_plan: %s\n", planName)
 		statePath := filepath.Join(groveDir, "state.yml")
 		// This is a best-effort attempt; failure should not stop the job.
 		_ = os.WriteFile(statePath, []byte(stateContent), 0644)

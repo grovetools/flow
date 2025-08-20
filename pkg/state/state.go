@@ -10,7 +10,7 @@ import (
 
 // State represents the local Grove state.
 type State struct {
-	ActiveJob string `yaml:"active_job,omitempty"`
+	ActiveJob string `yaml:"active_plan,omitempty"`
 }
 
 // stateFilePath returns the path to the state file.

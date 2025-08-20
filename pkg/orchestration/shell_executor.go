@@ -167,7 +167,7 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
 	} else {
 		planName := filepath.Base(plan.Directory)
-		stateContent := fmt.Sprintf("active_job: %s\n", planName)
+		stateContent := fmt.Sprintf("active_plan: %s\n", planName)
 		statePath := filepath.Join(groveDir, "state.yml")
 		// This is a best-effort attempt; failure should not stop the job.
 		_ = os.WriteFile(statePath, []byte(stateContent), 0644)

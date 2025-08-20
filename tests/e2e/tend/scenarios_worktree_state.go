@@ -122,8 +122,8 @@ Implement feature B in a different worktree.
 				}
 
 				// The state should contain the plan directory path (which is "." since we run from within the plan dir)
-				if !strings.Contains(stateContent, "active_job: .") {
-					return fmt.Errorf("state.yml should contain 'active_job: .', got:\n%s", stateContent)
+				if !strings.Contains(stateContent, "active_plan: .") {
+					return fmt.Errorf("state.yml should contain 'active_plan: .', got:\n%s", stateContent)
 				}
 
 				return nil
@@ -170,8 +170,8 @@ Implement feature B in a different worktree.
 				}
 
 				// The state should contain the plan directory path (which is "." since we run from within the plan dir)
-				if !strings.Contains(stateContent, "active_job: .") {
-					return fmt.Errorf("state.yml should contain 'active_job: .', got:\n%s", stateContent)
+				if !strings.Contains(stateContent, "active_plan: .") {
+					return fmt.Errorf("state.yml should contain 'active_plan: .', got:\n%s", stateContent)
 				}
 
 				// Verify that worktree A still has its own state
@@ -181,9 +181,9 @@ Implement feature B in a different worktree.
 					return fmt.Errorf("failed to read state file A: %w", err)
 				}
 
-				// Both worktrees should have 'active_job: .' since they were created from plan dirs
-				if !strings.Contains(stateContentA, "active_job: .") {
-					return fmt.Errorf("worktree A state should still contain 'active_job: .', got:\n%s", stateContentA)
+				// Both worktrees should have 'active_plan: .' since they were created from plan dirs
+				if !strings.Contains(stateContentA, "active_plan: .") {
+					return fmt.Errorf("worktree A state should still contain 'active_plan: .', got:\n%s", stateContentA)
 				}
 
 				return nil
@@ -317,7 +317,7 @@ Refactor the main.go file to improve structure.
 				// Write state file with the plan directory path
 				// Store the relative path to the plan from the worktree
 				planPath := filepath.Join("..", "..", "plans", "refactor-task")
-				stateContent := fmt.Sprintf("active_job: %s\n", planPath)
+				stateContent := fmt.Sprintf("active_plan: %s\n", planPath)
 				fs.WriteString(filepath.Join(worktreeDir, ".grove", "state.yml"), stateContent)
 
 				// Also create a context file
@@ -388,7 +388,7 @@ Refactor the main.go file to improve structure.
 					return fmt.Errorf("failed to read state file: %w", err)
 				}
 
-				if strings.Contains(content, "active_job:") && !strings.Contains(content, "active_job: \"\"") && !strings.Contains(content, "active_job: null") {
+				if strings.Contains(content, "active_plan:") && !strings.Contains(content, "active_plan: \"\"") && !strings.Contains(content, "active_plan: null") {
 					return fmt.Errorf("state should be cleared after unset, got:\n%s", content)
 				}
 
