@@ -180,7 +180,7 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Use the shared method to get or prepare the worktree at the git root
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "agent")
+	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
 }
 
 // runAgentInWorktree executes the agent in the worktree context.

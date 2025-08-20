@@ -82,7 +82,7 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 			gitRoot = plan.Directory
 		}
 
-		worktreePath, err = wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive")
+		worktreePath, err = wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -369,7 +369,7 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	if job.Worktree != "" {
 		// A worktree is specified, so create/use it on the host
 		wm := git.NewWorktreeManager()
-		worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive-host")
+		worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()

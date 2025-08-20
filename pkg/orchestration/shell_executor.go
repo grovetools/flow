@@ -121,5 +121,5 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Use the shared method to get or prepare the worktree at the git root
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "shell")
+	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
 }

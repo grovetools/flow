@@ -868,7 +868,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 	}
 
 	// Use the shared method to get or prepare the worktree at the git root
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "oneshot")
+	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
 }
 
 // regenerateContextInWorktree regenerates the context within a worktree.
