@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -21,11 +22,14 @@ type tuiModel struct {
 	// Form inputs
 	titleInput      textinput.Model
 	jobTypeList     list.Model
-	depInput        textinput.Model
+	depTree         dependencyTreeModel
 	templateList    list.Model
 	worktreeInput   textinput.Model
 	modelInput      textinput.Model
 	promptInput     textarea.Model
+	
+	// Store selected dependencies
+	dependencies    []string
 }
 
 type item string
@@ -83,12 +87,8 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.jobTypeList.SetFilteringEnabled(false)
 	m.jobTypeList.SetShowHelp(false)
 
-	// 3. Dependencies Input (placeholder for now)
-	// For now, use a simple text input as a placeholder. We will replace this
-	// with the interactive tree in a later step.
-	m.depInput = textinput.New()
-	m.depInput.Placeholder = "01-previous-job.md (comma-separated)"
-	m.depInput.Width = 50
+	// 3. Dependencies Input (Tree View)
+	m.depTree = initialDependencyTreeModel(plan)
 
 	// 4. Template Input (list)
 	templateManager := orchestration.NewTemplateManager()
@@ -151,4 +151,138 @@ func (m tuiModel) View() string {
 		return "Aborted.\n"
 	}
 	return "TUI is running...\n" // Placeholder view
+}
+
+// The helper functions findRootJobs and findDependents are already defined in plan_status.go
+
+// Dependency Tree View Components
+
+// dependencyJob represents a job in the tree view with its display properties.
+type dependencyJob struct {
+	job    *orchestration.Job
+	prefix string // The tree structure prefix, e.g., "├── "
+}
+
+type dependencyTreeModel struct {
+	plan         *orchestration.Plan
+	displayJobs  []dependencyJob // A flattened list of jobs in display order
+	cursor       int
+	selected     map[string]struct{} // A set of selected job filenames
+	width, height int
+}
+
+func initialDependencyTreeModel(plan *orchestration.Plan) dependencyTreeModel {
+	m := dependencyTreeModel{
+		plan:     plan,
+		selected: make(map[string]struct{}),
+		width:    50,
+		height:   10,
+	}
+
+	// Use a helper function to recursively build the flattened tree
+	var buildDisplayJobs func(*orchestration.Job, string, map[string]bool)
+	buildDisplayJobs = func(job *orchestration.Job, prefix string, printed map[string]bool) {
+		if printed[job.ID] {
+			return
+		}
+		printed[job.ID] = true
+
+		m.displayJobs = append(m.displayJobs, dependencyJob{job: job, prefix: prefix})
+
+		dependents := findDependents(job, plan)
+		for i, dep := range dependents {
+			connector := "│   "
+			if i == len(dependents)-1 {
+				connector = "    "
+			}
+			buildDisplayJobs(dep, prefix+connector, printed)
+		}
+	}
+
+	// Start building from the root jobs
+	roots := findRootJobs(plan)
+	printed := make(map[string]bool)
+	for i, root := range roots {
+		connector := "├── "
+		if i == len(roots)-1 {
+			connector = "└── "
+		}
+		buildDisplayJobs(root, connector, printed)
+	}
+	
+	return m
+}
+
+// Define a message to signal completion
+type dependenciesSelectedMsg struct{ deps []string }
+
+func (m dependencyTreeModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m dependencyTreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "k", "up":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "j", "down":
+			if m.cursor < len(m.displayJobs)-1 {
+				m.cursor++
+			}
+		case " ": // Spacebar to toggle selection
+			if len(m.displayJobs) > 0 {
+				selectedJob := m.displayJobs[m.cursor].job
+				if _, ok := m.selected[selectedJob.Filename]; ok {
+					delete(m.selected, selectedJob.Filename)
+				} else {
+					m.selected[selectedJob.Filename] = struct{}{}
+				}
+			}
+		case "enter":
+			// Return selected dependencies to the main model
+			var deps []string
+			for filename := range m.selected {
+				deps = append(deps, filename)
+			}
+			return m, func() tea.Msg { return dependenciesSelectedMsg{deps: deps} }
+		}
+	}
+	return m, nil
+}
+
+func (m dependencyTreeModel) View() string {
+	if len(m.displayJobs) == 0 {
+		return "No existing jobs to depend on.\n\nPress enter to continue."
+	}
+	
+	var b strings.Builder
+	b.WriteString("Select dependencies (space to toggle, enter to confirm):\n\n")
+
+	for i, dj := range m.displayJobs {
+		cursor := " "
+		if m.cursor == i {
+			cursor = ">" // Indicates the cursor position
+		}
+
+		checked := " "
+		if _, ok := m.selected[dj.job.Filename]; ok {
+			checked = "x" // Indicates a selected dependency
+		}
+
+		// Build the line
+		line := fmt.Sprintf("%s [%s] %s%s (%s)\n", cursor, checked, dj.prefix, dj.job.Filename, dj.job.Title)
+		
+		if m.cursor == i {
+			// Apply a style for the selected line
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(line))
+		} else {
+			b.WriteString(line)
+		}
+	}
+
+	b.WriteString("\n(Press q to quit)")
+	return b.String()
 }

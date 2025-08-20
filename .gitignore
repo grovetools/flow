@@ -9,3 +9,6 @@ bin/
 
 .grove
 .grove-worktrees
+
+go.work
+go.work.sum
