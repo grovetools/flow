@@ -44,6 +44,8 @@ func main() {
 		
 		// Worktree Context Isolation Scenarios
 		SimpleWorktreeContextTestScenario(),
+		WorktreeStateIsolationScenario(),
+		WorktreeStateDirectNavigationScenario(),
 		
 		// Debug Scenarios (optional - can be run individually)
 		LaunchDebugScenario(),

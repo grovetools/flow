@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,6 +88,19 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			return fmt.Errorf("failed to prepare worktree: %w", err)
+		}
+
+		// Automatically initialize state within the new worktree for a better UX.
+		groveDir := filepath.Join(worktreePath, ".grove")
+		if err := os.MkdirAll(groveDir, 0755); err != nil {
+			// Log a warning but don't fail the job, as this is a convenience feature.
+			fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
+		} else {
+			planName := filepath.Base(plan.Directory)
+			stateContent := fmt.Sprintf("active_job: %s\n", planName)
+			statePath := filepath.Join(groveDir, "state.yml")
+			// This is a best-effort attempt; failure should not stop the job.
+			_ = os.WriteFile(statePath, []byte(stateContent), 0644)
 		}
 
 		// Note: Canopy hooks configuration is handled in the cmd package
@@ -367,15 +381,66 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	if job.Worktree != "" {
-		// A worktree is specified, so create/use it on the host
-		wm := git.NewWorktreeManager()
-		worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
-		if err != nil {
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("failed to prepare host worktree: %w", err)
+		// Check if we're already in the worktree
+		currentDir, _ := os.Getwd()
+		
+		// Check if current directory is already a worktree for this job
+		// This handles cases where gitRoot might be the worktree itself
+		if currentDir != "" && (strings.HasSuffix(currentDir, "/.grove-worktrees/"+job.Worktree) || 
+			strings.HasSuffix(gitRoot, "/.grove-worktrees/"+job.Worktree)) {
+			// We're already in the worktree
+			workDir = currentDir
+		} else {
+			// Need to find the actual git root (not a worktree)
+			// If gitRoot ends with .grove-worktrees/something, go up to find real root
+			realGitRoot := gitRoot
+			if idx := strings.Index(gitRoot, "/.grove-worktrees/"); idx != -1 {
+				realGitRoot = gitRoot[:idx]
+			}
+			
+			expectedWorktreePath := filepath.Join(realGitRoot, ".grove-worktrees", job.Worktree)
+			
+			// A worktree is specified, so create/use it on the host
+			wm := git.NewWorktreeManager()
+			worktreePath, err := wm.GetOrPrepareWorktree(ctx, realGitRoot, job.Worktree, "")
+			if err != nil {
+				// Check if it's because the worktree already exists
+				if strings.Contains(err.Error(), "already checked out") || strings.Contains(err.Error(), "already exists") {
+					// Worktree exists, just use it
+					workDir = expectedWorktreePath
+				} else {
+					job.Status = JobStatusFailed
+					job.EndTime = time.Now()
+					return fmt.Errorf("failed to prepare host worktree: %w", err)
+				}
+			} else {
+				workDir = worktreePath
+				
+				// Check if grove-hooks is available and install hooks in the new worktree
+				if _, err := osexec.LookPath("grove-hooks"); err == nil {
+					cmd := osexec.Command("grove-hooks", "install")
+					cmd.Dir = worktreePath
+					if output, err := cmd.CombinedOutput(); err != nil {
+						fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))
+					} else {
+						fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
+					}
+				}
+			}
 		}
-		workDir = worktreePath
+
+		// Automatically initialize state within the new worktree for a better UX.
+		groveDir := filepath.Join(workDir, ".grove")
+		if err := os.MkdirAll(groveDir, 0755); err != nil {
+			// Log a warning but don't fail the job, as this is a convenience feature.
+			fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
+		} else {
+			planName := filepath.Base(plan.Directory)
+			stateContent := fmt.Sprintf("active_job: %s\n", planName)
+			statePath := filepath.Join(groveDir, "state.yml")
+			// This is a best-effort attempt; failure should not stop the job.
+			_ = os.WriteFile(statePath, []byte(stateContent), 0644)
+		}
 	} else {
 		// No worktree, use the main git repository root
 		workDir = gitRoot
@@ -389,7 +454,206 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		return fmt.Errorf("tmux not available: %w", err)
 	}
 
-	// Generate session name based on repository
+	// Check if job has a worktree - if so, create a new session; otherwise use existing behavior
+	if job.Worktree != "" {
+		// For jobs with worktrees, create a new isolated session
+		sessionName := e.generateSessionName(plan, job)
+		
+		// Check if session already exists
+		sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+		if sessionExists {
+			fmt.Printf("✓ Session '%s' already exists.\n", sessionName)
+			
+			// Build agent command
+			fullCfg, _ := config.LoadFrom(".")
+			agentCommand, err := e.buildAgentCommand(job, plan, workDir, fullCfg.Agent.Args)
+			if err != nil {
+				job.Status = JobStatusFailed
+				job.EndTime = time.Now()
+				return fmt.Errorf("failed to build agent command: %w", err)
+			}
+
+			// Create a new window for this agent job in the existing session
+			executor := &exec.RealCommandExecutor{}
+			agentWindowName := sanitizeForTmuxSession(job.Title)
+			
+			// Create new window for the agent
+			fmt.Printf("Creating window '%s' for agent...\n", agentWindowName)
+			if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
+				fmt.Printf("Warning: failed to create agent window: %v\n", err)
+			} else {
+				// Send the agent command to the new window
+				targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
+				if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+					fmt.Printf("Warning: failed to send agent command: %v\n", err)
+				}
+				
+				// Switch to the agent window
+				if os.Getenv("TMUX") != "" {
+					if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
+						fmt.Printf("Warning: failed to switch to agent window: %v\n", err)
+					}
+				}
+			}
+			
+			fmt.Printf("\n👉 Exit the tmux session when done to continue the plan.\n")
+			fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
+			fmt.Printf("   flow plan complete %s\n", job.FilePath)
+
+			// Wait for the existing session to close
+			err = tmuxClient.WaitForSessionClose(ctx, sessionName, 2*time.Second)
+
+			// Handle interruption
+			if err != nil {
+				if ctx.Err() != nil {
+					fmt.Printf("\n⚠️  Interrupted. Session '%s' will continue running.\n", sessionName)
+					job.Status = JobStatusFailed
+					job.EndTime = time.Now()
+					return fmt.Errorf("interrupted by user")
+				}
+				job.Status = JobStatusFailed
+				job.EndTime = time.Now()
+				return fmt.Errorf("wait for session failed: %w", err)
+			}
+
+			// Success - prompt for job status
+			status := e.promptForJobStatus(sessionName)
+
+			switch status {
+			case "c":
+				fmt.Printf("✅ Session '%s' marked as completed. Continuing plan...\n", sessionName)
+				job.Status = JobStatusCompleted
+			case "f":
+				fmt.Printf("❌ Session '%s' marked as failed.\n", sessionName)
+				job.Status = JobStatusFailed
+			case "q":
+				fmt.Printf("⏸️  Session '%s' closed with no status change.\n", sessionName)
+				// Keep current status (should still be Running)
+			}
+
+			job.EndTime = time.Now()
+			return nil
+		}
+
+		// Build agent command
+		fullCfg, _ := config.LoadFrom(".")
+		agentCommand, err := e.buildAgentCommand(job, plan, workDir, fullCfg.Agent.Args)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to build agent command: %w", err)
+		}
+
+		// Launch a NEW tmux session with two windows
+		// First window is a blank shell in the worktree
+		opts := tmux.LaunchOptions{
+			SessionName:      sessionName,
+			WorkingDirectory: workDir,
+			WindowName:       "workspace",  // First window for working in the worktree
+			Panes: []tmux.PaneOptions{
+				{
+					Command: "", // Empty command = default shell
+				},
+			},
+		}
+
+		fmt.Printf("🚀 Launching interactive session '%s'...\n", sessionName)
+		if err := tmuxClient.Launch(ctx, opts); err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to launch tmux session: %w", err)
+		}
+
+		// Create second window for the agent
+		executor := &exec.RealCommandExecutor{}
+		agentWindowName := sanitizeForTmuxSession(job.Title)
+		
+		// Create new window for the agent
+		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
+			fmt.Printf("Warning: failed to create agent window: %v\n", err)
+		} else {
+			// Send the agent command to the new window
+			targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
+			if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+				fmt.Printf("Warning: failed to send agent command: %v\n", err)
+			}
+			
+			// Switch to the agent window
+			if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
+				fmt.Printf("Warning: failed to switch to agent window: %v\n", err)
+			}
+		}
+
+		// Check if we're already in a tmux session
+		if os.Getenv("TMUX") != "" {
+			// We're already in tmux, so switch to the new session
+			fmt.Printf("✓ Switching to session '%s'...\n", sessionName)
+			executor := &exec.RealCommandExecutor{}
+			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+				// If switch fails, just print instructions
+				fmt.Printf("   Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
+			}
+		} else {
+			// Not in tmux, just print instructions
+			fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
+		}
+
+		fmt.Printf("\n👉 Exit the tmux session when done to continue the plan.\n")
+		fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
+		fmt.Printf("   flow plan complete %s\n", job.FilePath)
+
+		// Block and wait for session to close
+		err = tmuxClient.WaitForSessionClose(ctx, sessionName, 2*time.Second)
+
+		// Handle interruption
+		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Printf("\n⚠️  Interrupted. Cleaning up session '%s'...\n", sessionName)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = tmuxClient.KillSession(cleanupCtx, sessionName)
+				job.Status = JobStatusFailed
+				job.EndTime = time.Now()
+				return fmt.Errorf("interrupted by user")
+			}
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("wait for session failed: %w", err)
+		}
+
+		// Capture pane output for logging (optional)
+		output, _ := tmuxClient.CapturePane(context.Background(), sessionName+":0.0")
+		if output != "" {
+			outputFormatted := fmt.Sprintf("\n## Session Output\n\n```\n%s\n```\n", output)
+
+			// Get state persister to append output
+			persister := NewStatePersister()
+			if err := persister.AppendJobOutput(job, outputFormatted); err != nil {
+				// Non-fatal error, just log it
+				fmt.Printf("Warning: failed to save session output: %v\n", err)
+			}
+		}
+
+		// Success - prompt for job status
+		status := e.promptForJobStatus(sessionName)
+
+		switch status {
+		case "c":
+			fmt.Printf("✅ Session '%s' marked as completed. Continuing plan...\n", sessionName)
+			job.Status = JobStatusCompleted
+		case "f":
+			fmt.Printf("❌ Session '%s' marked as failed.\n", sessionName)
+			job.Status = JobStatusFailed
+		case "q":
+			fmt.Printf("⏸️  Session '%s' closed with no status change.\n", sessionName)
+			// Keep current status (should still be Running)
+		}
+
+		job.EndTime = time.Now()
+		return nil
+	}
+
+	// Original behavior for jobs without worktrees - use repository-based session with new window
 	repoName := filepath.Base(gitRoot)
 	sessionName := sanitizeForTmuxSession(repoName)
 	windowName := "job-" + sanitizeForTmuxSession(job.Title)

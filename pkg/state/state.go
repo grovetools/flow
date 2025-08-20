@@ -15,31 +15,13 @@ type State struct {
 
 // stateFilePath returns the path to the state file.
 func stateFilePath() (string, error) {
-	// Find the git root directory
+	// Use the current working directory to make the state local.
+	// This allows each worktree to have its own independent state.
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("get current directory: %w", err)
 	}
-
-	// Walk up the directory tree looking for .git
-	dir := cwd
-	for {
-		gitPath := filepath.Join(dir, ".git")
-		if _, err := os.Stat(gitPath); err == nil {
-			// Found .git directory
-			statePath := filepath.Join(dir, ".grove", "state.yml")
-			return statePath, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached root without finding .git
-			// Use current directory as fallback
-			statePath := filepath.Join(cwd, ".grove", "state.yml")
-			return statePath, nil
-		}
-		dir = parent
-	}
+	return filepath.Join(cwd, ".grove", "state.yml"), nil
 }
 
 // LoadState loads the state from the state file.

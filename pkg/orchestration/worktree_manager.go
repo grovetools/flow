@@ -3,6 +3,7 @@ package orchestration
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -127,6 +128,20 @@ func (wm *WorktreeManager) CreateWorktree(name string, baseBranch string) (strin
 	// Add worktree
 	if err := wm.gitClient.WorktreeAdd(worktreePath, branchName); err != nil {
 		return "", fmt.Errorf("adding worktree: %w", err)
+	}
+
+	// Check if grove-hooks is available and install hooks in the worktree
+	if _, err := exec.LookPath("grove-hooks"); err == nil {
+		// Change to worktree directory and run grove-hooks install
+		cmd := exec.Command("grove-hooks", "install")
+		cmd.Dir = worktreePath
+		if output, err := cmd.CombinedOutput(); err != nil {
+			wm.logger.Debug("grove-hooks install failed", "error", err, "output", string(output))
+		} else {
+			wm.logger.Info("installed grove-hooks in worktree", "path", worktreePath)
+		}
+	} else {
+		wm.logger.Debug("grove-hooks not found in PATH, skipping hook installation")
 	}
 
 	wm.logger.Info("created worktree", "name", name, "path", worktreePath, "branch", branchName)

@@ -11,8 +11,11 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/docker"
+	"github.com/mattsolo1/grove-core/git"
+	groveexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
+	"github.com/mattsolo1/grove-tmux/pkg/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -99,6 +102,74 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  - %s\n", wt)
 		}
 		fmt.Println()
+	}
+
+	// If plan uses a single worktree and we're not already in that session, create/switch to it
+	if len(worktrees) == 1 && !hasMainRepo {
+		worktreeName := ""
+		for wt := range worktrees {
+			worktreeName = wt
+			break
+		}
+
+		// Get git root to check if we're already in the worktree
+		gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
+		if err != nil {
+			gitRoot = ""
+		}
+
+		// Check if we're already in the worktree directory
+		currentDir, _ := os.Getwd()
+		expectedWorktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+		alreadyInWorktree := gitRoot != "" && currentDir != "" && strings.HasPrefix(currentDir, expectedWorktreePath)
+
+		// Check if we're already in the correct tmux session
+		currentTmuxSession := ""
+		if os.Getenv("TMUX") != "" {
+			// We're in tmux, get the current session name
+			cmd := exec.Command("tmux", "display-message", "-p", "#S")
+			output, err := cmd.Output()
+			if err == nil {
+				currentTmuxSession = strings.TrimSpace(string(output))
+			}
+		}
+		
+		expectedSessionName := sanitizeForTmuxSession(worktreeName)
+		alreadyInCorrectSession := currentTmuxSession == expectedSessionName
+
+		// Only prompt if we're not already in the worktree or the correct session
+		if !alreadyInWorktree && !alreadyInCorrectSession {
+			// Check if user wants to use tmux session for this worktree
+			if !planRunYes && os.Getenv("TERM") != "" {
+				fmt.Printf("This plan uses worktree '%s'. Launch in dedicated tmux session? [Y/n]: ", color.CyanString(worktreeName))
+				var response string
+				fmt.Scanln(&response)
+				response = strings.ToLower(strings.TrimSpace(response))
+				
+				// If user says no, continue with normal execution
+				if response == "n" || response == "no" {
+					fmt.Println("Continuing without tmux session...")
+				} else {
+					// User said yes or just pressed enter (default yes)
+					if err := createOrSwitchToWorktreeSession(ctx, plan, worktreeName, cmd, args); err != nil {
+						// If error, just continue with normal execution
+						fmt.Printf("Note: Could not create/switch to tmux session: %v\n", err)
+					} else {
+						// Successfully launched in tmux session, exit
+						return nil
+					}
+				}
+			} else if planRunYes {
+				// Auto-yes mode, create/switch to session
+				if err := createOrSwitchToWorktreeSession(ctx, plan, worktreeName, cmd, args); err != nil {
+					// If error, just continue with normal execution
+					fmt.Printf("Note: Could not create/switch to tmux session: %v\n", err)
+				} else {
+					// Successfully launched in tmux session, exit
+					return nil
+				}
+			}
+		}
 	}
 
 	// Inject the loaded configuration into the plan object
@@ -423,3 +494,172 @@ var (
 	planRunYes             bool
 	planRunSkipInteractive bool
 )
+
+// createOrSwitchToWorktreeSession creates or switches to a tmux session for the worktree
+func createOrSwitchToWorktreeSession(ctx context.Context, plan *orchestration.Plan, worktreeName string, cmd *cobra.Command, args []string) error {
+	// Only proceed if we're in a terminal and have tmux
+	if os.Getenv("TERM") == "" {
+		return fmt.Errorf("not in a terminal")
+	}
+
+	// Create tmux client
+	tmuxClient, err := tmux.NewClient()
+	if err != nil {
+		return fmt.Errorf("tmux not available: %w", err)
+	}
+
+	// Get the git root for the plan
+	gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+
+	// Get current working directory
+	currentDir, err := os.Getwd()
+	if err != nil {
+		currentDir = ""
+	}
+
+	// Check if we're already in the worktree
+	var worktreePath string
+	expectedWorktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	if currentDir != "" && strings.HasPrefix(currentDir, expectedWorktreePath) {
+		// We're already in the worktree
+		worktreePath = expectedWorktreePath
+	} else {
+		// Prepare the worktree
+		wm := git.NewWorktreeManager()
+		worktreePath, err = wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "")
+		if err != nil {
+			// Check if it's because the worktree already exists
+			if strings.Contains(err.Error(), "already checked out") {
+				// Worktree exists, just use it
+				worktreePath = expectedWorktreePath
+			} else {
+				return fmt.Errorf("failed to prepare worktree: %w", err)
+			}
+		} else {
+			// New worktree was created, install grove-hooks if available
+			if _, err := exec.LookPath("grove-hooks"); err == nil {
+				cmd := exec.Command("grove-hooks", "install")
+				cmd.Dir = worktreePath
+				if output, err := cmd.CombinedOutput(); err != nil {
+					fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))
+				} else {
+					fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
+				}
+			}
+		}
+	}
+
+	// Session name is just the worktree name (matching the executor's behavior)
+	sessionName := sanitizeForTmuxSession(worktreeName)
+
+	// Check if session already exists
+	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+
+	if !sessionExists {
+		// Create new session with workspace window
+		opts := tmux.LaunchOptions{
+			SessionName:      sessionName,
+			WorkingDirectory: worktreePath,
+			WindowName:       "workspace",
+			Panes: []tmux.PaneOptions{
+				{
+					Command: "", // Empty = default shell
+				},
+			},
+		}
+
+		fmt.Printf("🚀 Creating tmux session '%s' for worktree...\n", sessionName)
+		if err := tmuxClient.Launch(ctx, opts); err != nil {
+			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+	}
+
+	// Build the flow plan run command to execute in the session
+	flowCmd := []string{"flow", "plan", "run"}
+	
+	// Add all the original flags only if they were explicitly set
+	if cmd.Flags().Changed("all") && planRunAll {
+		flowCmd = append(flowCmd, "--all")
+	}
+	if cmd.Flags().Changed("next") && planRunNext {
+		flowCmd = append(flowCmd, "--next")
+	}
+	if cmd.Flags().Changed("yes") && planRunYes {
+		flowCmd = append(flowCmd, "--yes")
+	}
+	if cmd.Flags().Changed("watch") && planRunWatch {
+		flowCmd = append(flowCmd, "--watch")
+	}
+	if cmd.Flags().Changed("skip-interactive") && planRunSkipInteractive {
+		flowCmd = append(flowCmd, "--skip-interactive")
+	}
+	if cmd.Flags().Changed("parallel") {
+		flowCmd = append(flowCmd, "--parallel", fmt.Sprintf("%d", planRunParallel))
+	}
+	if cmd.Flags().Changed("model") && planRunModel != "" {
+		flowCmd = append(flowCmd, "--model", planRunModel)
+	}
+	
+	// Add the original arguments
+	flowCmd = append(flowCmd, args...)
+	
+	// Build the command string
+	flowCmdStr := strings.Join(flowCmd, " ")
+
+	// Create a new window for the plan run command
+	executor := &groveexec.RealCommandExecutor{}
+	windowName := "plan-run"
+	
+	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", worktreePath); err != nil {
+		// Window might already exist, try to use it
+		fmt.Printf("Note: Could not create new window: %v\n", err)
+	}
+
+	// Send the command to the window
+	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+	
+	// Send commands to the window
+	// First change to the worktree directory
+	cdCmd := fmt.Sprintf("cd %s", worktreePath)
+	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, cdCmd, "C-m"); err != nil {
+		return fmt.Errorf("failed to send cd command: %w", err)
+	}
+	
+	// Small delay
+	time.Sleep(100 * time.Millisecond)
+	
+	// Set the active plan in the worktree
+	planName := filepath.Base(plan.Directory)
+	setPlanCmd := fmt.Sprintf("flow plan set %s", planName)
+	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, setPlanCmd, "C-m"); err != nil {
+		return fmt.Errorf("failed to send set plan command: %w", err)
+	}
+	
+	// Small delay to let the set command complete
+	time.Sleep(200 * time.Millisecond)
+	
+	// Then run the actual flow plan run command
+	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, flowCmdStr, "C-m"); err != nil {
+		return fmt.Errorf("failed to send flow plan run command: %w", err)
+	}
+
+	// If we're already in tmux, switch to the session
+	if os.Getenv("TMUX") != "" {
+		fmt.Printf("✓ Switching to session '%s'...\n", sessionName)
+		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
+		}
+		// Also switch to the plan-run window
+		if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
+			fmt.Printf("Note: Could not switch to plan-run window\n")
+		}
+	} else {
+		fmt.Printf("Attach with: tmux attach -t %s\n", sessionName)
+	}
+
+	return nil
+}
+

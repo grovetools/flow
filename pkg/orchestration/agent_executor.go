@@ -180,7 +180,38 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Use the shared method to get or prepare the worktree at the git root
-	return e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
+	worktreePath, err := e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
+	if err != nil {
+		return "", err
+	}
+
+	// Check if grove-hooks is available and install hooks in the worktree
+	if _, err := exec.LookPath("grove-hooks"); err == nil {
+		cmd := exec.Command("grove-hooks", "install")
+		cmd.Dir = worktreePath
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))
+		} else {
+			fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
+		}
+	}
+
+	// Automatically initialize state within the new worktree for a better UX.
+	groveDir := filepath.Join(worktreePath, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		// Log a warning but don't fail the job, as this is a convenience feature.
+		fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
+	} else {
+		// For the active_job value, store just the plan name (not the full path)
+		// This allows 'flow plan status' to work correctly from within the worktree
+		planName := filepath.Base(plan.Directory)
+		stateContent := fmt.Sprintf("active_job: %s\n", planName)
+		statePath := filepath.Join(groveDir, "state.yml")
+		// This is a best-effort attempt; failure should not stop the job.
+		_ = os.WriteFile(statePath, []byte(stateContent), 0644)
+	}
+
+	return worktreePath, nil
 }
 
 // runAgentInWorktree executes the agent in the worktree context.
