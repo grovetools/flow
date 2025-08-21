@@ -106,6 +106,7 @@ If no directory is specified, uses the current directory.`,
 var (
 	planInitForce         bool
 	planInitModel         string
+	planInitWithWorktree  bool
 	planInitWorktree      string
 	planInitContainer     string
 	planRunDir            string
@@ -218,6 +219,7 @@ func NewPlanCmd() *cobra.Command {
 	// Init command flags
 	planInitCmd.Flags().BoolVarP(&planInitForce, "force", "f", false, "Overwrite existing directory")
 	planInitCmd.Flags().StringVar(&planInitModel, "model", "", "Default model for jobs (e.g., claude-3-5-sonnet-20241022, gpt-4)")
+	planInitCmd.Flags().BoolVar(&planInitWithWorktree, "with-worktree", false, "Automatically set the worktree name to match the plan directory name")
 	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Default worktree for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 
@@ -288,11 +290,12 @@ func NewPlanCmd() *cobra.Command {
 
 func runPlanInit(cmd *cobra.Command, args []string) error {
 	initCmd := &PlanInitCmd{
-		Dir:       args[0],
-		Force:     planInitForce,
-		Model:     planInitModel,
-		Worktree:  planInitWorktree,
-		Container: planInitContainer,
+		Dir:          args[0],
+		Force:        planInitForce,
+		Model:        planInitModel,
+		WithWorktree: planInitWithWorktree,
+		Worktree:     planInitWorktree,
+		Container:    planInitContainer,
 	}
 	return RunPlanInit(initCmd)
 }
@@ -355,9 +358,10 @@ func runPlanAddStep(cmd *cobra.Command, args []string) error {
 
 // PlanInitCmd holds the parameters for the init command.
 type PlanInitCmd struct {
-	Dir       string
-	Force     bool
-	Model     string
-	Worktree  string
-	Container string
+	Dir          string
+	Force        bool
+	Model        string
+	WithWorktree bool
+	Worktree     string
+	Container    string
 }

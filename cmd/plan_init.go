@@ -14,7 +14,8 @@ import (
 // RunPlanInit implements the plan init command.
 func RunPlanInit(cmd *PlanInitCmd) error {
 	// Resolve the full path for the new plan directory.
-	planPath, err := resolvePlanPath(cmd.Dir)
+	planName := cmd.Dir
+	planPath, err := resolvePlanPath(planName)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
@@ -24,13 +25,22 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 		return err
 	}
 
+	// Determine worktree to set in config
+	worktreeToSet := cmd.Worktree
+	if cmd.WithWorktree && worktreeToSet == "" {
+		worktreeToSet = planName
+	}
+
+	// Only use the model if explicitly provided via --model flag
+	effectiveModel := cmd.Model
+
 	// Create directory using the resolved path
 	if err := createPlanDirectory(planPath, cmd.Force); err != nil {
 		return err
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, cmd.Model, cmd.Worktree, cmd.Container); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container); err != nil {
 		// Log a warning but don't fail the init command
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	}
@@ -41,8 +51,8 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 	fmt.Println("✓ Created .grove-plan.yml with default configuration")
 
 	fmt.Println("\nNext steps:")
-	fmt.Printf("1. Add your first job: flow plan add %s\n", cmd.Dir)
-	fmt.Printf("2. Check status: flow plan status %s\n", cmd.Dir)
+	fmt.Printf("1. Add your first job: flow plan add %s\n", planName)
+	fmt.Printf("2. Check status: flow plan status %s\n", planName)
 
 	return nil
 }

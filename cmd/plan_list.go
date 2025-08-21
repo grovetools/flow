@@ -69,10 +69,15 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			planPath := filepath.Join(basePath, entry.Name())
-			// Only load if it looks like a plan (contains .md files)
-			if files, _ := filepath.Glob(filepath.Join(planPath, "*.md")); len(files) > 0 {
+			planConfigPath := filepath.Join(planPath, ".grove-plan.yml")
+			mdFiles, _ := filepath.Glob(filepath.Join(planPath, "*.md"))
+
+			// A directory is considered a plan if it has a .grove-plan.yml file or contains .md files.
+			if _, err := os.Stat(planConfigPath); err == nil || len(mdFiles) > 0 {
 				plan, err := orchestration.LoadPlan(planPath)
 				if err == nil {
+					// Even if there are no jobs, the plan object itself is valid
+					// and should be included in the list.
 					plans = append(plans, plan)
 				}
 			}

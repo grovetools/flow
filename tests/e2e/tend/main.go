@@ -26,6 +26,7 @@ func main() {
 		PlanConfigPropagationScenario(), // Tests plan config propagation to job frontmatter
 		GoWorkspaceWorktreeScenario(), // Tests go.work file creation in worktrees
 		StatusTUIScenario(), // Tests enhanced status command with TUI flag
+		PlanInitImprovementsScenario(), // Tests plan init improvements: empty plan listing, --with-worktree, oneshot_model default
 
 		// Chat Scenarios
 		BasicChatWorkflowScenario(),
