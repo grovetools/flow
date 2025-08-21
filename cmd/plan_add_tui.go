@@ -135,7 +135,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	// 5. Worktree Input (textinput with default)
 	m.worktreeInput = textinput.New()
 	m.worktreeInput.Placeholder = "feature-branch"
-	m.worktreeInput.Width = 50
+	m.worktreeInput.Width = 41
 	if plan.Config != nil && plan.Config.Worktree != "" {
 		m.worktreeInput.SetValue(plan.Config.Worktree)
 	}
@@ -151,7 +151,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 			defaultIndex = i
 		}
 	}
-	m.modelList = list.New(modelItems, itemDelegate{}, 20, 8)
+	m.modelList = list.New(modelItems, itemDelegate{}, 20, 6)
 	m.modelList.Title = ""
 	m.modelList.SetShowTitle(false)
 	m.modelList.SetShowStatusBar(false)
@@ -165,7 +165,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	// 7. Prompt Input (textarea)
 	m.promptInput = textarea.New()
 	m.promptInput.Placeholder = "Enter prompt here..."
-	m.promptInput.SetWidth(50)
+	m.promptInput.SetWidth(41)
 	m.promptInput.SetHeight(5)
 
 	return m
@@ -178,13 +178,6 @@ func (m tuiModel) Init() tea.Cmd {
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	// Handle dependency selection message
-	switch msg := msg.(type) {
-	case dependenciesSelectedMsg:
-		m.jobDependencies = msg.deps
-		m.focusIndex++ // Move to the next field
-		return m, nil
-	}
 
 	// Handle keyboard input
 	switch msg := msg.(type) {
@@ -210,9 +203,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			// Special handling for certain fields
-			if m.focusIndex == 4 && len(m.plan.Jobs) > 0 {
-				// Don't process enter on dependency tree - let it handle its own enter
-			} else if m.focusIndex == 6 {
+			if m.focusIndex == 6 {
 				// On the last field (prompt), enter confirms the form
 				// Extract values from all inputs
 				m.extractValues()
@@ -274,7 +265,18 @@ func (m *tuiModel) extractValues() {
 		m.jobType = string(selected.(item))
 	}
 
-	// Dependencies are already stored in m.jobDependencies
+	// Get dependencies from the tree model
+	var deps []string
+	for jobID := range m.depTree.selected {
+		// Find the corresponding job to get its filename
+		for _, job := range m.plan.Jobs {
+			if job.ID == jobID {
+				deps = append(deps, job.Filename)
+				break
+			}
+		}
+	}
+	m.jobDependencies = deps
 
 	// Get selected template
 	if selected := m.templateList.SelectedItem(); selected != nil {
@@ -406,7 +408,7 @@ func (m tuiModel) View() string {
 
 	// Row 3: Template | Dependencies
 	templateView := m.templateList.View()
-	templateField := renderField(3, "Template:", templateView, 0)
+	templateField := renderField(3, "Template:", templateView, 10)
 
 	// Dependencies - always show the tree view with fixed height
 	var depContent strings.Builder
@@ -437,8 +439,8 @@ func (m tuiModel) View() string {
 
 	// Row 4: Model | Prompt
 	modelView := m.modelList.View()
-	modelField := renderField(5, "Model:", modelView, 0)
-	promptField := renderField(6, "Prompt:", m.promptInput.View(), 0)
+	modelField := renderField(5, "Model:", modelView, 10)
+	promptField := renderField(6, "Prompt:", m.promptInput.View(), 10)
 
 	row4 := lipgloss.JoinHorizontal(lipgloss.Top, modelField, "  ", promptField)
 	b.WriteString(row4)
@@ -462,6 +464,7 @@ func (m tuiModel) View() string {
 func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 	// Generate job ID from title
 	jobID := generateJobIDFromTitle(plan, m.jobTitle)
+	
 
 	// Default job type if none selected
 	jobType := m.jobType
@@ -521,7 +524,7 @@ type dependencyTreeModel struct {
 	plan          *orchestration.Plan
 	displayJobs   []dependencyJob // A flattened list of jobs in display order
 	cursor        int
-	selected      map[string]struct{} // A set of selected job filenames
+	selected      map[string]struct{} // A set of selected job IDs
 	width, height int
 }
 
@@ -545,8 +548,6 @@ func initialDependencyTreeModel(plan *orchestration.Plan) dependencyTreeModel {
 	return m
 }
 
-// Define a message to signal completion
-type dependenciesSelectedMsg struct{ deps []string }
 
 func (m dependencyTreeModel) Init() tea.Cmd {
 	return nil
@@ -567,10 +568,10 @@ func (m dependencyTreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ": // Spacebar to toggle selection
 			if len(m.displayJobs) > 0 {
 				selectedJob := m.displayJobs[m.cursor].job
-				if _, ok := m.selected[selectedJob.Filename]; ok {
-					delete(m.selected, selectedJob.Filename)
+				if _, ok := m.selected[selectedJob.ID]; ok {
+					delete(m.selected, selectedJob.ID)
 				} else {
-					m.selected[selectedJob.Filename] = struct{}{}
+					m.selected[selectedJob.ID] = struct{}{}
 				}
 			}
 		case "a", "A": // Select/deselect all
@@ -580,16 +581,9 @@ func (m dependencyTreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Otherwise, select all
 				for _, dj := range m.displayJobs {
-					m.selected[dj.job.Filename] = struct{}{}
+					m.selected[dj.job.ID] = struct{}{}
 				}
 			}
-		case "enter":
-			// Return selected dependencies to the main model
-			var deps []string
-			for filename := range m.selected {
-				deps = append(deps, filename)
-			}
-			return m, func() tea.Msg { return dependenciesSelectedMsg{deps: deps} }
 		}
 	}
 	return m, nil
@@ -616,18 +610,18 @@ func (m dependencyTreeModel) View() string {
 		}
 
 		// Checkbox
-		if _, ok := m.selected[dj.job.Filename]; ok {
+		if _, ok := m.selected[dj.job.ID]; ok {
 			b.WriteString(selectedStyle.Render("[✓] "))
 		} else {
 			b.WriteString("[ ] ")
 		}
 
-		// Job info - just filename
-		jobInfo := dj.job.Filename
+		// Job info - show filename and title
+		jobInfo := fmt.Sprintf("%s (%s)", dj.job.Filename, dj.job.Title)
 
 		if m.cursor == i {
 			b.WriteString(selectedStyle.Render(jobInfo))
-		} else if _, ok := m.selected[dj.job.Filename]; ok {
+		} else if _, ok := m.selected[dj.job.ID]; ok {
 			b.WriteString(normalStyle.Render(jobInfo))
 		} else {
 			b.WriteString(dimStyle.Render(jobInfo))
