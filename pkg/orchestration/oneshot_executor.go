@@ -926,10 +926,79 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 	rulesPath := filepath.Join(worktreePath, ".grove", "rules")
 	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
-			// No rules file, but still display context info if context files exist
-			return e.displayContextInfo(worktreePath)
+			// Prompt user when rules file is missing
+			fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
+			fmt.Printf("Without a rules file, context cannot be generated for this %s job.\n", jobType)
+			
+			// Interactive prompt loop
+			for {
+				fmt.Println("\nOptions:")
+				fmt.Println("  [E]dit - Create and edit a rules file (default)")
+				fmt.Println("  [P]roceed - Continue without context")
+				fmt.Println("  [C]ancel - Cancel the job")
+				fmt.Print("\nYour choice [E/p/c]: ")
+				
+				reader := bufio.NewReader(os.Stdin)
+				input, _ := reader.ReadString('\n')
+				choice := strings.TrimSpace(strings.ToLower(input))
+				
+				switch choice {
+				case "e", "edit", "":
+					// Find cx or grove-context binary
+					var cxBinary string
+					if _, err := exec.LookPath("cx"); err == nil {
+						cxBinary = "cx"
+					} else if _, err := exec.LookPath("grove-context"); err == nil {
+						cxBinary = "grove-context"
+					} else {
+						fmt.Println("\n❌ Error: Neither 'cx' nor 'grove-context' found in PATH.")
+						fmt.Println("Please install grove-context to use this feature.")
+						continue
+					}
+					
+					// Run cx edit in the worktree
+					fmt.Printf("\nOpening rules editor with '%s edit'...\n", cxBinary)
+					cmd := exec.Command(cxBinary, "edit")
+					cmd.Dir = worktreePath
+					cmd.Stdin = os.Stdin
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					
+					if err := cmd.Run(); err != nil {
+						fmt.Printf("\n❌ Error running %s edit: %v\n", cxBinary, err)
+						fmt.Println("Please try again or choose a different option.")
+						continue
+					}
+					
+					// After edit completes, check if rules file now exists
+					if _, err := os.Stat(rulesPath); err == nil {
+						fmt.Println("\n✓ Rules file created successfully.")
+						// Break out of the prompt loop and continue with regeneration
+						break
+					} else {
+						fmt.Println("\n⚠️  Rules file still not found. Please try again.")
+						continue
+					}
+					
+				case "p", "proceed":
+					fmt.Println("\n⚠️  Proceeding without context from rules.")
+					fmt.Println("💡 To add context for future runs, open a new terminal, navigate to the worktree, and run 'cx edit'.")
+					return e.displayContextInfo(worktreePath)
+					
+				case "c", "cancel":
+					return fmt.Errorf("job canceled by user: .grove/rules file not found")
+					
+				default:
+					fmt.Printf("\n❌ Invalid choice '%s'. Please choose E, P, or C.\n", choice)
+					continue
+				}
+				
+				// If we reach here from the edit case, break the loop
+				break
+			}
+		} else {
+			return fmt.Errorf("checking .grove/rules: %w", err)
 		}
-		return fmt.Errorf("checking .grove/rules: %w", err)
 	}
 
 	// Display absolute path of rules file being used

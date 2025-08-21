@@ -52,6 +52,11 @@ func main() {
 		WorktreeStateIsolationScenario(),
 		WorktreeStateDirectNavigationScenario(),
 		
+		// Rules Prompt Scenarios
+		RulesPromptProceedScenario(),
+		RulesPromptCancelScenario(),
+		RulesPromptEditScenario(),
+		
 		// Debug Scenarios (optional - can be run individually)
 		LaunchDebugScenario(),
 		LaunchErrorHandlingScenario(),
