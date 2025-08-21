@@ -188,6 +188,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "tab", "down":
+			// Special handling for template list - confirm selection on tab
+			if m.focusIndex == 3 && msg.String() == "tab" {
+				// If we're in the template list and user pressed tab, treat it as confirming the selection
+				// The current selection is already stored in the list model, so we just move on
+			}
 			m.focusIndex++
 			if m.focusIndex > 6 {
 				m.focusIndex = 0

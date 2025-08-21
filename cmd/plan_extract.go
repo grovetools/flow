@@ -20,16 +20,19 @@ func NewPlanExtractCmd() *cobra.Command {
 	var outputType string
 
 	cmd := &cobra.Command{
-		Use:   "extract <block-id-1> [block-id-2...]",
+		Use:   "extract <block-id-1> [block-id-2...] | all",
 		Short: "Extract chat blocks into a new chat job",
 		Long: `Extract specific LLM responses from a chat into a new chat job for further refinement.
 
 This command creates a new chat job containing only the selected LLM responses,
 allowing you to continue working with specific parts of a larger conversation.
 
+The special argument "all" extracts all content below the frontmatter.
+
 Examples:
   flow plan extract --title "Database Schema Refinement" f3b9a2 a1c2d4
-  flow plan extract --file chat-session.md --title "API Design" d4e5f6`,
+  flow plan extract --file chat-session.md --title "API Design" d4e5f6
+  flow plan extract all --file doc.md --title "Full Document"`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runJobsExtract(title, file, args, dependsOn, worktree, model, outputType)
@@ -51,7 +54,16 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 	// Get the current plan directory
 	currentPlanPath, err := resolvePlanPathWithActiveJob("")
 	if err != nil {
-		return fmt.Errorf("could not resolve current plan path: %w", err)
+		// If we can't resolve from active job, check if we're in a plan directory
+		if _, err := os.Stat(".grove-plan.yml"); err == nil {
+			// We're in a plan directory
+			currentPlanPath, err = os.Getwd()
+			if err != nil {
+				return fmt.Errorf("could not get current directory: %w", err)
+			}
+		} else {
+			return fmt.Errorf("could not resolve current plan path: %w", err)
+		}
 	}
 
 	// Load the current plan
@@ -60,10 +72,18 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		return fmt.Errorf("load current plan: %w", err)
 	}
 
-	// Find the specified chat file in the current plan
-	chatFilePath := filepath.Join(currentPlanPath, file)
+	// Find the specified chat file
+	var chatFilePath string
+	if filepath.IsAbs(file) {
+		// If the file path is absolute, use it directly
+		chatFilePath = file
+	} else {
+		// Otherwise, look for it in the current plan
+		chatFilePath = filepath.Join(currentPlanPath, file)
+	}
+	
 	if _, err := os.Stat(chatFilePath); err != nil {
-		return fmt.Errorf("file %s not found in current plan: %w", file, err)
+		return fmt.Errorf("file %s not found: %w", file, err)
 	}
 
 	// Read and parse the chat file
@@ -72,31 +92,44 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		return fmt.Errorf("read %s: %w", file, err)
 	}
 
-	turns, err := orchestration.ParseChatFile(content)
-	if err != nil {
-		return fmt.Errorf("parse chat file: %w", err)
-	}
-
-	// Create a map of block IDs to content
-	blockMap := make(map[string]*orchestration.ChatTurn)
-	for _, turn := range turns {
-		if turn.Directive != nil && turn.Directive.ID != "" {
-			blockMap[turn.Directive.ID] = turn
-		}
-	}
-
-	// Extract the requested blocks
 	var extractedContent strings.Builder
 	foundBlocks := 0
-	for _, blockID := range blockIDs {
-		if turn, ok := blockMap[blockID]; ok {
-			if foundBlocks > 0 {
-				extractedContent.WriteString("\n\n---\n\n")
+
+	// Check if "all" argument is specified
+	if len(blockIDs) == 1 && blockIDs[0] == "all" {
+		// Extract all content below the frontmatter
+		_, bodyContent, err := orchestration.ParseFrontmatter(content)
+		if err != nil {
+			return fmt.Errorf("parse frontmatter: %w", err)
+		}
+		extractedContent.Write(bodyContent)
+		foundBlocks = 1
+	} else {
+		// Original behavior: extract specific blocks
+		turns, err := orchestration.ParseChatFile(content)
+		if err != nil {
+			return fmt.Errorf("parse chat file: %w", err)
+		}
+
+		// Create a map of block IDs to content
+		blockMap := make(map[string]*orchestration.ChatTurn)
+		for _, turn := range turns {
+			if turn.Directive != nil && turn.Directive.ID != "" {
+				blockMap[turn.Directive.ID] = turn
 			}
-			extractedContent.WriteString(turn.Content)
-			foundBlocks++
-		} else {
-			fmt.Printf("Warning: block ID '%s' not found\n", blockID)
+		}
+
+		// Extract the requested blocks
+		for _, blockID := range blockIDs {
+			if turn, ok := blockMap[blockID]; ok {
+				if foundBlocks > 0 {
+					extractedContent.WriteString("\n\n---\n\n")
+				}
+				extractedContent.WriteString(turn.Content)
+				foundBlocks++
+			} else {
+				fmt.Printf("Warning: block ID '%s' not found\n", blockID)
+			}
 		}
 	}
 
