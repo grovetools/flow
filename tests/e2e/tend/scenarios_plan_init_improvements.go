@@ -38,7 +38,7 @@ flow:
 				return nil
 			}),
 			
-			harness.NewStep("Test plan init with --with-worktree flag", func(ctx *harness.Context) error {
+			harness.NewStep("Test plan init with --with-worktree flag and auto-activation", func(ctx *harness.Context) error {
 				flow, err := getFlowBinary()
 				if err != nil {
 					return fmt.Errorf("failed to get flow binary: %w", err)
@@ -50,6 +50,11 @@ flow:
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
 					return fmt.Errorf("flow plan init failed: %w", result.Error)
+				}
+				
+				// Verify output shows plan was set as active
+				if !strings.Contains(result.Stdout, "Set active plan to: test-worktree-plan") {
+					return fmt.Errorf("expected init to set active plan, output:\n%s", result.Stdout)
 				}
 				
 				// Verify .grove-plan.yml was created with correct content
@@ -69,6 +74,16 @@ flow:
 					return fmt.Errorf("expected model to be commented out, got:\n%s", content)
 				}
 				
+				// Verify plan is set as active using plan current
+				cmd = command.New(flow, "plan", "current").Dir(ctx.RootDir)
+				result = cmd.Run()
+				if result.Error != nil {
+					return fmt.Errorf("flow plan current failed: %w", result.Error)
+				}
+				if !strings.Contains(result.Stdout, "test-worktree-plan") {
+					return fmt.Errorf("expected current plan to be 'test-worktree-plan', got:\n%s", result.Stdout)
+				}
+				
 				return nil
 			}),
 			
@@ -83,6 +98,11 @@ flow:
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("flow plan init failed: %w", result.Error)
+				}
+				
+				// Verify this plan is now active
+				if !strings.Contains(result.Stdout, "Set active plan to: empty-plan") {
+					return fmt.Errorf("expected init to set active plan to 'empty-plan', output:\n%s", result.Stdout)
 				}
 				
 				// List plans

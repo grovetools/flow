@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/mattsolo1/grove-flow/pkg/state"
 )
 
 // RunPlanInit implements the plan init command.
@@ -50,9 +51,17 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 	fmt.Println("✓ Created plan directory")
 	fmt.Println("✓ Created .grove-plan.yml with default configuration")
 
+	// Set the new plan as active
+	if err := state.SetActiveJob(planName); err != nil {
+		// Just warn if we can't set active job, don't fail the init
+		fmt.Printf("Warning: failed to set active job: %v\n", err)
+	} else {
+		fmt.Printf("✓ Set active plan to: %s\n", planName)
+	}
+
 	fmt.Println("\nNext steps:")
-	fmt.Printf("1. Add your first job: flow plan add %s\n", planName)
-	fmt.Printf("2. Check status: flow plan status %s\n", planName)
+	fmt.Printf("1. Add your first job: flow plan add\n")
+	fmt.Printf("2. Check status: flow plan status\n")
 
 	return nil
 }
