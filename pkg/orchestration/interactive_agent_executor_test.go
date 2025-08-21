@@ -28,14 +28,12 @@ func TestBuildAgentCommandWithContinue(t *testing.T) {
 		t.Fatalf("Failed to build agent command: %v", err)
 	}
 	
-	// Check that the command contains --continue
-	if !strings.Contains(cmd, " --continue ") {
-		t.Errorf("Command should contain --continue flag, got: %s", cmd)
+	// Check that the command is in the echo | claude format
+	if !strings.HasPrefix(cmd, "echo '") {
+		t.Errorf("Command should start with echo, got: %s", cmd)
 	}
-	
-	// Check that --continue comes before other args
-	if !strings.Contains(cmd, "claude --continue --model") {
-		t.Errorf("--continue should come right after claude, got: %s", cmd)
+	if !strings.Contains(cmd, " | claude --continue ") {
+		t.Errorf("Command should pipe to claude with --continue, got: %s", cmd)
 	}
 	
 	// Test with AgentContinue = false
@@ -52,7 +50,10 @@ func TestBuildAgentCommandWithContinue(t *testing.T) {
 		t.Fatalf("Failed to build agent command: %v", err)
 	}
 	
-	// Check that the command does NOT contain --continue
+	// Check that the command does NOT use echo | ...
+	if strings.HasPrefix(cmd2, "echo '") {
+		t.Errorf("Command should not start with echo, got: %s", cmd2)
+	}
 	if strings.Contains(cmd2, "--continue") {
 		t.Errorf("Command should NOT contain --continue flag, got: %s", cmd2)
 	}

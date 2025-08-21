@@ -24,59 +24,42 @@ func TestBuildAgentCommand(t *testing.T) {
 		wantErr      bool
 	}{
 		{
-			name: "Simple prompt",
+			name: "Simple job",
 			job: &orchestration.Job{
-				PromptBody: "Hello world",
+				FilePath: "/test/plan/01-job.md",
 			},
 			worktreePath: "/test/worktree",
 			agentArgs:    []string{},
-			expectedCmd:  "claude 'Hello world'",
+			expectedCmd:  "claude 'Read the file /test/plan/01-job.md and execute the agent job defined there. '",
 		},
 		{
-			name: "Prompt with single quote",
+			name: "Job with source files",
 			job: &orchestration.Job{
-				PromptBody: "It's a test",
-			},
-			worktreePath: "/test/worktree",
-			agentArgs:    []string{},
-			expectedCmd:  "claude 'It'\\''s a test'",
-		},
-		{
-			name: "Prompt with source files",
-			job: &orchestration.Job{
-				PromptBody:   "Implement this feature.",
+				FilePath:     "/test/plan/01-job.md",
 				PromptSource: []string{"src/main.go", "design.md"},
 			},
 			worktreePath: "/test/worktree",
 			agentArgs:    []string{},
-			expectedCmd:  "claude 'Implement this feature.\n\nRelevant files for context:\n- src/main.go\n- design.md\n'",
+			expectedCmd:  "claude 'Read the file /test/plan/01-job.md and execute the agent job defined there. Also read these context files: src/main.go, design.md'",
 		},
 		{
-			name: "Empty prompt",
+			name: "Job with agent args",
 			job: &orchestration.Job{
-				PromptBody: "",
-			},
-			worktreePath: "/test/worktree",
-			agentArgs:    []string{},
-			expectedCmd:  "claude ''",
-		},
-		{
-			name: "Prompt with multiple single quotes",
-			job: &orchestration.Job{
-				PromptBody: "It's Bob's test and it's working",
-			},
-			worktreePath: "/test/worktree",
-			agentArgs:    []string{},
-			expectedCmd:  "claude 'It'\\''s Bob'\\''s test and it'\\''s working'",
-		},
-		{
-			name: "Prompt with agent args",
-			job: &orchestration.Job{
-				PromptBody: "Hello world",
+				FilePath: "/test/plan/01-job.md",
 			},
 			worktreePath: "/test/worktree",
 			agentArgs:    []string{"--dangerously-skip-permissions", "--verbose"},
-			expectedCmd:  "claude --dangerously-skip-permissions --verbose 'Hello world'",
+			expectedCmd:  "claude --dangerously-skip-permissions --verbose 'Read the file /test/plan/01-job.md and execute the agent job defined there. '",
+		},
+		{
+			name: "Job with agent continue",
+			job: &orchestration.Job{
+				FilePath:      "/test/plan/01-job.md",
+				AgentContinue: true,
+			},
+			worktreePath: "/test/worktree",
+			agentArgs:    []string{"--verbose"},
+			expectedCmd:  "echo 'Read the file /test/plan/01-job.md and execute the agent job defined there. ' | claude --continue --verbose",
 		},
 	}
 

@@ -327,7 +327,10 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 	cmdParts := []string{"claude"}
 	if job.AgentContinue {
 		cmdParts = append(cmdParts, "--continue")
+		cmdParts = append(cmdParts, agentArgs...)
+		return fmt.Sprintf("echo %s | %s", escapedInstruction, strings.Join(cmdParts, " ")), nil
 	}
+	
 	cmdParts = append(cmdParts, agentArgs...)
 	cmdParts = append(cmdParts, escapedInstruction)
 
