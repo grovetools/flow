@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,14 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
+
+// BlockInfo represents information about an extractable block (same as in cmd/plan_extract.go)
+type BlockInfo struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	LineStart int    `json:"line_start"`
+	Preview   string `json:"preview"`
+}
 
 // ChatExtractBasicScenario tests basic functionality of the extract command.
 func ChatExtractBasicScenario() *harness.Scenario {
@@ -627,6 +636,245 @@ More content to include in the extraction.
 				}
 				if !strings.Contains(content, "## Section 2") {
 					return fmt.Errorf("missing section 2")
+				}
+				
+				return nil
+			}),
+		},
+	}
+}
+
+// ChatExtractListScenario tests the list functionality of the extract command.
+func ChatExtractListScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "flow-chat-extract-list",
+		Description: "Tests listing available blocks in chat files",
+		Tags:        []string{"chat", "extract", "list"},
+		Steps: []harness.Step{
+			harness.NewStep("Setup project with chat file", func(ctx *harness.Context) error {
+				// Setup git repo
+				git.Init(ctx.RootDir)
+				git.SetupTestConfig(ctx.RootDir)
+				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
+				git.Add(ctx.RootDir, ".")
+				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Create config
+				configContent := `name: test-project
+flow:
+  plans_directory: ./plans
+  oneshot_model: mock
+  agent_model: mock
+`
+				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
+
+				// Create plan directory
+				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
+				fs.CreateDir(planDir)
+
+				// Create .grove-plan.yml
+				fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "")
+
+				// Create a chat file with multiple blocks
+				chatContent := `---
+id: test-chat
+title: test-chat
+type: chat
+status: completed
+---
+
+Initial user prompt asking for help.
+
+<!-- grove: {"id": "block1"} -->
+
+## LLM Response
+
+This is the first response with some content that will be shown in the preview.
+
+<!-- grove: {"template": "chat"} -->
+
+Follow up question from user.
+
+<!-- grove: {"id": "block2"} -->
+
+## Another Response
+
+This is the second response with more content.
+
+<!-- grove: {"id": "block3"} -->
+
+## Final Response
+
+The last response in the conversation with even more detailed information.
+`
+				return fs.WriteString(filepath.Join(planDir, "chat-session.md"), chatContent)
+			}),
+			harness.NewStep("List blocks in text format", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "extract", "list", "--file", "chat-session.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				
+				// Verify output contains expected blocks
+				if !strings.Contains(result.Stdout, "Found 3 extractable blocks") {
+					return fmt.Errorf("expected to find 3 blocks")
+				}
+				if !strings.Contains(result.Stdout, "ID: block1") {
+					return fmt.Errorf("missing block1 in output")
+				}
+				if !strings.Contains(result.Stdout, "ID: block2") {
+					return fmt.Errorf("missing block2 in output")
+				}
+				if !strings.Contains(result.Stdout, "ID: block3") {
+					return fmt.Errorf("missing block3 in output")
+				}
+				if !strings.Contains(result.Stdout, "Type: llm") {
+					return fmt.Errorf("missing block type information")
+				}
+				if !strings.Contains(result.Stdout, "Line:") {
+					return fmt.Errorf("missing line number information")
+				}
+				if !strings.Contains(result.Stdout, "Preview:") {
+					return fmt.Errorf("missing preview information")
+				}
+				
+				return nil
+			}),
+			harness.NewStep("List blocks in JSON format", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "extract", "list", "--file", "chat-session.md", "--json").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				
+				// Parse JSON output
+				var blocks []BlockInfo
+				if err := json.Unmarshal([]byte(result.Stdout), &blocks); err != nil {
+					return fmt.Errorf("failed to parse JSON output: %w", err)
+				}
+				
+				// Verify blocks
+				if len(blocks) != 3 {
+					return fmt.Errorf("expected 3 blocks, got %d", len(blocks))
+				}
+				
+				// Check first block
+				if blocks[0].ID != "block1" {
+					return fmt.Errorf("expected first block ID to be 'block1', got '%s'", blocks[0].ID)
+				}
+				if blocks[0].Type != "llm" {
+					return fmt.Errorf("expected first block type to be 'llm', got '%s'", blocks[0].Type)
+				}
+				if blocks[0].LineStart == 0 {
+					return fmt.Errorf("expected line number to be set")
+				}
+				if blocks[0].Preview == "" {
+					return fmt.Errorf("expected preview to be set")
+				}
+				
+				// Check IDs of other blocks
+				if blocks[1].ID != "block2" {
+					return fmt.Errorf("expected second block ID to be 'block2'")
+				}
+				if blocks[2].ID != "block3" {
+					return fmt.Errorf("expected third block ID to be 'block3'")
+				}
+				
+				return nil
+			}),
+			harness.NewStep("List blocks from absolute path", func(ctx *harness.Context) error {
+				// Create a file outside the plan
+				externalDir := filepath.Join(ctx.RootDir, "external")
+				fs.CreateDir(externalDir)
+				
+				externalChat := `---
+id: external-chat
+title: External Chat
+type: chat
+status: completed
+---
+
+Question about external file.
+
+<!-- grove: {"id": "ext1"} -->
+
+Response in external file.
+`
+				fs.WriteString(filepath.Join(externalDir, "external-chat.md"), externalChat)
+				
+				flow, _ := getFlowBinary()
+				absolutePath := filepath.Join(externalDir, "external-chat.md")
+				cmd := command.New(flow, "plan", "extract", "list", "--file", absolutePath).Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				
+				// Verify output
+				if !strings.Contains(result.Stdout, "Found 1 extractable blocks") {
+					return fmt.Errorf("expected to find 1 block in external file")
+				}
+				if !strings.Contains(result.Stdout, "ID: ext1") {
+					return fmt.Errorf("missing ext1 in output")
+				}
+				
+				return nil
+			}),
+			harness.NewStep("List from file with no blocks", func(ctx *harness.Context) error {
+				// Create a file with no grove directives
+				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
+				noBlocksContent := `---
+id: no-blocks
+title: No Blocks
+type: chat
+status: completed
+---
+
+This is a chat file without any grove directives.
+
+Just plain content here.
+`
+				fs.WriteString(filepath.Join(planDir, "no-blocks.md"), noBlocksContent)
+				
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "extract", "list", "--file", "no-blocks.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				
+				// Verify output
+				if !strings.Contains(result.Stdout, "No extractable blocks found") {
+					return fmt.Errorf("expected 'No extractable blocks' message")
+				}
+				
+				return nil
+			}),
+			harness.NewStep("List from file with no blocks (JSON)", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "extract", "list", "--file", "no-blocks.md", "--json").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				
+				// Parse JSON output
+				var blocks []BlockInfo
+				if err := json.Unmarshal([]byte(result.Stdout), &blocks); err != nil {
+					return fmt.Errorf("failed to parse JSON output: %w", err)
+				}
+				
+				// Should be empty array
+				if len(blocks) != 0 {
+					return fmt.Errorf("expected empty array, got %d blocks", len(blocks))
 				}
 				
 				return nil

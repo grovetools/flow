@@ -1,14 +1,24 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
+
+// BlockInfo represents information about an extractable block
+type BlockInfo struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	LineStart int    `json:"line_start"`
+	Preview   string `json:"preview"`
+}
 
 // NewPlanExtractCmd creates the jobs extract command.
 func NewPlanExtractCmd() *cobra.Command {
@@ -20,32 +30,45 @@ func NewPlanExtractCmd() *cobra.Command {
 	var outputType string
 
 	cmd := &cobra.Command{
-		Use:   "extract <block-id-1> [block-id-2...] | all",
-		Short: "Extract chat blocks into a new chat job",
-		Long: `Extract specific LLM responses from a chat into a new chat job for further refinement.
-
-This command creates a new chat job containing only the selected LLM responses,
-allowing you to continue working with specific parts of a larger conversation.
+		Use:   "extract <block-id-1> [block-id-2...] | all | list",
+		Short: "Extract chat blocks into a new chat job or list available blocks",
+		Long: `Extract specific LLM responses from a chat into a new chat job for further refinement,
+or list available blocks in a file.
 
 The special argument "all" extracts all content below the frontmatter.
+The special argument "list" shows all available block IDs in the file.
 
 Examples:
   flow plan extract --title "Database Schema Refinement" f3b9a2 a1c2d4
   flow plan extract --file chat-session.md --title "API Design" d4e5f6
-  flow plan extract all --file doc.md --title "Full Document"`,
+  flow plan extract all --file doc.md --title "Full Document"
+  flow plan extract list --file chat-session.md
+  flow plan extract list --file chat-session.md --json`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check if this is a list command
+			if len(args) == 1 && args[0] == "list" {
+				jsonFlag, _ := cmd.Flags().GetBool("json")
+				return runJobsExtractList(file, jsonFlag)
+			}
+			
+			// For extract command, title is required
+			if title == "" {
+				return fmt.Errorf("--title is required for extract command")
+			}
+			
+			// Otherwise, run the normal extract command
 			return runJobsExtract(title, file, args, dependsOn, worktree, model, outputType)
 		},
 	}
 
-	cmd.Flags().StringVar(&title, "title", "", "Title for the new chat job (required)")
+	cmd.Flags().StringVar(&title, "title", "", "Title for the new chat job (required for extract)")
 	cmd.Flags().StringVar(&file, "file", "plan.md", "Chat file to extract from (default: plan.md)")
 	cmd.Flags().StringSliceVarP(&dependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model to use for this job")
 	cmd.Flags().StringVar(&outputType, "output", "file", "Output type: file, commit, none, or generate_jobs")
-	cmd.MarkFlagRequired("title")
+	cmd.Flags().Bool("json", false, "Output in JSON format (for list command)")
 
 	return cmd
 }
@@ -226,4 +249,121 @@ func sanitizeForFilename(s string) string {
 	}
 
 	return cleaned
+}
+
+// runJobsExtractList lists available block IDs in a chat file
+func runJobsExtractList(file string, jsonOutput bool) error {
+	// Get the file path
+	var chatFilePath string
+	if filepath.IsAbs(file) {
+		// If the file path is absolute, use it directly
+		chatFilePath = file
+	} else {
+		// Try to resolve from current plan directory
+		currentPlanPath, err := resolvePlanPathWithActiveJob("")
+		if err != nil {
+			// If we can't resolve from active job, check if we're in a plan directory
+			if _, err := os.Stat(".grove-plan.yml"); err == nil {
+				// We're in a plan directory
+				currentPlanPath, err = os.Getwd()
+				if err != nil {
+					return fmt.Errorf("could not get current directory: %w", err)
+				}
+			} else {
+				// If not in a plan directory, use current directory
+				currentPlanPath = "."
+			}
+		}
+		chatFilePath = filepath.Join(currentPlanPath, file)
+	}
+	
+	if _, err := os.Stat(chatFilePath); err != nil {
+		return fmt.Errorf("file %s not found: %w", file, err)
+	}
+
+	// Read and parse the chat file
+	content, err := os.ReadFile(chatFilePath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", file, err)
+	}
+
+	// Parse the file to find all grove directives with IDs
+	contentStr := string(content)
+	lines := strings.Split(contentStr, "\n")
+	
+	// Regular expression to find grove directives
+	groveDirectiveRegex := regexp.MustCompile(`(?m)<!-- grove: (.+?) -->`)
+	
+	var blocks []BlockInfo
+	
+	for i, line := range lines {
+		matches := groveDirectiveRegex.FindStringSubmatch(line)
+		if len(matches) > 1 {
+			// Parse the JSON directive
+			var directive orchestration.ChatDirective
+			if err := json.Unmarshal([]byte(matches[1]), &directive); err != nil {
+				continue // Skip malformed directives
+			}
+			
+			if directive.ID != "" {
+				// Determine the type based on whether it has a template
+				blockType := "llm"
+				if directive.Template != "" {
+					blockType = "user"
+				}
+				
+				// Get preview from the following lines
+				preview := ""
+				// Look at the next few lines for content
+				for j := i + 1; j < len(lines) && j < i + 6; j++ {
+					line := strings.TrimSpace(lines[j])
+					if line != "" && !strings.HasPrefix(line, "<!--") && !strings.HasPrefix(line, "##") {
+						preview = line
+						if len(preview) > 100 {
+							preview = preview[:97] + "..."
+						}
+						break
+					} else if strings.HasPrefix(line, "##") {
+						// Include headers in preview
+						preview = line
+						break
+					}
+				}
+				
+				blocks = append(blocks, BlockInfo{
+					ID:        directive.ID,
+					Type:      blockType,
+					LineStart: i + 1, // Convert to 1-based line numbers
+					Preview:   preview,
+				})
+			}
+		}
+	}
+
+	if jsonOutput {
+		// Output as JSON
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(blocks); err != nil {
+			return fmt.Errorf("encode JSON: %w", err)
+		}
+	} else {
+		// Output as text
+		if len(blocks) == 0 {
+			fmt.Println("No extractable blocks found in the file.")
+		} else {
+			fmt.Printf("Found %d extractable blocks in %s:\n\n", len(blocks), file)
+			for _, block := range blocks {
+				fmt.Printf("ID: %s\n", block.ID)
+				fmt.Printf("Type: %s\n", block.Type)
+				if block.LineStart > 0 {
+					fmt.Printf("Line: %d\n", block.LineStart)
+				}
+				fmt.Printf("Preview: %s\n", block.Preview)
+				fmt.Println("---")
+			}
+		}
+	}
+
+	return nil
 }

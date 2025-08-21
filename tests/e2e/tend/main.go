@@ -35,6 +35,7 @@ func main() {
 		ChatExtractBasicScenario(), // Tests basic chat block extraction
 		ChatExtractErrorScenario(), // Tests extract command error handling
 		ChatExtractAllScenario(), // Tests extracting all content with 'all' argument
+		ChatExtractListScenario(), // Tests listing available blocks
 		
 		// Phase 3: Complex Orchestration
 		SimpleOrchestrationScenario(),
