@@ -24,6 +24,10 @@ func GoWorkspaceWorktreeScenario() *harness.Scenario {
 				// Create workspace root directory structure
 				workspaceRoot := ctx.RootDir
 				
+				// Initialize workspace root as a git repository
+				git.Init(workspaceRoot)
+				git.SetupTestConfig(workspaceRoot)
+				
 				// Create go.work at the workspace root
 				goWorkContent := `go 1.21
 
@@ -36,15 +40,11 @@ use (
 					return err
 				}
 				
-				// Create my-module directory and initialize it as a git repo
+				// Create my-module directory
 				moduleDir := filepath.Join(workspaceRoot, "my-module")
 				if err := fs.CreateDir(moduleDir); err != nil {
 					return err
 				}
-				
-				// Initialize my-module as its own git repository
-				git.Init(moduleDir)
-				git.SetupTestConfig(moduleDir)
 				
 				// Create go.mod in my-module
 				goModContent := `module github.com/test/my-module
@@ -81,19 +81,12 @@ flow:
 					return err
 				}
 				
-				// Initial commit in my-module
-				git.Add(moduleDir, ".")
-				git.Commit(moduleDir, "Initial commit")
-				
 				// Create the other module directory (just for completeness)
 				otherModuleDir := filepath.Join(workspaceRoot, "other-module")
 				if err := fs.CreateDir(otherModuleDir); err != nil {
 					return err
 				}
 				
-				// Initialize other-module as its own git repository
-				git.Init(otherModuleDir)
-				git.SetupTestConfig(otherModuleDir)
 				
 				otherGoModContent := `module github.com/test/other-module
 
@@ -103,9 +96,9 @@ go 1.21
 					return err
 				}
 				
-				// Initial commit in other-module
-				git.Add(otherModuleDir, ".")
-				git.Commit(otherModuleDir, "Initial commit")
+				// Add all files and make initial commit at workspace root
+				git.Add(workspaceRoot, ".")
+				git.Commit(workspaceRoot, "Initial commit with Go workspace")
 				
 				// Store module directory for later use
 				ctx.Set("module_dir", moduleDir)
@@ -188,8 +181,9 @@ go 1.21
 				ctx.ShowCommandOutput("git worktree list", result.Stdout, "")
 				
 				// Find the worktree directory
-				// Since my-module is its own git repo, the worktree will be created there
-				worktreePath := filepath.Join(moduleDir, ".grove-worktrees", "test-go-build")
+				// The worktree will be created at the workspace root since that's where the git repo is
+				workspaceRoot := filepath.Dir(moduleDir) // Get parent directory
+				worktreePath := filepath.Join(workspaceRoot, ".grove-worktrees", "test-go-build")
 				
 				// Check if worktree exists
 				if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
