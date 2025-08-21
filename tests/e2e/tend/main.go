@@ -64,6 +64,10 @@ func main() {
 		RulesPromptCancelScenario(),
 		RulesPromptEditScenario(),
 
+		// Template Scenarios
+		TemplateSymlinkWorktreeScenario(),
+		TemplateSymlinkFromMainScenario(), // Tests symlink creation when running from main directory
+
 		// Debug Scenarios (optional - can be run individually)
 		LaunchDebugScenario(),
 		LaunchErrorHandlingScenario(),

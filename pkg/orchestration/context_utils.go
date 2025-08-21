@@ -9,14 +9,28 @@ import (
 	"github.com/mattsolo1/grove-core/git"
 )
 
-// GetProjectRoot attempts to find the project root directory
-// This is typically where grove.yml is located
+// GetProjectRoot attempts to find the project root directory by searching upwards for a grove.yml file.
 func GetProjectRoot() (string, error) {
-	cwd, err := os.Getwd()
+	dir, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("could not get current working directory: %w", err)
 	}
-	return cwd, nil
+
+	startDir := dir // For error message
+
+	for {
+		configPath := filepath.Join(dir, "grove.yml")
+		if _, err := os.Stat(configPath); err == nil {
+			return dir, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached root without finding grove.yml
+			return "", fmt.Errorf("could not find project root (grove.yml) searching up from %s", startDir)
+		}
+		dir = parent
+	}
 }
 
 // GetGitRootSafe attempts to find git root with multiple fallback strategies

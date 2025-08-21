@@ -90,6 +90,11 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 			return fmt.Errorf("failed to prepare worktree: %w", err)
 		}
 
+		// Symlink templates to make them available in the worktree
+		if err := e.symlinkTemplates(worktreePath); err != nil {
+			fmt.Printf("Warning: failed to symlink templates: %v\n", err)
+		}
+
 		// Set up Go workspace if this is a Go project
 		if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
 			// Log a warning but don't fail the job, as this is a convenience feature
@@ -420,6 +425,11 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 				if strings.Contains(err.Error(), "already checked out") || strings.Contains(err.Error(), "already exists") {
 					// Worktree exists, just use it
 					workDir = expectedWorktreePath
+					
+					// Still symlink templates for existing worktree
+					if err := e.symlinkTemplates(workDir); err != nil {
+						fmt.Printf("Warning: failed to symlink templates: %v\n", err)
+					}
 				} else {
 					job.Status = JobStatusFailed
 					job.EndTime = time.Now()
@@ -427,6 +437,11 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 				}
 			} else {
 				workDir = worktreePath
+				
+				// Symlink templates to make them available in the worktree
+				if err := e.symlinkTemplates(worktreePath); err != nil {
+					fmt.Printf("Warning: failed to symlink templates: %v\n", err)
+				}
 				
 				// Check if grove-hooks is available and install hooks in the new worktree
 				if _, err := osexec.LookPath("grove-hooks"); err == nil {
@@ -868,5 +883,74 @@ func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string
 	}
 	
 	return response
+}
+
+// symlinkTemplates creates symlinks to job templates in the worktree
+func (e *InteractiveAgentExecutor) symlinkTemplates(worktreePath string) error {
+	// Find the project root to locate templates
+	projectRoot, err := GetProjectRoot()
+	if err != nil {
+		fmt.Printf("Warning: could not find project root via grove.yml, trying fallback: %v\n", err)
+		// Fallback: if we're in a worktree, go up 2 directories
+		// Worktree path is typically: /path/to/project/.grove-worktrees/worktree-name
+		if strings.Contains(worktreePath, ".grove-worktrees") {
+			projectRoot = filepath.Dir(filepath.Dir(worktreePath))
+			fmt.Printf("Using fallback project root: %s\n", projectRoot)
+		} else {
+			return nil // Non-fatal error
+		}
+	}
+
+	// Look for templates in project-local and user-global locations
+	templatePaths := []string{
+		filepath.Join(projectRoot, ".grove", "job-templates"),
+	}
+
+	// Add user-global templates if accessible
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		templatePaths = append(templatePaths, filepath.Join(homeDir, ".config", "grove", "job-templates"))
+	}
+
+	// Create .grove directory in worktree if it doesn't exist
+	groveDir := filepath.Join(worktreePath, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		fmt.Printf("Warning: failed to create .grove directory in worktree for templates: %v\n", err)
+		return nil // Non-fatal error
+	}
+
+	// Symlink template directories
+	for _, templatePath := range templatePaths {
+		if _, err := os.Stat(templatePath); err != nil {
+			continue // Skip if template directory doesn't exist
+		}
+
+		// Determine symlink target name
+		var symlinkName string
+		if strings.Contains(templatePath, ".config") {
+			symlinkName = "user-job-templates"
+		} else {
+			symlinkName = "job-templates"
+		}
+
+		symlinkTarget := filepath.Join(groveDir, symlinkName)
+
+		// Remove existing symlink or directory if it exists
+		os.RemoveAll(symlinkTarget)
+
+		// Create relative path for symlink
+		relPath, err := filepath.Rel(groveDir, templatePath)
+		if err != nil {
+			fmt.Printf("Warning: failed to create relative path for template symlink: %v\n", err)
+			continue
+		}
+
+		// Create symlink
+		if err := os.Symlink(relPath, symlinkTarget); err != nil {
+			fmt.Printf("Warning: failed to create template symlink from %s to %s: %v\n", relPath, symlinkTarget, err)
+			continue // Non-fatal error
+		}
+	}
+
+	return nil
 }
 
