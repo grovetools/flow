@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -65,7 +67,7 @@ func runStarshipInstall(cmd *cobra.Command, args []string) error {
 description = "Shows Grove Flow plan status"
 command = "flow starship status"
 when = "test -f .grove/state.yml || test -f grove.yml"
-format = " [$output](bold green) "
+format = " $output "
 `
 
 	// Check if [custom.grove] already exists and replace it
@@ -152,8 +154,40 @@ func runStarshipStatus(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Format: 🌳 Plan: plan-name 🤖 model-name 🌲 in worktree (or worktree name)
+	// Format: 🌳 Plan: plan-name (stats) 🤖 model-name 🌲 in worktree (or worktree name)
 	output := fmt.Sprintf("🌳 Plan: %s", activePlan)
+
+	// Get job statistics using flow plan status --json
+	statusCmd := exec.Command("flow", "plan", "status", "--json")
+	statusOutput, err := statusCmd.Output()
+	if err == nil {
+		var statusData struct {
+			Statistics struct {
+				Completed int `json:"completed"`
+				Running   int `json:"running"`
+				Pending   int `json:"pending"`
+				Total     int `json:"total"`
+			} `json:"statistics"`
+		}
+		
+		if err := json.Unmarshal(statusOutput, &statusData); err == nil && statusData.Statistics.Total > 0 {
+			// Add job statistics with emojis matching grove plan status
+			stats := statusData.Statistics
+			var statsParts []string
+			if stats.Completed > 0 {
+				statsParts = append(statsParts, fmt.Sprintf("✓%d", stats.Completed))
+			}
+			if stats.Running > 0 {
+				statsParts = append(statsParts, fmt.Sprintf("⚡%d", stats.Running))
+			}
+			if stats.Pending > 0 {
+				statsParts = append(statsParts, fmt.Sprintf("⏳%d", stats.Pending))
+			}
+			if len(statsParts) > 0 {
+				output += fmt.Sprintf(" (%s)", strings.Join(statsParts, " "))
+			}
+		}
+	}
 
 	if config.Model != "" {
 		output += fmt.Sprintf(" 🤖 %s", config.Model)
