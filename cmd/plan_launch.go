@@ -184,6 +184,9 @@ func buildAgentCommand(job *orchestration.Job, plan *orchestration.Plan, worktre
 
 	// Build command with args
 	cmdParts := []string{"claude"}
+	if job.AgentContinue {
+		cmdParts = append(cmdParts, "--continue")
+	}
 	cmdParts = append(cmdParts, agentArgs...)
 	cmdParts = append(cmdParts, escapedInstruction)
 

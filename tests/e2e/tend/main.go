@@ -48,6 +48,11 @@ func main() {
 		InteractiveAgentSkipScenario(),
 		InteractiveAgentWorkflowScenario(),
 		
+		// Agent Continue Scenarios
+		AgentContinueScenario(),
+		AgentContinueAutoEnableScenario(),
+		AgentContinueFlagPropagationScenario(),
+		
 		// Worktree Context Isolation Scenarios
 		SimpleWorktreeContextTestScenario(),
 		WorktreeStateIsolationScenario(),

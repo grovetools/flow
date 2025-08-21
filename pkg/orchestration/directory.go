@@ -284,23 +284,25 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 	}
 
 	data := struct {
-		ID           string
-		Title        string
-		Type         string
-		DependsOn    []string
-		PromptSource []string
-		Worktree     string
-		OutputType   string
-		Prompt       string
+		ID            string
+		Title         string
+		Type          string
+		DependsOn     []string
+		PromptSource  []string
+		Worktree      string
+		OutputType    string
+		Prompt        string
+		AgentContinue bool
 	}{
-		ID:           job.ID,
-		Title:        job.Title,
-		Type:         string(job.Type),
-		DependsOn:    job.DependsOn,
-		PromptSource: job.PromptSource,
-		Worktree:     job.Worktree,
-		OutputType:   job.Output.Type,
-		Prompt:       job.PromptBody,
+		ID:            job.ID,
+		Title:         job.Title,
+		Type:          string(job.Type),
+		DependsOn:     job.DependsOn,
+		PromptSource:  job.PromptSource,
+		Worktree:      job.Worktree,
+		OutputType:    job.Output.Type,
+		Prompt:        job.PromptBody,
+		AgentContinue: job.AgentContinue,
 	}
 
 	if data.OutputType == "" {

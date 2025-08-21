@@ -325,6 +325,9 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 
 	// Build command with agent args
 	cmdParts := []string{"claude"}
+	if job.AgentContinue {
+		cmdParts = append(cmdParts, "--continue")
+	}
 	cmdParts = append(cmdParts, agentArgs...)
 	cmdParts = append(cmdParts, escapedInstruction)
 

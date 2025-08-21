@@ -93,7 +93,8 @@ depends_on:{{ range .DependsOn }}
   - {{ . }}{{ end }}{{ end }}{{ if .PromptSource }}
 prompt_source:{{ range .PromptSource }}
   - {{ . }}{{ end }}{{ end }}
-worktree: {{ .Worktree }}
+worktree: {{ .Worktree }}{{ if .AgentContinue }}
+agent_continue: true{{ end }}
 output:
   type: {{ .OutputType }}
 ---

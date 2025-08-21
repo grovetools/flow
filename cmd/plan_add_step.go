@@ -23,9 +23,10 @@ type PlanAddStepCmd struct {
 	SourceFiles []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
 	Prompt      string   `flag:"p" help:"Inline prompt text"`
 	OutputType  string   `flag:"" default:"file" help:"Output type: file, commit, none, or generate_jobs"`
-	Interactive bool     `flag:"i" help:"Interactive mode"`
-	Worktree    string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
-	Model       string   `flag:"" help:"LLM model to use for this job"`
+	Interactive   bool     `flag:"i" help:"Interactive mode"`
+	Worktree      string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
+	Model         string   `flag:"" help:"LLM model to use for this job"`
+	AgentContinue bool     `flag:"" help:"Continue the last agent session (adds --continue flag)"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -241,16 +242,26 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 
 	// Build job structure
 	job := &orchestration.Job{
-		ID:         jobID,
-		Title:      cmd.Title,
-		Type:       orchestration.JobType(cmd.Type),
-		Status:     "pending",
-		DependsOn:  cmd.DependsOn,
-		PromptBody: strings.TrimSpace(prompt),
-		Model:      cmd.Model,
+		ID:            jobID,
+		Title:         cmd.Title,
+		Type:          orchestration.JobType(cmd.Type),
+		Status:        "pending",
+		DependsOn:     cmd.DependsOn,
+		PromptBody:    strings.TrimSpace(prompt),
+		Model:         cmd.Model,
+		AgentContinue: cmd.AgentContinue,
 		Output: orchestration.OutputConfig{
 			Type: cmd.OutputType,
 		},
+	}
+	
+	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
+	// and the user didn't explicitly set it
+	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
+		// Only auto-enable if this is NOT the first interactive agent job
+		if hasExistingInteractiveAgentJob(plan) {
+			job.AgentContinue = true
+		}
 	}
 
 	// Set worktree only if explicitly provided
@@ -305,6 +316,14 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 	}
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
+	}
+	
+	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
+	if job.Type == orchestration.JobTypeInteractiveAgent && !job.AgentContinue {
+		// Only auto-enable if this is NOT the first interactive agent job
+		if hasExistingInteractiveAgentJob(plan) {
+			job.AgentContinue = true
+		}
 	}
 	
 	return job, nil
@@ -408,6 +427,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if cmd.Model != "" {
 		job.Model = cmd.Model
+	}
+	if cmd.AgentContinue {
+		job.AgentContinue = true
 	}
 
 	// Validate dependencies
@@ -541,6 +563,15 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
 	}
+	
+	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
+	// and the user didn't explicitly set it via CLI
+	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
+		// Only auto-enable if this is NOT the first interactive agent job
+		if hasExistingInteractiveAgentJob(plan) {
+			job.AgentContinue = true
+		}
+	}
 
 	return job, nil
 }
@@ -588,4 +619,14 @@ func generateJobIDFromTitle(plan *orchestration.Plan, title string) string {
 	}
 
 	return id
+}
+
+// hasExistingInteractiveAgentJob checks if the plan already has an interactive_agent job
+func hasExistingInteractiveAgentJob(plan *orchestration.Plan) bool {
+	for _, job := range plan.Jobs {
+		if job.Type == orchestration.JobTypeInteractiveAgent {
+			return true
+		}
+	}
+	return false
 }
