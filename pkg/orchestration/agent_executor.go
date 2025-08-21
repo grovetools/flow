@@ -436,8 +436,8 @@ func buildPromptFromSources(job *Job, plan *Plan) (string, error) {
 	var promptFiles []string
 	var systemMessage strings.Builder
 
-	// Check if this is a reference-based prompt (has template and prompt_source)
-	if job.Template != "" && len(job.PromptSource) > 0 {
+	// If a template is specified, use the reference-based prompt structure
+	if job.Template != "" {
 		// Reference-based prompt - load template
 		templateManager := NewTemplateManager()
 		template, err := templateManager.FindTemplate(job.Template)
