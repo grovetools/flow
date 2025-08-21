@@ -144,6 +144,11 @@ func (wm *WorktreeManager) CreateWorktree(name string, baseBranch string) (strin
 		wm.logger.Debug("grove-hooks not found in PATH, skipping hook installation")
 	}
 
+	// Symlink templates to make them available in the worktree
+	if err := wm.symlinkTemplates(worktreePath); err != nil {
+		wm.logger.Debug("failed to symlink templates", "error", err)
+	}
+
 	wm.logger.Info("created worktree", "name", name, "path", worktreePath, "branch", branchName)
 	return worktreePath, nil
 }
@@ -159,6 +164,12 @@ func (wm *WorktreeManager) GetOrCreateWorktree(name string) (string, error) {
 	for _, wt := range worktrees {
 		if wt.Name == name || strings.HasSuffix(wt.Path, name) {
 			wm.logger.Debug("found existing worktree", "name", name, "path", wt.Path)
+			
+			// Ensure templates are symlinked in existing worktree
+			if err := wm.symlinkTemplates(wt.Path); err != nil {
+				wm.logger.Debug("failed to symlink templates in existing worktree", "error", err)
+			}
+			
 			return wt.Path, nil
 		}
 	}
@@ -411,4 +422,67 @@ func isProcessAlive(pid int) bool {
 	// We need to send signal 0 to check
 	err = process.Signal(os.Signal(nil))
 	return err == nil
+}
+
+// symlinkTemplates creates symlinks to job templates in the worktree
+func (wm *WorktreeManager) symlinkTemplates(worktreePath string) error {
+	// Find the project root to locate templates
+	projectRoot, err := GetProjectRoot()
+	if err != nil {
+		wm.logger.Debug("failed to get project root for template symlinking", "error", err)
+		return nil // Non-fatal error
+	}
+
+	// Look for templates in project-local and user-global locations
+	templatePaths := []string{
+		filepath.Join(projectRoot, ".grove", "job-templates"),
+	}
+	
+	// Add user-global templates if accessible
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		templatePaths = append(templatePaths, filepath.Join(homeDir, ".config", "grove", "job-templates"))
+	}
+
+	// Create .grove directory in worktree if it doesn't exist
+	groveDir := filepath.Join(worktreePath, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		wm.logger.Debug("failed to create .grove directory in worktree", "error", err)
+		return nil // Non-fatal error
+	}
+
+	// Symlink template directories
+	for _, templatePath := range templatePaths {
+		if _, err := os.Stat(templatePath); err != nil {
+			continue // Skip if template directory doesn't exist
+		}
+
+		// Determine symlink target name
+		var symlinkName string
+		if strings.Contains(templatePath, ".config") {
+			symlinkName = "user-job-templates"
+		} else {
+			symlinkName = "job-templates"
+		}
+
+		symlinkTarget := filepath.Join(groveDir, symlinkName)
+		
+		// Remove existing symlink if it exists
+		os.Remove(symlinkTarget)
+		
+		// Create relative path for symlink
+		relPath, err := filepath.Rel(groveDir, templatePath)
+		if err != nil {
+			wm.logger.Debug("failed to create relative path for template symlink", "error", err, "templatePath", templatePath)
+			continue
+		}
+
+		// Create symlink
+		if err := os.Symlink(relPath, symlinkTarget); err != nil {
+			wm.logger.Debug("failed to create template symlink", "error", err, "target", symlinkTarget, "source", relPath)
+		} else {
+			wm.logger.Debug("created template symlink", "target", symlinkTarget, "source", templatePath)
+		}
+	}
+
+	return nil
 }

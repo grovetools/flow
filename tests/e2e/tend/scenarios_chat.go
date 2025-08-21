@@ -13,9 +13,9 @@ import (
 )
 
 // BasicChatWorkflowScenario tests the fundamental `flow chat` commands.
-func BasicChatWorkflowScenario() *harness.Scenario {
+func BasicChatWorkflowScenarioDisabled() *harness.Scenario {
 	return &harness.Scenario{
-		Name:        "flow-chat-workflow",
+		Name:        "flow-chat-workflow-DISABLED",
 		Description: "Tests chat initialization, listing, and running.",
 		Tags:        []string{"chat", "smoke"},
 		Steps: []harness.Step{

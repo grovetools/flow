@@ -480,6 +480,23 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 	// Default output type
 	outputType := "file"
 
+	// Handle template content embedding
+	promptBody := m.jobPrompt
+	if m.jobTemplate != "" && m.jobTemplate != "none" {
+		// Load the template and embed its content
+		templateManager := orchestration.NewTemplateManager()
+		template, err := templateManager.FindTemplate(m.jobTemplate)
+		if err == nil && template.Prompt != "" {
+			// Start with template content
+			promptBody = strings.TrimSpace(template.Prompt)
+			
+			// Append user prompt if provided
+			if m.jobPrompt != "" {
+				promptBody = promptBody + "\n\n## Additional Instructions\n\n" + strings.TrimSpace(m.jobPrompt)
+			}
+		}
+	}
+
 	return &orchestration.Job{
 		ID:         jobID,
 		Title:      m.jobTitle,
@@ -488,7 +505,7 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 		DependsOn:  m.jobDependencies,
 		Worktree:   m.jobWorktree,
 		Model:      m.jobModel,
-		PromptBody: m.jobPrompt,
+		PromptBody: promptBody,
 		Template:   m.jobTemplate,
 		Output: orchestration.OutputConfig{
 			Type: outputType,

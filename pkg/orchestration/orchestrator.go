@@ -130,6 +130,7 @@ func (o *Orchestrator) registerExecutors() {
 		RetryCount:      2,
 		Model:           "default",
 		ModelOverride:   o.config.ModelOverride,
+		SkipInteractive: o.config.SkipInteractive,
 	}
 
 	// Register oneshot executor (also handles chat jobs)

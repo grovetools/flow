@@ -219,7 +219,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		CheckInterval:       5 * time.Second,
 		ModelOverride:       modelOverride,
 		MaxConsecutiveSteps: maxSteps,
-		SkipInteractive:     planRunSkipInteractive,
+		SkipInteractive:     planRunSkipInteractive || planRunYes, // --yes implies skip interactive
 	}
 
 	// Check if we need Docker (only for agent and interactive_agent jobs)

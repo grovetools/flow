@@ -38,6 +38,12 @@ func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
 		return tm.LoadTemplate(projectPath, name, "project")
 	}
 
+	// 1b. Check symlinked user templates in worktree: .grove/user-job-templates/
+	userSymlinkPath := filepath.Join(".grove", "user-job-templates", name+".md")
+	if _, err := os.Stat(userSymlinkPath); err == nil {
+		return tm.LoadTemplate(userSymlinkPath, name, "user")
+	}
+
 	// 2. Check user-global: ~/.config/grove/job-templates/
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
@@ -89,6 +95,19 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 		}
 	}
 
+	// 1b. Check symlinked user templates in worktree: .grove/user-job-templates/
+	userSymlinkDir := filepath.Join(".grove", "user-job-templates")
+	if entries, err := os.ReadDir(userSymlinkDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+				name := strings.TrimSuffix(entry.Name(), ".md")
+				if tmpl, err := tm.LoadTemplate(filepath.Join(userSymlinkDir, entry.Name()), name, "user"); err == nil {
+					templates = append(templates, tmpl)
+				}
+			}
+		}
+	}
+
 	// 2. Check user-global: ~/.config/grove/job-templates/
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" {
@@ -98,7 +117,17 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
 					name := strings.TrimSuffix(entry.Name(), ".md")
 					if tmpl, err := tm.LoadTemplate(filepath.Join(userDir, entry.Name()), name, "user"); err == nil {
-						templates = append(templates, tmpl)
+						// Avoid duplicates from symlinked templates
+						found := false
+						for _, existing := range templates {
+							if existing.Name == name && existing.Source == "user" {
+								found = true
+								break
+							}
+						}
+						if !found {
+							templates = append(templates, tmpl)
+						}
 					}
 				}
 			}

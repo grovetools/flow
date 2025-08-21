@@ -240,7 +240,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		}
 	}
 
-	// Allow empty prompts
+	// Require a prompt if no template was used
+	if prompt == "" && cmd.Template == "" {
+		return nil, fmt.Errorf("either a prompt or template is required")
+	}
 
 	// Generate job ID
 	jobID := generateJobIDFromTitle(plan, cmd.Title)

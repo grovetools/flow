@@ -16,6 +16,7 @@ import (
 	"time"
 
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
+	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-flow/pkg/gemini"
 	"gopkg.in/yaml.v3"
@@ -28,6 +29,7 @@ type ExecutorConfig struct {
 	RetryCount      int
 	Model           string
 	ModelOverride   string // Override model from CLI
+	SkipInteractive bool   // Skip interactive prompts
 }
 
 // OneShotExecutor executes oneshot jobs.
@@ -89,6 +91,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			// but we check status to be safe.
 			if job.Status == JobStatusCompleted {
 				return nil
+			}
+
+			// Skip interactive prompts if configured to do so
+			if e.config.SkipInteractive {
+				fmt.Printf("Skipping interactive chat job '%s' (running automatically)\n", job.Title)
+				return e.executeChatJob(ctx, job, plan)
 			}
 
 			// Loop until user chooses to run or complete
@@ -921,6 +929,20 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 	rulesPath := filepath.Join(worktreePath, ".grove", "rules")
 	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
+			// Check if we should skip interactive prompts
+			if e.config.SkipInteractive {
+				fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
+				fmt.Printf("Skipping interactive prompt and proceeding without context for %s job.\n", jobType)
+				return e.displayContextInfo(worktreePath)
+			}
+
+			// Check if we have a TTY before prompting
+			if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+				fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
+				fmt.Printf("No TTY available, proceeding without context for %s job.\n", jobType)
+				return e.displayContextInfo(worktreePath)
+			}
+
 			// Prompt user when rules file is missing
 			fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
 			fmt.Printf("Without a rules file, context cannot be generated for this %s job.\n", jobType)
