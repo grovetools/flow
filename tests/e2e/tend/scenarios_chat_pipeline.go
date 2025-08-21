@@ -32,6 +32,7 @@ func ChatPipelineScenario() *harness.Scenario {
 				configContent := `name: test-project
 flow:
   chat_directory: ./chats
+  oneshot_model: mock
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				
