@@ -20,6 +20,7 @@ var (
 	statusVerbose bool
 	statusGraph   bool
 	statusFormat  string
+	statusTUI     bool
 )
 
 // InitPlanStatusFlags initializes the flags for the status command
@@ -27,6 +28,7 @@ func InitPlanStatusFlags() {
 	planStatusCmd.Flags().BoolVarP(&statusVerbose, "verbose", "v", false, "Show detailed job information")
 	planStatusCmd.Flags().BoolVarP(&statusGraph, "graph", "g", false, "Show dependency graph")
 	planStatusCmd.Flags().StringVarP(&statusFormat, "format", "f", "tree", "Output format: tree, list, json")
+	planStatusCmd.Flags().BoolVarP(&statusTUI, "tui", "t", false, "Launch interactive TUI")
 }
 
 // RunPlanStatus implements the status command.
@@ -56,6 +58,11 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	graph, err := orchestration.BuildDependencyGraph(plan)
 	if err != nil {
 		return fmt.Errorf("build dependency graph: %w", err)
+	}
+
+	// Launch TUI if requested
+	if statusTUI {
+		return runStatusTUI(plan, graph)
 	}
 
 	// Check if JSON output is requested via --json flag

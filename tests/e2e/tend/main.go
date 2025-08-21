@@ -25,6 +25,7 @@ func main() {
 		PlanConfigScenario(), // Tests plan-level configuration with .grove-plan.yml
 		PlanConfigPropagationScenario(), // Tests plan config propagation to job frontmatter
 		GoWorkspaceWorktreeScenario(), // Tests go.work file creation in worktrees
+		StatusTUIScenario(), // Tests enhanced status command with TUI flag
 
 		// Chat Scenarios
 		BasicChatWorkflowScenario(),
