@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -62,6 +63,10 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 
 	// Launch TUI if requested
 	if statusTUI {
+		// Check if we're in a TTY before launching TUI
+		if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+			return fmt.Errorf("could not open a new TTY: TUI mode requires an interactive terminal")
+		}
 		return runStatusTUI(plan, graph)
 	}
 
