@@ -712,11 +712,6 @@ func (e *OneShotExecutor) appendToJobFile(output string, job *Job) error {
 		return fmt.Errorf("writing job file: %w", err)
 	}
 
-	// Also print the output to stdout for immediate feedback
-	fmt.Println("\n--- Output ---")
-	fmt.Println(output)
-	fmt.Println("--- End Output ---")
-
 	return nil
 }
 

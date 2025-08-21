@@ -119,7 +119,7 @@ func TestRunPlanAddStep(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "missing prompt",
+			name: "missing prompt and template",
 			setupPlan: func(t *testing.T, dir string) {
 				plan := &orchestration.Plan{Name: "test-plan"}
 				if err := orchestration.SavePlan(dir, plan); err != nil {
@@ -208,9 +208,9 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Errorf("Expected 2 prompt sources, got %d", len(job.PromptSource))
 				}
 
-				// Check that prompt body contains reference comment
-				if !strings.Contains(job.PromptBody, "Template will be resolved at execution time") {
-					t.Error("Expected reference comment in prompt body")
+				// Check that prompt body contains template content
+				if !strings.Contains(job.PromptBody, "Given a high level plan") {
+					t.Error("Expected template content in prompt body")
 				}
 			},
 		},
@@ -249,13 +249,17 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal("Created job not found")
 				}
 
-				// Verify job has template and one prompt source
+				// Verify job has template
 				if job.Template != "agent-run" {
 					t.Errorf("Expected template 'agent-run', got '%s'", job.Template)
 				}
 
-				if len(job.PromptSource) != 1 {
-					t.Errorf("Expected 1 prompt source, got %d", len(job.PromptSource))
+				// Verify prompt body contains both template content and additional prompt
+				if !strings.Contains(job.PromptBody, "Given a high level plan") {
+					t.Error("Expected template content in prompt body")
+				}
+				if !strings.Contains(job.PromptBody, "Legacy prompt content") {
+					t.Error("Expected additional prompt content in prompt body")
 				}
 			},
 		},

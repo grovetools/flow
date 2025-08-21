@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
@@ -102,6 +103,10 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 
 func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeToUse string) (*orchestration.Job, error) {
 	if cmd.Interactive {
+		// Check if we're in a TTY before launching interactive mode
+		if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+			return nil, fmt.Errorf("interactive mode requires a terminal (TTY)")
+		}
 		return interactiveJobCreation(plan, cmd.Worktree)
 	}
 
@@ -490,8 +495,8 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		}
 		job.Template = template.Name
 
-		// Initialize empty prompt body - no comments needed since info is in frontmatter
-		job.PromptBody = ""
+		// Initialize prompt body with the template's prompt content
+		job.PromptBody = strings.TrimSpace(template.Prompt)
 
 		// Add user-provided prompt if any
 		userPrompt := ""

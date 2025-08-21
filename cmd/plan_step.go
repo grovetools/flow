@@ -10,12 +10,21 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 
 // runPlanStep implements the step command for guided plan execution.
 func runPlanStep(cmd *cobra.Command, args []string) error {
+	// Check if we're in a TTY before starting interactive mode
+	// Allow piped input for testing
+	stat, _ := os.Stdin.Stat()
+	isPiped := (stat.Mode() & os.ModeCharDevice) == 0
+	if !isPiped && !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+		return fmt.Errorf("step command requires an interactive terminal (TTY)")
+	}
+
 	// Determine plan directory
 	var planDir string
 	if len(args) > 0 {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 	groveexec "github.com/mattsolo1/grove-flow/pkg/exec"
@@ -141,22 +142,28 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		if !alreadyInWorktree && !alreadyInCorrectSession {
 			// Check if user wants to use tmux session for this worktree
 			if !planRunYes && os.Getenv("TERM") != "" {
-				fmt.Printf("This plan uses worktree '%s'. Launch in dedicated tmux session? [Y/n]: ", color.CyanString(worktreeName))
-				var response string
-				fmt.Scanln(&response)
-				response = strings.ToLower(strings.TrimSpace(response))
-				
-				// If user says no, continue with normal execution
-				if response == "n" || response == "no" {
-					fmt.Println("Continuing without tmux session...")
+				// Check if we have a TTY before trying to prompt
+				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+					// No TTY available, skip the prompt and continue without tmux
+					fmt.Println("No TTY available, continuing without tmux session...")
 				} else {
-					// User said yes or just pressed enter (default yes)
-					if err := createOrSwitchToWorktreeSession(ctx, plan, worktreeName, cmd, args); err != nil {
-						// If error, just continue with normal execution
-						fmt.Printf("Note: Could not create/switch to tmux session: %v\n", err)
+					fmt.Printf("This plan uses worktree '%s'. Launch in dedicated tmux session? [Y/n]: ", color.CyanString(worktreeName))
+					var response string
+					fmt.Scanln(&response)
+					response = strings.ToLower(strings.TrimSpace(response))
+					
+					// If user says no, continue with normal execution
+					if response == "n" || response == "no" {
+						fmt.Println("Continuing without tmux session...")
 					} else {
-						// Successfully launched in tmux session, exit
-						return nil
+						// User said yes or just pressed enter (default yes)
+						if err := createOrSwitchToWorktreeSession(ctx, plan, worktreeName, cmd, args); err != nil {
+							// If error, just continue with normal execution
+							fmt.Printf("Note: Could not create/switch to tmux session: %v\n", err)
+						} else {
+							// Successfully launched in tmux session, exit
+							return nil
+						}
 					}
 				}
 			} else if planRunYes {
