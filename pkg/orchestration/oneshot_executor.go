@@ -18,7 +18,7 @@ import (
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-flow/pkg/gemini"
+	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1494,14 +1494,26 @@ func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan 
 	coldContextFile := filepath.Join(workDir, ".grove", "cached-context")
 	hotContextFile := filepath.Join(workDir, ".grove", "context")
 
-	// Initialize cache manager
-	cacheManager := gemini.NewCacheManager(workDir)
+	// Determine the correct directory for context manager
+	// If we're in a worktree, we need to find the actual project root for rules file
+	contextDir := workDir
+	if strings.Contains(workDir, ".grove-worktrees") {
+		// Extract project root from worktree path
+		// worktree path format: /path/to/project/.grove-worktrees/worktree-name
+		idx := strings.Index(workDir, "/.grove-worktrees/")
+		if idx != -1 {
+			contextDir = workDir[:idx]
+		}
+	}
+	
+	// Initialize cache manager with the context directory
+	cacheManager := gemini.NewCacheManager(contextDir)
 
 	// Get or create cache for cold context (if it exists and is not empty)
 	var cacheInfo *gemini.CacheInfo
 	if info, err := os.Stat(coldContextFile); err == nil && info.Size() > 0 {
-		// Create context manager
-		ctxMgr := grovecontext.NewManager(workDir)
+		// Create context manager using the correct directory
+		ctxMgr := grovecontext.NewManager(contextDir)
 		
 		// Check for custom expiration time from @expire-time directive
 		ttl := 1 * time.Hour // Default TTL
