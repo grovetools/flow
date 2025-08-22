@@ -15,3 +15,4 @@ The user may provide feedback and ask for refinements in subsequent turns of thi
 - Use direct, technical language - no timelines or corporate speak  
 - Do NOT include large code blocks - just describe what to create (small snippets are enouraged though)
 - Be specific about file paths (e.g., "backend/src/routes/todos.ts")
+- IMPORTANT: inform the LLM agent of all files it should read for sufficient context, using full paths if they fall outside the repo/project
