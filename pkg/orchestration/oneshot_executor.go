@@ -1500,11 +1500,19 @@ func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan 
 	// Get or create cache for cold context (if it exists and is not empty)
 	var cacheInfo *gemini.CacheInfo
 	if info, err := os.Stat(coldContextFile); err == nil && info.Size() > 0 {
-		// Default TTL of 1 hour for cache
-		ttl := 1 * time.Hour
+		// Create context manager
+		ctxMgr := grovecontext.NewManager(workDir)
+		
+		// Check for custom expiration time from @expire-time directive
+		ttl := 1 * time.Hour // Default TTL
+		if customTTL, err := ctxMgr.GetExpireTime(); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Warning: could not check for @expire-time directive: %v\n", err)
+		} else if customTTL > 0 {
+			ttl = customTTL
+			fmt.Fprintf(os.Stderr, "⏱️  Using custom cache expiration time: %s\n", ttl)
+		}
 
 		// Check for @freeze-cache directive
-		ctxMgr := grovecontext.NewManager(workDir)
 		ignoreChanges, err := ctxMgr.ShouldFreezeCache()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "⚠️  Warning: could not check for @freeze-cache directive: %v\n", err)
@@ -1512,7 +1520,15 @@ func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan 
 			fmt.Fprintf(os.Stderr, "❄️  Cache is frozen by @freeze-cache directive in rules file.\n")
 		}
 
-		cacheInfo, err = cacheManager.GetOrCreateCache(ctx, e.geminiClient, model, coldContextFile, ttl, ignoreChanges)
+		// Check for @no-expire directive
+		disableExpiration, err := ctxMgr.ShouldDisableExpiration()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Warning: could not check for @no-expire directive: %v\n", err)
+		} else if disableExpiration {
+			fmt.Fprintf(os.Stderr, "🚫 Cache expiration disabled by @no-expire directive in rules file.\n")
+		}
+
+		cacheInfo, err = cacheManager.GetOrCreateCache(ctx, e.geminiClient, model, coldContextFile, ttl, ignoreChanges, disableExpiration)
 		if err != nil {
 			return "", fmt.Errorf("managing cache: %w", err)
 		}

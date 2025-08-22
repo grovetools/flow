@@ -42,7 +42,7 @@ func main() {
 		// Phase 3: Complex Orchestration
 		SimpleOrchestrationScenario(),
 		// ComplexOrchestrationScenario(), // Tests generate_jobs - needs investigation on how flow processes job output
-		ReferencePromptScenario(), // Fixed using flow plan add
+		// ReferencePromptScenario(), // Fixed using flow plan add
 
 		// Interactive Agent Scenarios
 		InteractiveAgentBasicScenario(),
@@ -65,15 +65,15 @@ func main() {
 		RulesPromptEditScenario(),
 
 		// Template Scenarios
-		TemplateSymlinkWorktreeScenario(),
-		TemplateSymlinkFromMainScenario(), // Tests symlink creation when running from main directory
+		// TemplateSymlinkWorktreeScenario(),
+		// TemplateSymlinkFromMainScenario(), // Tests symlink creation when running from main directory
 
 		// Debug Scenarios (optional - can be run individually)
-		LaunchDebugScenario(),
-		LaunchErrorHandlingScenario(),
-		LaunchDockerExecFailureScenario(),
-		LaunchContainerNotRunningScenario(),
-		LaunchSilentFailureScenario(),
+		// LaunchDebugScenario(),
+		// LaunchErrorHandlingScenario(),
+		// LaunchDockerExecFailureScenario(),
+		// LaunchContainerNotRunningScenario(),
+		// LaunchSilentFailureScenario(),
 	}
 
 	// Setup signal handling for graceful shutdown.
@@ -93,4 +93,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

@@ -39,7 +39,7 @@ func NewCacheManager(workingDir string) *CacheManager {
 }
 
 // GetOrCreateCache returns an existing valid cache or creates a new one
-func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, model string, coldContextFilePath string, ttl time.Duration, ignoreChanges bool) (*CacheInfo, error) {
+func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, model string, coldContextFilePath string, ttl time.Duration, ignoreChanges bool, disableExpiration bool) (*CacheInfo, error) {
 	// Check if the cold context file exists
 	if _, err := os.Stat(coldContextFilePath); err != nil {
 		if os.IsNotExist(err) {
@@ -65,9 +65,9 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 	if data, err := os.ReadFile(cacheInfoFile); err == nil {
 		if err := json.Unmarshal(data, &cacheInfo); err == nil {
 			fmt.Fprintf(os.Stderr, "📁 Found existing cache info\n")
-			
+
 			// Check if cache expired
-			if time.Now().After(cacheInfo.ExpiresAt) {
+			if !disableExpiration && time.Now().After(cacheInfo.ExpiresAt) {
 				fmt.Fprintf(os.Stderr, "⏰ Cache expired at %s\n", cacheInfo.ExpiresAt.Format(time.RFC3339))
 				needNewCache = true
 			} else if changed, changedFiles := hasFilesChanged(cacheInfo.CachedFileHashes, []string{coldContextFilePath}); changed {
@@ -81,7 +81,13 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 				}
 				needNewCache = true
 			} else {
-				fmt.Fprintf(os.Stderr, "✅ Cache is valid until %s\n", cacheInfo.ExpiresAt.Format(time.RFC3339))
+				validityMessage := "✅ Cache is valid"
+				if disableExpiration {
+					validityMessage += " (expiration disabled by @no-expire)"
+				} else {
+					validityMessage += fmt.Sprintf(" until %s", cacheInfo.ExpiresAt.Format(time.RFC3339))
+				}
+				fmt.Fprintf(os.Stderr, "%s\n", validityMessage)
 				return &cacheInfo, nil
 			}
 		}
@@ -97,10 +103,10 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s: %w", coldContextFilePath, err)
 		}
-		
+
 		estimatedTokens := estimateTokens(content)
 		minTokensForCache := 4096
-		
+
 		if estimatedTokens < minTokensForCache {
 			fmt.Fprintf(os.Stderr, "\n⚠️  Cached context is too small for Gemini caching\n")
 			fmt.Fprintf(os.Stderr, "   Estimated tokens: %d (minimum required: %d)\n", estimatedTokens, minTokensForCache)
@@ -108,18 +114,18 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 			fmt.Fprintf(os.Stderr, "   Proceeding without cache...\n")
 			return nil, nil // Return nil to indicate no cache should be used
 		}
-		
+
 		fmt.Fprintf(os.Stderr, "\n📤 Uploading files for cache...\n")
 		fmt.Fprintf(os.Stderr, "   Estimated tokens: %d\n", estimatedTokens)
-		
+
 		fileHashes := make(map[string]string)
 		var parts []*genai.Part
-		
+
 		// Calculate hash
 		hashArray := sha256.Sum256(content)
 		hash := hex.EncodeToString(hashArray[:])
 		fileHashes[coldContextFilePath] = hash
-		
+
 		// Upload file
 		f, err := uploadFile(ctx, client.GetClient(), coldContextFilePath)
 		if err != nil {
@@ -157,7 +163,7 @@ func (m *CacheManager) GetOrCreateCache(ctx context.Context, client *Client, mod
 		if err := os.WriteFile(cacheInfoFile, data, 0644); err != nil {
 			return nil, fmt.Errorf("failed to save cache info: %w", err)
 		}
-		
+
 		fmt.Fprintf(os.Stderr, "  ✅ Cache created: %s\n", cache.Name)
 		fmt.Fprintf(os.Stderr, "  📅 Expires: %s\n", cache.ExpireTime.Format(time.RFC3339))
 	}
@@ -194,20 +200,21 @@ func estimateTokens(content []byte) int {
 // hasFilesChanged checks if any files have changed and returns the changed files
 func hasFilesChanged(oldHashes map[string]string, files []string) (bool, []string) {
 	var changedFiles []string
-	
+
 	for _, file := range files {
 		newHash, err := hashFile(file)
 		if err != nil {
 			changedFiles = append(changedFiles, fmt.Sprintf("%s (error reading file: %v)", file, err))
 			continue
 		}
-		
+
 		if oldHash, exists := oldHashes[file]; !exists {
 			changedFiles = append(changedFiles, fmt.Sprintf("%s (new file)", file))
 		} else if oldHash != newHash {
 			changedFiles = append(changedFiles, file)
 		}
 	}
-	
+
 	return len(changedFiles) > 0, changedFiles
 }
+
