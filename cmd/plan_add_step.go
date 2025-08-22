@@ -186,11 +186,34 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		job.PromptBody = ""
 
 		// Add user-provided prompt if any
+		userPrompt := ""
 		if cmd.Prompt != "" {
+			userPrompt = cmd.Prompt
+		} else if cmd.PromptFile != "" {
+			resolvedPath, err := orchestration.ResolvePromptSource(cmd.PromptFile, plan)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve prompt file %s: %w", cmd.PromptFile, err)
+			}
+			content, err := os.ReadFile(resolvedPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read prompt file '%s': %w", resolvedPath, err)
+			}
+			userPrompt = string(content)
+		} else {
+			stat, _ := os.Stdin.Stat()
+			if (stat.Mode() & os.ModeCharDevice) == 0 {
+				content, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read prompt from stdin: %w", err)
+				}
+				userPrompt = string(content)
+			}
+		}
+		if userPrompt != "" {
 			if job.PromptBody == "" {
-				job.PromptBody = cmd.Prompt
+				job.PromptBody = userPrompt
 			} else {
-				job.PromptBody = job.PromptBody + "\n\n## Additional Instructions\n\n" + cmd.Prompt
+				job.PromptBody = job.PromptBody + "\n\n## Additional Instructions\n\n" + userPrompt
 			}
 		}
 

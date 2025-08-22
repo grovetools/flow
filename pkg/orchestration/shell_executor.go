@@ -66,7 +66,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	cmd.Dir = workDir
 	
 	// Set up environment for better debugging
-	cmd.Env = append(cmd.Environ(), 
+	cmd.Env = append(os.Environ(), 
 		fmt.Sprintf("GROVE_PLAN_DIR=%s", plan.Directory),
 		fmt.Sprintf("GROVE_WORK_DIR=%s", workDir),
 	)

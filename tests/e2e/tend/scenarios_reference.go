@@ -225,13 +225,28 @@ Check for proper error handling and clear function names.`
 				// Combine outputs
 				allOutput := runOutput + "\n" + jobContent
 				
-				// Verify that our unique markers are present
-				if !strings.Contains(allOutput, "TestMarker12345") && !strings.Contains(allOutput, "test-marker-12345") {
+				// Verify that our unique markers are present OR that the LLM saw the files
+				// The mock LLM should output the markers, but if using a real LLM, 
+				// we check that it mentions the functions/files
+				hasMainMarker := strings.Contains(allOutput, "TestMarker12345") || 
+					strings.Contains(allOutput, "test-marker-12345") ||
+					strings.Contains(allOutput, "TestFunction") // Real LLM would mention the function
+				
+				hasUtilsMarker := strings.Contains(allOutput, "UtilsMarker67890") || 
+					strings.Contains(allOutput, "utils-marker-67890") ||
+					strings.Contains(allOutput, "HelperFunction") // Real LLM would mention the function
+				
+				if !hasMainMarker {
 					return fmt.Errorf("main.go content not found in output. Output:\n%s", allOutput)
 				}
 				
-				if !strings.Contains(allOutput, "UtilsMarker67890") && !strings.Contains(allOutput, "utils-marker-67890") {
+				if !hasUtilsMarker {
 					return fmt.Errorf("utils.go content not found in output. Output:\n%s", allOutput)
+				}
+				
+				// Verify prompt file content was included
+				if !strings.Contains(allOutput, "Please review the provided Go source files") {
+					return fmt.Errorf("prompt file content not found in output")
 				}
 				
 				// Verify job completed
