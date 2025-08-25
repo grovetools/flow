@@ -1,3 +1,20 @@
+## v0.2.8 (2025-08-25)
+
+### Bug Fixes
+
+* disable lint
+* apply frontmatter template to first chat response
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+
+### Features
+
+* auto-inject template: chat for chat jobs without template
+* integrate grove-gemini library for Gemini model handling
+
 ## v0.2.7 (2025-08-25)
 
 ### Chores
