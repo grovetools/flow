@@ -37,7 +37,7 @@ type OneShotExecutor struct {
 	llmClient       LLMClient
 	config          *ExecutorConfig
 	worktreeManager *git.WorktreeManager
-	geminiClient    *gemini.Client
+	geminiRunner    *gemini.RequestRunner
 }
 
 // NewOneShotExecutor creates a new oneshot executor.
@@ -58,21 +58,11 @@ func NewOneShotExecutor(config *ExecutorConfig) *OneShotExecutor {
 		}
 	}
 
-	// Initialize Gemini client if API key is available
-	var geminiClient *gemini.Client
-	if os.Getenv("GEMINI_API_KEY") != "" {
-		ctx := context.Background()
-		if gc, err := gemini.NewClient(ctx); err == nil {
-			geminiClient = gc
-		}
-		// Silently ignore errors - Gemini will only be used when explicitly requested
-	}
-
 	return &OneShotExecutor{
 		llmClient:       llmClient,
 		config:          config,
 		worktreeManager: git.NewWorktreeManager(),
-		geminiClient:    geminiClient,
+		geminiRunner:    gemini.NewRequestRunner(),
 	}
 }
 
@@ -299,8 +289,14 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		response = "This is a mock LLM response for testing purposes."
 		err = nil
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
-		// Use first-party Gemini API with caching
-		response, err = e.executeWithGemini(ctx, job, plan, workDir, prompt, effectiveModel)
+		// Use grove-gemini package for Gemini models
+		opts := gemini.RequestOptions{
+			Model:            effectiveModel,
+			Prompt:           job.PromptBody,  // Use raw prompt, not buildPrompt result
+			WorkDir:          workDir,
+			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
+		}
+		response, err = e.geminiRunner.Run(ctx, opts)
 	} else {
 		// Use traditional llm command for other models
 		llmOpts := LLMOptions{
@@ -1436,8 +1432,15 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	fmt.Printf("[DEBUG] Calling LLM with model: %s...\n", llmOpts.Model)
 	var response string
 	if strings.HasPrefix(llmOpts.Model, "gemini") {
-		// Use Gemini API for chat
-		response, err = e.executeWithGemini(ctx, job, plan, worktreePath, fullPrompt, llmOpts.Model)
+		// Use grove-gemini package for Gemini models
+		opts := gemini.RequestOptions{
+			Model:            llmOpts.Model,
+			Prompt:           fullPrompt,
+			WorkDir:          worktreePath,
+			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
+			ContextFiles:     validContextPaths, // Pass context files
+		}
+		response, err = e.geminiRunner.Run(ctx, opts)
 		if err != nil {
 			fmt.Printf("[DEBUG] Gemini API call failed with error: %v\n", err)
 			execErr = fmt.Errorf("Gemini API completion: %w", err)
@@ -1483,92 +1486,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	return nil
 }
 
-// executeWithGemini executes a job using the Gemini API with caching support
-func (e *OneShotExecutor) executeWithGemini(ctx context.Context, job *Job, plan *Plan, workDir string, prompt string, model string) (string, error) {
-	// Check if Gemini client is available
-	if e.geminiClient == nil {
-		return "", fmt.Errorf("GEMINI_API_KEY environment variable is required for Gemini models")
-	}
-
-	// Identify context files
-	coldContextFile := filepath.Join(workDir, ".grove", "cached-context")
-	hotContextFile := filepath.Join(workDir, ".grove", "context")
-
-	// Determine the correct directory for context manager
-	// If we're in a worktree, we need to find the actual project root for rules file
-	contextDir := workDir
-	if strings.Contains(workDir, ".grove-worktrees") {
-		// Extract project root from worktree path
-		// worktree path format: /path/to/project/.grove-worktrees/worktree-name
-		idx := strings.Index(workDir, "/.grove-worktrees/")
-		if idx != -1 {
-			contextDir = workDir[:idx]
-		}
-	}
-	
-	// Initialize cache manager with the context directory
-	cacheManager := gemini.NewCacheManager(contextDir)
-
-	// Get or create cache for cold context (if it exists and is not empty)
-	var cacheInfo *gemini.CacheInfo
-	if info, err := os.Stat(coldContextFile); err == nil && info.Size() > 0 {
-		// Create context manager using the correct directory
-		ctxMgr := grovecontext.NewManager(contextDir)
-		
-		// Check for custom expiration time from @expire-time directive
-		ttl := 1 * time.Hour // Default TTL
-		if customTTL, err := ctxMgr.GetExpireTime(); err != nil {
-			fmt.Fprintf(os.Stderr, "⚠️  Warning: could not check for @expire-time directive: %v\n", err)
-		} else if customTTL > 0 {
-			ttl = customTTL
-			fmt.Fprintf(os.Stderr, "⏱️  Using custom cache expiration time: %s\n", ttl)
-		}
-
-		// Check for @freeze-cache directive
-		ignoreChanges, err := ctxMgr.ShouldFreezeCache()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "⚠️  Warning: could not check for @freeze-cache directive: %v\n", err)
-		} else if ignoreChanges {
-			fmt.Fprintf(os.Stderr, "❄️  Cache is frozen by @freeze-cache directive in rules file.\n")
-		}
-
-		// Check for @no-expire directive
-		disableExpiration, err := ctxMgr.ShouldDisableExpiration()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "⚠️  Warning: could not check for @no-expire directive: %v\n", err)
-		} else if disableExpiration {
-			fmt.Fprintf(os.Stderr, "🚫 Cache expiration disabled by @no-expire directive in rules file.\n")
-		}
-
-		cacheInfo, err = cacheManager.GetOrCreateCache(ctx, e.geminiClient, model, coldContextFile, ttl, ignoreChanges, disableExpiration)
-		if err != nil {
-			return "", fmt.Errorf("managing cache: %w", err)
-		}
-		// Note: cacheInfo may be nil if the file is too small for caching
-	} else if err == nil && info.Size() == 0 {
-		fmt.Fprintf(os.Stderr, "⚠️  Cached context file is empty, skipping cache\n")
-	}
-
-	// Prepare dynamic files (hot context)
-	var dynamicFiles []string
-	if _, err := os.Stat(hotContextFile); err == nil {
-		dynamicFiles = append(dynamicFiles, hotContextFile)
-	}
-
-	// Determine cache ID
-	var cacheID string
-	if cacheInfo != nil {
-		cacheID = cacheInfo.CacheID
-	}
-
-	// Call Gemini API with cache
-	response, err := e.geminiClient.GenerateContentWithCache(ctx, model, prompt, cacheID, dynamicFiles)
-	if err != nil {
-		return "", fmt.Errorf("Gemini API call failed: %w", err)
-	}
-
-	return response, nil
-}
 
 // symlinkTemplates creates symlinks to job templates in the worktree
 func (e *OneShotExecutor) symlinkTemplates(worktreePath string) error {
