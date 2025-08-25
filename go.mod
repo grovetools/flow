@@ -9,11 +9,11 @@ require (
 	github.com/fatih/color v1.17.0
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattsolo1/grove-context v0.2.14
+	github.com/mattsolo1/grove-context v0.2.16
 	github.com/mattsolo1/grove-core v0.2.12
 	github.com/mattsolo1/grove-gemini v0.0.2
-	github.com/mattsolo1/grove-tend v0.2.8
-	github.com/mattsolo1/grove-tmux v0.0.4
+	github.com/mattsolo1/grove-tend v0.2.11
+	github.com/mattsolo1/grove-tmux v0.0.7
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	gopkg.in/yaml.v3 v3.0.1
