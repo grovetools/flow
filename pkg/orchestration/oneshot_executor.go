@@ -73,7 +73,6 @@ func (e *OneShotExecutor) Name() string {
 
 // Execute runs a oneshot job.
 func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
-	fmt.Println("DEBUG: ONESHOT EXECUTOR STARTED")
 	
 	// Handle chat jobs differently
 	if job.Type == JobTypeChat {
@@ -1195,6 +1194,7 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
+	
 	// Update job status to running FIRST
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -1216,6 +1216,33 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	if err != nil {
 		execErr = fmt.Errorf("reading chat file: %w", err)
 		return execErr
+	}
+
+	// Check if job has a template, if not, add template: chat to frontmatter
+	if job.Template == "" {
+		// Add template: chat to the frontmatter
+		updates := map[string]interface{}{
+			"template": "chat",
+		}
+		newContent, err := UpdateFrontmatter(content, updates)
+		if err != nil {
+			execErr = fmt.Errorf("updating frontmatter with template: %w", err)
+			return execErr
+		}
+		
+		// Write the updated content back to the file
+		if err := os.WriteFile(job.FilePath, newContent, 0644); err != nil {
+			execErr = fmt.Errorf("writing updated chat file: %w", err)
+			return execErr
+		}
+		
+		// Update the job object with the new template
+		job.Template = "chat"
+		
+		// Update the content variable for subsequent processing
+		content = newContent
+		
+		fmt.Println("✓ Added 'template: chat' to job frontmatter")
 	}
 
 	// Parse the chat file
@@ -1263,7 +1290,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// Fallback if still no template
 	if directive.Template == "" && directive.Action == "" {
-		directive.Template = "refine-plan-generic" // Or "chat" as a better default
+		directive.Template = "chat" // Default template for chat jobs
 	}
 	// --- FIX ENDS HERE ---
 

@@ -33,6 +33,7 @@ func main() {
 		ChatLaunchScenario(), // Fixed with docker check skip
 		ChatRunFilteringScenario(),
 		ChatPipelineScenario(),
+		ChatTemplateInjectionScenario(),   // Tests automatic template injection
 		ChatInteractivePromptScenario(), // Tests interactive prompt for chat jobs in plans
 		ChatExtractBasicScenario(),      // Tests basic chat block extraction
 		ChatExtractErrorScenario(),      // Tests extract command error handling
