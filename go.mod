@@ -12,7 +12,7 @@ require (
 	github.com/mattsolo1/grove-context v0.2.16
 	github.com/mattsolo1/grove-core v0.2.12
 	github.com/mattsolo1/grove-gemini v0.0.4
-	github.com/mattsolo1/grove-tend v0.2.11
+	github.com/mattsolo1/grove-tend v0.2.12
 	github.com/mattsolo1/grove-tmux v0.0.7
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
