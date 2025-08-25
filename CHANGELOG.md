@@ -1,3 +1,14 @@
+## v0.2.9 (2025-08-25)
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+
+### Bug Fixes
+
+* disable lsf on release
+
 ## v0.2.8 (2025-08-25)
 
 ### Bug Fixes
