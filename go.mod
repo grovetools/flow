@@ -9,17 +9,15 @@ require (
 	github.com/fatih/color v1.17.0
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattsolo1/grove-context v0.2.13
-	github.com/mattsolo1/grove-core v0.2.11
-	github.com/mattsolo1/grove-gemini v0.0.1
+	github.com/mattsolo1/grove-context v0.2.14
+	github.com/mattsolo1/grove-core v0.2.12
+	github.com/mattsolo1/grove-gemini v0.0.2
 	github.com/mattsolo1/grove-tend v0.2.8
 	github.com/mattsolo1/grove-tmux v0.0.4
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	gopkg.in/yaml.v3 v3.0.1
 )
-
-replace github.com/mattsolo1/grove-gemini => ../grove-gemini
 
 require (
 	cloud.google.com/go v0.121.0 // indirect
@@ -78,6 +76,7 @@ require (
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
+	google.golang.org/api v0.232.0 // indirect
 	google.golang.org/genai v1.20.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250728155136-f173205681a0 // indirect
 	google.golang.org/grpc v1.74.2 // indirect
