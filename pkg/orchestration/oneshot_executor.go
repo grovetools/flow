@@ -1251,11 +1251,21 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	if lastTurn.Directive != nil {
 		directive = lastTurn.Directive
 	} else {
-		// Use default template
-		directive = &ChatDirective{
-			Template: "refine-plan-generic",
-		}
+		// No directive in the last turn, create a new one.
+		directive = &ChatDirective{}
 	}
+
+	// --- FIX STARTS HERE ---
+	// Prioritize template from the turn's directive, then job's frontmatter.
+	if directive.Template == "" && job.Template != "" {
+		directive.Template = job.Template
+	}
+
+	// Fallback if still no template
+	if directive.Template == "" && directive.Action == "" {
+		directive.Template = "refine-plan-generic" // Or "chat" as a better default
+	}
+	// --- FIX ENDS HERE ---
 
 	// Check for special actions
 	if directive.Action == "complete" {
@@ -1304,10 +1314,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// The entire content of the plan.md file serves as conversational history
 	conversationHistory := string(content)
 
-	// Ensure we have a template if no action is specified
-	if directive.Template == "" && directive.Action == "" {
-		directive.Template = "refine-plan-generic"
-	}
 
 	// Load the template using TemplateManager
 	templateManager := NewTemplateManager()

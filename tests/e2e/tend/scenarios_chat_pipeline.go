@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -27,6 +26,21 @@ func ChatPipelineScenario() *harness.Scenario {
 				// Create directories
 				chatDir := filepath.Join(ctx.RootDir, "chats")
 				fs.CreateDir(chatDir)
+				templateDir := filepath.Join(ctx.RootDir, ".grove", "job-templates")
+				fs.CreateDir(filepath.Join(ctx.RootDir, ".grove"))
+				fs.CreateDir(templateDir)
+				
+				// Create a custom chat template with easily verifiable instructions
+				chatTemplate := `---
+title: Test Chat Template
+type: chat
+---
+
+You are a helpful assistant. IMPORTANT: Start every response with "Ahoy!" to indicate this template is being used.
+
+Always be concise and helpful.
+`
+				fs.WriteString(filepath.Join(templateDir, "chat.md"), chatTemplate)
 				
 				// Write grove.yml
 				configContent := `name: test-project
@@ -53,13 +67,13 @@ echo "$NEXT_COUNT" > "$STATE_FILE"
 
 case "$COUNT" in
   0)
-    echo "First response: I'll help you build a test application. Let me outline the basic structure we'll need."
+    echo "Ahoy! First response: I'll help you build a test application. Let me outline the basic structure we'll need."
     ;;
   1)
-    echo "Second response: Based on your feedback, I'll add database configuration to the plan."
+    echo "Ahoy! Second response: Based on your feedback, I'll add database configuration to the plan."
     ;;
   *)
-    echo "Additional response: Continuing our conversation about the test application."
+    echo "Ahoy! Additional response: Continuing our conversation about the test application."
     ;;
 esac
 `
@@ -74,19 +88,22 @@ esac
 			}),
 			
 			harness.NewStep("Initialize chat with user prompt", func(ctx *harness.Context) error {
-				flow, _ := getFlowBinary()
 				chatFile := filepath.Join(ctx.RootDir, "chats", "pipeline-test.md")
 				
-				// Create initial content
-				initialContent := "# Pipeline Test\n\nUser: I want to build a test application.\n"
+				// Create initial content with template in frontmatter
+				initialContent := `---
+id: pipeline-test
+title: Pipeline Test Chat
+status: pending_user
+type: chat
+template: chat
+---
+
+# Pipeline Test
+
+User: I want to build a test application.
+`
 				fs.WriteString(chatFile, initialContent)
-				
-				// Initialize the chat using flow
-				cmd := command.New(flow, "chat", "-s", chatFile).Dir(ctx.RootDir)
-				result := cmd.Run()
-				if result.Error != nil {
-					return fmt.Errorf("failed to initialize chat: %v", result.Error)
-				}
 				
 				return nil
 			}),
@@ -95,7 +112,7 @@ esac
 				flow, _ := getFlowBinary()
 				
 				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run", "pipeline-test").Dir(ctx.RootDir)
+				cmd := cmdFunc(flow, "chat", "run", "Pipeline Test Chat").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -112,6 +129,11 @@ esac
 				
 				if !strings.Contains(content, "First response") {
 					return fmt.Errorf("expected first LLM response in chat file")
+				}
+				
+				// CRITICAL: Verify the template was applied to the first response
+				if !strings.Contains(content, "Ahoy!") {
+					return fmt.Errorf("expected 'Ahoy!' in first response to verify template was applied")
 				}
 				
 				if !strings.Contains(content, "status: pending_user") {
@@ -137,7 +159,7 @@ esac
 				flow, _ := getFlowBinary()
 				
 				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run", "pipeline-test").Dir(ctx.RootDir)
+				cmd := cmdFunc(flow, "chat", "run", "Pipeline Test Chat").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -158,6 +180,11 @@ esac
 				
 				if !strings.Contains(content, "Second response") {
 					return fmt.Errorf("expected second LLM response in chat file")
+				}
+				
+				// Verify the template continues to be applied
+				if strings.Count(content, "Ahoy!") < 2 {
+					return fmt.Errorf("expected 'Ahoy!' in both responses to verify template is consistently applied")
 				}
 				
 				// Count the number of LLM responses by looking for grove directives
