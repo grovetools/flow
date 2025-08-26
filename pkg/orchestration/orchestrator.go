@@ -224,6 +224,12 @@ func (o *Orchestrator) RunAll(ctx context.Context) error {
 			return nil
 		}
 
+		// Reload job statuses from disk to detect external changes
+		// This allows 'flow plan complete' to work while orchestrator is running
+		if err := o.reloadJobStatusesFromDisk(); err != nil {
+			o.logger.Error("Failed to reload job statuses", "error", err)
+		}
+		
 		// Get runnable jobs
 		runnable := o.dependencyGraph.GetRunnableJobs()
 		
@@ -260,6 +266,40 @@ func (o *Orchestrator) RunAll(ctx context.Context) error {
 		// Small delay before next iteration
 		time.Sleep(1 * time.Second)
 	}
+}
+
+// reloadJobStatusesFromDisk reloads job statuses from their files
+// This allows the orchestrator to detect external changes (e.g., from 'flow plan complete')
+func (o *Orchestrator) reloadJobStatusesFromDisk() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	
+	for _, job := range o.plan.Jobs {
+		// Load the job file to get the current status
+		diskJob, err := LoadJob(job.FilePath)
+		if err != nil {
+			o.logger.Error("Failed to reload job from disk", "job", job.ID, "error", err)
+			continue // Skip this job but continue with others
+		}
+		
+		// Update status if it changed externally
+		if diskJob.Status != job.Status {
+			o.logger.Info("Job status changed externally", 
+				"job", job.ID, 
+				"old_status", job.Status,
+				"new_status", diskJob.Status)
+			
+			// Update in-memory status
+			job.Status = diskJob.Status
+			job.StartTime = diskJob.StartTime
+			job.EndTime = diskJob.EndTime
+			
+			// Update dependency graph
+			o.dependencyGraph.UpdateJobStatus(job.ID, job.Status)
+		}
+	}
+	
+	return nil
 }
 
 // GetStatus returns the current plan status.

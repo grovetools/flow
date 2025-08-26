@@ -65,6 +65,18 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
+	if err := updateJobFile(job); err != nil {
+		return fmt.Errorf("updating job status: %w", err)
+	}
+
+	// Notify grove-hooks about job start
+	notifyJobStart(job, plan)
+
+	// Ensure we notify completion/failure when we exit
+	var execErr error
+	defer func() {
+		notifyJobComplete(job, execErr)
+	}()
 
 	// Verify container is running (skip if dockerClient is nil for testing)
 	skipDockerCheck := os.Getenv("GROVE_FLOW_SKIP_DOCKER_CHECK") == "true"
@@ -224,64 +236,13 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 	// Print user instructions
 	fmt.Printf("🚀 Interactive session '%s' launched.\n", sessionName)
 	fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
-	fmt.Printf("\n👉 Close the session (type 'exit' in all panes) to continue the plan.\n")
-	fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
+	fmt.Printf("\n👉 When your task is complete, run the following in any terminal:\n")
 	fmt.Printf("   flow plan complete %s\n", job.FilePath)
+	fmt.Printf("\n   The session can remain open - the plan will continue automatically.\n")
 
-	// Block and wait for session to close
-	err = tmuxClient.WaitForSessionClose(ctx, sessionName, 2*time.Second)
-
-	// Handle interruption
-	if err != nil {
-		if ctx.Err() != nil {
-			fmt.Printf("\n⚠️  Interrupted. Cleaning up session '%s'...\n", sessionName)
-			// Use a new context for cleanup since the original was cancelled
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = tmuxClient.KillSession(cleanupCtx, sessionName)
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("interrupted by user")
-		}
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("wait for session failed: %w", err)
-	}
-
-	// Capture pane output for logging (optional)
-	// We capture both panes to preserve the full interaction
-	hostOutput, _ := tmuxClient.CapturePane(context.Background(), sessionName+":0.0")
-	agentOutput, _ := tmuxClient.CapturePane(context.Background(), sessionName+":0.1")
-
-	// Append captured output to job file
-	if hostOutput != "" || agentOutput != "" {
-		output := fmt.Sprintf("\n## Session Output\n\n### Host Pane\n```\n%s\n```\n\n### Agent Pane\n```\n%s\n```\n",
-			hostOutput, agentOutput)
-		
-		// Get state persister to append output
-		persister := NewStatePersister()
-		if err := persister.AppendJobOutput(job, output); err != nil {
-			// Non-fatal error, just log it
-			fmt.Printf("Warning: failed to save session output: %v\n", err)
-		}
-	}
-
-	// Success - prompt for job status
-	status := e.promptForJobStatus(sessionName)
-	
-	switch status {
-	case "c":
-		fmt.Printf("✅ Session '%s' marked as completed. Continuing plan...\n", sessionName)
-		job.Status = JobStatusCompleted
-	case "f":
-		fmt.Printf("❌ Session '%s' marked as failed.\n", sessionName)
-		job.Status = JobStatusFailed
-	case "q":
-		fmt.Printf("⏸️  Session '%s' closed with no status change.\n", sessionName)
-		// Keep current status (should still be Running)
-	}
-	
-	job.EndTime = time.Now()
+	// Return immediately - the orchestrator will poll for completion
+	// Set execErr to nil to indicate successful launch
+	execErr = nil
 	return nil
 }
 
@@ -389,6 +350,18 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
+	if err := updateJobFile(job); err != nil {
+		return fmt.Errorf("updating job status: %w", err)
+	}
+
+	// Notify grove-hooks about job start
+	notifyJobStart(job, plan)
+
+	// Ensure we notify completion/failure when we exit
+	var execErr error
+	defer func() {
+		notifyJobComplete(job, execErr)
+	}()
 
 	// Determine the working directory for the job on the host
 	var workDir string
@@ -631,58 +604,13 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
 		}
 
-		fmt.Printf("\n👉 Exit the tmux session when done to continue the plan.\n")
-		fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
+		fmt.Printf("\n👉 When your task is complete, run the following in any terminal:\n")
 		fmt.Printf("   flow plan complete %s\n", job.FilePath)
+		fmt.Printf("\n   The session can remain open - the plan will continue automatically.\n")
 
-		// Block and wait for session to close
-		err = tmuxClient.WaitForSessionClose(ctx, sessionName, 2*time.Second)
-
-		// Handle interruption
-		if err != nil {
-			if ctx.Err() != nil {
-				fmt.Printf("\n⚠️  Interrupted. Cleaning up session '%s'...\n", sessionName)
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = tmuxClient.KillSession(cleanupCtx, sessionName)
-				job.Status = JobStatusFailed
-				job.EndTime = time.Now()
-				return fmt.Errorf("interrupted by user")
-			}
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("wait for session failed: %w", err)
-		}
-
-		// Capture pane output for logging (optional)
-		output, _ := tmuxClient.CapturePane(context.Background(), sessionName+":0.0")
-		if output != "" {
-			outputFormatted := fmt.Sprintf("\n## Session Output\n\n```\n%s\n```\n", output)
-
-			// Get state persister to append output
-			persister := NewStatePersister()
-			if err := persister.AppendJobOutput(job, outputFormatted); err != nil {
-				// Non-fatal error, just log it
-				fmt.Printf("Warning: failed to save session output: %v\n", err)
-			}
-		}
-
-		// Success - prompt for job status
-		status := e.promptForJobStatus(sessionName)
-
-		switch status {
-		case "c":
-			fmt.Printf("✅ Session '%s' marked as completed. Continuing plan...\n", sessionName)
-			job.Status = JobStatusCompleted
-		case "f":
-			fmt.Printf("❌ Session '%s' marked as failed.\n", sessionName)
-			job.Status = JobStatusFailed
-		case "q":
-			fmt.Printf("⏸️  Session '%s' closed with no status change.\n", sessionName)
-			// Keep current status (should still be Running)
-		}
-
-		job.EndTime = time.Now()
+		// Return immediately - the orchestrator will poll for completion
+		// Set execErr to nil to indicate successful launch
+		execErr = nil
 		return nil
 	}
 
@@ -763,56 +691,13 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	// Print user instructions
 	fmt.Printf("🚀 Interactive host session launched in window '%s'.\n", windowName)
 	fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
-	fmt.Printf("\n👉 Exit the tmux session when done to continue the plan.\n")
-	fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
+	fmt.Printf("\n👉 When your task is complete, run the following in any terminal:\n")
 	fmt.Printf("   flow plan complete %s\n", job.FilePath)
+	fmt.Printf("\n   The session can remain open - the plan will continue automatically.\n")
 
-	// Block and wait for window to close
-	// We'll wait for the specific window to be closed, not the entire session
-	err = e.waitForWindowClose(ctx, tmuxClient, sessionName, windowName, 2*time.Second)
-
-	// Handle interruption
-	if err != nil {
-		if ctx.Err() != nil {
-			fmt.Printf("\n⚠️  Interrupted. Job marked as failed.\n")
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("interrupted by user")
-		}
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("wait for window failed: %w", err)
-	}
-
-	// Capture pane output for logging (optional)
-	output, _ := tmuxClient.CapturePane(context.Background(), targetPane)
-	if output != "" {
-		outputFormatted := fmt.Sprintf("\n## Session Output\n\n```\n%s\n```\n", output)
-		
-		// Get state persister to append output
-		persister := NewStatePersister()
-		if err := persister.AppendJobOutput(job, outputFormatted); err != nil {
-			// Non-fatal error, just log it
-			fmt.Printf("Warning: failed to save session output: %v\n", err)
-		}
-	}
-
-	// Success - prompt for job status
-	status := e.promptForJobStatus(windowName)
-	
-	switch status {
-	case "c":
-		fmt.Printf("✅ Window '%s' marked as completed. Continuing plan...\n", windowName)
-		job.Status = JobStatusCompleted
-	case "f":
-		fmt.Printf("❌ Window '%s' marked as failed.\n", windowName)
-		job.Status = JobStatusFailed
-	case "q":
-		fmt.Printf("⏸️  Window '%s' closed with no status change.\n", windowName)
-		// Keep current status (should still be Running)
-	}
-	
-	job.EndTime = time.Now()
+	// Return immediately - the orchestrator will poll for completion
+	// Set execErr to nil to indicate successful launch
+	execErr = nil
 	return nil
 }
 

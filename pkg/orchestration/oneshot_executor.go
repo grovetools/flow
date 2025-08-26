@@ -291,8 +291,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		// Use grove-gemini package for Gemini models
 		opts := gemini.RequestOptions{
 			Model:            effectiveModel,
-			Prompt:           job.PromptBody,  // Use raw prompt, not buildPrompt result
+			Prompt:           prompt,  // Use the fully constructed prompt
+			PromptFiles:      job.PromptSource,  // Pass the list of source files
 			WorkDir:          workDir,
+			ContextFiles:     contextFiles,  // Pass the context files
 			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
@@ -1469,6 +1471,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		opts := gemini.RequestOptions{
 			Model:            llmOpts.Model,
 			Prompt:           fullPrompt,
+			PromptFiles:      []string{job.FilePath}, // The chat file itself is the prompt source
 			WorkDir:          worktreePath,
 			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
 			ContextFiles:     validContextPaths, // Pass context files

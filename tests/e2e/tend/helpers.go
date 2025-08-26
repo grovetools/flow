@@ -103,8 +103,13 @@ fi
 			return err
 		}
 		
-		// Mock grove-hooks to prevent sessions from being created during tests
-		groveHooksScript := `#!/bin/bash
+		// Mock grove-hooks - use stateful version if requested
+		var groveHooksScript string
+		if stateful, ok := opts["statefulGroveHooks"].(bool); ok && stateful {
+			groveHooksScript = createStatefulGroveHooksMock()
+		} else {
+			// Simple logging mock
+			groveHooksScript = `#!/bin/bash
 # Mock 'grove-hooks' command for testing
 # This prevents actual sessions from being created during e2e tests
 # Simply acknowledge the command was called
@@ -119,6 +124,7 @@ cat >> "$MOCK_LOG"
 echo -e "\n---" >> "$MOCK_LOG"
 exit 0
 `
+		}
 		if err := fs.WriteString(filepath.Join(binDir, "grove-hooks"), groveHooksScript); err != nil {
 			return err
 		}
@@ -142,4 +148,108 @@ exit 0
 		ctx.Set("test_bin_dir", binDir)
 		return nil
 	})
+}
+
+// setupTestEnvironmentWithOptions creates test environment with specified options
+func setupTestEnvironmentWithOptions(opts map[string]interface{}) harness.Step {
+	return harness.NewStep("Setup test environment with mocks", func(ctx *harness.Context) error {
+		// Clean up any previous mock state
+		os.RemoveAll("/tmp/grove-hooks-mock-state")
+		
+		// Set up the environment
+		return setupTestEnvironment(opts).Func(ctx)
+	})
+}
+
+// createStatefulGroveHooksMock creates a stateful mock of grove-hooks that simulates a database
+func createStatefulGroveHooksMock() string {
+	return `#!/bin/bash
+# Stateful mock 'grove-hooks' that uses files to simulate database
+STATE_DIR="/tmp/grove-hooks-mock-state"
+mkdir -p "$STATE_DIR"
+
+# Helper to read JSON from stdin
+read_stdin() {
+	local input
+	input=$(cat)
+	echo "$input"
+}
+
+case "$1/$2" in
+	"oneshot/start")
+		# Read the JSON payload from stdin
+		PAYLOAD=$(read_stdin)
+		# Extract job_id from the JSON payload
+		JOB_ID=$(echo "$PAYLOAD" | grep -o '"job_id":"[^"]*"' | cut -d'"' -f4)
+		if [ -z "$JOB_ID" ]; then
+			echo "Error: No job_id in payload" >&2
+			exit 1
+		fi
+		
+		STATE_FILE="$STATE_DIR/$JOB_ID.json"
+		
+		# Save the start payload with a timestamp
+		echo "$PAYLOAD" | jq '. + {"start_time": now | todate}' > "$STATE_FILE"
+		echo "[MOCK] Started tracking job $JOB_ID" >&2
+		;;
+		
+	"oneshot/stop")
+		# Read the JSON payload from stdin
+		PAYLOAD=$(read_stdin)
+		# Extract job_id from the JSON payload
+		JOB_ID=$(echo "$PAYLOAD" | grep -o '"job_id":"[^"]*"' | cut -d'"' -f4)
+		if [ -z "$JOB_ID" ]; then
+			echo "Error: No job_id in payload" >&2
+			exit 1
+		fi
+		
+		STATE_FILE="$STATE_DIR/$JOB_ID.json"
+		
+		# Update the state file with stop payload
+		if [ -f "$STATE_FILE" ]; then
+			# Merge the stop payload with existing data
+			jq --argjson stop_payload "$PAYLOAD" \
+				'. + $stop_payload + {"end_time": now | todate}' \
+				"$STATE_FILE" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+			echo "[MOCK] Stopped tracking job $JOB_ID" >&2
+		else
+			# Create new file if it doesn't exist (shouldn't happen normally)
+			echo "$PAYLOAD" | jq '. + {"end_time": now | todate}' > "$STATE_FILE"
+			echo "[MOCK] Created stop record for job $JOB_ID" >&2
+		fi
+		;;
+		
+	"sessions/get")
+		# $3 should be the session/job ID
+		JOB_ID="$3"
+		if [ -z "$JOB_ID" ]; then
+			echo '{"error": "No job_id specified"}' >&2
+			exit 1
+		fi
+		
+		STATE_FILE="$STATE_DIR/$JOB_ID.json"
+		
+		# Return the content of the state file
+		if [ -f "$STATE_FILE" ]; then
+			cat "$STATE_FILE"
+		else
+			echo '{"error": "Session not found"}' >&2
+			exit 1
+		fi
+		;;
+		
+	"install")
+		# Mock the install command
+		echo "[MOCK] grove-hooks install (no-op)" >&2
+		;;
+		
+	*)
+		echo "[MOCK] grove-hooks: Unknown command $1 $2" >&2
+		echo "[MOCK] Arguments: $@" >&2
+		# Don't fail for unknown commands, just log
+		;;
+esac
+
+exit 0
+`
 }

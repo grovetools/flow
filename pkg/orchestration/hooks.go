@@ -143,6 +143,12 @@ func notifyJobStart(job *Job, plan *Plan) {
 
 // notifyJobComplete sends a completion notification to grove-hooks
 func notifyJobComplete(job *Job, jobErr error) {
+	NotifyJobCompleteExternal(job, jobErr)
+}
+
+// NotifyJobCompleteExternal sends a completion notification to grove-hooks
+// This is exported for use by external commands like 'flow plan complete'
+func NotifyJobCompleteExternal(job *Job, jobErr error) {
 	if job == nil {
 		return
 	}
@@ -171,4 +177,38 @@ func notifyJobComplete(job *Job, jobErr error) {
 	}
 
 	callGroveHookWithSync("stop", payload, true)
+}
+
+// GroveHooksSessionStatus represents the response from grove-hooks sessions get --json
+type GroveHooksSessionStatus struct {
+	SessionID string    `json:"session_id"`
+	JobID     string    `json:"job_id"`
+	Status    string    `json:"status"`
+	Type      string    `json:"type"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time,omitempty"`
+	Error     string    `json:"error,omitempty"`
+}
+
+// queryGroveHooksStatus queries grove-hooks for the status of a job/session
+func queryGroveHooksStatus(jobID string) (*GroveHooksSessionStatus, error) {
+	// Check if grove-hooks is available
+	_, err := exec.LookPath("grove-hooks")
+	if err != nil {
+		return nil, fmt.Errorf("grove-hooks not available")
+	}
+
+	cmd := exec.Command("grove-hooks", "sessions", "get", jobID, "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// If command failed, it might mean the session doesn't exist yet
+		return nil, fmt.Errorf("grove-hooks query failed: %w", err)
+	}
+
+	var status GroveHooksSessionStatus
+	if err := json.Unmarshal(output, &status); err != nil {
+		return nil, fmt.Errorf("failed to parse grove-hooks response: %w", err)
+	}
+
+	return &status, nil
 }

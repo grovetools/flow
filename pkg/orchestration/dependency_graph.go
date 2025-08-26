@@ -101,6 +101,13 @@ func (dg *DependencyGraph) GetExecutionPlan() (*ExecutionPlan, error) {
 	return &ExecutionPlan{Stages: stages}, nil
 }
 
+// UpdateJobStatus updates the status of a job in the dependency graph
+func (dg *DependencyGraph) UpdateJobStatus(jobID string, status JobStatus) {
+	if job, exists := dg.nodes[jobID]; exists {
+		job.Status = status
+	}
+}
+
 // GetRunnableJobs finds all jobs that can be run immediately.
 func (dg *DependencyGraph) GetRunnableJobs() []*Job {
 	runnable := []*Job{}

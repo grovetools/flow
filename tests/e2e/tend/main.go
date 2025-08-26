@@ -49,6 +49,7 @@ func main() {
 		InteractiveAgentBasicScenario(),
 		InteractiveAgentSkipScenario(),
 		InteractiveAgentWorkflowScenario(),
+		InteractiveAgentPollingWorkflowScenario(), // Tests polling with flow plan complete
 
 		// Agent Continue Scenarios
 		AgentContinueScenario(),

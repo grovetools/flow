@@ -71,6 +71,12 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update job status: %w", err)
 	}
 
+	// Notify grove-hooks if this is an interactive agent job
+	if job.Type == orchestration.JobTypeInteractiveAgent {
+		// Use the completion hook to mark the job as completed in grove-hooks
+		orchestration.NotifyJobCompleteExternal(job, nil)
+	}
+
 	// Success message
 	fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
 	fmt.Printf("Status: %s → %s\n", oldStatus, orchestration.JobStatusCompleted)
