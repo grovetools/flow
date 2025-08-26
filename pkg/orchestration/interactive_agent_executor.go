@@ -78,13 +78,6 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 		notifyJobComplete(job, execErr)
 	}()
 
-	// Get the REAL project root BEFORE changing context
-	projectRoot, err := GetProjectRoot()
-	if err != nil {
-		// Log a warning but don't fail, symlinking is a convenience
-		fmt.Printf("Warning: could not find project root for template symlinking: %v\n", err)
-		projectRoot = ""
-	}
 
 	// Verify container is running (skip if dockerClient is nil for testing)
 	skipDockerCheck := os.Getenv("GROVE_FLOW_SKIP_DOCKER_CHECK") == "true"
@@ -110,10 +103,6 @@ func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job
 			return fmt.Errorf("failed to prepare worktree: %w", err)
 		}
 
-		// Symlink templates using the correct projectRoot
-		if err := SymlinkTemplates(worktreePath, projectRoot, nil); err != nil {
-			fmt.Printf("Warning: failed to symlink templates: %v\n", err)
-		}
 
 		// Set up Go workspace if this is a Go project
 		if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
@@ -371,13 +360,6 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		notifyJobComplete(job, execErr)
 	}()
 
-	// Get the REAL project root BEFORE changing context
-	projectRoot, err := GetProjectRoot()
-	if err != nil {
-		// Log a warning but don't fail, symlinking is a convenience
-		fmt.Printf("Warning: could not find project root for template symlinking: %v\n", err)
-		projectRoot = ""
-	}
 
 	// Determine the working directory for the job on the host
 	var workDir string
@@ -415,10 +397,6 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 					// Worktree exists, just use it
 					workDir = expectedWorktreePath
 					
-					// Still symlink templates for existing worktree
-					if err := SymlinkTemplates(workDir, projectRoot, nil); err != nil {
-						fmt.Printf("Warning: failed to symlink templates: %v\n", err)
-					}
 				} else {
 					job.Status = JobStatusFailed
 					job.EndTime = time.Now()
@@ -426,11 +404,6 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 				}
 			} else {
 				workDir = worktreePath
-				
-				// Symlink templates using the correct projectRoot
-				if err := SymlinkTemplates(worktreePath, projectRoot, nil); err != nil {
-					fmt.Printf("Warning: failed to symlink templates: %v\n", err)
-				}
 				
 				// Check if grove-hooks is available and install hooks in the new worktree
 				if _, err := osexec.LookPath("grove-hooks"); err == nil {

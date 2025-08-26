@@ -10,7 +10,6 @@ import (
 )
 
 // GetProjectRoot attempts to find the project root directory by searching upwards for a grove.yml file.
-// It skips any grove.yml found within .grove-worktrees to avoid incorrectly identifying worktrees as project roots.
 func GetProjectRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -22,16 +21,6 @@ func GetProjectRoot() (string, error) {
 	for {
 		configPath := filepath.Join(dir, "grove.yml")
 		if _, err := os.Stat(configPath); err == nil {
-			// Check if this grove.yml is inside a .grove-worktrees directory
-			// If so, skip it and continue searching upward
-			if strings.Contains(dir, "/.grove-worktrees/") {
-				parent := filepath.Dir(dir)
-				if parent == dir {
-					break
-				}
-				dir = parent
-				continue
-			}
 			return dir, nil
 		}
 
@@ -42,8 +31,6 @@ func GetProjectRoot() (string, error) {
 		}
 		dir = parent
 	}
-
-	return "", fmt.Errorf("could not find project root (grove.yml) searching up from %s", startDir)
 }
 
 // GetGitRootSafe attempts to find git root with multiple fallback strategies

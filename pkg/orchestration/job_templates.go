@@ -30,18 +30,33 @@ func NewTemplateManager() *TemplateManager {
 	return &TemplateManager{}
 }
 
-// FindTemplate searches for a template by name in the search path.
+// FindTemplate searches for a template by name, traversing upwards to find it.
 func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
-	// 1. Check project-local: .grove/job-templates/
-	projectPath := filepath.Join(".grove", "job-templates", name+".md")
-	if _, err := os.Stat(projectPath); err == nil {
-		return tm.LoadTemplate(projectPath, name, "project")
+	// Start from current directory and traverse upwards
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("getting current directory: %w", err)
 	}
 
-	// 1b. Check symlinked user templates in worktree: .grove/user-job-templates/
-	userSymlinkPath := filepath.Join(".grove", "user-job-templates", name+".md")
-	if _, err := os.Stat(userSymlinkPath); err == nil {
-		return tm.LoadTemplate(userSymlinkPath, name, "user")
+	// 1. Search upwards for .grove/job-templates/
+	dir := currentDir
+	for {
+		templatePath := filepath.Join(dir, ".grove", "job-templates", name+".md")
+		if _, err := os.Stat(templatePath); err == nil {
+			// Calculate relative path for cleaner display
+			relPath, _ := filepath.Rel(currentDir, templatePath)
+			if relPath == "" {
+				relPath = templatePath
+			}
+			return tm.LoadTemplate(templatePath, name, "project")
+		}
+
+		// Check if we've reached the root
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 
 	// 2. Check user-global: ~/.config/grove/job-templates/
@@ -78,34 +93,43 @@ func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
 	return nil, fmt.Errorf("template '%s' not found", name)
 }
 
-// ListTemplates lists all discoverable templates.
+// ListTemplates lists all discoverable templates by searching upwards.
 func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 	templates := make([]*JobTemplate, 0)
+	templateNames := make(map[string]bool) // Track template names to avoid duplicates
 
-	// 1. Check project-local: .grove/job-templates/
-	projectDir := filepath.Join(".grove", "job-templates")
-	if entries, err := os.ReadDir(projectDir); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
-				name := strings.TrimSuffix(entry.Name(), ".md")
-				if tmpl, err := tm.LoadTemplate(filepath.Join(projectDir, entry.Name()), name, "project"); err == nil {
-					templates = append(templates, tmpl)
-				}
-			}
-		}
+	// Start from current directory and traverse upwards
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("getting current directory: %w", err)
 	}
 
-	// 1b. Check symlinked user templates in worktree: .grove/user-job-templates/
-	userSymlinkDir := filepath.Join(".grove", "user-job-templates")
-	if entries, err := os.ReadDir(userSymlinkDir); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
-				name := strings.TrimSuffix(entry.Name(), ".md")
-				if tmpl, err := tm.LoadTemplate(filepath.Join(userSymlinkDir, entry.Name()), name, "user"); err == nil {
-					templates = append(templates, tmpl)
+	// 1. Search upwards for .grove/job-templates/
+	dir := currentDir
+	for {
+		projectDir := filepath.Join(dir, ".grove", "job-templates")
+		if entries, err := os.ReadDir(projectDir); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+					name := strings.TrimSuffix(entry.Name(), ".md")
+					// Only add if we haven't seen this template name yet (closer templates take precedence)
+					if !templateNames[name] {
+						if tmpl, err := tm.LoadTemplate(filepath.Join(projectDir, entry.Name()), name, "project"); err == nil {
+							templates = append(templates, tmpl)
+							templateNames[name] = true
+						}
+					}
 				}
 			}
+			break // Stop after finding the first .grove/job-templates directory
 		}
+
+		// Check if we've reached the root
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 
 	// 2. Check user-global: ~/.config/grove/job-templates/
@@ -116,17 +140,11 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 			for _, entry := range entries {
 				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
 					name := strings.TrimSuffix(entry.Name(), ".md")
-					if tmpl, err := tm.LoadTemplate(filepath.Join(userDir, entry.Name()), name, "user"); err == nil {
-						// Avoid duplicates from symlinked templates
-						found := false
-						for _, existing := range templates {
-							if existing.Name == name && existing.Source == "user" {
-								found = true
-								break
-							}
-						}
-						if !found {
+					// Only add if we haven't seen this template name yet
+					if !templateNames[name] {
+						if tmpl, err := tm.LoadTemplate(filepath.Join(userDir, entry.Name()), name, "user"); err == nil {
 							templates = append(templates, tmpl)
+							templateNames[name] = true
 						}
 					}
 				}
@@ -136,24 +154,28 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 
 	// 3. Add built-in templates
 	for name, content := range BuiltinTemplates {
-		fm, body, err := ParseFrontmatter([]byte(content))
-		if err != nil {
-			continue
-		}
+		// Only add if we haven't seen this template name yet
+		if !templateNames[name] {
+			fm, body, err := ParseFrontmatter([]byte(content))
+			if err != nil {
+				continue
+			}
 
-		template := &JobTemplate{
-			Name:        name,
-			Path:        "builtin:" + name,
-			Source:      "builtin",
-			Frontmatter: fm,
-			Prompt:      sanitize.UTF8(body),
-		}
+			template := &JobTemplate{
+				Name:        name,
+				Path:        "builtin:" + name,
+				Source:      "builtin",
+				Frontmatter: fm,
+				Prompt:      sanitize.UTF8(body),
+			}
 
-		if desc, ok := fm["description"].(string); ok {
-			template.Description = desc
-		}
+			if desc, ok := fm["description"].(string); ok {
+				template.Description = desc
+			}
 
-		templates = append(templates, template)
+			templates = append(templates, template)
+			templateNames[name] = true
+		}
 	}
 
 	return templates, nil

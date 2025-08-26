@@ -172,13 +172,6 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// Get the REAL project root BEFORE changing context
-	projectRoot, err := GetProjectRoot()
-	if err != nil {
-		// Log a warning but don't fail, symlinking is a convenience
-		fmt.Printf("Warning: could not find project root for template symlinking: %v\n", err)
-		projectRoot = ""
-	}
 
 	// Get git root for worktree creation
 	gitRoot, err := GetGitRootSafe(plan.Directory)
@@ -191,11 +184,6 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 	worktreePath, err := e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
 	if err != nil {
 		return "", err
-	}
-
-	// Symlink templates using the centralized function
-	if err := SymlinkTemplates(worktreePath, projectRoot, nil); err != nil {
-		fmt.Printf("Warning: failed to symlink templates: %v\n", err)
 	}
 
 	// Check if grove-hooks is available and install hooks in the worktree
