@@ -172,6 +172,14 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
+	// Get the REAL project root BEFORE changing context
+	projectRoot, err := GetProjectRoot()
+	if err != nil {
+		// Log a warning but don't fail, symlinking is a convenience
+		fmt.Printf("Warning: could not find project root for template symlinking: %v\n", err)
+		projectRoot = ""
+	}
+
 	// Get git root for worktree creation
 	gitRoot, err := GetGitRootSafe(plan.Directory)
 	if err != nil {
@@ -185,9 +193,8 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", err
 	}
 
-	// Symlink templates to make them available in the worktree
-	fmt.Printf("DEBUG: Attempting to symlink templates for worktree: %s\n", worktreePath)
-	if err := e.symlinkTemplates(worktreePath); err != nil {
+	// Symlink templates using the centralized function
+	if err := SymlinkTemplates(worktreePath, projectRoot, nil); err != nil {
 		fmt.Printf("Warning: failed to symlink templates: %v\n", err)
 	}
 
@@ -512,80 +519,3 @@ func buildPromptFromSources(job *Job, plan *Plan) (string, error) {
 	return systemMessage.String(), nil
 }
 
-// symlinkTemplates creates symlinks to job templates in the worktree
-func (e *AgentExecutor) symlinkTemplates(worktreePath string) error {
-	fmt.Printf("DEBUG: symlinkTemplates called with worktreePath: %s\n", worktreePath)
-	
-	// Find the project root to locate templates
-	projectRoot, err := GetProjectRoot()
-	if err != nil {
-		fmt.Printf("Warning: could not find project root via grove.yml, trying fallback: %v\n", err)
-		// Fallback: if we're in a worktree, go up 2 directories
-		// Worktree path is typically: /path/to/project/.grove-worktrees/worktree-name
-		if strings.Contains(worktreePath, ".grove-worktrees") {
-			projectRoot = filepath.Dir(filepath.Dir(worktreePath))
-			fmt.Printf("Using fallback project root: %s\n", projectRoot)
-		} else {
-			return nil // Non-fatal error
-		}
-	} else {
-		fmt.Printf("DEBUG: Found project root via grove.yml: %s\n", projectRoot)
-	}
-
-	// Look for templates in project-local and user-global locations
-	templatePaths := []string{
-		filepath.Join(projectRoot, ".grove", "job-templates"),
-	}
-
-	// Add user-global templates if accessible
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		templatePaths = append(templatePaths, filepath.Join(homeDir, ".config", "grove", "job-templates"))
-	}
-
-	// Create .grove directory in worktree if it doesn't exist
-	groveDir := filepath.Join(worktreePath, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
-		fmt.Printf("Warning: failed to create .grove directory in worktree for templates: %v\n", err)
-		return nil // Non-fatal error
-	}
-
-	// Symlink template directories
-	for _, templatePath := range templatePaths {
-		fmt.Printf("DEBUG: Checking template path: %s\n", templatePath)
-		if _, err := os.Stat(templatePath); err != nil {
-			fmt.Printf("DEBUG: Template path doesn't exist: %s\n", templatePath)
-			continue // Skip if template directory doesn't exist
-		}
-
-		// Determine symlink target name
-		var symlinkName string
-		if strings.Contains(templatePath, ".config") {
-			symlinkName = "user-job-templates"
-		} else {
-			symlinkName = "job-templates"
-		}
-
-		symlinkTarget := filepath.Join(groveDir, symlinkName)
-		fmt.Printf("DEBUG: Creating symlink: %s\n", symlinkTarget)
-
-		// Remove existing symlink or directory if it exists
-		os.RemoveAll(symlinkTarget)
-
-		// Create relative path for symlink
-		relPath, err := filepath.Rel(groveDir, templatePath)
-		if err != nil {
-			fmt.Printf("Warning: failed to create relative path for template symlink: %v\n", err)
-			continue
-		}
-
-		// Create symlink
-		fmt.Printf("DEBUG: Symlinking %s -> %s\n", symlinkTarget, relPath)
-		if err := os.Symlink(relPath, symlinkTarget); err != nil {
-			fmt.Printf("Warning: failed to create template symlink from %s to %s: %v\n", relPath, symlinkTarget, err)
-			continue // Non-fatal error
-		}
-		fmt.Printf("DEBUG: Successfully created symlink\n")
-	}
-
-	return nil
-}

@@ -167,75 +167,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			return execErr
 		}
 		workDir = path
-		
-		// DIRECT SYMLINK CREATION - SIMPLE AND GUARANTEED
-		fmt.Println("DEBUG: CREATING SYMLINKS DIRECTLY")
-		
-		// If this is a worktree under .grove-worktrees, create symlinks
-		if strings.Contains(workDir, ".grove-worktrees") {
-			// Go up 2 directories to find the project root
-			projectRoot := filepath.Dir(filepath.Dir(workDir))
-			templateSource := filepath.Join(projectRoot, ".grove", "job-templates")
-			
-			fmt.Printf("DEBUG: Project root: %s\n", projectRoot)
-			fmt.Printf("DEBUG: Template source: %s\n", templateSource)
-			
-			// Check if source exists
-			if info, err := os.Stat(templateSource); err == nil && info.IsDir() {
-				// Create .grove directory in worktree
-				groveDir := filepath.Join(workDir, ".grove")
-				os.MkdirAll(groveDir, 0755)
-				
-				// Create symlink
-				symlinkPath := filepath.Join(groveDir, "job-templates")
-				
-				// Remove any existing symlink/directory
-				os.RemoveAll(symlinkPath)
-				
-				// Create relative path from worktree .grove to project .grove/job-templates
-				// This should be ../../../.grove/job-templates
-				relPath := filepath.Join("..", "..", "..", ".grove", "job-templates")
-				
-				fmt.Printf("DEBUG: Creating symlink: %s -> %s\n", symlinkPath, relPath)
-				
-				if err := os.Symlink(relPath, symlinkPath); err != nil {
-					fmt.Printf("ERROR: Failed to create symlink: %v\n", err)
-					
-					// Try absolute path as fallback
-					fmt.Printf("DEBUG: Trying absolute path symlink\n")
-					if err := os.Symlink(templateSource, symlinkPath); err != nil {
-						fmt.Printf("ERROR: Absolute path symlink also failed: %v\n", err)
-					} else {
-						fmt.Println("SUCCESS: Created symlink with absolute path")
-					}
-				} else {
-					fmt.Println("SUCCESS: Created symlink with relative path")
-				}
-				
-				// Verify the symlink
-				if target, err := os.Readlink(symlinkPath); err == nil {
-					fmt.Printf("DEBUG: Symlink created successfully, points to: %s\n", target)
-					
-					// Test if we can read through the symlink
-					if entries, err := os.ReadDir(symlinkPath); err == nil {
-						fmt.Printf("DEBUG: Symlink is functional, found %d entries\n", len(entries))
-						for _, entry := range entries {
-							fmt.Printf("  - %s\n", entry.Name())
-						}
-					} else {
-						fmt.Printf("ERROR: Symlink exists but can't read through it: %v\n", err)
-					}
-				}
-			} else {
-				fmt.Printf("DEBUG: Template source doesn't exist or is not a directory: %v\n", err)
-			}
-		}
-		
-		// Still call the original function for completeness
-		fmt.Printf("DEBUG: [OneShot] Also calling original symlinkTemplates for worktree: %s\n", workDir)
-		if err := e.symlinkTemplates(workDir); err != nil {
-			fmt.Printf("Warning: original symlinkTemplates failed: %v\n", err)
-		}
 	} else {
 		// No worktree specified, default to the git repository root.
 		var err error
@@ -294,7 +225,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Prompt:           prompt,  // Use the fully constructed prompt
 			PromptFiles:      job.PromptSource,  // Pass the list of source files
 			WorkDir:          workDir,
-			ContextFiles:     contextFiles,  // Pass the context files
+			// Don't pass context files - Gemini runner finds them automatically
 			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
@@ -931,6 +862,14 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
+	// Get the REAL project root BEFORE changing context
+	projectRoot, err := GetProjectRoot()
+	if err != nil {
+		// Log a warning but don't fail, symlinking is a convenience
+		fmt.Printf("Warning: could not find project root for template symlinking: %v\n", err)
+		projectRoot = ""
+	}
+
 	// Get git root for worktree creation
 	gitRoot, err := GetGitRootSafe(plan.Directory)
 	if err != nil {
@@ -959,9 +898,8 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", err
 	}
 
-	// Symlink templates to make them available in the worktree
-	fmt.Printf("DEBUG: [OneShot] Attempting to symlink templates for worktree: %s\n", worktreePath)
-	if err := e.symlinkTemplates(worktreePath); err != nil {
+	// Symlink templates using the correct projectRoot
+	if err := SymlinkTemplates(worktreePath, projectRoot, nil); err != nil {
 		fmt.Printf("Warning: failed to symlink templates: %v\n", err)
 	}
 
@@ -1474,7 +1412,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			PromptFiles:      []string{job.FilePath}, // The chat file itself is the prompt source
 			WorkDir:          worktreePath,
 			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
-			ContextFiles:     validContextPaths, // Pass context files
+			// Don't pass context files - Gemini runner finds them automatically
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
 		if err != nil {
@@ -1523,80 +1461,3 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 }
 
 
-// symlinkTemplates creates symlinks to job templates in the worktree
-func (e *OneShotExecutor) symlinkTemplates(worktreePath string) error {
-	fmt.Printf("DEBUG: [OneShot] symlinkTemplates called with worktreePath: %s\n", worktreePath)
-	
-	// Find the project root to locate templates
-	projectRoot, err := GetProjectRoot()
-	if err != nil {
-		fmt.Printf("Warning: could not find project root via grove.yml, trying fallback: %v\n", err)
-		// Fallback: if we're in a worktree, go up 2 directories
-		// Worktree path is typically: /path/to/project/.grove-worktrees/worktree-name
-		if strings.Contains(worktreePath, ".grove-worktrees") {
-			projectRoot = filepath.Dir(filepath.Dir(worktreePath))
-			fmt.Printf("Using fallback project root: %s\n", projectRoot)
-		} else {
-			return nil // Non-fatal error
-		}
-	} else {
-		fmt.Printf("DEBUG: [OneShot] Found project root via grove.yml: %s\n", projectRoot)
-	}
-
-	// Look for templates in project-local and user-global locations
-	templatePaths := []string{
-		filepath.Join(projectRoot, ".grove", "job-templates"),
-	}
-
-	// Add user-global templates if accessible
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		templatePaths = append(templatePaths, filepath.Join(homeDir, ".config", "grove", "job-templates"))
-	}
-
-	// Create .grove directory in worktree if it doesn't exist
-	groveDir := filepath.Join(worktreePath, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
-		fmt.Printf("Warning: failed to create .grove directory in worktree for templates: %v\n", err)
-		return nil // Non-fatal error
-	}
-
-	// Symlink template directories
-	for _, templatePath := range templatePaths {
-		fmt.Printf("DEBUG: [OneShot] Checking template path: %s\n", templatePath)
-		if _, err := os.Stat(templatePath); err != nil {
-			fmt.Printf("DEBUG: [OneShot] Template path doesn't exist: %s\n", templatePath)
-			continue // Skip if template directory doesn't exist
-		}
-
-		// Determine symlink target name
-		var symlinkName string
-		if strings.Contains(templatePath, ".config") {
-			symlinkName = "user-job-templates"
-		} else {
-			symlinkName = "job-templates"
-		}
-
-		symlinkTarget := filepath.Join(groveDir, symlinkName)
-		fmt.Printf("DEBUG: [OneShot] Creating symlink: %s\n", symlinkTarget)
-
-		// Remove existing symlink or directory if it exists
-		os.RemoveAll(symlinkTarget)
-
-		// Create relative path for symlink
-		relPath, err := filepath.Rel(groveDir, templatePath)
-		if err != nil {
-			fmt.Printf("Warning: failed to create relative path for template symlink: %v\n", err)
-			continue
-		}
-
-		// Create symlink
-		fmt.Printf("DEBUG: [OneShot] Symlinking %s -> %s\n", symlinkTarget, relPath)
-		if err := os.Symlink(relPath, symlinkTarget); err != nil {
-			fmt.Printf("Warning: failed to create template symlink from %s to %s: %v\n", relPath, symlinkTarget, err)
-			continue // Non-fatal error
-		}
-		fmt.Printf("DEBUG: [OneShot] Successfully created symlink\n")
-	}
-
-	return nil
-}
