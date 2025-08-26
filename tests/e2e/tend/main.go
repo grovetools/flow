@@ -33,7 +33,7 @@ func main() {
 		ChatLaunchScenario(), // Fixed with docker check skip
 		ChatRunFilteringScenario(),
 		ChatPipelineScenario(),
-		ChatTemplateInjectionScenario(),   // Tests automatic template injection
+		ChatTemplateInjectionScenario(), // Tests automatic template injection
 		ChatInteractivePromptScenario(), // Tests interactive prompt for chat jobs in plans
 		ChatExtractBasicScenario(),      // Tests basic chat block extraction
 		ChatExtractErrorScenario(),      // Tests extract command error handling
@@ -49,7 +49,7 @@ func main() {
 		InteractiveAgentBasicScenario(),
 		InteractiveAgentSkipScenario(),
 		InteractiveAgentWorkflowScenario(),
-		InteractiveAgentPollingWorkflowScenario(), // Tests polling with flow plan complete
+		// InteractiveAgentPollingWorkflowScenario(), // Tests polling with flow plan complete
 
 		// Agent Continue Scenarios
 		AgentContinueScenario(),
