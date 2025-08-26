@@ -1,3 +1,21 @@
+## v0.2.10 (2025-08-26)
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* update readme (#1)
+
+### Bug Fixes
+
+* disable agent polling test for now
+* ensure job dependencies are properly passed as context files
+* simplify template resolution with upward directory search
+* template symlink sort of
+
+### Features
+
+* implement asynchronous interactive workflow with polling
+
 ## v0.2.9 (2025-08-25)
 
 ### Chores
