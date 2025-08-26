@@ -249,16 +249,13 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 	instruction := fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath)
 
 	// Add dependency files if the job has dependencies
-	if len(job.DependsOn) > 0 {
+	if len(job.Dependencies) > 0 {
 		instruction += "For additional context from previous jobs, also read: "
 		var depFiles []string
-		for _, dep := range job.DependsOn {
-			// Convert dependency to absolute path
-			depPath := dep
-			if !filepath.IsAbs(dep) {
-				depPath = filepath.Join(plan.Directory, dep)
+		for _, dep := range job.Dependencies {
+			if dep != nil && dep.FilePath != "" {
+				depFiles = append(depFiles, dep.FilePath)
 			}
-			depFiles = append(depFiles, depPath)
 		}
 		instruction += strings.Join(depFiles, ", ")
 		instruction += ". "

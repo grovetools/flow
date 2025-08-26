@@ -220,13 +220,24 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		err = nil
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Use grove-gemini package for Gemini models
+		// Only pass dependency files explicitly - grove context files are auto-discovered
+		allPromptFiles := job.PromptSource
+		
+		// Add dependency files (but not grove context files which are auto-discovered)
+		if len(job.Dependencies) > 0 {
+			for _, dep := range job.Dependencies {
+				if dep != nil && dep.FilePath != "" {
+					allPromptFiles = append(allPromptFiles, dep.FilePath)
+				}
+			}
+		}
+
 		opts := gemini.RequestOptions{
 			Model:            effectiveModel,
-			Prompt:           prompt,  // Use the fully constructed prompt
-			PromptFiles:      job.PromptSource,  // Pass the list of source files
+			Prompt:           prompt,            // Use the fully constructed prompt
+			PromptFiles:      allPromptFiles,    // Pass source files and dependencies
 			WorkDir:          workDir,
-			// Don't pass context files - Gemini runner finds them automatically
-			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
+			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
 	} else {
@@ -299,31 +310,14 @@ func (e *OneShotExecutor) completeWithSchema(ctx context.Context, prompt string,
 // buildPrompt constructs the prompt from job sources and returns context file paths separately.
 func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, []string, error) {
 	var parts []string
+	var allContextFiles []string // This will be the final list of context files
 
-	// Add content from dependencies first
+	// Add dependency files to the context list
 	if len(job.Dependencies) > 0 {
-		var depParts []string
-		depParts = append(depParts, "=== Context from previous steps ===")
-		includedDeps := make(map[string]bool)
-
 		for _, dep := range job.Dependencies {
-			if dep == nil || dep.FilePath == "" {
-				continue
+			if dep != nil && dep.FilePath != "" {
+				allContextFiles = append(allContextFiles, dep.FilePath)
 			}
-			if _, alreadyIncluded := includedDeps[dep.FilePath]; alreadyIncluded {
-				continue
-			}
-
-			content, err := os.ReadFile(dep.FilePath)
-			if err != nil {
-				fmt.Printf("Warning: could not read dependency file for context %s: %v\n", dep.FilePath, err)
-				continue
-			}
-			depParts = append(depParts, fmt.Sprintf("\n--- START OF %s ---\n%s\n--- END OF %s ---", dep.Filename, string(content), dep.Filename))
-			includedDeps[dep.FilePath] = true
-		}
-		if len(depParts) > 1 { // Only add if we have more than just the header
-			parts = append(parts, strings.Join(depParts, "\n"))
 		}
 	}
 
@@ -424,10 +418,9 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		}
 
 		// Verify context files exist
-		var validContextPaths []string
 		for _, contextPath := range contextPaths {
 			if _, err := os.Stat(contextPath); err == nil {
-				validContextPaths = append(validContextPaths, contextPath)
+				allContextFiles = append(allContextFiles, contextPath)
 			}
 		}
 
@@ -438,7 +431,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			return "", nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
 		}
 
-		return prompt, validContextPaths, nil
+		return prompt, allContextFiles, nil
 	} else {
 		// Traditional prompt assembly (backward compatibility)
 
@@ -503,10 +496,9 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		}
 
 		// Verify context files exist
-		var validContextPaths []string
 		for _, contextPath := range contextPaths {
 			if _, err := os.Stat(contextPath); err == nil {
-				validContextPaths = append(validContextPaths, contextPath)
+				allContextFiles = append(allContextFiles, contextPath)
 			}
 		}
 
@@ -517,7 +509,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			return "", nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
 		}
 
-		return prompt, validContextPaths, nil
+		return prompt, allContextFiles, nil
 	}
 }
 
