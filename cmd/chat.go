@@ -737,14 +737,14 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
 	// Use the title from frontmatter for the session name
-	sessionTitle := sanitizeForTmuxSession(job.Title)
+	sessionTitle := SanitizeForTmuxSession(job.Title)
 	sessionName := fmt.Sprintf("%s__%s", repoName, sessionTitle)
 
-	params := launchParameters{
-		sessionName:      sessionName,
-		container:        container,
-		hostWorktreePath: worktreePath,
-		agentCommand:     agentCommand,
+	params := LaunchParameters{
+		SessionName:      sessionName,
+		Container:        container,
+		HostWorktreePath: worktreePath,
+		AgentCommand:     agentCommand,
 	}
 
 	// Calculate container work directory
@@ -753,14 +753,14 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to calculate relative path: %w", err)
 	}
 	if fullCfg.Agent.MountWorkspaceAtHostPath {
-		params.containerWorkDir = filepath.Join(gitRoot, relPath)
+		params.ContainerWorkDir = filepath.Join(gitRoot, relPath)
 	} else {
-		params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
+		params.ContainerWorkDir = filepath.Join("/workspace", repoName, relPath)
 	}
 
 	// Launch the session using the same logic as plan launch
 	executor := &exec.RealCommandExecutor{}
-	return launchTmuxSession(executor, params)
+	return LaunchTmuxSession(executor, params)
 }
 
 // deriveWorktreeName creates a valid worktree name from a file path or title
@@ -832,7 +832,7 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 	repoName := filepath.Base(gitRoot)
-	sessionName := sanitizeForTmuxSession(repoName)
+	sessionName := SanitizeForTmuxSession(repoName)
 
 	executor := &exec.RealCommandExecutor{}
 
@@ -847,7 +847,7 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 
 	// 4. Create New Window
 	chatFileName := strings.TrimSuffix(filepath.Base(chatPath), filepath.Ext(chatPath))
-	windowName := "chat-" + sanitizeForTmuxSession(chatFileName)
+	windowName := "chat-" + SanitizeForTmuxSession(chatFileName)
 
 	// Create the window and set its working directory to the git root
 	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", gitRoot); err != nil {
@@ -872,39 +872,4 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 	fmt.Printf("✓ Launched chat in new window '%s' within session '%s'.\n", windowName, sessionName)
 	fmt.Printf("  Attach with: tmux attach -t %s\n", sessionName)
 	return nil
-}
-
-// sanitizeForTmuxSession creates a valid tmux session name from a title
-func sanitizeForTmuxSession(title string) string {
-	// Replace spaces and special characters with hyphens
-	sanitized := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, title)
-
-	// Convert to lowercase for consistency
-	sanitized = strings.ToLower(sanitized)
-
-	// Remove consecutive hyphens
-	for strings.Contains(sanitized, "--") {
-		sanitized = strings.ReplaceAll(sanitized, "--", "-")
-	}
-
-	// Trim hyphens from start and end
-	sanitized = strings.Trim(sanitized, "-")
-
-	// Ensure it's not empty
-	if sanitized == "" {
-		sanitized = "session"
-	}
-
-	// Tmux session names should not be too long
-	if len(sanitized) > 50 {
-		sanitized = sanitized[:50]
-	}
-
-	return sanitized
 }

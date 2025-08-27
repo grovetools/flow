@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 )
@@ -57,6 +60,69 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 		fmt.Printf("Warning: failed to set active job: %v\n", err)
 	} else {
 		fmt.Printf("✓ Set active plan to: %s\n", planName)
+	}
+
+	// Extraction Logic
+	if cmd.ExtractAllFrom != "" {
+		// 1. Load the plan we just created
+		plan, err := orchestration.LoadPlan(planPath)
+		if err != nil {
+			return fmt.Errorf("failed to reload plan for extraction: %w", err)
+		}
+
+		// 2. Read the source file
+		content, err := os.ReadFile(cmd.ExtractAllFrom)
+		if err != nil {
+			return fmt.Errorf("failed to read source file for extraction %s: %w", cmd.ExtractAllFrom, err)
+		}
+
+		// 3. Extract body
+		_, body, err := orchestration.ParseFrontmatter(content)
+		if err != nil {
+			return fmt.Errorf("failed to parse frontmatter from source file %s: %w", cmd.ExtractAllFrom, err)
+		}
+
+		// 4. Create a new job
+		jobTitle := strings.TrimSuffix(filepath.Base(cmd.ExtractAllFrom), filepath.Ext(filepath.Base(cmd.ExtractAllFrom)))
+		job := &orchestration.Job{
+			Title:      jobTitle,
+			Type:       orchestration.JobTypeChat, // Extracts become chat jobs
+			Status:     orchestration.JobStatusPending,
+			ID:         GenerateJobIDFromTitle(plan, jobTitle),
+			PromptBody: string(body),
+			// other fields will get defaults from plan config upon execution
+		}
+
+		// 5. Add the job to the plan
+		filename, err := orchestration.AddJob(plan, job)
+		if err != nil {
+			return fmt.Errorf("failed to add extracted job to plan: %w", err)
+		}
+		fmt.Printf("✓ Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename)
+	}
+
+	// Open Session Logic
+	if cmd.OpenSession {
+		if worktreeToSet == "" {
+			return fmt.Errorf("--open-session requires --with-worktree or --worktree to be set")
+		}
+		fmt.Println("\n🚀 Launching new session...")
+
+		// This logic is largely from RunPlanLaunch
+		ctx := context.Background()
+		if err := launchWorktreeSession(ctx, worktreeToSet, ""); err != nil {
+			// Log the error but don't fail the init command, as the primary goal was completed
+			fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
+			fmt.Printf("   You can launch it manually later with `flow plan launch <job-file>`\n")
+		}
+
+		// The launchWorktreeSession function prints its own success messages.
+		// We don't need to return here; we can let the original `init` messages print too.
+	} else if cmd.ExtractAllFrom != "" {
+		// If we extracted but didn't open a session, give next steps.
+		fmt.Println("\nNext steps:")
+		fmt.Printf("1. Open the session: flow plan launch <job-file>\n")
+		return nil
 	}
 
 	fmt.Println("\nNext steps:")
@@ -363,4 +429,62 @@ func copyFile(src, dst string) error {
 	}
 
 	return nil
+}
+
+// launchWorktreeSession is a helper to launch a tmux session for a worktree, adapted from plan_launch and chat_launch.
+func launchWorktreeSession(ctx context.Context, worktreeName string, agentCommand string) error {
+	// Load configuration
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		return err
+	}
+	fullCfg, err := loadFullConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	container := flowCfg.TargetAgentContainer
+	if container == "" {
+		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
+	}
+
+	// Get git root
+	gitRoot, err := git.GetGitRoot(".")
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+
+	// Prepare the worktree
+	wm := git.NewWorktreeManager()
+	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "interactive")
+	if err != nil {
+		return fmt.Errorf("failed to prepare worktree: %w", err)
+	}
+
+	// Set up Go workspace and Canopy hooks
+	_ = orchestration.SetupGoWorkspaceForWorktree(worktreePath, gitRoot)
+	_ = configureCanopyHooks(worktreePath)
+
+	// Prepare launch parameters
+	repoName := filepath.Base(gitRoot)
+	sessionTitle := SanitizeForTmuxSession(worktreeName)
+	params := LaunchParameters{
+		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
+		Container:        container,
+		HostWorktreePath: worktreePath,
+		AgentCommand:     agentCommand,
+	}
+
+	// Calculate container work directory
+	relPath, err := filepath.Rel(gitRoot, worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate relative path: %w", err)
+	}
+	if fullCfg.Agent.MountWorkspaceAtHostPath {
+		params.ContainerWorkDir = filepath.Join(gitRoot, relPath)
+	} else {
+		params.ContainerWorkDir = filepath.Join("/workspace", repoName, relPath)
+	}
+
+	executor := &exec.RealCommandExecutor{}
+	return LaunchTmuxSession(executor, params)
 }

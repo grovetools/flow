@@ -15,15 +15,15 @@ import (
 )
 
 type PlanAddStepCmd struct {
-	Dir         string   `arg:"" help:"Plan directory"`
-	Template    string   `flag:"" help:"Name of the job template to use"`
-	Type        string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, chat, interactive_agent, or shell"`
-	Title       string   `flag:"" help:"Job title"`
-	DependsOn   []string `flag:"d" help:"Dependencies (job filenames)"`
-	PromptFile  string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
-	SourceFiles []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
-	Prompt      string   `flag:"p" help:"Inline prompt text"`
-	OutputType  string   `flag:"" default:"file" help:"Output type: file, commit, none, or generate_jobs"`
+	Dir           string   `arg:"" help:"Plan directory"`
+	Template      string   `flag:"" help:"Name of the job template to use"`
+	Type          string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, chat, interactive_agent, or shell"`
+	Title         string   `flag:"" help:"Job title"`
+	DependsOn     []string `flag:"d" help:"Dependencies (job filenames)"`
+	PromptFile    string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
+	SourceFiles   []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
+	Prompt        string   `flag:"p" help:"Inline prompt text"`
+	OutputType    string   `flag:"" default:"file" help:"Output type: file, commit, none, or generate_jobs"`
 	Interactive   bool     `flag:"i" help:"Interactive mode"`
 	Worktree      string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model         string   `flag:"" help:"LLM model to use for this job"`
@@ -166,7 +166,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		}
 
 		// Generate job ID
-		jobID := generateJobIDFromTitle(plan, cmd.Title)
+		jobID := GenerateJobIDFromTitle(plan, cmd.Title)
 
 		// Build job structure
 		job := &orchestration.Job{
@@ -269,7 +269,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	}
 
 	// Generate job ID
-	jobID := generateJobIDFromTitle(plan, cmd.Title)
+	jobID := GenerateJobIDFromTitle(plan, cmd.Title)
 
 	// Build job structure
 	job := &orchestration.Job{
@@ -285,7 +285,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			Type: cmd.OutputType,
 		},
 	}
-	
+
 	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
 	// and the user didn't explicitly set it
 	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
@@ -314,12 +314,12 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (*orchestration.Job, error) {
 	// Create the initial TUI model
 	model := initialModel(plan)
-	
+
 	// Set explicit worktree if provided
 	if explicitWorktree != "" {
 		model.worktreeInput.SetValue(explicitWorktree)
 	}
-	
+
 	// Run the TUI
 	p := tea.NewProgram(model)
 	finalModel, err := p.Run()
@@ -335,12 +335,12 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 
 	// Convert the final TUI state into a Job object
 	job := finalTUIModel.toJob(plan)
-	
+
 	// Validate the job
 	if job.Title == "" {
 		return nil, fmt.Errorf("title cannot be empty")
 	}
-	
+
 	// Apply plan defaults if not set by user
 	if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
 		job.Model = plan.Config.Model
@@ -348,7 +348,7 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
 	}
-	
+
 	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
 	if job.Type == orchestration.JobTypeInteractiveAgent && !job.AgentContinue {
 		// Only auto-enable if this is NOT the first interactive agent job
@@ -356,7 +356,7 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 			job.AgentContinue = true
 		}
 	}
-	
+
 	return job, nil
 }
 
@@ -580,7 +580,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 
 	// Generate job ID
-	job.ID = generateJobIDFromTitle(plan, job.Title)
+	job.ID = GenerateJobIDFromTitle(plan, job.Title)
 
 	// Command line --worktree flag overrides template worktree
 	if worktreeToUse != "" {
@@ -594,7 +594,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
 	}
-	
+
 	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
 	// and the user didn't explicitly set it via CLI
 	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
@@ -607,7 +607,8 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	return job, nil
 }
 
-func generateJobIDFromTitle(plan *orchestration.Plan, title string) string {
+// GenerateJobIDFromTitle creates a unique job ID from a title string.
+func GenerateJobIDFromTitle(plan *orchestration.Plan, title string) string {
 	// Convert title to ID format
 	base := strings.ToLower(title)
 	base = strings.ReplaceAll(base, " ", "-")

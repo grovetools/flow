@@ -16,13 +16,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// launchParameters holds all the necessary information for launching a tmux session
-type launchParameters struct {
-	sessionName      string
-	container        string
-	hostWorktreePath string
-	containerWorkDir string
-	agentCommand     string
+// LaunchParameters holds all the necessary information for launching a tmux session
+type LaunchParameters struct {
+	SessionName      string
+	Container        string
+	HostWorktreePath string
+	ContainerWorkDir string
+	AgentCommand     string
 }
 
 // RunPlanLaunch implements the plan launch command
@@ -130,12 +130,12 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
 	// Use the job title for session name, sanitized for tmux
-	sessionTitle := sanitizeForTmuxSession(job.Title)
-	params := launchParameters{
-		sessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
-		container:        container,
-		hostWorktreePath: worktreePath,
-		agentCommand:     agentCommand,
+	sessionTitle := SanitizeForTmuxSession(job.Title)
+	params := LaunchParameters{
+		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
+		Container:        container,
+		HostWorktreePath: worktreePath,
+		AgentCommand:     agentCommand,
 	}
 
 	// Calculate container work directory
@@ -144,14 +144,14 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 		return fmt.Errorf("failed to calculate relative path: %w", err)
 	}
 	if fullCfg.Agent.MountWorkspaceAtHostPath {
-		params.containerWorkDir = filepath.Join(gitRoot, relPath)
+		params.ContainerWorkDir = filepath.Join(gitRoot, relPath)
 	} else {
-		params.containerWorkDir = filepath.Join("/workspace", repoName, relPath)
+		params.ContainerWorkDir = filepath.Join("/workspace", repoName, relPath)
 	}
 
 	// Launch the session
 	executor := &exec.RealCommandExecutor{}
-	return launchTmuxSession(executor, params)
+	return LaunchTmuxSession(executor, params)
 }
 
 // buildAgentCommand constructs the shell-escaped agent command string
@@ -189,38 +189,38 @@ func buildAgentCommand(job *orchestration.Job, plan *orchestration.Plan, worktre
 		cmdParts = append(cmdParts, agentArgs...)
 		return fmt.Sprintf("echo %s | %s", escapedInstruction, strings.Join(cmdParts, " ")), nil
 	}
-	
+
 	cmdParts = append(cmdParts, agentArgs...)
 	cmdParts = append(cmdParts, escapedInstruction)
 
 	return strings.Join(cmdParts, " "), nil
 }
 
-// launchTmuxSession creates and configures the tmux session
-func launchTmuxSession(executor exec.CommandExecutor, params launchParameters) error {
+// LaunchTmuxSession creates and configures the tmux session
+func LaunchTmuxSession(executor exec.CommandExecutor, params LaunchParameters) error {
 	// Pre-flight check for tmux
 	if _, err := executor.LookPath("tmux"); err != nil {
 		return fmt.Errorf("tmux command not found, please install it to use this feature")
 	}
 
 	// Command to run inside docker for the agent window
-	dockerCmdStr := fmt.Sprintf("docker exec -it -w %s %s sh", params.containerWorkDir, params.container)
+	dockerCmdStr := fmt.Sprintf("docker exec -it -w %s %s sh", params.ContainerWorkDir, params.Container)
 
 	// Debug: Log the docker command
 	if verbose := os.Getenv("GROVE_DEBUG"); verbose != "" {
 		fmt.Printf("Debug: Docker command for agent window: %s\n", dockerCmdStr)
-		fmt.Printf("Debug: Container working directory: %s\n", params.containerWorkDir)
+		fmt.Printf("Debug: Container working directory: %s\n", params.ContainerWorkDir)
 	}
 
 	// --- Execute Tmux Sequence ---
-	fmt.Printf("🚀 Launching interactive session '%s'...\n", params.sessionName)
+	fmt.Printf("🚀 Launching interactive session '%s'...\n", params.SessionName)
 
 	// 1. Create session with a shell on the host in the worktree directory
 	// The -c flag sets the default path for new windows in this session
-	if err := executor.Execute("tmux", "new-session", "-d", "-s", params.sessionName, "-c", params.hostWorktreePath); err != nil {
+	if err := executor.Execute("tmux", "new-session", "-d", "-s", params.SessionName, "-c", params.HostWorktreePath); err != nil {
 		if strings.Contains(err.Error(), "duplicate session") {
 			fmt.Printf("⚠️  Session '%s' already exists. Attach with `tmux attach -t %s`\n",
-				params.sessionName, params.sessionName)
+				params.SessionName, params.SessionName)
 			return nil
 		}
 		return fmt.Errorf("failed to create tmux session: %w", err)
@@ -228,16 +228,24 @@ func launchTmuxSession(executor exec.CommandExecutor, params launchParameters) e
 
 	// Debug: Log what we're doing
 	if verbose := os.Getenv("GROVE_DEBUG"); verbose != "" {
-		fmt.Printf("Debug: Created session %s, will cd to %s\n", params.sessionName, params.containerWorkDir)
+		fmt.Printf("Debug: Created session %s, will cd to %s\n", params.SessionName, params.ContainerWorkDir)
 	}
 
 	time.Sleep(300 * time.Millisecond) // Give shell time to start
 
 	// 2. Create a second window for the agent command
 	// Note: dockerCmdStr must be passed as a single argument to tmux
-	if err := executor.Execute("tmux", "new-window", "-t", params.sessionName, "-n", "agent", dockerCmdStr); err != nil {
+	// 2. Create a second window for the agent command
+	// Note: dockerCmdStr must be passed as a single argument to tmux
+	windowName := "agent"
+	if params.AgentCommand == "" {
+		// If no command, it's just a shell for exploration
+		windowName = "shell"
+	}
+
+	if err := executor.Execute("tmux", "new-window", "-t", params.SessionName, "-n", windowName, dockerCmdStr); err != nil {
 		// Log more details about the failure
-		fmt.Printf("⚠️  Failed to create agent window in tmux session '%s'\n", params.sessionName)
+		fmt.Printf("⚠️  Failed to create agent window in tmux session '%s'\n", params.SessionName)
 		fmt.Printf("   Docker command was: %s\n", dockerCmdStr)
 		fmt.Printf("   Error: %v\n", err)
 
@@ -249,32 +257,34 @@ func launchTmuxSession(executor exec.CommandExecutor, params launchParameters) e
 		}
 
 		// Cleanup on failure
-		executor.Execute("tmux", "kill-session", "-t", params.sessionName)
+		executor.Execute("tmux", "kill-session", "-t", params.SessionName)
 		return fmt.Errorf("failed to create agent window: %w", err)
 	}
 
 	time.Sleep(300 * time.Millisecond) // Give the new window time to start
 
-	// 3. Send pre-filled prompt to the agent window and execute it
-	if err := executor.Execute("tmux", "send-keys", "-t", params.sessionName+":agent", params.agentCommand, "C-m"); err != nil {
-		// Log details about the failure
-		fmt.Printf("⚠️  Failed to send claude-code command to agent window\n")
-		fmt.Printf("   Target: %s:agent\n", params.sessionName)
-		fmt.Printf("   Command length: %d characters\n", len(params.agentCommand))
-		fmt.Printf("   Error: %v\n", err)
+	// 3. Send pre-filled prompt to the agent window and execute it, if a command is provided
+	if params.AgentCommand != "" {
+		if err := executor.Execute("tmux", "send-keys", "-t", params.SessionName+":"+windowName, params.AgentCommand, "C-m"); err != nil {
+			// Log details about the failure
+			fmt.Printf("⚠️  Failed to send claude-code command to agent window\n")
+			fmt.Printf("   Target: %s:%s\n", params.SessionName, windowName)
+			fmt.Printf("   Command length: %d characters\n", len(params.AgentCommand))
+			fmt.Printf("   Error: %v\n", err)
 
-		// Cleanup on failure
-		executor.Execute("tmux", "kill-session", "-t", params.sessionName)
-		return fmt.Errorf("failed to send prompt to tmux session: %w", err)
+			// Cleanup on failure
+			executor.Execute("tmux", "kill-session", "-t", params.SessionName)
+			return fmt.Errorf("failed to send prompt to tmux session: %w", err)
+		}
 	}
 
 	// 4. Switch back to the first window so user starts there
-	executor.Execute("tmux", "select-window", "-t", params.sessionName+":1")
+	executor.Execute("tmux", "select-window", "-t", params.SessionName+":1")
 
 	// Success message
 	successMsg := color.GreenString("✓")
-	fmt.Printf("%s Interactive agent session launched.\n", successMsg)
-	fmt.Printf("   Attach with: %s\n", color.CyanString("tmux attach -t %s", params.sessionName))
+	fmt.Printf("%s Interactive session launched.\n", successMsg)
+	fmt.Printf("   Attach with: %s\n", color.CyanString("tmux attach -t %s", params.SessionName))
 
 	return nil
 }
@@ -337,8 +347,8 @@ func runPlanLaunchHost(jobPath string) error {
 
 	// Get repo name and create session/window names
 	repoName := filepath.Base(gitRoot)
-	sessionName := sanitizeForTmuxSession(repoName)
-	windowName := "job-" + sanitizeForTmuxSession(job.Title)
+	sessionName := SanitizeForTmuxSession(repoName)
+	windowName := "job-" + SanitizeForTmuxSession(job.Title)
 
 	executor := &exec.RealCommandExecutor{}
 
@@ -379,4 +389,40 @@ func runPlanLaunchHost(jobPath string) error {
 	fmt.Printf("  Working directory: %s\n", workDir)
 	fmt.Printf("  Attach with: tmux attach -t %s\n", sessionName)
 	return nil
+}
+
+// SanitizeForTmuxSession creates a valid tmux session name from a string.
+// Moved from chat.go to be reusable.
+func SanitizeForTmuxSession(title string) string {
+	// Replace spaces and special characters with hyphens
+	sanitized := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, title)
+
+	// Convert to lowercase for consistency
+	sanitized = strings.ToLower(sanitized)
+
+	// Remove consecutive hyphens
+	for strings.Contains(sanitized, "--") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	}
+
+	// Trim hyphens from start and end
+	sanitized = strings.Trim(sanitized, "-")
+
+	// Ensure it's not empty
+	if sanitized == "" {
+		sanitized = "session"
+	}
+
+	// Tmux session names should not be too long
+	if len(sanitized) > 50 {
+		sanitized = sanitized[:50]
+	}
+
+	return sanitized
 }

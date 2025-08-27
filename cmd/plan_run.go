@@ -135,7 +135,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 		
-		expectedSessionName := sanitizeForTmuxSession(worktreeName)
+		expectedSessionName := SanitizeForTmuxSession(worktreeName)
 		alreadyInCorrectSession := currentTmuxSession == expectedSessionName
 
 		// Only prompt if we're not already in the worktree or the correct session
@@ -566,7 +566,7 @@ func createOrSwitchToWorktreeSession(ctx context.Context, plan *orchestration.Pl
 	}
 
 	// Session name is just the worktree name (matching the executor's behavior)
-	sessionName := sanitizeForTmuxSession(worktreeName)
+	sessionName := SanitizeForTmuxSession(worktreeName)
 
 	// Check if session already exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
