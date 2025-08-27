@@ -1,3 +1,9 @@
+## v0.2.11 (2025-08-27)
+
+### Features
+
+* streamline flow plan init with extraction and session launching
+
 ## v0.2.10 (2025-08-26)
 
 ### Chores
