@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -451,34 +450,14 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		items[5].IsEnabled = planFinishCleanDevLinks && items[5].IsAvailable              // Clean up dev binaries
 		items[6].IsEnabled = planFinishArchive && items[6].IsAvailable                    // Archive plan directory
 	} else {
-		// Interactive mode
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Println("Select cleanup actions to perform:")
-		for i, item := range items {
-			if item.IsAvailable {
-				fmt.Printf("  [%d] %-40s (%s)\n", i+1, item.Name, item.Status)
-			} else {
-				fmt.Printf("      %-40s (%s)\n", item.Name, item.Status)
+		// Interactive TUI mode
+		err := runFinishTUI(planName, items)
+		if err != nil {
+			if err.Error() == "user aborted" {
+				fmt.Println("\nCleanup aborted.")
+				return nil
 			}
-		}
-
-		fmt.Print("\nEnter numbers to enable (e.g., 1,2,4), or 'all': ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(strings.ToLower(input))
-
-		if input == "all" {
-			for _, item := range items {
-				item.IsEnabled = item.IsAvailable
-			}
-		} else {
-			parts := strings.Split(input, ",")
-			for _, part := range parts {
-				var choice int
-				fmt.Sscanf(strings.TrimSpace(part), "%d", &choice)
-				if choice > 0 && choice <= len(items) && items[choice-1].IsAvailable {
-					items[choice-1].IsEnabled = true
-				}
-			}
+			return err
 		}
 	}
 
