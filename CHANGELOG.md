@@ -1,3 +1,36 @@
+## v0.2.12 (2025-08-28)
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+* remove test file
+
+### Features
+
+* implement flow plan recipes for common workflow templates
+* improve plan status tree display for DAGs with multiple dependencies
+* replace plan finish text prompt with interactive Bubble Tea TUI (#5)
+* add interactive plan TUI for browsing and managing plans (#4)
+* replace plan finish text prompt with interactive Bubble Tea TUI
+* add agent-xml builtin template
+* enhance flow plan finish command with advanced git warnings and remote branch support
+* add flow plan open command and refactor session management
+* add flow plan finish command with comprehensive cleanup workflow
+* add debug logging for LLM prompts
+
+### Bug Fixes
+
+* filter finished plans from flow plan tui command
+* remove duplicate prompt template content in oneshot jobs (#6)
+* improve prompt structure and fix chat file parsing
+* resolve duplicate context files and model precedence issues
+
+### Tests
+
+* add e2e tests for flow plan recipes feature
+
 ## v0.2.11 (2025-08-27)
 
 ### Features
