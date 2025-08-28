@@ -209,6 +209,7 @@ func GetPlanCommand() *cobra.Command {
 	// Add subcommands
 	planCmd.AddCommand(planInitCmd)
 	planCmd.AddCommand(planStatusCmd)
+	planCmd.AddCommand(planTUICmd)
 	planCmd.AddCommand(newPlanListCmd())
 	planCmd.AddCommand(planRunCmd)
 	planCmd.AddCommand(planAddCmd)
@@ -287,6 +288,7 @@ func NewPlanCmd() *cobra.Command {
 	// Add subcommands
 	planCmd.AddCommand(planInitCmd)
 	planCmd.AddCommand(planStatusCmd)
+	planCmd.AddCommand(planTUICmd)
 	planCmd.AddCommand(newPlanListCmd())
 	planCmd.AddCommand(planRunCmd)
 	planCmd.AddCommand(planAddCmd)
