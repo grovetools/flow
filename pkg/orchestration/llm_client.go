@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,10 +15,11 @@ import (
 
 // LLMOptions defines configuration for an LLM completion request.
 type LLMOptions struct {
-	Model        string
-	SchemaPath   string   // Path to JSON schema file for structured output
-	WorkingDir   string   // Working directory for the LLM command
-	ContextFiles []string // Paths to context files to pass directly to llm command
+	Model             string
+	SchemaPath        string   // Path to JSON schema file for structured output
+	WorkingDir        string   // Working directory for the LLM command
+	ContextFiles      []string // Paths to context files (.grove/context, CLAUDE.md)
+	PromptSourceFiles []string // Paths to prompt source files from job configuration
 }
 
 // LLMClient defines the interface for LLM interactions.
@@ -59,39 +61,68 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 		fmt.Printf("[LLM DEBUG] Prompt length: %d bytes\n", len(prompt))
 	}
 	
-	// If we have context files, prepend them to the prompt
-	var fullPrompt string
-	if len(opts.ContextFiles) > 0 {
-		var contextContent strings.Builder
+	// Build full prompt with all file contents
+	// Note: This is for non-Gemini models that don't support file attachments
+	var fullPrompt strings.Builder
+	
+	// First add prompt source files if any
+	if len(opts.PromptSourceFiles) > 0 {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Printf("[LLM DEBUG] Adding %d prompt source files\n", len(opts.PromptSourceFiles))
+		}
 		
-		// Add all context files to the beginning of the prompt
+		for i, sourceFile := range opts.PromptSourceFiles {
+			if os.Getenv("GROVE_DEBUG") != "" {
+				fmt.Printf("[LLM DEBUG] Adding prompt source: %s\n", sourceFile)
+			}
+			
+			if i > 0 {
+				fullPrompt.WriteString("\n\n")
+			}
+			fullPrompt.WriteString(fmt.Sprintf("=== Source: %s ===\n", filepath.Base(sourceFile)))
+			
+			content, err := os.ReadFile(sourceFile)
+			if err != nil {
+				return "", fmt.Errorf("reading prompt source file %s: %w", sourceFile, err)
+			}
+			fullPrompt.Write(content)
+		}
+		fullPrompt.WriteString("\n\n")
+	}
+	
+	// Then add context files
+	if len(opts.ContextFiles) > 0 {
+		if os.Getenv("GROVE_DEBUG") != "" {
+			fmt.Printf("[LLM DEBUG] Adding %d context files\n", len(opts.ContextFiles))
+		}
+		
 		for i, contextFile := range opts.ContextFiles {
 			if os.Getenv("GROVE_DEBUG") != "" {
 				fmt.Printf("[LLM DEBUG] Adding context from: %s\n", contextFile)
 			}
 			
-			// Write header
-			if i > 0 {
-				contextContent.WriteString("\n\n")
+			if i > 0 || opts.PromptSourceFiles != nil {
+				fullPrompt.WriteString("\n\n")
 			}
-			contextContent.WriteString(fmt.Sprintf("=== Context from %s ===\n", contextFile))
+			fullPrompt.WriteString(fmt.Sprintf("=== Context from %s ===\n", filepath.Base(contextFile)))
 			
-			// Read context file
 			content, err := os.ReadFile(contextFile)
 			if err != nil {
 				return "", fmt.Errorf("reading context file %s: %w", contextFile, err)
 			}
-			contextContent.Write(content)
+			fullPrompt.Write(content)
 		}
-		
-		// Prepend context to the original prompt
-		fullPrompt = contextContent.String() + "\n\n=== User Request ===\n\n" + prompt
-		
-		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Printf("[LLM DEBUG] Full prompt length with context: %d bytes\n", len(fullPrompt))
-		}
-	} else {
-		fullPrompt = prompt
+		fullPrompt.WriteString("\n\n")
+	}
+	
+	// Finally add the actual prompt
+	if fullPrompt.Len() > 0 {
+		fullPrompt.WriteString("=== User Request ===\n\n")
+	}
+	fullPrompt.WriteString(prompt)
+	
+	if os.Getenv("GROVE_DEBUG") != "" {
+		fmt.Printf("[LLM DEBUG] Full prompt length: %d bytes\n", fullPrompt.Len())
 	}
 
 	// Log full command being executed
@@ -119,8 +150,8 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 		}
 	}
 
-	// Pipe full prompt (with context) to stdin
-	execCmd.Stdin = strings.NewReader(fullPrompt)
+	// Pipe full prompt (with all file contents) to stdin
+	execCmd.Stdin = strings.NewReader(fullPrompt.String())
 	if os.Getenv("GROVE_DEBUG") != "" {
 		fmt.Printf("[LLM DEBUG] Starting LLM command execution...\n")
 	}

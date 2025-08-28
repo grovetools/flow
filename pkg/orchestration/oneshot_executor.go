@@ -188,7 +188,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 
 	// Build prompt
-	prompt, contextFiles, err := e.buildPrompt(job, plan, workDir)
+	prompt, promptSourceFiles, contextFiles, err := e.buildPrompt(job, plan, workDir)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -201,15 +201,24 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 	defer os.Unsetenv("GROVE_CURRENT_JOB_PATH")
 
-	// Determine the effective model to use
-	effectiveModel := job.Model
+	// Determine the effective model to use with clear precedence
+	var effectiveModel string
+	
+	// 1. CLI flag (highest priority)
 	if e.config.ModelOverride != "" {
 		effectiveModel = e.config.ModelOverride
-	} else if effectiveModel == "" {
-		// No model specified in job or CLI override
-		// The config default was already applied in the CLI layer
-		// This is a fallback if all else fails
-		effectiveModel = "claude-3-5-sonnet-20241022" // Default model
+	} else if job.Model != "" {
+		// 2. Job frontmatter model
+		effectiveModel = job.Model
+	} else if plan.Config != nil && plan.Config.Model != "" {
+		// 3. Plan config model
+		effectiveModel = plan.Config.Model
+	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
+		// 4. Global config model
+		effectiveModel = plan.Orchestration.OneshotModel
+	} else {
+		// 5. Hardcoded fallback
+		effectiveModel = "claude-3-5-sonnet-20241022"
 	}
 
 	// Call LLM based on model type
@@ -220,32 +229,22 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		err = nil
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Use grove-gemini package for Gemini models
-		// Only pass dependency files explicitly - grove context files are auto-discovered
-		allPromptFiles := job.PromptSource
-		
-		// Add dependency files (but not grove context files which are auto-discovered)
-		if len(job.Dependencies) > 0 {
-			for _, dep := range job.Dependencies {
-				if dep != nil && dep.FilePath != "" {
-					allPromptFiles = append(allPromptFiles, dep.FilePath)
-				}
-			}
-		}
-
 		opts := gemini.RequestOptions{
 			Model:            effectiveModel,
-			Prompt:           prompt,            // Use the fully constructed prompt
-			PromptFiles:      allPromptFiles,    // Pass source files and dependencies
+			Prompt:           prompt,            // Only template and prompt body
+			PromptFiles:      promptSourceFiles, // Pass resolved source file paths
 			WorkDir:          workDir,
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
+			// Don't pass context files - Gemini runner finds them automatically
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
 	} else {
 		// Use traditional llm command for other models
 		llmOpts := LLMOptions{
-			Model:        effectiveModel,
-			WorkingDir:   workDir,
-			ContextFiles: contextFiles,
+			Model:             effectiveModel,
+			WorkingDir:        workDir,
+			ContextFiles:      contextFiles,
+			PromptSourceFiles: promptSourceFiles,
 		}
 
 		if job.Output.Type == "generate_jobs" {
@@ -308,15 +307,16 @@ func (e *OneShotExecutor) completeWithSchema(ctx context.Context, prompt string,
 }
 
 // buildPrompt constructs the prompt from job sources and returns context file paths separately.
-func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, []string, error) {
+func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, []string, []string, error) {
 	var parts []string
-	var allContextFiles []string // This will be the final list of context files
+	var promptSourceFiles []string // Resolved paths for prompt source files
+	var contextFiles []string      // Context files (.grove/context, CLAUDE.md)
 
-	// Add dependency files to the context list
+	// Add dependency files to the prompt source list
 	if len(job.Dependencies) > 0 {
 		for _, dep := range job.Dependencies {
 			if dep != nil && dep.FilePath != "" {
-				allContextFiles = append(allContextFiles, dep.FilePath)
+				promptSourceFiles = append(promptSourceFiles, dep.FilePath)
 			}
 		}
 	}
@@ -329,7 +329,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		templateManager := NewTemplateManager()
 		template, err := templateManager.FindTemplate(job.Template)
 		if err != nil {
-			return "", nil, fmt.Errorf("resolving template %s: %w", job.Template, err)
+			return "", nil, nil, fmt.Errorf("resolving template %s: %w", job.Template, err)
 		}
 
 		// Add template content as system instructions
@@ -340,15 +340,13 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			parts = append(parts, fmt.Sprintf("\n=== Working Directory ===\nYou are working in the directory: %s", worktreePath))
 		}
 
-		// Add all source files with clear separators
-		parts = append(parts, "\n=== Source Files ===")
-
 		// Get project root for resolving paths
 		projectRoot, err := GetProjectRoot()
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to get project root: %w", err)
+			return "", nil, nil, fmt.Errorf("failed to get project root: %w", err)
 		}
 
+		// Resolve prompt source file paths (without reading content)
 		for _, source := range job.PromptSource {
 			// Resolve the source file path
 			var sourcePath string
@@ -365,16 +363,12 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				// Try alternative resolution strategies
 				sourcePath, err = ResolvePromptSource(source, plan)
 				if err != nil {
-					return "", nil, fmt.Errorf("could not find source file %s: %w", source, err)
+					return "", nil, nil, fmt.Errorf("could not find source file %s: %w", source, err)
 				}
 			}
 
-			content, err := os.ReadFile(sourcePath)
-			if err != nil {
-				return "", nil, fmt.Errorf("reading source file %s: %w", sourcePath, err)
-			}
-
-			parts = append(parts, fmt.Sprintf("\n--- START OF %s ---\n%s\n--- END OF %s ---", source, string(content), source))
+			// Add the resolved path to the list
+			promptSourceFiles = append(promptSourceFiles, sourcePath)
 		}
 
 		// Add any additional instructions from the prompt body
@@ -396,31 +390,26 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			}
 		}
 
-		// Add Grove context files for reference-based prompts
-		var contextPaths []string
-
+		// Collect Grove context files (just paths)
 		if worktreePath != "" {
 			// When using a worktree, ONLY use context from the worktree
 			// Check for .grove/context in worktree
 			worktreeContextPath := filepath.Join(worktreePath, ".grove", "context")
 			if _, err := os.Stat(worktreeContextPath); err == nil {
-				contextPaths = append(contextPaths, worktreeContextPath)
+				contextFiles = append(contextFiles, worktreeContextPath)
 			}
 
 			// Check for CLAUDE.md in worktree
 			worktreeClaudePath := filepath.Join(worktreePath, "CLAUDE.md")
 			if _, err := os.Stat(worktreeClaudePath); err == nil {
-				contextPaths = append(contextPaths, worktreeClaudePath)
+				contextFiles = append(contextFiles, worktreeClaudePath)
 			}
 		} else {
 			// No worktree, use the default context search
-			contextPaths = FindContextFiles(plan)
-		}
-
-		// Verify context files exist
-		for _, contextPath := range contextPaths {
-			if _, err := os.Stat(contextPath); err == nil {
-				allContextFiles = append(allContextFiles, contextPath)
+			for _, contextPath := range FindContextFiles(plan) {
+				if _, err := os.Stat(contextPath); err == nil {
+					contextFiles = append(contextFiles, contextPath)
+				}
 			}
 		}
 
@@ -428,10 +417,10 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 		// Check prompt length (without context files which will be passed separately)
 		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
-			return "", nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
+			return "", nil, nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
 		}
 
-		return prompt, allContextFiles, nil
+		return prompt, promptSourceFiles, contextFiles, nil
 	} else {
 		// Traditional prompt assembly (backward compatibility)
 
@@ -440,7 +429,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			parts = append(parts, fmt.Sprintf("=== Working Directory ===\nYou are working in the directory: %s\n", worktreePath))
 		}
 
-		// Add prompt sources
+		// Resolve prompt source paths (without reading content)
 		for _, source := range job.PromptSource {
 			// First try to resolve relative to worktree if specified
 			var sourcePath string
@@ -458,15 +447,12 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			if sourcePath == "" {
 				sourcePath, err = ResolvePromptSource(source, plan)
 				if err != nil {
-					return "", nil, fmt.Errorf("could not find prompt source %s: %w", source, err)
+					return "", nil, nil, fmt.Errorf("could not find prompt source %s: %w", source, err)
 				}
 			}
 
-			content, err := os.ReadFile(sourcePath)
-			if err != nil {
-				return "", nil, fmt.Errorf("reading prompt source %s: %w", sourcePath, err)
-			}
-			parts = append(parts, fmt.Sprintf("=== Content from %s ===\n%s", source, string(content)))
+			// Add the resolved path to the list
+			promptSourceFiles = append(promptSourceFiles, sourcePath)
 		}
 
 		// Add job prompt body
@@ -474,31 +460,26 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			parts = append(parts, "=== Job Instructions ===\n"+job.PromptBody)
 		}
 
-		// Add Grove context files
-		var contextPaths []string
-
+		// Collect Grove context files (just paths)
 		if worktreePath != "" {
 			// When using a worktree, ONLY use context from the worktree
 			// Check for .grove/context in worktree
 			worktreeContextPath := filepath.Join(worktreePath, ".grove", "context")
 			if _, err := os.Stat(worktreeContextPath); err == nil {
-				contextPaths = append(contextPaths, worktreeContextPath)
+				contextFiles = append(contextFiles, worktreeContextPath)
 			}
 
 			// Check for CLAUDE.md in worktree
 			worktreeClaudePath := filepath.Join(worktreePath, "CLAUDE.md")
 			if _, err := os.Stat(worktreeClaudePath); err == nil {
-				contextPaths = append(contextPaths, worktreeClaudePath)
+				contextFiles = append(contextFiles, worktreeClaudePath)
 			}
 		} else {
 			// No worktree, use the default context search
-			contextPaths = FindContextFiles(plan)
-		}
-
-		// Verify context files exist
-		for _, contextPath := range contextPaths {
-			if _, err := os.Stat(contextPath); err == nil {
-				allContextFiles = append(allContextFiles, contextPath)
+			for _, contextPath := range FindContextFiles(plan) {
+				if _, err := os.Stat(contextPath); err == nil {
+					contextFiles = append(contextFiles, contextPath)
+				}
 			}
 		}
 
@@ -506,10 +487,10 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 		// Check prompt length (without context files which will be passed separately)
 		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
-			return "", nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
+			return "", nil, nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
 		}
 
-		return prompt, allContextFiles, nil
+		return prompt, promptSourceFiles, contextFiles, nil
 	}
 }
 
@@ -1325,26 +1306,34 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		fmt.Println("⚠️  No context files included in chat prompt")
 	}
 
-	// Create LLM options - prioritize job model from frontmatter
+	// Determine effective model with clear precedence
+	var effectiveModel string
+	
+	// 1. CLI flag (highest priority)
+	if e.config.ModelOverride != "" {
+		effectiveModel = e.config.ModelOverride
+	} else if directive.Model != "" {
+		// 2. Chat directive model (for specific turns)
+		effectiveModel = directive.Model
+	} else if job.Model != "" {
+		// 3. Job frontmatter model
+		effectiveModel = job.Model
+	} else if plan.Config != nil && plan.Config.Model != "" {
+		// 4. Plan config model
+		effectiveModel = plan.Config.Model
+	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
+		// 5. Global config model
+		effectiveModel = plan.Orchestration.OneshotModel
+	} else {
+		// 6. Hardcoded fallback
+		effectiveModel = "claude-3-5-sonnet-20241022"
+	}
+	
+	// Create LLM options with determined model
 	llmOpts := LLMOptions{
-		Model:        job.Model, // Start with job model from frontmatter
+		Model:        effectiveModel,
 		WorkingDir:   worktreePath,
 		ContextFiles: validContextPaths, // Pass context file paths
-	}
-
-	// Allow directive to override job model (for specific turns that need different models)
-	if directive.Model != "" {
-		llmOpts.Model = directive.Model
-	}
-
-	// CLI model override has highest priority (for testing/debugging)
-	if e.config.ModelOverride != "" {
-		llmOpts.Model = e.config.ModelOverride
-	}
-
-	// Final fallback if no model specified anywhere
-	if llmOpts.Model == "" {
-		llmOpts.Model = "claude-3-5-sonnet-20241022" // Default
 	}
 
 	// Log memory usage before LLM call
@@ -1383,9 +1372,9 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 
 	// Call LLM based on model type
-	fmt.Printf("[DEBUG] Calling LLM with model: %s...\n", llmOpts.Model)
+	fmt.Printf("[DEBUG] Calling LLM with model: %s...\n", effectiveModel)
 	var response string
-	if strings.HasPrefix(llmOpts.Model, "gemini") {
+	if strings.HasPrefix(effectiveModel, "gemini") {
 		// Use grove-gemini package for Gemini models
 		opts := gemini.RequestOptions{
 			Model:            llmOpts.Model,

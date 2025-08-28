@@ -203,11 +203,8 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Load grove config to get default model if no override specified
+	// Only set model override if explicitly provided via CLI flag
 	modelOverride := planRunModel
-	if modelOverride == "" && flowCfg.OneshotModel != "" {
-		modelOverride = flowCfg.OneshotModel
-	}
 
 	// Create orchestrator config
 	maxSteps := 20 // Default
