@@ -18,12 +18,14 @@ import (
 )
 
 var (
-	planFinishYes           bool
-	planFinishDeleteBranch  bool
-	planFinishPruneWorktree bool
-	planFinishCloseSession  bool
-	planFinishArchive       bool
-	planFinishCleanDevLinks bool
+	planFinishYes             bool
+	planFinishDeleteBranch    bool
+	planFinishDeleteRemote    bool
+	planFinishPruneWorktree   bool
+	planFinishCloseSession    bool
+	planFinishArchive         bool
+	planFinishCleanDevLinks   bool
+	planFinishForce           bool
 )
 
 // cleanupItem represents a cleanup action that can be performed
@@ -48,11 +50,13 @@ This can include removing the git worktree, deleting the branch, closing tmux se
 	}
 
 	cmd.Flags().BoolVarP(&planFinishYes, "yes", "y", false, "Automatically confirm all cleanup actions")
-	cmd.Flags().BoolVar(&planFinishDeleteBranch, "delete-branch", false, "Delete the local and remote git branch")
+	cmd.Flags().BoolVar(&planFinishDeleteBranch, "delete-branch", false, "Delete the local git branch")
+	cmd.Flags().BoolVar(&planFinishDeleteRemote, "delete-remote", false, "Delete the remote git branch")
 	cmd.Flags().BoolVar(&planFinishPruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
 	cmd.Flags().BoolVar(&planFinishCloseSession, "close-session", false, "Close the associated tmux session")
 	cmd.Flags().BoolVar(&planFinishCleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
 	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory using 'nb archive'")
+	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
 
 	return cmd
 }
@@ -76,8 +80,9 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Finishing plan: %s\n\n", color.CyanString(planName))
 
-	// Gather information
-	gitRoot, err := git.GetGitRoot(planPath)
+	// Gather information - check for git root from current working directory
+	cwd, _ := os.Getwd()
+	gitRoot, err := git.GetGitRoot(cwd)
 	if err != nil {
 		fmt.Println(color.YellowString("Warning: Not in a git repository. Some cleanup actions are unavailable."))
 		gitRoot = "" // Continue without git-related actions
@@ -95,11 +100,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	wm := git.NewWorktreeManager()
 
 	branchName := worktreeName // Simple assumption: branch name matches worktree name
-	repoName := ""
-	if gitRoot != "" {
-		repoName = filepath.Base(gitRoot)
-	}
-	sessionName := SanitizeForTmuxSession(fmt.Sprintf("%s__%s", repoName, worktreeName))
+	sessionName := SanitizeForTmuxSession(worktreeName)
 
 	// Define cleanup items
 	items := []*cleanupItem{
@@ -155,6 +156,15 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				}
 				for _, wt := range worktrees {
 					if strings.HasSuffix(wt.Path, worktreeName) {
+						// Check if worktree has modifications or untracked files
+						worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+						statusOutput, statusErr := exec.Command("git", "-C", worktreePath, "status", "--porcelain").Output()
+						if statusErr != nil {
+							return color.YellowString("Exists"), nil // Default to exists if we can't check
+						}
+						if strings.TrimSpace(string(statusOutput)) != "" {
+							return color.RedString("Has changes (needs --force)"), nil
+						}
 						return color.YellowString("Exists"), nil
 					}
 				}
@@ -162,7 +172,17 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			},
 			Action: func() error {
 				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-				return executor.Execute("git", "worktree", "remove", worktreePath)
+				// Check if we need to use --force
+				if planFinishForce {
+					return executor.Execute("git", "worktree", "remove", "--force", worktreePath)
+				}
+				// Try regular removal first
+				err := executor.Execute("git", "worktree", "remove", worktreePath)
+				if err != nil && strings.Contains(err.Error(), "contains modified or untracked files") {
+					fmt.Printf("    Retrying with --force due to modified files...\n")
+					return executor.Execute("git", "worktree", "remove", "--force", worktreePath)
+				}
+				return err
 			},
 		},
 		{
@@ -178,10 +198,80 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				if strings.TrimSpace(string(output)) == "" {
 					return "Not found", nil
 				}
+				
+				// Check if branch has commits ahead of the default branch (try main, then master)
+				baseBranches := []string{"main", "master"}
+				for _, baseBranch := range baseBranches {
+					// Check if base branch exists
+					_, branchCheckErr := exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Output()
+					if branchCheckErr != nil {
+						continue // Base branch doesn't exist, try next
+					}
+					
+					aheadOutput, aheadErr := exec.Command("git", "-C", gitRoot, "rev-list", "--count", baseBranch+".."+branchName).Output()
+					if aheadErr == nil {
+						aheadCount := strings.TrimSpace(string(aheadOutput))
+						if aheadCount != "0" && aheadCount != "" {
+							return color.RedString("Has " + aheadCount + " commits ahead of " + baseBranch), nil
+						}
+					}
+					break // Found a valid base branch, stop checking
+				}
+				
+				// Check if branch is checked out in any worktree
+				worktreeList, wtErr := exec.Command("git", "-C", gitRoot, "worktree", "list").Output()
+				if wtErr != nil {
+					return color.YellowString("Exists"), nil // Default to exists if we can't check
+				}
+				
+				worktreeLines := strings.Split(string(worktreeList), "\n")
+				for _, line := range worktreeLines {
+					if strings.Contains(line, "["+branchName+"]") {
+						return color.RedString("Checked out in worktree"), nil
+					}
+				}
+				
 				return color.YellowString("Exists"), nil
 			},
 			Action: func() error {
-				return executor.Execute("git", "-C", gitRoot, "branch", "-d", branchName)
+				// Try regular delete first
+				err := executor.Execute("git", "-C", gitRoot, "branch", "-d", branchName)
+				if err != nil {
+					if strings.Contains(err.Error(), "checked out at") {
+						// Branch is checked out in a worktree, use force delete
+						fmt.Printf("    Retrying with -D (force) due to checked out branch...\n")
+						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
+					} else if strings.Contains(err.Error(), "not fully merged") {
+						// Branch has unmerged commits, use force delete
+						fmt.Printf("    Retrying with -D (force) due to unmerged commits...\n")
+						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
+					}
+				}
+				return err
+			},
+		},
+		{
+			Name: "Delete remote git branch",
+			Check: func() (string, error) {
+				if branchName == "" || gitRoot == "" {
+					return "N/A", nil
+				}
+				
+				// Check if remote branch exists (try origin first)
+				remoteOutput, remoteErr := exec.Command("git", "-C", gitRoot, "ls-remote", "--heads", "origin", branchName).Output()
+				if remoteErr != nil {
+					return "N/A (no remote)", nil
+				}
+				
+				if strings.TrimSpace(string(remoteOutput)) == "" {
+					return "Not found", nil
+				}
+				
+				return color.YellowString("Exists on origin"), nil
+			},
+			Action: func() error {
+				// Delete remote branch
+				return executor.Execute("git", "-C", gitRoot, "push", "origin", "--delete", branchName)
 			},
 		},
 		{
@@ -332,25 +422,34 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	for _, item := range items {
 		status, _ := item.Check()
 		item.Status = status
-		if status == color.YellowString("Available") || status == color.YellowString("Exists") || status == color.YellowString("Running") {
+		// Mark as available if it's a positive state (yellow/green) or warning state (red) that can still be attempted
+		if status == color.YellowString("Available") || 
+		   status == color.YellowString("Exists") || 
+		   status == color.YellowString("Exists on origin") ||
+		   status == color.YellowString("Running") ||
+		   status == color.YellowString("Has links") ||
+		   status == color.RedString("Has changes (needs --force)") ||
+		   status == color.RedString("Checked out in worktree") ||
+		   strings.Contains(status, "commits ahead of") {
 			item.IsAvailable = true
 		}
 	}
 
 	// Determine which items to enable
-	anyExplicitFlags := planFinishDeleteBranch || planFinishPruneWorktree || planFinishCloseSession || planFinishCleanDevLinks || planFinishArchive
+	anyExplicitFlags := planFinishDeleteBranch || planFinishDeleteRemote || planFinishPruneWorktree || planFinishCloseSession || planFinishCleanDevLinks || planFinishArchive || planFinishForce
 	if planFinishYes {
 		for _, item := range items {
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
 		// Always enable marking as finished
-		items[0].IsEnabled = items[0].IsAvailable
-		items[1].IsEnabled = planFinishPruneWorktree && items[1].IsAvailable
-		items[2].IsEnabled = planFinishDeleteBranch && items[2].IsAvailable
-		items[3].IsEnabled = planFinishCloseSession && items[3].IsAvailable
-		items[4].IsEnabled = planFinishCleanDevLinks && items[4].IsAvailable
-		items[5].IsEnabled = planFinishArchive && items[5].IsAvailable
+		items[0].IsEnabled = items[0].IsAvailable                                          // Mark plan as finished
+		items[1].IsEnabled = planFinishPruneWorktree && items[1].IsAvailable              // Prune git worktree
+		items[2].IsEnabled = planFinishDeleteBranch && items[2].IsAvailable               // Delete local git branch
+		items[3].IsEnabled = planFinishDeleteRemote && items[3].IsAvailable               // Delete remote git branch
+		items[4].IsEnabled = planFinishCloseSession && items[4].IsAvailable               // Close tmux session
+		items[5].IsEnabled = planFinishCleanDevLinks && items[5].IsAvailable              // Clean up dev binaries
+		items[6].IsEnabled = planFinishArchive && items[6].IsAvailable                    // Archive plan directory
 	} else {
 		// Interactive mode
 		reader := bufio.NewReader(os.Stdin)
