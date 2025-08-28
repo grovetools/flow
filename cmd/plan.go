@@ -102,6 +102,16 @@ If no directory is specified, uses the current directory.`,
 	RunE: runPlanStep,
 }
 
+var planOpenCmd = &cobra.Command{
+	Use:   "open [directory]",
+	Short: "Open a plan's worktree in a dedicated tmux session",
+	Long: `Switches to or creates a tmux session for the plan's worktree and opens the interactive status TUI.
+This provides a one-command entry point into a plan's interactive environment.
+If no directory is specified, uses the active job if set.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runPlanOpen,
+}
+
 // Command flags
 var (
 	planInitForce          bool
@@ -207,6 +217,7 @@ func GetPlanCommand() *cobra.Command {
 	planCmd.AddCommand(planCleanupWorktreesCmd)
 	planCmd.AddCommand(planLaunchCmd)
 	planCmd.AddCommand(planStepCmd)
+	planCmd.AddCommand(planOpenCmd)
 	planCmd.AddCommand(planTemplatesCmd)
 	planCmd.AddCommand(planWorktreeCmd)
 	planCmd.AddCommand(NewPlanSetCmd())
@@ -284,6 +295,7 @@ func NewPlanCmd() *cobra.Command {
 	planCmd.AddCommand(planCleanupWorktreesCmd)
 	planCmd.AddCommand(planLaunchCmd)
 	planCmd.AddCommand(planStepCmd)
+	planCmd.AddCommand(planOpenCmd)
 	planCmd.AddCommand(planTemplatesCmd)
 	planCmd.AddCommand(planWorktreeCmd)
 	planCmd.AddCommand(NewPlanSetCmd())
