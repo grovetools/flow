@@ -30,6 +30,7 @@ func main() {
 		PlanFinishScenario(),              // Tests interactive plan cleanup workflow
 		PlanFinishFlagsScenario(),         // Tests flag-based plan cleanup
 		PlanFinishDevLinksScenario(),      // Tests dev links cleanup functionality
+		PlanRecipesScenario(),             // Tests the new recipes feature
 
 		// Chat Scenarios
 		// BasicChatWorkflowScenario(), // Temporarily disabled - hanging issue
