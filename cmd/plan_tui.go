@@ -439,6 +439,10 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 			if _, err := os.Stat(planConfigPath); err == nil || len(mdFiles) > 0 {
 				plan, err := orchestration.LoadPlan(planPath)
 				if err == nil {
+					// Filter out finished plans
+					if plan.Config != nil && plan.Config.Status == "finished" {
+						continue
+					}
 					item := PlanListItem{
 						Plan:     plan,
 						Name:     plan.Name,
