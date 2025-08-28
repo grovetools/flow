@@ -434,6 +434,28 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Check if branch is merged (no commits ahead of main)
+	branchIsMerged := false
+	if branchName != "" && gitRoot != "" {
+		baseBranches := []string{"main", "master"}
+		for _, baseBranch := range baseBranches {
+			// Check if base branch exists
+			_, branchCheckErr := exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Output()
+			if branchCheckErr != nil {
+				continue // Base branch doesn't exist, try next
+			}
+			
+			aheadOutput, aheadErr := exec.Command("git", "-C", gitRoot, "rev-list", "--count", baseBranch+".."+branchName).Output()
+			if aheadErr == nil {
+				aheadCount := strings.TrimSpace(string(aheadOutput))
+				if aheadCount == "0" || aheadCount == "" {
+					branchIsMerged = true
+				}
+			}
+			break // Found a valid base branch, stop checking
+		}
+	}
+
 	// Determine which items to enable
 	anyExplicitFlags := planFinishDeleteBranch || planFinishDeleteRemote || planFinishPruneWorktree || planFinishCloseSession || planFinishCleanDevLinks || planFinishArchive || planFinishForce
 	if planFinishYes {
@@ -451,7 +473,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		items[6].IsEnabled = planFinishArchive && items[6].IsAvailable                    // Archive plan directory
 	} else {
 		// Interactive TUI mode
-		err := runFinishTUI(planName, items)
+		err := runFinishTUI(planName, items, branchIsMerged)
 		if err != nil {
 			if err.Error() == "user aborted" {
 				fmt.Println("\nCleanup aborted.")

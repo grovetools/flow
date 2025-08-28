@@ -10,14 +10,16 @@ import (
 )
 
 type finishTUIModel struct {
-	planName  string
-	items     []*cleanupItem
-	cursor    int
-	confirmed bool
-	quitting  bool
+	planName      string
+	items         []*cleanupItem
+	cursor        int
+	confirmed     bool
+	quitting      bool
+	branchIsMerged bool // Whether the branch is already merged/rebased
+	showHelp      bool // Whether to show help popup
 }
 
-func initialFinishTUIModel(planName string, items []*cleanupItem) finishTUIModel {
+func initialFinishTUIModel(planName string, items []*cleanupItem, branchIsMerged bool) finishTUIModel {
 	// Find first available item for initial cursor position
 	cursor := 0
 	for i, item := range items {
@@ -28,11 +30,13 @@ func initialFinishTUIModel(planName string, items []*cleanupItem) finishTUIModel
 	}
 
 	return finishTUIModel{
-		planName:  planName,
-		items:     items,
-		cursor:    cursor,
-		confirmed: false,
-		quitting:  false,
+		planName:       planName,
+		items:          items,
+		cursor:         cursor,
+		confirmed:      false,
+		quitting:       false,
+		branchIsMerged: branchIsMerged,
+		showHelp:       false,
 	}
 }
 
@@ -43,10 +47,24 @@ func (m finishTUIModel) Init() tea.Cmd {
 func (m finishTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle help popup keys first
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "q", "esc", "ctrl+c":
+				m.showHelp = false
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
+		
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quitting = true
 			return m, tea.Quit
+			
+		case "?":
+			m.showHelp = true
 
 		case "j", "down":
 			// Move to next available item or end of list
@@ -116,6 +134,11 @@ func (m finishTUIModel) View() string {
 		return "\nCleanup aborted.\n"
 	}
 
+	// Show help popup if active
+	if m.showHelp {
+		return m.renderHelp()
+	}
+
 	var b strings.Builder
 
 	// Header
@@ -136,6 +159,7 @@ func (m finishTUIModel) View() string {
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("63")).Render("🏁 Finishing Plan: ") +
 		planNameStyle.Render(m.planName) +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("63")).Render(" 🏁")
+	b.WriteString("  ") // Left padding
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n\n")
 
@@ -144,8 +168,27 @@ func (m finishTUIModel) View() string {
 		Foreground(lipgloss.Color("147")).
 		MarginBottom(1).
 		Bold(true)
+	b.WriteString("  ") // Left padding
 	b.WriteString(instructionStyle.Render("Select cleanup actions to perform:"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	
+	// Add congratulatory message if branch is merged
+	if m.branchIsMerged {
+		congratsStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("10")). // Green
+			Background(lipgloss.Color("22")).  // Dark green background
+			Bold(true).
+			Padding(0, 1).
+			Margin(0, 0, 1, 0)
+		
+		congratsMessage := "🎉 Great job! Your branch has been successfully merged/rebased into main! 🎉"
+		b.WriteString("\n")
+		b.WriteString("  ") // Left padding
+		b.WriteString(congratsStyle.Render(congratsMessage))
+		b.WriteString("\n")
+	}
+	
+	b.WriteString("\n")
 
 	// Styles
 	focusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -156,6 +199,9 @@ func (m finishTUIModel) View() string {
 	// List items with better spacing and alignment
 	for i, item := range m.items {
 		var line strings.Builder
+		
+		// Left padding
+		line.WriteString("  ")
 		
 		// Cursor indicator
 		if m.cursor == i && item.IsAvailable {
@@ -218,26 +264,79 @@ func (m finishTUIModel) View() string {
 	
 	statusText := fmt.Sprintf("Selected: %d actions", selectedCount)
 	b.WriteString("\n")
+	b.WriteString("  ") // Left padding
 	b.WriteString(statusStyle.Render(statusText))
 
-	// Help footer
+	// Simple help footer
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderTop(true).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1, 0, 0, 0).
-		MarginTop(1)
+		Foreground(lipgloss.Color("241"))
 
-	helpText := "j/k ↑/↓: navigate • space: toggle • a: select all • n: select none • enter: confirm • q: quit"
+	helpText := "Press ? for help"
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render(helpText))
 
 	return b.String()
 }
 
-func runFinishTUI(planName string, items []*cleanupItem) error {
-	model := initialFinishTUIModel(planName, items)
+// renderHelp renders the help popup with keybindings and usage instructions
+func (m finishTUIModel) renderHelp() string {
+	// Create styles
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("241")).
+		Padding(2, 3).
+		Width(70).
+		Align(lipgloss.Center)
+	
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205")).
+		MarginBottom(1)
+	
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("10")).
+		Bold(true)
+	
+	// Help content
+	helpItems := []string{
+		"Navigation:",
+		"  " + keyStyle.Render("j/k, ↑/↓") + " - Move up/down",
+		"",
+		"Selection:",
+		"  " + keyStyle.Render("space") + " - Toggle current item",
+		"  " + keyStyle.Render("a") + " - Select all available",
+		"  " + keyStyle.Render("n") + " - Select none",
+		"",
+		"Actions:",
+		"  " + keyStyle.Render("enter") + " - Confirm and proceed",
+		"  " + keyStyle.Render("q") + " - Quit without changes",
+		"",
+		"Help:",
+		"  " + keyStyle.Render("?") + " - Toggle this help",
+		"  " + keyStyle.Render("esc") + " - Close this help",
+		"",
+		"Legend:",
+		"  " + keyStyle.Render("[✓]") + " - Selected action",
+		"  " + keyStyle.Render("[  ]") + " - Available action",
+		"  " + keyStyle.Render("▸") + " - Current selection",
+		"",
+		"Status Colors:",
+		"  Green - Ready/Available",
+		"  Yellow - Exists/Running", 
+		"  Red - Conflicts/Issues",
+		"  Gray - Not available",
+	}
+	
+	// Render content
+	content := strings.Join(helpItems, "\n")
+	title := titleStyle.Render("🏁 Plan Finish - Help")
+	fullContent := lipgloss.JoinVertical(lipgloss.Center, title, content)
+	
+	return boxStyle.Render(fullContent)
+}
+
+func runFinishTUI(planName string, items []*cleanupItem, branchIsMerged bool) error {
+	model := initialFinishTUIModel(planName, items, branchIsMerged)
 	p := tea.NewProgram(model)
 
 	finalModel, err := p.Run()
