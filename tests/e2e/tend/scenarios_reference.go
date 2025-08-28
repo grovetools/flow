@@ -33,6 +33,7 @@ func ReferencePromptScenario() *harness.Scenario {
 				configContent := `name: test-project
 flow:
   plans_directory: ./plans
+  oneshot_model: test
 orchestration:
   target_agent_container: test-container
 llm:
@@ -194,6 +195,7 @@ Check for proper error handling and clear function names.`
 					currentPath := os.Getenv("PATH")
 					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
 				}
+				cmd.Env("GROVE_DEBUG=1") // Enable debug logging
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -254,6 +256,50 @@ Check for proper error handling and clear function names.`
 					return fmt.Errorf("job should be marked as completed")
 				}
 				
+				return nil
+			}),
+			
+			harness.NewStep("Verify prompt log file was created", func(ctx *harness.Context) error {
+				// Construct the expected path for the log file.
+				// We use a glob because the filename includes a timestamp.
+				logPattern := filepath.Join(
+					ctx.RootDir, 
+					".grove", 
+					"logs", 
+					"code-review", // Plan name
+					"prompts", 
+					"review-main-code-*-prompt.txt", // Job ID comes from the job title
+				)
+
+				matches, err := filepath.Glob(logPattern)
+				if err != nil {
+					return fmt.Errorf("error searching for log file: %w", err)
+				}
+
+				if len(matches) == 0 {
+					return fmt.Errorf("expected prompt log file was not created. Pattern: %s", logPattern)
+				}
+
+				// Read the log file content
+				logFile := matches[0]
+				content, err := fs.ReadString(logFile)
+				if err != nil {
+					return fmt.Errorf("failed to read prompt log file %s: %w", logFile, err)
+				}
+
+				// Verify the content is what we expect the LLM to see.
+				// This should contain the prompt sources and context files.
+				if !strings.Contains(content, "TestMarker12345") {
+					return fmt.Errorf("log file is missing content from main.go")
+				}
+				if !strings.Contains(content, "UtilsMarker67890") {
+					return fmt.Errorf("log file is missing content from utils.go")
+				}
+				if !strings.Contains(content, "Please review the provided Go source files") {
+					return fmt.Errorf("log file is missing content from the prompt file")
+				}
+
+				ctx.ShowCommandOutput("Log Verification", "✓ Prompt log file created and verified successfully.", "")
 				return nil
 			}),
 			

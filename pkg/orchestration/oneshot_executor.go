@@ -334,12 +334,12 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			return "", nil, nil, fmt.Errorf("resolving template %s: %w", job.Template, err)
 		}
 
-		// Add template content as system instructions
-		parts = append(parts, fmt.Sprintf("=== System Instructions (from template: %s) ===\n%s", job.Template, template.Prompt))
+		// Start XML structure with system instructions
+		parts = append(parts, fmt.Sprintf("<prompt>\n<system_instructions template=\"%s\">\n%s\n</system_instructions>", job.Template, template.Prompt))
 
 		// If worktree is specified, add a note about the working directory
 		if worktreePath != "" {
-			parts = append(parts, fmt.Sprintf("\n=== Working Directory ===\nYou are working in the directory: %s", worktreePath))
+			parts = append(parts, fmt.Sprintf("\n<working_directory>%s</working_directory>", worktreePath))
 		}
 
 		// Get project root for resolving paths
@@ -373,7 +373,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			promptSourceFiles = append(promptSourceFiles, sourcePath)
 		}
 
-		// Add any additional instructions from the prompt body
+		// Add user's prompt/request last with clear marking
 		if job.PromptBody != "" {
 			// Skip the comment lines we added
 			lines := strings.Split(job.PromptBody, "\n")
@@ -388,7 +388,8 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				}
 			}
 			if len(additionalInstructions) > 0 {
-				parts = append(parts, "\n"+strings.Join(additionalInstructions, "\n"))
+				parts = append(parts, fmt.Sprintf("\n<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>", 
+					strings.Join(additionalInstructions, "\n")))
 			}
 		}
 
@@ -414,8 +415,11 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				}
 			}
 		}
+		
+		// Close the XML prompt structure (template path)
+		parts = append(parts, "</prompt>")
 
-		prompt := strings.Join(parts, "\n\n")
+		prompt := strings.Join(parts, "\n")
 
 		// Check prompt length (without context files which will be passed separately)
 		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
@@ -457,9 +461,12 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			promptSourceFiles = append(promptSourceFiles, sourcePath)
 		}
 
-		// Add job prompt body
+		// Add prompt structure for non-template jobs
+		parts = append(parts, "<prompt>")
+		
+		// Add job prompt body with clear marking
 		if job.PromptBody != "" {
-			parts = append(parts, "=== Job Instructions ===\n"+job.PromptBody)
+			parts = append(parts, fmt.Sprintf("<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>", job.PromptBody))
 		}
 
 		// Collect Grove context files (just paths)
@@ -484,8 +491,11 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				}
 			}
 		}
+		
+		// Close the XML prompt structure (non-template path)
+		parts = append(parts, "</prompt>")
 
-		prompt := strings.Join(parts, "\n\n")
+		prompt := strings.Join(parts, "\n")
 
 		// Check prompt length (without context files which will be passed separately)
 		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
@@ -1242,8 +1252,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 
 	// Build the prompt
-	// The entire content of the plan.md file serves as conversational history
-	conversationHistory := string(content)
+	// Extract only the body content (without frontmatter) as conversation history
+	_, bodyContent, err := ParseFrontmatter(content)
+	if err != nil {
+		execErr = fmt.Errorf("parsing frontmatter: %w", err)
+		return execErr
+	}
+	conversationHistory := string(bodyContent)
 
 
 	// Load the template using TemplateManager
@@ -1297,10 +1312,21 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	}
 
-	// Build prompt with conversation history and template
-	// Context files will be passed separately as attachments
-	fullPrompt := fmt.Sprintf("%s\n\n---\n\n## System Instructions\n\n%s",
-		conversationHistory, string(templateContent))
+	// Build prompt with XML structure for better LLM parsing
+	// XML provides clearer boundaries and structure for the model
+	fullPrompt := fmt.Sprintf(`<prompt>
+<system_instructions>
+%s
+</system_instructions>
+
+<user_request priority="high">
+<instruction>Please focus on addressing the following user request:</instruction>
+<content>
+%s
+</content>
+</user_request>
+</prompt>`,
+		string(templateContent), conversationHistory)
 
 	if len(validContextPaths) > 0 {
 		fmt.Printf("✓ Including %d context file(s) as attachments\n", len(validContextPaths))
@@ -1381,7 +1407,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		opts := gemini.RequestOptions{
 			Model:            llmOpts.Model,
 			Prompt:           fullPrompt,
-			PromptFiles:      []string{job.FilePath}, // The chat file itself is the prompt source
+			PromptFiles:      []string{}, // Don't include the chat file as it's already in the prompt
 			WorkDir:          worktreePath,
 			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
 			// Don't pass context files - Gemini runner finds them automatically
