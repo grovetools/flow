@@ -24,7 +24,7 @@ type LLMOptions struct {
 
 // LLMClient defines the interface for LLM interactions.
 type LLMClient interface {
-	Complete(ctx context.Context, prompt string, opts LLMOptions) (string, error)
+	Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error)
 }
 
 // CommandLLMClient implements LLMClient using the llm command-line tool.
@@ -45,7 +45,7 @@ func NewCommandLLMClient() *CommandLLMClient {
 }
 
 // Complete sends a prompt to the LLM and returns the response.
-func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLMOptions) (string, error) {
+func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error) {
 	args := []string{}
 	if opts.Model != "" {
 		args = append(args, "-m", opts.Model)
@@ -123,6 +123,27 @@ func (c *CommandLLMClient) Complete(ctx context.Context, prompt string, opts LLM
 	
 	if os.Getenv("GROVE_DEBUG") != "" {
 		fmt.Printf("[LLM DEBUG] Full prompt length: %d bytes\n", fullPrompt.Len())
+		
+		// Save prompt to debug log file
+		if job != nil && plan != nil {
+			logDir := ResolveLogDirectory(plan, job)
+			promptLogDir := filepath.Join(logDir, "prompts")
+			if err := os.MkdirAll(promptLogDir, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "[DEBUG] Warning: could not create prompt log directory: %v\n", err)
+			} else {
+				// Use a timestamp to make each log unique for a given job
+				timestamp := time.Now().Format("20060102150405")
+				logFileName := fmt.Sprintf("%s-%s-prompt.txt", job.ID, timestamp)
+				logFilePath := filepath.Join(promptLogDir, logFileName)
+				
+				// Write the full prompt to the file
+				if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0644); err != nil {
+					fmt.Fprintf(os.Stderr, "[DEBUG] Warning: could not write prompt log file: %v\n", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[DEBUG] Prompt for job '%s' saved to: %s\n", job.ID, logFilePath)
+				}
+			}
+		}
 	}
 
 	// Log full command being executed

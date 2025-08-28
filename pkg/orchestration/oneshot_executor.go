@@ -237,6 +237,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 			// Don't pass context files - Gemini runner finds them automatically
 		}
+		// Note: Job ID and Plan name are not passed here as they would need to be propagated through
+		// the gemini.RequestRunner interface, which is beyond the scope of this change
 		response, err = e.geminiRunner.Run(ctx, opts)
 	} else {
 		// Use traditional llm command for other models
@@ -249,9 +251,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 		if job.Output.Type == "generate_jobs" {
 			// Use schema for structured output
-			response, err = e.completeWithSchema(ctx, prompt, llmOpts)
+			response, err = e.completeWithSchema(ctx, job, plan, prompt, llmOpts)
 		} else {
-			response, err = e.llmClient.Complete(ctx, prompt, llmOpts)
+			response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts)
 		}
 	}
 	if err != nil {
@@ -283,7 +285,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 }
 
 // completeWithSchema calls the LLM with a JSON schema for structured output.
-func (e *OneShotExecutor) completeWithSchema(ctx context.Context, prompt string, opts LLMOptions) (string, error) {
+func (e *OneShotExecutor) completeWithSchema(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error) {
 	schema, err := GenerateJobCreationSchema()
 	if err != nil {
 		return "", fmt.Errorf("could not generate job schema: %w", err)
@@ -303,7 +305,7 @@ func (e *OneShotExecutor) completeWithSchema(ctx context.Context, prompt string,
 
 	// Modify llm options to include schema
 	opts.SchemaPath = schemaFile.Name()
-	return e.llmClient.Complete(ctx, prompt, opts)
+	return e.llmClient.Complete(ctx, job, plan, prompt, opts)
 }
 
 // buildPrompt constructs the prompt from job sources and returns context file paths separately.
@@ -741,7 +743,7 @@ func NewMockLLMClient() LLMClient {
 }
 
 // Complete implements the LLMClient interface for mocking.
-func (m *MockLLMClient) Complete(ctx context.Context, prompt string, opts LLMOptions) (string, error) {
+func (m *MockLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error) {
 	// If no response file, return a simple response
 	if m.responseFile == "" {
 		return "Mock LLM response for: " + strings.Split(prompt, "\n")[0], nil
@@ -1392,7 +1394,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	} else {
 		// Use traditional llm command
-		response, err = e.llmClient.Complete(ctx, fullPrompt, llmOpts)
+		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts)
 		if err != nil {
 			fmt.Printf("[DEBUG] LLM call failed with error: %v\n", err)
 			execErr = fmt.Errorf("LLM completion: %w", err)
