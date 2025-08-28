@@ -9,7 +9,7 @@ require (
 	github.com/fatih/color v1.17.0
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattsolo1/grove-context v0.2.19
+	github.com/mattsolo1/grove-context v0.2.20
 	github.com/mattsolo1/grove-core v0.2.12
 	github.com/mattsolo1/grove-gemini v0.0.7
 	github.com/mattsolo1/grove-tend v0.2.15
