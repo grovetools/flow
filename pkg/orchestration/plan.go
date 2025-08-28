@@ -5,6 +5,7 @@ type PlanConfig struct {
 	Model                string `yaml:"model,omitempty"`
 	Worktree             string `yaml:"worktree,omitempty"`
 	TargetAgentContainer string `yaml:"target_agent_container,omitempty"`
+	Status               string `yaml:"status,omitempty"`
 }
 
 // Plan represents a collection of orchestration jobs.

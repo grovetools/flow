@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattn/go-isatty"
+	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"gopkg.in/yaml.v3"
@@ -73,7 +73,6 @@ func (e *OneShotExecutor) Name() string {
 
 // Execute runs a oneshot job.
 func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
-	
 	// Handle chat jobs differently
 	if job.Type == JobTypeChat {
 		// If a chat job is part of a multi-job plan, it's an interactive step.
@@ -203,7 +202,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// Determine the effective model to use with clear precedence
 	var effectiveModel string
-	
+
 	// 1. CLI flag (highest priority)
 	if e.config.ModelOverride != "" {
 		effectiveModel = e.config.ModelOverride
@@ -374,23 +373,9 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		}
 
 		// Add user's prompt/request last with clear marking
-		if job.PromptBody != "" {
-			// Skip the comment lines we added
-			lines := strings.Split(job.PromptBody, "\n")
-			var additionalInstructions []string
-			skipMode := true
-			for _, line := range lines {
-				if skipMode && strings.HasPrefix(line, "##") {
-					skipMode = false
-				}
-				if !skipMode && !strings.HasPrefix(line, "<!--") {
-					additionalInstructions = append(additionalInstructions, line)
-				}
-			}
-			if len(additionalInstructions) > 0 {
-				parts = append(parts, fmt.Sprintf("\n<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>", 
-					strings.Join(additionalInstructions, "\n")))
-			}
+		if strings.TrimSpace(job.PromptBody) != "" {
+			parts = append(parts, fmt.Sprintf("\n<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>",
+				strings.TrimSpace(job.PromptBody)))
 		}
 
 		// Collect Grove context files (just paths)
@@ -415,7 +400,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				}
 			}
 		}
-		
+
 		// Close the XML prompt structure (template path)
 		parts = append(parts, "</prompt>")
 
@@ -463,7 +448,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 		// Add prompt structure for non-template jobs
 		parts = append(parts, "<prompt>")
-		
+
 		// Add job prompt body with clear marking
 		if job.PromptBody != "" {
 			parts = append(parts, fmt.Sprintf("<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>", job.PromptBody))
@@ -491,7 +476,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				}
 			}
 		}
-		
+
 		// Close the XML prompt structure (non-template path)
 		parts = append(parts, "</prompt>")
 
@@ -539,12 +524,12 @@ func (e *OneShotExecutor) processFileOutput(output string, job *Job, plan *Plan)
 
 	// Create directory if needed
 	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
 	// Write file
-	if err := os.WriteFile(outputPath, []byte(output), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
 		return fmt.Errorf("writing output file: %w", err)
 	}
 
@@ -628,7 +613,7 @@ func (e *OneShotExecutor) processGeneratedJobs(output string, job *Job, plan *Pl
 
 		// Write job file
 		jobPath := filepath.Join(plan.Directory, filename)
-		if err := os.WriteFile(jobPath, []byte(jobContent), 0644); err != nil {
+		if err := os.WriteFile(jobPath, []byte(jobContent), 0o644); err != nil {
 			return fmt.Errorf("failed to write generated job file %s: %w", filename, err)
 		}
 		fmt.Printf("✓ Generated new job: %s\n", filename)
@@ -700,7 +685,7 @@ func (e *OneShotExecutor) appendToJobFile(output string, job *Job) error {
 	newContent := string(content) + separator + output
 
 	// Write back
-	if err := os.WriteFile(job.FilePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(job.FilePath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("writing job file: %w", err)
 	}
 
@@ -726,7 +711,7 @@ func updateJobFile(job *Job) error {
 	}
 
 	// Write back
-	if err := os.WriteFile(job.FilePath, newContent, 0644); err != nil {
+	if err := os.WriteFile(job.FilePath, newContent, 0o644); err != nil {
 		return fmt.Errorf("writing job file: %w", err)
 	}
 
@@ -830,7 +815,7 @@ func (m *MockLLMClient) splitIntoJobFiles(content string) (string, error) {
 			jobContent := fmt.Sprintf("---\n%s\n---\n%s", frontmatter, body)
 			jobPath := filepath.Join(planDir, filename)
 
-			if err := os.WriteFile(jobPath, []byte(jobContent), 0644); err != nil {
+			if err := os.WriteFile(jobPath, []byte(jobContent), 0o644); err != nil {
 				return "", fmt.Errorf("write job file %s: %w", filename, err)
 			}
 
@@ -847,7 +832,6 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-
 	// Get git root for worktree creation
 	gitRoot, err := GetGitRootSafe(plan.Directory)
 	if err != nil {
@@ -857,7 +841,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 
 	// Check if we're already in the worktree
 	currentDir, _ := os.Getwd()
-	if currentDir != "" && (strings.HasSuffix(currentDir, "/.grove-worktrees/"+job.Worktree) || 
+	if currentDir != "" && (strings.HasSuffix(currentDir, "/.grove-worktrees/"+job.Worktree) ||
 		strings.HasSuffix(gitRoot, "/.grove-worktrees/"+job.Worktree)) {
 		// We're already in the worktree
 		return currentDir, nil
@@ -876,7 +860,6 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", err
 	}
 
-
 	// Check if grove-hooks is available and install hooks in the worktree
 	if _, err := exec.LookPath("grove-hooks"); err == nil {
 		cmd := exec.Command("grove-hooks", "install")
@@ -890,7 +873,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 
 	// Automatically initialize state within the new worktree for a better UX.
 	groveDir := filepath.Join(worktreePath, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		// Log a warning but don't fail the job, as this is a convenience feature.
 		fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
 	} else {
@@ -898,7 +881,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		stateContent := fmt.Sprintf("active_plan: %s\n", planName)
 		statePath := filepath.Join(groveDir, "state.yml")
 		// This is a best-effort attempt; failure should not stop the job.
-		_ = os.WriteFile(statePath, []byte(stateContent), 0644)
+		_ = os.WriteFile(statePath, []byte(stateContent), 0o644)
 	}
 
 	return worktreePath, nil
@@ -932,7 +915,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 			// Prompt user when rules file is missing
 			fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
 			fmt.Printf("Without a rules file, context cannot be generated for this %s job.\n", jobType)
-			
+
 			// Interactive prompt loop
 			for {
 				fmt.Println("\nOptions:")
@@ -940,11 +923,11 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 				fmt.Println("  [P]roceed - Continue without context")
 				fmt.Println("  [C]ancel - Cancel the job")
 				fmt.Print("\nYour choice [E/p/c]: ")
-				
+
 				reader := bufio.NewReader(os.Stdin)
 				input, _ := reader.ReadString('\n')
 				choice := strings.TrimSpace(strings.ToLower(input))
-				
+
 				switch choice {
 				case "e", "edit", "":
 					// Find cx or grove-context binary
@@ -958,7 +941,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 						fmt.Println("Please install grove-context to use this feature.")
 						continue
 					}
-					
+
 					// Run cx edit in the worktree
 					fmt.Printf("\nOpening rules editor with '%s edit'...\n", cxBinary)
 					cmd := exec.Command(cxBinary, "edit")
@@ -966,13 +949,13 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 					cmd.Stdin = os.Stdin
 					cmd.Stdout = os.Stdout
 					cmd.Stderr = os.Stderr
-					
+
 					if err := cmd.Run(); err != nil {
 						fmt.Printf("\n❌ Error running %s edit: %v\n", cxBinary, err)
 						fmt.Println("Please try again or choose a different option.")
 						continue
 					}
-					
+
 					// After edit completes, check if rules file now exists
 					if _, err := os.Stat(rulesPath); err == nil {
 						fmt.Println("\n✓ Rules file created successfully.")
@@ -982,20 +965,20 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 						fmt.Println("\n⚠️  Rules file still not found. Please try again.")
 						continue
 					}
-					
+
 				case "p", "proceed":
 					fmt.Println("\n⚠️  Proceeding without context from rules.")
 					fmt.Println("💡 To add context for future runs, open a new terminal, navigate to the worktree, and run 'cx edit'.")
 					return e.displayContextInfo(worktreePath)
-					
+
 				case "c", "cancel":
 					return fmt.Errorf("job canceled by user: .grove/rules file not found")
-					
+
 				default:
 					fmt.Printf("\n❌ Invalid choice '%s'. Please choose E, P, or C.\n", choice)
 					continue
 				}
-				
+
 				// If we reach here from the edit case, break the loop
 				break
 			}
@@ -1108,7 +1091,6 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
-	
 	// Update job status to running FIRST
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -1143,19 +1125,19 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			execErr = fmt.Errorf("updating frontmatter with template: %w", err)
 			return execErr
 		}
-		
+
 		// Write the updated content back to the file
-		if err := os.WriteFile(job.FilePath, newContent, 0644); err != nil {
+		if err := os.WriteFile(job.FilePath, newContent, 0o644); err != nil {
 			execErr = fmt.Errorf("writing updated chat file: %w", err)
 			return execErr
 		}
-		
+
 		// Update the job object with the new template
 		job.Template = "chat"
-		
+
 		// Update the content variable for subsequent processing
 		content = newContent
-		
+
 		fmt.Println("✓ Added 'template: chat' to job frontmatter")
 	}
 
@@ -1260,7 +1242,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 	conversationHistory := string(bodyContent)
 
-
 	// Load the template using TemplateManager
 	templateManager := NewTemplateManager()
 	template, err := templateManager.FindTemplate(directive.Template)
@@ -1336,7 +1317,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// Determine effective model with clear precedence
 	var effectiveModel string
-	
+
 	// 1. CLI flag (highest priority)
 	if e.config.ModelOverride != "" {
 		effectiveModel = e.config.ModelOverride
@@ -1356,7 +1337,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// 6. Hardcoded fallback
 		effectiveModel = "claude-3-5-sonnet-20241022"
 	}
-	
+
 	// Create LLM options with determined model
 	llmOpts := LLMOptions{
 		Model:        effectiveModel,
@@ -1409,7 +1390,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			Prompt:           fullPrompt,
 			PromptFiles:      []string{}, // Don't include the chat file as it's already in the prompt
 			WorkDir:          worktreePath,
-			SkipConfirmation: e.config.SkipInteractive,  // Respect -y flag
+			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 			// Don't pass context files - Gemini runner finds them automatically
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
@@ -1442,7 +1423,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	newCell := fmt.Sprintf("\n---\n\n<!-- grove: {\"id\": \"%s\"} -->\n## LLM Response (%s)\n\n%s\n\n<!-- grove: {\"template\": \"chat\"} -->\n", blockID, timestamp, response)
 
 	// Append atomically
-	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0644); err != nil {
+	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0o644); err != nil {
 		execErr = fmt.Errorf("appending LLM response: %w", err)
 		return execErr
 	}
@@ -1457,5 +1438,3 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	return nil
 }
-
-

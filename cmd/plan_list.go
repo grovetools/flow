@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	planListVerbose bool
+	planListVerbose      bool
+	planListIncludeFinished bool
 )
 
 // PlanSummary represents a plan in the JSON output
@@ -42,6 +43,7 @@ func newPlanListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&planListVerbose, "verbose", "v", false, "Show detailed information including jobs in each plan")
+	cmd.Flags().BoolVar(&planListIncludeFinished, "include-finished", false, "Include finished plans in the output")
 
 	return cmd
 }
@@ -76,6 +78,10 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 			if _, err := os.Stat(planConfigPath); err == nil || len(mdFiles) > 0 {
 				plan, err := orchestration.LoadPlan(planPath)
 				if err == nil {
+					// Filter out finished plans unless explicitly included
+					if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
+						continue
+					}
 					// Even if there are no jobs, the plan object itself is valid
 					// and should be included in the list.
 					plans = append(plans, plan)
