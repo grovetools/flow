@@ -121,6 +121,7 @@ var (
 	planInitContainer      string
 	planInitExtractAllFrom string
 	planInitOpenSession    bool
+	planInitRecipe         string
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -163,6 +164,7 @@ func GetPlanCommand() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan's worktree (requires --with-worktree or --worktree)")
+	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature)")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -221,6 +223,7 @@ func GetPlanCommand() *cobra.Command {
 	planCmd.AddCommand(planOpenCmd)
 	planCmd.AddCommand(planTemplatesCmd)
 	planCmd.AddCommand(planWorktreeCmd)
+	planCmd.AddCommand(planRecipesCmd)
 	planCmd.AddCommand(NewPlanSetCmd())
 	planCmd.AddCommand(NewPlanCurrentCmd())
 	planCmd.AddCommand(NewPlanUnsetCmd())
@@ -242,6 +245,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan's worktree (requires --with-worktree or --worktree)")
+	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature)")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -300,6 +304,7 @@ func NewPlanCmd() *cobra.Command {
 	planCmd.AddCommand(planOpenCmd)
 	planCmd.AddCommand(planTemplatesCmd)
 	planCmd.AddCommand(planWorktreeCmd)
+	planCmd.AddCommand(planRecipesCmd)
 	planCmd.AddCommand(NewPlanSetCmd())
 	planCmd.AddCommand(NewPlanCurrentCmd())
 	planCmd.AddCommand(NewPlanUnsetCmd())
@@ -321,6 +326,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		Container:      planInitContainer,
 		ExtractAllFrom: planInitExtractAllFrom,
 		OpenSession:    planInitOpenSession,
+		Recipe:         planInitRecipe,
 	}
 	return RunPlanInit(initCmd)
 }
@@ -391,4 +397,5 @@ type PlanInitCmd struct {
 	Container      string
 	ExtractAllFrom string
 	OpenSession    bool
+	Recipe         string
 }

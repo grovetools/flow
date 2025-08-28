@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -27,6 +28,11 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 	// Validate inputs with resolved path
 	if err := validateInitInputs(cmd, planPath); err != nil {
 		return err
+	}
+
+	// NEW: Recipe-based initialization
+	if cmd.Recipe != "" {
+		return runPlanInitFromRecipe(cmd, planPath)
 	}
 
 	// Determine worktree to set in config
@@ -128,6 +134,89 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 	fmt.Println("\nNext steps:")
 	fmt.Printf("1. Add your first job: flow plan add\n")
 	fmt.Printf("2. Check status: flow plan status\n")
+
+	return nil
+}
+
+// runPlanInitFromRecipe initializes a plan from a predefined recipe.
+func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string) error {
+	planName := filepath.Base(planPath)
+
+	// Find the recipe
+	recipe, err := orchestration.GetBuiltinRecipe(cmd.Recipe)
+	if err != nil {
+		return err
+	}
+
+	// Create the plan directory
+	if err := createPlanDirectory(planPath, cmd.Force); err != nil {
+		return err
+	}
+
+	fmt.Printf("Initializing orchestration plan in:\n  %s\n\n", planPath)
+	fmt.Printf("✓ Using recipe: %s\n", cmd.Recipe)
+
+	// Data for templating
+	templateData := struct {
+		PlanName string
+	}{
+		PlanName: planName,
+	}
+
+	// Get sorted list of job filenames to process them in order
+	var jobFiles []string
+	for filename := range recipe.Jobs {
+		jobFiles = append(jobFiles, filename)
+	}
+	sort.Strings(jobFiles)
+
+	var firstAgentWorktree string
+
+	// Process each job file from the recipe
+	for _, filename := range jobFiles {
+		renderedContent, err := recipe.RenderJob(filename, templateData)
+		if err != nil {
+			return fmt.Errorf("rendering recipe job %s: %w", filename, err)
+		}
+
+		// Write the processed job file to the new plan directory
+		destPath := filepath.Join(planPath, filename)
+		if err := os.WriteFile(destPath, renderedContent, 0644); err != nil {
+			return fmt.Errorf("writing recipe job file %s: %w", filename, err)
+		}
+		fmt.Printf("✓ Created job: %s\n", filename)
+
+		// Heuristic: find the worktree from the first agent/interactive_agent job
+		// to set as the default in .grove-plan.yml
+		if firstAgentWorktree == "" {
+			fm, _, _ := orchestration.ParseFrontmatter(renderedContent)
+			if fm != nil {
+				if jobType, ok := fm["type"].(string); ok && (jobType == "agent" || jobType == "interactive_agent") {
+					if worktree, ok := fm["worktree"].(string); ok {
+						firstAgentWorktree = worktree
+					}
+				}
+			}
+		}
+	}
+
+	// Create a default .grove-plan.yml, using the derived worktree
+	if err := createDefaultPlanConfig(planPath, cmd.Model, firstAgentWorktree, cmd.Container); err != nil {
+		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
+	} else {
+		fmt.Println("✓ Created .grove-plan.yml")
+	}
+
+	// Set the new plan as active
+	if err := state.SetActiveJob(planName); err != nil {
+		fmt.Printf("Warning: failed to set active job: %v\n", err)
+	} else {
+		fmt.Printf("✓ Set active plan to: %s\n", planName)
+	}
+
+	fmt.Println("\nNext steps:")
+	fmt.Printf("1. Review the generated job files in %s\n", planPath)
+	fmt.Printf("2. Run the plan: flow plan run %s\n", planName)
 
 	return nil
 }
