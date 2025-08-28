@@ -18,9 +18,12 @@ type statusTUIModel struct {
 	plan          *orchestration.Plan
 	graph         *orchestration.DependencyGraph
 	jobs          []*orchestration.Job
+	jobParents    map[string]*orchestration.Job // Track parent in tree structure
+	jobIndents    map[string]int               // Track indentation level
 	cursor        int
 	selected      map[string]bool // For multi-select
 	multiSelect   bool
+	showHelp      bool   // Show extended help
 	statusSummary string
 	err           error
 	width         int
@@ -80,6 +83,9 @@ var (
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))
 
+	depAnnotationStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240"))  // Darker grey for dependency annotations
+
 	statusStyles = map[orchestration.JobStatus]lipgloss.Style{
 		orchestration.JobStatusCompleted:    lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
 		orchestration.JobStatusRunning:      lipgloss.NewStyle().Foreground(lipgloss.Color("11")),
@@ -94,13 +100,15 @@ var (
 
 // Initialize the model
 func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph) statusTUIModel {
-	// Flatten the job tree for navigation
-	jobs := flattenJobTree(plan)
+	// Flatten the job tree for navigation with parent tracking
+	jobs, parents, indents := flattenJobTreeWithParents(plan)
 	
 	return statusTUIModel{
 		plan:          plan,
 		graph:         graph,
 		jobs:          jobs,
+		jobParents:    parents,
+		jobIndents:    indents,
 		cursor:        0,
 		selected:      make(map[string]bool),
 		multiSelect:   false,
@@ -110,27 +118,55 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 	}
 }
 
-// flattenJobTree creates a flat list of jobs in tree order
-func flattenJobTree(plan *orchestration.Plan) []*orchestration.Job {
+// flattenJobTreeWithParents creates a flat list of jobs in tree order with parent tracking
+func flattenJobTreeWithParents(plan *orchestration.Plan) ([]*orchestration.Job, map[string]*orchestration.Job, map[string]int) {
 	var result []*orchestration.Job
 	visited := make(map[string]bool)
+	parents := make(map[string]*orchestration.Job)
+	indents := make(map[string]int)
 	
 	// Find root jobs
 	roots := findRootJobs(plan)
 	
 	// Add each root and its dependents
 	for _, root := range roots {
-		addJobAndDependents(root, plan, &result, visited)
+		addJobAndDependentsWithParent(root, plan, &result, visited, parents, indents, nil, 0)
 	}
 	
 	// Add any orphaned jobs
 	for _, job := range plan.Jobs {
 		if !visited[job.ID] {
 			result = append(result, job)
+			parents[job.ID] = nil
+			indents[job.ID] = 0
 		}
 	}
 	
-	return result
+	return result, parents, indents
+}
+
+// addJobAndDependentsWithParent recursively adds a job and its dependents with parent tracking
+func addJobAndDependentsWithParent(job *orchestration.Job, plan *orchestration.Plan, result *[]*orchestration.Job, visited map[string]bool, parents map[string]*orchestration.Job, indents map[string]int, parent *orchestration.Job, indent int) {
+	if visited[job.ID] {
+		return
+	}
+	visited[job.ID] = true
+	*result = append(*result, job)
+	parents[job.ID] = parent
+	indents[job.ID] = indent
+	
+	// Find and add dependents using the same logic as vanilla status
+	// This ensures jobs appear under their dependency with maximum height
+	dependents := findDependents(job, plan)
+	for _, dep := range dependents {
+		addJobAndDependentsWithParent(dep, plan, result, visited, parents, indents, job, indent+1)
+	}
+}
+
+// flattenJobTree creates a flat list of jobs in tree order (kept for compatibility)
+func flattenJobTree(plan *orchestration.Plan) []*orchestration.Job {
+	jobs, _, _ := flattenJobTreeWithParents(plan)
+	return jobs
 }
 
 // addJobAndDependents recursively adds a job and its dependents to the result
@@ -141,7 +177,8 @@ func addJobAndDependents(job *orchestration.Job, plan *orchestration.Plan, resul
 	visited[job.ID] = true
 	*result = append(*result, job)
 	
-	// Find and add dependents
+	// Find and add dependents using the same logic as vanilla status
+	// This ensures jobs appear under their dependency with maximum height
 	dependents := findDependents(job, plan)
 	for _, dep := range dependents {
 		addJobAndDependents(dep, plan, result, visited)
@@ -184,7 +221,10 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update model with refreshed data
 		m.plan = plan
 		m.graph = graph
-		m.jobs = flattenJobTree(plan)
+		jobs, parents, indents := flattenJobTreeWithParents(plan)
+		m.jobs = jobs
+		m.jobParents = parents
+		m.jobIndents = indents
 		m.statusSummary = formatStatusSummary(plan)
 		
 		// Adjust cursor if needed
@@ -309,6 +349,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				return m, addJobWithDependencies(m.plan.Directory, nil)
 			}
+		
+		case keys.Help:
+			m.showHelp = !m.showHelp
 		}
 	}
 
@@ -319,6 +362,16 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m statusTUIModel) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n", m.err)
+	}
+	
+	// Show help popup if active (centered overlay)
+	if m.showHelp {
+		helpView := m.renderHelp()
+		return lipgloss.NewStyle().
+			Width(m.width).
+			Height(m.height).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(helpView)
 	}
 
 	var s strings.Builder
@@ -363,36 +416,18 @@ func (m statusTUIModel) renderJobTree() string {
 	var s strings.Builder
 	s.WriteString(fmt.Sprintf("📁 %s\n", m.plan.Name))
 
-	// Track which jobs have been rendered and their indent levels
-	jobIndents := make(map[string]int)
+	// Use the pre-calculated parent and indent information
 	rendered := make(map[string]bool)
-	
-	// First pass: calculate indentation levels
-	for i, job := range m.jobs {
-		if i == 0 {
-			jobIndents[job.ID] = 0
-			continue
-		}
-		
-		// Check if this job depends on any previous job
-		maxIndent := 0
-		for _, dep := range job.Dependencies {
-			if dep != nil && jobIndents[dep.ID] >= maxIndent {
-				maxIndent = jobIndents[dep.ID] + 1
-			}
-		}
-		jobIndents[job.ID] = maxIndent
-	}
 
-	// Second pass: render with tree characters
+	// Render with tree characters
 	for i, job := range m.jobs {
-		indent := jobIndents[job.ID]
+		indent := m.jobIndents[job.ID]
 		prefix := strings.Repeat("    ", indent)
 		
 		// Determine if this is the last job at this indent level
 		isLast := true
 		for j := i + 1; j < len(m.jobs); j++ {
-			if jobIndents[m.jobs[j].ID] == indent {
+			if m.jobIndents[m.jobs[j].ID] == indent {
 				isLast = false
 				break
 			}
@@ -411,6 +446,21 @@ func (m statusTUIModel) renderJobTree() string {
 		jobContent := fmt.Sprintf("%s %s", m.getStatusIcon(job.Status), job.Filename)
 		if job.Title != "" {
 			jobContent += fmt.Sprintf(" (%s)", job.Title)
+		}
+		
+		// Add dependency annotations if job has multiple dependencies
+		var depAnnotation string
+		if len(job.Dependencies) > 1 && m.jobParents[job.ID] != nil {
+			var otherDeps []string
+			for _, dep := range job.Dependencies {
+				if dep != nil && dep.ID != m.jobParents[job.ID].ID {
+					otherDeps = append(otherDeps, dep.Filename)
+				}
+			}
+			if len(otherDeps) > 0 {
+				// Store annotation separately to apply different styling
+				depAnnotation = fmt.Sprintf(" ⚠️  Also: %s", strings.Join(otherDeps, ", "))
+			}
 		}
 		
 		// Apply styling to the job content based on state
@@ -435,8 +485,14 @@ func (m statusTUIModel) renderJobTree() string {
 			indicators += indicatorStyle.Render(" ◀")
 		}
 		
+		// Style the dependency annotation in grey
+		styledDepAnnotation := ""
+		if depAnnotation != "" {
+			styledDepAnnotation = depAnnotationStyle.Render(depAnnotation)
+		}
+		
 		// Combine all parts
-		fullLine := treePart + styledJobContent + indicators
+		fullLine := treePart + styledJobContent + styledDepAnnotation + indicators
 		
 		s.WriteString(fullLine + "\n")
 		rendered[job.ID] = true
@@ -482,20 +538,92 @@ func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 
 // renderHelp renders the help text
 func (m statusTUIModel) renderHelp() string {
+	if m.showHelp {
+		// Create styles matching grove-context
+		boxStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("241")).
+			Padding(2, 3).
+			Width(70).
+			Align(lipgloss.Center)
+		
+		titleStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("12")).
+			MarginBottom(1)
+		
+		columnStyle := lipgloss.NewStyle().
+			Width(30).
+			MarginRight(4)
+		
+		keyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("34")).
+			Bold(true)
+		
+		// Navigation column
+		navItems := []string{
+			"Navigation:",
+			"",
+			keyStyle.Render("j/k") + " - Move up/down",
+			keyStyle.Render("h/l") + " - Move left/right",
+			"",
+			"Selection:",
+			"",
+			keyStyle.Render("m") + " - Toggle multi-select",
+			keyStyle.Render("Space") + " - Select/deselect",
+			"",
+			"Actions:",
+			"",
+			keyStyle.Render("r") + " - Run job(s)",
+			keyStyle.Render("e") + " - Edit job file",
+			keyStyle.Render("c") + " - Mark completed",
+			keyStyle.Render("a") + " - Archive job",
+			keyStyle.Render("n") + " - Add new job",
+			"",
+			keyStyle.Render("q") + " - Quit",
+			keyStyle.Render("?") + " - Toggle this help",
+		}
+		
+		// Legend column
+		legendItems := []string{
+			"Legend:",
+			"",
+			"Job Status:",
+			"  ✓ - Completed",
+			"  ⚡ - Running",
+			"  ✗ - Failed",
+			"  🚫 - Blocked",
+			"  👁 - Needs Review",
+			"  💬 - Pending User",
+			"  🤖 - Pending LLM",
+			"  ⏳ - Pending",
+			"",
+			"Symbols:",
+			"  ◀ - Current item",
+			"  ◆ - Selected item",
+			"",
+			"Other:",
+			"  ⚠️ - Multiple dependencies",
+		}
+		
+		// Render columns
+		navColumn := columnStyle.Render(strings.Join(navItems, "\n"))
+		legendColumn := columnStyle.Copy().MarginRight(0).Render(strings.Join(legendItems, "\n"))
+		
+		// Combine columns
+		content := lipgloss.JoinHorizontal(lipgloss.Top, navColumn, legendColumn)
+		
+		// Add title and wrap in box
+		title := titleStyle.Render("Flow Plan Status - Help")
+		fullContent := lipgloss.JoinVertical(lipgloss.Center, title, content)
+		
+		return boxStyle.Render(fullContent)
+	}
+	
+	// Minimal help - just show navigation and help key
 	help := []string{
-		"Navigation: j/k (up/down) • h/l (left/right) • ◀ current • ◆ selected",
+		"j/k: up/down • ?: help • q: quit",
 	}
-	
-	if m.multiSelect {
-		help = append(help, "Multi-select: SPACE (select) • m (exit multi-select)")
-	} else {
-		help = append(help, "m: multi-select mode")
-	}
-	
-	help = append(help,
-		"Actions: a (archive) • e (edit) • r (run) • c (complete) • n (new job)",
-		"q: quit • ?: help",
-	)
 	
 	return helpStyle.Render(strings.Join(help, "\n"))
 }

@@ -221,7 +221,7 @@ func formatStatusTree(plan *orchestration.Plan, graph *orchestration.DependencyG
 	// Print each root and its dependents
 	for i, root := range roots {
 		isLast := i == len(roots)-1
-		printJobTree(writer, root, "", isLast, plan, printed)
+		printJobTree(writer, root, "", isLast, plan, printed, nil)
 	}
 
 	// Print any jobs not yet printed (in case of disconnected components)
@@ -247,7 +247,7 @@ func findRootJobs(plan *orchestration.Plan) []*orchestration.Job {
 }
 
 // printJobTree recursively prints a job and its dependents.
-func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast bool, plan *orchestration.Plan, printed map[string]bool) {
+func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast bool, plan *orchestration.Plan, printed map[string]bool, parent *orchestration.Job) {
 	// Skip if already printed
 	if printed[job.ID] {
 		return
@@ -266,6 +266,20 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 		jobInfo = fmt.Sprintf("%s (%s)", job.Filename, job.Title)
 	}
 
+	// Check if this job has multiple dependencies and format inline
+	if len(job.Dependencies) > 1 && parent != nil {
+		// Find dependencies that are NOT the parent we came from
+		var otherDeps []string
+		for _, dep := range job.Dependencies {
+			if dep != nil && dep.ID != parent.ID {
+				otherDeps = append(otherDeps, dep.Filename)
+			}
+		}
+		if len(otherDeps) > 0 {
+			jobInfo += fmt.Sprintf(" ⚠️  Also: %s", strings.Join(otherDeps, ", "))
+		}
+	}
+
 	fmt.Fprintf(w, "%s%s%s %s\n", prefix, connector, statusIcon, jobInfo)
 
 	// Update prefix for children
@@ -279,12 +293,76 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 	// Find jobs that depend on this one
 	dependents := findDependents(job, plan)
 	for i, dep := range dependents {
-		printJobTree(w, dep, newPrefix, i == len(dependents)-1, plan, printed)
+		printJobTree(w, dep, newPrefix, i == len(dependents)-1, plan, printed, job)
 	}
 }
 
-// findDependents returns jobs that depend on the given job.
+// findDependents returns jobs that depend on the given job, but only if this job
+// is the dependency closest to a leaf (has the fewest downstream dependents).
 func findDependents(job *orchestration.Job, plan *orchestration.Plan) []*orchestration.Job {
+	var dependents []*orchestration.Job
+	for _, candidate := range plan.Jobs {
+		// Check if candidate depends on the given job
+		dependsOnThis := false
+		var closestToLeafDep *orchestration.Job
+		minDistance := int(^uint(0) >> 1) // Max int
+		
+		for _, dep := range candidate.Dependencies {
+			if dep != nil {
+				if dep.ID == job.ID {
+					dependsOnThis = true
+				}
+				// Find the dependency closest to a leaf (minimum distance to leaf)
+				distance := getDistanceToLeaf(dep, plan)
+				if closestToLeafDep == nil || distance < minDistance {
+					closestToLeafDep = dep
+					minDistance = distance
+				}
+			}
+		}
+		
+		// Only include this dependent if the current job is its dependency closest to a leaf
+		if dependsOnThis && closestToLeafDep != nil && closestToLeafDep.ID == job.ID {
+			dependents = append(dependents, candidate)
+		}
+	}
+	return dependents
+}
+
+// getDistanceToLeaf returns the minimum distance from this job to any leaf node
+// (a job with no dependents). Distance 0 means this job is a leaf.
+func getDistanceToLeaf(job *orchestration.Job, plan *orchestration.Plan) int {
+	// Memoization to avoid recalculation
+	distanceCache := make(map[string]int)
+	return getDistanceToLeafCached(job, plan, distanceCache)
+}
+
+func getDistanceToLeafCached(job *orchestration.Job, plan *orchestration.Plan, cache map[string]int) int {
+	if distance, ok := cache[job.ID]; ok {
+		return distance
+	}
+	
+	dependents := findAllDependents(job, plan)
+	if len(dependents) == 0 {
+		// This is a leaf node
+		cache[job.ID] = 0
+		return 0
+	}
+	
+	minDistance := int(^uint(0) >> 1) // Max int
+	for _, dep := range dependents {
+		distance := getDistanceToLeafCached(dep, plan, cache) + 1
+		if distance < minDistance {
+			minDistance = distance
+		}
+	}
+	
+	cache[job.ID] = minDistance
+	return minDistance
+}
+
+// findAllDependents returns ALL jobs that depend on the given job (not filtered).
+func findAllDependents(job *orchestration.Job, plan *orchestration.Plan) []*orchestration.Job {
 	var dependents []*orchestration.Job
 	for _, candidate := range plan.Jobs {
 		for _, dep := range candidate.Dependencies {
@@ -296,6 +374,7 @@ func findDependents(job *orchestration.Job, plan *orchestration.Plan) []*orchest
 	}
 	return dependents
 }
+
 
 // formatStatusList creates a simple list format.
 func formatStatusList(plan *orchestration.Plan) string {
