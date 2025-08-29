@@ -18,6 +18,7 @@ import (
 	"github.com/mattn/go-isatty"
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
+	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"gopkg.in/yaml.v3"
 )
@@ -227,6 +228,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		response = "This is a mock LLM response for testing purposes."
 		err = nil
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
+		// Resolve API key here where we have the correct execution context
+		apiKey, geminiErr := geminiconfig.ResolveAPIKey()
+		if geminiErr != nil {
+			// Don't fail immediately, let the runner handle it for a more consistent error
+			apiKey = ""
+		}
 		// Use grove-gemini package for Gemini models
 		opts := gemini.RequestOptions{
 			Model:            effectiveModel,
@@ -234,6 +241,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			PromptFiles:      promptSourceFiles, // Pass resolved source file paths
 			WorkDir:          workDir,
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
+			APIKey:           apiKey, // Pass the resolved API key
 			// Don't pass context files - Gemini runner finds them automatically
 		}
 		// Note: Job ID and Plan name are not passed here as they would need to be propagated through
@@ -1383,11 +1391,20 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Call LLM based on model type
 	fmt.Printf("[DEBUG] Calling LLM with model: %s...\n", effectiveModel)
 	var response string
+	var apiKey string
+	var geminiErr error
 	if strings.HasPrefix(effectiveModel, "gemini") {
+		// Resolve API key here where we have the correct execution context
+		apiKey, geminiErr = geminiconfig.ResolveAPIKey()
+		if geminiErr != nil {
+			// Don't fail immediately, let the runner handle it for a more consistent error
+			apiKey = ""
+		}
 		// Use grove-gemini package for Gemini models
 		opts := gemini.RequestOptions{
 			Model:            llmOpts.Model,
 			Prompt:           fullPrompt,
+			APIKey:           apiKey, // Pass the resolved API key
 			PromptFiles:      []string{}, // Don't include the chat file as it's already in the prompt
 			WorkDir:          worktreePath,
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
