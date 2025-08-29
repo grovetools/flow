@@ -103,8 +103,8 @@ github.com/mattn/go-localereader v0.0.1 h1:ygSAOl7ZXTx4RdPYinUpg6W99U8jWvWi9Ye2J
 github.com/mattn/go-localereader v0.0.1/go.mod h1:8fBrzywKY7BI3czFoHkuzRoWE9C+EiG4R1k4Cjx5p88=
 github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
-github.com/mattsolo1/grove-context v0.2.20 h1:U70pv8QamfeVtT1mtXJVBG7KnUOj+1xmOr0baln/0lE=
-github.com/mattsolo1/grove-context v0.2.20/go.mod h1:lNOMsLusuxpUmhrYJdYzrDADBgxi5pzjwq0rsSPqrF4=
+github.com/mattsolo1/grove-context v0.2.21 h1:WkZckbqjqeSMMDu8Irw1MsHcVKSh7GOgFCri0Idvroc=
+github.com/mattsolo1/grove-context v0.2.21/go.mod h1:qGE9cCO/K9+47HD6zEXgsR2vyKbqUk7ocid+qX76vrk=
 github.com/mattsolo1/grove-core v0.2.12 h1:vRJS+yeJBRUNErkh66mSbuaBbS4r53tTTdvV6O5Z4Ww=
 github.com/mattsolo1/grove-core v0.2.12/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
 github.com/mattsolo1/grove-gemini v0.0.8 h1:H/tM8/u9b1lkH7S3M9R0k8GG31o4gQ2QdGLNMqZAhdw=
