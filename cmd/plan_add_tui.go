@@ -178,33 +178,61 @@ func (m tuiModel) Init() tea.Cmd {
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-
 	// Handle keyboard input
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Check if we're in a text input field that should capture all keys
+		inTextInput := m.focusIndex == 0 || m.focusIndex == 2 || m.focusIndex == 6
+		// Check if we're in a list that needs arrow keys
+		inList := m.focusIndex == 1 || m.focusIndex == 3 || m.focusIndex == 5
+		
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
-
-		case "tab", "down":
-			// Special handling for template list - confirm selection on tab
-			if m.focusIndex == 3 && msg.String() == "tab" {
-				// If we're in the template list and user pressed tab, treat it as confirming the selection
-				// The current selection is already stored in the list model, so we just move on
+			
+		case "q":
+			// Only quit on 'q' if not in text input
+			if !inTextInput {
+				m.quitting = true
+				return m, tea.Quit
 			}
+
+		case "tab":
+			// Tab always moves to next field
 			m.focusIndex++
 			if m.focusIndex > 6 {
 				m.focusIndex = 0
 			}
 			return m.updateFocus(), nil
+			
+		case "down":
+			// Down arrow only navigates fields when not in a list
+			if !inList {
+				m.focusIndex++
+				if m.focusIndex > 6 {
+					m.focusIndex = 0
+				}
+				return m.updateFocus(), nil
+			}
 
-		case "shift+tab", "up":
+		case "shift+tab":
+			// Shift+tab always moves to previous field
 			m.focusIndex--
 			if m.focusIndex < 0 {
 				m.focusIndex = 6
 			}
 			return m.updateFocus(), nil
+			
+		case "up":
+			// Up arrow only navigates fields when not in a list
+			if !inList {
+				m.focusIndex--
+				if m.focusIndex < 0 {
+					m.focusIndex = 6
+				}
+				return m.updateFocus(), nil
+			}
 
 		case "enter":
 			// Special handling for certain fields
@@ -214,6 +242,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.extractValues()
 				m.quitting = true
 				return m, tea.Quit
+			} else if inList {
+				// For lists, enter confirms selection and moves to next field
+				m.focusIndex++
+				if m.focusIndex > 6 {
+					m.focusIndex = 0
+				}
+				return m.updateFocus(), nil
 			}
 		}
 	}
@@ -458,7 +493,7 @@ func (m tuiModel) View() string {
 		BorderForeground(lipgloss.Color("240")).
 		Padding(1, 0, 0, 0)
 
-	helpText := "tab/↓: next • shift+tab/↑: prev • j/k: navigate • /: search • esc: clear • space: select • a: all • enter: confirm • ctrl+c: quit"
+	helpText := "tab: next field • shift+tab: prev field • ↑/↓/j/k: navigate lists • /: search • esc: clear • space: select • a: all • enter: confirm • ctrl+c: quit"
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render(helpText))
 
@@ -573,7 +608,7 @@ func (m dependencyTreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.displayJobs)-1 {
 				m.cursor++
 			}
-		case " ": // Spacebar to toggle selection
+		case " ", "space": // Spacebar to toggle selection
 			if len(m.displayJobs) > 0 {
 				selectedJob := m.displayJobs[m.cursor].job
 				if _, ok := m.selected[selectedJob.ID]; ok {
