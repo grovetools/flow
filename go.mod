@@ -11,7 +11,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mattsolo1/grove-context v0.2.21
 	github.com/mattsolo1/grove-core v0.2.12
-	github.com/mattsolo1/grove-gemini v0.0.8
+	github.com/mattsolo1/grove-gemini v0.0.9
 	github.com/mattsolo1/grove-tend v0.2.16
 	github.com/mattsolo1/grove-tmux v0.0.12
 	github.com/spf13/cobra v1.9.1

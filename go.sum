@@ -107,8 +107,8 @@ github.com/mattsolo1/grove-context v0.2.21 h1:WkZckbqjqeSMMDu8Irw1MsHcVKSh7GOgFC
 github.com/mattsolo1/grove-context v0.2.21/go.mod h1:qGE9cCO/K9+47HD6zEXgsR2vyKbqUk7ocid+qX76vrk=
 github.com/mattsolo1/grove-core v0.2.12 h1:vRJS+yeJBRUNErkh66mSbuaBbS4r53tTTdvV6O5Z4Ww=
 github.com/mattsolo1/grove-core v0.2.12/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
-github.com/mattsolo1/grove-gemini v0.0.8 h1:H/tM8/u9b1lkH7S3M9R0k8GG31o4gQ2QdGLNMqZAhdw=
-github.com/mattsolo1/grove-gemini v0.0.8/go.mod h1:TI3bQxQD7KZ1JN/CcbxxLsJHuYgvusmjgOIIBuPdpEU=
+github.com/mattsolo1/grove-gemini v0.0.9 h1:IVSmxNPQKAAYHwwZSfwXLWdNn3zVBNZh95FrQn0gSVw=
+github.com/mattsolo1/grove-gemini v0.0.9/go.mod h1:z9Xc7s61l/CUREsX702v+BWjRdADj2n9YswOthJ8QHA=
 github.com/mattsolo1/grove-tend v0.2.16 h1:ofyRDqwFtEOk0Rz0mml95bGiJ32Q0JZpUbIkZ0FNhSM=
 github.com/mattsolo1/grove-tend v0.2.16/go.mod h1:tCZN/J3lip+tsk1gHDobCqZ9kKdWzOwuC0fZzgpVF8U=
 github.com/mattsolo1/grove-tmux v0.0.12 h1:l7z11oTPSt03lU6Jk9/fMdQf5ZMTAg3CWUSDMYW6IGQ=
