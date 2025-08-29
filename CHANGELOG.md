@@ -1,3 +1,16 @@
+## v0.2.13 (2025-08-29)
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+
+### Bug Fixes
+
+* resolve API key in grove-flow context for gemini calls
+* resolve keyboard input conflicts in flow plan add --interactive
+
 ## v0.2.12 (2025-08-28)
 
 ### Chores
