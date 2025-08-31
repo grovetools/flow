@@ -1,3 +1,9 @@
+## v0.2.14 (2025-08-31)
+
+### Bug Fixes
+
+* set agent_continue to false by default for interactive_agent jobs
+
 ## v0.2.13 (2025-08-29)
 
 ### Chores
