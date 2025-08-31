@@ -198,11 +198,11 @@ agent:
 	}
 }
 
-// AgentContinueAutoEnableScenario tests that agent_continue is automatically enabled for subsequent interactive_agent jobs
+// AgentContinueAutoEnableScenario tests that agent_continue is NOT automatically enabled for subsequent interactive_agent jobs
 func AgentContinueAutoEnableScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name:        "flow-agent-continue-auto-enable",
-		Description: "Tests that agent_continue is automatically enabled for second and subsequent interactive_agent jobs",
+		Description: "Tests that agent_continue is NOT automatically enabled for interactive_agent jobs by default",
 		Tags:        []string{"plan", "agent", "continue", "auto"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup project", func(ctx *harness.Context) error {
@@ -267,11 +267,11 @@ flow:
 			harness.NewStep("Add second interactive agent job WITHOUT --agent-continue flag", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				// Note: Still NOT using --agent-continue flag, but it should be auto-enabled
+				// Note: NOT using --agent-continue flag, and it should NOT be auto-enabled
 				cmd := command.New(flow, "plan", "add", "auto-continue-test",
 					"--title", "Second Interactive Agent Auto",
 					"--type", "interactive_agent",
-					"-p", "This should automatically have agent_continue enabled",
+					"-p", "This should NOT have continue flag enabled by default",
 				).Dir(ctx.RootDir)
 				
 				result := cmd.Run()
@@ -281,12 +281,12 @@ flow:
 					return fmt.Errorf("failed to add second job: %v", result.Error)
 				}
 				
-				// Verify second job DOES have agent_continue: true
+				// Verify second job does NOT have agent_continue (new default behavior)
 				jobFile := filepath.Join(ctx.RootDir, "plans", "auto-continue-test", "02-second-interactive-agent-auto.md")
 				content, _ := fs.ReadString(jobFile)
 				
-				if !strings.Contains(content, "agent_continue: true") {
-					return fmt.Errorf("second interactive_agent job should automatically have 'agent_continue: true', got:\n%s", content)
+				if strings.Contains(content, "agent_continue") {
+					return fmt.Errorf("second interactive_agent job should NOT have agent_continue field by default, got:\n%s", content)
 				}
 				
 				return nil

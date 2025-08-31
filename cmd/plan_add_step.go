@@ -286,13 +286,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		},
 	}
 
-	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
-	// and the user didn't explicitly set it
+	// Set agent_continue to false by default for interactive_agent jobs
+	// Users can explicitly enable it with --agent-continue flag if needed
 	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
-		// Only auto-enable if this is NOT the first interactive agent job
-		if hasExistingInteractiveAgentJob(plan) {
-			job.AgentContinue = true
-		}
+		job.AgentContinue = false
 	}
 
 	// Set worktree only if explicitly provided
@@ -349,12 +346,10 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 		job.Worktree = plan.Config.Worktree
 	}
 
-	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
+	// Set agent_continue to false by default for interactive_agent jobs
+	// Users can explicitly enable it with --agent-continue flag if needed
 	if job.Type == orchestration.JobTypeInteractiveAgent && !job.AgentContinue {
-		// Only auto-enable if this is NOT the first interactive agent job
-		if hasExistingInteractiveAgentJob(plan) {
-			job.AgentContinue = true
-		}
+		job.AgentContinue = false
 	}
 
 	return job, nil
@@ -595,13 +590,10 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		job.Worktree = plan.Config.Worktree
 	}
 
-	// Auto-enable agent_continue for interactive_agent jobs if there's already one in the plan
-	// and the user didn't explicitly set it via CLI
+	// Set agent_continue to false by default for interactive_agent jobs
+	// Users can explicitly enable it with --agent-continue flag if needed
 	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
-		// Only auto-enable if this is NOT the first interactive agent job
-		if hasExistingInteractiveAgentJob(plan) {
-			job.AgentContinue = true
-		}
+		job.AgentContinue = false
 	}
 
 	return job, nil
@@ -653,12 +645,3 @@ func GenerateJobIDFromTitle(plan *orchestration.Plan, title string) string {
 	return id
 }
 
-// hasExistingInteractiveAgentJob checks if the plan already has an interactive_agent job
-func hasExistingInteractiveAgentJob(plan *orchestration.Plan) bool {
-	for _, job := range plan.Jobs {
-		if job.Type == orchestration.JobTypeInteractiveAgent {
-			return true
-		}
-	}
-	return false
-}
