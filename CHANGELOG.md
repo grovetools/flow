@@ -1,3 +1,9 @@
+## v0.2.15 (2025-09-02)
+
+### Features
+
+* append clogs transcript when completing interactive agent jobs
+
 ## v0.2.14 (2025-08-31)
 
 ### Bug Fixes
