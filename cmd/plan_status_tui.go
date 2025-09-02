@@ -328,7 +328,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				return m, tea.Sequence(
-					setJobCompleted(job),
+					setJobCompleted(job, m.plan),
 					refreshPlan(m.planDir),
 				)
 			}
@@ -675,7 +675,7 @@ func runJob(planDir string, job *orchestration.Job) tea.Cmd {
 	})
 }
 
-func setJobCompleted(job *orchestration.Job) tea.Cmd {
+func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan) tea.Cmd {
 	return func() tea.Msg {
 		// Create a state persister to update the job status
 		sp := orchestration.NewStatePersister()
@@ -683,6 +683,14 @@ func setJobCompleted(job *orchestration.Job) tea.Cmd {
 		// Update the job status to completed
 		if err := sp.UpdateJobStatus(job, orchestration.JobStatusCompleted); err != nil {
 			return err
+		}
+		
+		// Append transcript if it's an interactive agent job
+		if job.Type == orchestration.JobTypeInteractiveAgent {
+			if err := orchestration.AppendInteractiveTranscript(job, plan); err != nil {
+				// Return the error to be displayed by the TUI
+				return err
+			}
 		}
 		
 		return refreshMsg{} // Refresh to show the status change

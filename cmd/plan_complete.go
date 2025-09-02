@@ -71,6 +71,17 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update job status: %w", err)
 	}
 
+	// Append transcript if it's an interactive agent job
+	if job.Type == orchestration.JobTypeInteractiveAgent {
+		fmt.Println("Appending interactive session transcript...")
+		if err := orchestration.AppendInteractiveTranscript(job, plan); err != nil {
+			// Log warning but don't fail the command
+			fmt.Printf("Warning: failed to append transcript: %v\n", err)
+		} else {
+			fmt.Println(color.GreenString("✓") + " Appended session transcript.")
+		}
+	}
+
 	// Notify grove-hooks if this is an interactive agent job
 	if job.Type == orchestration.JobTypeInteractiveAgent {
 		// Use the completion hook to mark the job as completed in grove-hooks
