@@ -166,22 +166,10 @@ fi
 				flow, _ := getFlowBinary()
 				jobFile := filepath.Join(ctx.RootDir, "plans", "debug-plan", "01-debug-launch.md")
 				
+				cmd := ctx.Command(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
 				// Set environment variables
-				envVars := []string{
-					"GROVE_FLOW_SKIP_DOCKER_CHECK=true",
-					"GROVE_DEBUG=1",  // Enable debug logging
-				}
-				
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					envVars = append(envVars, fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
-				
-				cmd := command.New(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
-				for _, env := range envVars {
-					cmd.Env(env)
-				}
+				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
+				cmd.Env("GROVE_DEBUG=1")  // Enable debug logging
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -292,9 +280,8 @@ exit 0
 				flow, _ := getFlowBinary()
 				jobFile := filepath.Join(ctx.RootDir, "plans", "error-plan", "01-error-test.md")
 				
-				cmd := command.New(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
-				cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, os.Getenv("PATH")))
 				
 				result := cmd.Run()
 				
@@ -415,9 +402,8 @@ exit 0
 				flow, _ := getFlowBinary()
 				jobFile := filepath.Join(ctx.RootDir, "plans", "docker-fail", "01-docker-fail-test.md")
 				
-				cmd := command.New(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
-				cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, os.Getenv("PATH")))
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -500,9 +486,8 @@ exit 0
 				flow, _ := getFlowBinary()
 				jobFile := filepath.Join(ctx.RootDir, "plans", "no-container", "01-no-container-test.md")
 				
-				cmd := command.New(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
 				// Don't skip docker check - we want to test the pre-flight check
-				cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, os.Getenv("PATH")))
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -613,10 +598,9 @@ exit 0
 				jobFile := filepath.Join(ctx.RootDir, "plans", "silent-fail", "01-silent-fail-test.md")
 				
 				// Enable debug mode
-				cmd := command.New(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
 				cmd.Env("GROVE_DEBUG=1")
-				cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, os.Getenv("PATH")))
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,16 @@ var hookWaitGroup sync.WaitGroup
 // WaitForHooks waits for all pending hook operations to complete
 func WaitForHooks() {
 	hookWaitGroup.Wait()
+}
+
+// GetHooksBinaryPath returns the path to the grove-hooks executable.
+// It checks for the GROVE_HOOKS_BINARY environment variable first,
+// and falls back to "grove-hooks" if not set.
+func GetHooksBinaryPath() string {
+	if override := os.Getenv("GROVE_HOOKS_BINARY"); override != "" {
+		return override
+	}
+	return "grove-hooks"
 }
 
 // OneshotHookInput defines the JSON payload for starting a job
@@ -47,7 +58,7 @@ func callGroveHook(subcommand string, payload interface{}) {
 // callGroveHookWithSync calls grove-hooks with optional synchronous execution
 func callGroveHookWithSync(subcommand string, payload interface{}, synchronous bool) {
 	// Check if grove-hooks is available
-	_, err := exec.LookPath("grove-hooks")
+	_, err := exec.LookPath(GetHooksBinaryPath())
 	if err != nil {
 		// grove-hooks not installed, silently skip
 		return
@@ -61,7 +72,7 @@ func callGroveHookWithSync(subcommand string, payload interface{}, synchronous b
 	}
 
 	executeHook := func() {
-		cmd := exec.Command("grove-hooks", "oneshot", subcommand)
+		cmd := exec.Command(GetHooksBinaryPath(), "oneshot", subcommand)
 		cmd.Stdin = bytes.NewReader(data)
 		
 		// Run with timeout to prevent hanging
@@ -193,12 +204,12 @@ type GroveHooksSessionStatus struct {
 // queryGroveHooksStatus queries grove-hooks for the status of a job/session
 func queryGroveHooksStatus(jobID string) (*GroveHooksSessionStatus, error) {
 	// Check if grove-hooks is available
-	_, err := exec.LookPath("grove-hooks")
+	_, err := exec.LookPath(GetHooksBinaryPath())
 	if err != nil {
 		return nil, fmt.Errorf("grove-hooks not available")
 	}
 
-	cmd := exec.Command("grove-hooks", "sessions", "get", jobID, "--json")
+	cmd := exec.Command(GetHooksBinaryPath(), "sessions", "get", jobID, "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		// If command failed, it might mean the session doesn't exist yet

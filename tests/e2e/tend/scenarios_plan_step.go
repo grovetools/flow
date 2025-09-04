@@ -3,7 +3,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -26,7 +25,7 @@ func PlanStepCommandScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Create grove.yml config
 				groveConfig := `name: test-project
 flow:
@@ -38,13 +37,13 @@ flow:
 			}),
 			harness.NewStep("Initialize plan and create job chain", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Initialize plan
 				cmd := command.New(flow, "plan", "init", "step-plan").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
-				
+
 				// Create a three-job linear dependency chain
 				// Job 1: Shell job (no dependencies)
 				cmd = command.New(flow, "plan", "add", "step-plan",
@@ -54,7 +53,7 @@ flow:
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to add job 1: %w", err)
 				}
-				
+
 				// Job 2: Oneshot job (depends on job 1)
 				cmd = command.New(flow, "plan", "add", "step-plan",
 					"--title", "Analyze Code",
@@ -64,7 +63,7 @@ flow:
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to add job 2: %w", err)
 				}
-				
+
 				// Job 3: Agent job (depends on job 2)
 				cmd = command.New(flow, "plan", "add", "step-plan",
 					"--title", "Implement Feature",
@@ -74,36 +73,29 @@ flow:
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to add job 3: %w", err)
 				}
-				
+
 				return nil
 			}),
 			setupTestEnvironment(),
 			harness.NewStep("Run first step (Run shell job)", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Run flow plan step and send "R" to run the first job, then "Q" to quit
-				cmd := command.New(flow, "plan", "step", "step-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "step", "step-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("R\nQ\n"))
-				
-				// Add test bin directory to PATH if it exists
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
-				
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return result.Error
 				}
-				
+
 				// Verify output shows the job was run
 				if !strings.Contains(result.Stdout, "Running job:") {
 					return fmt.Errorf("output should indicate job is being run")
 				}
-				
+
 				// Verify the first job is now completed
 				jobPath := filepath.Join(ctx.RootDir, "plans", "step-plan", "01-setup-environment.md")
 				content, err := fs.ReadString(jobPath)
@@ -113,35 +105,28 @@ flow:
 				if !strings.Contains(content, "status: completed") {
 					return fmt.Errorf("first job should be marked as completed")
 				}
-				
+
 				return nil
 			}),
 			harness.NewStep("Skip second job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Run flow plan step and send "S" to skip the second job, then "Q" to quit
-				cmd := command.New(flow, "plan", "step", "step-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "step", "step-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("S\nQ\n"))
-				
-				// Add test bin directory to PATH if it exists
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
-				
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return result.Error
 				}
-				
+
 				// Verify output shows the job was skipped
 				if !strings.Contains(result.Stdout, "Skipping job:") {
 					return fmt.Errorf("output should indicate job is being skipped")
 				}
-				
+
 				// Verify the second job is now completed (skipped jobs are marked as completed)
 				jobPath := filepath.Join(ctx.RootDir, "plans", "step-plan", "02-analyze-code.md")
 				content, err := fs.ReadString(jobPath)
@@ -151,33 +136,33 @@ flow:
 				if !strings.Contains(content, "status: completed") {
 					return fmt.Errorf("skipped job should be marked as completed")
 				}
-				
+
 				return nil
 			}),
 			harness.NewStep("Verify third job is ready", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Run flow plan step and send "Q" to quit
-				cmd := command.New(flow, "plan", "step", "step-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "step", "step-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("Q\n"))
-				
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return result.Error
 				}
-				
+
 				// Verify the third job is listed as runnable
 				if !strings.Contains(result.Stdout, "Implement Feature") {
 					return fmt.Errorf("third job should be listed as runnable")
 				}
-				
+
 				// Verify it shows as agent type
 				if !strings.Contains(result.Stdout, "agent") {
 					return fmt.Errorf("third job should show as agent type")
 				}
-				
+
 				return nil
 			}),
 		},

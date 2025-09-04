@@ -145,20 +145,9 @@ go 1.21
 					return fmt.Errorf("job file not found at %s: %w", jobFile, err)
 				}
 				
-				cmd := command.New(flow, "plan", "launch", "--host", jobFile).Dir(moduleDir)
+				cmd := ctx.Command(flow, "plan", "launch", "--host", jobFile).Dir(moduleDir)
 				// Set environment variables for testing
-				envVars := []string{"GROVE_FLOW_SKIP_DOCKER_CHECK=true"}
-				
-				// Add test bin directory to PATH if it exists
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					envVars = append(envVars, fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
-				
-				for _, env := range envVars {
-					cmd.Env(env)
-				}
+				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {

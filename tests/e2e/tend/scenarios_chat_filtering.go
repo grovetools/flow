@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -36,21 +35,10 @@ flow:
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				
-				// Setup mock LLM
-				mockDir := filepath.Join(ctx.RootDir, "mocks")
-				fs.CreateDir(mockDir)
-				mockLLMScript := `#!/bin/bash
-# Mock LLM that marks chats as completed
-echo "Test response from mock LLM"
-`
-				mockPath := filepath.Join(mockDir, "llm")
-				fs.WriteString(mockPath, mockLLMScript)
-				os.Chmod(mockPath, 0755)
-				
-				// Store the mock directory for later use
-				ctx.Set("test_bin_dir", mockDir)
-				
 				return nil
+			}),
+			setupTestEnvironment(map[string]interface{}{
+				"mockLLMResponse": "Test response from mock LLM",
 			}),
 			
 			harness.NewStep("Create and initialize chat1 - runnable", func(ctx *harness.Context) error {
@@ -145,8 +133,7 @@ echo "Test response from mock LLM"
 				flow, _ := getFlowBinary()
 				
 				// Run without arguments - should process all pending_user chats
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "run").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -195,8 +182,7 @@ echo "Test response from mock LLM"
 				flow, _ := getFlowBinary()
 				
 				// Run with specific titles (using filenames which become the titles)
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run", "chat1", "chat4").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "run", "chat1", "chat4").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

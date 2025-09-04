@@ -131,9 +131,9 @@ func (wm *WorktreeManager) CreateWorktree(name string, baseBranch string) (strin
 	}
 
 	// Check if grove-hooks is available and install hooks in the worktree
-	if _, err := exec.LookPath("grove-hooks"); err == nil {
+	if _, err := exec.LookPath(GetHooksBinaryPath()); err == nil {
 		// Change to worktree directory and run grove-hooks install
-		cmd := exec.Command("grove-hooks", "install")
+		cmd := exec.Command(GetHooksBinaryPath(), "install")
 		cmd.Dir = worktreePath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			wm.logger.Debug("grove-hooks install failed", "error", err, "output", string(output))

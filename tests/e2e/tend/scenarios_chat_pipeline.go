@@ -81,8 +81,10 @@ esac
 				fs.WriteString(mockPath, mockLLMScript)
 				os.Chmod(mockPath, 0755)
 				
-				// Store the mock directory for later use
-				ctx.Set("test_bin_dir", mockDir)
+				// Add mock directory to PATH for commands run in this context
+				// Since harness.Context doesn't have AddToPath, we need to set it directly
+				currentPath := os.Getenv("PATH")
+				os.Setenv("PATH", mockDir + ":" + currentPath)
 				
 				return nil
 			}),
@@ -111,8 +113,7 @@ User: I want to build a test application.
 			harness.NewStep("Run chat for first LLM response", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run", "Pipeline Test Chat").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "run", "Pipeline Test Chat").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -158,8 +159,7 @@ User: I want to build a test application.
 			harness.NewStep("Run chat for second LLM response", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run", "Pipeline Test Chat").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "run", "Pipeline Test Chat").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

@@ -165,12 +165,7 @@ echo "Task completed successfully."
 			harness.NewStep("Check plan status", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				binDir := ctx.GetString("test_bin_dir")
-				cmd := command.New(flow, "plan", "status", "simple-plan").Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd := ctx.Command(flow, "plan", "status", "simple-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -195,18 +190,13 @@ echo "Task completed successfully."
 			
 			harness.NewStep("Try to run job with unmet dependencies", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				binDir := ctx.GetString("test_bin_dir")
 				
 				// Try to run job 3 (should fail)
 				// First set the active plan
-				setCmd := command.New(flow, "plan", "set", "simple-plan").Dir(ctx.RootDir)
+				setCmd := ctx.Command(flow, "plan", "set", "simple-plan").Dir(ctx.RootDir)
 				setCmd.Run()
 				
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md")).Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md")).Dir(ctx.RootDir)
 				result := cmd.Run()
 				
 				// This should fail
@@ -224,18 +214,13 @@ echo "Task completed successfully."
 			
 			harness.NewStep("Run jobs in correct order", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				binDir := ctx.GetString("test_bin_dir")
 				
 				// Set active plan
-				setCmd := command.New(flow, "plan", "set", "simple-plan").Dir(ctx.RootDir)
+				setCmd := ctx.Command(flow, "plan", "set", "simple-plan").Dir(ctx.RootDir)
 				setCmd.Run()
 				
 				// Run job 1
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "simple-plan", "01-setup-environment.md")).Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "01-setup-environment.md")).Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -244,11 +229,7 @@ echo "Task completed successfully."
 				}
 				
 				// Run job 2
-				cmd = command.New(flow, "plan", "run", filepath.Join("plans", "simple-plan", "02-install-dependencies.md")).Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd = ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "02-install-dependencies.md")).Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -257,11 +238,7 @@ echo "Task completed successfully."
 				}
 				
 				// Now job 3 should succeed
-				cmd = command.New(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md")).Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd = ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md")).Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -275,12 +252,7 @@ echo "Task completed successfully."
 			harness.NewStep("Verify all jobs completed", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				binDir := ctx.GetString("test_bin_dir")
-				cmd := command.New(flow, "plan", "status", "simple-plan").Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd := ctx.Command(flow, "plan", "status", "simple-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

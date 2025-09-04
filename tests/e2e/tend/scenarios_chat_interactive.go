@@ -73,10 +73,9 @@ flow:
 			// Test 1: Run the chat job
 			harness.NewStep("Test running chat job with 'r' option", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
 				
 				// Run plan and send "y" to confirm, then "r" to run the chat
-				cmd := cmdFunc(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("y\nr\n"))
 				
 				result := cmd.Run()
@@ -105,7 +104,6 @@ flow:
 			// Test 2: Mark chat as complete
 			harness.NewStep("Test completing chat job with 'c' option", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
 				
 				// Reset chat status to pending
 				chatFile := filepath.Join(ctx.RootDir, "plans", "multi-job-plan", "01-design-discussion.md")
@@ -114,7 +112,7 @@ flow:
 				fs.WriteString(chatFile, content)
 				
 				// Run plan and send "y" to confirm, then "c" to complete
-				cmd := cmdFunc(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("y\nc\n"))
 				
 				result := cmd.Run()
@@ -141,7 +139,6 @@ flow:
 			// Test 3: Edit and re-prompt behavior
 			harness.NewStep("Test edit option loops back to prompt", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
 				
 				// Reset chat to pending
 				chatFile := filepath.Join(ctx.RootDir, "plans", "multi-job-plan", "01-design-discussion.md")
@@ -160,7 +157,7 @@ echo "User added this line" >> "$1"
 				
 				// Run plan with mock editor
 				// Send: y (confirm), e (edit), r (run after edit)
-				cmd := cmdFunc(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("y\ne\nr\n"))
 				cmd.Env(fmt.Sprintf("EDITOR=%s", mockEditorPath))
 				
@@ -193,7 +190,6 @@ echo "User added this line" >> "$1"
 			// Test 4: Invalid input handling
 			harness.NewStep("Test invalid input handling", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
 				
 				// Reset chat to pending
 				chatFile := filepath.Join(ctx.RootDir, "plans", "multi-job-plan", "01-design-discussion.md")
@@ -202,7 +198,7 @@ echo "User added this line" >> "$1"
 				fs.WriteString(chatFile, content)
 				
 				// Send invalid input first, then valid
-				cmd := cmdFunc(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "multi-job-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("y\nx\nc\n")) // x is invalid, then c to complete
 				
 				result := cmd.Run()

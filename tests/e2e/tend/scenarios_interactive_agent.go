@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,7 +27,7 @@ func InteractiveAgentBasicScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Write grove.yml with required config
 				configContent := `name: test-project
 flow:
@@ -36,81 +35,68 @@ flow:
   target_agent_container: test-container
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
-				
+
 				return nil
 			}),
-			
+
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				cmd := command.New(flow, "plan", "init", "interactive-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("plan init failed: %v", result.Error)
 				}
-				
+
 				return nil
 			}),
-			
+
 			harness.NewStep("Add interactive agent job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				cmd := command.New(flow, "plan", "add", "interactive-test",
 					"--title", "Interactive Development",
 					"--type", "interactive_agent",
 					"-p", "Please implement a fizzbuzz function",
 				).Dir(ctx.RootDir)
-				
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("failed to add interactive agent job: %v", result.Error)
 				}
-				
+
 				// Verify job file was created
 				jobFile := filepath.Join(ctx.RootDir, "plans", "interactive-test", "01-interactive-development.md")
 				if !fs.Exists(jobFile) {
 					return fmt.Errorf("job file should exist: %s", jobFile)
 				}
-				
+
 				// Verify job type
 				content, _ := fs.ReadString(jobFile)
 				if !strings.Contains(content, "type: interactive_agent") {
 					return fmt.Errorf("job should have type: interactive_agent")
 				}
-				
+
 				return nil
 			}),
-			
+
 			setupTestEnvironmentWithInteractiveTmux(),
-			
+
 			harness.NewStep("Run plan with interactive job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
-				cmd := command.New(flow, "plan", "run", "--all", "-y", "interactive-test").Dir(ctx.RootDir)
-				
+
+				cmd := ctx.Command(flow, "plan", "run", "--all", "-y", "interactive-test").Dir(ctx.RootDir)
+
 				// Set environment variables for testing
-				envVars := []string{
-					"GROVE_FLOW_SKIP_DOCKER_CHECK=true",
-				}
-				
-				// Add test bin directory to PATH
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					envVars = append(envVars, fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
-				
-				for _, env := range envVars {
-					cmd.Env(env)
-				}
-				
+				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// The test should handle the docker check issue gracefully
 				// Since we're testing with mocked environment, we expect it to fail due to docker issues
 				// but the important part is that the job type is recognized and processed
@@ -132,7 +118,7 @@ flow:
 					}
 					// The test passes if we get a docker-related error, showing the job type is properly recognized
 				}
-				
+
 				return nil
 			}),
 		},
@@ -153,7 +139,7 @@ func InteractiveAgentSkipScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Write grove.yml
 				configContent := `name: test-project
 flow:
@@ -161,20 +147,20 @@ flow:
   target_agent_container: test-container
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
-				
+
 				return nil
 			}),
-			
+
 			harness.NewStep("Create plan with mixed job types", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Initialize plan
 				cmd := command.New(flow, "plan", "init", "mixed-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("plan init failed: %v", result.Error)
 				}
-				
+
 				// Add shell job
 				cmd = command.New(flow, "plan", "add", "mixed-plan",
 					"--title", "Setup",
@@ -185,7 +171,7 @@ flow:
 				if result.Error != nil {
 					return fmt.Errorf("failed to add shell job: %v", result.Error)
 				}
-				
+
 				// Add interactive agent job
 				cmd = command.New(flow, "plan", "add", "mixed-plan",
 					"--title", "Interactive Work",
@@ -197,7 +183,7 @@ flow:
 				if result.Error != nil {
 					return fmt.Errorf("failed to add interactive job: %v", result.Error)
 				}
-				
+
 				// Add another shell job
 				cmd = command.New(flow, "plan", "add", "mixed-plan",
 					"--title", "Cleanup",
@@ -209,52 +195,47 @@ flow:
 				if result.Error != nil {
 					return fmt.Errorf("failed to add cleanup job: %v", result.Error)
 				}
-				
+
 				return nil
 			}),
-			
+
 			setupTestEnvironment(),
-			
+
 			harness.NewStep("Run plan with --skip-interactive", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
-				cmd := command.New(flow, "plan", "run", "--all", "--skip-interactive", "mixed-plan").Dir(ctx.RootDir)
-				
+
+				cmd := ctx.Command(flow, "plan", "run", "--all", "--skip-interactive", "mixed-plan").Dir(ctx.RootDir)
+
 				// Set environment variables
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
-				
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// Should fail due to skipped interactive job
 				if result.Error == nil {
 					return fmt.Errorf("expected plan run to fail due to skipped interactive job")
 				}
-				
+
 				// Verify error mentions skipping
 				if !strings.Contains(result.Stderr, "skip-interactive") {
 					return fmt.Errorf("error should mention skip-interactive flag")
 				}
-				
+
 				return nil
 			}),
-			
+
 			harness.NewStep("Verify job statuses", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				cmd := command.New(flow, "plan", "status", "mixed-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("plan status failed: %v", result.Error)
 				}
-				
+
 				// Check the status summary shows correct counts
 				if !strings.Contains(result.Stdout, "✓ Completed: 1") {
 					return fmt.Errorf("should show 1 completed job")
@@ -265,7 +246,7 @@ flow:
 				if !strings.Contains(result.Stdout, "⏳ Pending: 1") {
 					return fmt.Errorf("should show 1 pending job")
 				}
-				
+
 				// Verify specific job statuses in the tree
 				if !strings.Contains(result.Stdout, "✓ 01-setup.md") {
 					return fmt.Errorf("first job (setup) should be completed")
@@ -276,7 +257,7 @@ flow:
 				if !strings.Contains(result.Stdout, "⏳ 03-cleanup.md") {
 					return fmt.Errorf("cleanup job should be pending")
 				}
-				
+
 				return nil
 			}),
 		},
@@ -297,7 +278,7 @@ func InteractiveAgentWorkflowScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "FizzBuzz Project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Write grove.yml
 				configContent := `name: fizzbuzz-project
 flow:
@@ -309,7 +290,7 @@ llm:
   model: test
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
-				
+
 				// Create spec file
 				specContent := `# FizzBuzz Specification
 
@@ -319,20 +300,20 @@ Write a program that prints the numbers from 1 to 100.
 - For numbers which are multiples of both three and five, print "FizzBuzz"
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "fizzbuzz-spec.md"), specContent)
-				
+
 				return nil
 			}),
-			
+
 			harness.NewStep("Create workflow plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Initialize plan
 				cmd := command.New(flow, "plan", "init", "fizzbuzz-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("plan init failed: %v", result.Error)
 				}
-				
+
 				// Add interactive implementation step
 				cmd = command.New(flow, "plan", "add", "fizzbuzz-plan",
 					"--title", "Implement FizzBuzz",
@@ -343,7 +324,7 @@ Write a program that prints the numbers from 1 to 100.
 				if result.Error != nil {
 					return fmt.Errorf("failed to add implementation job: %v", result.Error)
 				}
-				
+
 				// Add automated review step
 				cmd = command.New(flow, "plan", "add", "fizzbuzz-plan",
 					"--title", "Review Implementation",
@@ -355,28 +336,23 @@ Write a program that prints the numbers from 1 to 100.
 				if result.Error != nil {
 					return fmt.Errorf("failed to add review job: %v", result.Error)
 				}
-				
+
 				return nil
 			}),
-			
+
 			setupTestEnvironmentWithWorkflow(),
-			
+
 			harness.NewStep("Run complete workflow", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
-				cmd := command.New(flow, "plan", "run", "--all", "-y", "fizzbuzz-plan").Dir(ctx.RootDir)
-				
+
+				cmd := ctx.Command(flow, "plan", "run", "--all", "-y", "fizzbuzz-plan").Dir(ctx.RootDir)
+
 				// Set environment variables
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
-				
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// In test environment, jobs might fail due to docker/container issues
 				// Just verify the orchestration ran
 				if result.Error != nil {
@@ -391,23 +367,23 @@ Write a program that prints the numbers from 1 to 100.
 						return fmt.Errorf("should launch interactive session")
 					}
 				}
-				
+
 				return nil
 			}),
-			
+
 			harness.NewStep("Verify final status", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				cmd := command.New(flow, "plan", "status", "fizzbuzz-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				// In test environment, we might have failures due to docker issues
 				// Just verify the plan has the expected number of jobs
 				if !strings.Contains(result.Stdout, "Jobs: 2 total") {
 					return fmt.Errorf("expected 2 total jobs")
 				}
-				
+
 				return nil
 			}),
 		},
@@ -525,28 +501,28 @@ func InteractiveAgentPollingWorkflowScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project for polling workflow")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Write grove.yml
 				configContent := `name: polling-test-project
 flow:
   plans_directory: ./plans
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
-				
+
 				return nil
 			}),
-			
+
 			// Step 2: Setup plan with interactive -> shell dependency
 			harness.NewStep("Setup plan with interactive -> shell dependency", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Initialize plan
 				cmd := command.New(flow, "plan", "init", "polling-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("plan init failed: %v", result.Error)
 				}
-				
+
 				// Add interactive job
 				cmd = command.New(flow, "plan", "add", "polling-plan",
 					"--title", "Interactive Step",
@@ -558,7 +534,7 @@ flow:
 				if result.Error != nil {
 					return fmt.Errorf("failed to add interactive job: %v", result.Error)
 				}
-				
+
 				// Add dependent shell job
 				cmd = command.New(flow, "plan", "add", "polling-plan",
 					"--title", "Automated Verification",
@@ -570,10 +546,10 @@ flow:
 				if result.Error != nil {
 					return fmt.Errorf("failed to add shell job: %v", result.Error)
 				}
-				
+
 				return nil
 			}),
-			
+
 			// Step 3: Setup the enhanced, stateful mocks
 			setupTestEnvironmentWithOptions(map[string]interface{}{
 				"statefulGroveHooks": true,
@@ -603,29 +579,27 @@ exit 0
 `,
 				},
 			}),
-			
+
 			// Step 4: Run the plan in background and verify it starts the interactive job
 			harness.NewStep("Run plan in background and verify polling starts", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Run plan with all jobs (don't use -y as it skips interactive jobs)
-				cmd := command.New(flow, "plan", "run", "polling-plan", "--all").Dir(ctx.RootDir)
-				
+				cmd := ctx.Command(flow, "plan", "run", "polling-plan", "--all").Dir(ctx.RootDir)
+
 				// Set environment variables
-				binDir := ctx.GetString("test_bin_dir")
-				cmd.Env("PATH=" + binDir + ":" + os.Getenv("PATH"))
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
-				
+
 				// Start the plan run in background using tend's new Start() method
 				process, err := cmd.Start()
 				if err != nil {
 					return fmt.Errorf("failed to start plan run: %v", err)
 				}
 				ctx.Set("polling_process", process)
-				
+
 				// Give it a moment to launch the interactive job
 				time.Sleep(2 * time.Second)
-				
+
 				// Check the process output for the launch message
 				stdout := process.Stdout()
 				if !strings.Contains(stdout, "Interactive") || !strings.Contains(stdout, "launched") {
@@ -633,20 +607,20 @@ exit 0
 					time.Sleep(1 * time.Second)
 					stdout = process.Stdout()
 				}
-				
+
 				if !strings.Contains(stdout, "flow plan complete") {
 					return fmt.Errorf("expected launch message with complete instructions not found in process output: %s", stdout)
 				}
-				
+
 				// Process should still be running, polling for completion
 				ctx.ShowCommandOutput("Note", "Orchestrator process is polling for job completion", "")
-				
+
 				// Verify grove-hooks was called with start
 				stateFiles, _ := filepath.Glob("/tmp/grove-hooks-mock-state/*.json")
 				if len(stateFiles) == 0 {
 					return fmt.Errorf("no grove-hooks state files found")
 				}
-				
+
 				// Read the state file
 				var foundRunning bool
 				for _, stateFile := range stateFiles {
@@ -665,52 +639,48 @@ exit 0
 						}
 						break
 					} else {
-						ctx.ShowCommandOutput("No match", fmt.Sprintf("File: %s, has status:running: %v, has Interactive Step: %v", 
-							stateFile, 
+						ctx.ShowCommandOutput("No match", fmt.Sprintf("File: %s, has status:running: %v, has Interactive Step: %v",
+							stateFile,
 							strings.Contains(content, `"status":"running"`),
 							strings.Contains(content, "Interactive Step")), "")
 					}
 				}
-				
+
 				if !foundRunning {
 					return fmt.Errorf("interactive job not marked as running in grove-hooks state")
 				}
-				
+
 				return nil
 			}),
-			
+
 			// Step 5: Run flow plan complete to signal task completion
 			harness.NewStep("Run 'flow plan complete' to signal task completion", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				jobFile := ctx.GetString("interactive_job_file")
 				if jobFile == "" {
 					return fmt.Errorf("interactive job file not found in context")
 				}
-				
-				cmd := command.New(flow, "plan", "complete", jobFile).Dir(ctx.RootDir)
-				
-				// Set environment variables
-				binDir := ctx.GetString("test_bin_dir")
-				cmd.Env("PATH=" + binDir + ":" + os.Getenv("PATH"))
-				
+
+				cmd := ctx.Command(flow, "plan", "complete", jobFile).Dir(ctx.RootDir)
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("flow plan complete failed: %v", result.Error)
 				}
-				
+
 				// Verify the command updated the job file
 				jobContent, err := fs.ReadString(filepath.Join(ctx.RootDir, jobFile))
 				if err != nil {
 					return fmt.Errorf("failed to read job file: %v", err)
 				}
-				
+
 				if !strings.Contains(jobContent, "status: completed") {
 					return fmt.Errorf("job file not updated to completed status")
 				}
-				
+
 				// Verify grove-hooks was notified
 				jobID := ctx.GetString("job_id")
 				if jobID != "" {
@@ -720,50 +690,50 @@ exit 0
 						ctx.ShowCommandOutput("Status Update", "Grove-hooks state updated to completed", "")
 					}
 				}
-				
+
 				return nil
 			}),
-			
+
 			// Step 6: Wait for the background process to complete
 			harness.NewStep("Wait for orchestrator to run the dependent job", func(ctx *harness.Context) error {
 				processInt := ctx.Get("polling_process")
 				if processInt == nil {
 					return fmt.Errorf("polling process not found in context")
 				}
-				
+
 				process, ok := processInt.(*command.Process)
 				if !ok {
 					return fmt.Errorf("polling_process is not of type *command.Process")
 				}
-				
+
 				// Wait for the background process to complete (with timeout)
 				result := process.Wait(30 * time.Second)
 				ctx.ShowCommandOutput("flow plan run (background)", result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("polling process failed: %v", result.Error)
 				}
-				
+
 				// Check that the verification step ran
 				if !strings.Contains(result.Stdout, "Verification step ran successfully!") {
 					return fmt.Errorf("dependent shell job did not run after interactive job was completed")
 				}
-				
+
 				// Check that orchestration completed
 				if !strings.Contains(result.Stdout, "Orchestration completed successfully") {
 					return fmt.Errorf("orchestration did not complete successfully")
 				}
-				
+
 				// Check final plan status
 				flow, _ := getFlowBinary()
 				statusCmd := command.New(flow, "plan", "status", "polling-plan").Dir(ctx.RootDir)
 				statusResult := statusCmd.Run()
 				ctx.ShowCommandOutput(statusCmd.String(), statusResult.Stdout, statusResult.Stderr)
-				
+
 				if !strings.Contains(statusResult.Stdout, "Completed") && !strings.Contains(statusResult.Stdout, "2/2") {
 					return fmt.Errorf("final plan status should show all jobs completed")
 				}
-				
+
 				return nil
 			}),
 		},

@@ -68,15 +68,12 @@ This is a test job.
 					return fmt.Errorf("failed to find flow binary: %w", err)
 				}
 
-				// Get command function with test bin
-				cmdFunc := getCommandWithTestBin(ctx)
-
 				// Set environment for mock LLM
 				os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
 				defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 				// Need to run with -y to skip plan confirmation prompt
-				cmd := cmdFunc(flow, "plan", "run", "-y", "test-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "-y", "test-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("p\n")) // Choose 'proceed' when prompted about missing rules
 				
 				// Disable tmux session switching by unsetting TERM
@@ -160,15 +157,12 @@ This is a test job.
 					return fmt.Errorf("failed to find flow binary: %w", err)
 				}
 
-				// Get command function with test bin
-				cmdFunc := getCommandWithTestBin(ctx)
-
 				// Set environment for mock LLM (even though we'll cancel)
 				os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
 				defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 				// Don't use -y flag since we want to test cancellation
-				cmd := cmdFunc(flow, "plan", "run", "test-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "test-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("n\n")) // Choose 'no' to cancel
 				
 				// Disable tmux session switching by unsetting TERM
@@ -264,15 +258,12 @@ fi
 					return fmt.Errorf("failed to find flow binary: %w", err)
 				}
 
-				// Get command function with test bin
-				cmdFunc := getCommandWithTestBin(ctx)
-
 				// Set environment for mock LLM
 				os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
 				defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 				// Don't use -y flag since we want to test the edit option
-				cmd := cmdFunc(flow, "plan", "run", "test-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "test-plan").Dir(ctx.RootDir)
 				cmd.Stdin(strings.NewReader("e\n")) // Choose 'edit'
 				
 				// Disable tmux session switching by unsetting TERM

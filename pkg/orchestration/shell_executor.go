@@ -145,8 +145,8 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Check if grove-hooks is available and install hooks in the worktree
-	if _, err := exec.LookPath("grove-hooks"); err == nil {
-		cmd := exec.Command("grove-hooks", "install")
+	if _, err := exec.LookPath(GetHooksBinaryPath()); err == nil {
+		cmd := exec.Command(GetHooksBinaryPath(), "install")
 		cmd.Dir = worktreePath
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))

@@ -80,6 +80,7 @@ Implement feature B in a different worktree.
 				
 				return nil
 			}),
+			setupTestEnvironment(),
 			harness.NewStep("Run job A to create worktree with state", func(ctx *harness.Context) error {
 				flow, err := getFlowBinary()
 				if err != nil {
@@ -306,6 +307,7 @@ Refactor the main.go file to improve structure.
 
 				return nil
 			}),
+			setupTestEnvironment(),
 			harness.NewStep("Simulate worktree creation by interactive agent", func(ctx *harness.Context) error {
 				// Manually create the worktree structure as if interactive agent created it
 				// This simulates what would happen when the interactive agent job runs

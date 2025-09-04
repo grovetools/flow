@@ -71,8 +71,7 @@ flow:
 				flow, _ := getFlowBinary()
 				// Run the chat file directly using flow plan run
 				chatPath := filepath.Join(ctx.RootDir, "chats", "my-idea.md")
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "plan", "run", chatPath, "--yes", "--model", "mock").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", chatPath, "--yes", "--model", "mock").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -126,8 +125,7 @@ flow:
 			harness.NewStep("Launch the chat", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				chatFile := filepath.Join(ctx.RootDir, "dev-task.md")
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "launch", chatFile).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "launch", chatFile).Dir(ctx.RootDir)
 				// Set environment variables for testing
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
 				result := cmd.Run()

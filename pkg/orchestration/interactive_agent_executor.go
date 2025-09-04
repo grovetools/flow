@@ -403,8 +403,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 				workDir = worktreePath
 				
 				// Check if grove-hooks is available and install hooks in the new worktree
-				if _, err := osexec.LookPath("grove-hooks"); err == nil {
-					cmd := osexec.Command("grove-hooks", "install")
+				if _, err := osexec.LookPath(GetHooksBinaryPath()); err == nil {
+					cmd := osexec.Command(GetHooksBinaryPath(), "install")
 					cmd.Dir = worktreePath
 					if output, err := cmd.CombinedOutput(); err != nil {
 						fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))

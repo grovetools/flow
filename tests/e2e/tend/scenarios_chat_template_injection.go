@@ -97,8 +97,7 @@ User: Please help me with a test task.
 			harness.NewStep("Run chat and verify template injection", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run", "Test Chat Without Template").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "run", "Test Chat Without Template").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -139,8 +138,7 @@ User: Please help me with a test task.
 				
 				// Run chat again
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
-				cmd := cmdFunc(flow, "chat", "run", "Test Chat Without Template").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "run", "Test Chat Without Template").Dir(ctx.RootDir)
 				result := cmd.Run()
 				
 				if result.Error != nil {

@@ -131,20 +131,14 @@ Check for proper error handling and clear function names.`
 			
 			harness.NewStep("Add job with source file references", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				binDir := ctx.GetString("test_bin_dir")
 				
 				// Add job that references source files
-				cmd := command.New(flow, "plan", "add", "code-review",
+				cmd := ctx.Command(flow, "plan", "add", "code-review",
 					"--title", "Review Main Code",
 					"--type", "oneshot",
 					"--prompt-file", "prompts/review-main.txt",
 					"--source-files", "src/main.go,src/utils.go",
 				).Dir(ctx.RootDir)
-				
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -177,10 +171,9 @@ Check for proper error handling and clear function names.`
 			
 			harness.NewStep("Run job and capture output", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				binDir := ctx.GetString("test_bin_dir")
 				
 				// Set active plan
-				setCmd := command.New(flow, "plan", "set", "code-review").Dir(ctx.RootDir)
+				setCmd := ctx.Command(flow, "plan", "set", "code-review").Dir(ctx.RootDir)
 				setCmd.Run()
 				
 				// Get job filename
@@ -190,11 +183,7 @@ Check for proper error handling and clear function names.`
 				}
 				
 				// Run the job
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "code-review", jobFile)).Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "code-review", jobFile)).Dir(ctx.RootDir)
 				cmd.Env("GROVE_DEBUG=1") // Enable debug logging
 				
 				result := cmd.Run()
@@ -305,20 +294,14 @@ Check for proper error handling and clear function names.`
 			
 			harness.NewStep("Add second job with single source file", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				binDir := ctx.GetString("test_bin_dir")
 				
 				// Add job that references only utils
-				cmd := command.New(flow, "plan", "add", "code-review", 
+				cmd := ctx.Command(flow, "plan", "add", "code-review", 
 					"--title", "Review Utils Only",
 					"--type", "oneshot",
 					"--prompt-file", "prompts/review-utils.txt",
 					"--source-files", "src/utils.go",
 				).Dir(ctx.RootDir)
-				
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -332,13 +315,8 @@ Check for proper error handling and clear function names.`
 			
 			harness.NewStep("Verify plan status shows both jobs", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				binDir := ctx.GetString("test_bin_dir")
 				
-				cmd := command.New(flow, "plan", "status", "code-review").Dir(ctx.RootDir)
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					cmd.Env(fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
+				cmd := ctx.Command(flow, "plan", "status", "code-review").Dir(ctx.RootDir)
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)

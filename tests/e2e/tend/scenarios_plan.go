@@ -3,7 +3,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -27,7 +26,7 @@ func BasicPlanLifecycleScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
 flow:
@@ -66,7 +65,7 @@ flow:
 				if !fs.Exists(jobFile) {
 					return fmt.Errorf("job file '01-create-file.md' should exist")
 				}
-				
+
 				// Remove worktree from job file to avoid worktree directory requirement
 				content, _ := fs.ReadString(jobFile)
 				lines := strings.Split(content, "\n")
@@ -77,7 +76,7 @@ flow:
 					}
 				}
 				fs.WriteString(jobFile, strings.Join(newLines, "\n"))
-				
+
 				return nil
 			}),
 			harness.NewStep("Add second shell job with dependency", func(ctx *harness.Context) error {
@@ -89,13 +88,13 @@ flow:
 				if result.Error != nil {
 					return result.Error
 				}
-				
+
 				// Remove worktree from job file to avoid worktree directory requirement
 				jobFile := filepath.Join(ctx.RootDir, "plans", "my-plan", "02-copy-file-using-shell.md")
 				content, _ := fs.ReadString(jobFile)
 				content = strings.ReplaceAll(content, "worktree: my-plan\n", "")
 				fs.WriteString(jobFile, content)
-				
+
 				return nil
 			}),
 			harness.NewStep("Run the first shell job", func(ctx *harness.Context) error {
@@ -174,14 +173,14 @@ func PlanActiveJobScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
 flow:
   plans_directory: ./plans
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
-				
+
 				flow, _ := getFlowBinary()
 				cmd := command.New(flow, "plan", "init", "active-plan-test").Dir(ctx.RootDir)
 				return cmd.Run().Error
@@ -261,11 +260,11 @@ func AgentJobLaunchScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				// Plans are in ./plans/agent-plan as configured
 				planPath := filepath.Join(ctx.RootDir, "plans", "agent-plan")
-				
+
 				// Add the agent job with a worktree for launch
-				cmdAdd := command.New(flow, "plan", "add", planPath, 
-					"--title", "Refactor Code", 
-					"--type", "agent", 
+				cmdAdd := command.New(flow, "plan", "add", planPath,
+					"--title", "Refactor Code",
+					"--type", "agent",
 					"--worktree", "refactor-code",
 					"-p", "Refactor everything.").Dir(ctx.RootDir)
 				resultAdd := cmdAdd.Run()
@@ -277,21 +276,10 @@ func AgentJobLaunchScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				// Plans are in ./plans/agent-plan as configured
 				jobFile := filepath.Join(ctx.RootDir, "plans", "agent-plan", "01-refactor-code.md")
-				
-				cmd := command.New(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
+
+				cmd := ctx.Command(flow, "plan", "launch", jobFile).Dir(ctx.RootDir)
 				// Set environment variables for testing
-				envVars := []string{"GROVE_FLOW_SKIP_DOCKER_CHECK=true"}
-				
-				// Add test bin directory to PATH if it exists
-				binDir := ctx.GetString("test_bin_dir")
-				if binDir != "" {
-					currentPath := os.Getenv("PATH")
-					envVars = append(envVars, fmt.Sprintf("PATH=%s:%s", binDir, currentPath))
-				}
-				
-				for _, env := range envVars {
-					cmd.Env(env)
-				}
+				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -303,13 +291,13 @@ func AgentJobLaunchScenario() *harness.Scenario {
 				if result.Error != nil {
 					return fmt.Errorf("git worktree list failed: %w", result.Error)
 				}
-				
+
 				// Just check if the worktree exists in git, regardless of exact path
 				// The worktree might be named after the plan or the job
 				if strings.Contains(result.Stdout, "refactor-code") || strings.Contains(result.Stdout, "agent-plan") {
 					return nil // Success - worktree was created
 				}
-				
+
 				return fmt.Errorf("worktree not found in git worktree list")
 			}),
 		},
@@ -329,14 +317,14 @@ func PlanGraphScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
 flow:
   plans_directory: ./plans
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
-				
+
 				flow, _ := getFlowBinary()
 				command.New(flow, "plan", "init", "graph-plan").Dir(ctx.RootDir).Run()
 				// Add three shell jobs to test dependency graph visualization
@@ -365,6 +353,7 @@ flow:
 		},
 	}
 }
+
 // PlanWorktreeInheritanceScenario tests smart worktree inheritance feature
 func PlanWorktreeInheritanceScenario() *harness.Scenario {
 	return &harness.Scenario{
@@ -378,7 +367,7 @@ func PlanWorktreeInheritanceScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
 flow:
@@ -400,16 +389,16 @@ flow:
 			harness.NewStep("Add first agent job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Add the agent job - it should get worktree=inheritance-plan by default
-				cmd := command.New(flow, "plan", "add", "inheritance-plan", 
-					"--title", "Implement API", 
-					"--type", "agent", 
+				cmd := command.New(flow, "plan", "add", "inheritance-plan",
+					"--title", "Implement API",
+					"--type", "agent",
 					"-p", "Implement the API").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
 					return result.Error
 				}
-				
+
 				// Verify the job has the default worktree
 				jobPath := filepath.Join(ctx.RootDir, "plans", "inheritance-plan", "01-implement-api.md")
 				content, err := fs.ReadString(jobPath)
@@ -424,8 +413,8 @@ flow:
 			harness.NewStep("Add dependent job without specifying worktree", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Add dependent job - it should inherit worktree from dependency
-				cmd := command.New(flow, "plan", "add", "inheritance-plan", 
-					"--title", "Review API", 
+				cmd := command.New(flow, "plan", "add", "inheritance-plan",
+					"--title", "Review API",
 					"--type", "oneshot",
 					"--depends-on", "01-implement-api.md",
 					"-p", "Review the API code").Dir(ctx.RootDir)
@@ -434,7 +423,7 @@ flow:
 				if result.Error != nil {
 					return result.Error
 				}
-				
+
 				// Verify the job inherited the worktree
 				jobPath := filepath.Join(ctx.RootDir, "plans", "inheritance-plan", "02-review-api.md")
 				content, err := fs.ReadString(jobPath)
