@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
@@ -240,6 +241,120 @@ echo "Created a calculator function with basic operations and error handling for
 				// The important thing is that summarization still works based on the job content
 
 				if !strings.Contains(content, "summary: Created a calculator function with basic operations and error handling for division by zero.") {
+					return fmt.Errorf("job frontmatter does not contain the expected summary:\n%s", content)
+				}
+
+				return nil
+			}),
+		},
+	}
+}
+
+// OneshotJobSummaryScenario tests that oneshot jobs get summarized when they complete automatically.
+func OneshotJobSummaryScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "flow-oneshot-job-summary",
+		Description: "Tests that oneshot jobs are summarized when they complete via orchestrator",
+		Tags:        []string{"plan", "run", "summary", "oneshot"},
+		Steps: []harness.Step{
+			harness.NewStep("Setup project with summarization enabled", func(ctx *harness.Context) error {
+				// Setup git repo
+				git.Init(ctx.RootDir)
+				git.SetupTestConfig(ctx.RootDir)
+
+				// Create grove.yml with summarization enabled
+				configContent := `name: test-project
+flow:
+  plans_directory: ./plans
+  summarize_on_complete: true
+  summary_model: mock-summarizer
+  oneshot_model: mock-llm
+  summary_max_chars: 100
+`
+				if err := fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent); err != nil {
+					return err
+				}
+
+				// Initialize plan
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "init", "oneshot-summary-test").Dir(ctx.RootDir)
+				if err := cmd.Run().Error; err != nil {
+					return fmt.Errorf("failed to init plan: %w", err)
+				}
+
+				// Add a oneshot job
+				jobContent := `---
+id: oneshot-calculation
+title: Calculate Sum
+status: pending
+type: oneshot
+---
+
+# Task
+
+Calculate the sum of 15 and 27.
+`
+				planDir := filepath.Join(ctx.RootDir, "plans", "oneshot-summary-test")
+				if err := fs.WriteString(filepath.Join(planDir, "01-calculate.md"), jobContent); err != nil {
+					return err
+				}
+
+				return nil
+			}),
+			setupTestEnvironment(map[string]interface{}{
+				"additionalMocks": map[string]string{
+					"llm": `#!/bin/bash
+# Mock LLM - if called with model "mock-summarizer", generate summary
+# Otherwise, generate oneshot output
+if [[ "$@" == *"mock-summarizer"* ]]; then
+    echo "Calculated the sum of 15 and 27, which equals 42."
+else
+    echo "## Output"
+    echo ""
+    echo "15 + 27 = 42"
+    echo ""
+    echo "The sum of 15 and 27 is 42."
+fi
+`,
+				},
+			}),
+			harness.NewStep("Run the oneshot job", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmdFunc := getCommandWithTestBin(ctx)
+
+				cmd := cmdFunc(flow, "plan", "run", "--next", "--yes", "plans/oneshot-summary-test").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+				if result.Error != nil {
+					return fmt.Errorf("'flow plan run' failed: %w", result.Error)
+				}
+
+				// Give some time for async summarization to complete
+				time.Sleep(5 * time.Second)
+
+				return nil
+			}),
+			harness.NewStep("Verify job file has output and summary", func(ctx *harness.Context) error {
+				jobPath := filepath.Join(ctx.RootDir, "plans", "oneshot-summary-test", "01-calculate.md")
+				content, err := fs.ReadString(jobPath)
+				if err != nil {
+					return fmt.Errorf("failed to read job file: %w", err)
+				}
+
+				if !strings.Contains(content, "status: completed") {
+					return fmt.Errorf("job status was not updated to 'completed'")
+				}
+
+				if !strings.Contains(content, "## Output") {
+					return fmt.Errorf("job output was not appended")
+				}
+
+				if !strings.Contains(content, "15 + 27 = 42") {
+					return fmt.Errorf("expected calculation result not found in output")
+				}
+
+				if !strings.Contains(content, "summary: Calculated the sum of 15 and 27, which equals 42.") {
 					return fmt.Errorf("job frontmatter does not contain the expected summary:\n%s", content)
 				}
 

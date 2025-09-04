@@ -24,6 +24,7 @@ type statusTUIModel struct {
 	cursor        int
 	selected      map[string]bool // For multi-select
 	multiSelect   bool
+	showSummaries bool   // Toggle for showing job summaries
 	showHelp      bool   // Show extended help
 	statusSummary string
 	err           error
@@ -46,6 +47,7 @@ type keyMap struct {
 	Run           string
 	SetCompleted  string
 	AddJob        string
+	ToggleSummaries string
 	Quit          string
 	Help          string
 }
@@ -62,6 +64,7 @@ var keys = keyMap{
 	Run:          "r",
 	SetCompleted: "c",
 	AddJob:       "n",
+	ToggleSummaries: "s",
 	Quit:         "q",
 	Help:         "?",
 }
@@ -351,6 +354,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, addJobWithDependencies(m.plan.Directory, nil)
 			}
 		
+		case keys.ToggleSummaries:
+			m.showSummaries = !m.showSummaries
+		
 		case keys.Help:
 			m.showHelp = !m.showHelp
 		}
@@ -495,6 +501,16 @@ func (m statusTUIModel) renderJobTree() string {
 		// Combine all parts
 		fullLine := treePart + styledJobContent + styledDepAnnotation + indicators
 		
+		// Add summary on a new line if toggled on and available
+		if m.showSummaries && job.Summary != "" {
+			summaryStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")). // A muted color
+				Italic(true).
+				PaddingLeft(indent*4 + 6) // indent level * 4 spaces + tree chars + space
+			
+			fullLine += "\n" + summaryStyle.Render("↳ "+job.Summary)
+		}
+		
 		s.WriteString(fullLine + "\n")
 		rendered[job.ID] = true
 	}
@@ -578,6 +594,7 @@ func (m statusTUIModel) renderHelp() string {
 			keyStyle.Render("r") + " - Run job(s)",
 			keyStyle.Render("e") + " - Edit job file",
 			keyStyle.Render("c") + " - Mark completed",
+			keyStyle.Render("s") + " - Toggle summaries",
 			keyStyle.Render("a") + " - Archive job",
 			keyStyle.Render("n") + " - Add new job",
 			"",
@@ -602,6 +619,7 @@ func (m statusTUIModel) renderHelp() string {
 			"Symbols:",
 			"  ◀ - Current item",
 			"  ◆ - Selected item",
+			"  ↳ - Job summary",
 			"",
 			"Other:",
 			"  ⚠️ - Multiple dependencies",
@@ -623,7 +641,7 @@ func (m statusTUIModel) renderHelp() string {
 	
 	// Minimal help - just show navigation and help key
 	help := []string{
-		"j/k: up/down • ?: help • q: quit",
+		"j/k: up/down • r: run • c: complete • s: summaries • ?: help • q: quit",
 	}
 	
 	return helpStyle.Render(strings.Join(help, "\n"))

@@ -217,6 +217,16 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		MaxConsecutiveSteps: maxSteps,
 		SkipInteractive:     planRunSkipInteractive || planRunYes, // --yes implies skip interactive
 	}
+	
+	// Add summary configuration if enabled
+	if flowCfg.SummarizeOnComplete {
+		orchConfig.SummaryConfig = &orchestration.SummaryConfig{
+			Enabled:  true,
+			Model:    flowCfg.SummaryModel,
+			Prompt:   flowCfg.SummaryPrompt,
+			MaxChars: flowCfg.SummaryMaxChars,
+		}
+	}
 
 	// Check if we need Docker (only for agent and interactive_agent jobs)
 	var dockerClient docker.Client
