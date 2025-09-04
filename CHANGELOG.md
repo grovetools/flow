@@ -1,3 +1,23 @@
+## v0.2.16 (2025-09-04)
+
+### Tests
+
+* migrate E2E tests from inline script mocks to compiled Go binaries
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+* **deps:** sync Grove dependencies to latest versions
+
+### Bug Fixes
+
+* ensure oneshot jobs are summarized on completion
+
+### Features
+
+* add TUI support for displaying job summaries
+* add job summarization on completion
+
 ## v0.2.15 (2025-09-02)
 
 ### Features
