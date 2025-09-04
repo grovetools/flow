@@ -109,8 +109,8 @@ github.com/mattsolo1/grove-core v0.2.12 h1:vRJS+yeJBRUNErkh66mSbuaBbS4r53tTTdvV6
 github.com/mattsolo1/grove-core v0.2.12/go.mod h1:jCZmYXEo3os2MXGH79K7c5xDtuM+/GooNyD96twXMgM=
 github.com/mattsolo1/grove-gemini v0.0.9 h1:IVSmxNPQKAAYHwwZSfwXLWdNn3zVBNZh95FrQn0gSVw=
 github.com/mattsolo1/grove-gemini v0.0.9/go.mod h1:z9Xc7s61l/CUREsX702v+BWjRdADj2n9YswOthJ8QHA=
-github.com/mattsolo1/grove-tend v0.2.16 h1:ofyRDqwFtEOk0Rz0mml95bGiJ32Q0JZpUbIkZ0FNhSM=
-github.com/mattsolo1/grove-tend v0.2.16/go.mod h1:tCZN/J3lip+tsk1gHDobCqZ9kKdWzOwuC0fZzgpVF8U=
+github.com/mattsolo1/grove-tend v0.2.17 h1:9igRji0LoGi+RPqOFLi4HNKRYMcucgFJVn7xkoLQEmw=
+github.com/mattsolo1/grove-tend v0.2.17/go.mod h1:tCZN/J3lip+tsk1gHDobCqZ9kKdWzOwuC0fZzgpVF8U=
 github.com/mattsolo1/grove-tmux v0.0.12 h1:l7z11oTPSt03lU6Jk9/fMdQf5ZMTAg3CWUSDMYW6IGQ=
 github.com/mattsolo1/grove-tmux v0.0.12/go.mod h1:bHi5yoUbyG/ZMrDeYyN4qtIhm1eeQGeWnfWB1BUvF4A=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
