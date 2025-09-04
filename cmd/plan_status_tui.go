@@ -504,8 +504,7 @@ func (m statusTUIModel) renderJobTree() string {
 		// Add summary on a new line if toggled on and available
 		if m.showSummaries && job.Summary != "" {
 			summaryStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244")). // A muted color
-				Italic(true).
+				Foreground(lipgloss.Color("111")). // Soft blue
 				PaddingLeft(indent*4 + 6) // indent level * 4 spaces + tree chars + space
 			
 			fullLine += "\n" + summaryStyle.Render("↳ "+job.Summary)

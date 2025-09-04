@@ -449,8 +449,8 @@ func (o *Orchestrator) UpdateJobStatus(job *Job, status JobStatus) error {
 		"from", oldStatus,
 		"to", status)
 	
-	// If job completed and summarization is enabled, generate summary
-	if status == JobStatusCompleted && o.config.SummaryConfig != nil && o.config.SummaryConfig.Enabled {
+	// If job is being marked as completed and summarization is enabled, generate summary
+	if status == JobStatusCompleted && oldStatus != JobStatusCompleted && o.config.SummaryConfig != nil && o.config.SummaryConfig.Enabled {
 		// Note: Running summarization in a goroutine to avoid blocking the orchestrator
 		go func() {
 			o.logger.Info("Generating job summary", "job", job.ID)
