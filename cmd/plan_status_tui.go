@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -690,6 +691,29 @@ func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan) tea.Cmd {
 			if err := orchestration.AppendInteractiveTranscript(job, plan); err != nil {
 				// Return the error to be displayed by the TUI
 				return err
+			}
+		}
+		
+		// Summarize the job content if enabled
+		flowCfg, err := loadFlowConfig()
+		if err != nil {
+			// Don't fail the whole operation, just return the error to be displayed
+			return fmt.Errorf("could not load flow config for summarization: %w", err)
+		}
+		
+		if flowCfg.SummarizeOnComplete {
+			summaryCfg := orchestration.SummaryConfig{
+				Enabled:  flowCfg.SummarizeOnComplete,
+				Model:    flowCfg.SummaryModel,
+				Prompt:   flowCfg.SummaryPrompt,
+				MaxChars: flowCfg.SummaryMaxChars,
+			}
+			
+			summary, err := orchestration.SummarizeJobContent(context.Background(), job, plan, summaryCfg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to generate summary: %v\n", err)
+			} else if summary != "" {
+				_ = orchestration.AddSummaryToJobFile(job, summary) // Ignore error in TUI for now
 			}
 		}
 		

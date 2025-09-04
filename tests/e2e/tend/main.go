@@ -27,10 +27,12 @@ func main() {
 		GoWorkspaceWorktreeScenario(),     // Tests go.work file creation in worktrees
 		StatusTUIScenario(),               // Tests enhanced status command with TUI flag
 		// PlanInitImprovementsScenario(), // Tests plan init improvements: empty plan listing, --with-worktree, oneshot_model default
-		PlanFinishScenario(),         // Tests interactive plan cleanup workflow
-		PlanFinishFlagsScenario(),    // Tests flag-based plan cleanup
-		PlanFinishDevLinksScenario(), // Tests dev links cleanup functionality
-		PlanRecipesScenario(),        // Tests the new recipes feature
+		PlanFinishScenario(),                 // Tests interactive plan cleanup workflow
+		PlanFinishFlagsScenario(),            // Tests flag-based plan cleanup
+		PlanFinishDevLinksScenario(),         // Tests dev links cleanup functionality
+		PlanRecipesScenario(),                // Tests the new recipes feature
+		JobSummaryScenario(),                 // Tests job summarization on completion
+		InteractiveAgentJobSummaryScenario(), // Tests interactive_agent job summarization with transcripts
 
 		// Chat Scenarios
 		// BasicChatWorkflowScenario(), // Temporarily disabled - hanging issue

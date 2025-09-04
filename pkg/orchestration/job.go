@@ -59,6 +59,7 @@ type Job struct {
 	OnCompleteStatus     string       `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty"`
 	CreatedAt            time.Time    `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	UpdatedAt            time.Time    `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+	Summary              string       `yaml:"summary,omitempty" json:"summary,omitempty"`
 
 	// Derived fields
 	Filename     string      `json:"filename,omitempty"`     // The markdown filename

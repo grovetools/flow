@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
@@ -79,6 +80,33 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Warning: failed to append transcript: %v\n", err)
 		} else {
 			fmt.Println(color.GreenString("✓") + " Appended session transcript.")
+		}
+	}
+
+	// Summarize the job content if enabled
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		// Don't fail the command, just log a warning
+		fmt.Printf("Warning: could not load flow config for summarization: %v\n", err)
+	} else if flowCfg.SummarizeOnComplete {
+		summaryCfg := orchestration.SummaryConfig{
+			Enabled:  flowCfg.SummarizeOnComplete,
+			Model:    flowCfg.SummaryModel,
+			Prompt:   flowCfg.SummaryPrompt,
+			MaxChars: flowCfg.SummaryMaxChars,
+		}
+
+		fmt.Println("Generating job summary...")
+		summary, err := orchestration.SummarizeJobContent(context.Background(), job, plan, summaryCfg)
+		if err != nil {
+			fmt.Printf("Warning: failed to generate job summary: %v\n", err)
+		} else if summary != "" {
+			// Add summary to frontmatter
+			if err := orchestration.AddSummaryToJobFile(job, summary); err != nil {
+				fmt.Printf("Warning: failed to add summary to job file: %v\n", err)
+			} else {
+				fmt.Println(color.GreenString("✓") + " Added summary to job frontmatter.")
+			}
 		}
 	}
 

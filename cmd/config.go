@@ -12,6 +12,10 @@ type FlowConfig struct {
 	TargetAgentContainer string `yaml:"target_agent_container"`
 	PlansDirectory       string `yaml:"plans_directory"`
 	MaxConsecutiveSteps  int    `yaml:"max_consecutive_steps"`
+	SummarizeOnComplete  bool   `yaml:"summarize_on_complete"`
+	SummaryModel         string `yaml:"summary_model"`
+	SummaryPrompt        string `yaml:"summary_prompt"`
+	SummaryMaxChars      int    `yaml:"summary_max_chars"`
 }
 
 // loadFlowConfig loads the core grove config and unmarshals the 'flow' extension.
