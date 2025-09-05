@@ -242,10 +242,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			WorkDir:          workDir,
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 			APIKey:           apiKey, // Pass the resolved API key
-			// Don't pass context files - Gemini runner finds them automatically
+			// Pass context for better logging
+			Caller:   "grove-flow-oneshot",
+			JobID:    job.ID,
+			PlanName: plan.Name,
 		}
-		// Note: Job ID and Plan name are not passed here as they would need to be propagated through
-		// the gemini.RequestRunner interface, which is beyond the scope of this change
 		response, err = e.geminiRunner.Run(ctx, opts)
 	} else {
 		// Use traditional llm command for other models
@@ -1404,7 +1405,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			PromptFiles:      []string{}, // Don't include the chat file as it's already in the prompt
 			WorkDir:          worktreePath,
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
-			// Don't pass context files - Gemini runner finds them automatically
+			// Pass context for better logging
+			Caller:   "grove-flow-chat",
+			JobID:    job.ID,
+			PlanName: plan.Name,
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
 		if err != nil {
