@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -39,7 +38,7 @@ flow:
 
 				// Initialize plan
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "summary-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "summary-test").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -77,10 +76,9 @@ echo "This is a concise mock summary."
 			}),
 			harness.NewStep("Run 'flow plan complete' on the job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
 				jobPath := filepath.Join("plans", "summary-test", "01-job-to-summarize.md")
 
-				cmd := cmdFunc(flow, "plan", "complete", jobPath).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "complete", jobPath).Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -142,7 +140,7 @@ flow:
 
 				// Initialize plan
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "agent-summary-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "agent-summary-test").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -184,7 +182,7 @@ User: Great! Can you add error handling?
 Assistant: I've added error handling to prevent division by zero and handle unknown operations.`
 
 				// Create logs directory structure using shell commands
-				cmd = command.New("mkdir", "-p", ".logs/plans/agent-summary-test/jobs/interactive-agent-job/interactive_sessions").Dir(ctx.RootDir)
+				cmd = ctx.Command("mkdir", "-p", ".logs/plans/agent-summary-test/jobs/interactive-agent-job/interactive_sessions").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to create logs directory: %w", err)
 				}
@@ -207,10 +205,9 @@ echo "Created a calculator function with basic operations and error handling for
 			}),
 			harness.NewStep("Run 'flow plan complete' on the interactive_agent job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
 				jobPath := filepath.Join("plans", "agent-summary-test", "01-interactive-agent.md")
 
-				cmd := cmdFunc(flow, "plan", "complete", jobPath).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "complete", jobPath).Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -277,7 +274,7 @@ flow:
 
 				// Initialize plan
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "oneshot-summary-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "oneshot-summary-test").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -320,9 +317,8 @@ fi
 			}),
 			harness.NewStep("Run the oneshot job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmdFunc := getCommandWithTestBin(ctx)
 
-				cmd := cmdFunc(flow, "plan", "run", "--next", "--yes", "plans/oneshot-summary-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", "--next", "--yes", "plans/oneshot-summary-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 

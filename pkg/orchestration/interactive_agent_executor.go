@@ -11,21 +11,18 @@ import (
 
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-tmux/pkg/tmux"
 )
 
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
 type InteractiveAgentExecutor struct {
-	dockerClient    docker.Client
 	skipInteractive bool
 }
 
 // NewInteractiveAgentExecutor creates a new interactive agent executor.
-func NewInteractiveAgentExecutor(dockerClient docker.Client, skipInteractive bool) *InteractiveAgentExecutor {
+func NewInteractiveAgentExecutor(skipInteractive bool) *InteractiveAgentExecutor {
 	return &InteractiveAgentExecutor{
-		dockerClient:    dockerClient,
 		skipInteractive: skipInteractive,
 	}
 }
@@ -44,204 +41,10 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		return fmt.Errorf("interactive agent job skipped due to --skip-interactive flag")
 	}
 
-	// Get the container from job or plan orchestration config
-	container := job.TargetAgentContainer
-	if container == "" && plan.Orchestration != nil {
-		container = plan.Orchestration.TargetAgentContainer
-	}
-	
-	// Determine execution mode based on container presence
-	if container != "" {
-		// Container is specified, run in sandboxed mode
-		return e.executeContainerMode(ctx, job, plan, container)
-	} else {
-		// No container specified, run in host mode
-		return e.executeHostMode(ctx, job, plan)
-	}
+	// Always run in host mode - no container dependencies
+	return e.executeHostMode(ctx, job, plan)
 }
 
-// executeContainerMode runs the job in a Docker container with tmux
-func (e *InteractiveAgentExecutor) executeContainerMode(ctx context.Context, job *Job, plan *Plan, container string) error {
-	// Update job status to running
-	job.Status = JobStatusRunning
-	job.StartTime = time.Now()
-	if err := updateJobFile(job); err != nil {
-		return fmt.Errorf("updating job status: %w", err)
-	}
-
-	// Notify grove-hooks about job start
-	notifyJobStart(job, plan)
-
-	// Ensure we notify completion/failure when we exit
-	var execErr error
-	defer func() {
-		notifyJobComplete(job, execErr)
-	}()
-
-
-	// Verify container is running (skip if dockerClient is nil for testing)
-	skipDockerCheck := os.Getenv("GROVE_FLOW_SKIP_DOCKER_CHECK") == "true"
-	if e.dockerClient != nil && !skipDockerCheck && !e.dockerClient.IsContainerRunning(ctx, container) {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("container '%s' is not running", container)
-	}
-
-	// Prepare worktree
-	var worktreePath string
-	if job.Worktree != "" {
-		wm := git.NewWorktreeManager()
-		gitRoot, err := GetGitRootSafe(plan.Directory)
-		if err != nil {
-			gitRoot = plan.Directory
-		}
-
-		worktreePath, err = wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
-		if err != nil {
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("failed to prepare worktree: %w", err)
-		}
-
-
-		// Set up Go workspace if this is a Go project
-		if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
-			// Log a warning but don't fail the job, as this is a convenience feature
-			fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
-		}
-
-		// Automatically initialize state within the new worktree for a better UX.
-		groveDir := filepath.Join(worktreePath, ".grove")
-		if err := os.MkdirAll(groveDir, 0755); err != nil {
-			// Log a warning but don't fail the job, as this is a convenience feature.
-			fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
-		} else {
-			planName := filepath.Base(plan.Directory)
-			stateContent := fmt.Sprintf("active_plan: %s\n", planName)
-			statePath := filepath.Join(groveDir, "state.yml")
-			// This is a best-effort attempt; failure should not stop the job.
-			_ = os.WriteFile(statePath, []byte(stateContent), 0644)
-		}
-
-		// Note: Canopy hooks configuration is handled in the cmd package
-		// Skip it here to avoid dependency issues
-	} else {
-		// No worktree specified, use git root or plan directory
-		var err error
-		worktreePath, err = GetGitRootSafe(plan.Directory)
-		if err != nil {
-			worktreePath = plan.Directory
-		}
-	}
-
-	// Load full config to get agent args (same as plan_launch)
-	fullCfg, err := config.LoadFrom(".")
-	if err != nil {
-		// Proceed with minimal config
-		fullCfg = &config.Config{}
-	}
-	
-	// Build agent command
-	agentCommand, err := e.buildAgentCommand(job, plan, worktreePath, fullCfg.Agent.Args)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to build agent command: %w", err)
-	}
-
-	// Create tmux client
-	tmuxClient, err := tmux.NewClient()
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("tmux not available: %w", err)
-	}
-
-	// Generate session name
-	sessionName := e.generateSessionName(plan, job)
-
-	// Get git root to calculate relative path
-	gitRoot, err := GetGitRootSafe(plan.Directory)
-	if err != nil {
-		gitRoot = plan.Directory
-	}
-	
-	// Get repo name from git root
-	repoName := filepath.Base(gitRoot)
-	
-	// Calculate container work directory (same logic as plan_launch)
-	relPath, err := filepath.Rel(gitRoot, worktreePath)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to calculate relative path: %w", err)
-	}
-	
-	var containerWorkDir string
-	if fullCfg.Agent.MountWorkspaceAtHostPath {
-		containerWorkDir = filepath.Join(gitRoot, relPath)
-	} else {
-		containerWorkDir = filepath.Join("/workspace", repoName, relPath)
-	}
-
-	// Create docker command for agent pane
-	dockerCmd := fmt.Sprintf("docker exec -it -w %s %s sh", containerWorkDir, container)
-
-	// Launch tmux session with two windows (matching plan_launch behavior)
-	// First create session with host window
-	opts := tmux.LaunchOptions{
-		SessionName:      sessionName,
-		WorkingDirectory: worktreePath,
-		WindowName:       "host",
-		Panes: []tmux.PaneOptions{
-			{
-				// Host shell in worktree (default shell, no command needed)
-			},
-		},
-	}
-
-	if err := tmuxClient.Launch(ctx, opts); err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to launch tmux session: %w", err)
-	}
-
-	// Create second window for agent
-	if err := tmuxClient.NewWindow(ctx, sessionName, "agent", dockerCmd); err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		// Clean up session on failure
-		_ = tmuxClient.KillSession(ctx, sessionName)
-		return fmt.Errorf("failed to create agent window: %w", err)
-	}
-
-	// Small delay to ensure window is ready
-	time.Sleep(300 * time.Millisecond)
-
-	// Send agent command to the agent window
-	if err := tmuxClient.SendKeys(ctx, sessionName+":agent", agentCommand, "C-m"); err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		// Clean up session on failure
-		_ = tmuxClient.KillSession(ctx, sessionName)
-		return fmt.Errorf("failed to send agent command: %w", err)
-	}
-
-	// Switch back to first window so user starts in host shell
-	_ = tmuxClient.SelectWindow(ctx, sessionName+":1")
-
-	// Print user instructions
-	fmt.Printf("🚀 Interactive session '%s' launched.\n", sessionName)
-	fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
-	fmt.Printf("\n👉 When your task is complete, run the following in any terminal:\n")
-	fmt.Printf("   flow plan complete %s\n", job.FilePath)
-	fmt.Printf("\n   The session can remain open - the plan will continue automatically.\n")
-
-	// Return immediately - the orchestrator will poll for completion
-	// Set execErr to nil to indicate successful launch
-	execErr = nil
-	return nil
-}
 
 // buildAgentCommand constructs the agent command for the interactive session.
 func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, worktreePath string, agentArgs []string) (string, error) {

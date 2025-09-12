@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -55,28 +54,7 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 		return fmt.Errorf("agent job must have a 'worktree' specified for interactive launch")
 	}
 
-	// Load configuration
-	flowCfg, err := loadFlowConfig()
-	if err != nil {
-		return err
-	}
-	container := flowCfg.TargetAgentContainer
-	if container == "" {
-		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
-	}
-
-	// Pre-flight check: verify container is running (unless skipped for testing)
 	ctx := context.Background()
-	if !shouldSkipDockerCheck() {
-		dockerClient, err := docker.NewSDKClient()
-		if err != nil {
-			return fmt.Errorf("failed to create docker client: %w", err)
-		}
-
-		if !dockerClient.IsContainerRunning(ctx, container) {
-			return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
-		}
-	}
 
 	// Load full config to get agent args
 	fullCfg, err := loadFullConfig()
@@ -133,25 +111,13 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 	sessionTitle := SanitizeForTmuxSession(job.Title)
 	params := LaunchParameters{
 		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
-		Container:        container,
 		HostWorktreePath: worktreePath,
 		AgentCommand:     agentCommand,
 	}
 
-	// Calculate container work directory
-	relPath, err := filepath.Rel(gitRoot, worktreePath)
-	if err != nil {
-		return fmt.Errorf("failed to calculate relative path: %w", err)
-	}
-	if fullCfg.Agent.MountWorkspaceAtHostPath {
-		params.ContainerWorkDir = filepath.Join(gitRoot, relPath)
-	} else {
-		params.ContainerWorkDir = filepath.Join("/workspace", repoName, relPath)
-	}
-
-	// Launch the session
+	// Launch the session in host mode
 	executor := &exec.RealCommandExecutor{}
-	return LaunchTmuxSession(executor, params)
+	return LaunchTmuxSessionHost(executor, params)
 }
 
 // buildAgentCommand constructs the shell-escaped agent command string
@@ -287,6 +253,11 @@ func LaunchTmuxSession(executor exec.CommandExecutor, params LaunchParameters) e
 	fmt.Printf("   Attach with: %s\n", color.CyanString("tmux attach -t %s", params.SessionName))
 
 	return nil
+}
+
+// LaunchTmuxSessionHost creates and configures the tmux session for host mode
+func LaunchTmuxSessionHost(executor exec.CommandExecutor, params LaunchParameters) error {
+	return LaunchTmuxSession(executor, params)
 }
 
 // runPlanLaunchHost launches a job in host mode (without container)

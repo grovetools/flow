@@ -11,7 +11,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
-	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
@@ -228,25 +227,8 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check if we need Docker (only for agent and interactive_agent jobs)
-	var dockerClient docker.Client
-	hasAgentJobs := false
-	for _, job := range plan.Jobs {
-		if job.Type == orchestration.JobTypeAgent || job.Type == orchestration.JobTypeInteractiveAgent {
-			hasAgentJobs = true
-			break
-		}
-	}
-
-	if hasAgentJobs && !shouldSkipDockerCheck() {
-		dockerClient, err = docker.NewSDKClient()
-		if err != nil {
-			return fmt.Errorf("failed to create Docker client: %w", err)
-		}
-	}
-
 	// Create orchestrator
-	orch, err := orchestration.NewOrchestrator(plan, orchConfig, dockerClient)
+	orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
 	}

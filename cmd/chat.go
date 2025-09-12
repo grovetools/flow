@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -517,11 +516,6 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		MaxConsecutiveSteps: 20,
 	}
 
-	// Create Docker client for the orchestrator
-	dockerClient, err := docker.NewSDKClient()
-	if err != nil {
-		return fmt.Errorf("failed to create Docker client: %w", err)
-	}
 
 	var executionErrors []error
 	for _, job := range runnableChats {
@@ -540,7 +534,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		}
 
 		// Create orchestrator
-		orch, err := orchestration.NewOrchestrator(plan, orchConfig, dockerClient)
+		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 		if err != nil {
 			errorMsg := fmt.Sprintf("✗ Error creating orchestrator for chat '%s': %v\n", job.Title, err)
 			fmt.Print(errorMsg)
@@ -651,28 +645,7 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to access chat file: %w", err)
 	}
 
-	// Load configuration
-	flowCfg, err := loadFlowConfig()
-	if err != nil {
-		return err
-	}
-	container := flowCfg.TargetAgentContainer
-	if container == "" {
-		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
-	}
-
-	// Pre-flight check: verify container is running (unless skipped for testing)
 	ctx := cmd.Context()
-	if !shouldSkipDockerCheck() {
-		dockerClient, err := docker.NewSDKClient()
-		if err != nil {
-			return fmt.Errorf("failed to create docker client: %w", err)
-		}
-
-		if !dockerClient.IsContainerRunning(ctx, container) {
-			return fmt.Errorf("container '%s' is not running. Did you run 'grove-proxy up'?", container)
-		}
-	}
 
 	// Load full config to get agent args
 	fullCfg, err := loadFullConfig()
@@ -742,25 +715,13 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 
 	params := LaunchParameters{
 		SessionName:      sessionName,
-		Container:        container,
 		HostWorktreePath: worktreePath,
 		AgentCommand:     agentCommand,
 	}
 
-	// Calculate container work directory
-	relPath, err := filepath.Rel(gitRoot, worktreePath)
-	if err != nil {
-		return fmt.Errorf("failed to calculate relative path: %w", err)
-	}
-	if fullCfg.Agent.MountWorkspaceAtHostPath {
-		params.ContainerWorkDir = filepath.Join(gitRoot, relPath)
-	} else {
-		params.ContainerWorkDir = filepath.Join("/workspace", repoName, relPath)
-	}
-
-	// Launch the session using the same logic as plan launch
+	// Launch the session in host mode
 	executor := &exec.RealCommandExecutor{}
-	return LaunchTmuxSession(executor, params)
+	return LaunchTmuxSessionHost(executor, params)
 }
 
 // deriveWorktreeName creates a valid worktree name from a file path or title

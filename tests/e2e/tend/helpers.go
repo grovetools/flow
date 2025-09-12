@@ -4,6 +4,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
@@ -60,6 +61,19 @@ func setupTestEnvironment(options ...map[string]interface{}) harness.Step {
 	mocks = append(mocks, harness.Mock{CommandName: "cx"})
 	mocks = append(mocks, harness.Mock{CommandName: "grove"})
 
+	// Handle additionalMocks by creating response files for mocks to read
+	if additionalMocks, ok := opts["additionalMocks"].(map[string]string); ok {
+		// For each mock script provided, we need to configure the existing mock binary
+		// to behave as specified. The llm mock reads from MOCK_LLM_RESPONSE env var.
+		if llmScript, ok := additionalMocks["llm"]; ok {
+			// Extract the response from the script (it's usually an echo statement)
+			// The script format is typically: #!/bin/bash\necho "response"
+			// We'll just set the whole script as the response for simplicity
+			// The actual mock will need to parse it appropriately
+			os.Setenv("MOCK_LLM_RESPONSE", llmScript)
+		}
+	}
+
 	// Use the framework's SetupMocks builder
 	setupStep := harness.SetupMocks(mocks...)
 	
@@ -74,6 +88,29 @@ func setupTestEnvironment(options ...map[string]interface{}) harness.Step {
 		// The harness creates mocks in a test_bin directory under the test root
 		mockPath := filepath.Join(ctx.RootDir, "test_bin", "grove-hooks")
 		os.Setenv("GROVE_HOOKS_BINARY", mockPath)
+		
+		// Handle additionalMocks that need special setup after mocks are in place
+		if additionalMocks, ok := opts["additionalMocks"].(map[string]string); ok {
+			// Write mock response files if needed
+			for cmdName, script := range additionalMocks {
+				if cmdName == "llm" {
+					// Parse the script to extract the actual response
+					// Scripts typically have format: #!/bin/bash\n# comment\necho "response"
+					lines := strings.Split(script, "\n")
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if strings.HasPrefix(line, "echo ") {
+							// Extract the response from the echo command
+							response := strings.TrimPrefix(line, "echo ")
+							// Remove quotes if present
+							response = strings.Trim(response, `"'`)
+							os.Setenv("MOCK_LLM_RESPONSE", response)
+							break
+						}
+					}
+				}
+			}
+		}
 		
 		return nil
 	})

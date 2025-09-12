@@ -11,7 +11,6 @@ import (
 
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/docker"
 	"github.com/mattsolo1/grove-core/git"
 )
 
@@ -26,17 +25,15 @@ type AgentExecutor struct {
 	config          *ExecutorConfig
 	worktreeManager *git.WorktreeManager
 	agentRunner     AgentRunner
-	dockerClient    docker.Client
 }
 
 // defaultAgentRunner implements AgentRunner using grove agent subprocess.
 type defaultAgentRunner struct {
-	config       *ExecutorConfig
-	dockerClient docker.Client
+	config *ExecutorConfig
 }
 
 // NewAgentExecutor creates a new agent executor.
-func NewAgentExecutor(llmClient LLMClient, config *ExecutorConfig, dockerClient docker.Client) *AgentExecutor {
+func NewAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *AgentExecutor {
 	if config == nil {
 		config = &ExecutorConfig{
 			MaxPromptLength: 1000000,
@@ -50,8 +47,7 @@ func NewAgentExecutor(llmClient LLMClient, config *ExecutorConfig, dockerClient 
 		llmClient:       llmClient,
 		config:          config,
 		worktreeManager: git.NewWorktreeManager(),
-		agentRunner:     &defaultAgentRunner{config: config, dockerClient: dockerClient},
-		dockerClient:    dockerClient,
+		agentRunner:     &defaultAgentRunner{config: config},
 	}
 }
 
@@ -152,19 +148,6 @@ func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	return nil
 }
 
-// getTargetContainer determines the target container for the job.
-func getTargetContainer(job *Job, plan *Plan) string {
-	if job.TargetAgentContainer != "" {
-		return job.TargetAgentContainer
-	}
-	if plan.Config != nil && plan.Config.TargetAgentContainer != "" {
-		return plan.Config.TargetAgentContainer
-	}
-	if plan.Orchestration != nil {
-		return plan.Orchestration.TargetAgentContainer
-	}
-	return ""
-}
 
 // prepareWorktree ensures the worktree exists and is ready.
 func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Plan) (string, error) {
@@ -244,116 +227,13 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 		fmt.Printf("Warning: could not load grove.yml for agent execution: %v\n", err)
 	}
 
-	// Get git root for targeted mode
-	// First try from the plan directory
-	var gitRoot string
-	if coreCfg.Agent.UseSuperprojectRoot {
-		gitRoot, err = git.GetSuperprojectRoot(plan.Directory)
-		if err != nil {
-			// If that fails (e.g., when using plans_directory), try from current working directory
-			cwd, _ := os.Getwd()
-			gitRoot, err = git.GetSuperprojectRoot(cwd)
-			if err != nil {
-				return fmt.Errorf("could not find superproject root from plan directory or current directory: %w", err)
-			}
-		}
-	} else {
-		gitRoot, err = git.GetGitRoot(plan.Directory)
-		if err != nil {
-			// If that fails (e.g., when using plans_directory), try from current working directory
-			cwd, _ := os.Getwd()
-			gitRoot, err = git.GetGitRoot(cwd)
-			if err != nil {
-				return fmt.Errorf("could not find git root from plan directory or current directory: %w", err)
-			}
-		}
-	}
+	// Git root is no longer needed since we removed container operations
 
-	targetContainer := getTargetContainer(job, plan)
-
-	// Determine execution mode based on container presence
-	if targetContainer != "" {
-		// Container mode - existing behavior
-		fmt.Fprintf(os.Stdout, "Running job in targeted agent container: %s\n", targetContainer)
-		return e.runInContainer(ctx, worktreePath, prompt, job, plan, targetContainer, log, coreCfg, gitRoot)
-	} else {
-		// Host mode - run directly on the host
-		fmt.Fprintf(os.Stdout, "Running job in host mode (no container)\n")
-		return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, coreCfg)
-	}
+	// Always run in host mode - no container dependencies
+	fmt.Fprintf(os.Stdout, "Running job in host mode\n")
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, coreCfg)
 }
 
-// runInContainer executes the agent in a Docker container
-func (e *AgentExecutor) runInContainer(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, targetContainer string, log *os.File, coreCfg *config.Config, gitRoot string) error {
-	// Get repo name from git root
-	repoName := filepath.Base(gitRoot)
-
-	// Convert host worktree path to container path
-	// The container mounts the git root at its host path.
-	relPath, err := filepath.Rel(gitRoot, worktreePath)
-	if err != nil {
-		return fmt.Errorf("failed to get relative worktree path: %w", err)
-	}
-
-	var containerWorkDir string
-	if coreCfg.Agent.MountWorkspaceAtHostPath {
-		// Path inside container matches host path
-		containerWorkDir = filepath.Join(gitRoot, relPath)
-	} else {
-		// Default behavior: path is under /workspace
-		containerWorkDir = fmt.Sprintf("/workspace/%s/%s", repoName, relPath)
-	}
-
-	// For non-interactive orchestration, we need to skip permission prompts
-	shellCommand := fmt.Sprintf("cd %s && claude --dangerously-skip-permissions", containerWorkDir)
-
-	// Execute the command using the Docker client
-	stdout, stderr, err := e.dockerClient.ExecInContainer(ctx, targetContainer, []string{"bash", "-c", shellCommand}, strings.NewReader(prompt))
-	if err != nil {
-		return fmt.Errorf("agent execution failed: %w", err)
-	}
-
-	// Write output to both log file and console
-	if stdout != "" {
-		fmt.Print(stdout)
-		if _, writeErr := log.WriteString(stdout); writeErr != nil {
-			fmt.Printf("Warning: failed to write stdout to log: %v\n", writeErr)
-		}
-	}
-
-	if stderr != "" {
-		fmt.Fprint(os.Stderr, stderr)
-		if _, writeErr := log.WriteString(stderr); writeErr != nil {
-			fmt.Printf("Warning: failed to write stderr to log: %v\n", writeErr)
-		}
-	}
-
-	// Handle output based on configuration
-	if job.Output.Type == "commit" && job.Output.Commit.Enabled {
-		// Create commit in worktree
-		commitCmd := exec.CommandContext(ctx, "git", "add", "-A")
-		commitCmd.Dir = worktreePath
-		if err := commitCmd.Run(); err != nil {
-			return fmt.Errorf("git add: %w", err)
-		}
-
-		commitMsg := job.Output.Commit.Message
-		if commitMsg == "" {
-			commitMsg = fmt.Sprintf("Agent execution for job %s", job.ID)
-		}
-
-		commitCmd = exec.CommandContext(ctx, "git", "commit", "-m", commitMsg)
-		commitCmd.Dir = worktreePath
-		if err := commitCmd.Run(); err != nil {
-			// No changes to commit is not an error
-			if !strings.Contains(err.Error(), "nothing to commit") {
-				return fmt.Errorf("git commit: %w", err)
-			}
-		}
-	}
-
-	return nil
-}
 
 // runOnHost executes the agent directly on the host machine
 func (e *AgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, coreCfg *config.Config) error {

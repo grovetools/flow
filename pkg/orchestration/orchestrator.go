@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-	
-	"github.com/mattsolo1/grove-core/docker"
 )
 
 // Logger defines the logging interface.
@@ -36,7 +34,6 @@ type Orchestrator struct {
 	config          *OrchestratorConfig
 	logger          Logger
 	stateManager    *StateManager
-	dockerClient    docker.Client
 	mu              sync.Mutex
 }
 
@@ -52,7 +49,7 @@ type PlanStatus struct {
 }
 
 // NewOrchestrator creates a new orchestrator instance.
-func NewOrchestrator(plan *Plan, config *OrchestratorConfig, dockerClient docker.Client) (*Orchestrator, error) {
+func NewOrchestrator(plan *Plan, config *OrchestratorConfig) (*Orchestrator, error) {
 	if config == nil {
 		config = &OrchestratorConfig{
 			MaxParallelJobs: 3,
@@ -77,7 +74,6 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig, dockerClient docker
 		config:          config,
 		logger:          NewDefaultLogger(),
 		stateManager:    stateManager,
-		dockerClient:    dockerClient,
 	}
 
 	// Register executors
@@ -93,32 +89,7 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig, dockerClient docker
 
 // ValidatePrerequisites ensures all requirements are met before running jobs.
 func (o *Orchestrator) ValidatePrerequisites() error {
-	// Check if we have any agent jobs that require a container
-	hasContainerAgentJobs := false
-	for _, job := range o.plan.Jobs {
-		if job.Type == JobTypeAgent || job.Type == JobTypeInteractiveAgent {
-			// Check if this specific job or the plan has a container specified
-			container := job.TargetAgentContainer
-			if container == "" && o.plan.Orchestration != nil {
-				container = o.plan.Orchestration.TargetAgentContainer
-			}
-			
-			// If a container is specified, we need to ensure it's configured properly
-			if container != "" {
-				hasContainerAgentJobs = true
-				break
-			}
-		}
-	}
-
-	// Only validate container configuration if we have jobs that actually need containers
-	if hasContainerAgentJobs {
-		if o.plan.Orchestration != nil && o.plan.Orchestration.TargetAgentContainer != "" {
-			o.logger.Info("Using target agent container", "container", o.plan.Orchestration.TargetAgentContainer)
-		}
-		// Note: Individual jobs may override the container, so we don't fail here
-	}
-
+	// Agent jobs now run directly on the host without Docker dependencies
 	return nil
 }
 
@@ -140,10 +111,10 @@ func (o *Orchestrator) registerExecutors() {
 	o.executors[JobTypeChat] = oneshotExecutor
 
 	// Register agent executor with mock LLM client
-	o.executors[JobTypeAgent] = NewAgentExecutor(NewMockLLMClient(), execConfig, o.dockerClient)
+	o.executors[JobTypeAgent] = NewAgentExecutor(NewMockLLMClient(), execConfig)
 
 	// Register interactive agent executor
-	o.executors[JobTypeInteractiveAgent] = NewInteractiveAgentExecutor(o.dockerClient, o.config.SkipInteractive)
+	o.executors[JobTypeInteractiveAgent] = NewInteractiveAgentExecutor(o.config.SkipInteractive)
 
 	// Register shell executor
 	o.executors[JobTypeShell] = NewShellExecutor()
