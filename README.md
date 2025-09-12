@@ -1,6 +1,6 @@
 # Grove Flow
 
-<img src="https://github.com/user-attachments/assets/6e8ccd29-e344-45d6-95fc-06ab2c930cea" height=500 />
+<img src="https://github.com/user-attachments/assets/6b0cc785-c87f-4a34-a1ac-f083b5f3f8ac" width="70%" />
 
 ### LLM job orchestration in Markdown
 
