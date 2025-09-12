@@ -52,7 +52,7 @@ func NewOneShotExecutor(config *ExecutorConfig) *OneShotExecutor {
 
 	if config == nil {
 		config = &ExecutorConfig{
-			MaxPromptLength: 1000000,
+			MaxPromptLength: 0, // No limit
 			Timeout:         5 * time.Minute,
 			RetryCount:      3,
 			Model:           "default",
@@ -412,9 +412,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		prompt := strings.Join(parts, "\n")
 
 		// Check prompt length (without context files which will be passed separately)
-		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
-			return "", nil, nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
-		}
+		// Prompt length check removed - no longer enforcing limits
 
 		return prompt, promptSourceFiles, contextFiles, nil
 	} else {
@@ -488,9 +486,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		prompt := strings.Join(parts, "\n")
 
 		// Check prompt length (without context files which will be passed separately)
-		if e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
-			return "", nil, nil, fmt.Errorf("prompt exceeds maximum length (%d > %d)", len(prompt), e.config.MaxPromptLength)
-		}
+		// Prompt length check removed - no longer enforcing limits
 
 		return prompt, promptSourceFiles, contextFiles, nil
 	}
@@ -1020,10 +1016,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 		fmt.Printf("Total tokens: %s\n", grovecontext.FormatTokenCount(stats.TotalTokens))
 		fmt.Printf("Total size: %s\n", grovecontext.FormatBytes(int(stats.TotalSize)))
 
-		// Check token limit
-		if stats.TotalTokens > 500000 {
-			return fmt.Errorf("context size exceeds limit: %d tokens (max 500,000 tokens)", stats.TotalTokens)
-		}
+		// Token limit check removed - no longer enforcing limits
 
 		// Show language distribution if there are files
 		if stats.TotalFiles > 0 {
