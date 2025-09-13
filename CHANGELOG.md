@@ -1,3 +1,18 @@
+## v0.2.17 (2025-09-13)
+
+### Chores
+
+* **deps:** sync Grove dependencies to latest versions
+
+### Features
+
+* remove token limits from oneshot executor
+
+### Bug Fixes
+
+* resolve E2E test failures and remove Docker dependencies
+* pass job context to grove-gemini for proper usage tracking
+
 ## v0.2.16 (2025-09-04)
 
 ### Tests
