@@ -31,6 +31,8 @@ func main() {
 		PlanFinishFlagsScenario(),            // Tests flag-based plan cleanup
 		PlanFinishDevLinksScenario(),         // Tests dev links cleanup functionality
 		PlanRecipesScenario(),                // Tests the new recipes feature
+		GenerateRecipeScenario(),             // Tests generate-recipe job type functionality
+		GenerateRecipeWithVariablesScenario(), // Tests generate-recipe with multiple template variables
 		JobSummaryScenario(),                 // Tests job summarization on completion
 		InteractiveAgentJobSummaryScenario(), // Tests interactive_agent job summarization with transcripts
 		// OneshotJobSummaryScenario(),       // DISABLED: Tests oneshot job summarization via orchestrator - fails due to async goroutine not inheriting test PATH

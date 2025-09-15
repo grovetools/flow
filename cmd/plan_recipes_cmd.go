@@ -20,9 +20,8 @@ var planRecipesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available plan recipes",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// For now, only built-in recipes are supported.
-		// In the future, a RecipeManager would handle discovery.
-		recipes, err := orchestration.ListBuiltinRecipes()
+		// List all recipes (user and built-in)
+		recipes, err := orchestration.ListAllRecipes()
 		if err != nil {
 			return err
 		}
@@ -40,9 +39,9 @@ var planRecipesListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSOURCE\tDESCRIPTION")
+		fmt.Fprintln(w, "NAME\tDESCRIPTION")
 		for _, r := range recipes {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Name, "builtin", r.Description)
+			fmt.Fprintf(w, "%s\t%s\n", r.Name, r.Description)
 		}
 		w.Flush()
 		return nil

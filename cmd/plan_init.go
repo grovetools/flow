@@ -142,8 +142,8 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string) error {
 	planName := filepath.Base(planPath)
 
-	// Find the recipe
-	recipe, err := orchestration.GetBuiltinRecipe(cmd.Recipe)
+	// Find the recipe (checks user recipes first, then built-in)
+	recipe, err := orchestration.GetRecipe(cmd.Recipe)
 	if err != nil {
 		return err
 	}

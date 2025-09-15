@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -91,5 +92,86 @@ func ListBuiltinRecipes() ([]*Recipe, error) {
 			recipes = append(recipes, recipe)
 		}
 	}
+	return recipes, nil
+}
+
+// GetUserRecipe finds and returns a user-defined recipe.
+func GetUserRecipe(name string) (*Recipe, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("getting home directory: %w", err)
+	}
+	
+	recipeDir := filepath.Join(homeDir, ".config", "grove", "recipes", name)
+	entries, err := os.ReadDir(recipeDir)
+	if err != nil {
+		return nil, fmt.Errorf("recipe '%s' not found", name)
+	}
+
+	recipe := &Recipe{
+		Name: name,
+		Jobs: make(map[string][]byte),
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			content, err := os.ReadFile(filepath.Join(recipeDir, entry.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("could not read recipe file %s: %w", entry.Name(), err)
+			}
+			recipe.Jobs[entry.Name()] = content
+		}
+	}
+
+	if len(recipe.Jobs) == 0 {
+		return nil, fmt.Errorf("recipe '%s' contains no job files", name)
+	}
+
+	return recipe, nil
+}
+
+// GetRecipe finds and returns a recipe by name, checking user recipes first, then built-in.
+func GetRecipe(name string) (*Recipe, error) {
+	// First try user recipes
+	recipe, err := GetUserRecipe(name)
+	if err == nil {
+		return recipe, nil
+	}
+	
+	// Then try built-in recipes
+	return GetBuiltinRecipe(name)
+}
+
+// ListAllRecipes lists all available recipes (both user and built-in).
+func ListAllRecipes() ([]*Recipe, error) {
+	recipes := make([]*Recipe, 0)
+	
+	// First add user recipes
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		userRecipeDir := filepath.Join(homeDir, ".config", "grove", "recipes")
+		if entries, err := os.ReadDir(userRecipeDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					if recipe, err := GetUserRecipe(entry.Name()); err == nil {
+						recipe.Description = "[User] " + recipe.Description
+						recipes = append(recipes, recipe)
+					}
+				}
+			}
+		}
+	}
+	
+	// Then add built-in recipes
+	builtinRecipes, err := ListBuiltinRecipes()
+	if err != nil {
+		return nil, err
+	}
+	
+	for _, recipe := range builtinRecipes {
+		recipe.Description = "[Built-in] " + recipe.Description
+		recipes = append(recipes, recipe)
+	}
+	
 	return recipes, nil
 }

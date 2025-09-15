@@ -25,6 +25,7 @@ const (
 	JobTypeShell            JobType = "shell"
 	JobTypeChat             JobType = "chat"
 	JobTypeInteractiveAgent JobType = "interactive_agent"
+	JobTypeGenerateRecipe   JobType = "generate-recipe"
 )
 
 // OutputConfig defines how job output should be handled.
@@ -60,6 +61,8 @@ type Job struct {
 	CreatedAt            time.Time    `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	UpdatedAt            time.Time    `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 	Summary              string       `yaml:"summary,omitempty" json:"summary,omitempty"`
+	SourcePlan           string       `yaml:"source_plan,omitempty" json:"source_plan,omitempty"`
+	RecipeName           string       `yaml:"recipe_name,omitempty" json:"recipe_name,omitempty"`
 
 	// Derived fields
 	Filename     string      `json:"filename,omitempty"`     // The markdown filename

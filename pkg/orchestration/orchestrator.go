@@ -118,6 +118,9 @@ func (o *Orchestrator) registerExecutors() {
 
 	// Register shell executor
 	o.executors[JobTypeShell] = NewShellExecutor()
+
+	// Register generate-recipe executor
+	o.executors[JobTypeGenerateRecipe] = NewGenerateRecipeExecutor(execConfig)
 }
 
 // RunJob executes a specific job by filename.
