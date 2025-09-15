@@ -34,7 +34,7 @@ flow:
 				return nil
 			}),
 
-			harness.NewStep("Test recipe with extracted spec replaces recipe spec", func(ctx *harness.Context) error {
+			harness.NewStep("Test recipe with extracted content merged into first job", func(ctx *harness.Context) error {
 				flow, err := getFlowBinary()
 				if err != nil {
 					return fmt.Errorf("failed to get flow binary: %w", err)
@@ -125,37 +125,49 @@ We need to implement a comprehensive authentication system for our application.
 
 				planDir := filepath.Join(ctx.RootDir, "plans", "auth-system")
 				
-				// Verify extracted spec exists
-				extractedSpec := filepath.Join(planDir, "01-auth-spec.md")
-				content, err := os.ReadFile(extractedSpec)
+				// The first job in standard-feature recipe is 01-spec.md
+				// Verify it exists and contains the extracted content
+				specPath := filepath.Join(planDir, "01-spec.md")
+				content, err := os.ReadFile(specPath)
 				if err != nil {
-					return fmt.Errorf("failed to read extracted spec: %w", err)
+					return fmt.Errorf("failed to read spec file: %w", err)
 				}
 
-				// Verify content was preserved
+				// Verify it has the recipe's frontmatter structure
+				if !strings.Contains(string(content), "id: spec") {
+					return fmt.Errorf("spec should have recipe's id: spec")
+				}
+				// The standard-feature recipe's spec is type: oneshot
+				if !strings.Contains(string(content), "type: oneshot") {
+					return fmt.Errorf("spec should have recipe's type: oneshot")
+				}
+
+				// Verify the extracted content was merged as the body
 				if !strings.Contains(string(content), "Authentication System Specification") {
-					return fmt.Errorf("extracted spec missing original content")
+					return fmt.Errorf("spec missing extracted content")
 				}
 				if !strings.Contains(string(content), "JWT-based authentication") {
-					return fmt.Errorf("extracted spec missing detailed content")
+					return fmt.Errorf("spec missing detailed extracted content")
 				}
 
 				// Verify worktree is set
 				if !strings.Contains(string(content), "worktree: auth-system") {
-					return fmt.Errorf("extracted spec missing worktree")
+					return fmt.Errorf("spec missing worktree")
 				}
 
-				// Verify NO duplicate spec from recipe
+				// Verify we have the expected number of files (no extras)
 				files, err := os.ReadDir(planDir)
 				if err != nil {
 					return fmt.Errorf("failed to read plan dir: %w", err)
 				}
-
-				for _, file := range files {
-					name := file.Name()
-					if strings.Contains(strings.ToLower(name), "spec") && name != "01-auth-spec.md" {
-						return fmt.Errorf("found duplicate spec file: %s", name)
+				
+				// Should have: .grove-plan.yml + 5 recipe jobs
+				if len(files) != 6 {
+					var fileNames []string
+					for _, f := range files {
+						fileNames = append(fileNames, f.Name())
 					}
+					return fmt.Errorf("expected 6 files, got %d: %v", len(files), fileNames)
 				}
 
 				// Verify implementation job exists and depends on the extracted spec
@@ -230,7 +242,7 @@ The system currently lacks proper error handling.
 				return nil
 			}),
 
-			harness.NewStep("Test recipe with multiple extractions uses only first", func(ctx *harness.Context) error {
+			harness.NewStep("Test recipe with extraction and explicit worktree", func(ctx *harness.Context) error {
 				flow, err := getFlowBinary()
 				if err != nil {
 					return fmt.Errorf("failed to get flow binary: %w", err)
@@ -266,11 +278,16 @@ All endpoints require Bearer token authentication.
 
 				planDir := filepath.Join(ctx.RootDir, "plans", "api-feature")
 				
-				// Verify extracted spec
-				extractedPath := filepath.Join(planDir, "01-api-spec.md")
-				content, err := os.ReadFile(extractedPath)
+				// Verify the merged spec file (01-spec.md from recipe with extracted content)
+				specPath := filepath.Join(planDir, "01-spec.md")
+				content, err := os.ReadFile(specPath)
 				if err != nil {
-					return fmt.Errorf("failed to read extracted spec: %w", err)
+					return fmt.Errorf("failed to read spec file: %w", err)
+				}
+
+				// Should have extracted content in body
+				if !strings.Contains(string(content), "API Specification") {
+					return fmt.Errorf("spec missing extracted content")
 				}
 
 				// Should use explicit --worktree value
@@ -325,11 +342,16 @@ All endpoints require Bearer token authentication.
 				// Plan should be created at the path but use base name for worktree
 				planDir := filepath.Join(ctx.RootDir, "plans", "frontend", "ui-components")
 				
-				// Verify extracted spec
-				extractedPath := filepath.Join(planDir, "01-ui-spec.md")
-				content, err := os.ReadFile(extractedPath)
+				// Verify merged spec file (01-spec.md from recipe)
+				specPath := filepath.Join(planDir, "01-spec.md")
+				content, err := os.ReadFile(specPath)
 				if err != nil {
-					return fmt.Errorf("failed to read extracted spec: %w", err)
+					return fmt.Errorf("failed to read spec file: %w", err)
+				}
+
+				// Should have extracted content
+				if !strings.Contains(string(content), "UI Components Specification") {
+					return fmt.Errorf("spec missing extracted content")
 				}
 
 				// Worktree should be base name only

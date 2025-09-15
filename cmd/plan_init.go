@@ -162,8 +162,8 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	fmt.Printf("Initializing orchestration plan in:\n  %s\n\n", planPath)
 	fmt.Printf("✓ Using recipe: %s\n", cmd.Recipe)
 
-	// Handle extraction first if provided (this becomes the first job)
-	var extractedJobFilename string
+	// Prepare extracted content if provided
+	var extractedBody []byte
 	if cmd.ExtractAllFrom != "" {
 		// Read the source file
 		content, err := os.ReadFile(cmd.ExtractAllFrom)
@@ -171,43 +171,14 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			return fmt.Errorf("failed to read source file for extraction %s: %w", cmd.ExtractAllFrom, err)
 		}
 
-		// Extract body
+		// Extract body (remove any existing frontmatter)
 		_, body, err := orchestration.ParseFrontmatter(content)
 		if err != nil {
 			return fmt.Errorf("failed to parse frontmatter from source file %s: %w", cmd.ExtractAllFrom, err)
 		}
-
-		// Create a job file with appropriate frontmatter
-		jobTitle := strings.TrimSuffix(filepath.Base(cmd.ExtractAllFrom), filepath.Ext(filepath.Base(cmd.ExtractAllFrom)))
-		extractedJobFilename = fmt.Sprintf("01-%s.md", jobTitle)
 		
-		// Determine worktree for the extracted job
-		worktreeToSet := cmd.Worktree
-		if cmd.WithWorktree && worktreeToSet == "" {
-			worktreeToSet = planName
-		}
-		
-		// Create frontmatter for the extracted job
-		frontmatter := map[string]interface{}{
-			"id":     jobTitle,
-			"title":  jobTitle,
-			"type":   "chat",
-			"status": "pending",
-		}
-		if worktreeToSet != "" {
-			frontmatter["worktree"] = worktreeToSet
-		}
-		
-		// Write the extracted job as the first file
-		jobContent, err := orchestration.RebuildMarkdownWithFrontmatter(frontmatter, body)
-		if err != nil {
-			return fmt.Errorf("rebuilding markdown with frontmatter: %w", err)
-		}
-		destPath := filepath.Join(planPath, extractedJobFilename)
-		if err := os.WriteFile(destPath, jobContent, 0644); err != nil {
-			return fmt.Errorf("writing extracted job file: %w", err)
-		}
-		fmt.Printf("✓ Extracted content from %s to job: %s\n", cmd.ExtractAllFrom, extractedJobFilename)
+		extractedBody = body
+		fmt.Printf("✓ Extracted content from %s\n", cmd.ExtractAllFrom)
 	}
 
 	// Data for templating
@@ -226,30 +197,48 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	var firstAgentWorktree string
 
+	// Track if this is the first job for content merging
+	isFirstJob := true
+	
 	// Process each job file from the recipe
 	for _, filename := range jobFiles {
-		// Skip the spec file from recipe if we already extracted content
-		// (typically 01-spec.md or similar spec-related files)
-		if extractedJobFilename != "" && strings.Contains(strings.ToLower(filename), "spec") {
-			// Skip this file as we already have the spec from extraction
-			continue
-		}
-		
-		// Keep the original filename for non-spec files
-		// The extracted content already occupies the 01- slot
-		finalFilename := filename
-		
 		renderedContent, err := recipe.RenderJob(filename, templateData)
 		if err != nil {
 			return fmt.Errorf("rendering recipe job %s: %w", filename, err)
 		}
+		
+		// If we have extracted content and this is the first job, merge them
+		if extractedBody != nil && isFirstJob {
+			// Parse the recipe job's frontmatter
+			frontmatter, _, err := orchestration.ParseFrontmatter(renderedContent)
+			if err != nil {
+				return fmt.Errorf("parsing frontmatter from recipe job %s: %w", filename, err)
+			}
+			
+			// Apply worktree if needed
+			if cmd.WithWorktree {
+				frontmatter["worktree"] = planName
+			} else if cmd.Worktree != "" {
+				frontmatter["worktree"] = cmd.Worktree
+			}
+			
+			// Rebuild with recipe's frontmatter but extracted content as body
+			renderedContent, err = orchestration.RebuildMarkdownWithFrontmatter(frontmatter, extractedBody)
+			if err != nil {
+				return fmt.Errorf("rebuilding job with extracted content: %w", err)
+			}
+			
+			fmt.Printf("✓ Merged extracted content into job: %s\n", filename)
+			isFirstJob = false
+		} else {
+			fmt.Printf("✓ Created job: %s\n", filename)
+		}
 
 		// Write the processed job file to the new plan directory
-		destPath := filepath.Join(planPath, finalFilename)
+		destPath := filepath.Join(planPath, filename)
 		if err := os.WriteFile(destPath, renderedContent, 0644); err != nil {
-			return fmt.Errorf("writing recipe job file %s: %w", finalFilename, err)
+			return fmt.Errorf("writing recipe job file %s: %w", filename, err)
 		}
-		fmt.Printf("✓ Created job: %s\n", finalFilename)
 
 		// Heuristic: find the worktree from the first agent/interactive_agent job
 		// to set as the default in .grove-plan.yml

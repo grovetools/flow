@@ -357,8 +357,7 @@ This is the specification for my new feature.
 					return fmt.Errorf("failed to read plan directory: %w", err)
 				}
 				
-				// Should have: .grove-plan.yml, extracted job (01-spec.md), and recipe jobs (but NOT duplicate spec)
-				// standard-feature recipe has 5 jobs, but we skip the spec, so 4 recipe jobs + 1 extracted + 1 config = 6 total
+				// Should have: .grove-plan.yml + 5 recipe jobs (standard-feature has 5 jobs total) = 6 files
 				expectedFiles := 6
 				if len(files) != expectedFiles {
 					var fileNames []string
@@ -368,30 +367,26 @@ This is the specification for my new feature.
 					return fmt.Errorf("expected exactly %d files, got %d: %v", expectedFiles, len(files), fileNames)
 				}
 				
-				// Check that 01-spec.md exists (the extracted job)
-				extractedJobPath := filepath.Join(planDir, "01-spec.md")
-				extractedContent, err := os.ReadFile(extractedJobPath)
+				// Check that 01-spec.md exists and contains merged content
+				specPath := filepath.Join(planDir, "01-spec.md")
+				specContent, err := os.ReadFile(specPath)
 				if err != nil {
-					return fmt.Errorf("failed to read extracted job file: %w", err)
+					return fmt.Errorf("failed to read spec file: %w", err)
 				}
 				
-				// Verify extracted job has worktree in frontmatter
-				if !strings.Contains(string(extractedContent), "worktree: recipe-with-extract") {
-					return fmt.Errorf("expected extracted job to have worktree, got:\n%s", extractedContent)
+				// Verify it has recipe's frontmatter
+				if !strings.Contains(string(specContent), "id: spec") {
+					return fmt.Errorf("spec should have recipe's id: spec")
 				}
 				
-				// Verify extracted job has the original content
-				if !strings.Contains(string(extractedContent), "Feature Specification") {
-					return fmt.Errorf("expected extracted job to contain original content")
+				// Verify spec has worktree in frontmatter
+				if !strings.Contains(string(specContent), "worktree: recipe-with-extract") {
+					return fmt.Errorf("expected spec to have worktree, got:\n%s", specContent)
 				}
 				
-				// Verify there's NO duplicate spec file from the recipe
-				for _, file := range files {
-					name := file.Name()
-					// The only spec file should be 01-spec.md (our extracted one)
-					if strings.Contains(strings.ToLower(name), "spec") && name != "01-spec.md" {
-						return fmt.Errorf("found duplicate spec file from recipe: %s (should have been skipped)", name)
-					}
+				// Verify spec has the extracted content as body
+				if !strings.Contains(string(specContent), "Feature Specification") {
+					return fmt.Errorf("expected spec to contain extracted content")
 				}
 				
 				// Verify implementation file exists (02-implement.md from the recipe)
