@@ -33,9 +33,9 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 		return err
 	}
 
-	// NEW: Recipe-based initialization
+	// NEW: Recipe-based initialization (can be combined with extraction)
 	if cmd.Recipe != "" {
-		return runPlanInitFromRecipe(cmd, planPath)
+		return runPlanInitFromRecipe(cmd, planPath, planName)
 	}
 
 	// Determine worktree to set in config
@@ -146,8 +146,7 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 }
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
-func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string) error {
-	planName := filepath.Base(planPath)
+func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) error {
 
 	// Find the recipe (checks user recipes first, then built-in)
 	recipe, err := orchestration.GetRecipe(cmd.Recipe)
@@ -162,6 +161,54 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string) error {
 
 	fmt.Printf("Initializing orchestration plan in:\n  %s\n\n", planPath)
 	fmt.Printf("✓ Using recipe: %s\n", cmd.Recipe)
+
+	// Handle extraction first if provided (this becomes the first job)
+	var extractedJobFilename string
+	if cmd.ExtractAllFrom != "" {
+		// Read the source file
+		content, err := os.ReadFile(cmd.ExtractAllFrom)
+		if err != nil {
+			return fmt.Errorf("failed to read source file for extraction %s: %w", cmd.ExtractAllFrom, err)
+		}
+
+		// Extract body
+		_, body, err := orchestration.ParseFrontmatter(content)
+		if err != nil {
+			return fmt.Errorf("failed to parse frontmatter from source file %s: %w", cmd.ExtractAllFrom, err)
+		}
+
+		// Create a job file with appropriate frontmatter
+		jobTitle := strings.TrimSuffix(filepath.Base(cmd.ExtractAllFrom), filepath.Ext(filepath.Base(cmd.ExtractAllFrom)))
+		extractedJobFilename = fmt.Sprintf("01-%s.md", jobTitle)
+		
+		// Determine worktree for the extracted job
+		worktreeToSet := cmd.Worktree
+		if cmd.WithWorktree && worktreeToSet == "" {
+			worktreeToSet = planName
+		}
+		
+		// Create frontmatter for the extracted job
+		frontmatter := map[string]interface{}{
+			"id":     jobTitle,
+			"title":  jobTitle,
+			"type":   "chat",
+			"status": "pending",
+		}
+		if worktreeToSet != "" {
+			frontmatter["worktree"] = worktreeToSet
+		}
+		
+		// Write the extracted job as the first file
+		jobContent, err := orchestration.RebuildMarkdownWithFrontmatter(frontmatter, body)
+		if err != nil {
+			return fmt.Errorf("rebuilding markdown with frontmatter: %w", err)
+		}
+		destPath := filepath.Join(planPath, extractedJobFilename)
+		if err := os.WriteFile(destPath, jobContent, 0644); err != nil {
+			return fmt.Errorf("writing extracted job file: %w", err)
+		}
+		fmt.Printf("✓ Extracted content from %s to job: %s\n", cmd.ExtractAllFrom, extractedJobFilename)
+	}
 
 	// Data for templating
 	templateData := struct {
@@ -181,17 +228,24 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string) error {
 
 	// Process each job file from the recipe
 	for _, filename := range jobFiles {
+		// If we extracted a job and this recipe file would conflict, rename it
+		finalFilename := filename
+		if extractedJobFilename != "" && strings.HasPrefix(filename, "01-") {
+			// Increment the number prefix for recipe jobs when extraction is present
+			finalFilename = "02" + filename[2:]
+		}
+		
 		renderedContent, err := recipe.RenderJob(filename, templateData)
 		if err != nil {
 			return fmt.Errorf("rendering recipe job %s: %w", filename, err)
 		}
 
 		// Write the processed job file to the new plan directory
-		destPath := filepath.Join(planPath, filename)
+		destPath := filepath.Join(planPath, finalFilename)
 		if err := os.WriteFile(destPath, renderedContent, 0644); err != nil {
-			return fmt.Errorf("writing recipe job file %s: %w", filename, err)
+			return fmt.Errorf("writing recipe job file %s: %w", finalFilename, err)
 		}
-		fmt.Printf("✓ Created job: %s\n", filename)
+		fmt.Printf("✓ Created job: %s\n", finalFilename)
 
 		// Heuristic: find the worktree from the first agent/interactive_agent job
 		// to set as the default in .grove-plan.yml
@@ -207,8 +261,18 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string) error {
 		}
 	}
 
-	// Create a default .grove-plan.yml, using the derived worktree
-	if err := createDefaultPlanConfig(planPath, cmd.Model, firstAgentWorktree, cmd.Container); err != nil {
+	// Determine the final worktree to use in .grove-plan.yml
+	finalWorktree := firstAgentWorktree
+	if cmd.WithWorktree {
+		// --with-worktree flag takes precedence
+		finalWorktree = planName
+	} else if cmd.Worktree != "" {
+		// Explicit --worktree flag takes precedence
+		finalWorktree = cmd.Worktree
+	}
+	
+	// Create a default .grove-plan.yml, using the determined worktree
+	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("✓ Created .grove-plan.yml")

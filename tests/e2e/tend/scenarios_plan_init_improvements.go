@@ -308,6 +308,101 @@ This is the second job.
 				
 				return nil
 			}),
+			
+			harness.NewStep("Test plan init with --recipe and --extract-all-from together", func(ctx *harness.Context) error {
+				flow, err := getFlowBinary()
+				if err != nil {
+					return fmt.Errorf("failed to get flow binary: %w", err)
+				}
+				
+				// Create a source file for extraction
+				sourceFile := filepath.Join(ctx.RootDir, "spec.md")
+				sourceContent := `# Feature Specification
+
+This is the specification for my new feature.
+
+## Requirements
+
+- Must be fast
+- Must be reliable
+- Must be secure
+`
+				if err := os.WriteFile(sourceFile, []byte(sourceContent), 0644); err != nil {
+					return fmt.Errorf("failed to create source file: %w", err)
+				}
+				
+				// Initialize plan with both recipe and extraction
+				cmd := command.New(flow, "plan", "init", "recipe-with-extract",
+					"--recipe", "standard-feature",
+					"--extract-all-from", sourceFile,
+					"--with-worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("flow plan init with recipe and extract failed: %w", result.Error)
+				}
+				
+				// Verify output mentions both recipe and extraction
+				if !strings.Contains(result.Stdout, "Using recipe: standard-feature") {
+					return fmt.Errorf("expected recipe usage in output:\n%s", result.Stdout)
+				}
+				if !strings.Contains(result.Stdout, "Extracted content from") {
+					return fmt.Errorf("expected extraction message in output:\n%s", result.Stdout)
+				}
+				
+				// Verify files were created
+				planDir := filepath.Join(ctx.RootDir, "plans", "recipe-with-extract")
+				files, err := os.ReadDir(planDir)
+				if err != nil {
+					return fmt.Errorf("failed to read plan directory: %w", err)
+				}
+				
+				// Should have at least: .grove-plan.yml, extracted job (01-spec.md), and recipe jobs
+				if len(files) < 4 {
+					return fmt.Errorf("expected at least 4 files (config + extracted + recipe jobs), got %d", len(files))
+				}
+				
+				// Check that 01-spec.md exists (the extracted job)
+				extractedJobPath := filepath.Join(planDir, "01-spec.md")
+				extractedContent, err := os.ReadFile(extractedJobPath)
+				if err != nil {
+					return fmt.Errorf("failed to read extracted job file: %w", err)
+				}
+				
+				// Verify extracted job has worktree in frontmatter
+				if !strings.Contains(string(extractedContent), "worktree: recipe-with-extract") {
+					return fmt.Errorf("expected extracted job to have worktree, got:\n%s", extractedContent)
+				}
+				
+				// Verify extracted job has the original content
+				if !strings.Contains(string(extractedContent), "Feature Specification") {
+					return fmt.Errorf("expected extracted job to contain original content")
+				}
+				
+				// Check that recipe jobs exist with adjusted numbering (02- prefix for first recipe job)
+				var foundRecipeJob bool
+				for _, file := range files {
+					if strings.HasPrefix(file.Name(), "02-") {
+						foundRecipeJob = true
+						break
+					}
+				}
+				if !foundRecipeJob {
+					return fmt.Errorf("expected recipe jobs to be renumbered starting with 02- when extraction is present")
+				}
+				
+				// Verify .grove-plan.yml has worktree set
+				configPath := filepath.Join(planDir, ".grove-plan.yml")
+				configContent, err := os.ReadFile(configPath)
+				if err != nil {
+					return fmt.Errorf("failed to read plan config: %w", err)
+				}
+				if !strings.Contains(string(configContent), "worktree: recipe-with-extract") {
+					return fmt.Errorf("expected plan config to have worktree set")
+				}
+				
+				return nil
+			}),
 		},
 	}
 }
