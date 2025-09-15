@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -42,30 +43,27 @@ flow:
 					return err
 				}
 				
-				// Use explicit config file to ensure we're using the test directory's config
-				configPath := filepath.Join(ctx.RootDir, "grove.yml")
-				
-				cmd := ctx.Command(flow, "-c", configPath, "plan", "init", "api-migration-example")
+				cmd := command.New(flow, "plan", "init", "api-migration-example").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to init plan: %v\nOutput: %s\nError: %s", result.Error, result.Stdout, result.Stderr)
 				}
 				
-				cmd = ctx.Command(flow, "-c", configPath, "plan", "add", "api-migration-example",
+				cmd = command.New(flow, "plan", "add", "api-migration-example",
 					"--title", "Spec for user-profile-api",
 					"--type", "oneshot",
-					"-p", "Define the spec.")
+					"-p", "Define the spec.").Dir(ctx.RootDir)
 				result = cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to add spec job: %v", result.Error)
 				}
 				
-				cmd = ctx.Command(flow, "-c", configPath, "plan", "add", "api-migration-example",
+				cmd = command.New(flow, "plan", "add", "api-migration-example",
 					"--title", "Implement user-profile-api migration",
 					"--type", "interactive_agent",
 					"--depends-on", "01-spec-for-user-profile-api.md",
 					"--worktree", "user-profile-api",
-					"-p", "Implement the migration.")
+					"-p", "Implement the migration.").Dir(ctx.RootDir)
 				result = cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to add impl job: %v", result.Error)
@@ -116,11 +114,8 @@ Generalize this plan for API endpoint migrations. Replace 'user-profile-api' wit
 				jobPath := filepath.Join(ctx.RootDir, "plans", "recipe-generation-plan", "01-generate-recipe.md")
 				fs.WriteString(jobPath, jobContent)
 				
-				// Run the job using ctx.Command for proper context
-				// Use relative path from test root
-				configPath := filepath.Join(ctx.RootDir, "grove.yml")
-				relJobPath := "plans/recipe-generation-plan/01-generate-recipe.md"
-				cmd := ctx.Command(flow, "-c", configPath, "plan", "run", relJobPath, "--yes")
+				// Run the job - use --next to run the next available job in the plan
+				cmd := command.New(flow, "plan", "run", "--next", "--yes", "plans/recipe-generation-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -155,8 +150,7 @@ Generalize this plan for API endpoint migrations. Replace 'user-profile-api' wit
 				fs.WriteString(filepath.Join(recipePath, "01-spec.md"), "title: Specification for {{ .PlanName }}")
 				
 				flow, _ := getFlowBinary()
-				configPath := filepath.Join(ctx.RootDir, "grove.yml")
-				cmd := ctx.Command(flow, "-c", configPath, "plan", "init", "new-api-plan", "--recipe", "api-migration")
+				cmd := command.New(flow, "plan", "init", "new-api-plan", "--recipe", "api-migration").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -206,28 +200,27 @@ flow:
 
 				// Use flow binary to create source plan
 				flow, _ := getFlowBinary()
-				configPath := filepath.Join(ctx.RootDir, "grove.yml")
 
 				// Initialize the source plan
-				cmd := ctx.Command(flow, "-c", configPath, "plan", "init", "microservice-setup")
+				cmd := command.New(flow, "plan", "init", "microservice-setup").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init source plan: %w", err)
 				}
 
 				// Add jobs with multiple variable parts
-				cmd = ctx.Command(flow, "-c", configPath, "plan", "add", "microservice-setup",
+				cmd = command.New(flow, "plan", "add", "microservice-setup",
 					"--title", "Design user-service API",
 					"--type", "oneshot",
-					"-p", "Design the REST API for user-service using OpenAPI 3.0 specification.")
+					"-p", "Design the REST API for user-service using OpenAPI 3.0 specification.").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to add design job: %w", err)
 				}
 
-				cmd = ctx.Command(flow, "-c", configPath, "plan", "add", "microservice-setup",
+				cmd = command.New(flow, "plan", "add", "microservice-setup",
 					"--title", "Implement user-service in Go",
 					"--type", "interactive_agent",
 					"--worktree", "user-service",
-					"-p", "Implement the user-service microservice in Go based on the API design.")
+					"-p", "Implement the user-service microservice in Go based on the API design.").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to add implementation job: %w", err)
 				}
@@ -285,10 +278,8 @@ Make sure to replace these consistently throughout the recipe.
 					return fmt.Errorf("failed to write generate-recipe job: %w", err)
 				}
 
-				// Run the job
-				configPath := filepath.Join(ctx.RootDir, "grove.yml")
-				relJobPath := "plans/recipe-gen-multi/01-generate-microservice-recipe.md"
-				cmd := ctx.Command(flow, "-c", configPath, "plan", "run", relJobPath, "--yes")
+				// Run the job - use --next to run the next available job in the plan
+				cmd := command.New(flow, "plan", "run", "--next", "--yes", "plans/recipe-gen-multi").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
