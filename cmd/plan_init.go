@@ -18,11 +18,21 @@ import (
 
 // RunPlanInit implements the plan init command.
 func RunPlanInit(cmd *PlanInitCmd) error {
+	result, err := executePlanInit(cmd)
+	if err != nil {
+		return err
+	}
+	fmt.Print(result)
+	return nil
+}
+
+// executePlanInit contains the core logic for initializing a plan and returns a result string.
+func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	// Resolve the full path for the new plan directory.
 	planDirArg := cmd.Dir
 	planPath, err := resolvePlanPath(planDirArg)
 	if err != nil {
-		return fmt.Errorf("could not resolve plan path: %w", err)
+		return "", fmt.Errorf("could not resolve plan path: %w", err)
 	}
 
 	// The canonical plan name is the base name of the directory argument.
@@ -30,12 +40,18 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 
 	// Validate inputs with resolved path
 	if err := validateInitInputs(cmd, planPath); err != nil {
-		return err
+		return "", err
 	}
+
+	var result strings.Builder
 
 	// NEW: Recipe-based initialization (can be combined with extraction)
 	if cmd.Recipe != "" {
-		return runPlanInitFromRecipe(cmd, planPath, planName)
+		// Note: runPlanInitFromRecipe prints its own messages. This part could be refactored further
+		// but for now we'll call it and assume it works for the CLI context.
+		// To make it TUI-friendly, it would also need to return a result string.
+		// For this implementation, we assume TUI will not use recipes initially.
+		return "", runPlanInitFromRecipe(cmd, planPath, planName)
 	}
 
 	// Determine worktree to set in config
@@ -49,26 +65,24 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 
 	// Create directory using the resolved path
 	if err := createPlanDirectory(planPath, cmd.Force); err != nil {
-		return err
+		return "", err
 	}
 
 	// Create default .grove-plan.yml
 	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container); err != nil {
-		// Log a warning but don't fail the init command
-		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
+		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
-	// Print success message
-	fmt.Printf("Initializing orchestration plan in:\n  %s\n\n", planPath)
-	fmt.Println("✓ Created plan directory")
-	fmt.Println("✓ Created .grove-plan.yml with default configuration")
+	// Build success message
+	result.WriteString(fmt.Sprintf("Initializing orchestration plan in:\n  %s\n\n", planPath))
+	result.WriteString("✓ Created plan directory\n")
+	result.WriteString("✓ Created .grove-plan.yml with default configuration\n")
 
 	// Set the new plan as active
 	if err := state.SetActiveJob(planName); err != nil {
-		// Just warn if we can't set active job, don't fail the init
-		fmt.Printf("Warning: failed to set active job: %v\n", err)
+		result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
 	} else {
-		fmt.Printf("✓ Set active plan to: %s\n", planName)
+		result.WriteString(fmt.Sprintf("✓ Set active plan to: %s\n", planName))
 	}
 
 	// Extraction Logic
@@ -76,19 +90,19 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 		// 1. Load the plan we just created
 		plan, err := orchestration.LoadPlan(planPath)
 		if err != nil {
-			return fmt.Errorf("failed to reload plan for extraction: %w", err)
+			return "", fmt.Errorf("failed to reload plan for extraction: %w", err)
 		}
 
 		// 2. Read the source file
 		content, err := os.ReadFile(cmd.ExtractAllFrom)
 		if err != nil {
-			return fmt.Errorf("failed to read source file for extraction %s: %w", cmd.ExtractAllFrom, err)
+			return "", fmt.Errorf("failed to read source file for extraction %s: %w", cmd.ExtractAllFrom, err)
 		}
 
 		// 3. Extract body
 		_, body, err := orchestration.ParseFrontmatter(content)
 		if err != nil {
-			return fmt.Errorf("failed to parse frontmatter from source file %s: %w", cmd.ExtractAllFrom, err)
+			return "", fmt.Errorf("failed to parse frontmatter from source file %s: %w", cmd.ExtractAllFrom, err)
 		}
 
 		// 4. Create a new job
@@ -109,14 +123,14 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 		// 5. Add the job to the plan
 		filename, err := orchestration.AddJob(plan, job)
 		if err != nil {
-			return fmt.Errorf("failed to add extracted job to plan: %w", err)
+			return "", fmt.Errorf("failed to add extracted job to plan: %w", err)
 		}
-		fmt.Printf("✓ Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename)
+		result.WriteString(fmt.Sprintf("✓ Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename))
 	}
 
 	// Open Session Logic
 	if cmd.OpenSession {
-		fmt.Println("\n🚀 Launching new session...")
+		result.WriteString("\n🚀 Launching new session...\n")
 
 		ctx := context.Background()
 		commandToRun := []string{"flow", "plan", "status", "-t"}
@@ -129,28 +143,27 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 			}
 			if err := CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeToSet, commandToRun); err != nil {
 				// Log the error but don't fail the init command, as the primary goal was completed
-				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
-				fmt.Printf("   You can launch it manually later with `flow plan open`\n")
+				result.WriteString(fmt.Sprintf("⚠️  Warning: Failed to launch tmux session: %v\n", err))
+				result.WriteString("   You can launch it manually later with `flow plan open`\n")
 			}
 		} else {
 			// Launch session without worktree (in main repo)
 			if err := CreateOrSwitchToMainRepoSessionAndRunCommand(ctx, planName, commandToRun); err != nil {
-				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
-				fmt.Printf("   You can launch it manually later with `flow plan status -t`\n")
+				result.WriteString(fmt.Sprintf("⚠️  Warning: Failed to launch tmux session: %v\n", err))
+				result.WriteString("   You can launch it manually later with `flow plan status -t`\n")
 			}
 		}
 	} else if cmd.ExtractAllFrom != "" {
 		// If we extracted but didn't open a session, give next steps.
-		fmt.Println("\nNext steps:")
-		fmt.Printf("1. Open the session: flow plan launch <job-file>\n")
-		return nil
+		result.WriteString("\nNext steps:\n")
+		result.WriteString("1. Open the session: flow plan launch <job-file>\n")
+	} else {
+		result.WriteString("\nNext steps:\n")
+		result.WriteString("1. Add your first job: flow plan add\n")
+		result.WriteString("2. Check status: flow plan status\n")
 	}
 
-	fmt.Println("\nNext steps:")
-	fmt.Printf("1. Add your first job: flow plan add\n")
-	fmt.Printf("2. Check status: flow plan status\n")
-
-	return nil
+	return result.String(), nil
 }
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.

@@ -51,6 +51,7 @@ type planListTUIModel struct {
 	showHelp       bool
 	loading        bool
 	plansDirectory string
+	statusMessage  string
 }
 
 // TUI key mappings for plan list
@@ -61,6 +62,7 @@ type planListKeyMap struct {
 	FinishPlan string
 	Quit      string
 	Help      string
+	NewPlan   string
 }
 
 var planListKeys = planListKeyMap{
@@ -70,6 +72,7 @@ var planListKeys = planListKeyMap{
 	FinishPlan: "ctrl+x",
 	Quit:      "q",
 	Help:      "?",
+	NewPlan:    "n",
 }
 
 // TUI styles for plan list
@@ -198,10 +201,16 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Clear status message on any key press
+		m.statusMessage = ""
+
 		// Regular key handling
 		switch msg.String() {
 		case "ctrl+c", planListKeys.Quit:
 			return m, tea.Quit
+
+		case planListKeys.NewPlan:
+			return newPlanInitTUIModel(m.plansDirectory), nil
 
 		case planListKeys.Help:
 			m.showHelp = true
@@ -245,6 +254,12 @@ func (m planListTUIModel) View() string {
 	}
 
 	var s strings.Builder
+
+	// Display status message if any
+	if m.statusMessage != "" {
+		s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).PaddingBottom(1).Render(m.statusMessage))
+		s.WriteString("\n")
+	}
 
 	// Show help popup if active
 	if m.showHelp {
@@ -394,6 +409,7 @@ func (m planListTUIModel) renderPlanListHelpScreen() string {
 		"",
 		keyStyle.Render("Enter") + " - View plan status (opens plan status TUI)",
 		keyStyle.Render("Ctrl+X") + " - Finish plan (executes plan finish command)",
+		keyStyle.Render("n") + " - New plan",
 		"",
 		"General:",
 		"",
