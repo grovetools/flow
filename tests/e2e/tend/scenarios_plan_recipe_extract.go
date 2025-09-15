@@ -108,7 +108,7 @@ We need to implement a comprehensive authentication system for our application.
 				cmd := command.New(flow, "plan", "init", "auth-system",
 					"--recipe", "standard-feature",
 					"--extract-all-from", specFile,
-					"--with-worktree").Dir(ctx.RootDir)
+					"--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -208,7 +208,7 @@ The system currently lacks proper error handling.
 				// Initialize with just extraction (no recipe)
 				cmd := command.New(flow, "plan", "init", "error-handling",
 					"--extract-all-from", docFile,
-					"--with-worktree").Dir(ctx.RootDir)
+					"--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -269,7 +269,7 @@ All endpoints require Bearer token authentication.
 				cmd := command.New(flow, "plan", "init", "api-feature",
 					"--recipe", "standard-feature", 
 					"--extract-all-from", specFile,
-					"--worktree", "api-wt").Dir(ctx.RootDir)
+					"--worktree=api-wt").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -332,7 +332,7 @@ All endpoints require Bearer token authentication.
 				cmd := command.New(flow, "plan", "init", "frontend/ui-components",
 					"--recipe", "standard-feature",
 					"--extract-all-from", specFile,
-					"--with-worktree").Dir(ctx.RootDir)
+					"--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {

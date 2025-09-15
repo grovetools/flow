@@ -41,7 +41,7 @@ flow:
 			// Initialize plan with all config flags
 			cmd := command.New(flow, "plan", "init", "test-config",
 				"--model", "gemini-2.0-flash",
-				"--worktree", "feature/test",
+				"--worktree=feature/test",
 				"--target-agent-container", "grove-agent-fast",
 			).Dir(ctx.RootDir)
 			result := cmd.Run()

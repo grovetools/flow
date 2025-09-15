@@ -132,14 +132,21 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Build command
+				// Determine the correct worktree value based on TUI state
+				var worktreeVal string
+				if m.withWorktree {
+					worktreeVal = "__AUTO__"
+				} else {
+					worktreeVal = m.worktreeInput.Value()
+				}
+				
 				initCmd := &PlanInitCmd{
 					Dir:       m.nameInput.Value(),
 					Force:     false, // Can't be set from TUI for safety
 					Container: m.containerInput.Value(),
 					ExtractAllFrom: m.extractFromInput.Value(),
 					OpenSession: m.openSession,
-					WithWorktree: m.withWorktree,
-					Worktree: m.worktreeInput.Value(),
+					Worktree: worktreeVal,
 				}
 				if selected := m.recipeList.SelectedItem(); selected != nil {
 					if recipeItem, ok := selected.(item); ok && string(recipeItem) != "none" {

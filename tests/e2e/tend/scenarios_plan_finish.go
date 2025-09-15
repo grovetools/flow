@@ -35,7 +35,7 @@ flow:
 
 				// Create plan and set its worktree
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "finish-test", "--with-worktree").Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "init", "finish-test", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -128,7 +128,7 @@ flow:
 
 				// Create plan with worktree
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "flags-test", "--with-worktree").Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "init", "flags-test", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -171,7 +171,7 @@ flow:
 			harness.NewStep("Test finish with --yes flag", func(ctx *harness.Context) error {
 				// Create another plan for this test
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "yes-test", "--with-worktree").Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "init", "yes-test", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -230,7 +230,7 @@ flow:
 
 				// Create plan
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "devlinks-test", "--with-worktree").Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "init", "devlinks-test", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -270,7 +270,7 @@ flow:
 			harness.NewStep("Test finish with specific dev links flag", func(ctx *harness.Context) error {
 				// Create another plan
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "interactive-devlinks", "--with-worktree").Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "init", "interactive-devlinks", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}

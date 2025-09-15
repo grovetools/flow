@@ -379,7 +379,7 @@ flow:
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Initialize plan with a default worktree
-				cmd := command.New(flow, "plan", "init", "inheritance-plan", "--worktree", "inheritance-plan").Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "init", "inheritance-plan", "--worktree=inheritance-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to init plan: %w", result.Error)
