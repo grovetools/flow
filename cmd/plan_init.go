@@ -228,12 +228,16 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// Process each job file from the recipe
 	for _, filename := range jobFiles {
-		// If we extracted a job and this recipe file would conflict, rename it
-		finalFilename := filename
-		if extractedJobFilename != "" && strings.HasPrefix(filename, "01-") {
-			// Increment the number prefix for recipe jobs when extraction is present
-			finalFilename = "02" + filename[2:]
+		// Skip the spec file from recipe if we already extracted content
+		// (typically 01-spec.md or similar spec-related files)
+		if extractedJobFilename != "" && strings.Contains(strings.ToLower(filename), "spec") {
+			// Skip this file as we already have the spec from extraction
+			continue
 		}
+		
+		// Keep the original filename for non-spec files
+		// The extracted content already occupies the 01- slot
+		finalFilename := filename
 		
 		renderedContent, err := recipe.RenderJob(filename, templateData)
 		if err != nil {

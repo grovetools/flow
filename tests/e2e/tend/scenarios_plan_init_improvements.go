@@ -357,9 +357,15 @@ This is the specification for my new feature.
 					return fmt.Errorf("failed to read plan directory: %w", err)
 				}
 				
-				// Should have at least: .grove-plan.yml, extracted job (01-spec.md), and recipe jobs
-				if len(files) < 4 {
-					return fmt.Errorf("expected at least 4 files (config + extracted + recipe jobs), got %d", len(files))
+				// Should have: .grove-plan.yml, extracted job (01-spec.md), and recipe jobs (but NOT duplicate spec)
+				// standard-feature recipe has 5 jobs, but we skip the spec, so 4 recipe jobs + 1 extracted + 1 config = 6 total
+				expectedFiles := 6
+				if len(files) != expectedFiles {
+					var fileNames []string
+					for _, f := range files {
+						fileNames = append(fileNames, f.Name())
+					}
+					return fmt.Errorf("expected exactly %d files, got %d: %v", expectedFiles, len(files), fileNames)
 				}
 				
 				// Check that 01-spec.md exists (the extracted job)
@@ -379,16 +385,19 @@ This is the specification for my new feature.
 					return fmt.Errorf("expected extracted job to contain original content")
 				}
 				
-				// Check that recipe jobs exist with adjusted numbering (02- prefix for first recipe job)
-				var foundRecipeJob bool
+				// Verify there's NO duplicate spec file from the recipe
 				for _, file := range files {
-					if strings.HasPrefix(file.Name(), "02-") {
-						foundRecipeJob = true
-						break
+					name := file.Name()
+					// The only spec file should be 01-spec.md (our extracted one)
+					if strings.Contains(strings.ToLower(name), "spec") && name != "01-spec.md" {
+						return fmt.Errorf("found duplicate spec file from recipe: %s (should have been skipped)", name)
 					}
 				}
-				if !foundRecipeJob {
-					return fmt.Errorf("expected recipe jobs to be renumbered starting with 02- when extraction is present")
+				
+				// Verify implementation file exists (02-implement.md from the recipe)
+				implementPath := filepath.Join(planDir, "02-implement.md")
+				if _, err := os.Stat(implementPath); err != nil {
+					return fmt.Errorf("expected 02-implement.md from recipe to exist: %w", err)
 				}
 				
 				// Verify .grove-plan.yml has worktree set
