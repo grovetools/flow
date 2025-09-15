@@ -116,21 +116,23 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 
 	// Open Session Logic
 	if cmd.OpenSession {
-		if worktreeToSet == "" {
-			return fmt.Errorf("--open-session requires --with-worktree or --worktree to be set")
-		}
 		fmt.Println("\n🚀 Launching new session...")
 
-		// This logic is largely from RunPlanLaunch
 		ctx := context.Background()
-		if err := launchWorktreeSession(ctx, worktreeToSet, ""); err != nil {
-			// Log the error but don't fail the init command, as the primary goal was completed
-			fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
-			fmt.Printf("   You can launch it manually later with `flow plan launch <job-file>`\n")
+		if worktreeToSet != "" {
+			// Launch session with worktree
+			if err := launchPlanSession(ctx, worktreeToSet, planName, true); err != nil {
+				// Log the error but don't fail the init command, as the primary goal was completed
+				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
+				fmt.Printf("   You can launch it manually later with `flow plan launch <job-file>`\n")
+			}
+		} else {
+			// Launch session without worktree (in main repo)
+			if err := launchPlanSession(ctx, "", planName, false); err != nil {
+				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
+				fmt.Printf("   You can launch it manually later with `flow plan status -t`\n")
+			}
 		}
-
-		// The launchWorktreeSession function prints its own success messages.
-		// We don't need to return here; we can let the original `init` messages print too.
 	} else if cmd.ExtractAllFrom != "" {
 		// If we extracted but didn't open a session, give next steps.
 		fmt.Println("\nNext steps:")
@@ -278,9 +280,37 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		fmt.Printf("✓ Set active plan to: %s\n", planName)
 	}
 
-	fmt.Println("\nNext steps:")
-	fmt.Printf("1. Review the generated job files in %s\n", planPath)
-	fmt.Printf("2. Run the plan: flow plan run %s\n", planName)
+	// Handle --open-session for recipe flow
+	if cmd.OpenSession {
+		fmt.Println("\n🚀 Launching new session...")
+		
+		ctx := context.Background()
+		worktreeToSet := firstAgentWorktree
+		if cmd.WithWorktree && worktreeToSet == "" {
+			worktreeToSet = planName
+		}
+		if cmd.Worktree != "" {
+			worktreeToSet = cmd.Worktree
+		}
+		
+		if worktreeToSet != "" {
+			// Launch session with worktree
+			if err := launchPlanSession(ctx, worktreeToSet, planName, true); err != nil {
+				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
+				fmt.Printf("   You can launch it manually later with `flow plan launch <job-file>`\n")
+			}
+		} else {
+			// Launch session without worktree (in main repo)
+			if err := launchPlanSession(ctx, "", planName, false); err != nil {
+				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
+				fmt.Printf("   You can launch it manually later with `flow plan status -t`\n")
+			}
+		}
+	} else {
+		fmt.Println("\nNext steps:")
+		fmt.Printf("1. Review the generated job files in %s\n", planPath)
+		fmt.Printf("2. Run the plan: flow plan run %s\n", planName)
+	}
 
 	return nil
 }
@@ -582,6 +612,60 @@ func copyFile(src, dst string) error {
 	}
 
 	return nil
+}
+
+// launchPlanSession launches a tmux session for plan management.
+// If withWorktree is true, it creates/switches to a worktree.
+// If withWorktree is false, it launches in the main repo.
+func launchPlanSession(ctx context.Context, worktreeName string, planName string, withWorktree bool) error {
+	if withWorktree {
+		return launchWorktreeSession(ctx, worktreeName, fmt.Sprintf("flow plan status -t %s", planName))
+	}
+	
+	// Launch in main repo without worktree
+	return launchMainRepoSession(ctx, planName)
+}
+
+// launchMainRepoSession launches a tmux session in the main repo for plan management.
+func launchMainRepoSession(_ context.Context, planName string) error {
+	// Get git root
+	gitRoot, err := git.GetGitRoot(".")
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+	
+	repoName := filepath.Base(gitRoot)
+	sessionTitle := SanitizeForTmuxSession(fmt.Sprintf("%s-plan", planName))
+	sessionName := fmt.Sprintf("%s__%s", repoName, sessionTitle)
+	
+	// Check if session already exists
+	executor := &exec.RealCommandExecutor{}
+	if err := executor.Execute("tmux", "has-session", "-t", sessionName); err == nil {
+		// Session exists, attach to it
+		fmt.Printf("✓ Attaching to existing tmux session: %s\n", sessionName)
+		return executor.Execute("tmux", "attach-session", "-t", sessionName)
+	}
+	
+	// Create new session with flow plan status -t
+	fmt.Printf("✓ Creating new tmux session: %s\n", sessionName)
+	fmt.Printf("  Working directory: %s\n", gitRoot)
+	fmt.Printf("  Running: flow plan status -t\n")
+	
+	// First create the session
+	if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-c", gitRoot); err != nil {
+		return fmt.Errorf("failed to create tmux session: %w", err)
+	}
+	
+	// Then send the command to run
+	command := fmt.Sprintf("flow plan status -t %s", planName)
+	if err := executor.Execute("tmux", "send-keys", "-t", sessionName, command, "Enter"); err != nil {
+		// Clean up on failure
+		executor.Execute("tmux", "kill-session", "-t", sessionName)
+		return fmt.Errorf("failed to send command to tmux session: %w", err)
+	}
+	
+	// Attach to the session
+	return executor.Execute("tmux", "attach-session", "-t", sessionName)
 }
 
 // launchWorktreeSession is a helper to launch a tmux session for a worktree, adapted from plan_launch and chat_launch.
