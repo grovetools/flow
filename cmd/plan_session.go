@@ -163,3 +163,85 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 
 	return nil
 }
+
+// CreateOrSwitchToMainRepoSessionAndRunCommand creates or switches to a tmux session in the main repo and executes a command.
+// This is similar to CreateOrSwitchToWorktreeSessionAndRunCommand but operates in the main repository.
+func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName string, commandToRun []string) error {
+	// Only proceed if we're in a terminal and have tmux
+	if os.Getenv("TERM") == "" {
+		return fmt.Errorf("not in a terminal")
+	}
+
+	// Create tmux client
+	tmuxClient, err := tmux.NewClient()
+	if err != nil {
+		return fmt.Errorf("tmux not available: %w", err)
+	}
+
+	// Get git root
+	gitRoot, err := git.GetGitRoot(".")
+	if err != nil {
+		return fmt.Errorf("could not find git root: %w", err)
+	}
+	
+	repoName := filepath.Base(gitRoot)
+	sessionTitle := fmt.Sprintf("%s-plan", planName)
+	sessionName := fmt.Sprintf("%s__%s", repoName, SanitizeForTmuxSession(sessionTitle))
+
+	// Check if session already exists
+	executor := &groveexec.RealCommandExecutor{}
+	sessions, err := tmuxClient.ListSessions(ctx)
+	if err == nil {
+		for _, session := range sessions {
+			if session == sessionName {
+				// Session exists, switch to it
+				fmt.Printf("✓ Switching to existing session '%s'...\n", sessionName)
+				
+				// If we're already in tmux, switch to the session
+				if os.Getenv("TMUX") != "" {
+					if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+						fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
+					}
+				} else {
+					// Not in tmux, attach to the session
+					if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
+						return fmt.Errorf("failed to attach to session: %w", err)
+					}
+				}
+				return nil
+			}
+		}
+	}
+
+	// Session doesn't exist, create it
+	fmt.Printf("✓ Creating new session '%s' in main repository...\n", sessionName)
+	
+	// Create the session
+	if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-c", gitRoot); err != nil {
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// Send the command to the session
+	commandStr := strings.Join(commandToRun, " ")
+	if err := executor.Execute("tmux", "send-keys", "-t", sessionName, commandStr, "C-m"); err != nil {
+		// Clean up on failure
+		executor.Execute("tmux", "kill-session", "-t", sessionName)
+		return fmt.Errorf("failed to send command: %w", err)
+	}
+
+	// If we're already in tmux, switch to the new session
+	if os.Getenv("TMUX") != "" {
+		fmt.Printf("✓ Switching to session '%s'...\n", sessionName)
+		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
+		}
+	} else {
+		// Not in tmux, attach to the new session
+		fmt.Printf("✓ Attaching to session '%s'...\n", sessionName)
+		if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
+			return fmt.Errorf("failed to attach to session: %w", err)
+		}
+	}
+
+	return nil
+}
