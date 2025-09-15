@@ -141,11 +141,15 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					WithWorktree: m.withWorktree,
 					Worktree: m.worktreeInput.Value(),
 				}
-				if selected := m.recipeList.SelectedItem(); selected != nil && string(selected.(item)) != "none" {
-					initCmd.Recipe = string(selected.(item))
+				if selected := m.recipeList.SelectedItem(); selected != nil {
+					if recipeItem, ok := selected.(item); ok && string(recipeItem) != "none" {
+						initCmd.Recipe = string(recipeItem)
+					}
 				}
-				if selected := m.modelList.SelectedItem(); selected != nil && selected.(modelItem).ID != "(default)" {
-					initCmd.Model = selected.(modelItem).ID
+				if selected := m.modelList.SelectedItem(); selected != nil {
+					if model, ok := selected.(modelItem); ok && model.ID != "(default)" {
+						initCmd.Model = model.ID
+					}
 				}
 
 				// Execute and transition
@@ -267,7 +271,23 @@ func renderList(label string, l list.Model, focused bool) string {
 	if focused {
 		style = style.Foreground(lipgloss.Color("205"))
 	}
-	return style.Render(fmt.Sprintf("%-25s [%s]", label, l.SelectedItem().(item).FilterValue())) + "\n"
+	
+	// Handle different item types
+	var displayValue string
+	if selected := l.SelectedItem(); selected != nil {
+		switch v := selected.(type) {
+		case item:
+			displayValue = v.FilterValue()
+		case modelItem:
+			displayValue = v.FilterValue()
+		default:
+			displayValue = "unknown"
+		}
+	} else {
+		displayValue = "none"
+	}
+	
+	return style.Render(fmt.Sprintf("%-25s [%s]", label, displayValue)) + "\n"
 }
 
 func renderCheckbox(label string, checked bool, focused bool) string {
