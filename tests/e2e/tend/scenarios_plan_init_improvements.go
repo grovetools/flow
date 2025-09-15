@@ -243,6 +243,29 @@ This is the second job.
 					return fmt.Errorf("expected extraction message in output:\n%s", result.Stdout)
 				}
 				
+				// Verify the extracted job has worktree in its frontmatter
+				var extractedJobPath string
+				for _, file := range files {
+					if file.Name() != ".grove-plan.yml" {
+						extractedJobPath = filepath.Join(planDir, file.Name())
+						break
+					}
+				}
+				
+				if extractedJobPath == "" {
+					return fmt.Errorf("no extracted job file found")
+				}
+				
+				jobContent, err := os.ReadFile(extractedJobPath)
+				if err != nil {
+					return fmt.Errorf("failed to read extracted job file: %w", err)
+				}
+				
+				// Check that the job frontmatter includes the worktree
+				if !strings.Contains(string(jobContent), "worktree: extract-worktree-test") {
+					return fmt.Errorf("expected extracted job to have worktree in frontmatter, got:\n%s", jobContent)
+				}
+				
 				return nil
 			}),
 			

@@ -99,7 +99,11 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 			Status:     orchestration.JobStatusPending,
 			ID:         GenerateJobIDFromTitle(plan, jobTitle),
 			PromptBody: string(body),
-			// other fields will get defaults from plan config upon execution
+		}
+		
+		// Apply worktree from plan config if set
+		if plan.Config != nil && plan.Config.Worktree != "" {
+			job.Worktree = plan.Config.Worktree
 		}
 
 		// 5. Add the job to the plan
