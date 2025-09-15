@@ -116,7 +116,6 @@ If no directory is specified, uses the active job if set.`,
 var (
 	planInitForce          bool
 	planInitModel          string
-	planInitWithWorktree   bool
 	planInitWorktree       string
 	planInitContainer      string
 	planInitExtractAllFrom string
@@ -159,8 +158,8 @@ func GetPlanCommand() *cobra.Command {
 	// Init command flags
 	planInitCmd.Flags().BoolVarP(&planInitForce, "force", "f", false, "Overwrite existing directory")
 	planInitCmd.Flags().StringVar(&planInitModel, "model", "", "Default model for jobs (e.g., claude-3-5-sonnet-20241022, gpt-4)")
-	planInitCmd.Flags().BoolVar(&planInitWithWorktree, "with-worktree", false, "Automatically set the worktree name to match the plan directory name")
-	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Default worktree for agent jobs in the plan")
+	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Set default worktree (uses plan name if no value provided)")
+	planInitCmd.Flags().Lookup("worktree").NoOptDefVal = "__AUTO__" // Special marker for auto-naming
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
@@ -240,8 +239,8 @@ func NewPlanCmd() *cobra.Command {
 	// Init command flags
 	planInitCmd.Flags().BoolVarP(&planInitForce, "force", "f", false, "Overwrite existing directory")
 	planInitCmd.Flags().StringVar(&planInitModel, "model", "", "Default model for jobs (e.g., claude-3-5-sonnet-20241022, gpt-4)")
-	planInitCmd.Flags().BoolVar(&planInitWithWorktree, "with-worktree", false, "Automatically set the worktree name to match the plan directory name")
-	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Default worktree for agent jobs in the plan")
+	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Set default worktree (uses plan name if no value provided)")
+	planInitCmd.Flags().Lookup("worktree").NoOptDefVal = "__AUTO__" // Special marker for auto-naming
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
@@ -321,7 +320,6 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		Dir:            args[0],
 		Force:          planInitForce,
 		Model:          planInitModel,
-		WithWorktree:   planInitWithWorktree,
 		Worktree:       planInitWorktree,
 		Container:      planInitContainer,
 		ExtractAllFrom: planInitExtractAllFrom,
@@ -392,7 +390,6 @@ type PlanInitCmd struct {
 	Dir            string
 	Force          bool
 	Model          string
-	WithWorktree   bool
 	Worktree       string
 	Container      string
 	ExtractAllFrom string

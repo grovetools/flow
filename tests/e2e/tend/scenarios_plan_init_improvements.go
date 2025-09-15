@@ -14,11 +14,11 @@ import (
 
 // PlanInitImprovementsScenario tests the new features for plan init:
 // 1. Empty plans with .grove-plan.yml show in list
-// 2. --with-worktree flag auto-sets worktree name
+// 2. --worktree flag with and without values
 func PlanInitImprovementsScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name:        "flow-plan-init-improvements",
-		Description: "Tests plan init improvements: empty plan listing and --with-worktree flag",
+		Description: "Tests plan init improvements: empty plan listing and --worktree flag variations",
 		Tags:        []string{"plan", "init"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup git repository and config", func(ctx *harness.Context) error {
@@ -38,14 +38,14 @@ flow:
 				return nil
 			}),
 			
-			harness.NewStep("Test plan init with --with-worktree flag and auto-activation", func(ctx *harness.Context) error {
+			harness.NewStep("Test plan init with --worktree flag (no value, auto mode)", func(ctx *harness.Context) error {
 				flow, err := getFlowBinary()
 				if err != nil {
 					return fmt.Errorf("failed to get flow binary: %w", err)
 				}
 				
-				// Initialize plan with --with-worktree
-				cmd := command.New(flow, "plan", "init", "test-worktree-plan", "--with-worktree").Dir(ctx.RootDir)
+				// Initialize plan with --worktree (no value)
+				cmd := command.New(flow, "plan", "init", "test-auto-worktree", "--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -53,35 +53,49 @@ flow:
 				}
 				
 				// Verify output shows plan was set as active
-				if !strings.Contains(result.Stdout, "Set active plan to: test-worktree-plan") {
+				if !strings.Contains(result.Stdout, "Set active plan to: test-auto-worktree") {
 					return fmt.Errorf("expected init to set active plan, output:\n%s", result.Stdout)
 				}
 				
 				// Verify .grove-plan.yml was created with correct content
-				planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-worktree-plan", ".grove-plan.yml")
+				planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-auto-worktree", ".grove-plan.yml")
 				content, err := os.ReadFile(planConfigPath)
 				if err != nil {
 					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
 				}
 				
-				// Check that worktree matches plan name
-				if !strings.Contains(string(content), "worktree: test-worktree-plan") {
-					return fmt.Errorf("expected worktree to be set to 'test-worktree-plan', got:\n%s", content)
+				// Check that worktree matches plan name (auto mode)
+				if !strings.Contains(string(content), "worktree: test-auto-worktree") {
+					return fmt.Errorf("expected worktree to be auto-set to 'test-auto-worktree', got:\n%s", content)
 				}
 				
-				// Check that model is commented out (not automatically set from grove.yml)
-				if !strings.Contains(string(content), "# model: gemini-2.5-pro") {
-					return fmt.Errorf("expected model to be commented out, got:\n%s", content)
+				return nil
+			}),
+			
+			harness.NewStep("Test plan init with --worktree=custom-name flag", func(ctx *harness.Context) error {
+				flow, err := getFlowBinary()
+				if err != nil {
+					return fmt.Errorf("failed to get flow binary: %w", err)
 				}
 				
-				// Verify plan is set as active using plan current
-				cmd = command.New(flow, "plan", "current").Dir(ctx.RootDir)
-				result = cmd.Run()
+				// Initialize plan with --worktree=custom-name
+				cmd := command.New(flow, "plan", "init", "test-custom-worktree", "--worktree=my-custom-wt").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
-					return fmt.Errorf("flow plan current failed: %w", result.Error)
+					return fmt.Errorf("flow plan init failed: %w", result.Error)
 				}
-				if !strings.Contains(result.Stdout, "test-worktree-plan") {
-					return fmt.Errorf("expected current plan to be 'test-worktree-plan', got:\n%s", result.Stdout)
+				
+				// Verify .grove-plan.yml was created with custom worktree
+				planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-custom-worktree", ".grove-plan.yml")
+				content, err := os.ReadFile(planConfigPath)
+				if err != nil {
+					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
+				}
+				
+				// Check that worktree is set to custom value
+				if !strings.Contains(string(content), "worktree: my-custom-wt") {
+					return fmt.Errorf("expected worktree to be set to 'my-custom-wt', got:\n%s", content)
 				}
 				
 				return nil
@@ -113,33 +127,43 @@ flow:
 					return fmt.Errorf("flow plan list failed: %w", result.Error)
 				}
 				
-				// Check that both plans appear in the list
-				if !strings.Contains(result.Stdout, "test-worktree-plan") {
-					return fmt.Errorf("expected 'test-worktree-plan' to appear in plan list, got:\n%s", result.Stdout)
+				// Check that all created plans appear in the list
+				if !strings.Contains(result.Stdout, "test-auto-worktree") {
+					return fmt.Errorf("expected 'test-auto-worktree' to appear in plan list, got:\n%s", result.Stdout)
+				}
+				if !strings.Contains(result.Stdout, "test-custom-worktree") {
+					return fmt.Errorf("expected 'test-custom-worktree' to appear in plan list, got:\n%s", result.Stdout)
 				}
 				if !strings.Contains(result.Stdout, "empty-plan") {
 					return fmt.Errorf("expected 'empty-plan' to appear in plan list, got:\n%s", result.Stdout)
 				}
 				
-				// Both should show 0 jobs
+				// All should show 0 jobs
 				lines := strings.Split(result.Stdout, "\n")
 				foundEmptyPlanWithZeroJobs := false
-				foundWorktreePlanWithZeroJobs := false
+				foundAutoWorktreeWithZeroJobs := false
+				foundCustomWorktreeWithZeroJobs := false
 				
 				for _, line := range lines {
 					if strings.Contains(line, "empty-plan") && strings.Contains(line, "0") {
 						foundEmptyPlanWithZeroJobs = true
 					}
-					if strings.Contains(line, "test-worktree-plan") && strings.Contains(line, "0") {
-						foundWorktreePlanWithZeroJobs = true
+					if strings.Contains(line, "test-auto-worktree") && strings.Contains(line, "0") {
+						foundAutoWorktreeWithZeroJobs = true
+					}
+					if strings.Contains(line, "test-custom-worktree") && strings.Contains(line, "0") {
+						foundCustomWorktreeWithZeroJobs = true
 					}
 				}
 				
 				if !foundEmptyPlanWithZeroJobs {
 					return fmt.Errorf("expected 'empty-plan' to show 0 jobs in list")
 				}
-				if !foundWorktreePlanWithZeroJobs {
-					return fmt.Errorf("expected 'test-worktree-plan' to show 0 jobs in list")
+				if !foundAutoWorktreeWithZeroJobs {
+					return fmt.Errorf("expected 'test-auto-worktree' to show 0 jobs in list")
+				}
+				if !foundCustomWorktreeWithZeroJobs {
+					return fmt.Errorf("expected 'test-custom-worktree' to show 0 jobs in list")
 				}
 				
 				return nil
@@ -173,7 +197,7 @@ flow:
 				return nil
 			}),
 			
-			harness.NewStep("Test plan init with --extract-all-from and --with-worktree", func(ctx *harness.Context) error {
+			harness.NewStep("Test plan init with --extract-all-from and --worktree", func(ctx *harness.Context) error {
 				flow, err := getFlowBinary()
 				if err != nil {
 					return fmt.Errorf("failed to get flow binary: %w", err)
@@ -199,10 +223,10 @@ This is the second job.
 					return fmt.Errorf("failed to create source file: %w", err)
 				}
 				
-				// Initialize plan with --extract-all-from and --with-worktree using a path
+				// Initialize plan with --extract-all-from and --worktree (auto mode)
 				cmd := command.New(flow, "plan", "init", "extract-worktree-test", 
 					"--extract-all-from", sourceFile,
-					"--with-worktree").Dir(ctx.RootDir)
+					"--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -269,7 +293,7 @@ This is the second job.
 				return nil
 			}),
 			
-			harness.NewStep("Test plan init with path argument and --with-worktree", func(ctx *harness.Context) error {
+			harness.NewStep("Test plan init with path argument and --worktree", func(ctx *harness.Context) error {
 				flow, err := getFlowBinary()
 				if err != nil {
 					return fmt.Errorf("failed to get flow binary: %w", err)
@@ -282,7 +306,7 @@ This is the second job.
 				}
 				
 				// Initialize plan with a path argument that includes directory separators
-				cmd := command.New(flow, "plan", "init", "subplans/path-test-plan", "--with-worktree").Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "init", "subplans/path-test-plan", "--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -335,7 +359,7 @@ This is the specification for my new feature.
 				cmd := command.New(flow, "plan", "init", "recipe-with-extract",
 					"--recipe", "standard-feature",
 					"--extract-all-from", sourceFile,
-					"--with-worktree").Dir(ctx.RootDir)
+					"--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {

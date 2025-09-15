@@ -56,7 +56,8 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Determine worktree to set in config
 	worktreeToSet := cmd.Worktree
-	if cmd.WithWorktree && worktreeToSet == "" {
+	if worktreeToSet == "__AUTO__" {
+		// User used --worktree without a value, use plan name
 		worktreeToSet = planName
 	}
 
@@ -237,7 +238,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			}
 			
 			// Apply worktree if needed
-			if cmd.WithWorktree {
+			if cmd.Worktree == "__AUTO__" {
 				frontmatter["worktree"] = planName
 			} else if cmd.Worktree != "" {
 				frontmatter["worktree"] = cmd.Worktree
@@ -277,11 +278,11 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// Determine the final worktree to use in .grove-plan.yml
 	finalWorktree := firstAgentWorktree
-	if cmd.WithWorktree {
-		// --with-worktree flag takes precedence
+	if cmd.Worktree == "__AUTO__" {
+		// --worktree without value, use plan name
 		finalWorktree = planName
 	} else if cmd.Worktree != "" {
-		// Explicit --worktree flag takes precedence
+		// Explicit --worktree value takes precedence
 		finalWorktree = cmd.Worktree
 	}
 	
