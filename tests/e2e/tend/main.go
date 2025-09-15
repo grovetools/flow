@@ -31,6 +31,7 @@ func main() {
 		PlanFinishFlagsScenario(),            // Tests flag-based plan cleanup
 		PlanFinishDevLinksScenario(),         // Tests dev links cleanup functionality
 		PlanRecipesScenario(),                // Tests the new recipes feature
+		PlanRecipeWithExtractScenario(),      // Tests combining recipe with content extraction
 		GenerateRecipeScenario(),             // Tests generate-recipe job type functionality
 		GenerateRecipeWithVariablesScenario(), // Tests generate-recipe with multiple template variables
 		JobSummaryScenario(),                 // Tests job summarization on completion
