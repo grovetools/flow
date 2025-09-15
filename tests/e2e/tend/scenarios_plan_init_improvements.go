@@ -172,6 +172,119 @@ flow:
 				
 				return nil
 			}),
+			
+			harness.NewStep("Test plan init with --extract-all-from and --with-worktree", func(ctx *harness.Context) error {
+				flow, err := getFlowBinary()
+				if err != nil {
+					return fmt.Errorf("failed to get flow binary: %w", err)
+				}
+				
+				// Create a source markdown file with jobs to extract
+				sourceFile := filepath.Join(ctx.RootDir, "test-jobs.md")
+				sourceContent := `# Test Jobs Document
+
+<!-- grove: {"id": "job1"} -->
+## Job 1
+
+This is the first job.
+
+---
+
+<!-- grove: {"id": "job2"} -->
+## Job 2
+
+This is the second job.
+`
+				if err := os.WriteFile(sourceFile, []byte(sourceContent), 0644); err != nil {
+					return fmt.Errorf("failed to create source file: %w", err)
+				}
+				
+				// Initialize plan with --extract-all-from and --with-worktree using a path
+				cmd := command.New(flow, "plan", "init", "extract-worktree-test", 
+					"--extract-all-from", sourceFile,
+					"--with-worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("flow plan init with extract failed: %w", result.Error)
+				}
+				
+				// Verify plan was created with correct name
+				if !strings.Contains(result.Stdout, "Set active plan to: extract-worktree-test") {
+					return fmt.Errorf("expected plan name to be 'extract-worktree-test', output:\n%s", result.Stdout)
+				}
+				
+				// Verify .grove-plan.yml has correct worktree
+				planConfigPath := filepath.Join(ctx.RootDir, "plans", "extract-worktree-test", ".grove-plan.yml")
+				content, err := os.ReadFile(planConfigPath)
+				if err != nil {
+					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
+				}
+				
+				// Check that worktree matches plan name (base name)
+				if !strings.Contains(string(content), "worktree: extract-worktree-test") {
+					return fmt.Errorf("expected worktree to be set to 'extract-worktree-test', got:\n%s", content)
+				}
+				
+				// Verify jobs were extracted
+				planDir := filepath.Join(ctx.RootDir, "plans", "extract-worktree-test")
+				files, err := os.ReadDir(planDir)
+				if err != nil {
+					return fmt.Errorf("failed to read plan directory: %w", err)
+				}
+				
+				// Should have .grove-plan.yml and at least one extracted job file
+				if len(files) < 2 {
+					return fmt.Errorf("expected at least 2 files (config + extracted job), got %d", len(files))
+				}
+				
+				// Check extraction output mentions extraction
+				if !strings.Contains(result.Stdout, "Extracted content") {
+					return fmt.Errorf("expected extraction message in output:\n%s", result.Stdout)
+				}
+				
+				return nil
+			}),
+			
+			harness.NewStep("Test plan init with path argument and --with-worktree", func(ctx *harness.Context) error {
+				flow, err := getFlowBinary()
+				if err != nil {
+					return fmt.Errorf("failed to get flow binary: %w", err)
+				}
+				
+				// Create a subdirectory for plans
+				subDir := filepath.Join(ctx.RootDir, "subplans")
+				if err := os.MkdirAll(subDir, 0755); err != nil {
+					return fmt.Errorf("failed to create subdirectory: %w", err)
+				}
+				
+				// Initialize plan with a path argument that includes directory separators
+				cmd := command.New(flow, "plan", "init", "subplans/path-test-plan", "--with-worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("flow plan init with path failed: %w", result.Error)
+				}
+				
+				// Verify plan name is the base name, not the full path
+				if !strings.Contains(result.Stdout, "Set active plan to: path-test-plan") {
+					return fmt.Errorf("expected plan name to be 'path-test-plan', output:\n%s", result.Stdout)
+				}
+				
+				// Verify .grove-plan.yml has correct worktree (should be base name)
+				planConfigPath := filepath.Join(ctx.RootDir, "plans", "subplans", "path-test-plan", ".grove-plan.yml")
+				content, err := os.ReadFile(planConfigPath)
+				if err != nil {
+					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
+				}
+				
+				// Check that worktree matches the base name of the path
+				if !strings.Contains(string(content), "worktree: path-test-plan") {
+					return fmt.Errorf("expected worktree to be set to 'path-test-plan' (base name), got:\n%s", content)
+				}
+				
+				return nil
+			}),
 		},
 	}
 }
