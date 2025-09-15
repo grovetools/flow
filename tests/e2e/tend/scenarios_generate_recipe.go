@@ -71,9 +71,10 @@ flow:
 
 				return nil
 			}),
-			// 4. Use the standard helper to set up mocks
-			setupTestEnvironment(map[string]interface{}{
-				"mockLLMResponse": `--- [01-spec.md] ---
+			// 4. Set up mock LLM response file
+			harness.NewStep("Setup mock LLM response", func(ctx *harness.Context) error {
+				// Write the mock response to a file
+				mockResponse := `--- [01-spec.md] ---
 ---
 id: spec
 title: "Specification for {{ .PlanName }}"
@@ -93,8 +94,18 @@ worktree: "{{ .PlanName }}"
 status: pending
 ---
 Implement the "{{ .PlanName }}" feature based on the specification.
-`,
+`
+				mockFile := filepath.Join(ctx.RootDir, "mock-response.txt")
+				if err := fs.WriteString(mockFile, mockResponse); err != nil {
+					return fmt.Errorf("failed to write mock response file: %w", err)
+				}
+				
+				// Set environment variable
+				os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", mockFile)
+				
+				return nil
 			}),
+			setupTestEnvironment(map[string]interface{}{}),
 			harness.NewStep("Create and run the generate-recipe job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 
@@ -140,6 +151,7 @@ Generalize this plan for API endpoint migrations. Replace 'user-profile-api' wit
 				
 				// Cleanup
 				os.RemoveAll(recipePath)
+				os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 				return nil
 			}),
 			harness.NewStep("Initialize a new plan from the generated recipe", func(ctx *harness.Context) error {
@@ -227,8 +239,9 @@ flow:
 
 				return nil
 			}),
-			setupTestEnvironment(map[string]interface{}{
-				"mockLLMResponse": `--- [01-design-api.md] ---
+			harness.NewStep("Setup mock LLM response", func(ctx *harness.Context) error {
+				// Write the mock response to a file
+				mockResponse := `--- [01-design-api.md] ---
 ---
 id: design-api
 title: "Design {{ .ServiceName }} API"
@@ -250,8 +263,18 @@ status: pending
 ---
 
 Implement the {{ .ServiceName }} microservice in {{ .Language }} based on the API design.
-`,
+`
+				mockFile := filepath.Join(ctx.RootDir, "mock-response.txt")
+				if err := fs.WriteString(mockFile, mockResponse); err != nil {
+					return fmt.Errorf("failed to write mock response file: %w", err)
+				}
+				
+				// Set environment variable
+				os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", mockFile)
+				
+				return nil
 			}),
+			setupTestEnvironment(map[string]interface{}{}),
 			harness.NewStep("Create and run generate-recipe job with multiple variables", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 
@@ -308,6 +331,7 @@ Make sure to replace these consistently throughout the recipe.
 
 				// Clean up
 				os.RemoveAll(recipePath)
+				os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 				return nil
 			}),
 		},
