@@ -19,11 +19,14 @@ import (
 // RunPlanInit implements the plan init command.
 func RunPlanInit(cmd *PlanInitCmd) error {
 	// Resolve the full path for the new plan directory.
-	planName := cmd.Dir
-	planPath, err := resolvePlanPath(planName)
+	planDirArg := cmd.Dir
+	planPath, err := resolvePlanPath(planDirArg)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
+
+	// The canonical plan name is the base name of the directory argument.
+	planName := filepath.Base(planDirArg)
 
 	// Validate inputs with resolved path
 	if err := validateInitInputs(cmd, planPath); err != nil {
