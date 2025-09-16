@@ -45,19 +45,12 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	var result strings.Builder
 
-	// Default to the "chat" recipe if no other recipe is specified and no extraction is requested.
-	useRecipe := cmd.Recipe
-	if useRecipe == "" && cmd.ExtractAllFrom == "" {
-		useRecipe = "chat"
-	}
-
 	// NEW: Recipe-based initialization (can be combined with extraction)
-	if useRecipe != "" {
+	if cmd.Recipe != "" {
 		// Note: runPlanInitFromRecipe prints its own messages. This part could be refactored further
 		// but for now we'll call it and assume it works for the CLI context.
 		// To make it TUI-friendly, it would also need to return a result string.
 		// For this implementation, we assume TUI will not use recipes initially.
-		cmd.Recipe = useRecipe // Update the cmd object so the recipe function sees the default
 		return "", runPlanInitFromRecipe(cmd, planPath, planName)
 	}
 
