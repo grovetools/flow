@@ -89,6 +89,9 @@ func ListBuiltinRecipes() ([]*Recipe, error) {
 			if recipe.Name == "standard-feature" {
 				recipe.Description = "A standard workflow: spec -> implement -> review."
 			}
+			if recipe.Name == "chat" {
+				recipe.Description = "A chat-driven workflow: chat -> implement -> review."
+			}
 			recipes = append(recipes, recipe)
 		}
 	}
