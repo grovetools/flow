@@ -153,7 +153,6 @@ var (
 	planLaunchHost bool
 )
 
-
 // NewPlanCmd returns the plan command with all subcommands configured.
 func NewPlanCmd() *cobra.Command {
 	// Init command flags
@@ -178,7 +177,7 @@ func NewPlanCmd() *cobra.Command {
 
 	// Add-step command flags
 	planAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
-	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, agent, chat, shell, or interactive_agent")
+	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, chat, shell, headless_agent, or interactive_agent (agent is an alias for interactive_agent)")
 	planAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	planAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")

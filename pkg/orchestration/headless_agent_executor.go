@@ -19,8 +19,8 @@ type AgentRunner interface {
 	RunAgent(ctx context.Context, worktree string, prompt string) error
 }
 
-// AgentExecutor executes agent jobs in isolated git worktrees.
-type AgentExecutor struct {
+// HeadlessAgentExecutor executes headless agent jobs in isolated git worktrees.
+type HeadlessAgentExecutor struct {
 	llmClient       LLMClient
 	config          *ExecutorConfig
 	worktreeManager *git.WorktreeManager
@@ -32,8 +32,8 @@ type defaultAgentRunner struct {
 	config *ExecutorConfig
 }
 
-// NewAgentExecutor creates a new agent executor.
-func NewAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *AgentExecutor {
+// NewHeadlessAgentExecutor creates a new headless agent executor.
+func NewHeadlessAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *HeadlessAgentExecutor {
 	if config == nil {
 		config = &ExecutorConfig{
 			MaxPromptLength: 1000000,
@@ -43,7 +43,7 @@ func NewAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *AgentExecuto
 		}
 	}
 
-	return &AgentExecutor{
+	return &HeadlessAgentExecutor{
 		llmClient:       llmClient,
 		config:          config,
 		worktreeManager: git.NewWorktreeManager(),
@@ -52,12 +52,12 @@ func NewAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *AgentExecuto
 }
 
 // Name returns the executor name.
-func (e *AgentExecutor) Name() string {
+func (e *HeadlessAgentExecutor) Name() string {
 	return "agent"
 }
 
 // Execute runs an agent job in a worktree.
-func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -150,7 +150,7 @@ func (e *AgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 
 
 // prepareWorktree ensures the worktree exists and is ready.
-func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Plan) (string, error) {
+func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Plan) (string, error) {
 	if job.Worktree == "" {
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
@@ -205,7 +205,7 @@ func (e *AgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 }
 
 // runAgentInWorktree executes the agent in the worktree context.
-func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan) error {
+func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan) error {
 	// Set up output handling
 	logDir := ResolveLogDirectory(plan, job)
 	logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", job.ID))
@@ -236,7 +236,7 @@ func (e *AgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath str
 
 
 // runOnHost executes the agent directly on the host machine
-func (e *AgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, coreCfg *config.Config) error {
+func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, coreCfg *config.Config) error {
 	// Change to the worktree directory
 	originalDir, err := os.Getwd()
 	if err != nil {

@@ -47,8 +47,8 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 	}
 
 	// Validate job type
-	if job.Type != orchestration.JobTypeAgent {
-		return fmt.Errorf("launch command only supports 'agent' type jobs, got '%s'", job.Type)
+	if job.Type != orchestration.JobTypeAgent && job.Type != orchestration.JobTypeInteractiveAgent {
+		return fmt.Errorf("launch command only supports 'agent' or 'interactive_agent' type jobs, got '%s'", job.Type)
 	}
 	if job.Worktree == "" {
 		return fmt.Errorf("agent job must have a 'worktree' specified for interactive launch")

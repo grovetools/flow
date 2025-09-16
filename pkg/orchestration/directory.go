@@ -118,7 +118,7 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 
 	// Generate job content
 	var content []byte
-	if job.Type == JobTypeAgent || job.Type == JobTypeInteractiveAgent {
+	if job.Type == JobTypeAgent || job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
 		content, err = generateAgentJobContent(job)
 	} else {
 		content, err = generateJobContent(job)

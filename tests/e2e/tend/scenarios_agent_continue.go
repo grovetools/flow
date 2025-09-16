@@ -292,30 +292,30 @@ flow:
 				return nil
 			}),
 			
-			harness.NewStep("Add regular agent job to verify it's not affected", func(ctx *harness.Context) error {
+			harness.NewStep("Add agent job (now an alias for interactive_agent)", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				// Add a regular agent job (not interactive_agent)
+				// Add an agent job (which is now an alias for interactive_agent)
 				cmd := command.New(flow, "plan", "add", "auto-continue-test",
-					"--title", "Regular Agent Job",
+					"--title", "Agent Job (Alias)",
 					"--type", "agent",
 					"--worktree", "test-worktree",
-					"-p", "This is a regular agent job",
+					"-p", "This is an agent job (now behaves as interactive_agent)",
 				).Dir(ctx.RootDir)
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
 				if result.Error != nil {
-					return fmt.Errorf("failed to add regular agent job: %v", result.Error)
+					return fmt.Errorf("failed to add agent job: %v", result.Error)
 				}
 				
-				// Verify regular agent job does NOT have agent_continue
-				jobFile := filepath.Join(ctx.RootDir, "plans", "auto-continue-test", "03-regular-agent-job.md")
+				// Verify agent job (alias) also does NOT have agent_continue by default
+				jobFile := filepath.Join(ctx.RootDir, "plans", "auto-continue-test", "03-agent-job-alias.md")
 				content, _ := fs.ReadString(jobFile)
 				
 				if strings.Contains(content, "agent_continue") {
-					return fmt.Errorf("regular agent job should NOT have agent_continue field")
+					return fmt.Errorf("agent job (alias) should NOT have agent_continue field by default")
 				}
 				
 				return nil

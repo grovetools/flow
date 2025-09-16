@@ -87,25 +87,8 @@ func TestAutoEnableAgentContinue(t *testing.T) {
 		t.Error("Job with explicit AgentContinue = true should keep that value")
 	}
 
-	// Test 4: Regular agent jobs should NOT be affected
-	plan.Jobs = append(plan.Jobs, job2) // Now we have two interactive_agent jobs
-
-	cmd4 := &PlanAddStepCmd{
-		Dir:           tmpDir,
-		Title:         "Regular Agent Job",
-		Type:          "agent",
-		AgentContinue: false,
-		Prompt:        "Regular agent job",
-	}
-
-	job4, err := collectJobDetails(cmd4, plan, "")
-	if err != nil {
-		t.Fatalf("Failed to collect job details for regular agent job: %v", err)
-	}
-
-	if job4.AgentContinue {
-		t.Error("Regular agent job should NOT have AgentContinue auto-enabled")
-	}
+	// Test 4 (removed): The distinction between 'agent' and 'interactive_agent'
+	// for auto-continue logic is no longer relevant as they are now aliases.
 }
 
 func TestAutoEnableAgentContinueIntegration(t *testing.T) {

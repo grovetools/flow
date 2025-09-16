@@ -110,11 +110,13 @@ func (o *Orchestrator) registerExecutors() {
 	o.executors[JobTypeOneshot] = oneshotExecutor
 	o.executors[JobTypeChat] = oneshotExecutor
 
-	// Register agent executor with mock LLM client
-	o.executors[JobTypeAgent] = NewAgentExecutor(NewMockLLMClient(), execConfig)
+	// Register headless agent executor with mock LLM client
+	o.executors[JobTypeHeadlessAgent] = NewHeadlessAgentExecutor(NewMockLLMClient(), execConfig)
 
-	// Register interactive agent executor
-	o.executors[JobTypeInteractiveAgent] = NewInteractiveAgentExecutor(o.config.SkipInteractive)
+	// Register interactive agent executor for both agent and interactive_agent types (agent is now an alias)
+	interactiveExecutor := NewInteractiveAgentExecutor(o.config.SkipInteractive)
+	o.executors[JobTypeAgent] = interactiveExecutor
+	o.executors[JobTypeInteractiveAgent] = interactiveExecutor
 
 	// Register shell executor
 	o.executors[JobTypeShell] = NewShellExecutor()

@@ -22,6 +22,7 @@ type JobType string
 const (
 	JobTypeOneshot          JobType = "oneshot"
 	JobTypeAgent            JobType = "agent"
+	JobTypeHeadlessAgent    JobType = "headless_agent"
 	JobTypeShell            JobType = "shell"
 	JobTypeChat             JobType = "chat"
 	JobTypeInteractiveAgent JobType = "interactive_agent"

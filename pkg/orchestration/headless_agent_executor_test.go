@@ -20,9 +20,9 @@ func (m *mockAgentRunner) RunAgent(ctx context.Context, worktree string, prompt 
 	return m.runError
 }
 
-func TestAgentExecutor_Execute(t *testing.T) {
+func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 	// Create temporary directory for test
-	tmpDir, err := os.MkdirTemp("", "agent-executor-test")
+	tmpDir, err := os.MkdirTemp("", "headless-agent-executor-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestAgentExecutor_Execute(t *testing.T) {
 
 	job := &Job{
 		ID:       "test-job",
-		Type:     JobTypeAgent,
+		Type:     JobTypeHeadlessAgent,
 		Status:   JobStatusPending,
 		Worktree: "test-worktree",
 		FilePath: filepath.Join(tmpDir, "test-job.md"),
@@ -49,7 +49,7 @@ func TestAgentExecutor_Execute(t *testing.T) {
 	config := &ExecutorConfig{
 		Timeout: 5 * time.Second,
 	}
-	executor := NewAgentExecutor(NewMockLLMClient(), config, nil)
+	executor := NewHeadlessAgentExecutor(NewMockLLMClient(), config)
 	
 	// Use mock agent runner
 	mockRunner := &mockAgentRunner{}
@@ -70,18 +70,18 @@ func TestAgentExecutor_Execute(t *testing.T) {
 	}
 }
 
-func TestAgentExecutor_Name(t *testing.T) {
-	executor := NewAgentExecutor(nil, nil, nil)
+func TestHeadlessAgentExecutor_Name(t *testing.T) {
+	executor := NewHeadlessAgentExecutor(nil, nil)
 	if executor.Name() != "agent" {
 		t.Errorf("Expected name 'agent', got %s", executor.Name())
 	}
 }
 
-func TestAgentExecutor_PrepareWorktree(t *testing.T) {
+func TestHeadlessAgentExecutor_PrepareWorktree(t *testing.T) {
 	// This test would require a real git repository
 	// For now, we'll just test the error cases
 
-	executor := NewAgentExecutor(nil, nil, nil)
+	executor := NewHeadlessAgentExecutor(nil, nil)
 	ctx := context.Background()
 
 	// Test missing worktree in job
@@ -98,7 +98,7 @@ func TestAgentExecutor_PrepareWorktree(t *testing.T) {
 	}
 }
 
-func TestAgentExecutor_BuildPrompt(t *testing.T) {
+func TestHeadlessAgentExecutor_BuildPrompt(t *testing.T) {
 	// Create temporary directory
 	tmpDir, err := os.MkdirTemp("", "prompt-test")
 	if err != nil {
@@ -137,7 +137,7 @@ func TestAgentExecutor_BuildPrompt(t *testing.T) {
 	}
 }
 
-func TestAgentExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
+func TestHeadlessAgentExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
 	// Create temporary directory
 	tmpDir, err := os.MkdirTemp("", "reference-prompt-test")
 	if err != nil {
