@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPlanJobTypesCommand(t *testing.T) {
+func TestPlanJobsListCommand(t *testing.T) {
 	// Ensure binary exists
 	flowPath := "./bin/flow"
 	if _, err := os.Stat(flowPath); os.IsNotExist(err) {
@@ -25,7 +25,7 @@ func TestPlanJobTypesCommand(t *testing.T) {
 
 	t.Run("text output", func(t *testing.T) {
 		// Execute command
-		cmd := exec.Command(flowPath, "plan", "job-types")
+		cmd := exec.Command(flowPath, "plan", "jobs", "list")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -60,7 +60,7 @@ func TestPlanJobTypesCommand(t *testing.T) {
 
 	t.Run("JSON output", func(t *testing.T) {
 		// Execute command with --json flag
-		cmd := exec.Command(flowPath, "plan", "job-types", "--json")
+		cmd := exec.Command(flowPath, "plan", "jobs", "list", "--json")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -94,26 +94,27 @@ func TestPlanJobTypesCommand(t *testing.T) {
 		assert.Equal(t, "Recipe generation job for automation", typeMap["generate-recipe"])
 	})
 
-	t.Run("aliases work", func(t *testing.T) {
-		// Execute command with alias
-		cmd := exec.Command(flowPath, "plan", "types")
+	t.Run("parent command shows help", func(t *testing.T) {
+		// Execute parent command without subcommand
+		cmd := exec.Command(flowPath, "plan", "jobs")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 
-		err := cmd.Run()
-		require.NoError(t, err, "Command failed: %s", stderr.String())
+		// Parent command without subcommand should show help
+		cmd.Run() // Ignore error as help returns non-zero
 
-		output := stdout.String()
+		output := stdout.String() + stderr.String()
 
-		// Verify output contains expected content
-		assert.Contains(t, output, "TYPE")
-		assert.Contains(t, output, "oneshot")
+		// Verify help content
+		assert.Contains(t, output, "Available Commands:")
+		assert.Contains(t, output, "list")
+		assert.Contains(t, output, "List available job types")
 	})
 
-	t.Run("no args accepted", func(t *testing.T) {
+	t.Run("no args accepted on list", func(t *testing.T) {
 		// Execute command with unexpected args
-		cmd := exec.Command(flowPath, "plan", "job-types", "extra-arg")
+		cmd := exec.Command(flowPath, "plan", "jobs", "list", "extra-arg")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr

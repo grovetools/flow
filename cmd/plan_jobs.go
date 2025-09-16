@@ -11,24 +11,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// planJobsCmd is the parent command for job-related operations
+var planJobsCmd = &cobra.Command{
+	Use:   "jobs",
+	Short: "Manage job types and definitions",
+	Long:  `Manage job types and definitions for orchestration plans.`,
+}
+
+// planJobsListCmd lists available job types
+var planJobsListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available job types",
+	Long:  `Display all available job types for orchestration plans.`,
+	Args:  cobra.NoArgs,
+	RunE:  runPlanJobsList,
+}
+
 type jobTypeInfo struct {
 	Type        string `json:"type"`
 	Description string `json:"description"`
 }
 
-func NewPlanJobTypesCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "job-types",
-		Aliases: []string{"types"},
-		Short:   "List available job types",
-		Long:    `Display all available job types for orchestration plans.`,
-		Args:    cobra.NoArgs,
-		RunE:    runPlanJobTypes,
-	}
-	return cmd
+func NewPlanJobsCmd() *cobra.Command {
+	// Add subcommands
+	planJobsCmd.AddCommand(planJobsListCmd)
+	return planJobsCmd
 }
 
-func runPlanJobTypes(cmd *cobra.Command, args []string) error {
+func runPlanJobsList(cmd *cobra.Command, args []string) error {
 	jobTypes := []jobTypeInfo{
 		{
 			Type:        string(orchestration.JobTypeOneshot),
