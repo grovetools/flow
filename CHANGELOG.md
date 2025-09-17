@@ -1,3 +1,43 @@
+## v0.2.18 (2025-09-17)
+
+### Chores
+
+* update Grove dependencies to latest versions
+
+### Bug Fixes
+
+* restore default behavior to create empty plans
+* resolve E2E test failures from worktree flag consolidation
+* handle type assertions correctly in plan init TUI
+* skip duplicate spec file when using --recipe with --extract-all-from
+* include worktree in extracted job frontmatter
+* derive plan name from directory base name in plan init
+* complete generate-recipe implementation with job type validation
+* update generate-recipe E2E test to use command.New pattern
+
+### Code Refactoring
+
+* rename chat recipe to chat-workflow, create minimal chat recipe
+* consolidate session launching logic
+* merge extracted content into recipe's first job
+
+### Tests
+
+* add comprehensive E2E tests for recipe with extraction
+* add E2E tests for plan init with --extract-all-from and --with-worktree
+
+### Features
+
+* add CLI command for listing job types
+* add CLI command for querying job types
+* add chat recipe and make it default for plan init
+* keep old agent behavior as headless_agent, make agent an alias for interactive_agent
+* consolidate --with-worktree and --worktree flags
+* add interactive TUI form for creating new plans
+* enhance --open-session to work with and without worktrees
+* allow --recipe with --extract-all-from for combined initialization
+* implement generate-recipe job type and fix E2E tests
+
 ## v0.2.17 (2025-09-13)
 
 ### Chores
