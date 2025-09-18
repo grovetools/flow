@@ -8,4 +8,4 @@ depends_on:
 worktree: {{ .PlanName }}
 ---
 
-git diff --name-status
+git diff --name-status main...HEAD

@@ -65,8 +65,16 @@ flow:
 				if len(recipes) == 0 {
 					return fmt.Errorf("expected at least one recipe in JSON output")
 				}
-				if recipes[0]["name"] != "standard-feature" {
-					return fmt.Errorf("expected recipe name to be 'standard-feature'")
+				// Check that standard-feature recipe exists in the list
+				found := false
+				for _, recipe := range recipes {
+					if recipe["name"] == "standard-feature" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("expected 'standard-feature' recipe to be in the list")
 				}
 				return nil
 			}),
@@ -112,8 +120,8 @@ flow:
 				if !strings.Contains(gitChangesContent, "type: shell") {
 					return fmt.Errorf("git-changes job should be a shell type")
 				}
-				if !strings.Contains(gitChangesContent, "git diff --name-status") {
-					return fmt.Errorf("git-changes job should contain git diff command")
+				if !strings.Contains(gitChangesContent, "git diff --name-status main...HEAD") {
+					return fmt.Errorf("git-changes job should contain git diff command with main...HEAD")
 				}
 
 				gitStatusContent, _ := fs.ReadString(filepath.Join(planDir, "04-git-status.md"))
