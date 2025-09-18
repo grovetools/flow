@@ -115,25 +115,40 @@ func notifyJobStart(job *Job, plan *Plan) {
 		return
 	}
 
-	// Get git information from the working directory
 	repo := ""
 	branch := ""
-	
-	workDir := plan.Directory
-	if workDir == "" {
-		workDir = "."
-	}
-	
-	// Try to get git info
-	gitCmd := exec.Command("git", "-C", workDir, "rev-parse", "--show-toplevel")
-	if output, err := gitCmd.Output(); err == nil {
-		repoPath := strings.TrimSpace(string(output))
-		repo = filepath.Base(repoPath)
-		
-		// Get branch name
-		branchCmd := exec.Command("git", "-C", workDir, "rev-parse", "--abbrev-ref", "HEAD")
-		if branchOutput, err := branchCmd.Output(); err == nil {
-			branch = strings.TrimSpace(string(branchOutput))
+
+	// If the job has a worktree, use it for context.
+	if job.Worktree != "" {
+		branch = job.Worktree // The branch name is the worktree name.
+
+		// Find the main git repository root to get the repo name.
+		gitRoot, err := GetGitRootSafe(plan.Directory)
+		if err == nil {
+			// If gitRoot contains .grove-worktrees, we need to find the actual root
+			if idx := strings.Index(gitRoot, "/.grove-worktrees/"); idx != -1 {
+				gitRoot = gitRoot[:idx]
+			}
+			repo = filepath.Base(gitRoot)
+		} else {
+			repo = plan.Name // Fallback to plan name if git root isn't found.
+		}
+	} else {
+		// Original logic for non-worktree jobs.
+		workDir := plan.Directory
+		if workDir == "" {
+			workDir = "."
+		}
+
+		gitCmd := exec.Command("git", "-C", workDir, "rev-parse", "--show-toplevel")
+		if output, err := gitCmd.Output(); err == nil {
+			repoPath := strings.TrimSpace(string(output))
+			repo = filepath.Base(repoPath)
+
+			branchCmd := exec.Command("git", "-C", workDir, "rev-parse", "--abbrev-ref", "HEAD")
+			if branchOutput, err := branchCmd.Output(); err == nil {
+				branch = strings.TrimSpace(string(branchOutput))
+			}
 		}
 	}
 

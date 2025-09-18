@@ -31,11 +31,21 @@ func (e *ShellExecutor) Name() string {
 
 // Execute runs a shell job.
 func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Notify grove-hooks about job start
+	notifyJobStart(job, plan)
+
+	// Ensure we notify completion/failure when we exit
+	var execErr error
+	defer func() {
+		notifyJobComplete(job, execErr)
+	}()
+
 	// Update job status to running
 	persister := NewStatePersister()
 	job.StartTime = time.Now()
 	if err := job.UpdateStatus(persister, JobStatusRunning); err != nil {
-		return fmt.Errorf("updating job status: %w", err)
+		execErr = fmt.Errorf("updating job status: %w", err)
+		return execErr
 	}
 	
 	// Log execution details for debugging
@@ -79,33 +89,41 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	}
 	
 	output, err := cmd.CombinedOutput()
-	
+	execErr = err // Capture the execution error for the deferred hook
+
 	// Persist the output of the shell command to the job file for easy debugging and audit
 	if writeErr := job.AppendOutput(persister, string(output)); writeErr != nil {
 		// Log this error, but return the original command's error
 		fmt.Printf("Warning: failed to write output for job %s: %v\n", job.ID, writeErr)
 	}
-	
+
 	// Update job status based on command result
 	job.EndTime = time.Now()
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.UpdateStatus(persister, JobStatusFailed)
-		// Include more details about the failure
+	finalStatus := JobStatusCompleted
+	if execErr != nil {
+		finalStatus = JobStatusFailed
+	}
+
+	if statusUpdateErr := job.UpdateStatus(persister, finalStatus); statusUpdateErr != nil {
+		// If the original command succeeded but status update failed, return the status error
+		if execErr == nil {
+			execErr = fmt.Errorf("updating job status to %s: %w", finalStatus, statusUpdateErr)
+			return execErr
+		}
+		// Otherwise, log the status update error and return the original execution error
+		fmt.Printf("Warning: failed to update job status to %s: %v\n", finalStatus, statusUpdateErr)
+	}
+	
+	if execErr != nil {
 		exitCode := -1
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
 		}
-		return fmt.Errorf("shell command failed (exit code: %v): %w\nCommand: %s\nWorking Dir: %s\nOutput: %s", 
-			exitCode, err, job.PromptBody, workDir, string(output))
+		execErr = fmt.Errorf("shell command failed (exit code: %v): %w\nCommand: %s\nWorking Dir: %s\nOutput: %s",
+			exitCode, execErr, job.PromptBody, workDir, string(output))
+		return execErr
 	}
-	
-	// Update job status to completed
-	job.Status = JobStatusCompleted
-	if err := job.UpdateStatus(persister, JobStatusCompleted); err != nil {
-		return fmt.Errorf("updating job status to completed: %w", err)
-	}
-	
+
 	return nil
 }
 

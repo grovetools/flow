@@ -110,6 +110,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					fmt.Println("\nMarking chat as complete.")
 					job.Status = JobStatusCompleted
 					job.EndTime = time.Now()
+					notifyJobStart(job, plan)  // Notify start if not already done
+					notifyJobComplete(job, nil) // Notify completion with no error
 					return updateJobFile(job)
 				case "e", "edit":
 					editor := os.Getenv("EDITOR")
@@ -1089,21 +1091,22 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
-	// Update job status to running FIRST
-	job.Status = JobStatusRunning
-	job.StartTime = time.Now()
-	if err := updateJobFile(job); err != nil {
-		return fmt.Errorf("updating job status: %w", err)
-	}
-
-	// Notify grove-hooks about job start AFTER status is set
-	notifyJobStart(job, plan)
-
 	// Ensure we notify completion/failure when we exit
 	var execErr error
 	defer func() {
 		notifyJobComplete(job, execErr)
 	}()
+
+	// Update job status to running FIRST
+	job.Status = JobStatusRunning
+	job.StartTime = time.Now()
+	if err := updateJobFile(job); err != nil {
+		execErr = fmt.Errorf("updating job status: %w", err)
+		return execErr
+	}
+
+	// Notify grove-hooks about job start AFTER status is set
+	notifyJobStart(job, plan)
 
 	// Read the job file content
 	content, err := os.ReadFile(job.FilePath)
