@@ -128,8 +128,11 @@ flow:
 				if !strings.Contains(gitStatusContent, "type: shell") {
 					return fmt.Errorf("git-status job should be a shell type")
 				}
-				if !strings.Contains(gitStatusContent, "git status --porcelain") {
-					return fmt.Errorf("git-status job should contain git status command")
+				if !strings.Contains(gitStatusContent, "Uncommitted changes") {
+					return fmt.Errorf("git-status job should contain uncommitted changes section")
+				}
+				if !strings.Contains(gitStatusContent, "All changes since main") {
+					return fmt.Errorf("git-status job should contain all changes since main section")
 				}
 
 				// Verify review job dependencies

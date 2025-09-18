@@ -8,4 +8,8 @@ depends_on:
 worktree: {{ .PlanName }}
 ---
 
+echo "=== Uncommitted changes ==="
 git status --porcelain
+echo ""
+echo "=== All changes since main ==="
+git diff --name-status main...HEAD
