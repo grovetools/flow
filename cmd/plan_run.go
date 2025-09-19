@@ -11,6 +11,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
@@ -131,7 +132,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 		
-		expectedSessionName := SanitizeForTmuxSession(worktreeName)
+		expectedSessionName := tmux.SanitizeForTmuxSession(worktreeName)
 		alreadyInCorrectSession := currentTmuxSession == expectedSessionName
 
 		// Only prompt if we're not already in the worktree or the correct session

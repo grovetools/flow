@@ -79,7 +79,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	}
 
 	// Session name is derived from the worktree name
-	sessionName := SanitizeForTmuxSession(worktreeName)
+	sessionName := tmux.SanitizeForTmuxSession(worktreeName)
 
 	// Check if session already exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
@@ -186,7 +186,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	
 	repoName := filepath.Base(gitRoot)
 	sessionTitle := fmt.Sprintf("%s-plan", planName)
-	sessionName := fmt.Sprintf("%s__%s", repoName, SanitizeForTmuxSession(sessionTitle))
+	sessionName := fmt.Sprintf("%s__%s", repoName, tmux.SanitizeForTmuxSession(sessionTitle))
 
 	// Check if session already exists
 	executor := &groveexec.RealCommandExecutor{}

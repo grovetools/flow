@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
@@ -652,7 +653,7 @@ func launchWorktreeSession(ctx context.Context, worktreeName string, agentComman
 
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
-	sessionTitle := SanitizeForTmuxSession(worktreeName)
+	sessionTitle := tmux.SanitizeForTmuxSession(worktreeName)
 	params := LaunchParameters{
 		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
 		Container:        container,

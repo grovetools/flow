@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -710,7 +711,7 @@ func runChatLaunch(cmd *cobra.Command, args []string) error {
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
 	// Use the title from frontmatter for the session name
-	sessionTitle := SanitizeForTmuxSession(job.Title)
+	sessionTitle := tmux.SanitizeForTmuxSession(job.Title)
 	sessionName := fmt.Sprintf("%s__%s", repoName, sessionTitle)
 
 	params := LaunchParameters{
@@ -793,7 +794,7 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 	repoName := filepath.Base(gitRoot)
-	sessionName := SanitizeForTmuxSession(repoName)
+	sessionName := tmux.SanitizeForTmuxSession(repoName)
 
 	executor := &exec.RealCommandExecutor{}
 
@@ -808,7 +809,7 @@ func runChatLaunchHost(cmd *cobra.Command, args []string) error {
 
 	// 4. Create New Window
 	chatFileName := strings.TrimSuffix(filepath.Base(chatPath), filepath.Ext(chatPath))
-	windowName := "chat-" + SanitizeForTmuxSession(chatFileName)
+	windowName := "chat-" + tmux.SanitizeForTmuxSession(chatFileName)
 
 	// Create the window and set its working directory to the git root
 	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", gitRoot); err != nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	gexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -99,7 +100,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	wm := git.NewWorktreeManager()
 
 	branchName := worktreeName // Simple assumption: branch name matches worktree name
-	sessionName := SanitizeForTmuxSession(worktreeName)
+	sessionName := tmux.SanitizeForTmuxSession(worktreeName)
 
 	// Define cleanup items
 	items := []*cleanupItem{

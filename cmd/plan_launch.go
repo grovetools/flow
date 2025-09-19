@@ -10,6 +10,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -108,7 +109,7 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
 	// Use the job title for session name, sanitized for tmux
-	sessionTitle := SanitizeForTmuxSession(job.Title)
+	sessionTitle := tmux.SanitizeForTmuxSession(job.Title)
 	params := LaunchParameters{
 		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
 		HostWorktreePath: worktreePath,
@@ -318,8 +319,8 @@ func runPlanLaunchHost(jobPath string) error {
 
 	// Get repo name and create session/window names
 	repoName := filepath.Base(gitRoot)
-	sessionName := SanitizeForTmuxSession(repoName)
-	windowName := "job-" + SanitizeForTmuxSession(job.Title)
+	sessionName := tmux.SanitizeForTmuxSession(repoName)
+	windowName := "job-" + tmux.SanitizeForTmuxSession(job.Title)
 
 	executor := &exec.RealCommandExecutor{}
 
@@ -362,38 +363,3 @@ func runPlanLaunchHost(jobPath string) error {
 	return nil
 }
 
-// SanitizeForTmuxSession creates a valid tmux session name from a string.
-// Moved from chat.go to be reusable.
-func SanitizeForTmuxSession(title string) string {
-	// Replace spaces and special characters with hyphens
-	sanitized := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, title)
-
-	// Convert to lowercase for consistency
-	sanitized = strings.ToLower(sanitized)
-
-	// Remove consecutive hyphens
-	for strings.Contains(sanitized, "--") {
-		sanitized = strings.ReplaceAll(sanitized, "--", "-")
-	}
-
-	// Trim hyphens from start and end
-	sanitized = strings.Trim(sanitized, "-")
-
-	// Ensure it's not empty
-	if sanitized == "" {
-		sanitized = "session"
-	}
-
-	// Tmux session names should not be too long
-	if len(sanitized) > 50 {
-		sanitized = sanitized[:50]
-	}
-
-	return sanitized
-}

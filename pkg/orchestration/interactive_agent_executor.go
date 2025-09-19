@@ -270,7 +270,7 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 
 			// Create a new window for this agent job in the existing session
 			executor := &exec.RealCommandExecutor{}
-			agentWindowName := sanitizeForTmuxSession(job.Title)
+			agentWindowName := tmux.SanitizeForTmuxSession(job.Title)
 			
 			// Create new window for the agent
 			fmt.Printf("Creating window '%s' for agent...\n", agentWindowName)
@@ -361,7 +361,7 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 
 		// Create second window for the agent
 		executor := &exec.RealCommandExecutor{}
-		agentWindowName := sanitizeForTmuxSession(job.Title)
+		agentWindowName := tmux.SanitizeForTmuxSession(job.Title)
 		
 		// Create new window for the agent
 		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
@@ -405,8 +405,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 
 	// Original behavior for jobs without worktrees - use repository-based session with new window
 	repoName := filepath.Base(gitRoot)
-	sessionName := sanitizeForTmuxSession(repoName)
-	windowName := "job-" + sanitizeForTmuxSession(job.Title)
+	sessionName := tmux.SanitizeForTmuxSession(repoName)
+	windowName := "job-" + tmux.SanitizeForTmuxSession(job.Title)
 
 	// Ensure session exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
@@ -498,40 +498,6 @@ func (e *InteractiveAgentExecutor) waitForWindowClose(ctx context.Context, clien
 	return client.WaitForSessionClose(ctx, sessionName, pollInterval)
 }
 
-// sanitizeForTmuxSession creates a valid tmux session name from a string
-func sanitizeForTmuxSession(name string) string {
-	// Replace spaces and special characters with hyphens
-	sanitized := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || 
-		   (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, name)
-	
-	// Convert to lowercase for consistency
-	sanitized = strings.ToLower(sanitized)
-	
-	// Remove consecutive hyphens
-	for strings.Contains(sanitized, "--") {
-		sanitized = strings.ReplaceAll(sanitized, "--", "-")
-	}
-	
-	// Trim hyphens from start and end
-	sanitized = strings.Trim(sanitized, "-")
-	
-	// Ensure it's not empty
-	if sanitized == "" {
-		sanitized = "session"
-	}
-	
-	// Tmux session names should not be too long
-	if len(sanitized) > 50 {
-		sanitized = sanitized[:50]
-	}
-	
-	return sanitized
-}
 
 // promptForJobStatus prompts the user to select the job status after tmux session ends
 func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string) string {
