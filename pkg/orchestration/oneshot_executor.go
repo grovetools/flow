@@ -283,9 +283,13 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return execErr
 	}
 
-	// Don't update status here - let the orchestrator handle it
-	// This ensures summarization and other post-completion hooks run properly
+	// Update status to completed if we got here without errors
+	job.Status = JobStatusCompleted
 	job.EndTime = time.Now()
+	if err := updateJobFile(job); err != nil {
+		// Log but don't fail - the job executed successfully
+		fmt.Printf("Warning: failed to update job file status: %v\n", err)
+	}
 
 	return nil
 }
