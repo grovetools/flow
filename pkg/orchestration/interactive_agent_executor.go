@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-tmux/pkg/tmux"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-flow/pkg/exec"
 )
 
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.

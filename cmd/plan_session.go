@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	groveexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-tmux/pkg/tmux"
 )
 
 // CreateOrSwitchToWorktreeSessionAndRunCommand creates or switches to a tmux session for the worktree and executes a command.
