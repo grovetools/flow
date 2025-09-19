@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -59,17 +58,6 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 				return fmt.Errorf("failed to prepare worktree: %w", err)
 			}
 		} else {
-			// New worktree was created, install grove-hooks if available
-			if _, err := exec.LookPath("grove-hooks"); err == nil {
-				cmd := exec.Command("grove-hooks", "install")
-				cmd.Dir = worktreePath
-				if output, err := cmd.CombinedOutput(); err != nil {
-					fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))
-				} else {
-					fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
-				}
-			}
-
 			// Set up Go workspace if this is a Go project
 			if err := orchestration.SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
 				// Log a warning but don't fail the worktree creation

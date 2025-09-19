@@ -162,17 +162,6 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", err
 	}
 
-	// Check if grove-hooks is available and install hooks in the worktree
-	if _, err := exec.LookPath(GetHooksBinaryPath()); err == nil {
-		cmd := exec.Command(GetHooksBinaryPath(), "install")
-		cmd.Dir = worktreePath
-		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))
-		} else {
-			fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
-		}
-	}
-
 	// Set up Go workspace if this is a Go project
 	if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
 		// Log a warning but don't fail the job, as this is a convenience feature

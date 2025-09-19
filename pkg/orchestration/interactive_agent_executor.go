@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -204,17 +203,6 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 				}
 			} else {
 				workDir = worktreePath
-				
-				// Check if grove-hooks is available and install hooks in the new worktree
-				if _, err := osexec.LookPath(GetHooksBinaryPath()); err == nil {
-					cmd := osexec.Command(GetHooksBinaryPath(), "install")
-					cmd.Dir = worktreePath
-					if output, err := cmd.CombinedOutput(); err != nil {
-						fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))
-					} else {
-						fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
-					}
-				}
 				
 				// Set up Go workspace if this is a Go project
 				if err := SetupGoWorkspaceForWorktree(workDir, realGitRoot); err != nil {
