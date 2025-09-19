@@ -17,7 +17,7 @@ import (
 func PlanRecipesScenario() *harness.Scenario {
 	return &harness.Scenario{
 		Name:        "flow-plan-recipes",
-		Description: "Tests the creation of plans from recipes and listing available recipes.",
+		Description: "Tests the creation of plans from recipes, listing available recipes, and worktree behavior.",
 		Tags:        []string{"plan", "recipes", "init"},
 		Steps: []harness.Step{
 			harness.NewStep("Setup git repository and config", func(ctx *harness.Context) error {
@@ -109,10 +109,10 @@ flow:
 					}
 				}
 
-				// Verify implement job
+				// Verify implement job does NOT have worktree (since no --worktree flag was used)
 				implementContent, _ := fs.ReadString(filepath.Join(planDir, "02-implement.md"))
-				if !strings.Contains(implementContent, "worktree: my-feature-plan") {
-					return fmt.Errorf("implement job did not have its worktree templated correctly")
+				if strings.Contains(implementContent, "worktree:") {
+					return fmt.Errorf("implement job should not have worktree when --worktree flag is not used")
 				}
 
 				// Verify shell jobs
@@ -155,8 +155,13 @@ flow:
 				if err != nil {
 					return err
 				}
-				if !strings.Contains(content, "worktree: my-feature-plan") {
-					return fmt.Errorf("plan config should have worktree auto-detected from the recipe")
+				// Plan config should NOT have worktree set when --worktree flag is not used
+				if strings.Contains(content, "worktree: my-feature-plan") {
+					return fmt.Errorf("plan config should not have worktree set when --worktree flag is not used")
+				}
+				// Should be commented out
+				if !strings.Contains(content, "# worktree: feature-branch") {
+					return fmt.Errorf("plan config should have commented worktree example")
 				}
 				return nil
 			}),
@@ -174,6 +179,86 @@ flow:
 				if !strings.Contains(result.Stdout, "Pending: 5") {
 					return fmt.Errorf("all 5 jobs should be pending")
 				}
+				return nil
+			}),
+			harness.NewStep("Test recipe with --worktree flag", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "init", "my-worktree-plan", "--recipe", "standard-feature", "--worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				if !strings.Contains(result.Stdout, "Using recipe: standard-feature") {
+					return fmt.Errorf("output should confirm which recipe is being used")
+				}
+
+				// Verify that ALL jobs have worktree set when --worktree flag is used
+				planDir := filepath.Join(ctx.RootDir, "plans", "my-worktree-plan")
+				expectedFiles := []string{"01-spec.md", "02-implement.md", "03-git-changes.md", "04-git-status.md", "05-review.md"}
+
+				for _, file := range expectedFiles {
+					path := filepath.Join(planDir, file)
+					content, err := fs.ReadString(path)
+					if err != nil {
+						return err
+					}
+					// Each job should have worktree set to the plan name
+					if !strings.Contains(content, "worktree: my-worktree-plan") {
+						return fmt.Errorf("file '%s' should have worktree set when --worktree flag is used", file)
+					}
+				}
+
+				// Verify .grove-plan.yml has worktree set
+				configPath := filepath.Join(planDir, ".grove-plan.yml")
+				configContent, err := fs.ReadString(configPath)
+				if err != nil {
+					return err
+				}
+				if !strings.Contains(configContent, "worktree: my-worktree-plan") {
+					return fmt.Errorf("plan config should have worktree set when --worktree flag is used")
+				}
+
+				return nil
+			}),
+			harness.NewStep("Test recipe with --worktree=custom-name flag", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "init", "my-custom-plan", "--recipe", "chat-workflow", "--worktree=custom-worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return result.Error
+				}
+				if !strings.Contains(result.Stdout, "Using recipe: chat-workflow") {
+					return fmt.Errorf("output should confirm which recipe is being used")
+				}
+
+				// Verify that ALL jobs have the custom worktree set
+				planDir := filepath.Join(ctx.RootDir, "plans", "my-custom-plan")
+				expectedFiles := []string{"01-chat.md", "02-implement.md", "03-git-changes.md", "04-git-status.md", "05-review.md"}
+
+				for _, file := range expectedFiles {
+					path := filepath.Join(planDir, file)
+					content, err := fs.ReadString(path)
+					if err != nil {
+						return err
+					}
+					// Each job should have the custom worktree
+					if !strings.Contains(content, "worktree: custom-worktree") {
+						return fmt.Errorf("file '%s' should have custom worktree set, got:\n%s", file, content)
+					}
+				}
+
+				// Verify .grove-plan.yml has custom worktree set
+				configPath := filepath.Join(planDir, ".grove-plan.yml")
+				configContent, err := fs.ReadString(configPath)
+				if err != nil {
+					return err
+				}
+				if !strings.Contains(configContent, "worktree: custom-worktree") {
+					return fmt.Errorf("plan config should have custom worktree set when --worktree=custom-name flag is used")
+				}
+
 				return nil
 			}),
 		},

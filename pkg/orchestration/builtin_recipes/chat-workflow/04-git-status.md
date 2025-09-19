@@ -5,7 +5,6 @@ status: pending
 type: shell
 depends_on:
   - 02-implement.md
-worktree: {{ .PlanName }}
 ---
 
 echo "=== Uncommitted changes ==="

@@ -217,7 +217,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	}
 	sort.Strings(jobFiles)
 
-	var firstAgentWorktree string
+	// Determine worktree from command-line flag
+	var worktreeOverride string
+	if cmd.Worktree == "__AUTO__" {
+		worktreeOverride = planName
+	} else if cmd.Worktree != "" {
+		worktreeOverride = cmd.Worktree
+	}
 
 	// Track if this is the first job for content merging
 	isFirstJob := true
@@ -229,62 +235,41 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			return fmt.Errorf("rendering recipe job %s: %w", filename, err)
 		}
 		
-		// If we have extracted content and this is the first job, merge them
+		// Parse the frontmatter and body from the rendered job content
+		frontmatter, body, err := orchestration.ParseFrontmatter(renderedContent)
+		if err != nil {
+			return fmt.Errorf("parsing frontmatter from recipe job %s: %w", filename, err)
+		}
+
+		// If a worktree was specified via the CLI, apply it to every job
+		if worktreeOverride != "" {
+			frontmatter["worktree"] = worktreeOverride
+		}
+		
+		// If we have extracted content and this is the first job, merge it into the body
 		if extractedBody != nil && isFirstJob {
-			// Parse the recipe job's frontmatter
-			frontmatter, _, err := orchestration.ParseFrontmatter(renderedContent)
-			if err != nil {
-				return fmt.Errorf("parsing frontmatter from recipe job %s: %w", filename, err)
-			}
-			
-			// Apply worktree if needed
-			if cmd.Worktree == "__AUTO__" {
-				frontmatter["worktree"] = planName
-			} else if cmd.Worktree != "" {
-				frontmatter["worktree"] = cmd.Worktree
-			}
-			
-			// Rebuild with recipe's frontmatter but extracted content as body
-			renderedContent, err = orchestration.RebuildMarkdownWithFrontmatter(frontmatter, extractedBody)
-			if err != nil {
-				return fmt.Errorf("rebuilding job with extracted content: %w", err)
-			}
-			
+			body = extractedBody // Replace the template's body with the extracted content
 			fmt.Printf("✓ Merged extracted content into job: %s\n", filename)
 			isFirstJob = false
 		} else {
 			fmt.Printf("✓ Created job: %s\n", filename)
 		}
 
+		// Rebuild the markdown file with the potentially modified frontmatter and body
+		finalContent, err := orchestration.RebuildMarkdownWithFrontmatter(frontmatter, body)
+		if err != nil {
+			return fmt.Errorf("rebuilding job content for %s: %w", filename, err)
+		}
+
 		// Write the processed job file to the new plan directory
 		destPath := filepath.Join(planPath, filename)
-		if err := os.WriteFile(destPath, renderedContent, 0644); err != nil {
+		if err := os.WriteFile(destPath, finalContent, 0644); err != nil {
 			return fmt.Errorf("writing recipe job file %s: %w", filename, err)
 		}
-
-		// Heuristic: find the worktree from the first agent/interactive_agent job
-		// to set as the default in .grove-plan.yml
-		if firstAgentWorktree == "" {
-			fm, _, _ := orchestration.ParseFrontmatter(renderedContent)
-			if fm != nil {
-				if jobType, ok := fm["type"].(string); ok && (jobType == "agent" || jobType == "interactive_agent") {
-					if worktree, ok := fm["worktree"].(string); ok {
-						firstAgentWorktree = worktree
-					}
-				}
-			}
-		}
 	}
 
-	// Determine the final worktree to use in .grove-plan.yml
-	finalWorktree := firstAgentWorktree
-	if cmd.Worktree == "__AUTO__" {
-		// --worktree without value, use plan name
-		finalWorktree = planName
-	} else if cmd.Worktree != "" {
-		// Explicit --worktree value takes precedence
-		finalWorktree = cmd.Worktree
-	}
+	// The final worktree to use in .grove-plan.yml is simply the one from the CLI flag
+	finalWorktree := worktreeOverride
 	
 	// Create a default .grove-plan.yml, using the determined worktree
 	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container); err != nil {
@@ -566,8 +551,7 @@ func createInitialPlanJob(dir string, model string, outputType string, templateN
 		frontmatter["title"] = "Create High-Level Implementation Plan"
 		frontmatter["status"] = "pending"
 		frontmatter["model"] = model
-		// Add worktree to use the plan directory name
-		frontmatter["worktree"] = filepath.Base(dir)
+		// Removed default worktree assignment
 
 		content, err = orchestration.RebuildMarkdownWithFrontmatter(frontmatter, []byte(promptBody))
 		if err != nil {
@@ -578,18 +562,17 @@ func createInitialPlanJob(dir string, model string, outputType string, templateN
 	} else {
 		// Create a simpler job for other output types
 		modelField := fmt.Sprintf("\nmodel: %s", model)
-		worktreeField := fmt.Sprintf("\nworktree: %s", filepath.Base(dir))
 		content = []byte(fmt.Sprintf(`---
 id: %s
 title: "Initial Job"
 status: pending
-type: oneshot%s%s
+type: oneshot%s
 output:
   type: %s
 ---
 
 %s
-`, jobID, modelField, worktreeField, outputType, specContent))
+`, jobID, modelField, outputType, specContent))
 
 		filename = "01-initial-job.md"
 	}

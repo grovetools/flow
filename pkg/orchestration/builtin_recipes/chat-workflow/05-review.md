@@ -7,7 +7,6 @@ depends_on:
   - 02-implement.md
   - 03-git-changes.md
   - 04-git-status.md
-worktree: {{ .PlanName }}
 ---
 
 Review the code implemented for the "{{ .PlanName }}" feature.

@@ -5,7 +5,6 @@ status: pending
 type: interactive_agent
 depends_on:
   - 01-chat.md
-worktree: {{ .PlanName }}
 ---
 
 Implement the "{{ .PlanName }}" feature based on the discussion in `01-chat.md`.

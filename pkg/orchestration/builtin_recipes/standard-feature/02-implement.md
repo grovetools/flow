@@ -5,7 +5,6 @@ status: pending
 type: interactive_agent
 depends_on:
   - 01-spec.md
-worktree: {{ .PlanName }}
 ---
 
 Implement the "{{ .PlanName }}" feature based on the specification in `01-spec.md`.
