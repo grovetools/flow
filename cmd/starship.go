@@ -147,10 +147,16 @@ func runStarshipStatus(cmd *cobra.Command, args []string) error {
 	var config struct {
 		Model    string `yaml:"model"`
 		Worktree string `yaml:"worktree"`
+		Status   string `yaml:"status"`
 	}
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		// Invalid config, just show the plan name
 		fmt.Printf("🌳 Plan: %s", activePlan)
+		return nil
+	}
+
+	// If the plan is marked as finished, don't show it in the prompt
+	if config.Status == "finished" {
 		return nil
 	}
 
