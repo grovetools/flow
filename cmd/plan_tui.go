@@ -210,7 +210,9 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case planListKeys.NewPlan:
-			return newPlanInitTUIModel(m.plansDirectory), nil
+			// Create a new plan init TUI, which will take over.
+			// It knows how to return to this list view when the user quits.
+			return newPlanInitTUIModel(m.plansDirectory, &PlanInitCmd{}), nil
 
 		case planListKeys.Help:
 			m.showHelp = true

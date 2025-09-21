@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -14,10 +17,11 @@ var planCmd = &cobra.Command{
 
 var planInitCmd = &cobra.Command{
 	Use:   "init <directory>",
-	Short: "Initialize a new orchestration plan directory",
+	Short: "Initialize a new plan directory, interactively or via flags",
 	Long: `Initialize a new orchestration plan in the specified directory.
-Creates a .grove-plan.yml file with default configuration options.`,
-	Args: cobra.ExactArgs(1),
+Creates a .grove-plan.yml file with default configuration options.
+If no directory is provided, an interactive TUI will be launched.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanInit,
 }
 
@@ -121,6 +125,7 @@ var (
 	planInitExtractAllFrom string
 	planInitOpenSession    bool
 	planInitRecipe         string
+	planInitTUI            bool
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -162,8 +167,9 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().Lookup("worktree").NoOptDefVal = "__AUTO__" // Special marker for auto-naming
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
-	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
-	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature)")
+	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", true, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
+	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "chat-workflow", "Name of a plan recipe to initialize from (e.g., standard-feature)")
+	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -236,8 +242,26 @@ func NewPlanCmd() *cobra.Command {
 }
 
 func runPlanInit(cmd *cobra.Command, args []string) error {
-	initCmd := &PlanInitCmd{
-		Dir:            args[0],
+	var dir string
+	if len(args) > 0 {
+		dir = args[0]
+	}
+
+	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
+	isTTY := isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+	if (dir == "" && isTTY) || planInitTUI {
+		// This logic is now in cmd/plan_init.go
+		return RunPlanInitTUI(dir)
+	}
+
+	// Non-interactive path
+	if dir == "" {
+		return cmd.Help() // Show help if no directory is given and not in TUI mode
+	}
+
+	// This is the direct CLI execution path
+	directCmd := &PlanInitCmd{
+		Dir:            dir,
 		Force:          planInitForce,
 		Model:          planInitModel,
 		Worktree:       planInitWorktree,
@@ -246,7 +270,12 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		OpenSession:    planInitOpenSession,
 		Recipe:         planInitRecipe,
 	}
-	return RunPlanInit(initCmd)
+	result, err := executePlanInit(directCmd)
+	if err != nil {
+		return err
+	}
+	fmt.Print(result)
+	return nil
 }
 
 func runPlanStatus(cmd *cobra.Command, args []string) error {

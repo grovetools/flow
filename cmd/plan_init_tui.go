@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,6 +12,45 @@ import (
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
+var ErrTUIQuit = errors.New("quit")
+
+// runPlanInitTUI is the main entry point to launch the plan initialization TUI.
+// It returns a fully configured PlanInitCmd or an error if the user quits.
+func runPlanInitTUI(plansDir string, initialCmd *PlanInitCmd) (*PlanInitCmd, error) {
+	// Check for TTY
+	// if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+	// 	return nil, fmt.Errorf("TUI mode requires an interactive terminal")
+	// }
+
+	model := newPlanInitTUIModel(plansDir, initialCmd)
+	model.standalone = true // Mark as running standalone
+	p := tea.NewProgram(model)
+
+	finalModel, err := p.Run()
+	if err != nil {
+		return nil, fmt.Errorf("error running plan init TUI: %w", err)
+	}
+
+	// Check if the model is our planInitTUIModel or if user navigated away
+	m, ok := finalModel.(planInitTUIModel)
+	if !ok {
+		// User navigated to a different view (e.g., plan list)
+		return nil, ErrTUIQuit
+	}
+
+	if m.quitting {
+		return nil, ErrTUIQuit
+	}
+
+	// If we get here, the user submitted the form.
+	// Convert the final TUI state to a PlanInitCmd struct.
+	finalCmd := m.toPlanInitCmd()
+	if finalCmd.Dir == "" {
+		return nil, ErrTUIQuit // Treat empty name as quitting
+	}
+	return finalCmd, nil
+}
+
 // planInitTUIModel represents the state of the new plan creation TUI.
 type planInitTUIModel struct {
 	plansDirectory   string
@@ -18,6 +58,8 @@ type planInitTUIModel struct {
 	err              error
 	width, height    int
 
+	standalone bool
+	quitting   bool
 	// Form inputs
 	nameInput        textinput.Model
 	recipeList       list.Model
@@ -30,7 +72,7 @@ type planInitTUIModel struct {
 }
 
 // newPlanInitTUIModel creates a new model for the plan initialization form.
-func newPlanInitTUIModel(plansDir string) planInitTUIModel {
+func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIModel {
 	m := planInitTUIModel{
 		plansDirectory: plansDir,
 	}
@@ -42,16 +84,21 @@ func newPlanInitTUIModel(plansDir string) planInitTUIModel {
 	m.nameInput.Width = 50
 
 	// Recipes List
-	recipes, _ := orchestration.ListAllRecipes()
+	recipes, _ := orchestration.ListAllRecipes() // Ignore error for TUI
 	recipeItems := make([]list.Item, len(recipes)+1)
 	recipeItems[0] = item("none")
+	defaultRecipeIndex := 0
 	for i, r := range recipes {
 		recipeItems[i+1] = item(r.Name)
+		if r.Name == "chat-workflow" {
+			defaultRecipeIndex = i + 1
+		}
 	}
 	m.recipeList = list.New(recipeItems, itemDelegate{}, 20, 7)
 	m.recipeList.Title = ""
 	m.recipeList.SetShowTitle(false)
 	m.recipeList.SetShowStatusBar(false)
+	m.recipeList.Select(defaultRecipeIndex) // Default to chat-workflow
 
 	// Models List
 	models := getAvailableModels()
@@ -71,13 +118,70 @@ func newPlanInitTUIModel(plansDir string) planInitTUIModel {
 
 	m.containerInput = textinput.New()
 	m.containerInput.Placeholder = "grove-agent-ide"
+	m.containerInput.SetValue("grove-agent-ide") // Set default value
 	m.containerInput.Width = 41
 
 	m.extractFromInput = textinput.New()
 	m.extractFromInput.Placeholder = "/path/to/spec.md"
 	m.extractFromInput.Width = 41
 
+	// Set default values for checkboxes
+	m.withWorktree = true
+	m.openSession = true
+
+	// Apply pre-populated values from CLI flags (this may override defaults)
+	m.prePopulate(initialCmd)
+
 	return m
+}
+
+// prePopulate sets the initial TUI state from provided CLI flags.
+func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
+	if initialCmd == nil {
+		return
+	}
+
+	if initialCmd.Dir != "" {
+		m.nameInput.SetValue(initialCmd.Dir)
+	}
+
+	if initialCmd.Recipe != "" && initialCmd.Recipe != "chat-workflow" {
+		for i, listItem := range m.recipeList.Items() {
+			if recipeItem, ok := listItem.(item); ok && string(recipeItem) == initialCmd.Recipe {
+				m.recipeList.Select(i)
+				break
+			}
+		}
+	}
+
+	// Handle worktree logic. Default is true (auto-mode).
+	// Only change if the flag was explicitly provided with a value or set to false.
+	// We don't have a direct way to check for flag presence here, so we rely on the value.
+	if initialCmd.Worktree != "" && initialCmd.Worktree != "__AUTO__" {
+		m.withWorktree = false
+		m.worktreeInput.SetValue(initialCmd.Worktree)
+	} else if initialCmd.Worktree == "__AUTO__" {
+		m.withWorktree = true
+	}
+
+	// For boolean flags, if they were set on the command line, their value will be passed in.
+	// Cobra handles the default values.
+	m.openSession = initialCmd.OpenSession
+
+	if initialCmd.Model != "" {
+		for i, listItem := range m.modelList.Items() {
+			if model, ok := listItem.(modelItem); ok && model.ID == initialCmd.Model {
+				m.modelList.Select(i)
+				break
+			}
+		}
+	}
+	if initialCmd.Container != "" {
+		m.containerInput.SetValue(initialCmd.Container)
+	}
+	if initialCmd.ExtractAllFrom != "" {
+		m.extractFromInput.SetValue(initialCmd.ExtractAllFrom)
+	}
 }
 
 func (m planInitTUIModel) Init() tea.Cmd {
@@ -132,43 +236,9 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Build command
-				// Determine the correct worktree value based on TUI state
-				var worktreeVal string
-				if m.withWorktree {
-					worktreeVal = "__AUTO__"
-				} else {
-					worktreeVal = m.worktreeInput.Value()
-				}
-				
-				initCmd := &PlanInitCmd{
-					Dir:       m.nameInput.Value(),
-					Force:     false, // Can't be set from TUI for safety
-					Container: m.containerInput.Value(),
-					ExtractAllFrom: m.extractFromInput.Value(),
-					OpenSession: m.openSession,
-					Worktree: worktreeVal,
-				}
-				if selected := m.recipeList.SelectedItem(); selected != nil {
-					if recipeItem, ok := selected.(item); ok && string(recipeItem) != "none" {
-						initCmd.Recipe = string(recipeItem)
-					}
-				}
-				if selected := m.modelList.SelectedItem(); selected != nil {
-					if model, ok := selected.(modelItem); ok && model.ID != "(default)" {
-						initCmd.Model = model.ID
-					}
-				}
-
-				// Execute and transition
-				result, err := executePlanInit(initCmd)
-				if err != nil {
-					m.err = err
-					return m, nil
-				}
-
-				listModel := newPlanListTUIModel(m.plansDirectory)
-				listModel.statusMessage = result
-				return listModel, loadPlansListCmd(m.plansDirectory)
+				// The final command is built by the caller from the final model state.
+				// We just need to exit the TUI program.
+				return m, tea.Quit
 			}
 		}
 	}
@@ -307,4 +377,39 @@ func renderCheckbox(label string, checked bool, focused bool) string {
 		style = style.Foreground(lipgloss.Color("205"))
 	}
 	return style.Render(fmt.Sprintf("%-25s %s", label, box)) + "\n"
+}
+
+// toPlanInitCmd converts the final TUI model state into a PlanInitCmd struct.
+func (m planInitTUIModel) toPlanInitCmd() *PlanInitCmd {
+	cmd := &PlanInitCmd{
+		Dir:            m.nameInput.Value(),
+		Container:      m.containerInput.Value(),
+		ExtractAllFrom: m.extractFromInput.Value(),
+		OpenSession:    m.openSession,
+		Force:          false, // Not settable from TUI
+	}
+
+	// Get selected recipe
+	if selected := m.recipeList.SelectedItem(); selected != nil {
+		if recipeItem, ok := selected.(item); ok && string(recipeItem) != "none" {
+			cmd.Recipe = string(recipeItem)
+		}
+	}
+
+	// Get selected model
+	if selected := m.modelList.SelectedItem(); selected != nil {
+		if model, ok := selected.(modelItem); ok && model.ID != "(default)" {
+			cmd.Model = model.ID
+		}
+	}
+
+	// Determine worktree value
+	if m.withWorktree {
+		// This signifies --worktree flag with no value.
+		cmd.Worktree = "__AUTO__"
+	} else if m.worktreeInput.Value() != "" {
+		cmd.Worktree = m.worktreeInput.Value()
+	}
+
+	return cmd
 }

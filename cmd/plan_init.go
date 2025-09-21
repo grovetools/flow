@@ -17,6 +17,46 @@ import (
 	"github.com/mattsolo1/grove-flow/pkg/state"
 )
 
+// RunPlanInitTUI launches the interactive TUI for creating a new plan.
+func RunPlanInitTUI(dir string) error {
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		// Don't fail if config doesn't exist.
+		flowCfg = &FlowConfig{}
+	}
+	var plansDir string
+	if flowCfg.PlansDirectory != "" {
+		plansDir, err = expandPath(flowCfg.PlansDirectory)
+		if err != nil {
+			return err
+		}
+	} else {
+		// If not configured, plans are relative to CWD.
+		plansDir, _ = os.Getwd()
+	}
+
+	// Create a pre-populated command object from CLI flags
+	initialCmd := &PlanInitCmd{
+		Dir:            dir,
+		Model:          planInitModel,
+		Worktree:       planInitWorktree,
+		Container:      planInitContainer,
+		ExtractAllFrom: planInitExtractAllFrom,
+		OpenSession:    planInitOpenSession,
+		Recipe:         planInitRecipe,
+	}
+
+	finalCmd, err := runPlanInitTUI(plansDir, initialCmd)
+	if err != nil {
+		if err == ErrTUIQuit {
+			// User quit the TUI, this is not an error
+			return nil
+		}
+		return err
+	}
+	return RunPlanInit(finalCmd)
+}
+
 // RunPlanInit implements the plan init command.
 func RunPlanInit(cmd *PlanInitCmd) error {
 	result, err := executePlanInit(cmd)
