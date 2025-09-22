@@ -45,7 +45,7 @@ func TestAutoEnableAgentContinue(t *testing.T) {
 	// Add the first job to the plan
 	plan.Jobs = append(plan.Jobs, job1)
 
-	// Test 2: Second interactive_agent job should automatically have agent_continue = true
+	// Test 2: Second interactive_agent job should NOT automatically have agent_continue = true
 	cmd2 := &PlanAddStepCmd{
 		Dir:           tmpDir,
 		Title:         "Second Interactive Agent",
@@ -59,8 +59,8 @@ func TestAutoEnableAgentContinue(t *testing.T) {
 		t.Fatalf("Failed to collect job details for second job: %v", err)
 	}
 
-	if !job2.AgentContinue {
-		t.Error("Second interactive_agent job should automatically have AgentContinue = true")
+	if job2.AgentContinue {
+		t.Error("Second interactive_agent job should NOT have AgentContinue = true by default")
 	}
 
 	// Test 3: User can still explicitly set agent_continue = true on first job
@@ -148,9 +148,9 @@ func TestAutoEnableAgentContinueIntegration(t *testing.T) {
 		t.Fatalf("Failed to collect details for second job: %v", err)
 	}
 
-	// Second job should have agent_continue = true
-	if !job2.AgentContinue {
-		t.Error("Second interactive_agent job should have AgentContinue = true")
+	// Second job should NOT have agent_continue by default
+	if job2.AgentContinue {
+		t.Error("Second interactive_agent job should NOT have AgentContinue = true by default")
 	}
 
 	// Add it to the plan
@@ -165,8 +165,8 @@ func TestAutoEnableAgentContinueIntegration(t *testing.T) {
 		t.Fatalf("Failed to read second job file: %v", err)
 	}
 
-	// Second job SHOULD have agent_continue: true
-	if !strings.Contains(string(content2), "agent_continue: true") {
-		t.Errorf("Second job file should contain 'agent_continue: true', got:\n%s", string(content2))
+	// Second job should NOT have agent_continue by default
+	if strings.Contains(string(content2), "agent_continue:") {
+		t.Errorf("Second job file should NOT contain 'agent_continue:' by default, got:\n%s", string(content2))
 	}
 }
