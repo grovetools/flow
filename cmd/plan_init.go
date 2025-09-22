@@ -44,6 +44,7 @@ func RunPlanInitTUI(dir string) error {
 		ExtractAllFrom: planInitExtractAllFrom,
 		OpenSession:    planInitOpenSession,
 		Recipe:         planInitRecipe,
+		RecipeVars:     planInitRecipeVars,
 	}
 
 	finalCmd, err := runPlanInitTUI(plansDir, initialCmd)
@@ -217,6 +218,9 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		return err
 	}
 
+	// Load flow config to get default recipe vars
+	flowCfg, _ := loadFlowConfig() // Ignore error, use empty config if not found
+
 	// Create the plan directory
 	if err := createPlanDirectory(planPath, cmd.Force); err != nil {
 		return err
@@ -244,11 +248,47 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		fmt.Printf("✓ Extracted content from %s\n", cmd.ExtractAllFrom)
 	}
 
+	// Parse recipe vars into a map
+	// Start with defaults from grove.yml config if present
+	recipeVars := make(map[string]string)
+	if flowCfg != nil && flowCfg.Recipes != nil {
+		if recipeCfg, ok := flowCfg.Recipes[cmd.Recipe]; ok && recipeCfg.Vars != nil {
+			// Copy default vars from config
+			for k, v := range recipeCfg.Vars {
+				recipeVars[k] = v
+			}
+			fmt.Printf("✓ Loaded default vars from grove.yml for recipe '%s'\n", cmd.Recipe)
+		}
+	}
+
+	// Parse command-line recipe vars (these override config defaults)
+	// Supports both:
+	//   - Multiple flags: --recipe-vars key1=val1 --recipe-vars key2=val2
+	//   - Comma-delimited: --recipe-vars "key1=val1,key2=val2,key3=val3"
+	for _, v := range cmd.RecipeVars {
+		// Split by comma to support comma-delimited format
+		pairs := strings.Split(v, ",")
+		for _, pair := range pairs {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			parts := strings.SplitN(pair, "=", 2)
+			if len(parts) == 2 {
+				recipeVars[parts[0]] = parts[1] // Overrides config default if exists
+			} else {
+				fmt.Printf("Warning: invalid recipe-var format '%s', expected key=value\n", pair)
+			}
+		}
+	}
+
 	// Data for templating
 	templateData := struct {
 		PlanName string
+		Vars     map[string]string
 	}{
 		PlanName: planName,
+		Vars:     recipeVars,
 	}
 
 	// Get sorted list of job filenames to process them in order

@@ -7,15 +7,21 @@ import (
 
 // FlowConfig defines the structure for the 'flow' section in grove.yml.
 type FlowConfig struct {
-	ChatDirectory        string `yaml:"chat_directory"`
-	OneshotModel         string `yaml:"oneshot_model"`
-	TargetAgentContainer string `yaml:"target_agent_container"`
-	PlansDirectory       string `yaml:"plans_directory"`
-	MaxConsecutiveSteps  int    `yaml:"max_consecutive_steps"`
-	SummarizeOnComplete  bool   `yaml:"summarize_on_complete"`
-	SummaryModel         string `yaml:"summary_model"`
-	SummaryPrompt        string `yaml:"summary_prompt"`
-	SummaryMaxChars      int    `yaml:"summary_max_chars"`
+	ChatDirectory        string                  `yaml:"chat_directory"`
+	OneshotModel         string                  `yaml:"oneshot_model"`
+	TargetAgentContainer string                  `yaml:"target_agent_container"`
+	PlansDirectory       string                  `yaml:"plans_directory"`
+	MaxConsecutiveSteps  int                     `yaml:"max_consecutive_steps"`
+	SummarizeOnComplete  bool                    `yaml:"summarize_on_complete"`
+	SummaryModel         string                  `yaml:"summary_model"`
+	SummaryPrompt        string                  `yaml:"summary_prompt"`
+	SummaryMaxChars      int                     `yaml:"summary_max_chars"`
+	Recipes              map[string]RecipeConfig `yaml:"recipes"`
+}
+
+// RecipeConfig defines configuration for a specific recipe.
+type RecipeConfig struct {
+	Vars map[string]string `yaml:"vars"`
 }
 
 // loadFlowConfig loads the core grove config and unmarshals the 'flow' extension.
