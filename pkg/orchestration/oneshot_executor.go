@@ -181,7 +181,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	}
 
 	// Always regenerate context to ensure oneshot has latest view
-	if err := e.regenerateContextInWorktree(workDir, "oneshot"); err != nil {
+	if err := e.regenerateContextInWorktree(workDir, "oneshot", job, plan); err != nil {
 		// Log warning but don't fail the job
 		fmt.Printf("Warning: failed to regenerate context: %v\n", err)
 	}
@@ -895,13 +895,28 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 }
 
 // regenerateContextInWorktree regenerates the context within a worktree.
-func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobType string) error {
+func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobType string, job *Job, plan *Plan) error {
 	fmt.Printf("Checking context in worktree for %s job...\n", jobType)
 
 	// Create context manager for the worktree
 	ctxMgr := grovecontext.NewManager(worktreePath)
 
-	// Check if .grove/rules exists
+	// Check if job has a custom rules file specified
+	if job != nil && job.RulesFile != "" {
+		// Resolve the custom rules file path relative to the plan directory
+		rulesFilePath := filepath.Join(plan.Directory, job.RulesFile)
+		
+		fmt.Printf("Using job-specific context from: %s\n", rulesFilePath)
+		
+		// Generate context using the custom rules file
+		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, false); err != nil {
+			return fmt.Errorf("failed to generate job-specific context: %w", err)
+		}
+		
+		return e.displayContextInfo(worktreePath)
+	}
+
+	// Check if .grove/rules exists for default context generation
 	rulesPath := filepath.Join(worktreePath, ".grove", "rules")
 	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
@@ -1217,7 +1232,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		worktreePath = path
 
 		// Regenerate context in the worktree to ensure chat has latest view
-		if err := e.regenerateContextInWorktree(worktreePath, "chat"); err != nil {
+		if err := e.regenerateContextInWorktree(worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
 			fmt.Printf("Warning: failed to regenerate context in worktree: %v\n", err)
 		}
@@ -1232,7 +1247,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 
 		// Also regenerate context for non-worktree case if .grove/rules exists
-		if err := e.regenerateContextInWorktree(worktreePath, "chat"); err != nil {
+		if err := e.regenerateContextInWorktree(worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
 			fmt.Printf("Warning: failed to regenerate context: %v\n", err)
 		}

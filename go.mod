@@ -70,3 +70,5 @@ require (
 	google.golang.org/grpc v1.74.2 // indirect
 	google.golang.org/protobuf v1.36.7 // indirect
 )
+
+replace github.com/mattsolo1/grove-context => /Users/solom4/Code/grove-ecosystem/grove-context/.grove-worktrees/rules-defaults

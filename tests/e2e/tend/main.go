@@ -75,6 +75,7 @@ func main() {
 		RulesPromptProceedScenario(),
 		RulesPromptCancelScenario(),
 		RulesPromptEditScenario(),
+		RulesInFrontmatterScenario(), // Tests job-specific rules_file in frontmatter
 
 		// Template Scenarios
 		// TemplateSymlinkWorktreeScenario(),

@@ -99,46 +99,79 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return fmt.Errorf("run agent: %w", err)
 	}
 
-	// Automatically update context within the working directory if .grove/rules exists
+	// Automatically update context within the working directory
 	if os.Getenv("GROVE_DEBUG") != "" {
 		fmt.Println("Checking for context update in working directory...")
 	}
 	ctxMgr := grovecontext.NewManager(workDir)
-	rulesPath := filepath.Join(workDir, ".grove", "rules")
-
-	if _, err := os.Stat(rulesPath); err == nil {
-		absRulesPath, _ := filepath.Abs(rulesPath)
-		if os.Getenv("GROVE_DEBUG") != "" {
-			fmt.Printf("Found context rules file, updating context...\n")
-			fmt.Printf("  Rules File: %s\n", absRulesPath)
-		}
-		if err := ctxMgr.UpdateFromRules(); err != nil {
+	
+	// Check if job has a custom rules file specified
+	if job.RulesFile != "" {
+		// Resolve the custom rules file path relative to the plan directory
+		rulesFilePath := filepath.Join(plan.Directory, job.RulesFile)
+		
+		fmt.Printf("Using job-specific context from: %s\n", rulesFilePath)
+		
+		// Generate context using the custom rules file
+		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
 			// Log a warning, but don't fail the job for a context update failure.
-			fmt.Printf("Warning: failed to update context file list in worktree: %v\n", err)
+			fmt.Printf("Warning: failed to generate job-specific context: %v\n", err)
 		} else {
-			if err := ctxMgr.GenerateContext(true); err != nil {
-				fmt.Printf("Warning: failed to generate context file in worktree: %v\n", err)
+			fmt.Println("✓ Context updated successfully with job-specific rules.")
+			
+			// Check token count after successful context generation
+			// Read the files list that was just generated
+			files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
+			stats, err := ctxMgr.GetStats("agent", files, 10)
+			if err != nil {
+				fmt.Printf("Warning: failed to get context stats: %v\n", err)
+			} else if stats.TotalTokens > 500000 {
+				// Fail the job if context exceeds 500k tokens
+				job.Status = JobStatusFailed
+				job.EndTime = time.Now()
+				return fmt.Errorf("context size exceeds limit: %d tokens (max 500,000 tokens)", stats.TotalTokens)
 			} else {
-				fmt.Println("✓ Context updated successfully in worktree.")
-
-				// Check token count after successful context generation
-				// Read the files list that was just generated
-				files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
-				stats, err := ctxMgr.GetStats("agent", files, 10)
-				if err != nil {
-					fmt.Printf("Warning: failed to get context stats: %v\n", err)
-				} else if stats.TotalTokens > 500000 {
-					// Fail the job if context exceeds 500k tokens
-					job.Status = JobStatusFailed
-					job.EndTime = time.Now()
-					return fmt.Errorf("context size exceeds limit: %d tokens (max 500,000 tokens)", stats.TotalTokens)
-				} else {
-					fmt.Printf("Context size: %d tokens\n", stats.TotalTokens)
-				}
+				fmt.Printf("Context size: %d tokens\n", stats.TotalTokens)
 			}
 		}
 	} else {
-		fmt.Println("No .grove/rules file found in worktree, skipping context update.")
+		// Check for default .grove/rules file
+		rulesPath := filepath.Join(workDir, ".grove", "rules")
+		
+		if _, err := os.Stat(rulesPath); err == nil {
+			absRulesPath, _ := filepath.Abs(rulesPath)
+			if os.Getenv("GROVE_DEBUG") != "" {
+				fmt.Printf("Found context rules file, updating context...\n")
+				fmt.Printf("  Rules File: %s\n", absRulesPath)
+			}
+			if err := ctxMgr.UpdateFromRules(); err != nil {
+				// Log a warning, but don't fail the job for a context update failure.
+				fmt.Printf("Warning: failed to update context file list in worktree: %v\n", err)
+			} else {
+				if err := ctxMgr.GenerateContext(true); err != nil {
+					fmt.Printf("Warning: failed to generate context file in worktree: %v\n", err)
+				} else {
+					fmt.Println("✓ Context updated successfully in worktree.")
+
+					// Check token count after successful context generation
+					// Read the files list that was just generated
+					files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
+					stats, err := ctxMgr.GetStats("agent", files, 10)
+					if err != nil {
+						fmt.Printf("Warning: failed to get context stats: %v\n", err)
+					} else if stats.TotalTokens > 500000 {
+						// Fail the job if context exceeds 500k tokens
+						job.Status = JobStatusFailed
+						job.EndTime = time.Now()
+						return fmt.Errorf("context size exceeds limit: %d tokens (max 500,000 tokens)", stats.TotalTokens)
+					} else {
+						fmt.Printf("Context size: %d tokens\n", stats.TotalTokens)
+					}
+				}
+			}
+		} else {
+			fmt.Println("No .grove/rules file found in worktree, skipping context update.")
+		}
 	}
 
 	// Update job status on completion
