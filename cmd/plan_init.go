@@ -45,6 +45,7 @@ func RunPlanInitTUI(dir string) error {
 		OpenSession:    planInitOpenSession,
 		Recipe:         planInitRecipe,
 		RecipeVars:     planInitRecipeVars,
+		RecipeCmd:      planInitRecipeCmd,
 	}
 
 	finalCmd, err := runPlanInitTUI(plansDir, initialCmd)
@@ -211,11 +212,19 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
 func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) error {
-	// Load flow config to get dynamic recipe command
-	_, getRecipeCmd, err := loadFlowConfigWithDynamicRecipes()
-	if err != nil {
-		// Warning but don't fail
-		fmt.Fprintf(os.Stderr, "Warning: could not load flow config for dynamic recipes: %v\n", err)
+	// Determine the recipe command to use
+	var getRecipeCmd string
+	if cmd.RecipeCmd != "" {
+		// Use the command from the CLI flag if provided
+		getRecipeCmd = cmd.RecipeCmd
+	} else {
+		// Otherwise load from flow config
+		_, configRecipeCmd, err := loadFlowConfigWithDynamicRecipes()
+		if err != nil {
+			// Warning but don't fail
+			fmt.Fprintf(os.Stderr, "Warning: could not load flow config for dynamic recipes: %v\n", err)
+		}
+		getRecipeCmd = configRecipeCmd
 	}
 
 	// Find the recipe (checks user recipes first, then dynamic, then built-in)

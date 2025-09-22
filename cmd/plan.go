@@ -127,6 +127,7 @@ var (
 	planInitRecipe         string
 	planInitTUI            bool
 	planInitRecipeVars     []string
+	planInitRecipeCmd      string
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -171,6 +172,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
 	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "chat-workflow", "Name of a plan recipe to initialize from (e.g., standard-feature)")
 	planInitCmd.Flags().StringArrayVar(&planInitRecipeVars, "recipe-vars", nil, "Variables to pass to recipe templates. Can be used multiple times or comma-delimited (e.g., --recipe-vars model=gpt-4 --recipe-vars rules_file=docs.rules OR --recipe-vars \"model=gpt-4,rules_file=docs.rules,output_dir=docs\")")
+	planInitCmd.Flags().StringVar(&planInitRecipeCmd, "recipe-cmd", "", "Command that outputs JSON recipe definitions (overrides grove.yml's get_recipe_cmd)")
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 
 	// Run command flags
@@ -272,6 +274,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		OpenSession:    planInitOpenSession,
 		Recipe:         planInitRecipe,
 		RecipeVars:     planInitRecipeVars,
+		RecipeCmd:      planInitRecipeCmd,
 	}
 	result, err := executePlanInit(directCmd)
 	if err != nil {
@@ -348,4 +351,5 @@ type PlanInitCmd struct {
 	OpenSession    bool
 	Recipe         string
 	RecipeVars     []string
+	RecipeCmd      string
 }
