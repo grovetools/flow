@@ -325,7 +325,7 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 		return err
 	}
 
-	fmt.Printf("%s Job completed successfully\n", color.GreenString("✓"))
+	fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
 	return nil
 }
 

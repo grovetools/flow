@@ -52,37 +52,13 @@ llm:
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				
-				// Setup mock LLM that shows what context it received
+				// Create mock response file for the real mock-llm binary to use
+				mockResponseContent := "Task completed successfully."
+				fs.WriteString(filepath.Join(ctx.RootDir, "mock-response.txt"), mockResponseContent)
+				
+				// Setup mock mocks directory
 				mockDir := filepath.Join(ctx.RootDir, "mocks")
 				fs.CreateDir(mockDir)
-				
-				// Mock LLM that outputs the context files it received
-				mockLLMScript := `#!/bin/bash
-# Read the prompt from stdin
-prompt=$(cat)
-
-# Extract context file paths from the prompt
-echo "Context received:"
-if echo "$prompt" | grep -q "src/main.go"; then
-    echo "- src/main.go"
-fi
-if echo "$prompt" | grep -q "src/helper.go"; then
-    echo "- src/helper.go"
-fi
-if echo "$prompt" | grep -q "src/test.go"; then
-    echo "- src/test.go"
-fi
-if echo "$prompt" | grep -q "docs/readme.md"; then
-    echo "- docs/readme.md"
-fi
-if echo "$prompt" | grep -q "docs/guide.md"; then
-    echo "- docs/guide.md"
-fi
-echo "Task completed."
-`
-				mockPath := filepath.Join(mockDir, "llm")
-				fs.WriteString(mockPath, mockLLMScript)
-				os.Chmod(mockPath, 0755)
 				
 				// Setup mock cx that supports required operations
 				mockCxScript := `#!/bin/bash
@@ -110,9 +86,6 @@ exit 0
 				mockCxPath := filepath.Join(mockDir, "cx")
 				fs.WriteString(mockCxPath, mockCxScript)
 				os.Chmod(mockCxPath, 0755)
-				
-				// Store the mock directory for later use
-				ctx.Set("test_bin_dir", mockDir)
 				
 				return nil
 			}),
@@ -222,11 +195,13 @@ Please perform a general analysis of the project.
 			
 			harness.NewStep("Run job with Go-only rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				testBinDir := ctx.GetString("test_bin_dir")
+				// Use the mock binaries from the test infrastructure
+				mockBinDir := filepath.Join(filepath.Dir(flow), "..", "tests", "e2e", "tend", "mocks", "bin")
 				
-				cmd := command.New(flow, "plan", "run", "01-go-analysis.md", "-d", filepath.Join(ctx.RootDir, "plans", "test-plan")).
+				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "01-go-analysis.md"), "-y").
 					Dir(ctx.RootDir).
-					Env("PATH", fmt.Sprintf("%s:%s", testBinDir, os.Getenv("PATH")))
+					Env("PATH", fmt.Sprintf("%s:%s:%s", mockBinDir, filepath.Join(ctx.RootDir, "mocks"), os.Getenv("PATH"))).
+					Env("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -242,7 +217,7 @@ Please perform a general analysis of the project.
 				}
 				
 				// Verify job completed successfully
-				if !strings.Contains(result.Stdout, "✓ Job completed: go-analysis") {
+				if !strings.Contains(result.Stdout, "✓ Job completed: Analyze Go files") {
 					return fmt.Errorf("job should have completed successfully")
 				}
 				
@@ -251,11 +226,13 @@ Please perform a general analysis of the project.
 			
 			harness.NewStep("Run job with docs-only rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				testBinDir := ctx.GetString("test_bin_dir")
+				// Use the mock binaries from the test infrastructure
+				mockBinDir := filepath.Join(filepath.Dir(flow), "..", "tests", "e2e", "tend", "mocks", "bin")
 				
-				cmd := command.New(flow, "plan", "run", "02-docs-review.md", "-d", filepath.Join(ctx.RootDir, "plans", "test-plan")).
+				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "02-docs-review.md"), "-y").
 					Dir(ctx.RootDir).
-					Env("PATH", fmt.Sprintf("%s:%s", testBinDir, os.Getenv("PATH")))
+					Env("PATH", fmt.Sprintf("%s:%s:%s", mockBinDir, filepath.Join(ctx.RootDir, "mocks"), os.Getenv("PATH"))).
+					Env("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -271,7 +248,7 @@ Please perform a general analysis of the project.
 				}
 				
 				// Verify job completed successfully
-				if !strings.Contains(result.Stdout, "✓ Job completed: docs-review") {
+				if !strings.Contains(result.Stdout, "✓ Job completed: Review documentation") {
 					return fmt.Errorf("job should have completed successfully")
 				}
 				
@@ -280,7 +257,6 @@ Please perform a general analysis of the project.
 			
 			harness.NewStep("Run job without custom rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				testBinDir := ctx.GetString("test_bin_dir")
 				
 				// First create a default .grove/rules file
 				groveDir := filepath.Join(ctx.RootDir, ".grove")
@@ -289,10 +265,13 @@ Please perform a general analysis of the project.
 README.md
 `
 				fs.WriteString(filepath.Join(groveDir, "rules"), defaultRules)
+				// Use the mock binaries from the test infrastructure
+				mockBinDir := filepath.Join(filepath.Dir(flow), "..", "tests", "e2e", "tend", "mocks", "bin")
 				
-				cmd := command.New(flow, "plan", "run", "03-general-task.md", "-d", filepath.Join(ctx.RootDir, "plans", "test-plan")).
+				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "03-general-task.md"), "-y").
 					Dir(ctx.RootDir).
-					Env("PATH", fmt.Sprintf("%s:%s", testBinDir, os.Getenv("PATH")))
+					Env("PATH", fmt.Sprintf("%s:%s:%s", mockBinDir, filepath.Join(ctx.RootDir, "mocks"), os.Getenv("PATH"))).
+					Env("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -307,7 +286,7 @@ README.md
 				}
 				
 				// Verify job completed successfully
-				if !strings.Contains(result.Stdout, "✓ Job completed: general-task") {
+				if !strings.Contains(result.Stdout, "✓ Job completed: General task") {
 					return fmt.Errorf("job should have completed successfully")
 				}
 				

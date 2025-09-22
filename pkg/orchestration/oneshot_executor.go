@@ -909,7 +909,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 		fmt.Printf("Using job-specific context from: %s\n", rulesFilePath)
 		
 		// Generate context using the custom rules file
-		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, false); err != nil {
+		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
 			return fmt.Errorf("failed to generate job-specific context: %w", err)
 		}
 		
