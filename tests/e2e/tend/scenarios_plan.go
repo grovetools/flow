@@ -63,7 +63,7 @@ flow:
 				}
 				jobFile := filepath.Join(ctx.RootDir, "plans", "my-plan", "01-create-hello-file.md")
 				if !fs.Exists(jobFile) {
-					return fmt.Errorf("job file '01-create-file.md' should exist")
+					return fmt.Errorf("job file '01-create-hello-file.md' should exist")
 				}
 
 				// Remove worktree from job file to avoid worktree directory requirement
