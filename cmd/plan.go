@@ -167,7 +167,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().Lookup("worktree").NoOptDefVal = "__AUTO__" // Special marker for auto-naming
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
-	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", true, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
+	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
 	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "chat-workflow", "Name of a plan recipe to initialize from (e.g., standard-feature)")
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 
