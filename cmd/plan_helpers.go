@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 )
@@ -69,4 +70,35 @@ func resolvePlanPathWithActiveJob(planName string) (string, error) {
 	}
 
 	return resolvePlanPath(planName)
+}
+
+// loadFlowConfigWithDynamicRecipes is a helper to load flow config and extract the get_recipe_cmd.
+func loadFlowConfigWithDynamicRecipes() (*FlowConfig, string, error) {
+	coreCfg, err := config.LoadFrom(".")
+	if err != nil {
+		coreCfg = &config.Config{}
+	}
+
+	// Load the flow section as a generic map to find get_recipe_cmd
+	var rawFlowConfig map[string]interface{}
+	if err := coreCfg.UnmarshalExtension("flow", &rawFlowConfig); err != nil {
+		return nil, "", fmt.Errorf("failed to parse 'flow' configuration: %w", err)
+	}
+
+	var getRecipeCmd string
+	if recipes, ok := rawFlowConfig["recipes"].(map[string]interface{}); ok {
+		if cmd, ok := recipes["get_recipe_cmd"].(string); ok {
+			getRecipeCmd = cmd
+			// Remove the key so it doesn't interfere with unmarshalling into FlowConfig
+			delete(recipes, "get_recipe_cmd")
+		}
+	}
+	
+	// Now unmarshal into the typed FlowConfig struct
+	var flowCfg FlowConfig
+	if err := coreCfg.UnmarshalExtension("flow", &flowCfg); err != nil {
+		return nil, "", fmt.Errorf("failed to parse 'flow' configuration into struct: %w", err)
+	}
+	
+	return &flowCfg, getRecipeCmd, nil
 }

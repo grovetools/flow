@@ -84,7 +84,9 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	m.nameInput.Width = 50
 
 	// Recipes List
-	recipes, _ := orchestration.ListAllRecipes() // Ignore error for TUI
+	// Load flow config to get dynamic recipe command
+	_, getRecipeCmd, _ := loadFlowConfigWithDynamicRecipes() // Ignore error for TUI
+	recipes, _ := orchestration.ListAllRecipes(getRecipeCmd) // Ignore error for TUI
 	recipeItems := make([]list.Item, len(recipes)+1)
 	recipeItems[0] = item("none")
 	defaultRecipeIndex := 0

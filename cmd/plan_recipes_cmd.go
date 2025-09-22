@@ -20,8 +20,15 @@ var planRecipesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available plan recipes",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// List all recipes (user and built-in)
-		recipes, err := orchestration.ListAllRecipes()
+		// Load flow config to get dynamic recipe command
+		_, getRecipeCmd, err := loadFlowConfigWithDynamicRecipes()
+		if err != nil {
+			// Warning but don't fail - we can still list built-in and user recipes
+			fmt.Fprintf(os.Stderr, "Warning: could not load flow config: %v\n", err)
+		}
+
+		// List all recipes (user, dynamic, and built-in)
+		recipes, err := orchestration.ListAllRecipes(getRecipeCmd)
 		if err != nil {
 			return err
 		}
@@ -39,9 +46,9 @@ var planRecipesListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tDESCRIPTION")
+		fmt.Fprintln(w, "NAME\tSOURCE\tDESCRIPTION")
 		for _, r := range recipes {
-			fmt.Fprintf(w, "%s\t%s\n", r.Name, r.Description)
+			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Name, r.Source, r.Description)
 		}
 		w.Flush()
 		return nil

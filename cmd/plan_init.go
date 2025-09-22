@@ -211,9 +211,15 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
 func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) error {
+	// Load flow config to get dynamic recipe command
+	_, getRecipeCmd, err := loadFlowConfigWithDynamicRecipes()
+	if err != nil {
+		// Warning but don't fail
+		fmt.Fprintf(os.Stderr, "Warning: could not load flow config for dynamic recipes: %v\n", err)
+	}
 
-	// Find the recipe (checks user recipes first, then built-in)
-	recipe, err := orchestration.GetRecipe(cmd.Recipe)
+	// Find the recipe (checks user recipes first, then dynamic, then built-in)
+	recipe, err := orchestration.GetRecipe(cmd.Recipe, getRecipeCmd)
 	if err != nil {
 		return err
 	}
@@ -227,7 +233,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	}
 
 	fmt.Printf("Initializing orchestration plan in:\n  %s\n\n", planPath)
-	fmt.Printf("✓ Using recipe: %s\n", cmd.Recipe)
+	fmt.Printf("✓ Using recipe: %s %s\n", recipe.Name, recipe.Source)
 
 	// Prepare extracted content if provided
 	var extractedBody []byte

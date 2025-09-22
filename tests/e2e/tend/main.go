@@ -33,6 +33,7 @@ func main() {
 		PlanRecipesScenario(),                // Tests the new recipes feature
 		PlanRecipeWithExtractScenario(),      // Tests combining recipe with content extraction
 		PlanRecipeVarsScenario(),             // Tests passing variables to recipe templates with --recipe-vars flag
+		PlanDynamicRecipesScenario(),         // Tests loading recipes dynamically from external commands
 		GenerateRecipeScenario(),             // Tests generate-recipe job type functionality
 		GenerateRecipeWithVariablesScenario(), // Tests generate-recipe with multiple template variables
 		JobSummaryScenario(),                 // Tests job summarization on completion
