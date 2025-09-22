@@ -227,8 +227,32 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		getRecipeCmd = configRecipeCmd
 	}
 
+	// Special handling when --recipe-cmd is provided
+	recipeName := cmd.Recipe
+	if cmd.RecipeCmd != "" && (cmd.Recipe == "" || cmd.Recipe == "chat-workflow") {
+		// If recipe-cmd is provided but recipe is not (or is default), 
+		// try to auto-select from available recipes
+		dynamicRecipes, err := orchestration.ListDynamicRecipes(getRecipeCmd)
+		if err == nil && len(dynamicRecipes) > 0 {
+			if len(dynamicRecipes) == 1 {
+				// Auto-select the only recipe
+				recipeName = dynamicRecipes[0].Name
+				fmt.Printf("✓ Auto-selected recipe: %s\n", recipeName)
+			} else if cmd.Recipe == "" || cmd.Recipe == "chat-workflow" {
+				// Multiple recipes available and no specific one requested
+				fmt.Println("Available recipes from command:")
+				for i, r := range dynamicRecipes {
+					fmt.Printf("  %d. %s - %s\n", i+1, r.Name, r.Description)
+				}
+				// For now, we'll use the first one, but this could be made interactive
+				recipeName = dynamicRecipes[0].Name
+				fmt.Printf("✓ Using first recipe: %s (specify with --recipe to choose a different one)\n", recipeName)
+			}
+		}
+	}
+
 	// Find the recipe (checks user recipes first, then dynamic, then built-in)
-	recipe, err := orchestration.GetRecipe(cmd.Recipe, getRecipeCmd)
+	recipe, err := orchestration.GetRecipe(recipeName, getRecipeCmd)
 	if err != nil {
 		return err
 	}

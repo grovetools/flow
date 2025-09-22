@@ -170,7 +170,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
-	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "chat-workflow", "Name of a plan recipe to initialize from (e.g., standard-feature)")
+	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "chat-workflow", "Name of a plan recipe to initialize from (e.g., standard-feature). When using --recipe-cmd, this can be omitted if the command provides only one recipe")
 	planInitCmd.Flags().StringArrayVar(&planInitRecipeVars, "recipe-vars", nil, "Variables to pass to recipe templates. Can be used multiple times or comma-delimited (e.g., --recipe-vars model=gpt-4 --recipe-vars rules_file=docs.rules OR --recipe-vars \"model=gpt-4,rules_file=docs.rules,output_dir=docs\")")
 	planInitCmd.Flags().StringVar(&planInitRecipeCmd, "recipe-cmd", "", "Command that outputs JSON recipe definitions (overrides grove.yml's get_recipe_cmd)")
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
