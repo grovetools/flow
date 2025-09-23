@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mattsolo1/grove-docgen/main/schema/docgen.config.schema.json
+category: Libraries
+description: A brief description of this library.
+enabled: true
+sections:
+  - name: introduction
+    order: 1
+    output: introduction.md
+    prompt: prompts/introduction.md
+    title: Introduction
+  - name: core-concepts
+    order: 2
+    output: core-concepts.md
+    prompt: prompts/core-concepts.md
+    title: Core Concepts
+  - name: usage-patterns
+    order: 3
+    output: usage-patterns.md
+    prompt: prompts/usage-patterns.md
+    title: Usage Patterns
+  - name: best-practices
+    order: 4
+    output: best-practices.md
+    prompt: prompts/best-practices.md
+    title: Best Practices
+settings:
+  model: gpt-5
+  output_dir: docs
+  regeneration_mode: scratch
+  rules_file: docs.rules
+  structured_output_file: pkg/docs/docs.json
+  system_prompt: default
+title: My Library
