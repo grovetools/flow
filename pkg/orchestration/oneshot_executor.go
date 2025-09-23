@@ -903,8 +903,58 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 
 	// Check if job has a custom rules file specified
 	if job != nil && job.RulesFile != "" {
-		// Resolve the custom rules file path relative to the plan directory
-		rulesFilePath := filepath.Join(plan.Directory, job.RulesFile)
+		// Try multiple locations for the rules file:
+		// 1. Relative to plan directory (original behavior)
+		// 2. Relative to current working directory
+		// 3. Relative to git root
+		
+		var rulesFilePath string
+		var foundPath bool
+		
+		// 1. Try relative to plan directory (original/primary location)
+		candidatePath := filepath.Join(plan.Directory, job.RulesFile)
+		if _, err := os.Stat(candidatePath); err == nil {
+			rulesFilePath = candidatePath
+			foundPath = true
+		}
+		
+		// 2. Try relative to current working directory
+		if !foundPath {
+			cwd, err := os.Getwd()
+			if err == nil {
+				candidatePath = filepath.Join(cwd, job.RulesFile)
+				if _, err := os.Stat(candidatePath); err == nil {
+					rulesFilePath = candidatePath
+					foundPath = true
+				}
+			}
+		}
+		
+		// 3. Try relative to git root
+		if !foundPath {
+			gitRoot, err := GetGitRootSafe(plan.Directory)
+			if err == nil {
+				candidatePath = filepath.Join(gitRoot, job.RulesFile)
+				if _, err := os.Stat(candidatePath); err == nil {
+					rulesFilePath = candidatePath
+					foundPath = true
+				}
+			}
+		}
+		
+		// 4. Try as an absolute path
+		if !foundPath {
+			if filepath.IsAbs(job.RulesFile) {
+				if _, err := os.Stat(job.RulesFile); err == nil {
+					rulesFilePath = job.RulesFile
+					foundPath = true
+				}
+			}
+		}
+		
+		if !foundPath {
+			return fmt.Errorf("rules file '%s' not found in plan directory, current directory, or git root", job.RulesFile)
+		}
 		
 		fmt.Printf("Using job-specific context from: %s\n", rulesFilePath)
 		

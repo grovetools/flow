@@ -42,13 +42,11 @@ func RulesInFrontmatterScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 				
-				// Write grove.yml with LLM config
+				// Write grove.yml with a mock LLM model
 				configContent := `name: test-project
 flow:
   plans_directory: ./plans
-llm:
-  provider: openai
-  model: test
+  oneshot_model: mock
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 				
@@ -195,13 +193,9 @@ Please perform a general analysis of the project.
 			
 			harness.NewStep("Run job with Go-only rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				// Use the mock binaries from the test infrastructure
-				mockBinDir := filepath.Join(filepath.Dir(flow), "..", "tests", "e2e", "tend", "mocks", "bin")
 				
 				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "01-go-analysis.md"), "-y").
-					Dir(ctx.RootDir).
-					Env("PATH", fmt.Sprintf("%s:%s:%s", mockBinDir, filepath.Join(ctx.RootDir, "mocks"), os.Getenv("PATH"))).
-					Env("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
+					Dir(ctx.RootDir)
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -226,13 +220,9 @@ Please perform a general analysis of the project.
 			
 			harness.NewStep("Run job with docs-only rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				// Use the mock binaries from the test infrastructure
-				mockBinDir := filepath.Join(filepath.Dir(flow), "..", "tests", "e2e", "tend", "mocks", "bin")
 				
 				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "02-docs-review.md"), "-y").
-					Dir(ctx.RootDir).
-					Env("PATH", fmt.Sprintf("%s:%s:%s", mockBinDir, filepath.Join(ctx.RootDir, "mocks"), os.Getenv("PATH"))).
-					Env("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
+					Dir(ctx.RootDir)
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -265,13 +255,9 @@ Please perform a general analysis of the project.
 README.md
 `
 				fs.WriteString(filepath.Join(groveDir, "rules"), defaultRules)
-				// Use the mock binaries from the test infrastructure
-				mockBinDir := filepath.Join(filepath.Dir(flow), "..", "tests", "e2e", "tend", "mocks", "bin")
 				
 				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "03-general-task.md"), "-y").
-					Dir(ctx.RootDir).
-					Env("PATH", fmt.Sprintf("%s:%s:%s", mockBinDir, filepath.Join(ctx.RootDir, "mocks"), os.Getenv("PATH"))).
-					Env("GROVE_MOCK_LLM_RESPONSE_FILE", filepath.Join(ctx.RootDir, "mock-response.txt"))
+					Dir(ctx.RootDir)
 				
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -305,7 +291,111 @@ README.md
 				}
 				
 				// All three jobs should be completed
-				return assert.Contains(result.Stdout, "completed: 3")
+				return assert.Contains(result.Stdout, "Completed: 3")
+			}),
+			
+			harness.NewStep("Test rules file fallback to git root", func(ctx *harness.Context) error {
+				// Create a rules file in the git root
+				gitRootRulesContent := `# Root-level rules
+*.go
+*.md
+`
+				fs.WriteString(filepath.Join(ctx.RootDir, "root-level.rules"), gitRootRulesContent)
+				
+				planPath := filepath.Join(ctx.RootDir, "plans", "test-plan")
+				
+				// Create job that references rules file not in plan dir but in git root
+				jobContent := `---
+id: fallback-test
+title: "Test fallback resolution"
+type: oneshot
+status: pending
+rules_file: root-level.rules
+---
+
+Please test the fallback resolution for rules files.
+`
+				jobPath := filepath.Join(planPath, "04-fallback-test.md")
+				fs.WriteString(jobPath, jobContent)
+				
+				flow, _ := getFlowBinary()
+				
+				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "04-fallback-test.md"), "-y").
+					Dir(ctx.RootDir)
+				
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				
+				if result.Error != nil {
+					return fmt.Errorf("failed to run job with git-root rules: %v", result.Error)
+				}
+				
+				// Verify that job found and used the rules file from git root
+				if !strings.Contains(result.Stdout, "Using job-specific context from") ||
+				   !strings.Contains(result.Stdout, "root-level.rules") {
+					return fmt.Errorf("job should have found root-level.rules file in git root")
+				}
+				
+				// Verify job completed successfully
+				if !strings.Contains(result.Stdout, "✓ Job completed: Test fallback resolution") {
+					return fmt.Errorf("job should have completed successfully")
+				}
+				
+				return nil
+			}),
+			
+			harness.NewStep("Test rules file fallback with subdirectory path", func(ctx *harness.Context) error {
+				// Create a docs directory in git root with a rules file
+				docsDir := filepath.Join(ctx.RootDir, "docs")
+				fs.CreateDir(docsDir)
+				
+				docsRulesContent := `# Documentation-specific rules
+*.md
+README.*
+docs/**
+`
+				fs.WriteString(filepath.Join(docsDir, "root-level.rules"), docsRulesContent)
+				
+				planPath := filepath.Join(ctx.RootDir, "plans", "test-plan")
+				
+				// Create job that references rules file with subdirectory path
+				jobContent := `---
+id: subdirectory-fallback-test
+title: "Test subdirectory fallback resolution"
+type: oneshot
+status: pending
+rules_file: docs/root-level.rules
+---
+
+Please test the subdirectory fallback resolution for rules files.
+`
+				jobPath := filepath.Join(planPath, "05-subdirectory-fallback-test.md")
+				fs.WriteString(jobPath, jobContent)
+				
+				flow, _ := getFlowBinary()
+				
+				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "05-subdirectory-fallback-test.md"), "-y").
+					Dir(ctx.RootDir)
+				
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				
+				if result.Error != nil {
+					return fmt.Errorf("failed to run job with subdirectory rules: %v", result.Error)
+				}
+				
+				// Verify that job found and used the rules file from git root/docs
+				if !strings.Contains(result.Stdout, "Using job-specific context from") ||
+				   !strings.Contains(result.Stdout, "docs/root-level.rules") {
+					return fmt.Errorf("job should have found docs/root-level.rules file in git root")
+				}
+				
+				// Verify job completed successfully
+				if !strings.Contains(result.Stdout, "✓ Job completed: Test subdirectory fallback resolution") {
+					return fmt.Errorf("job should have completed successfully")
+				}
+				
+				return nil
 			}),
 		},
 	}
