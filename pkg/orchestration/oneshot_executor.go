@@ -970,89 +970,128 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 	rulesPath := filepath.Join(worktreePath, ".grove", "rules")
 	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
-			// Check if we should skip interactive prompts
-			if e.config.SkipInteractive {
-				fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
-				fmt.Printf("Skipping interactive prompt and proceeding without context for %s job.\n", jobType)
-				return e.displayContextInfo(worktreePath)
+			// Try to create default rules file using cx reset
+			fmt.Println("No .grove/rules file found. Creating default rules file...")
+			
+			// Try cx reset to create default rules
+			var resetCmd *exec.Cmd
+			var resetErr error
+			
+			// Try grove cx reset first
+			resetCmd = exec.Command("grove", "cx", "reset")
+			resetCmd.Dir = worktreePath
+			resetCmd.Stdout = os.Stdout
+			resetCmd.Stderr = os.Stderr
+			resetErr = resetCmd.Run()
+			
+			if resetErr != nil {
+				// Try cx reset directly as fallback
+				resetCmd = exec.Command("cx", "reset")
+				resetCmd.Dir = worktreePath
+				resetCmd.Stdout = os.Stdout
+				resetCmd.Stderr = os.Stderr
+				resetErr = resetCmd.Run()
 			}
-
-			// Check if we have a TTY before prompting
-			if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
-				fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
-				fmt.Printf("No TTY available, proceeding without context for %s job.\n", jobType)
-				return e.displayContextInfo(worktreePath)
+			
+			// Check if cx reset succeeded in creating the rules file
+			if resetErr == nil {
+				if _, err := os.Stat(rulesPath); err == nil {
+					fmt.Println("✓ Created default .grove/rules file")
+					// Continue with the normal flow - the rules file now exists
+					// Fall through to the code below that handles existing rules files
+				} else {
+					// cx reset ran but didn't create the file
+					fmt.Printf("Warning: cx reset completed but .grove/rules was not created\n")
+					resetErr = fmt.Errorf("rules file not created")
+				}
 			}
-
-			// Prompt user when rules file is missing
-			fmt.Println("\n⚠️  No .grove/rules file found in worktree.")
-			fmt.Printf("Without a rules file, context cannot be generated for this %s job.\n", jobType)
-
-			// Interactive prompt loop
-			for {
-				fmt.Println("\nOptions:")
-				fmt.Println("  [E]dit - Create and edit a rules file (default)")
-				fmt.Println("  [P]roceed - Continue without context")
-				fmt.Println("  [C]ancel - Cancel the job")
-				fmt.Print("\nYour choice [E/p/c]: ")
-
-				reader := bufio.NewReader(os.Stdin)
-				input, _ := reader.ReadString('\n')
-				choice := strings.TrimSpace(strings.ToLower(input))
-
-				switch choice {
-				case "e", "edit", "":
-					// Find cx or grove-context binary
-					var cxBinary string
-					if _, err := exec.LookPath("cx"); err == nil {
-						cxBinary = "cx"
-					} else if _, err := exec.LookPath("grove-context"); err == nil {
-						cxBinary = "grove-context"
-					} else {
-						fmt.Println("\n❌ Error: Neither 'cx' nor 'grove-context' found in PATH.")
-						fmt.Println("Please install grove-context to use this feature.")
-						continue
-					}
-
-					// Run cx edit in the worktree
-					fmt.Printf("\nOpening rules editor with '%s edit'...\n", cxBinary)
-					cmd := exec.Command(cxBinary, "edit")
-					cmd.Dir = worktreePath
-					cmd.Stdin = os.Stdin
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-
-					if err := cmd.Run(); err != nil {
-						fmt.Printf("\n❌ Error running %s edit: %v\n", cxBinary, err)
-						fmt.Println("Please try again or choose a different option.")
-						continue
-					}
-
-					// After edit completes, check if rules file now exists
-					if _, err := os.Stat(rulesPath); err == nil {
-						fmt.Println("\n✓ Rules file created successfully.")
-						// Break out of the prompt loop and continue with regeneration
-						break
-					} else {
-						fmt.Println("\n⚠️  Rules file still not found. Please try again.")
-						continue
-					}
-
-				case "p", "proceed":
-					fmt.Println("\n⚠️  Proceeding without context from rules.")
-					fmt.Println("💡 To add context for future runs, open a new terminal, navigate to the worktree, and run 'cx edit'.")
+			
+			// If cx reset failed or didn't create the file, handle as before
+			if resetErr != nil {
+				// Check if we should skip interactive prompts
+				if e.config.SkipInteractive {
+					fmt.Println("\n⚠️  Could not create .grove/rules file.")
+					fmt.Printf("Skipping interactive prompt and proceeding without context for %s job.\n", jobType)
 					return e.displayContextInfo(worktreePath)
-
-				case "c", "cancel":
-					return fmt.Errorf("job canceled by user: .grove/rules file not found")
-
-				default:
-					fmt.Printf("\n❌ Invalid choice '%s'. Please choose E, P, or C.\n", choice)
-					continue
 				}
 
-				// If we reach here from the edit case, break the loop
-				break
+				// Check if we have a TTY before prompting
+				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+					fmt.Println("\n⚠️  Could not create .grove/rules file.")
+					fmt.Printf("No TTY available, proceeding without context for %s job.\n", jobType)
+					return e.displayContextInfo(worktreePath)
+				}
+
+				// Prompt user when rules file is missing
+				fmt.Println("\n⚠️  Could not create .grove/rules file.")
+				fmt.Printf("Without a rules file, context cannot be generated for this %s job.\n", jobType)
+
+				// Interactive prompt loop
+				for {
+					fmt.Println("\nOptions:")
+					fmt.Println("  [E]dit - Create and edit a rules file (default)")
+					fmt.Println("  [P]roceed - Continue without context")
+					fmt.Println("  [C]ancel - Cancel the job")
+					fmt.Print("\nYour choice [E/p/c]: ")
+
+					reader := bufio.NewReader(os.Stdin)
+					input, _ := reader.ReadString('\n')
+					choice := strings.TrimSpace(strings.ToLower(input))
+
+					switch choice {
+					case "e", "edit", "":
+						// Find cx or grove-context binary
+						var cxBinary string
+						if _, err := exec.LookPath("cx"); err == nil {
+							cxBinary = "cx"
+						} else if _, err := exec.LookPath("grove-context"); err == nil {
+							cxBinary = "grove-context"
+						} else {
+							fmt.Println("\n❌ Error: Neither 'cx' nor 'grove-context' found in PATH.")
+							fmt.Println("Please install grove-context to use this feature.")
+							continue
+						}
+
+						// Run cx edit in the worktree
+						fmt.Printf("\nOpening rules editor with '%s edit'...\n", cxBinary)
+						cmd := exec.Command(cxBinary, "edit")
+						cmd.Dir = worktreePath
+						cmd.Stdin = os.Stdin
+						cmd.Stdout = os.Stdout
+						cmd.Stderr = os.Stderr
+
+						if err := cmd.Run(); err != nil {
+							fmt.Printf("\n❌ Error running %s edit: %v\n", cxBinary, err)
+							fmt.Println("Please try again or choose a different option.")
+							continue
+						}
+
+						// After edit completes, check if rules file now exists
+						if _, err := os.Stat(rulesPath); err == nil {
+							fmt.Println("\n✓ Rules file created successfully.")
+							// Break out of the prompt loop and continue with regeneration
+							break
+						} else {
+							fmt.Println("\n⚠️  Rules file still not found. Please try again.")
+							continue
+						}
+
+					case "p", "proceed":
+						fmt.Println("\n⚠️  Proceeding without context from rules.")
+						fmt.Println("💡 To add context for future runs, open a new terminal, navigate to the worktree, and run 'cx edit'.")
+						return e.displayContextInfo(worktreePath)
+
+					case "c", "cancel":
+						return fmt.Errorf("job canceled by user: .grove/rules file not found")
+
+					default:
+						fmt.Printf("\n❌ Invalid choice '%s'. Please choose E, P, or C.\n", choice)
+						continue
+					}
+
+					// If we reach here from the edit case, break the loop
+					break
+				}
 			}
 		} else {
 			return fmt.Errorf("checking .grove/rules: %w", err)
@@ -1424,8 +1463,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 
 	// Only run cx generate if we don't have a custom rules file
-	// (custom rules file already generated the correct context)
+	// Custom rules files have already generated the correct context via regenerateContextInWorktree
+	// Running cx generate would overwrite it with the wrong rules
 	if job.RulesFile == "" {
+		// For jobs without custom rules, cx generate ensures we have the latest context
 		fmt.Printf("Running cx generate before submission...\n")
 
 		// Try grove cx generate first (capture stderr to suppress error if fallback works)
@@ -1452,7 +1493,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			// If cx generate succeeded, we don't show the grove cx error
 		}
 	} else {
-		fmt.Printf("Skipping cx generate (already generated with custom rules file: %s)\n", job.RulesFile)
+		fmt.Printf("Skipping cx generate (using custom rules file: %s)\n", job.RulesFile)
 	}
 
 	// Call LLM based on model type
