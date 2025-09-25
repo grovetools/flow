@@ -18,9 +18,16 @@ import (
 	"github.com/mattn/go-isatty"
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	log       = grovelogging.NewLogger("grove-flow")
+	prettyLog = grovelogging.NewPrettyLogger("grove-flow")
 )
 
 // ExecutorConfig holds configuration for executors.
@@ -86,7 +93,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 			// Skip interactive prompts if configured to do so
 			if e.config.SkipInteractive {
-				fmt.Printf("Skipping interactive chat job '%s' (running automatically)\n", job.Title)
+				log.WithField("job", job.Title).Info("Skipping interactive chat job (running automatically)")
+				prettyLog.InfoPretty(fmt.Sprintf("Skipping interactive chat job '%s' (running automatically)", job.Title))
 				return e.executeChatJob(ctx, job, plan)
 			}
 
@@ -176,14 +184,16 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			workDir = plan.Directory
-			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", workDir)
+			log.WithField("workdir", workDir).Warn("Not a git repository, using plan directory as working directory")
+			prettyLog.WarnPretty(fmt.Sprintf("Not a git repository. Using plan directory as working directory: %s", workDir))
 		}
 	}
 
 	// Always regenerate context to ensure oneshot has latest view
 	if err := e.regenerateContextInWorktree(workDir, "oneshot", job, plan); err != nil {
 		// Log warning but don't fail the job
-		fmt.Printf("Warning: failed to regenerate context: %v\n", err)
+		log.WithError(err).Warn("Failed to regenerate context")
+		prettyLog.WarnPretty(fmt.Sprintf("Failed to regenerate context: %v", err))
 	}
 
 	// Set environment for mock testing
@@ -288,7 +298,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	job.EndTime = time.Now()
 	if err := updateJobFile(job); err != nil {
 		// Log but don't fail - the job executed successfully
-		fmt.Printf("Warning: failed to update job file status: %v\n", err)
+		log.WithError(err).Warn("Failed to update job file status")
+		prettyLog.WarnPretty(fmt.Sprintf("Failed to update job file status: %v", err))
 	}
 
 	return nil
@@ -623,7 +634,8 @@ func (e *OneShotExecutor) processGeneratedJobs(output string, job *Job, plan *Pl
 		if err := os.WriteFile(jobPath, []byte(jobContent), 0o644); err != nil {
 			return fmt.Errorf("failed to write generated job file %s: %w", filename, err)
 		}
-		fmt.Printf("✓ Generated new job: %s\n", filename)
+		log.WithField("file", filename).Info("Generated new job")
+		prettyLog.Success(fmt.Sprintf("Generated new job: %s", filename))
 
 		// Track the created job
 		createdJobs = append(createdJobs, struct {
@@ -872,9 +884,14 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		cmd := exec.Command(GetHooksBinaryPath(), "install")
 		cmd.Dir = worktreePath
 		if output, err := cmd.CombinedOutput(); err != nil {
-			fmt.Printf("Warning: grove-hooks install failed: %v (output: %s)\n", err, string(output))
+			log.WithFields(logrus.Fields{
+				"error": err,
+				"output": string(output),
+			}).Warn("grove-hooks install failed")
+			prettyLog.WarnPretty(fmt.Sprintf("grove-hooks install failed: %v (output: %s)", err, string(output)))
 		} else {
-			fmt.Printf("✓ Installed grove-hooks in worktree: %s\n", worktreePath)
+			log.WithField("worktree", worktreePath).Info("Installed grove-hooks in worktree")
+			prettyLog.Success(fmt.Sprintf("Installed grove-hooks in worktree: %s", worktreePath))
 		}
 	}
 
@@ -882,7 +899,8 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 	groveDir := filepath.Join(worktreePath, ".grove")
 	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		// Log a warning but don't fail the job, as this is a convenience feature.
-		fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
+		log.WithError(err).Warn("Failed to create .grove directory in worktree")
+		prettyLog.WarnPretty(fmt.Sprintf("Failed to create .grove directory in worktree: %v", err))
 	} else {
 		planName := filepath.Base(plan.Directory)
 		stateContent := fmt.Sprintf("active_plan: %s\n", planName)
@@ -896,7 +914,8 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 
 // regenerateContextInWorktree regenerates the context within a worktree.
 func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobType string, job *Job, plan *Plan) error {
-	fmt.Printf("Checking context in worktree for %s job...\n", jobType)
+	log.WithField("job_type", jobType).Info("Checking context in worktree")
+	prettyLog.InfoPretty(fmt.Sprintf("Checking context in worktree for %s job...", jobType))
 
 	// Create context manager for the worktree
 	ctxMgr := grovecontext.NewManager(worktreePath)
@@ -956,7 +975,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 			return fmt.Errorf("rules file '%s' not found in plan directory, current directory, or git root", job.RulesFile)
 		}
 		
-		fmt.Printf("Using job-specific context from: %s\n", rulesFilePath)
+		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
 		
 		// Generate context using the custom rules file
 		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
@@ -1001,7 +1020,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 					// Fall through to the code below that handles existing rules files
 				} else {
 					// cx reset ran but didn't create the file
-					fmt.Printf("Warning: cx reset completed but .grove/rules was not created\n")
+					log.Warn("cx reset completed but .grove/rules was not created")
 					resetErr = fmt.Errorf("rules file not created")
 				}
 			}
@@ -1011,14 +1030,14 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 				// Check if we should skip interactive prompts
 				if e.config.SkipInteractive {
 					fmt.Println("\n⚠️  Could not create .grove/rules file.")
-					fmt.Printf("Skipping interactive prompt and proceeding without context for %s job.\n", jobType)
+					log.WithField("job_type", jobType).Info("Skipping interactive prompt and proceeding without context")
 					return e.displayContextInfo(worktreePath)
 				}
 
 				// Check if we have a TTY before prompting
 				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
 					fmt.Println("\n⚠️  Could not create .grove/rules file.")
-					fmt.Printf("No TTY available, proceeding without context for %s job.\n", jobType)
+					log.WithField("job_type", jobType).Info("No TTY available, proceeding without context")
 					return e.displayContextInfo(worktreePath)
 				}
 
@@ -1100,8 +1119,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 
 	// Display absolute path of rules file being used
 	absRulesPath, _ := filepath.Abs(rulesPath)
-	fmt.Printf("Found context rules file, regenerating context in worktree...\n")
-	fmt.Printf("  Rules File: %s\n", absRulesPath)
+	log.WithField("rules_file", absRulesPath).Info("Found context rules file, regenerating context in worktree")
 
 	// Update context from rules
 	if err := ctxMgr.UpdateFromRules(); err != nil {
@@ -1118,13 +1136,15 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 	files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
 	stats, err := ctxMgr.GetStats("oneshot", files, 10) // Show top 10 files
 	if err != nil {
-		fmt.Printf("Warning: failed to get context stats: %v\n", err)
+		log.WithError(err).Warn("Failed to get context stats")
 	} else {
 		// Display summary statistics
 		fmt.Println("\n=== Context Summary ===")
-		fmt.Printf("Total files: %d\n", stats.TotalFiles)
-		fmt.Printf("Total tokens: %s\n", grovecontext.FormatTokenCount(stats.TotalTokens))
-		fmt.Printf("Total size: %s\n", grovecontext.FormatBytes(int(stats.TotalSize)))
+		log.WithFields(logrus.Fields{
+			"total_files": stats.TotalFiles,
+			"total_tokens": grovecontext.FormatTokenCount(stats.TotalTokens),
+			"total_size": grovecontext.FormatBytes(int(stats.TotalSize)),
+		}).Info("Context summary")
 
 		// Token limit check removed - no longer enforcing limits
 
@@ -1266,10 +1286,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	lastTurn := turns[len(turns)-1]
 	if lastTurn.Speaker == "llm" {
 		// Job is waiting for user input
-		fmt.Printf("Chat job '%s' is waiting for user input.\n", job.Title)
+		log.WithField("job", job.Title).Info("Chat job is waiting for user input")
 		job.Status = JobStatusPendingUser
 		updateJobFile(job)
-		fmt.Printf("[DEBUG] Early return: job waiting for user input\n")
+		log.Debug("Early return: job waiting for user input")
 		return nil
 	}
 
@@ -1302,7 +1322,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Check for special actions
 	if directive.Action == "complete" {
 		// Mark the chat as completed
-		fmt.Printf("✓ Completing chat job: %s\n", job.Title)
+		log.WithField("job", job.Title).Info("Completing chat job")
 		job.Status = JobStatusCompleted
 		job.EndTime = time.Now()
 		updateJobFile(job)
@@ -1323,7 +1343,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Regenerate context in the worktree to ensure chat has latest view
 		if err := e.regenerateContextInWorktree(worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
-			fmt.Printf("Warning: failed to regenerate context in worktree: %v\n", err)
+			log.WithError(err).Warn("Failed to regenerate context in worktree")
 		}
 	} else {
 		// No worktree specified, default to the git repository root.
@@ -1332,13 +1352,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			worktreePath = plan.Directory
-			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", worktreePath)
+			log.WithField("workdir", worktreePath).Warn("Not a git repository, using plan directory as working directory")
 		}
 
 		// Also regenerate context for non-worktree case if .grove/rules exists
 		if err := e.regenerateContextInWorktree(worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
-			fmt.Printf("Warning: failed to regenerate context: %v\n", err)
+			log.WithError(err).Warn("Failed to regenerate context")
 		}
 	}
 
@@ -1364,7 +1384,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Add Grove context files
 	var contextPaths []string
 
-	fmt.Printf("DEBUG: Worktree path for chat job: %s\n", worktreePath)
+	log.WithField("worktree", worktreePath).Debug("Worktree path for chat job")
 
 	if worktreePath != "" {
 		// When using a worktree, ONLY use context from the worktree
@@ -1372,16 +1392,19 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		worktreeContextPath := filepath.Join(worktreePath, ".grove", "context")
 		if _, err := os.Stat(worktreeContextPath); err == nil {
 			contextPaths = append(contextPaths, worktreeContextPath)
-			fmt.Printf("  Found context file: %s\n", worktreeContextPath)
+			log.WithField("file", worktreeContextPath).Debug("Found context file")
 		} else {
-			fmt.Printf("  Context file not found: %s (error: %v)\n", worktreeContextPath, err)
+			log.WithFields(logrus.Fields{
+				"file": worktreeContextPath,
+				"error": err,
+			}).Debug("Context file not found")
 		}
 
 		// Check for CLAUDE.md in worktree
 		worktreeClaudePath := filepath.Join(worktreePath, "CLAUDE.md")
 		if _, err := os.Stat(worktreeClaudePath); err == nil {
 			contextPaths = append(contextPaths, worktreeClaudePath)
-			fmt.Printf("  Found context file: %s\n", worktreeClaudePath)
+			log.WithField("file", worktreeClaudePath).Debug("Found context file")
 		} else {
 			fmt.Printf("  Context file not found: %s (error: %v)\n", worktreeClaudePath, err)
 		}
