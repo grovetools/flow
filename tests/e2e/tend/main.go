@@ -42,7 +42,6 @@ func main() {
 
 		// Chat Scenarios
 		// BasicChatWorkflowScenario(), // Temporarily disabled - hanging issue
-		ChatLaunchScenario(), // Fixed with docker check skip
 		ChatRunFilteringScenario(),
 		ChatPipelineScenario(),
 		ChatTemplateInjectionScenario(), // Tests automatic template injection

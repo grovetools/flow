@@ -29,7 +29,7 @@ Whether you're scaffolding a new feature, running a series of code modifications
 -   💻 **Interactive Tooling**: A beautiful terminal UI (`flow plan status -t`) and an interactive step-by-step wizard (`flow plan step`) for managing plans.
 -   🚀 **Powerful CLI**: A comprehensive set of commands to `init`, `add`, `run`, `status`, `graph`, and `launch` your plans and jobs.
 -   📄 **Templating**: Create and reuse job templates for common tasks.
--   💬 **Chat-to-Code**: Start with an idea in a markdown `chat` file, and seamlessly `launch` it into an interactive agent session or `extract` parts into a formal plan.
+-   💬 **Chat-to-Code**: Start with an idea in a markdown `chat` file, and seamlessly `extract` parts into a formal plan.
 
 ## Quick Start
 
@@ -79,7 +79,6 @@ The `chat` subcommand manages conversational workflows, perfect for ideation and
 
 -   `flow chat -s <file.md>`: Turn a markdown file into a runnable chat job.
 -   `flow chat run [title]`: Run the next LLM turn for one or more pending chats.
--   `flow chat launch <title-or-file>`: Instantly jump from a chat into an interactive agent session in a new worktree.
 -   `flow chat list`: List all chat jobs in your configured `chat_directory`.
 
 ## Configuration

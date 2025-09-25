@@ -342,19 +342,6 @@ Runs outstanding chat jobs that are waiting for an LLM response.
     *   `flow chat run testing-situation`: Runs only the chat titled "testing-situation".
     *   `flow chat run chat1 chat2`: Runs multiple specific chats.
 
-#### `flow chat launch [title-or-file]`
-
-Launches an interactive agent session from a chat file.
-
-*   **Usage:** `flow chat launch [title-or-file]`
-*   **Description:** Launches a chat in a new detached tmux session, pre-filling the agent prompt with the chat content. Allows you to quickly jump from an idea in a markdown file into an interactive session.
-*   **Arguments:**
-    *   `[title-or-file]`: The title or file path of the chat to launch.
-*   **Flags:**
-    *    `--host`: Launch agent on the host in the main git repo, not in a container worktree (boolean, default: false)
-*   **Examples:**
-    *   `flow chat launch issue123`: Launches the chat with the title "issue123".
-    *   `flow chat launch /path/to/issue.md`: Launches the chat from the specified file path.
 
 ## flow models
 
