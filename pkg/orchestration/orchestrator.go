@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/sirupsen/logrus"
 )
 
 // Logger defines the logging interface.
@@ -477,16 +479,42 @@ func (o *Orchestrator) SetLogger(logger Logger) {
 
 // defaultLogger provides a simple logger implementation using grove-core logging.
 type defaultLogger struct{
-	log *grovelogging.PrettyLogger
+	prettyLog *grovelogging.PrettyLogger
+	structuredLog *logrus.Entry
 }
 
 func NewDefaultLogger() Logger {
 	return &defaultLogger{
-		log: grovelogging.NewPrettyLogger(),
+		prettyLog: grovelogging.NewPrettyLogger(),
+		structuredLog: grovelogging.NewLogger("grove-flow"),
 	}
 }
 
 func (l *defaultLogger) Info(msg string, keysAndValues ...interface{}) {
+	// For now, just include key-value pairs in the message
+	if len(keysAndValues) > 0 {
+		var parts []string
+		for i := 0; i < len(keysAndValues); i += 2 {
+			if i+1 < len(keysAndValues) {
+				parts = append(parts, fmt.Sprintf("%v=%v", keysAndValues[i], keysAndValues[i+1]))
+			}
+		}
+		l.prettyLog.InfoPretty(fmt.Sprintf("%s [%s]", msg, strings.Join(parts, " ")))
+	} else {
+		l.prettyLog.InfoPretty(msg)
+	}
+}
+
+func (l *defaultLogger) Error(msg string, keysAndValues ...interface{}) {
+	if len(keysAndValues) > 0 {
+		l.prettyLog.ErrorPretty(fmt.Sprintf("%s %v", msg, keysAndValues), nil)
+	} else {
+		l.prettyLog.ErrorPretty(msg, nil)
+	}
+}
+
+func (l *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {
+	// Use structured logger for debug messages
 	if len(keysAndValues) > 0 {
 		fields := make(map[string]interface{})
 		for i := 0; i < len(keysAndValues); i += 2 {
@@ -494,27 +522,10 @@ func (l *defaultLogger) Info(msg string, keysAndValues ...interface{}) {
 				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
 			}
 		}
-		l.log.InfoPretty(msg)
+		l.structuredLog.WithFields(fields).Debug(msg)
 	} else {
-		l.log.InfoPretty(msg)
+		l.structuredLog.Debug(msg)
 	}
-}
-
-func (l *defaultLogger) Error(msg string, keysAndValues ...interface{}) {
-	if len(keysAndValues) > 0 {
-		l.log.ErrorPretty(fmt.Sprintf("%s %v", msg, keysAndValues), nil)
-	} else {
-		l.log.ErrorPretty(msg, nil)
-	}
-}
-
-func (l *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {
-	// PrettyLogger doesn't have Debug, use InfoPretty for debug messages
-	debugMsg := fmt.Sprintf("[DEBUG] %s", msg)
-	if len(keysAndValues) > 0 {
-		debugMsg = fmt.Sprintf("%s %v", debugMsg, keysAndValues)
-	}
-	l.log.InfoPretty(debugMsg)
 }
 
 // StateManager handles persistence of job states.
