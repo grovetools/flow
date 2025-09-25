@@ -55,6 +55,7 @@ func main() {
 		// Phase 3: Complex Orchestration
 		SimpleOrchestrationScenario(),
 		// ComplexOrchestrationScenario(), // Tests generate_jobs - needs investigation on how flow processes job output
+		EcosystemWorktreeScenario(), // Tests submodule handling in superproject worktrees
 		ReferencePromptScenario(), // Fixed using flow plan add
 
 		// Interactive Agent Scenarios

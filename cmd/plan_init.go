@@ -759,15 +759,13 @@ func launchWorktreeSession(ctx context.Context, worktreeName string, agentComman
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 
-	// Prepare the worktree
-	wm := git.NewWorktreeManager()
-	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "interactive")
+	// Prepare the worktree using the centralized helper
+	worktreePath, err := orchestration.PrepareWorktree(ctx, gitRoot, worktreeName, worktreeName)
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
 
-	// Set up Go workspace and Canopy hooks
-	_ = orchestration.SetupGoWorkspaceForWorktree(worktreePath, gitRoot)
+	// Configure Canopy hooks
 	_ = configureCanopyHooks(worktreePath)
 
 	// Prepare launch parameters

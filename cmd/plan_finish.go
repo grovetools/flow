@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,6 +38,163 @@ type cleanupItem struct {
 	Status      string
 	IsAvailable bool
 	IsEnabled   bool
+}
+
+// discoverLocalWorkspaces uses grove ws list to find local repository paths
+func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
+	// Check for test environment override first (same as in worktree_setup.go)
+	if mockData := os.Getenv("GROVE_TEST_WORKSPACES"); mockData != "" {
+		var workspaces []orchestration.WorkspaceInfo
+		if err := json.Unmarshal([]byte(mockData), &workspaces); err != nil {
+			return make(map[string]string), nil
+		}
+		
+		result := make(map[string]string)
+		for _, ws := range workspaces {
+			for _, wt := range ws.Worktrees {
+				if wt.IsMain {
+					result[ws.Name] = wt.Path
+					break
+				}
+			}
+		}
+		return result, nil
+	}
+	
+	cmd := exec.CommandContext(ctx, "grove", "ws", "list", "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// If grove ws list fails, return empty map (fallback to standard submodule behavior)
+		return make(map[string]string), nil
+	}
+
+	var workspaces []orchestration.WorkspaceInfo
+	if err := json.Unmarshal(output, &workspaces); err != nil {
+		return nil, fmt.Errorf("failed to parse grove ws list output: %w", err)
+	}
+
+	// Build a map from workspace name to main worktree path
+	result := make(map[string]string)
+	for _, ws := range workspaces {
+		for _, wt := range ws.Worktrees {
+			if wt.IsMain {
+				result[ws.Name] = wt.Path
+				break
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// parseGitmodules reads and parses the .gitmodules file
+func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
+	file, err := os.Open(gitmodulesPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	submodules := make(map[string]string)
+	var currentName string
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "[submodule") {
+			// Extract submodule name from [submodule "name"]
+			start := strings.Index(line, "\"")
+			end := strings.LastIndex(line, "\"")
+			if start != -1 && end != -1 && start < end {
+				currentName = line[start+1 : end]
+			}
+		} else if strings.HasPrefix(line, "path =") && currentName != "" {
+			// Extract path
+			path := strings.TrimSpace(strings.TrimPrefix(line, "path ="))
+			submodules[currentName] = path
+		}
+	}
+
+	return submodules, scanner.Err()
+}
+
+// removeLinkedSubmoduleWorktrees removes linked worktrees from submodule source repositories
+func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string) error {
+	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	gitmodulesPath := filepath.Join(worktreePath, ".gitmodules")
+	
+	// Check if .gitmodules exists
+	if _, err := os.Stat(gitmodulesPath); os.IsNotExist(err) {
+		// No submodules to clean up
+		return nil
+	}
+	
+	// Parse .gitmodules
+	submodulePaths, err := parseGitmodules(gitmodulesPath)
+	if err != nil {
+		return fmt.Errorf("failed to parse .gitmodules: %w", err)
+	}
+	
+	// Discover local workspaces
+	localWorkspaces, err := discoverLocalWorkspaces(ctx)
+	if err != nil {
+		// If we can't discover workspaces, we can't clean up linked worktrees
+		// but this shouldn't fail the entire cleanup
+		return nil
+	}
+	
+	// For each submodule, check if it's a linked worktree and remove it
+	for submoduleName, submodulePath := range submodulePaths {
+		// Path to the submodule worktree inside the superproject worktree
+		submoduleWorktreePath := filepath.Join(worktreePath, submodulePath)
+		
+		// First, try to remove from main checkout's submodule
+		mainSubmodulePath := filepath.Join(gitRoot, submodulePath)
+		if _, err := os.Stat(filepath.Join(mainSubmodulePath, ".git")); err == nil {
+			// Check if this is a worktree of the main submodule
+			cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
+			cmd.Dir = mainSubmodulePath
+			output, err := cmd.Output()
+			if err == nil && strings.Contains(string(output), submoduleWorktreePath) {
+				// This is a linked worktree of the main submodule, remove it
+				fmt.Printf("    Removing linked worktree for %s\n", submoduleName)
+				removeCmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", submoduleWorktreePath)
+				removeCmd.Dir = mainSubmodulePath
+				if err := removeCmd.Run(); err != nil {
+					fmt.Printf("      Warning: failed to remove worktree from main checkout: %v\n", err)
+				} else {
+					continue // Successfully removed, skip to next submodule
+				}
+			}
+		}
+		
+		// Fallback: try to remove from local workspace if it exists
+		localRepoPath, hasLocal := localWorkspaces[submoduleName]
+		if !hasLocal {
+			continue // Not a linked worktree
+		}
+		
+		// Check if this is actually a worktree of the local repo
+		cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain")
+		cmd.Dir = localRepoPath
+		output, err := cmd.Output()
+		if err != nil {
+			continue // Can't verify, skip
+		}
+		
+		// Look for this worktree in the output
+		if strings.Contains(string(output), submoduleWorktreePath) {
+			// This is a linked worktree, remove it
+			fmt.Printf("    Removing linked worktree for %s\n", submoduleName)
+			removeCmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", submoduleWorktreePath)
+			removeCmd.Dir = localRepoPath
+			if err := removeCmd.Run(); err != nil {
+				fmt.Printf("      Warning: failed to remove worktree: %v\n", err)
+			}
+		}
+	}
+	
+	return nil
 }
 
 // NewPlanFinishCmd creates the `plan finish` command.
@@ -172,17 +331,149 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			},
 			Action: func() error {
 				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-				// Check if we need to use --force
-				if planFinishForce {
-					return executor.Execute("git", "worktree", "remove", "--force", worktreePath)
+				
+				// Check if worktree has submodules
+				hasSubmodules := false
+				if _, err := os.Stat(filepath.Join(worktreePath, ".gitmodules")); err == nil {
+					hasSubmodules = true
 				}
-				// Try regular removal first
-				err := executor.Execute("git", "worktree", "remove", worktreePath)
-				if err != nil && strings.Contains(err.Error(), "contains modified or untracked files") {
+				
+				// First, remove any linked submodule worktrees
+				if hasSubmodules {
+					if err := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName); err != nil {
+						fmt.Printf("    Warning: failed to remove linked submodule worktrees: %v\n", err)
+					}
+				}
+				
+				// Now remove the main worktree
+				// Check if we need to use --force
+				removeCmd := "git"
+				removeArgs := []string{"worktree", "remove"}
+				if planFinishForce {
+					removeArgs = append(removeArgs, "--force")
+				}
+				removeArgs = append(removeArgs, worktreePath)
+				
+				// Try removal
+				err := executor.Execute(removeCmd, removeArgs...)
+				
+				// Handle known Git limitation with submodules
+				if err != nil && hasSubmodules && strings.Contains(err.Error(), "working trees containing submodules") {
+					// Git won't remove it, but we can do it safely ourselves
+					fmt.Printf("    Note: Git won't remove worktrees with submodules, removing manually...\n")
+					
+					// First, make sure we're not deleting something important
+					// Check if there are uncommitted changes (but ignore submodule status)
+					statusCmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain", "--ignore-submodules")
+					if statusOutput, statusErr := statusCmd.Output(); statusErr == nil {
+						if strings.TrimSpace(string(statusOutput)) != "" && !planFinishForce {
+							fmt.Printf("    Warning: Worktree has uncommitted changes. Use --force to remove anyway.\n")
+							return fmt.Errorf("worktree has uncommitted changes")
+						}
+					}
+					
+					// Remove the directory
+					if err := os.RemoveAll(worktreePath); err != nil {
+						fmt.Printf("    Error: Failed to remove worktree directory: %v\n", err)
+						return err
+					}
+					
+					// Clean up git's worktree metadata
+					pruneCmd := exec.Command("git", "-C", gitRoot, "worktree", "prune")
+					if err := pruneCmd.Run(); err != nil {
+						fmt.Printf("    Warning: Failed to prune worktree metadata: %v\n", err)
+					}
+					
+					fmt.Printf("    ✓ Worktree removed successfully\n")
+					return nil // Success
+				}
+				
+				// Handle other errors
+				if err != nil && !planFinishForce && strings.Contains(err.Error(), "contains modified or untracked files") {
 					fmt.Printf("    Retrying with --force due to modified files...\n")
 					return executor.Execute("git", "worktree", "remove", "--force", worktreePath)
 				}
+				
 				return err
+			},
+		},
+		{
+			Name: "Delete submodule branches",
+			Check: func() (string, error) {
+				if branchName == "" || gitRoot == "" {
+					return "N/A", nil
+				}
+				if _, err := os.Stat(filepath.Join(gitRoot, ".gitmodules")); os.IsNotExist(err) {
+					return "N/A (no submodules)", nil
+				}
+				// A simple check is sufficient; the action will handle non-existent branches.
+				return color.YellowString("Available"), nil
+			},
+			Action: func() error {
+				// First try the standard approach for regular submodules
+				foreachCmd := fmt.Sprintf("git branch -D %s 2>/dev/null || true", branchName)
+				cmd := exec.Command("git", "-C", gitRoot, "submodule", "foreach", foreachCmd)
+				_ = cmd.Run() // Ignore errors as branches may not exist
+				
+				// Now handle linked worktree submodules
+				gitmodulesPath := filepath.Join(gitRoot, ".gitmodules")
+				if _, err := os.Stat(gitmodulesPath); err == nil {
+					// Parse .gitmodules
+					submodulePaths, _ := parseGitmodules(gitmodulesPath)
+					
+					// Discover local workspaces
+					localWorkspaces, _ := discoverLocalWorkspaces(context.Background())
+					
+					// Delete branches and worktrees from repositories
+					for submoduleName, submodulePath := range submodulePaths {
+						worktreePath := filepath.Join(gitRoot, ".grove-worktrees", branchName, submodulePath)
+						
+						// First try to remove worktree from main checkout's submodule
+						mainSubmodulePath := filepath.Join(gitRoot, submodulePath)
+						if _, err := os.Stat(filepath.Join(mainSubmodulePath, ".git")); err == nil {
+							// Remove the linked worktree from main checkout's submodule
+							removeWorktreeCmd := exec.Command("git", "-C", mainSubmodulePath, "worktree", "remove", "--force", worktreePath)
+							if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
+								// Ignore errors - worktree might not exist or already be removed
+								if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
+									fmt.Printf("    Note: could not remove worktree for %s from main checkout: %s\n", submoduleName, string(output))
+								}
+							}
+							
+							// Delete the branch from the main checkout's submodule
+							deleteCmd := exec.Command("git", "-C", mainSubmodulePath, "branch", "-D", branchName)
+							if output, err := deleteCmd.CombinedOutput(); err != nil {
+								// Only report if it's not a "branch not found" error
+								if !strings.Contains(string(output), "not found") {
+									fmt.Printf("    Note: could not delete branch '%s' from %s main checkout: %v\n", branchName, submoduleName, err)
+								}
+							}
+						}
+						
+						// Also try to clean up from local workspace if it exists
+						if localRepoPath, hasLocal := localWorkspaces[submoduleName]; hasLocal {
+							// Remove the linked worktree if it exists
+							removeWorktreeCmd := exec.Command("git", "-C", localRepoPath, "worktree", "remove", "--force", worktreePath)
+							if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
+								// Ignore errors - worktree might not exist or already be removed
+								if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
+									fmt.Printf("    Note: could not remove worktree for %s from local workspace: %s\n", submoduleName, string(output))
+								}
+							}
+							
+							// Delete the branch from the local workspace repository
+							deleteCmd := exec.Command("git", "-C", localRepoPath, "branch", "-D", branchName)
+							if output, err := deleteCmd.CombinedOutput(); err != nil {
+								// Only report if it's not a "branch not found" error
+								if !strings.Contains(string(output), "not found") {
+									fmt.Printf("    Warning: failed to delete branch '%s' from %s local workspace: %v\n", branchName, submoduleName, err)
+								}
+							}
+						}
+					}
+				}
+				
+				return nil
 			},
 		},
 		{
@@ -238,12 +529,13 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				err := executor.Execute("git", "-C", gitRoot, "branch", "-d", branchName)
 				if err != nil {
 					if strings.Contains(err.Error(), "checked out at") {
-						// Branch is checked out in a worktree, use force delete
-						fmt.Printf("    Retrying with -D (force) due to checked out branch...\n")
+						// Branch is checked out in a worktree - just force delete it
+						// By this point, the worktree should have been removed already
+						fmt.Printf("    Using -D (force) to delete branch that was in worktree...\n")
 						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
 					} else if strings.Contains(err.Error(), "not fully merged") {
 						// Branch has unmerged commits, use force delete
-						fmt.Printf("    Retrying with -D (force) due to unmerged commits...\n")
+						fmt.Printf("    Using -D (force) due to unmerged commits...\n")
 						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
 					}
 				}
@@ -467,11 +759,12 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		// Always enable marking as finished
 		items[0].IsEnabled = items[0].IsAvailable                                          // Mark plan as finished
 		items[1].IsEnabled = planFinishPruneWorktree && items[1].IsAvailable              // Prune git worktree
-		items[2].IsEnabled = planFinishDeleteBranch && items[2].IsAvailable               // Delete local git branch
-		items[3].IsEnabled = planFinishDeleteRemote && items[3].IsAvailable               // Delete remote git branch
-		items[4].IsEnabled = planFinishCloseSession && items[4].IsAvailable               // Close tmux session
-		items[5].IsEnabled = planFinishCleanDevLinks && items[5].IsAvailable              // Clean up dev binaries
-		items[6].IsEnabled = planFinishArchive && items[6].IsAvailable                    // Archive plan directory
+		items[2].IsEnabled = planFinishDeleteBranch && items[2].IsAvailable               // Delete submodule branches
+		items[3].IsEnabled = planFinishDeleteBranch && items[3].IsAvailable               // Delete local git branch
+		items[4].IsEnabled = planFinishDeleteRemote && items[4].IsAvailable               // Delete remote git branch
+		items[5].IsEnabled = planFinishCloseSession && items[5].IsAvailable               // Close tmux session
+		items[6].IsEnabled = planFinishCleanDevLinks && items[6].IsAvailable              // Clean up dev binaries
+		items[7].IsEnabled = planFinishArchive && items[7].IsAvailable                    // Archive plan directory
 	} else {
 		// Interactive TUI mode
 		err := runFinishTUI(planName, items, branchIsMerged)

@@ -33,37 +33,10 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 
-	// Get current working directory
-	currentDir, err := os.Getwd()
+	// Prepare the worktree using the centralized helper
+	worktreePath, err := orchestration.PrepareWorktree(ctx, gitRoot, worktreeName, plan.Name)
 	if err != nil {
-		currentDir = ""
-	}
-
-	// Check if we're already in the worktree
-	var worktreePath string
-	expectedWorktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-	if currentDir != "" && strings.HasPrefix(currentDir, expectedWorktreePath) {
-		// We're already in the worktree
-		worktreePath = expectedWorktreePath
-	} else {
-		// Prepare the worktree
-		wm := git.NewWorktreeManager()
-		worktreePath, err = wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "")
-		if err != nil {
-			// Check if it's because the worktree already exists
-			if strings.Contains(err.Error(), "already checked out") {
-				// Worktree exists, just use it
-				worktreePath = expectedWorktreePath
-			} else {
-				return fmt.Errorf("failed to prepare worktree: %w", err)
-			}
-		} else {
-			// Set up Go workspace if this is a Go project
-			if err := orchestration.SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
-				// Log a warning but don't fail the worktree creation
-				fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
-			}
-		}
+		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
 
 	// Session name is derived from the worktree name

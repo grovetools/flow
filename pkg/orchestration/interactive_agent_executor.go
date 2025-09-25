@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 )
@@ -168,62 +167,14 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	if job.Worktree != "" {
-		// Check if we're already in the worktree
-		currentDir, _ := os.Getwd()
-		
-		// Check if current directory is already a worktree for this job
-		// This handles cases where gitRoot might be the worktree itself
-		if currentDir != "" && (strings.HasSuffix(currentDir, "/.grove-worktrees/"+job.Worktree) || 
-			strings.HasSuffix(gitRoot, "/.grove-worktrees/"+job.Worktree)) {
-			// We're already in the worktree
-			workDir = currentDir
-		} else {
-			// Need to find the actual git root (not a worktree)
-			// If gitRoot ends with .grove-worktrees/something, go up to find real root
-			realGitRoot := gitRoot
-			if idx := strings.Index(gitRoot, "/.grove-worktrees/"); idx != -1 {
-				realGitRoot = gitRoot[:idx]
-			}
-			
-			expectedWorktreePath := filepath.Join(realGitRoot, ".grove-worktrees", job.Worktree)
-			
-			// A worktree is specified, so create/use it on the host
-			wm := git.NewWorktreeManager()
-			worktreePath, err := wm.GetOrPrepareWorktree(ctx, realGitRoot, job.Worktree, "")
-			if err != nil {
-				// Check if it's because the worktree already exists
-				if strings.Contains(err.Error(), "already checked out") || strings.Contains(err.Error(), "already exists") {
-					// Worktree exists, just use it
-					workDir = expectedWorktreePath
-					
-				} else {
-					job.Status = JobStatusFailed
-					job.EndTime = time.Now()
-					return fmt.Errorf("failed to prepare host worktree: %w", err)
-				}
-			} else {
-				workDir = worktreePath
-				
-				// Set up Go workspace if this is a Go project
-				if err := SetupGoWorkspaceForWorktree(workDir, realGitRoot); err != nil {
-					// Log a warning but don't fail the job, as this is a convenience feature
-					fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
-				}
-			}
+		// A worktree is specified, so prepare it using the centralized helper.
+		worktreePath, err := PrepareWorktree(ctx, gitRoot, job.Worktree, plan.Name)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to prepare host worktree: %w", err)
 		}
-
-		// Automatically initialize state within the new worktree for a better UX.
-		groveDir := filepath.Join(workDir, ".grove")
-		if err := os.MkdirAll(groveDir, 0755); err != nil {
-			// Log a warning but don't fail the job, as this is a convenience feature.
-			fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
-		} else {
-			planName := filepath.Base(plan.Directory)
-			stateContent := fmt.Sprintf("active_plan: %s\n", planName)
-			statePath := filepath.Join(groveDir, "state.yml")
-			// This is a best-effort attempt; failure should not stop the job.
-			_ = os.WriteFile(statePath, []byte(stateContent), 0644)
-		}
+		workDir = worktreePath
 	} else {
 		// No worktree, use the main git repository root
 		workDir = gitRoot

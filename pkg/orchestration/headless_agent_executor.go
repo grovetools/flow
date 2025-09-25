@@ -11,7 +11,6 @@ import (
 
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/git"
 )
 
 // AgentRunner defines the interface for running agents.
@@ -21,10 +20,9 @@ type AgentRunner interface {
 
 // HeadlessAgentExecutor executes headless agent jobs in isolated git worktrees.
 type HeadlessAgentExecutor struct {
-	llmClient       LLMClient
-	config          *ExecutorConfig
-	worktreeManager *git.WorktreeManager
-	agentRunner     AgentRunner
+	llmClient   LLMClient
+	config      *ExecutorConfig
+	agentRunner AgentRunner
 }
 
 // defaultAgentRunner implements AgentRunner using grove agent subprocess.
@@ -44,10 +42,9 @@ func NewHeadlessAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *Head
 	}
 
 	return &HeadlessAgentExecutor{
-		llmClient:       llmClient,
-		config:          config,
-		worktreeManager: git.NewWorktreeManager(),
-		agentRunner:     &defaultAgentRunner{config: config},
+		llmClient:   llmClient,
+		config:      config,
+		agentRunner: &defaultAgentRunner{config: config},
 	}
 }
 
@@ -188,7 +185,6 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-
 	// Get git root for worktree creation
 	gitRoot, err := GetGitRootSafe(plan.Directory)
 	if err != nil {
@@ -196,34 +192,8 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		gitRoot = plan.Directory
 	}
 
-	// Use the shared method to get or prepare the worktree at the git root
-	worktreePath, err := e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "")
-	if err != nil {
-		return "", err
-	}
-
-	// Set up Go workspace if this is a Go project
-	if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
-		// Log a warning but don't fail the job, as this is a convenience feature
-		fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
-	}
-
-	// Automatically initialize state within the new worktree for a better UX.
-	groveDir := filepath.Join(worktreePath, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
-		// Log a warning but don't fail the job, as this is a convenience feature.
-		fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
-	} else {
-		// For the active_plan value, store just the plan name (not the full path)
-		// This allows 'flow plan status' to work correctly from within the worktree
-		planName := filepath.Base(plan.Directory)
-		stateContent := fmt.Sprintf("active_plan: %s\n", planName)
-		statePath := filepath.Join(groveDir, "state.yml")
-		// This is a best-effort attempt; failure should not stop the job.
-		_ = os.WriteFile(statePath, []byte(stateContent), 0644)
-	}
-
-	return worktreePath, nil
+	// Use the new centralized worktree preparation function.
+	return PrepareWorktree(ctx, gitRoot, job.Worktree, plan.Name)
 }
 
 // runAgentInWorktree executes the agent in the worktree context.

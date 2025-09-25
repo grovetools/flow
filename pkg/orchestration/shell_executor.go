@@ -5,23 +5,16 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
-
-	"github.com/mattsolo1/grove-core/git"
 )
 
 // ShellExecutor executes shell commands as orchestration jobs.
 type ShellExecutor struct {
-	worktreeManager *git.WorktreeManager
 }
 
 // NewShellExecutor creates a new shell executor.
 func NewShellExecutor() *ShellExecutor {
-	return &ShellExecutor{
-		worktreeManager: git.NewWorktreeManager(),
-	}
+	return &ShellExecutor{}
 }
 
 // Name returns the executor name.
@@ -133,54 +126,13 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-
-	// Get git root for worktree creation
 	gitRoot, err := GetGitRootSafe(plan.Directory)
 	if err != nil {
 		// Fallback to plan directory if not in a git repo
 		gitRoot = plan.Directory
 	}
 
-	// Check if we're already in the worktree
-	currentDir, _ := os.Getwd()
-	if currentDir != "" && (strings.HasSuffix(currentDir, "/.grove-worktrees/"+job.Worktree) || 
-		strings.HasSuffix(gitRoot, "/.grove-worktrees/"+job.Worktree)) {
-		// We're already in the worktree
-		return currentDir, nil
-	}
-
-	// Need to find the actual git root (not a worktree)
-	// If gitRoot ends with .grove-worktrees/something, go up to find real root
-	realGitRoot := gitRoot
-	if idx := strings.Index(gitRoot, "/.grove-worktrees/"); idx != -1 {
-		realGitRoot = gitRoot[:idx]
-	}
-
-	// Use the shared method to get or prepare the worktree at the git root
-	worktreePath, err := e.worktreeManager.GetOrPrepareWorktree(ctx, realGitRoot, job.Worktree, "")
-	if err != nil {
-		return "", err
-	}
-
-	// Set up Go workspace if this is a Go project
-	if err := SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
-		// Log a warning but don't fail the job, as this is a convenience feature
-		fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
-	}
-
-	// Automatically initialize state within the new worktree for a better UX.
-	groveDir := filepath.Join(worktreePath, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
-		// Log a warning but don't fail the job, as this is a convenience feature.
-		fmt.Printf("Warning: failed to create .grove directory in worktree: %v\n", err)
-	} else {
-		planName := filepath.Base(plan.Directory)
-		stateContent := fmt.Sprintf("active_plan: %s\n", planName)
-		statePath := filepath.Join(groveDir, "state.yml")
-		// This is a best-effort attempt; failure should not stop the job.
-		_ = os.WriteFile(statePath, []byte(stateContent), 0644)
-	}
-
-	return worktreePath, nil
+	// Use the new centralized worktree preparation function.
+	return PrepareWorktree(ctx, gitRoot, job.Worktree, plan.Name)
 }
 
