@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 )
 
 // Logger defines the logging interface.
@@ -473,23 +475,51 @@ func (o *Orchestrator) SetLogger(logger Logger) {
 	o.logger = logger
 }
 
-// defaultLogger provides a simple logger implementation.
-type defaultLogger struct{}
+// defaultLogger provides a simple logger implementation using grove-core logging.
+type defaultLogger struct{
+	log *grovelogging.PrettyLogger
+}
 
 func NewDefaultLogger() Logger {
-	return &defaultLogger{}
+	return &defaultLogger{
+		log: grovelogging.NewPrettyLogger("grove-flow"),
+	}
 }
 
 func (l *defaultLogger) Info(msg string, keysAndValues ...interface{}) {
-	fmt.Printf("[INFO] %s %v\n", msg, keysAndValues)
+	if len(keysAndValues) > 0 {
+		fields := make(map[string]interface{})
+		for i := 0; i < len(keysAndValues); i += 2 {
+			if i+1 < len(keysAndValues) {
+				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
+			}
+		}
+		l.log.InfoPretty(msg, fields)
+	} else {
+		l.log.InfoPretty(msg)
+	}
 }
 
 func (l *defaultLogger) Error(msg string, keysAndValues ...interface{}) {
-	fmt.Printf("[ERROR] %s %v\n", msg, keysAndValues)
+	if len(keysAndValues) > 0 {
+		l.log.ErrorPretty(fmt.Sprintf("%s %v", msg, keysAndValues), nil)
+	} else {
+		l.log.ErrorPretty(msg, nil)
+	}
 }
 
 func (l *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {
-	fmt.Printf("[DEBUG] %s %v\n", msg, keysAndValues)
+	if len(keysAndValues) > 0 {
+		fields := make(map[string]interface{})
+		for i := 0; i < len(keysAndValues); i += 2 {
+			if i+1 < len(keysAndValues) {
+				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
+			}
+		}
+		l.log.Entry.WithFields(fields).Debug(msg)
+	} else {
+		l.log.Entry.Debug(msg)
+	}
 }
 
 // StateManager handles persistence of job states.

@@ -1478,11 +1478,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 
 	// Log memory usage before LLM call
-	fmt.Printf("[DEBUG] About to call LLM with:\n")
-	fmt.Printf("[DEBUG]   - Prompt length: %d bytes\n", len(fullPrompt))
-	fmt.Printf("[DEBUG]   - Context files: %d\n", len(llmOpts.ContextFiles))
+	log.Debug("About to call LLM")
+	log.WithField("prompt_length_bytes", len(fullPrompt)).Debug("Prompt length")
+	log.WithField("context_files_count", len(llmOpts.ContextFiles)).Debug("Context files")
 	for i, cf := range llmOpts.ContextFiles {
-		fmt.Printf("[DEBUG]   - Context file %d: %s\n", i+1, cf)
+		log.WithField("file", cf).Debug(fmt.Sprintf("Context file %d", i+1))
 	}
 
 	// Only run cx generate if we don't have a custom rules file
@@ -1490,7 +1490,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Running cx generate would overwrite it with the wrong rules
 	if job.RulesFile == "" {
 		// For jobs without custom rules, cx generate ensures we have the latest context
-		fmt.Printf("Running cx generate before submission...\n")
+		prettyLog.InfoPretty("Running cx generate before submission...")
 
 		// Try grove cx generate first (capture stderr to suppress error if fallback works)
 		var stderrBuf strings.Builder
@@ -1511,7 +1511,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 				if stderrBuf.Len() > 0 {
 					fmt.Fprintf(os.Stderr, "%s", stderrBuf.String())
 				}
-				fmt.Printf("Warning: failed to run cx generate: %v\n", err)
+				prettyLog.WarnPretty(fmt.Sprintf("Failed to run cx generate: %v", err))
 			}
 			// If cx generate succeeded, we don't show the grove cx error
 		}
@@ -1520,7 +1520,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 
 	// Call LLM based on model type
-	fmt.Printf("[DEBUG] Calling LLM with model: %s...\n", effectiveModel)
+	log.WithField("model", effectiveModel).Debug("Calling LLM")
 	var response string
 	var apiKey string
 	var geminiErr error
@@ -1554,12 +1554,12 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Use traditional llm command
 		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts)
 		if err != nil {
-			fmt.Printf("[DEBUG] LLM call failed with error: %v\n", err)
+			log.WithError(err).Debug("LLM call failed")
 			execErr = fmt.Errorf("LLM completion: %w", err)
 			return execErr
 		}
 	}
-	fmt.Printf("[DEBUG] LLM call succeeded, response length: %d bytes\n", len(response))
+	log.WithField("response_length_bytes", len(response)).Debug("LLM call succeeded")
 
 	// Generate a unique ID for this response
 	bytes := make([]byte, 3)
