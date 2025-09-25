@@ -33,8 +33,12 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 
-	// Prepare the worktree using the centralized helper
-	worktreePath, err := orchestration.PrepareWorktree(ctx, gitRoot, worktreeName, plan.Name)
+	// Prepare the worktree using the centralized helper, with repos filter if configured
+	var repos []string
+	if plan.Config != nil && len(plan.Config.Repos) > 0 {
+		repos = plan.Config.Repos
+	}
+	worktreePath, err := orchestration.PrepareWorktreeWithRepos(ctx, gitRoot, worktreeName, plan.Name, repos)
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}

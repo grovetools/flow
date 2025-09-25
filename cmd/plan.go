@@ -128,6 +128,7 @@ var (
 	planInitTUI            bool
 	planInitRecipeVars     []string
 	planInitRecipeCmd      string
+	planInitRepos          []string
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -173,6 +174,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature). When using --recipe-cmd, this can be omitted if the command provides only one recipe")
 	planInitCmd.Flags().StringArrayVar(&planInitRecipeVars, "recipe-vars", nil, "Variables to pass to recipe templates. Can be used multiple times or comma-delimited (e.g., --recipe-vars model=gpt-4 --recipe-vars rules_file=docs.rules OR --recipe-vars \"model=gpt-4,rules_file=docs.rules,output_dir=docs\")")
 	planInitCmd.Flags().StringVar(&planInitRecipeCmd, "recipe-cmd", "", "Command that outputs JSON recipe definitions (overrides grove.yml's get_recipe_cmd)")
+	planInitCmd.Flags().StringSliceVar(&planInitRepos, "repos", nil, "Specific repos to include in ecosystem worktree (e.g., --repos grove-core,grove-flow). If not specified, all submodules are included")
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 
 	// Run command flags
@@ -275,6 +277,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		Recipe:         planInitRecipe,
 		RecipeVars:     planInitRecipeVars,
 		RecipeCmd:      planInitRecipeCmd,
+		Repos:          planInitRepos,
 	}
 	result, err := executePlanInit(directCmd)
 	if err != nil {
@@ -352,4 +355,5 @@ type PlanInitCmd struct {
 	Recipe         string
 	RecipeVars     []string
 	RecipeCmd      string
+	Repos          []string // List of repos to include in ecosystem worktree
 }

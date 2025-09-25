@@ -116,15 +116,19 @@ func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
 // For local ecosystem submodules, it creates linked worktrees from their source repos.
 // For external submodules, it falls back to standard git submodule behavior.
 func SetupSubmodulesForWorktree(ctx context.Context, worktreePath, branchName string) error {
+	return SetupSubmodulesForWorktreeWithRepos(ctx, worktreePath, branchName, nil)
+}
+
+// SetupSubmodulesForWorktreeWithRepos is like SetupSubmodulesForWorktree but allows filtering which repos to include.
+// If repos is nil or empty, all submodules are included.
+func SetupSubmodulesForWorktreeWithRepos(ctx context.Context, worktreePath, branchName string, repos []string) error {
 	// First, ensure all tracked files are checked out in the worktree
-	// Sometimes worktrees might not have all files checked out initially
 	cmdCheckout := exec.CommandContext(ctx, "git", "checkout", "HEAD", "--", ".")
 	cmdCheckout.Dir = worktreePath
 	if output, err := cmdCheckout.CombinedOutput(); err != nil {
 		fmt.Printf("Warning: could not ensure all files checked out in worktree: %s\n", string(output))
 	}
-	
-	// Check if .gitmodules exists in the worktree, if not, there's nothing to do.
+
 	gitmodulesPath := filepath.Join(worktreePath, ".gitmodules")
 	if _, err := os.Stat(gitmodulesPath); os.IsNotExist(err) {
 		fmt.Printf("No .gitmodules found at %s, skipping submodule setup\n", gitmodulesPath)
@@ -133,60 +137,83 @@ func SetupSubmodulesForWorktree(ctx context.Context, worktreePath, branchName st
 
 	fmt.Printf("✓ Initializing submodules in worktree at %s...\n", worktreePath)
 
-	// Parse .gitmodules to get submodule names and paths
 	submodulePaths, err := parseGitmodules(gitmodulesPath)
 	if err != nil {
-		fmt.Printf("Warning: could not parse .gitmodules: %v\n", err)
-		// Fall back to standard submodule behavior
+		fmt.Printf("Warning: could not parse .gitmodules: %v. Falling back to standard init.\n", err)
 		return setupSubmodulesStandard(ctx, worktreePath, branchName)
 	}
 
-	// Discover local workspaces
 	localWorkspaces, err := discoverLocalWorkspaces(ctx)
 	if err != nil {
-		fmt.Printf("Warning: failed to discover local workspaces: %v\n", err)
-		// Fall back to standard submodule behavior
+		fmt.Printf("Warning: failed to discover local workspaces: %v. Falling back to standard init.\n", err)
 		return setupSubmodulesStandard(ctx, worktreePath, branchName)
 	}
 
-	// First, run standard submodule update to ensure all submodules are initialized
-	// This is important for external dependencies
-	cmdUpdate := exec.CommandContext(ctx, "git", "submodule", "update", "--init", "--recursive")
-	cmdUpdate.Dir = worktreePath
-	if output, err := cmdUpdate.CombinedOutput(); err != nil {
-		return fmt.Errorf("git submodule update failed: %w\n%s", err, string(output))
+	// Create a filter map if repos is specified
+	repoFilter := make(map[string]bool)
+	if len(repos) > 0 {
+		for _, repo := range repos {
+			repoFilter[repo] = true
+		}
 	}
-
+	
 	// Derive gitRoot from worktreePath (parent of .grove-worktrees)
 	gitRoot := filepath.Dir(filepath.Dir(worktreePath))
 	
-	// Now process each submodule to potentially replace with linked worktrees
+	var externalSubmodules []string
+
+	// Process each submodule, creating linked worktrees for local ones
 	for submoduleName, submodulePath := range submodulePaths {
+		// Skip if repos filter is specified and this repo is not in the list
+		if len(repoFilter) > 0 && !repoFilter[submoduleName] {
+			fmt.Printf("  • %s: skipping (not in repos filter)\n", submoduleName)
+			continue
+		}
+		targetPath := filepath.Join(worktreePath, submodulePath)
+		
 		// First check if we can create a linked worktree from the main checkout's submodule
 		mainSubmodulePath := filepath.Join(gitRoot, submodulePath)
+		
+		// Try to initialize the submodule in the main checkout if it's not already
+		if _, err := os.Stat(mainSubmodulePath); err == nil {
+			// Directory exists, check if it's initialized
+			if _, err := os.Stat(filepath.Join(mainSubmodulePath, ".git")); err != nil {
+				// Submodule directory exists but not initialized, try to initialize it
+				cmdInit := exec.CommandContext(ctx, "git", "submodule", "update", "--init", "--", submodulePath)
+				cmdInit.Dir = gitRoot
+				if _, err := cmdInit.CombinedOutput(); err != nil {
+					fmt.Printf("    Note: could not initialize submodule %s in main checkout: %v\n", submoduleName, err)
+				}
+			}
+		}
 		
 		// Check if the main submodule exists and is a git repository
 		if _, err := os.Stat(filepath.Join(mainSubmodulePath, ".git")); err == nil {
 			// We can create a linked worktree from the main checkout's submodule
-			targetPath := filepath.Join(worktreePath, submodulePath)
 			fmt.Printf("  • %s: creating linked worktree from main checkout at %s\n", submoduleName, mainSubmodulePath)
 
-			// Remove the directory created by submodule update
-			if err := os.RemoveAll(targetPath); err != nil {
-				fmt.Printf("    Warning: could not remove submodule directory: %v\n", err)
+			// Ensure the parent directory exists
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+				fmt.Printf("    Warning: could not create parent directory for submodule: %v\n", err)
 				continue
 			}
 
-			// Create a linked worktree from the main submodule checkout
-			cmdWorktree := exec.CommandContext(ctx, "git", "worktree", "add", "-B", branchName, targetPath)
-			cmdWorktree.Dir = mainSubmodulePath
-			if output, err := cmdWorktree.CombinedOutput(); err != nil {
-				fmt.Printf("    Warning: failed to create linked worktree from main checkout: %v\n%s\n", err, string(output))
-				// Try to restore with standard submodule update for this one
-				cmdRestore := exec.CommandContext(ctx, "git", "submodule", "update", "--init", submodulePath)
-				cmdRestore.Dir = worktreePath
-				if restoreErr := cmdRestore.Run(); restoreErr != nil {
-					fmt.Printf("    Error: could not restore submodule: %v\n", restoreErr)
+			// Check if the worktree already exists and has content
+			if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+				fmt.Printf("    Linked worktree already exists at %s, skipping creation\n", targetPath)
+			} else {
+				// Remove any existing directory to make room for the worktree
+				if err := os.RemoveAll(targetPath); err != nil {
+					fmt.Printf("    Warning: could not remove submodule directory: %v\n", err)
+					continue
+				}
+
+				// Create a linked worktree from the main submodule checkout
+				cmdWorktree := exec.CommandContext(ctx, "git", "worktree", "add", targetPath, "-B", branchName)
+				cmdWorktree.Dir = mainSubmodulePath
+				if output, err := cmdWorktree.CombinedOutput(); err != nil {
+					fmt.Printf("    Warning: failed to create linked worktree from main checkout: %v\n%s\n", err, string(output))
+					// Don't try to restore with standard submodule update, will handle below
 				}
 			}
 			continue
@@ -194,45 +221,59 @@ func SetupSubmodulesForWorktree(ctx context.Context, worktreePath, branchName st
 		
 		// Fallback: Check if we have this submodule locally via grove ws list
 		localRepoPath, hasLocal := localWorkspaces[submoduleName]
-		if !hasLocal {
-			// No local version, keep the standard submodule clone
-			fmt.Printf("  • %s: using standard submodule (no local workspace found)\n", submoduleName)
-			continue
-		}
+		if hasLocal {
+			// We have a local version - replace the submodule with a linked worktree
+			fmt.Printf("  • %s: creating linked worktree from local workspace at %s\n", submoduleName, localRepoPath)
 
-		// We have a local version - replace the submodule with a linked worktree
-		targetPath := filepath.Join(worktreePath, submodulePath)
-		fmt.Printf("  • %s: creating linked worktree from local workspace at %s\n", submoduleName, localRepoPath)
-
-		// Remove the directory created by submodule update
-		if err := os.RemoveAll(targetPath); err != nil {
-			fmt.Printf("    Warning: could not remove submodule directory: %v\n", err)
-			continue
-		}
-
-		// Create a linked worktree from the local repository
-		cmdWorktree := exec.CommandContext(ctx, "git", "worktree", "add", "-B", branchName, targetPath)
-		cmdWorktree.Dir = localRepoPath
-		if output, err := cmdWorktree.CombinedOutput(); err != nil {
-			fmt.Printf("    Warning: failed to create linked worktree: %v\n%s\n", err, string(output))
-			// Try to restore with standard submodule update for this one
-			cmdRestore := exec.CommandContext(ctx, "git", "submodule", "update", "--init", submodulePath)
-			cmdRestore.Dir = worktreePath
-			if restoreErr := cmdRestore.Run(); restoreErr != nil {
-				fmt.Printf("    Error: could not restore submodule: %v\n", restoreErr)
+			// Ensure the parent directory exists
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+				fmt.Printf("    Warning: could not create parent directory for submodule: %v\n", err)
+				continue
 			}
+
+			// Check if the worktree already exists and has content
+			if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+				fmt.Printf("    Linked worktree already exists at %s, skipping creation\n", targetPath)
+			} else {
+				// Remove any existing directory to make room for the worktree
+				if err := os.RemoveAll(targetPath); err != nil {
+					fmt.Printf("    Warning: could not remove existing submodule directory: %v\n", err)
+					continue
+				}
+
+				cmdWorktree := exec.CommandContext(ctx, "git", "worktree", "add", targetPath, "-B", branchName)
+				cmdWorktree.Dir = localRepoPath
+				if output, err := cmdWorktree.CombinedOutput(); err != nil {
+					fmt.Printf("    Warning: failed to create linked worktree for %s: %v\n%s\n", submoduleName, err, string(output))
+				}
+			}
+		} else {
+			// No local version, queue for standard submodule initialization
+			fmt.Printf("  • %s: queuing for standard submodule initialization (external dependency)\n", submoduleName)
+			externalSubmodules = append(externalSubmodules, submodulePath)
 		}
 	}
 
-	// For any remaining submodules that weren't replaced (external deps),
-	// switch them to the parallel branch
-	// First try to create the branch, then switch to it if it exists
-	foreachCmd := fmt.Sprintf("git checkout -b %s 2>/dev/null || git checkout %s", branchName, branchName)
-	cmdForeach := exec.CommandContext(ctx, "git", "submodule", "foreach", "--recursive", foreachCmd)
-	cmdForeach.Dir = worktreePath
-	if output, err := cmdForeach.CombinedOutput(); err != nil {
-		// Log the output for debugging
-		fmt.Printf("  Note: submodule branch switching output:\n%s\n", string(output))
+	// Only run git submodule update for external dependencies
+	if len(externalSubmodules) > 0 {
+		fmt.Printf("✓ Initializing %d external submodule(s)...\n", len(externalSubmodules))
+		for _, submodulePath := range externalSubmodules {
+			cmdUpdate := exec.CommandContext(ctx, "git", "submodule", "update", "--init", "--recursive", "--", submodulePath)
+			cmdUpdate.Dir = worktreePath
+			if output, err := cmdUpdate.CombinedOutput(); err != nil {
+				fmt.Printf("    Warning: could not initialize external submodule %s: %v\n%s\n", submodulePath, err, string(output))
+				// Continue with other submodules even if one fails
+			}
+		}
+
+		// Switch external submodules to the parallel branch
+		for _, submodulePath := range externalSubmodules {
+			foreachCmd := fmt.Sprintf("git checkout -b %s 2>/dev/null || git checkout %s", branchName, branchName)
+			cmdForeach := exec.CommandContext(ctx, "git", "-C", filepath.Join(worktreePath, submodulePath), "submodule", "foreach", "--recursive", foreachCmd)
+			if output, err := cmdForeach.CombinedOutput(); err != nil {
+				fmt.Printf("  Note: branch switching output for %s:\n%s\n", submodulePath, string(output))
+			}
+		}
 	}
 
 	fmt.Printf("✓ Submodules initialized with linked worktrees where possible.\n")
@@ -241,11 +282,12 @@ func SetupSubmodulesForWorktree(ctx context.Context, worktreePath, branchName st
 
 // setupSubmodulesStandard is the fallback standard submodule setup
 func setupSubmodulesStandard(ctx context.Context, worktreePath, branchName string) error {
-	// Run standard git submodule update
+	// Run standard git submodule update - but don't fail completely if some submodules can't be initialized
 	cmdUpdate := exec.CommandContext(ctx, "git", "submodule", "update", "--init", "--recursive")
 	cmdUpdate.Dir = worktreePath
 	if output, err := cmdUpdate.CombinedOutput(); err != nil {
-		return fmt.Errorf("git submodule update failed: %w\n%s", err, string(output))
+		// Log as warning but continue - some submodules might not have URLs in local ecosystems
+		fmt.Printf("⚠️  Warning: git submodule update had issues (this is often safe for local ecosystems):\n%s\n", string(output))
 	}
 
 	// Switch each submodule to a parallel branch
@@ -256,13 +298,25 @@ func setupSubmodulesStandard(ctx context.Context, worktreePath, branchName strin
 		fmt.Printf("⚠️  Warning during submodule branch switching (this is often safe):\n%s\n", string(output))
 	}
 
-	fmt.Printf("✓ Submodules initialized and switched to branch '%s' (standard mode).\n", branchName)
+	fmt.Printf("✓ Submodules initialized (standard mode).\n")
 	return nil
 }
 
 // PrepareWorktree is a centralized function to get or create a worktree and fully configure it.
 // It handles git worktree creation, submodule initialization, Go workspace setup, and state management.
 func PrepareWorktree(ctx context.Context, gitRoot, worktreeName, planName string) (string, error) {
+	return PrepareWorktreeWithRepos(ctx, gitRoot, worktreeName, planName, nil)
+}
+
+// PrepareWorktreeWithRepos is like PrepareWorktree but allows specifying which repos to include.
+// When repos are specified, it creates an "ecosystem worktree" with individual worktrees for each repo.
+func PrepareWorktreeWithRepos(ctx context.Context, gitRoot, worktreeName, planName string, repos []string) (string, error) {
+	// If repos are specified, create an ecosystem worktree structure
+	if len(repos) > 0 {
+		return PrepareEcosystemWorktree(ctx, gitRoot, worktreeName, planName, repos)
+	}
+
+	// Otherwise, use the traditional approach
 	wm := git.NewWorktreeManager()
 	worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, worktreeName, "")
 	if err != nil {
@@ -275,7 +329,7 @@ func PrepareWorktree(ctx context.Context, gitRoot, worktreeName, planName string
 	}
 
 	// NEW: Setup submodules with parallel branches.
-	if err := SetupSubmodulesForWorktree(ctx, worktreePath, worktreeName); err != nil {
+	if err := SetupSubmodulesForWorktreeWithRepos(ctx, worktreePath, worktreeName, repos); err != nil {
 		// Log as a warning since some submodule operations might not be critical to the main task.
 		fmt.Printf("Warning: failed to setup submodules for worktree '%s': %v\n", worktreeName, err)
 	}
@@ -294,4 +348,109 @@ func PrepareWorktree(ctx context.Context, gitRoot, worktreeName, planName string
 	}
 
 	return worktreePath, nil
+}
+
+// PrepareEcosystemWorktree creates a simplified ecosystem worktree structure.
+// Instead of creating a worktree of the superproject and dealing with submodules,
+// it creates individual worktrees for each specified repo directly from their source locations.
+func PrepareEcosystemWorktree(ctx context.Context, gitRoot, worktreeName, planName string, repos []string) (string, error) {
+	fmt.Printf("✓ Creating ecosystem worktree for repos: %v\n", repos)
+	
+	// Create the ecosystem directory structure
+	ecosystemDir := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	if err := os.MkdirAll(ecosystemDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create ecosystem directory: %w", err)
+	}
+
+	// Discover local workspace paths using grove ws list
+	localWorkspaces, err := discoverLocalWorkspaces(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to discover local workspaces: %w", err)
+	}
+
+	// For filtering display purposes, show what repos are being filtered out
+	// We'll use the local workspaces as the full set of available repos for filtering display
+	repoFilter := make(map[string]bool)
+	for _, repo := range repos {
+		repoFilter[repo] = true
+	}
+	
+	// Show filtering behavior for all available repos
+	for repoName := range localWorkspaces {
+		if !repoFilter[repoName] {
+			fmt.Printf("  • %s: skipping (not in repos filter)\n", repoName)
+		}
+	}
+
+	// Create individual worktrees for each specified repo
+	for _, repo := range repos {
+		repoPath, exists := localWorkspaces[repo]
+		if !exists {
+			fmt.Printf("Warning: repo '%s' not found in local workspaces, skipping\n", repo)
+			continue
+		}
+
+		targetPath := filepath.Join(ecosystemDir, repo)
+		fmt.Printf("  • %s: creating linked worktree\n", repo)
+
+		// Check if the worktree already exists
+		if _, err := os.Stat(filepath.Join(targetPath, ".git")); err == nil {
+			fmt.Printf("    Worktree already exists, skipping creation\n")
+			continue
+		}
+
+		// Remove any existing directory to make room for the worktree
+		if err := os.RemoveAll(targetPath); err != nil {
+			fmt.Printf("    Warning: could not remove existing directory: %v\n", err)
+			continue
+		}
+
+		// Create a linked worktree from the source repo
+		cmdWorktree := exec.CommandContext(ctx, "git", "worktree", "add", targetPath, "-B", worktreeName)
+		cmdWorktree.Dir = repoPath
+		if output, err := cmdWorktree.CombinedOutput(); err != nil {
+			fmt.Printf("    Warning: failed to create worktree for %s: %v\n%s\n", repo, err, string(output))
+			continue
+		}
+
+		fmt.Printf("    ✓ Created worktree on branch %s\n", worktreeName)
+	}
+
+	// Generate a go.work file in the ecosystem directory
+	if err := generateGoWorkspaceForEcosystem(ecosystemDir, repos); err != nil {
+		fmt.Printf("Warning: failed to generate go.work file: %v\n", err)
+	}
+
+	// Create state management for the ecosystem worktree
+	groveDir := filepath.Join(ecosystemDir, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err == nil {
+		stateContent := fmt.Sprintf("active_plan: %s\necosystem_repos: %v\n", planName, repos)
+		statePath := filepath.Join(ecosystemDir, ".grove", "state.yml")
+		_ = os.WriteFile(statePath, []byte(stateContent), 0644)
+	}
+
+	fmt.Printf("✓ Ecosystem worktree created at %s\n", ecosystemDir)
+	return ecosystemDir, nil
+}
+
+// generateGoWorkspaceForEcosystem creates a go.work file for the ecosystem worktree
+func generateGoWorkspaceForEcosystem(ecosystemDir string, repos []string) error {
+	var workspaceContent strings.Builder
+	workspaceContent.WriteString("go 1.21\n\n")
+	
+	for _, repo := range repos {
+		repoPath := filepath.Join(ecosystemDir, repo)
+		// Check if this repo has a go.mod file
+		if _, err := os.Stat(filepath.Join(repoPath, "go.mod")); err == nil {
+			workspaceContent.WriteString(fmt.Sprintf("use ./%s\n", repo))
+		}
+	}
+
+	workspacePath := filepath.Join(ecosystemDir, "go.work")
+	if err := os.WriteFile(workspacePath, []byte(workspaceContent.String()), 0644); err != nil {
+		return fmt.Errorf("failed to write go.work file: %w", err)
+	}
+
+	fmt.Printf("  ✓ Generated go.work file at %s\n", workspacePath)
+	return nil
 }

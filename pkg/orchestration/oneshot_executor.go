@@ -27,7 +27,7 @@ import (
 
 var (
 	log       = grovelogging.NewLogger("grove-flow")
-	prettyLog = grovelogging.NewPrettyLogger("grove-flow")
+	prettyLog = grovelogging.NewPrettyLogger()
 )
 
 // ExecutorConfig holds configuration for executors.

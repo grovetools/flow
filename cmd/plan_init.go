@@ -46,6 +46,7 @@ func RunPlanInitTUI(dir string) error {
 		Recipe:         planInitRecipe,
 		RecipeVars:     planInitRecipeVars,
 		RecipeCmd:      planInitRecipeCmd,
+		Repos:          planInitRepos,
 	}
 
 	finalCmd, err := runPlanInitTUI(plansDir, initialCmd)
@@ -113,7 +114,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.Repos); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -392,7 +393,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	finalWorktree := worktreeOverride
 	
 	// Create a default .grove-plan.yml, using the determined worktree
-	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container); err != nil {
+	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("✓ Created .grove-plan.yml")
@@ -487,7 +488,7 @@ func createPlanDirectory(dir string, force bool) error {
 }
 
 // createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
-func createDefaultPlanConfig(planPath, model, worktree, container string) error {
+func createDefaultPlanConfig(planPath, model, worktree, container string, repos []string) error {
 	var configContent strings.Builder
 
 	configContent.WriteString("# Default model for jobs in this plan\n")
@@ -511,6 +512,21 @@ func createDefaultPlanConfig(planPath, model, worktree, container string) error 
 		configContent.WriteString(fmt.Sprintf("target_agent_container: %s\n", container))
 	} else {
 		configContent.WriteString("# target_agent_container: grove-agent-ide\n")
+	}
+	configContent.WriteString("\n")
+
+	// Add repos configuration if specified
+	if len(repos) > 0 {
+		configContent.WriteString("# Specific repos to include in ecosystem worktree\n")
+		configContent.WriteString("repos:\n")
+		for _, repo := range repos {
+			configContent.WriteString(fmt.Sprintf("  - %s\n", repo))
+		}
+	} else {
+		configContent.WriteString("# Specific repos to include in ecosystem worktree (all if not specified)\n")
+		configContent.WriteString("# repos:\n")
+		configContent.WriteString("#   - grove-core\n")
+		configContent.WriteString("#   - grove-flow\n")
 	}
 
 	configPath := filepath.Join(planPath, ".grove-plan.yml")

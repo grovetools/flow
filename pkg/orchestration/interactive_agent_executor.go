@@ -167,8 +167,12 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	if job.Worktree != "" {
-		// A worktree is specified, so prepare it using the centralized helper.
-		worktreePath, err := PrepareWorktree(ctx, gitRoot, job.Worktree, plan.Name)
+		// A worktree is specified, so prepare it using the centralized helper with repos filter
+		var repos []string
+		if plan.Config != nil && len(plan.Config.Repos) > 0 {
+			repos = plan.Config.Repos
+		}
+		worktreePath, err := PrepareWorktreeWithRepos(ctx, gitRoot, job.Worktree, plan.Name, repos)
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()

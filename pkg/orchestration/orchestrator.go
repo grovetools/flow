@@ -482,7 +482,7 @@ type defaultLogger struct{
 
 func NewDefaultLogger() Logger {
 	return &defaultLogger{
-		log: grovelogging.NewPrettyLogger("grove-flow"),
+		log: grovelogging.NewPrettyLogger(),
 	}
 }
 
@@ -494,7 +494,7 @@ func (l *defaultLogger) Info(msg string, keysAndValues ...interface{}) {
 				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
 			}
 		}
-		l.log.InfoPretty(msg, fields)
+		l.log.InfoPretty(msg)
 	} else {
 		l.log.InfoPretty(msg)
 	}
@@ -509,17 +509,12 @@ func (l *defaultLogger) Error(msg string, keysAndValues ...interface{}) {
 }
 
 func (l *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {
+	// PrettyLogger doesn't have Debug, use InfoPretty for debug messages
+	debugMsg := fmt.Sprintf("[DEBUG] %s", msg)
 	if len(keysAndValues) > 0 {
-		fields := make(map[string]interface{})
-		for i := 0; i < len(keysAndValues); i += 2 {
-			if i+1 < len(keysAndValues) {
-				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
-			}
-		}
-		l.log.Entry.WithFields(fields).Debug(msg)
-	} else {
-		l.log.Entry.Debug(msg)
+		debugMsg = fmt.Sprintf("%s %v", debugMsg, keysAndValues)
 	}
+	l.log.InfoPretty(debugMsg)
 }
 
 // StateManager handles persistence of job states.

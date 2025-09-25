@@ -132,7 +132,11 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 		gitRoot = plan.Directory
 	}
 
-	// Use the new centralized worktree preparation function.
-	return PrepareWorktree(ctx, gitRoot, job.Worktree, plan.Name)
+	// Use the new centralized worktree preparation function with repos filter
+	var repos []string
+	if plan.Config != nil && len(plan.Config.Repos) > 0 {
+		repos = plan.Config.Repos
+	}
+	return PrepareWorktreeWithRepos(ctx, gitRoot, job.Worktree, plan.Name, repos)
 }
 

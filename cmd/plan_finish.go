@@ -332,6 +332,11 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			Action: func() error {
 				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 				
+				// Check if this is an ecosystem worktree (has repos configuration)
+				if plan.Config != nil && len(plan.Config.Repos) > 0 {
+					return cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos)
+				}
+				
 				// Check if worktree has submodules
 				hasSubmodules := false
 				if _, err := os.Stat(filepath.Join(worktreePath, ".gitmodules")); err == nil {
@@ -799,5 +804,66 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("\nPlan cleanup finished.")
+	return nil
+}
+
+// cleanupEcosystemWorktree removes an ecosystem worktree by cleaning up individual repo worktrees
+func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string) error {
+	ecosystemDir := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	fmt.Printf("    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
+	
+	// Discover local workspace paths
+	localWorkspaces, err := discoverLocalWorkspaces(ctx)
+	if err != nil {
+		fmt.Printf("    Warning: failed to discover local workspaces: %v\n", err)
+	}
+
+	// Remove individual repo worktrees and delete branches
+	for _, repo := range repos {
+		repoWorktreePath := filepath.Join(ecosystemDir, repo)
+		fmt.Printf("    • %s: removing worktree and branch\n", repo)
+		
+		// Find the source repository path
+		repoPath, exists := localWorkspaces[repo]
+		if !exists {
+			fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping branch cleanup\n", repo)
+			// Still try to remove the directory if it exists
+			if err := os.RemoveAll(repoWorktreePath); err != nil {
+				fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+			}
+			continue
+		}
+
+		// Remove the worktree from the source repository
+		removeWorktreeCmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", repoWorktreePath)
+		removeWorktreeCmd.Dir = repoPath
+		if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
+			// If worktree removal fails, try to remove the directory manually
+			if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
+				fmt.Printf("      Warning: git worktree remove failed, removing directory manually: %s\n", string(output))
+			}
+			if err := os.RemoveAll(repoWorktreePath); err != nil {
+				fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+			}
+		}
+
+		// Delete the branch from the source repository
+		deleteBranchCmd := exec.CommandContext(ctx, "git", "branch", "-D", worktreeName)
+		deleteBranchCmd.Dir = repoPath
+		if output, err := deleteBranchCmd.CombinedOutput(); err != nil {
+			if !strings.Contains(string(output), "not found") {
+				fmt.Printf("      Warning: failed to delete branch '%s' from %s: %s\n", worktreeName, repo, string(output))
+			}
+		} else {
+			fmt.Printf("      ✓ Deleted branch '%s'\n", worktreeName)
+		}
+	}
+
+	// Remove the entire ecosystem directory
+	if err := os.RemoveAll(ecosystemDir); err != nil {
+		return fmt.Errorf("failed to remove ecosystem directory: %w", err)
+	}
+
+	fmt.Printf("    ✓ Ecosystem worktree removed successfully\n")
 	return nil
 }
