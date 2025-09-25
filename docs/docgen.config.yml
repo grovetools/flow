@@ -1,28 +1,54 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/mattsolo1/grove-docgen/main/schema/docgen.config.schema.json
-category: Libraries
-description: A brief description of this library.
+title: Grove Flow
+description: LLM job orchestration in Markdown for complex development workflows.
+category: "Developer Tools"
 enabled: true
 sections:
   - name: introduction
     order: 1
-    output: introduction.md
+    output: 01-introduction.md
     prompt: prompts/introduction.md
     title: Introduction
   - name: core-concepts
     order: 2
-    output: core-concepts.md
+    output: 02-core-concepts.md
     prompt: prompts/core-concepts.md
     title: Core Concepts
-  - name: usage-patterns
+  - name: getting-started
     order: 3
-    output: usage-patterns.md
-    prompt: prompts/usage-patterns.md
-    title: Usage Patterns
-  - name: best-practices
+    output: 03-getting-started.md
+    prompt: prompts/getting-started.md
+    title: Getting Started
+  - name: managing-plans
     order: 4
-    output: best-practices.md
-    prompt: prompts/best-practices.md
-    title: Best Practices
+    output: 04-managing-plans.md
+    prompt: prompts/managing-plans.md
+    title: Managing Plans
+  - name: working-with-jobs
+    order: 5
+    output: 05-working-with-jobs.md
+    prompt: prompts/working-with-jobs.md
+    title: Working with Jobs
+  - name: chats
+    order: 6
+    output: 06-chats.md
+    prompt: prompts/chats.md
+    title: Conversational Workflows (Chats)
+  - name: recipes-and-templates
+    order: 7
+    output: 07-recipes-and-templates.md
+    prompt: prompts/recipes-and-templates.md
+    title: Recipes and Templates
+  - name: configuration
+    order: 8
+    output: 08-configuration.md
+    prompt: prompts/configuration.md
+    title: Configuration
+  - name: cli-reference
+    order: 9
+    output: 09-cli-reference.md
+    prompt: prompts/cli-reference.md
+    title: CLI Reference
 settings:
   model: gpt-5
   output_dir: docs
@@ -30,4 +56,3 @@ settings:
   rules_file: docs.rules
   structured_output_file: pkg/docs/docs.json
   system_prompt: default
-title: My Library
