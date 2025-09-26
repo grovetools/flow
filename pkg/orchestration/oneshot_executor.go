@@ -93,7 +93,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 			// Skip interactive prompts if configured to do so
 			if e.config.SkipInteractive {
-				log.WithField("job", job.Title).Info("Skipping interactive chat job (running automatically)")
+				log.WithFields(logrus.Fields{
+					"job_id": job.ID,
+					"job_title": job.Title,
+					"job_type": job.Type,
+					"skip_reason": "configured",
+				}).Info("Skipping interactive chat job")
 				prettyLog.InfoPretty(fmt.Sprintf("Skipping interactive chat job '%s' (running automatically)", job.Title))
 				return e.executeChatJob(ctx, job, plan)
 			}
@@ -151,9 +156,27 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Notify grove-hooks about job start
 	notifyJobStart(job, plan)
 
+	// Log job execution start
+	execStart := time.Now()
+	log.WithFields(logrus.Fields{
+		"job_id": job.ID,
+		"job_type": job.Type,
+		"job_title": job.Title,
+		"dependencies": job.DependsOn,
+		"model": job.Model,
+		"worktree": job.Worktree,
+		"plan_name": plan.Name,
+	}).Info("Starting job execution")
+
 	// Ensure we notify completion/failure when we exit
 	var execErr error
 	defer func() {
+		log.WithFields(logrus.Fields{
+			"job_id": job.ID,
+			"duration_ms": time.Since(execStart).Milliseconds(),
+			"status": job.Status,
+			"error": execErr,
+		}).Info("Job execution completed")
 		notifyJobComplete(job, execErr)
 	}()
 
@@ -185,7 +208,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			workDir = plan.Directory
-			log.WithField("workdir", workDir).Warn("Not a git repository, using plan directory as working directory")
+			log.WithFields(logrus.Fields{
+				"workdir": workDir,
+				"plan_dir": plan.Directory,
+				"fallback": true,
+			}).Warn("Not a git repository, using plan directory")
 			prettyLog.WarnPretty(fmt.Sprintf("Not a git repository. Using plan directory as working directory: %s", workDir))
 		}
 	}

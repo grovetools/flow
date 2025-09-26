@@ -58,12 +58,18 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		args = append(args, "--schema", opts.SchemaPath)
 	}
 	
-	// Log debug info
+	// Track LLM request start
+	requestStart := time.Now()
+	requestID := fmt.Sprintf("%s-%d", job.ID, requestStart.Unix())
 	c.log.WithFields(logrus.Fields{
+		"request_id":    requestID,
+		"job_id":        job.ID,
 		"model":         opts.Model,
 		"context_files": len(opts.ContextFiles),
+		"prompt_source_files": len(opts.PromptSourceFiles),
 		"prompt_length": len(prompt),
-	}).Debug("LLM call details")
+		"schema_path":   opts.SchemaPath,
+	}).Info("Starting LLM request")
 	
 	// Build full prompt with all file contents
 	// Note: This is for non-Gemini models that don't support file attachments
@@ -180,18 +186,30 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	if err := execCmd.Run(); err != nil {
 		duration := time.Since(startTime)
 		c.log.WithFields(logrus.Fields{
-			"duration": duration,
-			"error":    err,
-			"stderr":   stderr.String(),
-		}).Debug("LLM command failed")
+			"request_id":    requestID,
+			"duration_ms":   duration.Milliseconds(),
+			"error":         err.Error(),
+			"stderr":        stderr.String(),
+			"model":         opts.Model,
+		}).Error("LLM request failed")
 		return "", fmt.Errorf("llm command failed: %s: %w", stderr.String(), err)
 	}
 
 	duration := time.Since(startTime)
+	responseLength := stdout.Len()
+	
+	// Calculate approximate token count (rough estimate: 1 token ≈ 4 chars)
+	approxInputTokens := fullPrompt.Len() / 4
+	approxOutputTokens := responseLength / 4
+	
 	c.log.WithFields(logrus.Fields{
-		"duration":        duration,
-		"response_length": stdout.Len(),
-	}).Debug("LLM command succeeded")
+		"request_id":      requestID,
+		"duration_ms":     duration.Milliseconds(),
+		"response_length": responseLength,
+		"input_tokens_est": approxInputTokens,
+		"output_tokens_est": approxOutputTokens,
+		"model":          opts.Model,
+	}).Info("LLM request completed")
 	
 	return stdout.String(), nil
 }
