@@ -9,19 +9,25 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/config"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
+	"github.com/sirupsen/logrus"
 )
 
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
 type InteractiveAgentExecutor struct {
 	skipInteractive bool
+	log             *logrus.Entry
+	prettyLog       *grovelogging.PrettyLogger
 }
 
 // NewInteractiveAgentExecutor creates a new interactive agent executor.
 func NewInteractiveAgentExecutor(skipInteractive bool) *InteractiveAgentExecutor {
 	return &InteractiveAgentExecutor{
 		skipInteractive: skipInteractive,
+		log:             grovelogging.NewLogger("grove-flow"),
+		prettyLog:       grovelogging.NewPrettyLogger(),
 	}
 }
 
@@ -200,7 +206,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		// Check if session already exists
 		sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
 		if sessionExists {
-			fmt.Printf("✓ Session '%s' already exists.\n", sessionName)
+			e.log.WithField("session", sessionName).Info("Session already exists")
+			e.prettyLog.Success(fmt.Sprintf("Session '%s' already exists.", sessionName))
 			
 			// Build agent command
 			fullCfg, _ := config.LoadFrom(".")
@@ -216,27 +223,32 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			agentWindowName := tmux.SanitizeForTmuxSession(job.Title)
 			
 			// Create new window for the agent
-			fmt.Printf("Creating window '%s' for agent...\n", agentWindowName)
+			e.log.WithField("window", agentWindowName).Info("Creating window for agent")
+			e.prettyLog.InfoPretty(fmt.Sprintf("Creating window '%s' for agent...", agentWindowName))
 			if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
-				fmt.Printf("Warning: failed to create agent window: %v\n", err)
+				e.log.WithError(err).Warn("Failed to create agent window")
+				e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to create agent window: %v", err))
 			} else {
 				// Send the agent command to the new window
 				targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 				if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
-					fmt.Printf("Warning: failed to send agent command: %v\n", err)
+					e.log.WithError(err).Warn("Failed to send agent command")
+					e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to send agent command: %v", err))
 				}
 				
 				// Switch to the agent window
 				if os.Getenv("TMUX") != "" {
 					if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
-						fmt.Printf("Warning: failed to switch to agent window: %v\n", err)
+						e.log.WithError(err).Warn("Failed to switch to agent window")
+						e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to switch to agent window: %v", err))
 					}
 				}
 			}
 			
-			fmt.Printf("\n👉 Exit the tmux session when done to continue the plan.\n")
-			fmt.Printf("💡 To mark as complete without closing, run in another terminal:\n")
-			fmt.Printf("   flow plan complete %s\n", job.FilePath)
+			e.prettyLog.Blank()
+			e.prettyLog.InfoPretty("👉 Exit the tmux session when done to continue the plan.")
+			e.prettyLog.InfoPretty("💡 To mark as complete without closing, run in another terminal:")
+			e.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
 
 			// Wait for the existing session to close
 			err = tmuxClient.WaitForSessionClose(ctx, sessionName, 2*time.Second)
@@ -244,7 +256,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			// Handle interruption
 			if err != nil {
 				if ctx.Err() != nil {
-					fmt.Printf("\n⚠️  Interrupted. Session '%s' will continue running.\n", sessionName)
+					e.log.WithField("session", sessionName).Warn("Interrupted. Session will continue running")
+					e.prettyLog.WarnPretty(fmt.Sprintf("Interrupted. Session '%s' will continue running.", sessionName))
 					job.Status = JobStatusFailed
 					job.EndTime = time.Now()
 					return fmt.Errorf("interrupted by user")
@@ -259,13 +272,16 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 
 			switch status {
 			case "c":
-				fmt.Printf("✅ Session '%s' marked as completed. Continuing plan...\n", sessionName)
+				e.log.WithField("session", sessionName).Info("Session marked as completed")
+				e.prettyLog.Success(fmt.Sprintf("Session '%s' marked as completed. Continuing plan...", sessionName))
 				job.Status = JobStatusCompleted
 			case "f":
-				fmt.Printf("❌ Session '%s' marked as failed.\n", sessionName)
+				e.log.WithField("session", sessionName).Info("Session marked as failed")
+				e.prettyLog.ErrorPretty(fmt.Sprintf("Session '%s' marked as failed.", sessionName), nil)
 				job.Status = JobStatusFailed
 			case "q":
-				fmt.Printf("⏸️  Session '%s' closed with no status change.\n", sessionName)
+				e.log.WithField("session", sessionName).Info("Session closed with no status change")
+				e.prettyLog.InfoPretty(fmt.Sprintf("⏸️  Session '%s' closed with no status change.", sessionName))
 				// Keep current status (should still be Running)
 			}
 
@@ -295,7 +311,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			},
 		}
 
-		fmt.Printf("🚀 Launching interactive session '%s'...\n", sessionName)
+		e.log.WithField("session", sessionName).Info("Launching interactive session")
+		e.prettyLog.InfoPretty(fmt.Sprintf("🚀 Launching interactive session '%s'...", sessionName))
 		if err := tmuxClient.Launch(ctx, opts); err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -308,37 +325,44 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		
 		// Create new window for the agent
 		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
-			fmt.Printf("Warning: failed to create agent window: %v\n", err)
+			e.log.WithError(err).Warn("Failed to create agent window")
+			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to create agent window: %v", err))
 		} else {
 			// Send the agent command to the new window
 			targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 			if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
-				fmt.Printf("Warning: failed to send agent command: %v\n", err)
+				e.log.WithError(err).Warn("Failed to send agent command")
+				e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to send agent command: %v", err))
 			}
 			
 			// Switch to the agent window
 			if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
-				fmt.Printf("Warning: failed to switch to agent window: %v\n", err)
+				e.log.WithError(err).Warn("Failed to switch to agent window")
+				e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to switch to agent window: %v", err))
 			}
 		}
 
 		// Check if we're already in a tmux session
 		if os.Getenv("TMUX") != "" {
 			// We're already in tmux, so switch to the new session
-			fmt.Printf("✓ Switching to session '%s'...\n", sessionName)
+			e.log.WithField("session", sessionName).Info("Switching to session")
+			e.prettyLog.Success(fmt.Sprintf("Switching to session '%s'...", sessionName))
 			executor := &exec.RealCommandExecutor{}
 			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 				// If switch fails, just print instructions
-				fmt.Printf("   Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
+				e.log.WithError(err).Warn("Could not switch to session")
+				e.prettyLog.InfoPretty(fmt.Sprintf("   Could not switch to session. Attach with: tmux attach -t %s", sessionName))
 			}
 		} else {
 			// Not in tmux, just print instructions
-			fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
+			e.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
 		}
 
-		fmt.Printf("\n👉 When your task is complete, run the following in any terminal:\n")
-		fmt.Printf("   flow plan complete %s\n", job.FilePath)
-		fmt.Printf("\n   The session can remain open - the plan will continue automatically.\n")
+		e.prettyLog.Blank()
+		e.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
+		e.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
+		e.prettyLog.Blank()
+		e.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
 
 		// Return immediately - the orchestrator will poll for completion
 		// Set execErr to nil to indicate successful launch
@@ -354,7 +378,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	// Ensure session exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
 	if !sessionExists {
-		fmt.Printf("✓ Tmux session '%s' not found, creating it...\n", sessionName)
+		e.log.WithField("session", sessionName).Info("Tmux session not found, creating it")
+		e.prettyLog.Success(fmt.Sprintf("Tmux session '%s' not found, creating it...", sessionName))
 		opts := tmux.LaunchOptions{
 			SessionName:      sessionName,
 			WorkingDirectory: gitRoot,
@@ -367,7 +392,12 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	// Create new window using RealCommandExecutor pattern (like chat and plan launch)
-	fmt.Printf("Creating tmux window: session=%s, window=%s, workdir=%s\n", sessionName, windowName, workDir)
+	e.log.WithFields(logrus.Fields{
+		"session": sessionName,
+		"window":  windowName,
+		"workdir": workDir,
+	}).Info("Creating tmux window")
+	e.prettyLog.InfoPretty(fmt.Sprintf("Creating tmux window: session=%s, window=%s, workdir=%s", sessionName, windowName, workDir))
 	
 	// Create a RealCommandExecutor like chat/plan launch do
 	executor := &exec.RealCommandExecutor{}
@@ -376,7 +406,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir); err != nil {
 		// Check if it's because window already exists
 		if strings.Contains(err.Error(), "duplicate window") {
-			fmt.Printf("Window '%s' already exists, attempting to kill it first\n", windowName)
+			e.log.WithField("window", windowName).Info("Window already exists, attempting to kill it first")
+			e.prettyLog.InfoPretty(fmt.Sprintf("Window '%s' already exists, attempting to kill it first", windowName))
 			// Kill the existing window
 			executor.Execute("tmux", "kill-window", "-t", fmt.Sprintf("%s:%s", sessionName, windowName))
 			time.Sleep(100 * time.Millisecond)
@@ -413,7 +444,8 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 
 	// Send agent command to the window using executor pattern
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
-	fmt.Printf("Sending command to tmux pane: %s\n", targetPane)
+	e.log.WithField("pane", targetPane).Info("Sending command to tmux pane")
+	e.prettyLog.InfoPretty(fmt.Sprintf("Sending command to tmux pane: %s", targetPane))
 	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -421,11 +453,14 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	// Print user instructions
-	fmt.Printf("🚀 Interactive host session launched in window '%s'.\n", windowName)
-	fmt.Printf("   Attach with: tmux attach -t %s\n", sessionName)
-	fmt.Printf("\n👉 When your task is complete, run the following in any terminal:\n")
-	fmt.Printf("   flow plan complete %s\n", job.FilePath)
-	fmt.Printf("\n   The session can remain open - the plan will continue automatically.\n")
+	e.log.WithField("window", windowName).Info("Interactive host session launched")
+	e.prettyLog.InfoPretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName))
+	e.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
+	e.prettyLog.Blank()
+	e.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
+	e.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
+	e.prettyLog.Blank()
+	e.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
 
 	// Return immediately - the orchestrator will poll for completion
 	// Set execErr to nil to indicate successful launch
@@ -444,11 +479,13 @@ func (e *InteractiveAgentExecutor) waitForWindowClose(ctx context.Context, clien
 
 // promptForJobStatus prompts the user to select the job status after tmux session ends
 func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string) string {
-	fmt.Printf("\n💭 Session '%s' has ended. What's the job status?\n", sessionOrWindowName)
-	fmt.Println("   c - Mark as completed")
-	fmt.Println("   f - Mark as failed")
-	fmt.Println("   q - No status change (keep as running)")
-	fmt.Print("\nChoice [c/f/q]: ")
+	e.prettyLog.Blank()
+	e.prettyLog.InfoPretty(fmt.Sprintf("💭 Session '%s' has ended. What's the job status?", sessionOrWindowName))
+	e.prettyLog.InfoPretty("   c - Mark as completed")
+	e.prettyLog.InfoPretty("   f - Mark as failed")
+	e.prettyLog.InfoPretty("   q - No status change (keep as running)")
+	e.prettyLog.Blank()
+	e.prettyLog.InfoPretty("Choice [c/f/q]: ")
 	
 	var response string
 	fmt.Scanln(&response)
@@ -461,7 +498,8 @@ func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string
 	
 	// Validate response
 	if response != "c" && response != "f" && response != "q" {
-		fmt.Printf("Invalid choice '%s'. Defaulting to completed.\n", response)
+		e.log.WithField("choice", response).Warn("Invalid choice. Defaulting to completed")
+		e.prettyLog.WarnPretty(fmt.Sprintf("Invalid choice '%s'. Defaulting to completed.", response))
 		response = "c"
 	}
 	

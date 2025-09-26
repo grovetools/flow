@@ -6,15 +6,23 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/sirupsen/logrus"
 )
 
 // ShellExecutor executes shell commands as orchestration jobs.
 type ShellExecutor struct {
+	log       *logrus.Entry
+	prettyLog *grovelogging.PrettyLogger
 }
 
 // NewShellExecutor creates a new shell executor.
 func NewShellExecutor() *ShellExecutor {
-	return &ShellExecutor{}
+	return &ShellExecutor{
+		log:       grovelogging.NewLogger("grove-flow"),
+		prettyLog: grovelogging.NewPrettyLogger(),
+	}
 }
 
 // Name returns the executor name.
@@ -42,8 +50,10 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	}
 	
 	// Log execution details for debugging
-	fmt.Printf("[Shell Executor] Executing job %s\n", job.ID)
-	fmt.Printf("[Shell Executor] Command: %s\n", job.PromptBody)
+	e.log.WithFields(logrus.Fields{
+		"job_id":  job.ID,
+		"command": job.PromptBody,
+	}).Debug("Executing shell job")
 
 	// Determine the working directory
 	var workDir string
@@ -61,7 +71,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		workDir = ResolveWorkingDirectory(plan)
 	}
 	
-	fmt.Printf("[Shell Executor] Working directory resolved to: %s\n", workDir)
+	e.log.WithField("workdir", workDir).Debug("Working directory resolved")
 
 	// The PromptBody contains the shell command to run
 	// Use "sh" instead of "/bin/sh" to be more portable
@@ -87,7 +97,11 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	// Persist the output of the shell command to the job file for easy debugging and audit
 	if writeErr := job.AppendOutput(persister, string(output)); writeErr != nil {
 		// Log this error, but return the original command's error
-		fmt.Printf("Warning: failed to write output for job %s: %v\n", job.ID, writeErr)
+		e.log.WithFields(logrus.Fields{
+			"job_id": job.ID,
+			"error":  writeErr,
+		}).Warn("Failed to write output for job")
+		e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to write output for job %s: %v", job.ID, writeErr))
 	}
 
 	// Update job status based on command result
@@ -104,7 +118,11 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 			return execErr
 		}
 		// Otherwise, log the status update error and return the original execution error
-		fmt.Printf("Warning: failed to update job status to %s: %v\n", finalStatus, statusUpdateErr)
+		e.log.WithFields(logrus.Fields{
+			"status": finalStatus,
+			"error":  statusUpdateErr,
+		}).Warn("Failed to update job status")
+		e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to update job status to %s: %v", finalStatus, statusUpdateErr))
 	}
 	
 	if execErr != nil {
