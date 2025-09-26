@@ -493,6 +493,7 @@ func PrepareEcosystemWorktree(ctx context.Context, gitRoot, worktreeName, planNa
 	if err := os.WriteFile(markerPath, []byte(markerContent), 0644); err != nil {
 		fmt.Printf("Warning: could not create .grove-workspace marker file: %v\n", err)
 	}
+
 	// Create a .git file to prevent git from seeing this as part of the parent repository
 	// This makes the ecosystem worktree directory appear as if it's not in a git repo
 	gitFilePath := filepath.Join(ecosystemDir, ".git")
