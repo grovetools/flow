@@ -490,3 +490,210 @@ func EcosystemWorktreeReposFilterScenario() *harness.Scenario {
 		},
 	}
 }
+
+// EcosystemWorktreeCaseSensitivePathScenario tests that workspace discovery handles case-sensitive path mismatches
+func EcosystemWorktreeCaseSensitivePathScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "flow-ecosystem-worktree-case-sensitive-paths",
+		Description: "Tests that workspace discovery correctly handles case-sensitive path mismatches and is_main:false flags",
+		Tags:        []string{"plan", "worktree", "ecosystem", "path-resolution"},
+		Steps: []harness.Step{
+			harness.NewStep("Setup test repositories", func(ctx *harness.Context) error {
+				// Create test repositories
+				coreRepoPath := filepath.Join(ctx.RootDir, "grove-core.git")
+				fs.CreateDir(coreRepoPath)
+				git.Init(coreRepoPath)
+				git.SetupTestConfig(coreRepoPath)
+				fs.WriteString(filepath.Join(coreRepoPath, "README.md"), "This is grove-core.")
+				fs.WriteString(filepath.Join(coreRepoPath, "go.mod"), "module github.com/mattsolo1/grove-core\n\ngo 1.21\n")
+				git.Add(coreRepoPath, ".")
+				git.Commit(coreRepoPath, "Initial commit for core")
+
+				contextRepoPath := filepath.Join(ctx.RootDir, "grove-context.git")
+				fs.CreateDir(contextRepoPath)
+				git.Init(contextRepoPath)
+				git.SetupTestConfig(contextRepoPath)
+				fs.WriteString(filepath.Join(contextRepoPath, "README.md"), "This is grove-context.")
+				fs.WriteString(filepath.Join(contextRepoPath, "go.mod"), "module github.com/mattsolo1/grove-context\n\ngo 1.21\n")
+				git.Add(contextRepoPath, ".")
+				git.Commit(contextRepoPath, "Initial commit for context")
+
+				flowRepoPath := filepath.Join(ctx.RootDir, "grove-flow.git")
+				fs.CreateDir(flowRepoPath)
+				git.Init(flowRepoPath)
+				git.SetupTestConfig(flowRepoPath)
+				fs.WriteString(filepath.Join(flowRepoPath, "README.md"), "This is grove-flow.")
+				fs.WriteString(filepath.Join(flowRepoPath, "go.mod"), "module github.com/mattsolo1/grove-flow\n\ngo 1.21\n")
+				git.Add(flowRepoPath, ".")
+				git.Commit(flowRepoPath, "Initial commit for flow")
+
+				// Setup the superproject
+				superprojectPath := filepath.Join(ctx.RootDir, "grove-ecosystem")
+				fs.CreateDir(superprojectPath)
+				git.Init(superprojectPath)
+				git.SetupTestConfig(superprojectPath)
+				
+				// Create grove.yml
+				fs.WriteString(filepath.Join(superprojectPath, "grove.yml"), "name: grove-ecosystem\nflow:\n  plans_directory: ./plans\n")
+				git.Add(superprojectPath, ".")
+				git.Commit(superprojectPath, "Initial commit")
+
+				// Store paths
+				ctx.Set("superproject_path", superprojectPath)
+				ctx.Set("core_repo_path", coreRepoPath)
+				ctx.Set("context_repo_path", contextRepoPath)
+				ctx.Set("flow_repo_path", flowRepoPath)
+				
+				return nil
+			}),
+			
+			harness.NewStep("Setup test environment with case-sensitive path mismatch", func(ctx *harness.Context) error {
+				// First run the standard setup
+				if err := setupTestEnvironment().Func(ctx); err != nil {
+					return err
+				}
+				
+				// Simulate the case-sensitive path issue from the real-world scenario
+				// The issue: workspace paths have lowercase "code" but worktree paths have uppercase "Code"
+				// Also simulate is_main being false for all entries
+				coreRepoPath := ctx.GetString("core_repo_path")
+				contextRepoPath := ctx.GetString("context_repo_path")
+				flowRepoPath := ctx.GetString("flow_repo_path")
+				
+				// Create mock data that simulates the problem:
+				// 1. Lowercase "code" in workspace path
+				// 2. Uppercase "Code" in worktree path
+				// 3. is_main: false for all entries
+				workspaceData := fmt.Sprintf(`[
+					{
+						"name": "grove-core",
+						"path": "%s",
+						"worktrees": [
+							{
+								"path": "%s",
+								"branch": "main",
+								"is_main": false
+							}
+						]
+					},
+					{
+						"name": "grove-context",
+						"path": "%s",
+						"worktrees": [
+							{
+								"path": "%s",
+								"branch": "main",
+								"is_main": false
+							}
+						]
+					},
+					{
+						"name": "grove-flow",
+						"path": "%s",
+						"worktrees": [
+							{
+								"path": "%s",
+								"branch": "main",
+								"is_main": false
+							}
+						]
+					}
+				]`, 
+					strings.ToLower(coreRepoPath), strings.Replace(coreRepoPath, ctx.RootDir, strings.ToUpper(ctx.RootDir), 1),
+					strings.ToLower(contextRepoPath), strings.Replace(contextRepoPath, ctx.RootDir, strings.ToUpper(ctx.RootDir), 1),
+					strings.ToLower(flowRepoPath), strings.Replace(flowRepoPath, ctx.RootDir, strings.ToUpper(ctx.RootDir), 1))
+				
+				// Set both environment variables
+				os.Setenv("MOCK_GROVE_WS_LIST", workspaceData)
+				os.Setenv("GROVE_TEST_WORKSPACES", workspaceData)
+				
+				return nil
+			}),
+
+			harness.NewStep("Initialize a plan with repos filter (should handle path mismatch)", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				superprojectPath := ctx.GetString("superproject_path")
+				// Try to create ecosystem worktree with specific repos
+				cmd := command.New(flow, "plan", "init", "case-test", "--worktree", "--repos", "grove-core,grove-context,grove-flow").Dir(superprojectPath)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				return result.Error
+			}),
+
+			harness.NewStep("Trigger worktree creation and verify repos are found", func(ctx *harness.Context) error {
+				superprojectPath := ctx.GetString("superproject_path")
+				flow, _ := getFlowBinary()
+				
+				// Add a simple job to trigger worktree creation
+				cmd := command.New(flow, "plan", "add", "--title", "test", "--type", "shell", "--prompt", "echo 'Testing path resolution'").Dir(superprojectPath)
+				result := cmd.Run()
+				if result.Error != nil {
+					return fmt.Errorf("failed to add job: %w", result.Error)
+				}
+
+				// Run the job to trigger worktree creation
+				// Use ctx.Command to allow setting environment variables
+				cmdRun := ctx.Command(flow, "plan", "run", "--yes").Dir(superprojectPath)
+				// Disable tmux session switching by unsetting TERM
+				cmdRun.Env("TERM=")
+				result = cmdRun.Run()
+				ctx.ShowCommandOutput("Plan run", result.Stdout, result.Stderr)
+				
+				// Check that workspaces were discovered correctly
+				if strings.Contains(result.Stdout, "Discovered 0 local workspaces") {
+					return fmt.Errorf("workspace discovery failed - no workspaces found despite path normalization")
+				}
+				
+				// Check that repos were not skipped
+				if strings.Contains(result.Stdout, "not found in local workspaces, skipping") {
+					return fmt.Errorf("repos were not found in local workspaces - path resolution failed")
+				}
+				
+				// Check that worktrees were created
+				if !strings.Contains(result.Stdout, "creating linked worktree") {
+					return fmt.Errorf("no linked worktrees were created - workspace discovery likely failed")
+				}
+				
+				return nil
+			}),
+
+			harness.NewStep("Verify worktrees were created successfully", func(ctx *harness.Context) error {
+				superprojectPath := ctx.GetString("superproject_path")
+				worktreePath := filepath.Join(superprojectPath, ".grove-worktrees", "case-test")
+				
+				// Check that worktree directory exists
+				if !fs.Exists(worktreePath) {
+					return fmt.Errorf("worktree directory was not created at %s", worktreePath)
+				}
+				
+				// Check that each repo worktree exists and is populated
+				repos := []string{"grove-core", "grove-context", "grove-flow"}
+				for _, repo := range repos {
+					repoPath := filepath.Join(worktreePath, repo)
+					if !fs.Exists(repoPath) {
+						return fmt.Errorf("%s directory should exist in worktree", repo)
+					}
+					
+					// Check that it's populated (has README.md)
+					readmePath := filepath.Join(repoPath, "README.md")
+					if !fs.Exists(readmePath) {
+						return fmt.Errorf("%s/README.md should exist (worktree should be populated)", repo)
+					}
+					
+					// Verify it's on the correct branch
+					result := command.New("git", "branch", "--show-current").Dir(repoPath).Run()
+					if result.Error != nil {
+						return fmt.Errorf("could not get branch for %s: %w", repo, result.Error)
+					}
+					branch := strings.TrimSpace(result.Stdout)
+					if branch != "case-test" {
+						return fmt.Errorf("%s should be on branch 'case-test' but is on '%s'", repo, branch)
+					}
+				}
+				
+				fmt.Printf("✓ All repos successfully created with linked worktrees despite path case mismatch\n")
+				return nil
+			}),
+		},
+	}
+}

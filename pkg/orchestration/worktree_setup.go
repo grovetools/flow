@@ -40,12 +40,35 @@ func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
 		
 		result := make(map[string]string)
 		for _, ws := range workspaces {
+			// Find the main worktree - prioritize is_main:true, but fall back to path matching
+			mainPath := ""
 			for _, wt := range ws.Worktrees {
 				if wt.IsMain {
-					result[ws.Name] = wt.Path
-					fmt.Printf("DEBUG: Test workspace %s at %s\n", ws.Name, wt.Path)
+					mainPath = wt.Path
 					break
 				}
+			}
+			
+			// If no is_main:true found, use path matching as fallback
+			if mainPath == "" && len(ws.Worktrees) > 0 {
+				// Normalize paths for comparison (handle case sensitivity)
+				wsPathNorm := strings.ToLower(filepath.Clean(ws.Path))
+				for _, wt := range ws.Worktrees {
+					wtPathNorm := strings.ToLower(filepath.Clean(wt.Path))
+					if wsPathNorm == wtPathNorm {
+						mainPath = wt.Path
+						break
+					}
+				}
+				// If still no match, use the first worktree as a last resort
+				if mainPath == "" {
+					mainPath = ws.Worktrees[0].Path
+				}
+			}
+			
+			if mainPath != "" {
+				result[ws.Name] = mainPath
+				fmt.Printf("DEBUG: Test workspace %s at %s\n", ws.Name, mainPath)
 			}
 		}
 		return result, nil
@@ -68,12 +91,35 @@ func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
 	// Build a map from workspace name to main worktree path
 	result := make(map[string]string)
 	for _, ws := range workspaces {
+		// Find the main worktree - prioritize is_main:true, but fall back to path matching
+		mainPath := ""
 		for _, wt := range ws.Worktrees {
 			if wt.IsMain {
-				result[ws.Name] = wt.Path
-				fmt.Printf("DEBUG: Found workspace %s at %s\n", ws.Name, wt.Path)
+				mainPath = wt.Path
 				break
 			}
+		}
+		
+		// If no is_main:true found, use path matching as fallback
+		if mainPath == "" && len(ws.Worktrees) > 0 {
+			// Normalize paths for comparison (handle case sensitivity)
+			wsPathNorm := strings.ToLower(filepath.Clean(ws.Path))
+			for _, wt := range ws.Worktrees {
+				wtPathNorm := strings.ToLower(filepath.Clean(wt.Path))
+				if wsPathNorm == wtPathNorm {
+					mainPath = wt.Path
+					break
+				}
+			}
+			// If still no match, use the first worktree as a last resort
+			if mainPath == "" {
+				mainPath = ws.Worktrees[0].Path
+			}
+		}
+		
+		if mainPath != "" {
+			result[ws.Name] = mainPath
+			fmt.Printf("DEBUG: Found workspace %s at %s\n", ws.Name, mainPath)
 		}
 	}
 
@@ -428,6 +474,19 @@ func PrepareEcosystemWorktree(ctx context.Context, gitRoot, worktreeName, planNa
 		statePath := filepath.Join(ecosystemDir, ".grove", "state.yml")
 		_ = os.WriteFile(statePath, []byte(stateContent), 0644)
 	}
+
+	// Create a .git file to prevent git from seeing this as part of the parent repository
+	// This makes the ecosystem worktree directory appear as if it's not in a git repo
+	gitFilePath := filepath.Join(ecosystemDir, ".git")
+	gitFileContent := "gitdir: /dev/null\n"
+	if err := os.WriteFile(gitFilePath, []byte(gitFileContent), 0644); err != nil {
+		fmt.Printf("Warning: could not create .git isolation file: %v\n", err)
+	}
+
+	// Also add a .gitignore to ignore common files
+	gitignorePath := filepath.Join(ecosystemDir, ".gitignore")
+	gitignoreContent := "go.work.sum\n.DS_Store\n"
+	_ = os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644)
 
 	fmt.Printf("✓ Ecosystem worktree created at %s\n", ecosystemDir)
 	return ecosystemDir, nil

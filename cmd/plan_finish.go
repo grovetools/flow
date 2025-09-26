@@ -51,11 +51,34 @@ func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
 		
 		result := make(map[string]string)
 		for _, ws := range workspaces {
+			// Find the main worktree - prioritize is_main:true, but fall back to path matching
+			mainPath := ""
 			for _, wt := range ws.Worktrees {
 				if wt.IsMain {
-					result[ws.Name] = wt.Path
+					mainPath = wt.Path
 					break
 				}
+			}
+			
+			// If no is_main:true found, use path matching as fallback
+			if mainPath == "" && len(ws.Worktrees) > 0 {
+				// Normalize paths for comparison (handle case sensitivity)
+				wsPathNorm := strings.ToLower(filepath.Clean(ws.Path))
+				for _, wt := range ws.Worktrees {
+					wtPathNorm := strings.ToLower(filepath.Clean(wt.Path))
+					if wsPathNorm == wtPathNorm {
+						mainPath = wt.Path
+						break
+					}
+				}
+				// If still no match, use the first worktree as a last resort
+				if mainPath == "" {
+					mainPath = ws.Worktrees[0].Path
+				}
+			}
+			
+			if mainPath != "" {
+				result[ws.Name] = mainPath
 			}
 		}
 		return result, nil
@@ -76,11 +99,34 @@ func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
 	// Build a map from workspace name to main worktree path
 	result := make(map[string]string)
 	for _, ws := range workspaces {
+		// Find the main worktree - prioritize is_main:true, but fall back to path matching
+		mainPath := ""
 		for _, wt := range ws.Worktrees {
 			if wt.IsMain {
-				result[ws.Name] = wt.Path
+				mainPath = wt.Path
 				break
 			}
+		}
+		
+		// If no is_main:true found, use path matching as fallback
+		if mainPath == "" && len(ws.Worktrees) > 0 {
+			// Normalize paths for comparison (handle case sensitivity)
+			wsPathNorm := strings.ToLower(filepath.Clean(ws.Path))
+			for _, wt := range ws.Worktrees {
+				wtPathNorm := strings.ToLower(filepath.Clean(wt.Path))
+				if wsPathNorm == wtPathNorm {
+					mainPath = wt.Path
+					break
+				}
+			}
+			// If still no match, use the first worktree as a last resort
+			if mainPath == "" {
+				mainPath = ws.Worktrees[0].Path
+			}
+		}
+		
+		if mainPath != "" {
+			result[ws.Name] = mainPath
 		}
 	}
 

@@ -56,6 +56,7 @@ func main() {
 		// ComplexOrchestrationScenario(), // Tests generate_jobs - needs investigation on how flow processes job output
 		EcosystemWorktreeScenario(), // Tests submodule handling in superproject worktrees
 		EcosystemWorktreeReposFilterScenario(), // Tests --repos flag for selective repo inclusion
+		EcosystemWorktreeCaseSensitivePathScenario(), // Tests case-sensitive path handling and is_main:false flags
 		ReferencePromptScenario(), // Fixed using flow plan add
 
 		// Interactive Agent Scenarios
