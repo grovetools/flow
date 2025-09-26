@@ -28,8 +28,8 @@ type WorktreeInfo struct {
 	IsMain bool   `json:"is_main"`
 }
 
-// discoverLocalWorkspaces uses grove ws list to find local repository paths
-func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
+// DiscoverLocalWorkspaces uses grove ws list to find local repository paths
+func DiscoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
 	// Check for test environment override first
 	if mockData := os.Getenv("GROVE_TEST_WORKSPACES"); mockData != "" {
 		fmt.Printf("DEBUG: Using test workspace data from GROVE_TEST_WORKSPACES\n")
@@ -190,7 +190,7 @@ func SetupSubmodulesForWorktreeWithRepos(ctx context.Context, worktreePath, bran
 		return setupSubmodulesStandard(ctx, worktreePath, branchName)
 	}
 
-	localWorkspaces, err := discoverLocalWorkspaces(ctx)
+	localWorkspaces, err := DiscoverLocalWorkspaces(ctx)
 	if err != nil {
 		fmt.Printf("Warning: failed to discover local workspaces: %v. Falling back to standard init.\n", err)
 		return setupSubmodulesStandard(ctx, worktreePath, branchName)
@@ -419,7 +419,7 @@ func PrepareEcosystemWorktree(ctx context.Context, gitRoot, worktreeName, planNa
 	}
 
 	// Discover local workspace paths using grove ws list
-	localWorkspaces, err := discoverLocalWorkspaces(ctx)
+	localWorkspaces, err := DiscoverLocalWorkspaces(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to discover local workspaces: %w", err)
 	}
