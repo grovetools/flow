@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -92,5 +95,45 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("failed to open workspace session for '%s'. Please ensure grove-meta is installed and the workspace exists. Error: %w", worktreeName, err)
 	}
+
+	// Add convenience features: set active plan and run status TUI
+	if err := setupPlanConveniences(worktreeName, plan.Directory); err != nil {
+		// Don't fail the whole command if conveniences fail
+		fmt.Printf("Note: %v\n", err)
+	}
+
 	return nil
+}
+
+// setupPlanConveniences sets up convenience features in the tmux session
+func setupPlanConveniences(worktreeName, planDirectory string) error {
+	sessionName := tmux.SanitizeForTmuxSession(worktreeName)
+	targetPane := fmt.Sprintf("%s:workspace", sessionName)
+	
+	// Small delay to let the session initialize
+	time.Sleep(500 * time.Millisecond)
+
+	// Set the active plan by updating the state file in the worktree
+	planName := filepath.Base(planDirectory)
+	setPlanCmd := fmt.Sprintf("flow plan set %s", planName)
+	if err := execTmuxSendKeys(targetPane, setPlanCmd); err != nil {
+		return fmt.Errorf("failed to set active plan: %w", err)
+	}
+
+	// Small delay to let the set command complete
+	time.Sleep(300 * time.Millisecond)
+
+	// Run flow plan status -t (will use the active plan)
+	statusCmd := "flow plan status -t"
+	if err := execTmuxSendKeys(targetPane, statusCmd); err != nil {
+		return fmt.Errorf("failed to run status TUI: %w", err)
+	}
+
+	return nil
+}
+
+// execTmuxSendKeys is a helper to send commands to tmux
+func execTmuxSendKeys(targetPane, command string) error {
+	cmd := exec.Command("tmux", "send-keys", "-t", targetPane, command, "C-m")
+	return cmd.Run()
 }

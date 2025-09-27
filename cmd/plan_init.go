@@ -106,6 +106,13 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		worktreeToSet = planName
 	}
 
+	// Create the actual worktree if requested
+	if worktreeToSet != "" {
+		if err := createWorktreeIfRequested(worktreeToSet); err != nil {
+			return "", err
+		}
+	}
+
 	// Only use the model if explicitly provided via --model flag
 	effectiveModel := cmd.Model
 
@@ -122,6 +129,9 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	// Build success message
 	result.WriteString(fmt.Sprintf("Initializing orchestration plan in:\n  %s\n\n", planPath))
 	result.WriteString("✓ Created plan directory\n")
+	if worktreeToSet != "" {
+		result.WriteString(fmt.Sprintf("✓ Created worktree: %s\n", worktreeToSet))
+	}
 	result.WriteString("✓ Created .grove-plan.yml with default configuration\n")
 
 	// Set the new plan as active
@@ -345,6 +355,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		worktreeOverride = planName
 	} else if cmd.Worktree != "" {
 		worktreeOverride = cmd.Worktree
+	}
+
+	// Create the actual worktree if requested
+	if worktreeOverride != "" {
+		if err := createWorktreeIfRequested(worktreeOverride); err != nil {
+			return err
+		}
 	}
 
 	// Track if this is the first job for content merging
@@ -812,4 +829,25 @@ func launchWorktreeSession(ctx context.Context, worktreeName string, agentComman
 
 	executor := &exec.RealCommandExecutor{}
 	return LaunchTmuxSession(executor, params)
+}
+
+// createWorktreeIfRequested creates a git worktree with the given name
+func createWorktreeIfRequested(worktreeName string) error {
+	gitRoot, err := orchestration.GetGitRootSafe(".")
+	if err != nil {
+		return fmt.Errorf("failed to find git root: %w", err)
+	}
+	
+	opts := workspace.PrepareOptions{
+		GitRoot:      gitRoot,
+		WorktreeName: worktreeName,
+		BranchName:   worktreeName,
+	}
+	
+	_, err = workspace.Prepare(context.Background(), opts)
+	if err != nil {
+		return fmt.Errorf("failed to create worktree: %w", err)
+	}
+	
+	return nil
 }
