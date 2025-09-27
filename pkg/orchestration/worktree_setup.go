@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,17 +77,22 @@ func DiscoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
 	}
 	
 	cmd := exec.CommandContext(ctx, "grove", "ws", "list", "--json")
-	output, err := cmd.CombinedOutput() // Changed to capture stderr as well
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 	if err != nil {
-		fmt.Printf("DEBUG: grove ws list failed: %v\nOutput: %s\n", err, string(output))
+		fmt.Printf("DEBUG: grove ws list failed: %v\nStderr: %s\n", err, stderr.String())
 		// If grove ws list fails, return empty map (fallback to standard submodule behavior)
 		return make(map[string]string), nil
 	}
-	fmt.Printf("DEBUG: grove ws list output: %s\n", string(output))
+	fmt.Printf("DEBUG: grove ws list output: %s\n", stdout.String())
 
+	output := stdout.Bytes()
 	var workspaces []WorkspaceInfo
 	if err := json.Unmarshal(output, &workspaces); err != nil {
-		return nil, fmt.Errorf("failed to parse grove ws list output: %w", err)
+		return nil, fmt.Errorf("failed to parse grove ws list output: %w. Stderr: %s", err, stderr.String())
 	}
 
 	// Build a map from workspace name to main worktree path

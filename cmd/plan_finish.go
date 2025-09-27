@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -85,15 +86,21 @@ func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
 	}
 	
 	cmd := exec.CommandContext(ctx, "grove", "ws", "list", "--json")
-	output, err := cmd.Output()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 	if err != nil {
 		// If grove ws list fails, return empty map (fallback to standard submodule behavior)
 		return make(map[string]string), nil
 	}
 
+	output := stdout.Bytes()
 	var workspaces []orchestration.WorkspaceInfo
 	if err := json.Unmarshal(output, &workspaces); err != nil {
-		return nil, fmt.Errorf("failed to parse grove ws list output: %w", err)
+		// Log stderr for better debugging if parsing fails
+		return nil, fmt.Errorf("failed to parse grove ws list output: %w. Stderr: %s", err, stderr.String())
 	}
 
 	// Build a map from workspace name to main worktree path
