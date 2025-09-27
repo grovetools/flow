@@ -408,11 +408,11 @@ func PrepareWorktreeWithRepos(ctx context.Context, gitRoot, worktreeName, planNa
 
 	// Create a generic workspace marker file for grove-meta to detect
 	// This enables automatic workspace-aware binary resolution
-	markerPath := filepath.Join(worktreePath, ".grove-workspace")
+	markerPath := filepath.Join(worktreePath, ".grove", "workspace")
 	markerContent := fmt.Sprintf("branch: %s\nplan: %s\ncreated_at: %s\n",
 		worktreeName, planName, time.Now().UTC().Format(time.RFC3339))
 	if err := os.WriteFile(markerPath, []byte(markerContent), 0644); err != nil {
-		fmt.Printf("Warning: could not create .grove-workspace marker file: %v\n", err)
+		fmt.Printf("Warning: could not create .grove/workspace marker file: %v\n", err)
 	}
 
 	return worktreePath, nil
@@ -505,11 +505,11 @@ func PrepareEcosystemWorktree(ctx context.Context, gitRoot, worktreeName, planNa
 
 	// Create a generic workspace marker file for grove-meta to detect
 	// This enables automatic workspace-aware binary resolution
-	markerPath := filepath.Join(ecosystemDir, ".grove-workspace")
+	markerPath := filepath.Join(ecosystemDir, ".grove", "workspace")
 	markerContent := fmt.Sprintf("branch: %s\nplan: %s\ncreated_at: %s\n",
 		worktreeName, planName, time.Now().UTC().Format(time.RFC3339))
 	if err := os.WriteFile(markerPath, []byte(markerContent), 0644); err != nil {
-		fmt.Printf("Warning: could not create .grove-workspace marker file: %v\n", err)
+		fmt.Printf("Warning: could not create .grove/workspace marker file: %v\n", err)
 	}
 
 	// Create a .git file to prevent git from seeing this as part of the parent repository
