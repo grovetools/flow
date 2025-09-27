@@ -22,7 +22,8 @@ type tuiModel struct {
 	// Form inputs
 	titleInput    textinput.Model
 	jobTypeList   list.Model
-	depTree       dependencyTreeModel
+	depList       list.Model
+	selectedDeps  map[string]bool  // Track selected dependencies
 	templateList  list.Model
 	worktreeInput textinput.Model
 	modelList     list.Model
@@ -50,6 +51,16 @@ type modelItem struct {
 func (m modelItem) FilterValue() string { return m.ID }
 func (m modelItem) Title() string       { return m.ID }
 func (m modelItem) Description() string { return fmt.Sprintf("%s - %s", m.Provider, m.Note) }
+
+// dependencyItem represents a job that can be selected as a dependency
+type dependencyItem struct {
+	job      *orchestration.Job
+	selected bool
+}
+
+func (d dependencyItem) FilterValue() string { return d.job.Filename + " " + d.job.Title }
+func (d dependencyItem) Title() string       { return d.job.Filename }
+func (d dependencyItem) Description() string { return d.job.Title }
 
 type itemDelegate struct{}
 
@@ -81,6 +92,51 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	}
 }
 
+// dependencyDelegate handles rendering for dependency items with checkboxes
+type dependencyDelegate struct {
+	selectedDeps *map[string]bool
+}
+
+func (d dependencyDelegate) Height() int                               { return 1 }
+func (d dependencyDelegate) Spacing() int                              { return 0 }
+func (d dependencyDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
+func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	depItem, ok := listItem.(dependencyItem)
+	if !ok {
+		return
+	}
+
+	var str string
+	cursor := " "
+	if index == m.Index() {
+		cursor = ">"
+	}
+
+	checkbox := "[ ]"
+	if (*d.selectedDeps)[depItem.job.ID] {
+		checkbox = "[✓]"
+	}
+
+	// Format the display text
+	displayText := fmt.Sprintf("%s (%s)", depItem.job.Filename, depItem.job.Title)
+	
+	// Truncate to prevent wrapping (account for cursor and checkbox = 6 chars)
+	maxWidth := 35 // Conservative width for 45-char list minus cursor/checkbox
+	if len(displayText) > maxWidth {
+		displayText = displayText[:maxWidth-3] + "..."
+	}
+	
+	str = fmt.Sprintf("%s %s %s", cursor, checkbox, displayText)
+
+	if index == m.Index() {
+		fmt.Fprint(w, lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(str))
+	} else if (*d.selectedDeps)[depItem.job.ID] {
+		fmt.Fprint(w, lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(str))
+	} else {
+		fmt.Fprint(w, lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(str))
+	}
+}
+
 func initialModel(plan *orchestration.Plan) tuiModel {
 	m := tuiModel{
 		plan: plan,
@@ -101,18 +157,33 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 		item("shell"),
 		item("chat"),
 	}
-	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 7)
+	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 5)
 	m.jobTypeList.Title = ""
 	m.jobTypeList.SetShowTitle(false)
 	m.jobTypeList.SetShowStatusBar(false)
 	m.jobTypeList.SetFilteringEnabled(true)
 	m.jobTypeList.SetShowHelp(false)
+	m.jobTypeList.SetShowPagination(true)
 	m.jobTypeList.FilterInput.Prompt = "🔍 "
 	m.jobTypeList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
 	m.jobTypeList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
-	// 3. Dependencies Input (Tree View)
-	m.depTree = initialDependencyTreeModel(plan)
+	// 3. Dependencies Input (List with checkboxes)
+	m.selectedDeps = make(map[string]bool)
+	depItems := make([]list.Item, 0, len(plan.Jobs))
+	for _, job := range plan.Jobs {
+		depItems = append(depItems, dependencyItem{job: job})
+	}
+	m.depList = list.New(depItems, dependencyDelegate{selectedDeps: &m.selectedDeps}, 45, 7)
+	m.depList.Title = ""
+	m.depList.SetShowTitle(false)
+	m.depList.SetShowStatusBar(false)
+	m.depList.SetFilteringEnabled(true)
+	m.depList.SetShowHelp(false)
+	m.depList.SetShowPagination(true)
+	m.depList.FilterInput.Prompt = "🔍 "
+	m.depList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
+	m.depList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	// 4. Template Input (list)
 	templateManager := orchestration.NewTemplateManager()
@@ -122,12 +193,13 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	for i, t := range templates {
 		templateItems[i+1] = item(t.Name)
 	}
-	m.templateList = list.New(templateItems, itemDelegate{}, 20, 10)
+	m.templateList = list.New(templateItems, itemDelegate{}, 20, 7)
 	m.templateList.Title = ""
 	m.templateList.SetShowTitle(false)
 	m.templateList.SetShowStatusBar(false)
 	m.templateList.SetFilteringEnabled(true)
 	m.templateList.SetShowHelp(false)
+	m.templateList.SetShowPagination(true)
 	m.templateList.FilterInput.Prompt = "🔍 "
 	m.templateList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
 	m.templateList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -157,6 +229,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.modelList.SetShowStatusBar(false)
 	m.modelList.SetFilteringEnabled(true)
 	m.modelList.SetShowHelp(false)
+	m.modelList.SetShowPagination(true)
 	m.modelList.FilterInput.Prompt = "🔍 "
 	m.modelList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
 	m.modelList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -184,13 +257,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if we're in a text input field that should capture all keys
 		inTextInput := m.focusIndex == 0 || m.focusIndex == 2 || m.focusIndex == 6
 		// Check if we're in a list that needs arrow keys
-		inList := m.focusIndex == 1 || m.focusIndex == 3 || m.focusIndex == 5
-		
+		inList := m.focusIndex == 1 || m.focusIndex == 3 || m.focusIndex == 4 || m.focusIndex == 5
+
 		switch msg.String() {
 		case "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
-			
+
 		case "q":
 			// Only quit on 'q' if not in text input
 			if !inTextInput {
@@ -205,7 +278,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusIndex = 0
 			}
 			return m.updateFocus(), nil
-			
+
 		case "down":
 			// Down arrow only navigates fields when not in a list
 			if !inList {
@@ -223,7 +296,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusIndex = 6
 			}
 			return m.updateFocus(), nil
-			
+
 		case "up":
 			// Up arrow only navigates fields when not in a list
 			if !inList {
@@ -263,10 +336,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.worktreeInput, cmd = m.worktreeInput.Update(msg)
 	case 3: // Template list
 		m.templateList, cmd = m.templateList.Update(msg)
-	case 4: // Dependency tree
-		var updatedTree tea.Model
-		updatedTree, cmd = m.depTree.Update(msg)
-		m.depTree = updatedTree.(dependencyTreeModel)
+	case 4: // Dependency list
+		// Handle space key for toggling selection
+		if key, ok := msg.(tea.KeyMsg); ok && key.String() == " " {
+			if selectedItem := m.depList.SelectedItem(); selectedItem != nil {
+				if depItem, ok := selectedItem.(dependencyItem); ok {
+					// Toggle selection
+					m.selectedDeps[depItem.job.ID] = !m.selectedDeps[depItem.job.ID]
+				}
+			}
+		} else {
+			m.depList, cmd = m.depList.Update(msg)
+		}
 	case 5: // Model list
 		m.modelList, cmd = m.modelList.Update(msg)
 	case 6: // Prompt textarea
@@ -305,14 +386,16 @@ func (m *tuiModel) extractValues() {
 		m.jobType = string(selected.(item))
 	}
 
-	// Get dependencies from the tree model
+	// Get dependencies from selected items
 	var deps []string
-	for jobID := range m.depTree.selected {
-		// Find the corresponding job to get its filename
-		for _, job := range m.plan.Jobs {
-			if job.ID == jobID {
-				deps = append(deps, job.Filename)
-				break
+	for jobID, selected := range m.selectedDeps {
+		if selected {
+			// Find the corresponding job to get its filename
+			for _, job := range m.plan.Jobs {
+				if job.ID == jobID {
+					deps = append(deps, job.Filename)
+					break
+				}
 			}
 		}
 	}
@@ -450,28 +533,14 @@ func (m tuiModel) View() string {
 	templateView := m.templateList.View()
 	templateField := renderField(3, "Template:", templateView, 10)
 
-	// Dependencies - always show the tree view with fixed height
-	var depContent strings.Builder
-	if m.focusIndex == 4 {
-		depContent.WriteString(focusedStyle.Render("▸ ") + headingStyle.Render("Dependencies:"))
-	} else {
-		depContent.WriteString("  " + headingStyle.Render("Dependencies:"))
-	}
-	depContent.WriteString("\n")
-
-	// Show the tree view or a placeholder
+	// Dependencies - use renderField for consistency
+	var depView string
 	if len(m.plan.Jobs) > 0 {
-		depContent.WriteString(m.depTree.View())
+		depView = m.depList.View()
 	} else {
-		depContent.WriteString("  No existing jobs available")
+		depView = "  No existing jobs available"
 	}
-
-	// Fixed height for consistency - match template height
-	depStyle := borderStyle.Copy().Height(10)
-	if m.focusIndex == 4 {
-		depStyle = focusedBorderStyle.Copy().Height(10)
-	}
-	depField := depStyle.Render(depContent.String())
+	depField := renderField(4, "Dependencies:", depView, 10)
 
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, templateField, "  ", depField)
 	b.WriteString(row3)
@@ -504,7 +573,6 @@ func (m tuiModel) View() string {
 func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 	// Generate job ID from title
 	jobID := GenerateJobIDFromTitle(plan, m.jobTitle)
-	
 
 	// Default job type if none selected
 	jobType := m.jobType
@@ -555,123 +623,3 @@ func getAvailableModels() []Model {
 	}
 }
 
-// Dependency Tree View Components
-
-// dependencyJob represents a job in the tree view with its display properties.
-type dependencyJob struct {
-	job    *orchestration.Job
-	prefix string // The tree structure prefix, e.g., "├── "
-}
-
-type dependencyTreeModel struct {
-	plan          *orchestration.Plan
-	displayJobs   []dependencyJob // A flattened list of jobs in display order
-	cursor        int
-	selected      map[string]struct{} // A set of selected job IDs
-	width, height int
-}
-
-func initialDependencyTreeModel(plan *orchestration.Plan) dependencyTreeModel {
-	m := dependencyTreeModel{
-		plan:     plan,
-		selected: make(map[string]struct{}),
-		width:    50,
-		height:   10,
-	}
-
-	// Build a simple flat list of jobs for now to avoid complex tree logic
-	// This makes selection easier and avoids indentation issues
-	for _, job := range plan.Jobs {
-		m.displayJobs = append(m.displayJobs, dependencyJob{
-			job:    job,
-			prefix: "", // No tree prefixes for simplicity
-		})
-	}
-
-	return m
-}
-
-
-func (m dependencyTreeModel) Init() tea.Cmd {
-	return nil
-}
-
-func (m dependencyTreeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "k", "up":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "j", "down":
-			if m.cursor < len(m.displayJobs)-1 {
-				m.cursor++
-			}
-		case " ", "space": // Spacebar to toggle selection
-			if len(m.displayJobs) > 0 {
-				selectedJob := m.displayJobs[m.cursor].job
-				if _, ok := m.selected[selectedJob.ID]; ok {
-					delete(m.selected, selectedJob.ID)
-				} else {
-					m.selected[selectedJob.ID] = struct{}{}
-				}
-			}
-		case "a", "A": // Select/deselect all
-			if len(m.selected) == len(m.displayJobs) {
-				// If all selected, deselect all
-				m.selected = make(map[string]struct{})
-			} else {
-				// Otherwise, select all
-				for _, dj := range m.displayJobs {
-					m.selected[dj.job.ID] = struct{}{}
-				}
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m dependencyTreeModel) View() string {
-	if len(m.displayJobs) == 0 {
-		return "No existing jobs available"
-	}
-
-	var b strings.Builder
-
-	// Style for the list
-	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-
-	for i, dj := range m.displayJobs {
-		// Cursor
-		if m.cursor == i {
-			b.WriteString(selectedStyle.Render("▸ "))
-		} else {
-			b.WriteString("  ")
-		}
-
-		// Checkbox
-		if _, ok := m.selected[dj.job.ID]; ok {
-			b.WriteString(selectedStyle.Render("[✓] "))
-		} else {
-			b.WriteString("[ ] ")
-		}
-
-		// Job info - show filename and title
-		jobInfo := fmt.Sprintf("%s (%s)", dj.job.Filename, dj.job.Title)
-
-		if m.cursor == i {
-			b.WriteString(selectedStyle.Render(jobInfo))
-		} else if _, ok := m.selected[dj.job.ID]; ok {
-			b.WriteString(normalStyle.Render(jobInfo))
-		} else {
-			b.WriteString(dimStyle.Render(jobInfo))
-		}
-
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
