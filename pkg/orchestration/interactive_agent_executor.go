@@ -173,18 +173,37 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	if job.Worktree != "" {
-		// A worktree is specified, so prepare it using the centralized helper with repos filter
-		var repos []string
-		if plan.Config != nil && len(plan.Config.Repos) > 0 {
-			repos = plan.Config.Repos
+		// Check if we're already in the requested worktree to avoid duplicate paths
+		currentPath := gitRoot
+		if strings.HasSuffix(currentPath, filepath.Join(".grove-worktrees", job.Worktree)) {
+			// We're already in the requested worktree, use the current directory
+			workDir = currentPath
+		} else {
+			// A worktree is specified, so prepare it using the centralized helper with repos filter
+			var repos []string
+			if plan.Config != nil && len(plan.Config.Repos) > 0 {
+				repos = plan.Config.Repos
+			}
+			
+			// If gitRoot is already a worktree path, we need to find the actual git root
+			// by going up the directory tree to find the main repository
+			actualGitRoot := gitRoot
+			if strings.Contains(gitRoot, ".grove-worktrees") {
+				// Extract the main repository path by removing the worktree portion
+				parts := strings.Split(gitRoot, ".grove-worktrees")
+				if len(parts) > 0 {
+					actualGitRoot = strings.TrimSuffix(parts[0], string(filepath.Separator))
+				}
+			}
+			
+			worktreePath, err := PrepareWorktreeWithRepos(ctx, actualGitRoot, job.Worktree, plan.Name, repos)
+			if err != nil {
+				job.Status = JobStatusFailed
+				job.EndTime = time.Now()
+				return fmt.Errorf("failed to prepare host worktree: %w", err)
+			}
+			workDir = worktreePath
 		}
-		worktreePath, err := PrepareWorktreeWithRepos(ctx, gitRoot, job.Worktree, plan.Name, repos)
-		if err != nil {
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("failed to prepare host worktree: %w", err)
-		}
-		workDir = worktreePath
 	} else {
 		// No worktree, use the main git repository root
 		workDir = gitRoot

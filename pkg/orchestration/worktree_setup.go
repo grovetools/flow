@@ -386,6 +386,12 @@ func PrepareWorktreeWithRepos(ctx context.Context, gitRoot, worktreeName, planNa
 		fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
 	}
 
+	// Automatically create a default .grove/rules file
+	if err := runCxResetInWorktree(worktreePath); err != nil {
+		// This is a non-fatal error, just a warning
+		fmt.Printf("Warning: failed to create default .grove/rules file: %v\n", err)
+	}
+
 	// State management: ensure the worktree knows which plan it's associated with.
 	groveDir := filepath.Join(worktreePath, ".grove")
 	if err := os.MkdirAll(groveDir, 0755); err == nil {
@@ -470,6 +476,12 @@ func PrepareEcosystemWorktree(ctx context.Context, gitRoot, worktreeName, planNa
 		}
 
 		fmt.Printf("    ✓ Created worktree on branch %s\n", worktreeName)
+
+		// Automatically create a default .grove/rules file
+		if err := runCxResetInWorktree(targetPath); err != nil {
+			// This is a non-fatal error, just a warning
+			fmt.Printf("    Warning: failed to create default .grove/rules file: %v\n", err)
+		}
 	}
 
 	// Generate a go.work file in the ecosystem directory
@@ -509,6 +521,28 @@ func PrepareEcosystemWorktree(ctx context.Context, gitRoot, worktreeName, planNa
 
 	fmt.Printf("✓ Ecosystem worktree created at %s\n", ecosystemDir)
 	return ecosystemDir, nil
+}
+
+// runCxResetInWorktree executes `cx reset` in the specified directory.
+func runCxResetInWorktree(worktreePath string) error {
+	// Try `cx reset` first
+	cmd := exec.Command("cx", "reset", "--force")
+	cmd.Dir = worktreePath
+	if err := cmd.Run(); err == nil {
+		fmt.Printf("    ✓ Initialized .grove/rules in worktree: %s\n", worktreePath)
+		return nil
+	}
+
+	// Fallback to `grove cx reset`
+	cmd = exec.Command("grove", "cx", "reset", "--force")
+	cmd.Dir = worktreePath
+	if err := cmd.Run(); err == nil {
+		fmt.Printf("    ✓ Initialized .grove/rules in worktree: %s\n", worktreePath)
+		return nil
+	}
+
+	// If both fail, return an error
+	return fmt.Errorf("failed to run 'cx reset' or 'grove cx reset' in worktree")
 }
 
 // generateGoWorkspaceForEcosystem creates a go.work file for the ecosystem worktree
