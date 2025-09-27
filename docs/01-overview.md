@@ -1,18 +1,8 @@
-# Introduction to Grove Flow
+# Overview
 
-Grove Flow is a command-line tool for orchestrating multi-step development workflows using Large Language Models (LLMs). It transforms complex, manual development processes into structured, automated workflows that can be executed consistently and reliably.
+`grove-flow` is a command-line tool for orchestrating multi-step development workflows using Large Language Models (LLMs). It formalizes complex processes into structured **Plans** composed of individual **Jobs**, all defined in plain Markdown files. This tool is a core component of the experimental Grove ecosystem, designed to make it easier to direct coding agents.
 
-## What Grove Flow Solves
-
-Modern software development involves many complex, multi-step processes that are difficult to automate and coordinate. Whether you're implementing a new feature, conducting a code review, or planning a system migration, these workflows typically involve:
-
-- Multiple discrete tasks with dependencies between them
-- Switching between different tools and contexts
-- Maintaining state and context across long-running processes
-- Coordinating work that spans different time periods
-- Ensuring consistency and quality across repeated processes
-
-Grove Flow addresses these challenges by providing a structured approach to defining, executing, and managing complex workflows as code.
+The central assumption is that agents like Claude Code are highly effective at executing well-defined, scoped tasks but can "go off the rails" during long, open-ended sessions. `grove-flow` mitigates this by transforming development into a more measured process: a detailed plan is created (often with a planning-focused LLM like Gemini), and then an execution-focused agent is tasked with completing discrete jobs from that plan. This "Plan -> Agent -> Review" cycle creates a traceable, repeatable, and more predictable workflow, all managed through editor-independent, version-controlled text files.
 
 ## Core Concept: Plans and Jobs
 

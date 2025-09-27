@@ -4,11 +4,11 @@ description: LLM job orchestration in Markdown for complex development workflows
 category: "Developer Tools"
 enabled: true
 sections:
-  - name: introduction
+  - name: overview
     order: 1
-    output: 01-introduction.md
+    output: 01-overview.md
     prompt: prompts/introduction.md
-    title: Introduction
+    title: Overview
   - name: core-concepts
     order: 2
     output: 02-core-concepts.md
