@@ -10,6 +10,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -195,7 +196,7 @@ func runRebaseMainOntoWorktree(plan *orchestration.Plan, featureBranch string) e
 		// Ecosystem Plan
 		fmt.Printf("Detected ecosystem plan with %d repositories.\n", len(plan.Config.Repos))
 		ctx := context.Background()
-		localWorkspaces, err := orchestration.DiscoverLocalWorkspaces(ctx)
+		localWorkspaces, err := workspace.DiscoverLocalWorkspaces(ctx)
 		if err != nil {
 			return fmt.Errorf("could not discover local workspaces for source repositories: %w", err)
 		}
@@ -470,7 +471,7 @@ func findAllPossibleRebaseLocations(gitRoot string, plan *orchestration.Plan) ([
 	// 2. Add all source repositories (main checkouts) for ecosystem plans.
 	if plan.Config != nil && len(plan.Config.Repos) > 0 {
 		ctx := context.Background()
-		localWorkspaces, err := orchestration.DiscoverLocalWorkspaces(ctx)
+		localWorkspaces, err := workspace.DiscoverLocalWorkspaces(ctx)
 		if err == nil {
 			for _, repoName := range plan.Config.Repos {
 				if path, ok := localWorkspaces[repoName]; ok {

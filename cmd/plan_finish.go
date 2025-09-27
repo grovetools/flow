@@ -2,9 +2,7 @@ package cmd
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +12,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	gexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -41,104 +40,6 @@ type cleanupItem struct {
 	IsEnabled   bool
 }
 
-// discoverLocalWorkspaces uses grove ws list to find local repository paths
-func discoverLocalWorkspaces(ctx context.Context) (map[string]string, error) {
-	// Check for test environment override first (same as in worktree_setup.go)
-	if mockData := os.Getenv("GROVE_TEST_WORKSPACES"); mockData != "" {
-		var workspaces []orchestration.WorkspaceInfo
-		if err := json.Unmarshal([]byte(mockData), &workspaces); err != nil {
-			return make(map[string]string), nil
-		}
-		
-		result := make(map[string]string)
-		for _, ws := range workspaces {
-			// Find the main worktree - prioritize is_main:true, but fall back to path matching
-			mainPath := ""
-			for _, wt := range ws.Worktrees {
-				if wt.IsMain {
-					mainPath = wt.Path
-					break
-				}
-			}
-			
-			// If no is_main:true found, use path matching as fallback
-			if mainPath == "" && len(ws.Worktrees) > 0 {
-				// Normalize paths for comparison (handle case sensitivity)
-				wsPathNorm := strings.ToLower(filepath.Clean(ws.Path))
-				for _, wt := range ws.Worktrees {
-					wtPathNorm := strings.ToLower(filepath.Clean(wt.Path))
-					if wsPathNorm == wtPathNorm {
-						mainPath = wt.Path
-						break
-					}
-				}
-				// If still no match, use the first worktree as a last resort
-				if mainPath == "" {
-					mainPath = ws.Worktrees[0].Path
-				}
-			}
-			
-			if mainPath != "" {
-				result[ws.Name] = mainPath
-			}
-		}
-		return result, nil
-	}
-	
-	cmd := exec.CommandContext(ctx, "grove", "ws", "list", "--json")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		// If grove ws list fails, return empty map (fallback to standard submodule behavior)
-		return make(map[string]string), nil
-	}
-
-	output := stdout.Bytes()
-	var workspaces []orchestration.WorkspaceInfo
-	if err := json.Unmarshal(output, &workspaces); err != nil {
-		// Log stderr for better debugging if parsing fails
-		return nil, fmt.Errorf("failed to parse grove ws list output: %w. Stderr: %s", err, stderr.String())
-	}
-
-	// Build a map from workspace name to main worktree path
-	result := make(map[string]string)
-	for _, ws := range workspaces {
-		// Find the main worktree - prioritize is_main:true, but fall back to path matching
-		mainPath := ""
-		for _, wt := range ws.Worktrees {
-			if wt.IsMain {
-				mainPath = wt.Path
-				break
-			}
-		}
-		
-		// If no is_main:true found, use path matching as fallback
-		if mainPath == "" && len(ws.Worktrees) > 0 {
-			// Normalize paths for comparison (handle case sensitivity)
-			wsPathNorm := strings.ToLower(filepath.Clean(ws.Path))
-			for _, wt := range ws.Worktrees {
-				wtPathNorm := strings.ToLower(filepath.Clean(wt.Path))
-				if wsPathNorm == wtPathNorm {
-					mainPath = wt.Path
-					break
-				}
-			}
-			// If still no match, use the first worktree as a last resort
-			if mainPath == "" {
-				mainPath = ws.Worktrees[0].Path
-			}
-		}
-		
-		if mainPath != "" {
-			result[ws.Name] = mainPath
-		}
-	}
-
-	return result, nil
-}
 
 // parseGitmodules reads and parses the .gitmodules file
 func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
@@ -189,7 +90,7 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 	}
 	
 	// Discover local workspaces
-	localWorkspaces, err := discoverLocalWorkspaces(ctx)
+	localWorkspaces, err := workspace.DiscoverLocalWorkspaces(ctx)
 	if err != nil {
 		// If we can't discover workspaces, we can't clean up linked worktrees
 		// but this shouldn't fail the entire cleanup
@@ -480,7 +381,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 					submodulePaths, _ := parseGitmodules(gitmodulesPath)
 					
 					// Discover local workspaces
-					localWorkspaces, _ := discoverLocalWorkspaces(context.Background())
+					localWorkspaces, _ := workspace.DiscoverLocalWorkspaces(context.Background())
 					
 					// Delete branches and worktrees from repositories
 					for submoduleName, submodulePath := range submodulePaths {
@@ -866,7 +767,7 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 	fmt.Printf("    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
 	
 	// Discover local workspace paths
-	localWorkspaces, err := discoverLocalWorkspaces(ctx)
+	localWorkspaces, err := workspace.DiscoverLocalWorkspaces(ctx)
 	if err != nil {
 		fmt.Printf("    Warning: failed to discover local workspaces: %v\n", err)
 	}

@@ -1,18 +1,18 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 
 // runPlanOpen implements the open command.
 func runPlanOpen(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-
 	var planDir string
 	if len(args) > 0 {
 		planDir = args[0]
@@ -67,9 +67,30 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf(errorMsg.String())
 	}
 
-	// Define the command to run in the tmux session
-	commandToRun := []string{"flow", "plan", "status", "-t"}
+	// The new core logic:
+	logger := grovelogging.NewPrettyLogger()
+	logger.InfoPretty(fmt.Sprintf("Delegating to 'grove ws open %s'...", worktreeName))
 
-	// Call the shared session management function
-	return CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeName, commandToRun)
+	// Check if grove-meta is available
+	if _, err := exec.LookPath("grove"); err != nil {
+		return fmt.Errorf("failed to open workspace session: 'grove' command not found in PATH. Please ensure grove-meta is installed")
+	}
+
+	execCmd := exec.Command("grove", "ws", "open", worktreeName)
+	execCmd.Stdin = os.Stdin
+	execCmd.Stdout = os.Stdout
+	execCmd.Stderr = os.Stderr
+
+	err = execCmd.Run()
+	if err != nil {
+		// Provide more informative error message
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 127 {
+				return fmt.Errorf("failed to open workspace session for '%s': 'grove' command not found. Please ensure grove-meta is installed and in your PATH", worktreeName)
+			}
+			return fmt.Errorf("failed to open workspace session for '%s': command exited with code %d. Please ensure the workspace exists. You can create it with: grove ws create %s", worktreeName, exitErr.ExitCode(), worktreeName)
+		}
+		return fmt.Errorf("failed to open workspace session for '%s'. Please ensure grove-meta is installed and the workspace exists. Error: %w", worktreeName, err)
+	}
+	return nil
 }

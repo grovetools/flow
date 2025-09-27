@@ -11,6 +11,7 @@ import (
 
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 )
 
 // AgentRunner defines the interface for running agents.
@@ -185,19 +186,24 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// Get git root for worktree creation
 	gitRoot, err := GetGitRootSafe(plan.Directory)
 	if err != nil {
-		// Fallback to plan directory if not in a git repo
 		gitRoot = plan.Directory
 	}
 
-	// Use the new centralized worktree preparation function with repos filter
-	var repos []string
-	if plan.Config != nil && len(plan.Config.Repos) > 0 {
-		repos = plan.Config.Repos
+	// The new logic:
+	opts := workspace.PrepareOptions{
+		GitRoot:      gitRoot,
+		WorktreeName: job.Worktree,
+		BranchName:   job.Worktree, // Convention: branch name matches worktree name
+		PlanName:     plan.Name,
 	}
-	return PrepareWorktreeWithRepos(ctx, gitRoot, job.Worktree, plan.Name, repos)
+
+	if plan.Config != nil && len(plan.Config.Repos) > 0 {
+		opts.Repos = plan.Config.Repos
+	}
+
+	return workspace.Prepare(ctx, opts)
 }
 
 // runAgentInWorktree executes the agent in the worktree context.

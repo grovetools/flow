@@ -11,6 +11,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -55,8 +56,6 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 		return fmt.Errorf("agent job must have a 'worktree' specified for interactive launch")
 	}
 
-	ctx := context.Background()
-
 	// Load full config to get agent args
 	fullCfg, err := loadFullConfig()
 	if err != nil {
@@ -77,15 +76,22 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 		}
 	}
 
-	// Prepare the worktree at the git root using the new centralized function
-	worktreePath, err := orchestration.PrepareWorktree(ctx, gitRoot, job.Worktree, plan.Name)
-	if err != nil {
-		return fmt.Errorf("failed to prepare worktree: %w", err)
+	// Prepare the worktree (same as in host mode)
+	ctx := context.Background()
+	opts := workspace.PrepareOptions{
+		GitRoot:      gitRoot,
+		WorktreeName: job.Worktree,
+		BranchName:   job.Worktree,
+		PlanName:     plan.Name,
 	}
 
-	// Configure Canopy hooks for the worktree
-	if err := configureCanopyHooks(worktreePath); err != nil {
-		return fmt.Errorf("failed to configure canopy hooks: %w", err)
+	if plan.Config != nil && len(plan.Config.Repos) > 0 {
+		opts.Repos = plan.Config.Repos
+	}
+
+	worktreePath, err := workspace.Prepare(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
 
 	// Debug: Log config status
@@ -287,24 +293,23 @@ func runPlanLaunchHost(jobPath string) error {
 	var workDir string
 	if job.Worktree != "" {
 		// A worktree is specified, so create/use it on the host
-		wm := git.NewWorktreeManager()
 		ctx := context.Background()
-		worktreePath, err := wm.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "interactive-host")
+		opts := workspace.PrepareOptions{
+			GitRoot:      gitRoot,
+			WorktreeName: job.Worktree,
+			BranchName:   job.Worktree,
+			PlanName:     plan.Name,
+		}
+
+		if plan.Config != nil && len(plan.Config.Repos) > 0 {
+			opts.Repos = plan.Config.Repos
+		}
+
+		worktreePath, err := workspace.Prepare(ctx, opts)
 		if err != nil {
 			return fmt.Errorf("failed to prepare host worktree: %w", err)
 		}
 		workDir = worktreePath
-
-		// Set up Go workspace if this is a Go project
-		if err := orchestration.SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
-			// Log a warning but don't fail the job, as this is a convenience feature
-			fmt.Printf("Warning: failed to setup Go workspace in worktree: %v\n", err)
-		}
-
-		// Configure Canopy hooks for the worktree
-		if err := configureCanopyHooks(worktreePath); err != nil {
-			return fmt.Errorf("failed to configure canopy hooks: %w", err)
-		}
 	} else {
 		// No worktree, use the main git repository root
 		workDir = gitRoot

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
@@ -776,13 +777,17 @@ func launchWorktreeSession(ctx context.Context, worktreeName string, agentComman
 	}
 
 	// Prepare the worktree using the centralized helper
-	worktreePath, err := orchestration.PrepareWorktree(ctx, gitRoot, worktreeName, worktreeName)
+	opts := workspace.PrepareOptions{
+		GitRoot:      gitRoot,
+		WorktreeName: worktreeName,
+		BranchName:   worktreeName,
+		PlanName:     worktreeName,
+	}
+
+	worktreePath, err := workspace.Prepare(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("failed to prepare worktree: %w", err)
 	}
-
-	// Configure Canopy hooks
-	_ = configureCanopyHooks(worktreePath)
 
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)

@@ -11,6 +11,7 @@ import (
 	"github.com/mattsolo1/grove-core/config"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
@@ -180,11 +181,6 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			workDir = currentPath
 		} else {
 			// A worktree is specified, so prepare it using the centralized helper with repos filter
-			var repos []string
-			if plan.Config != nil && len(plan.Config.Repos) > 0 {
-				repos = plan.Config.Repos
-			}
-			
 			// If gitRoot is already a worktree path, we need to find the actual git root
 			// by going up the directory tree to find the main repository
 			actualGitRoot := gitRoot
@@ -196,7 +192,19 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 				}
 			}
 			
-			worktreePath, err := PrepareWorktreeWithRepos(ctx, actualGitRoot, job.Worktree, plan.Name, repos)
+			// The new logic:
+			opts := workspace.PrepareOptions{
+				GitRoot:      actualGitRoot,
+				WorktreeName: job.Worktree,
+				BranchName:   job.Worktree,
+				PlanName:     plan.Name,
+			}
+
+			if plan.Config != nil && len(plan.Config.Repos) > 0 {
+				opts.Repos = plan.Config.Repos
+			}
+
+			worktreePath, err := workspace.Prepare(ctx, opts)
 			if err != nil {
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()

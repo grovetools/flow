@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mattsolo1/grove-context v0.2.27
-	github.com/mattsolo1/grove-core v0.2.13
+	github.com/mattsolo1/grove-core v0.3.0
 	github.com/mattsolo1/grove-gemini v0.0.13
 	github.com/mattsolo1/grove-tend v0.2.18
 	github.com/mattsolo1/grove-tmux v0.0.13
