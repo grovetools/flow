@@ -2,6 +2,10 @@
 title: Grove Flow
 description: LLM job orchestration in Markdown for complex development workflows.
 category: "Developer Tools"
+readme:
+  template: docs/README.md.tpl
+  output: README.md
+  source_section: overview
 enabled: true
 sections:
   - name: overview

@@ -2,103 +2,67 @@
 
 <img src="https://github.com/user-attachments/assets/6b0cc785-c87f-4a34-a1ac-f083b5f3f8ac" width="70%" />
 
-### LLM job orchestration in Markdown
+### LLM job orchestration in Markdown for complex development workflows.
 
-`grove-flow` is a CLI tool for orchestrating multi-step tasks using LLMs. It allows you to define, run, and manage workflows (called "Plans") as a series of Markdown files, leveraging isolated worktrees for safe, reproducible execution.
+## Overview
 
-Whether you're scaffolding a new feature, running a series of code modifications, or building an emergent plan with AI, `grove-flow` provides the structure and tooling to automate your development process.
+<!-- DOCGEN:OVERVIEW:START -->
 
-## Core Concepts
+# Grove Flow: LLM Job Orchestration in Markdown
 
--   **Plan**: A directory containing a sequence of dependent jobs that define a complete workflow. It's a living document of a complex task.
--   **Job**: A single step in a plan, defined in a Markdown file. Jobs have a type, status, dependencies, and a prompt for an LLM or shell.
--   **Executor**: The engine that runs a job. `grove-flow` has different executors for different job types (e.g., `agent` for code generation, `shell` for commands, `oneshot` for analysis).
--   **Worktree Isolation**: `agent` and `interactive_agent` jobs run in dedicated Git worktrees, keeping your main branch clean until you're ready to merge changes.
+Grove Flow is a command-line interface designed for orchestrating multi-step tasks that leverage Large Language Models (LLMs). It provides a structured way to define, execute, and manage complex development workflows—referred to as "Plans"—using a series of Markdown files. By integrating with Git worktrees, it ensures that each task runs in an isolated environment, keeping the main development branch clean and stable.
 
-## Features
+Whether you are scaffolding a new feature, automating a series of code modifications, or building an emergent plan with AI assistance, Grove Flow offers the tooling to formalize and automate your development process.
 
--   🌳 **Multi-Step Plans**: Define complex workflows with dependencies between jobs.
--   🤖 **Diverse Job Types**:
-    -   `agent`: Long-running, stateful AI agent for code generation in an isolated worktree.
-    -   `interactive_agent`: Human-in-the-loop agent sessions in `tmux`.
-    -   `oneshot`: Quick, single-shot LLM prompts for analysis or generation.
-    -   `shell`: Execute arbitrary shell commands in a worktree or the main repo.
-    -   `chat`: Manage conversational, multi-turn AI interactions as markdown files.
--   🌿 **Git Integration**: Automatic creation and management of Git worktrees for safe, isolated execution.
--   ✨ **Emergent Workflows**: Use the `generate_jobs` output type to have an AI create the next steps in your plan dynamically.
--   💻 **Interactive Tooling**: A beautiful terminal UI (`flow plan status -t`) and an interactive step-by-step wizard (`flow plan step`) for managing plans.
--   🚀 **Powerful CLI**: A comprehensive set of commands to `init`, `add`, `run`, `status`, `graph`, and `launch` your plans and jobs.
--   📄 **Templating**: Create and reuse job templates for common tasks.
--   💬 **Chat-to-Code**: Start with an idea in a markdown `chat` file, and seamlessly `extract` parts into a formal plan.
+<!-- placeholder for animated gif -->
 
-## Quick Start
+## Key Features
 
-1.  **Initialize a new plan:**
-    ```bash
-    flow plan init new-feature --with-worktree
-    ```
-    This creates a `plans/new-feature` directory, sets its default worktree to `new-feature`, and makes it the active plan.
+Grove Flow is built around a set of core concepts that facilitate structured, reproducible, and automated workflows.
 
-2.  **Add your first job:**
-    ```bash
-    # Since 'new-feature' is active, we don't need to specify the directory
-    flow plan add --title "Scaffold API" --type agent -p "Create a new Go API endpoint for users with basic CRUD operations."
-    ```
-    This creates `01-scaffold-api.md` inside your plan. The job will run in the `new-feature` worktree.
+*   **Job Orchestration**: Define complex workflows as a sequence of jobs with dependencies. Grove Flow manages the execution order, ensuring that each step runs only after its prerequisites are met. This allows for the creation of sophisticated, multi-stage tasks that can combine AI-driven code generation, shell command execution, and manual review steps.
 
-3.  **Check the plan status with the interactive TUI:**
-    ```bash
-    flow plan status -t
-    ```
-    ![Status TUI](https://raw.githubusercontent.com/mattsolo1/assets/main/grove-flow/status-tui.png)
+*   **Plan Management**: Plans are living documents that capture the entire lifecycle of a complex task. They are organized in directories and defined by Markdown files, making them easy to read, version control, and share. The `flow plan` command provides a comprehensive suite of tools to `init`, `add`, `run`, `status`, `graph`, and `finish` your plans. An interactive terminal UI (`flow plan status -t`) offers a visual way to manage and monitor plan progress.
 
-4.  **Run the job:**
-    ```bash
-    flow plan run
-    ```
-    This runs the next available job in the active plan. The agent will spin up in its isolated worktree and begin implementing the feature.
+*   **Chat Integration**: Start with an idea in a conversational format and seamlessly transition to a structured plan. The `flow chat` command allows you to manage multi-turn AI interactions as Markdown files. As a conversation evolves, you can use the `flow plan extract` command to convert specific LLM responses into formal, executable jobs within a plan, bridging the gap between exploration and implementation.
 
-## Usage
+*   **Recipes and Templates**: Accelerate common workflows using reusable components. Job templates provide pre-defined structures for frequent tasks, while plan recipes offer complete scaffolds for entire projects, such as implementing a new feature or generating documentation. You can use built-in recipes or create your own to standardize processes across your team.
 
-### `flow plan`
+## Ecosystem Integration
 
-The `plan` subcommand is the core of `grove-flow`, used to manage multi-step workflows.
+Grove Flow is a component of the larger Grove ecosystem and is designed to work in concert with other specialized tools to provide a cohesive development environment.
 
--   `flow plan init <dir>`: Create a new plan directory.
--   `flow plan add [dir]`: Add a new job to a plan.
--   `flow plan run [job-file]`: Run the next job, a specific job, or all jobs (`--all`).
--   `flow plan status [dir]`: View the plan's status. Use `-t` for the TUI.
--   `flow plan graph [dir]`: Visualize the dependency graph as Mermaid, DOT, or ASCII.
--   `flow plan launch <job-file>`: Launch an `interactive_agent` job in a `tmux` session.
--   `flow plan step [dir]`: Step through plan execution interactively.
--   `flow plan set <dir>` / `current` / `unset`: Manage the active plan for the current context.
+*   **Grove Meta-CLI (`grove`)**: The central tool for managing the entire ecosystem. `grove` handles the installation, updating, and version management of all Grove binaries, including `grove-flow`. It ensures that the correct versions of all tools are available in your `PATH`.
 
-### `flow chat`
+*   **Grove Context (`cx`)**: Manages the context provided to LLMs. `grove-flow` uses `grove-context` to automatically gather relevant source code and documentation based on predefined rules (`.grove/rules`). This ensures that AI agents have the necessary information to perform their tasks accurately, without requiring manual context gathering for each job.
 
-The `chat` subcommand manages conversational workflows, perfect for ideation and refinement before creating a formal plan.
+*   **Grove Hooks (`grove-hooks`)**: Provides a system for tracking and responding to events within the ecosystem. `grove-flow` integrates with `grove-hooks` to emit events for job lifecycle stages, such as when a job starts, completes, or fails. This enables external systems, dashboards, or notification services to monitor the progress of orchestration plans.
 
--   `flow chat -s <file.md>`: Turn a markdown file into a runnable chat job.
--   `flow chat run [title]`: Run the next LLM turn for one or more pending chats.
--   `flow chat list`: List all chat jobs in your configured `chat_directory`.
+## Installation
 
-## Configuration
-
-`grove-flow` is configured via your project's `grove.yml` file under the `flow` key.
-
-```yaml
-# .grove/config.yml or grove.yml
-flow:
-  # Directory where plans are stored. Supports variables like ${REPO}.
-  plans_directory: ./plans
-  
-  # Directory for chat-based jobs.
-  chat_directory: ./chats
-
-  # Default container for agent jobs.
-  target_agent_container: grove-agent-ide
-  
-  # Default model for oneshot jobs.
-  oneshot_model: gemini-2.5-pro
+Install via the Grove meta-CLI:
+```bash
+grove install flow
 ```
 
-Plan-specific defaults (like `model` or `worktree`) can be set in a `.grove-plan.yml` file inside a plan directory.
+Verify installation:
+```bash
+flow version
+```
+
+Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github.com/mattsolo1/grove-meta/blob/main/docs/02-installation.md) if you don't have it installed.
+
+<!-- DOCGEN:OVERVIEW:END -->
+
+## Documentation
+
+See the [documentation](docs/) for detailed usage instructions:
+- [Overview](docs/01-overview.md) - Introduction and key concepts
+- [Examples](docs/02-examples.md) - Common usage patterns and tutorials
+- [Managing Plans](docs/03-managing-plans.md) - Creating and organizing workflow plans
+- [Working with Jobs](docs/04-working-with-jobs.md) - Different job types and their uses
+- [Chats](docs/05-chats.md) - Interactive AI conversations
+- [Recipes and Templates](docs/06-recipes-and-templates.md) - Using pre-built workflows
+- [Configuration](docs/07-configuration.md) - Configuring Grove Flow
+- [Command Reference](docs/08-command-reference.md) - Complete CLI reference
+
