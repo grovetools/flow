@@ -44,15 +44,8 @@ sections:
     output: 08-command-reference.md
     prompt: prompts/08-command-reference.md
     title: Command Reference
-  - name: changelog
-    order: 9
-    output: 09-changelog.md
-    prompt: prompts/09-changelog.md
-    title: Changelog
 settings:
-  model: gemini-2.5-pro
   output_dir: docs
-  regeneration_mode: scratch
   rules_file: docs.rules
   structured_output_file: pkg/docs/docs.json
   system_prompt: default
