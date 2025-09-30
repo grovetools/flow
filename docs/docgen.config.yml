@@ -6,6 +6,7 @@ readme:
   template: docs/README.md.tpl
   output: README.md
   source_section: overview
+  strip_lines: 2
 enabled: true
 sections:
   - name: overview
