@@ -1,7 +1,3 @@
-<img src="https://github.com/user-attachments/assets/6b0cc785-c87f-4a34-a1ac-f083b5f3f8ac" width="70%" />
-
-### {{ .Description }}
-
 <!-- DOCGEN:OVERVIEW:START -->
 <!-- This content will be automatically replaced by generated documentation -->
 <!-- DOCGEN:OVERVIEW:END -->

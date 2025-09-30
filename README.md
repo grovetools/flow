@@ -1,8 +1,6 @@
-<img src="https://github.com/user-attachments/assets/6b0cc785-c87f-4a34-a1ac-f083b5f3f8ac" width="70%" />
-
-### LLM job orchestration in Markdown for complex development workflows.
-
 <!-- DOCGEN:OVERVIEW:START -->
+
+<img src="./images/grove-flow-readme.svg" width="60%" />
 
 Grove Flow is a command-line interface designed for orchestrating multi-step tasks that leverage Large Language Models (LLMs). It provides a structured way to define, execute, and manage complex development workflows—referred to as "Plans"—using a series of Markdown files. By integrating with Git worktrees, it ensures that each task runs in an isolated environment, keeping the main development branch clean and stable.
 
