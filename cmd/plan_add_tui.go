@@ -5,19 +5,68 @@ import (
 	"io"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
+// Custom keymap extending the base
+type addTuiKeyMap struct {
+	keymap.Base
+	Next     key.Binding
+	Prev     key.Binding
+	Submit   key.Binding
+	Toggle   key.Binding
+}
+
+var addKeys = addTuiKeyMap{
+	Base: keymap.NewBase(),
+	Next: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "next field"),
+	),
+	Prev: key.NewBinding(
+		key.WithKeys("shift+tab"),
+		key.WithHelp("shift+tab", "prev field"),
+	),
+	Submit: key.NewBinding(
+		key.WithKeys("ctrl+s"),
+		key.WithHelp("ctrl+s", "submit"),
+	),
+	Toggle: key.NewBinding(
+		key.WithKeys(" "),
+		key.WithHelp("space", "toggle"),
+	),
+}
+
+// ShortHelp returns key bindings to show in the mini help view
+func (k addTuiKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Base.Up, k.Base.Down, k.Next, k.Submit, k.Base.Help, k.Base.Quit}
+}
+
+// FullHelp returns keybindings for the expanded help view
+func (k addTuiKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Base.Up, k.Base.Down, k.Next, k.Prev},
+		{k.Toggle, k.Submit, k.Base.Help, k.Base.Quit},
+	}
+}
+
 type tuiModel struct {
 	plan       *orchestration.Plan // To access existing jobs and defaults
+	keys       addTuiKeyMap
+	helpModel  help.Model
 	focusIndex int
 	quitting   bool
 	err        error
+	showHelp   bool
 
 	// Form inputs
 	titleInput    textinput.Model
@@ -86,7 +135,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	}
 
 	if index == m.Index() {
-		fmt.Fprint(w, lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(str))
+		fmt.Fprint(w, theme.DefaultTheme.Selected.Render(str))
 	} else {
 		fmt.Fprint(w, str)
 	}
@@ -129,11 +178,11 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 	str = fmt.Sprintf("%s %s %s", cursor, checkbox, displayText)
 
 	if index == m.Index() {
-		fmt.Fprint(w, lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(str))
+		fmt.Fprint(w, theme.DefaultTheme.Selected.Render(str))
 	} else if (*d.selectedDeps)[depItem.job.ID] {
-		fmt.Fprint(w, lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(str))
+		fmt.Fprint(w, theme.DefaultTheme.Bold.Render(str))
 	} else {
-		fmt.Fprint(w, lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(str))
+		fmt.Fprint(w, theme.DefaultTheme.Muted.Render(str))
 	}
 }
 
@@ -165,8 +214,8 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.jobTypeList.SetShowHelp(false)
 	m.jobTypeList.SetShowPagination(true)
 	m.jobTypeList.FilterInput.Prompt = "🔍 "
-	m.jobTypeList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
-	m.jobTypeList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	m.jobTypeList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	m.jobTypeList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 
 	// 3. Dependencies Input (List with checkboxes)
 	m.selectedDeps = make(map[string]bool)
@@ -182,8 +231,8 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.depList.SetShowHelp(false)
 	m.depList.SetShowPagination(true)
 	m.depList.FilterInput.Prompt = "🔍 "
-	m.depList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
-	m.depList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	m.depList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	m.depList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 
 	// 4. Template Input (list)
 	templateManager := orchestration.NewTemplateManager()
@@ -201,8 +250,8 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.templateList.SetShowHelp(false)
 	m.templateList.SetShowPagination(true)
 	m.templateList.FilterInput.Prompt = "🔍 "
-	m.templateList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
-	m.templateList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	m.templateList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	m.templateList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 
 	// 5. Worktree Input (textinput with default)
 	m.worktreeInput = textinput.New()
@@ -231,8 +280,8 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.modelList.SetShowHelp(false)
 	m.modelList.SetShowPagination(true)
 	m.modelList.FilterInput.Prompt = "🔍 "
-	m.modelList.FilterInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("147"))
-	m.modelList.FilterInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	m.modelList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	m.modelList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 	m.modelList.Select(defaultIndex)
 
 	// 7. Prompt Input (textarea)
@@ -428,43 +477,36 @@ func (m tuiModel) View() string {
 
 	var b strings.Builder
 
-	focusedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	headingStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("147"))
+	focusedStyle := theme.DefaultTheme.Selected
+	headingStyle := theme.DefaultTheme.Bold
 
 	// Smaller width for two-column layout
-	borderStyle := lipgloss.NewStyle().
+	borderStyle := theme.DefaultTheme.Box.
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
 		Padding(0, 1).
 		Width(45).
 		Height(8)
-	focusedBorderStyle := lipgloss.NewStyle().
+	focusedBorderStyle := theme.DefaultTheme.Selected.
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("205")).
 		Padding(0, 1).
 		Width(45).
 		Height(8)
 
 	// Create a stylish header
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("63")).
+	headerStyle := theme.DefaultTheme.Header.
 		Padding(0, 2).
 		MarginBottom(1).
 		Align(lipgloss.Center).
 		Width(95)
 
-	planNameStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("219")).
-		Background(lipgloss.Color("63"))
+	planNameStyle := theme.DefaultTheme.Selected.
+		Background(theme.DefaultTheme.Header.GetBackground())
 
 	// Build the header content
 	if m.plan != nil && m.plan.Name != "" {
-		header := lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("63")).Render("✨ Add New Job to ") +
+		header := theme.DefaultTheme.Header.Render("✨ Add New Job to ") +
 			planNameStyle.Render(m.plan.Name) +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("63")).Render(" ✨")
+			theme.DefaultTheme.Header.Render(" ✨")
 		b.WriteString(headerStyle.Render(header))
 	} else {
 		b.WriteString(headerStyle.Render("✨ Add New Job ✨"))
@@ -555,8 +597,7 @@ func (m tuiModel) View() string {
 	b.WriteString(row4)
 
 	// Help text
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+	helpStyle := theme.DefaultTheme.Muted.
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderTop(true).
 		BorderForeground(lipgloss.Color("240")).

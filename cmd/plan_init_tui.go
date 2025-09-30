@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
@@ -51,6 +55,52 @@ func runPlanInitTUI(plansDir string, initialCmd *PlanInitCmd) (*PlanInitCmd, err
 	return finalCmd, nil
 }
 
+type planInitTUIKeyMap struct {
+	keymap.Base
+	Toggle     key.Binding
+	NextField  key.Binding
+	PrevField  key.Binding
+	Submit     key.Binding
+	Back       key.Binding
+}
+
+func newPlanInitTUIKeyMap() planInitTUIKeyMap {
+	return planInitTUIKeyMap{
+		Base: keymap.NewBase(),
+		Toggle: key.NewBinding(
+			key.WithKeys(" "),
+			key.WithHelp("space", "toggle checkbox"),
+		),
+		NextField: key.NewBinding(
+			key.WithKeys("tab", "j"),
+			key.WithHelp("tab/j", "next field"),
+		),
+		PrevField: key.NewBinding(
+			key.WithKeys("shift+tab", "k"),
+			key.WithHelp("shift+tab/k", "prev field"),
+		),
+		Submit: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "submit form"),
+		),
+		Back: key.NewBinding(
+			key.WithKeys("q"),
+			key.WithHelp("q", "back to plan list"),
+		),
+	}
+}
+
+func (k planInitTUIKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.NextField, k.PrevField, k.Toggle, k.Submit, k.Back}
+}
+
+func (k planInitTUIKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.NextField, k.PrevField, k.Toggle},
+		{k.Submit, k.Back, k.Help},
+	}
+}
+
 // planInitTUIModel represents the state of the new plan creation TUI.
 type planInitTUIModel struct {
 	plansDirectory   string
@@ -69,6 +119,8 @@ type planInitTUIModel struct {
 	containerInput   textinput.Model
 	extractFromInput textinput.Model
 	openSession      bool
+	keyMap           planInitTUIKeyMap
+	help             help.Model
 }
 
 // newPlanInitTUIModel creates a new model for the plan initialization form.
@@ -130,6 +182,10 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	// Set default values for checkboxes
 	m.withWorktree = true
 	m.openSession = true
+
+	// Initialize keymap and help
+	m.keyMap = newPlanInitTUIKeyMap()
+	m.help = help.New(newPlanInitTUIKeyMap())
 
 	// Apply pre-populated values from CLI flags (this may override defaults)
 	m.prePopulate(initialCmd)
@@ -198,27 +254,30 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
+		switch {
+		case key.Matches(msg, m.keyMap.Back):
 			// Go back to the plan list view
 			listModel := newPlanListTUIModel(m.plansDirectory)
 			return listModel, loadPlansListCmd(m.plansDirectory)
 
-		case "tab", "down":
+		case key.Matches(msg, m.keyMap.Help):
+			m.help.ShowAll = !m.help.ShowAll
+
+		case key.Matches(msg, m.keyMap.NextField):
 			m.focusIndex++
 			if m.focusIndex > 7 {
 				m.focusIndex = 0
 			}
 			return m.updateFocus(), nil
 
-		case "shift+tab", "up":
+		case key.Matches(msg, m.keyMap.PrevField):
 			m.focusIndex--
 			if m.focusIndex < 0 {
 				m.focusIndex = 7
 			}
 			return m.updateFocus(), nil
 
-		case " ": // Toggle checkboxes
+		case key.Matches(msg, m.keyMap.Toggle):
 			switch m.focusIndex {
 			case 2: // With Worktree
 				m.withWorktree = !m.withWorktree
@@ -229,7 +288,7 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.openSession = !m.openSession
 			}
 
-		case "enter":
+		case key.Matches(msg, m.keyMap.Submit):
 			if m.focusIndex == 7 { // Submit on the last field
 				// Validate input
 				if m.nameInput.Value() == "" {
@@ -289,9 +348,16 @@ func (m planInitTUIModel) updateFocus() planInitTUIModel {
 }
 
 func (m planInitTUIModel) View() string {
+	if m.help.ShowAll {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			theme.DefaultTheme.Header.Render("✨ Create New Plan - Help"),
+			m.help.View(),
+		)
+	}
+
 	var b strings.Builder
 
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render("✨ Create New Plan"))
+	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render("✨ Create New Plan"))
 	b.WriteString("\n\n")
 
 	// Render fields
@@ -311,9 +377,9 @@ func (m planInitTUIModel) View() string {
 	b.WriteString(renderTextInput("Extract from File:", m.extractFromInput, m.focusIndex == 7))
 
 	// Submit button
-	submitStyle := lipgloss.NewStyle().Padding(1, 2)
+	submitStyle := theme.DefaultTheme.Box.Padding(1, 2)
 	if m.focusIndex == 7 {
-		submitStyle = submitStyle.Background(lipgloss.Color("205")).Foreground(lipgloss.Color("255"))
+		submitStyle = theme.DefaultTheme.Selected.Background(theme.DefaultTheme.Colors.SelectedBackground)
 	}
 	b.WriteString("\n")
 	b.WriteString(submitStyle.Render("[ Submit ]"))
@@ -322,33 +388,35 @@ func (m planInitTUIModel) View() string {
 	// Error message
 	if m.err != nil {
 		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(m.err.Error()))
+		b.WriteString(theme.DefaultTheme.Error.Render(m.err.Error()))
 	}
 
+	// Help footer
+	helpText := m.help.View()
 	b.WriteString("\n")
-	b.WriteString("tab: next field • space: toggle • enter: submit • q: back")
+	b.WriteString(helpText)
 
 	return b.String()
 }
 
 // Helper rendering functions for consistency
 func renderTextInput(label string, input textinput.Model, focused bool) string {
-	style := lipgloss.NewStyle().Padding(0, 1)
+	style := theme.DefaultTheme.Bold.Padding(0, 1)
 	if focused {
-		style = style.Foreground(lipgloss.Color("205"))
+		style = theme.DefaultTheme.Selected
 	}
 	return style.Render(fmt.Sprintf("%-25s %s", label, input.View())) + "\n"
 }
 
 func renderTextInputDisabled(label, value string) string {
-	style := lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("240"))
+	style := theme.DefaultTheme.Muted.Padding(0, 1)
 	return style.Render(fmt.Sprintf("%-25s %s", label, value)) + "\n"
 }
 
 func renderList(label string, l list.Model, focused bool) string {
-	style := lipgloss.NewStyle().Padding(0, 1)
+	style := theme.DefaultTheme.Bold.Padding(0, 1)
 	if focused {
-		style = style.Foreground(lipgloss.Color("205"))
+		style = theme.DefaultTheme.Selected
 	}
 	
 	// Handle different item types
@@ -374,9 +442,9 @@ func renderCheckbox(label string, checked bool, focused bool) string {
 	if checked {
 		box = "[x]"
 	}
-	style := lipgloss.NewStyle().Padding(0, 1)
+	style := theme.DefaultTheme.Bold.Padding(0, 1)
 	if focused {
-		style = style.Foreground(lipgloss.Color("205"))
+		style = theme.DefaultTheme.Selected
 	}
 	return style.Render(fmt.Sprintf("%-25s %s", label, box)) + "\n"
 }

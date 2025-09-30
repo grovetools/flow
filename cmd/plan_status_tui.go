@@ -9,10 +9,76 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
+
+type statusTUIKeyMap struct {
+	keymap.Base
+	Select        key.Binding
+	ToggleMulti   key.Binding
+	Archive       key.Binding
+	Edit          key.Binding
+	Run           key.Binding
+	SetCompleted  key.Binding
+	AddJob        key.Binding
+	ToggleSummaries key.Binding
+}
+
+func newStatusTUIKeyMap() statusTUIKeyMap {
+	return statusTUIKeyMap{
+		Base: keymap.NewBase(),
+		Select: key.NewBinding(
+			key.WithKeys(" "),
+			key.WithHelp("space", "select/deselect"),
+		),
+		ToggleMulti: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "toggle multi-select"),
+		),
+		Archive: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "archive job"),
+		),
+		Edit: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "edit job"),
+		),
+		Run: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "run job"),
+		),
+		SetCompleted: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "mark completed"),
+		),
+		AddJob: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "add job"),
+		),
+		ToggleSummaries: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "toggle summaries"),
+		),
+	}
+}
+
+func (k statusTUIKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.Select, k.Run, k.Help, k.Quit}
+}
+
+func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Select, k.ToggleMulti},
+		{k.Run, k.Edit, k.SetCompleted, k.AddJob},
+		{k.Archive, k.ToggleSummaries, k.Help, k.Quit},
+	}
+}
 
 // Status TUI model represents the state of the TUI
 type statusTUIModel struct {
@@ -25,82 +91,30 @@ type statusTUIModel struct {
 	selected      map[string]bool // For multi-select
 	multiSelect   bool
 	showSummaries bool   // Toggle for showing job summaries
-	showHelp      bool   // Show extended help
 	statusSummary string
 	err           error
 	width         int
 	height        int
 	confirmArchive bool  // Show archive confirmation
 	planDir       string // Store plan directory for refresh
+	keyMap        statusTUIKeyMap
+	help          help.Model
 }
 
-// Key bindings
-type keyMap struct {
-	Up            string
-	Down          string
-	Left          string
-	Right         string
-	Select        string
-	ToggleMulti   string
-	Archive       string
-	Edit          string
-	Run           string
-	SetCompleted  string
-	AddJob        string
-	ToggleSummaries string
-	Quit          string
-	Help          string
-}
 
-var keys = keyMap{
-	Up:           "k",
-	Down:         "j",
-	Left:         "h",
-	Right:        "l",
-	Select:       " ",
-	ToggleMulti:  "m",
-	Archive:      "a",
-	Edit:         "e",
-	Run:          "r",
-	SetCompleted: "c",
-	AddJob:       "n",
-	ToggleSummaries: "s",
-	Quit:         "q",
-	Help:         "?",
-}
-
-// Styles
-var (
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("205"))
-
-	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("205"))
-
-	cursorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214"))  // Orange for current item
-	
-	indicatorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("205"))  // Pink for indicators
-
-	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-
-	depAnnotationStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))  // Darker grey for dependency annotations
-
-	statusStyles = map[orchestration.JobStatus]lipgloss.Style{
-		orchestration.JobStatusCompleted:    lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
-		orchestration.JobStatusRunning:      lipgloss.NewStyle().Foreground(lipgloss.Color("11")),
-		orchestration.JobStatusFailed:       lipgloss.NewStyle().Foreground(lipgloss.Color("9")),
-		orchestration.JobStatusBlocked:      lipgloss.NewStyle().Foreground(lipgloss.Color("9")),
-		orchestration.JobStatusNeedsReview:  lipgloss.NewStyle().Foreground(lipgloss.Color("12")),
-		orchestration.JobStatusPendingUser:  lipgloss.NewStyle().Foreground(lipgloss.Color("14")),
-		orchestration.JobStatusPendingLLM:   lipgloss.NewStyle().Foreground(lipgloss.Color("11")),
-		orchestration.JobStatusPending:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+// getStatusStyles returns theme-based styles for job statuses
+func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
+	return map[orchestration.JobStatus]lipgloss.Style{
+		orchestration.JobStatusCompleted:    theme.DefaultTheme.Success,
+		orchestration.JobStatusRunning:      theme.DefaultTheme.Warning,
+		orchestration.JobStatusFailed:       theme.DefaultTheme.Error,
+		orchestration.JobStatusBlocked:      theme.DefaultTheme.Error,
+		orchestration.JobStatusNeedsReview:  theme.DefaultTheme.Info,
+		orchestration.JobStatusPendingUser:  theme.DefaultTheme.Info,
+		orchestration.JobStatusPendingLLM:   theme.DefaultTheme.Warning,
+		orchestration.JobStatusPending:      theme.DefaultTheme.Muted,
 	}
-)
+}
 
 // Initialize the model
 func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph) statusTUIModel {
@@ -119,6 +133,8 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		statusSummary: formatStatusSummary(plan),
 		confirmArchive: false,
 		planDir:       plan.Directory,
+		keyMap:        newStatusTUIKeyMap(),
+		help:          help.New(newStatusTUIKeyMap()),
 	}
 }
 
@@ -275,26 +291,29 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					job := m.jobs[m.cursor]
 					return m, func() tea.Msg { return archiveConfirmedMsg{job: job} }
 				}
-			case "n", "N", "ctrl+c", keys.Quit:
+			case "n", "N", "ctrl+c", "q":
 				m.confirmArchive = false
 			}
 			return m, nil
 		}
-		switch msg.String() {
-		case "ctrl+c", keys.Quit:
+		switch {
+		case key.Matches(msg, m.keyMap.Quit):
 			return m, tea.Quit
 
-		case keys.Up:
+		case key.Matches(msg, m.keyMap.Help):
+			m.help.ShowAll = !m.help.ShowAll
+
+		case key.Matches(msg, m.keyMap.Up):
 			if m.cursor > 0 {
 				m.cursor--
 			}
 
-		case keys.Down:
+		case key.Matches(msg, m.keyMap.Down):
 			if m.cursor < len(m.jobs)-1 {
 				m.cursor++
 			}
 
-		case keys.Select:
+		case key.Matches(msg, m.keyMap.Select):
 			if m.multiSelect && m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				if m.selected[job.ID] {
@@ -304,31 +323,31 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case keys.ToggleMulti:
+		case key.Matches(msg, m.keyMap.ToggleMulti):
 			m.multiSelect = !m.multiSelect
 			if !m.multiSelect {
 				// Clear selections when exiting multi-select mode
 				m.selected = make(map[string]bool)
 			}
 
-		case keys.Archive:
+		case key.Matches(msg, m.keyMap.Archive):
 			if m.cursor < len(m.jobs) {
 				m.confirmArchive = true
 			}
 
-		case keys.Edit:
+		case key.Matches(msg, m.keyMap.Edit):
 			if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				return m, editJob(job)
 			}
 
-		case keys.Run:
+		case key.Matches(msg, m.keyMap.Run):
 			if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				return m, runJob(m.plan.Directory, job)
 			}
 
-		case keys.SetCompleted:
+		case key.Matches(msg, m.keyMap.SetCompleted):
 			if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				return m, tea.Sequence(
@@ -337,7 +356,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 			}
 
-		case keys.AddJob:
+		case key.Matches(msg, m.keyMap.AddJob):
 			if m.multiSelect && len(m.selected) > 0 {
 				// Get selected job IDs for dependencies
 				var deps []string
@@ -354,11 +373,8 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, addJobWithDependencies(m.plan.Directory, nil)
 			}
 		
-		case keys.ToggleSummaries:
+		case key.Matches(msg, m.keyMap.ToggleSummaries):
 			m.showSummaries = !m.showSummaries
-		
-		case keys.Help:
-			m.showHelp = !m.showHelp
 		}
 	}
 
@@ -371,20 +387,18 @@ func (m statusTUIModel) View() string {
 		return fmt.Sprintf("Error: %v\n", m.err)
 	}
 	
-	// Show help popup if active (centered overlay)
-	if m.showHelp {
-		helpView := m.renderHelp()
-		return lipgloss.NewStyle().
-			Width(m.width).
-			Height(m.height).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(helpView)
+	// Show help if active
+	if m.help.ShowAll {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			theme.DefaultTheme.Header.Render("📈 Plan Status - Help"),
+			m.help.View(),
+		)
 	}
 
 	var s strings.Builder
 
 	// Title and summary
-	s.WriteString(titleStyle.Render(fmt.Sprintf("Plan: %s", m.plan.Name)))
+	s.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Plan: %s", m.plan.Name)))
 	s.WriteString("\n\n")
 	s.WriteString(m.statusSummary)
 	s.WriteString("\n")
@@ -398,15 +412,16 @@ func (m statusTUIModel) View() string {
 		if m.cursor < len(m.jobs) {
 			job := m.jobs[m.cursor]
 			s.WriteString("\n")
-			s.WriteString(lipgloss.NewStyle().
+			s.WriteString(theme.DefaultTheme.Warning.
 				Bold(true).
-				Foreground(lipgloss.Color("226")).
 				Render(fmt.Sprintf("Archive '%s'? (y/n)", job.Filename)))
 			s.WriteString("\n")
 		}
 	} else {
 		// Help text
-		s.WriteString(m.renderHelp())
+		helpText := m.help.View()
+		s.WriteString("\n")
+		s.WriteString(helpText)
 	}
 
 	return s.String()
@@ -474,28 +489,28 @@ func (m statusTUIModel) renderJobTree() string {
 		styledJobContent := jobContent
 		if i == m.cursor && m.selected[job.ID] {
 			// Both cursor and selected - use cursor style
-			styledJobContent = cursorStyle.Render(jobContent)
+			styledJobContent = theme.DefaultTheme.Selected.Render(jobContent)
 		} else if i == m.cursor {
 			// Just cursor
-			styledJobContent = cursorStyle.Render(jobContent)
+			styledJobContent = theme.DefaultTheme.Selected.Render(jobContent)
 		} else if m.selected[job.ID] {
 			// Just selected  
-			styledJobContent = selectedStyle.Render(jobContent)
+			styledJobContent = theme.DefaultTheme.Accent.Render(jobContent)
 		}
 		
 		// Build indicators separately with their own style
 		indicators := ""
 		if m.selected[job.ID] {
-			indicators += indicatorStyle.Render(" ◆")
+			indicators += theme.DefaultTheme.Accent.Render(" ◆")
 		}
 		if i == m.cursor {
-			indicators += indicatorStyle.Render(" ◀")
+			indicators += theme.DefaultTheme.Selected.Render(" ◀")
 		}
 		
 		// Style the dependency annotation in grey
 		styledDepAnnotation := ""
 		if depAnnotation != "" {
-			styledDepAnnotation = depAnnotationStyle.Render(depAnnotation)
+			styledDepAnnotation = theme.DefaultTheme.Muted.Render(depAnnotation)
 		}
 		
 		// Combine all parts
@@ -503,8 +518,7 @@ func (m statusTUIModel) renderJobTree() string {
 		
 		// Add summary on a new line if toggled on and available
 		if m.showSummaries && job.Summary != "" {
-			summaryStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("111")). // Soft blue
+			summaryStyle := theme.DefaultTheme.Info.
 				PaddingLeft(indent*4 + 6) // indent level * 4 spaces + tree chars + space
 			
 			fullLine += "\n" + summaryStyle.Render("↳ "+job.Summary)
@@ -519,8 +533,9 @@ func (m statusTUIModel) renderJobTree() string {
 
 // getStatusIcon returns the icon for a job status
 func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
+	statusStyles := getStatusStyles()
 	icon := ""
-	style := lipgloss.NewStyle()
+	style := theme.DefaultTheme.Bold
 	
 	switch status {
 	case orchestration.JobStatusCompleted:
@@ -546,105 +561,14 @@ func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 		style = statusStyles[status]
 	default:
 		icon = "⏳"
-		style = statusStyles[orchestration.JobStatusPending]
+		if s, ok := statusStyles[orchestration.JobStatusPending]; ok {
+			style = s
+		}
 	}
 	
 	return style.Render(icon)
 }
 
-// renderHelp renders the help text
-func (m statusTUIModel) renderHelp() string {
-	if m.showHelp {
-		// Create styles matching grove-context
-		boxStyle := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("241")).
-			Padding(2, 3).
-			Width(70).
-			Align(lipgloss.Center)
-		
-		titleStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("12")).
-			MarginBottom(1)
-		
-		columnStyle := lipgloss.NewStyle().
-			Width(30).
-			MarginRight(4)
-		
-		keyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("34")).
-			Bold(true)
-		
-		// Navigation column
-		navItems := []string{
-			"Navigation:",
-			"",
-			keyStyle.Render("j/k") + " - Move up/down",
-			keyStyle.Render("h/l") + " - Move left/right",
-			"",
-			"Selection:",
-			"",
-			keyStyle.Render("m") + " - Toggle multi-select",
-			keyStyle.Render("Space") + " - Select/deselect",
-			"",
-			"Actions:",
-			"",
-			keyStyle.Render("r") + " - Run job(s)",
-			keyStyle.Render("e") + " - Edit job file",
-			keyStyle.Render("c") + " - Mark completed",
-			keyStyle.Render("s") + " - Toggle summaries",
-			keyStyle.Render("a") + " - Archive job",
-			keyStyle.Render("n") + " - Add new job",
-			"",
-			keyStyle.Render("q") + " - Quit",
-			keyStyle.Render("?") + " - Toggle this help",
-		}
-		
-		// Legend column
-		legendItems := []string{
-			"Legend:",
-			"",
-			"Job Status:",
-			"  ✓ - Completed",
-			"  ⚡ - Running",
-			"  ✗ - Failed",
-			"  🚫 - Blocked",
-			"  👁 - Needs Review",
-			"  💬 - Pending User",
-			"  🤖 - Pending LLM",
-			"  ⏳ - Pending",
-			"",
-			"Symbols:",
-			"  ◀ - Current item",
-			"  ◆ - Selected item",
-			"  ↳ - Job summary",
-			"",
-			"Other:",
-			"  ⚠️ - Multiple dependencies",
-		}
-		
-		// Render columns
-		navColumn := columnStyle.Render(strings.Join(navItems, "\n"))
-		legendColumn := columnStyle.Copy().MarginRight(0).Render(strings.Join(legendItems, "\n"))
-		
-		// Combine columns
-		content := lipgloss.JoinHorizontal(lipgloss.Top, navColumn, legendColumn)
-		
-		// Add title and wrap in box
-		title := titleStyle.Render("Flow Plan Status - Help")
-		fullContent := lipgloss.JoinVertical(lipgloss.Center, title, content)
-		
-		return boxStyle.Render(fullContent)
-	}
-	
-	// Minimal help - just show navigation and help key
-	help := []string{
-		"j/k: up/down • r: run • c: complete • s: summaries • ?: help • q: quit",
-	}
-	
-	return helpStyle.Render(strings.Join(help, "\n"))
-}
 
 // Command functions that return tea.Cmd
 
