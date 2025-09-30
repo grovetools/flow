@@ -1,6 +1,6 @@
 <!-- DOCGEN:OVERVIEW:START -->
 
-<img src="./docs/images/grove-flow-readme.svg" width="60%" />
+<img src="docs/images/grove-flow-readme.svg" width="60%" />
 
 Grove Flow is a command-line interface designed for orchestrating multi-step tasks that leverage Large Language Models (LLMs). It provides a structured way to define, execute, and manage complex development workflows—referred to as "Plans"—using a series of Markdown files. By integrating with Git worktrees, it ensures that each task runs in an isolated environment, keeping the main development branch clean and stable.
 
@@ -58,3 +58,17 @@ See the [documentation](docs/) for detailed usage instructions:
 - [Configuration](docs/07-configuration.md) - Configuring Grove Flow
 - [Command Reference](docs/08-command-reference.md) - Complete CLI reference
 
+
+<!-- DOCGEN:TOC:START -->
+
+See the [documentation](docs/) for detailed usage instructions:
+- [Overview](docs/01-overview.md) - <img src="./images/grove-flow-readme.svg" width="60%" />
+- [Examples](docs/02-examples.md) - This document provides a series of practical examples to demonstrate the capa...
+- [Managing Plans](docs/03-managing-plans.md) - Grove Flow uses "Plans" to organize and execute multi-step workflows. A plan ...
+- [Working with Jobs](docs/04-working-with-jobs.md) - Jobs are the fundamental units of work in a Grove Flow plan. Each job is a si...
+- [Chats](docs/05-chats.md) - Grove Flow includes a dedicated set of commands for managing conversational w...
+- [Recipes and Templates](docs/06-recipes-and-templates.md) - Grove Flow uses recipes and templates to automate common workflows and promot...
+- [Configuration](docs/07-configuration.md) - Grove Flow is configured through YAML files at both the project and plan leve...
+- [Command Reference](docs/08-command-reference.md) - This document provides a comprehensive reference for the `flow` command-line ...
+
+<!-- DOCGEN:TOC:END -->

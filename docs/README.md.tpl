@@ -14,3 +14,6 @@ See the [documentation](docs/) for detailed usage instructions:
 - [Configuration](docs/07-configuration.md) - Configuring Grove Flow
 - [Command Reference](docs/08-command-reference.md) - Complete CLI reference
 
+
+<!-- DOCGEN:TOC:START -->
+<!-- DOCGEN:TOC:END -->
