@@ -207,12 +207,11 @@ func (m finishTUIModel) View() string {
 	// Add congratulatory message if branch is merged
 	if m.branchIsMerged {
 		congratsStyle := theme.DefaultTheme.Success.
-			Background(theme.DefaultTheme.Colors.Green).
 			Bold(true).
 			Padding(0, 1).
 			Margin(0, 0, 1, 0)
 		
-		congratsMessage := "🎉 Great job! Your branch has been successfully merged/rebased into main! 🎉"
+		congratsMessage := "🎉 Branch successfully merged into main! 🎉"
 		b.WriteString("\n")
 		b.WriteString("  ") // Left padding
 		b.WriteString(congratsStyle.Render(congratsMessage))
