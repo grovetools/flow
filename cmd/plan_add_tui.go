@@ -48,14 +48,28 @@ var addKeys = addTuiKeyMap{
 
 // ShortHelp returns key bindings to show in the mini help view
 func (k addTuiKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Base.Up, k.Base.Down, k.Next, k.Submit, k.Base.Help, k.Base.Quit}
+	return []key.Binding{k.Next, k.Toggle, k.Submit, k.Help, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view
 func (k addTuiKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Base.Up, k.Base.Down, k.Next, k.Prev},
-		{k.Toggle, k.Submit, k.Base.Help, k.Base.Quit},
+		{
+			key.NewBinding(key.WithHelp("", "Navigation")),
+			k.Next,
+			k.Prev,
+			key.NewBinding(key.WithHelp("↑/↓, j/k", "Navigate lists")),
+			key.NewBinding(key.WithHelp("/", "Search lists")),
+			key.NewBinding(key.WithHelp("esc", "Clear search")),
+		},
+		{
+			key.NewBinding(key.WithHelp("", "Actions")),
+			k.Toggle,
+			key.NewBinding(key.WithHelp("enter", "Confirm & Next")),
+			k.Submit,
+			k.Help,
+			k.Quit,
+		},
 	}
 }
 
@@ -66,7 +80,6 @@ type tuiModel struct {
 	focusIndex int
 	quitting   bool
 	err        error
-	showHelp   bool
 
 	// Form inputs
 	titleInput    textinput.Model
@@ -189,6 +202,11 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 func initialModel(plan *orchestration.Plan) tuiModel {
 	m := tuiModel{
 		plan: plan,
+		keys: addKeys,
+		helpModel: help.NewBuilder().
+			WithKeys(addKeys).
+			WithTitle("✨ Add New Job - Help").
+			Build(),
 	}
 
 	// 1. Title Input (textinput)
@@ -303,12 +321,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle keyboard input
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// If help is visible, it consumes all key presses
+		if m.helpModel.ShowAll {
+			m.helpModel.Toggle()
+			return m, nil
+		}
+
 		// Check if we're in a text input field that should capture all keys
 		inTextInput := m.focusIndex == 0 || m.focusIndex == 2 || m.focusIndex == 6
 		// Check if we're in a list that needs arrow keys
 		inList := m.focusIndex == 1 || m.focusIndex == 3 || m.focusIndex == 4 || m.focusIndex == 5
 
 		switch msg.String() {
+		case "?":
+			m.helpModel.Toggle()
+			return m, nil
+
 		case "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
@@ -475,6 +503,12 @@ func (m tuiModel) View() string {
 		return "Aborted.\n"
 	}
 
+	// If help is visible, show it and return
+	if m.helpModel.ShowAll {
+		m.helpModel.SetSize(95, m.jobTypeList.Height()+m.templateList.Height()+m.modelList.Height()+10) // estimate height
+		return m.helpModel.View()
+	}
+
 	var b strings.Builder
 
 	focusedStyle := theme.DefaultTheme.Selected
@@ -603,7 +637,7 @@ func (m tuiModel) View() string {
 		BorderForeground(lipgloss.Color("240")).
 		Padding(1, 0, 0, 0)
 
-	helpText := "tab: next field • shift+tab: prev field • ↑/↓/j/k: navigate lists • /: search • esc: clear • space: select • a: all • enter: confirm • ctrl+c: quit"
+	helpText := m.helpModel.View()
 	b.WriteString("\n")
 	b.WriteString(helpStyle.Render(helpText))
 
