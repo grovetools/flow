@@ -93,7 +93,7 @@ func (k addTuiKeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithHelp("enter", "Confirm & Next")),
 			key.NewBinding(key.WithHelp("c", "Quick chat setup")),
 			key.NewBinding(key.WithHelp("a", "Quick agent setup")),
-			key.NewBinding(key.WithHelp("s", "Save and exit")),
+			key.NewBinding(key.WithHelp("ctrl+s", "Save and exit")),
 			key.NewBinding(key.WithHelp(":wq", "Vim save and exit")),
 			k.Submit,
 			k.Help,
@@ -233,6 +233,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m := tuiModel{
 		plan: plan,
 		keys: addKeys,
+		unfocused: false, // Start in insert mode (focused)
 		helpModel: help.NewBuilder().
 			WithKeys(addKeys).
 			WithTitle("✨ Add New Job - Help").
@@ -595,7 +596,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case "s":
+		case "ctrl+s":
 			// Save - extract values and quit (works in both normal and insert mode)
 			m.extractValues()
 			m.quitting = true
