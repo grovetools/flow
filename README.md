@@ -2,19 +2,19 @@
 
 <img src="docs/images/grove-flow-readme.svg" width="60%" />
 
-Grove Flow is a command-line tool for orchestrating multi-step LLM-assisted tasks using Markdown files as definitions. It uses Git worktrees facilitate parallel development. The tool is intended for formalizing and automating development workflows that involve code generation or analysis by LLMs. `grove-flow` is designed for stateful, local development workflows that wrap tools like Anthropic's Claude Code and the Google's Gemini API discrete, dependent steps.
+Grove Flow is a command-line tool that executes multi-step workflows defined in Markdown files. It uses Git worktrees to facilitate parallel development and is intended for formalizing development workflows that involve code generation or analysis by LLMs.
 
 <!-- placeholder for animated gif -->
 
 ## Key Features
 
-*   **Job Orchestration**: Defines a workflow as a sequence of jobs in Markdown files with dependencies specified in YAML frontmatter. The tool manages the execution order, running jobs only after their prerequisites are met. It supports executing shell commands and running LLM-driven code generation tasks.
+*   **Job Orchestration**: Executes a sequence of jobs defined in Markdown files. The execution order is determined by dependencies specified in each file's YAML frontmatter. It supports running shell commands and LLM-driven tasks.
 
-*   **Plan Management**: A "Plan" is a directory of Markdown files that represents a task. The `flow plan` command includes subcommands to `init`, `add`, `run`, `status`, `graph`, and `finish` these plans. A terminal interface (`flow plan status -t`) is available for managing and monitoring plan progress.
+*   **Plan Management**: A "Plan" is a directory of Markdown files that represents a task. The `flow plan` command includes subcommands to `init`, `add`, `run`, `status`, `graph`, and `finish` these plans. A terminal interface (`flow plan status -t`) is available for monitoring plan progress.
 
-*   **Chat Integration**: The `flow chat` command manages multi-turn conversations with an LLM, stored as a single Markdown file. The `flow plan extract` command can then be used to convert sections of the conversation into executable jobs within a plan.
+*   **Chat Integration**: The `flow chat` command manages conversational logs with an LLM, stored as a single Markdown file. The `flow plan extract` command can then be used to convert sections of the conversation into executable jobs within a plan.
 
-*   **Recipes and Templates**: The `flow plan init --recipe` command scaffolds a new plan from a predefined directory structure of job files. The `flow plan add --template` command creates a new job from a predefined Markdown file.
+*   **Recipes and Templates**: The `flow plan init --recipe` command creates a new plan from a predefined directory structure of job files. The `flow plan add --template` command creates a new job from a predefined Markdown file.
 
 ## How It Works
 
