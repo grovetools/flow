@@ -28,6 +28,10 @@ type statusTUIKeyMap struct {
 	SetCompleted  key.Binding
 	AddJob        key.Binding
 	ToggleSummaries key.Binding
+	GoToTop       key.Binding
+	GoToBottom    key.Binding
+	PageUp        key.Binding
+	PageDown      key.Binding
 }
 
 func newStatusTUIKeyMap() statusTUIKeyMap {
@@ -65,18 +69,54 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "toggle summaries"),
 		),
+		GoToTop: key.NewBinding(
+			key.WithKeys("g"),
+			key.WithHelp("gg", "go to top"),
+		),
+		GoToBottom: key.NewBinding(
+			key.WithKeys("G"),
+			key.WithHelp("G", "go to bottom"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("ctrl+u"),
+			key.WithHelp("ctrl+u", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("ctrl+d", "page down"),
+		),
 	}
 }
 
 func (k statusTUIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Select, k.Run, k.Help, k.Quit}
+	// Return empty to show no help in footer - all help goes in popup
+	return []key.Binding{}
 }
 
 func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Select, k.ToggleMulti},
-		{k.Run, k.Edit, k.SetCompleted, k.AddJob},
-		{k.Archive, k.ToggleSummaries, k.Help, k.Quit},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Navigation")),
+			k.Up,
+			k.Down,
+			k.GoToTop,
+			k.GoToBottom,
+			k.PageUp,
+			k.PageDown,
+			k.Select,
+			k.ToggleMulti,
+			k.ToggleSummaries,
+		},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
+			k.Run,
+			k.Edit,
+			k.SetCompleted,
+			k.AddJob,
+			k.Archive,
+			k.Help,
+			k.Quit,
+		},
 	}
 }
 
@@ -99,6 +139,7 @@ type statusTUIModel struct {
 	planDir       string // Store plan directory for refresh
 	keyMap        statusTUIKeyMap
 	help          help.Model
+	waitingForG   bool   // Track if we're waiting for second 'g' in 'gg' sequence
 }
 
 
@@ -296,6 +337,22 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Handle 'gg' sequence for going to top
+		if msg.String() == "g" {
+			if m.waitingForG {
+				// Second 'g' - go to top
+				m.cursor = 0
+				m.waitingForG = false
+			} else {
+				// First 'g' - wait for second
+				m.waitingForG = true
+			}
+			return m, nil
+		} else {
+			// Any other key resets the 'g' waiting state
+			m.waitingForG = false
+		}
+
 		switch {
 		case key.Matches(msg, m.keyMap.Quit):
 			return m, tea.Quit
@@ -311,6 +368,25 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Down):
 			if m.cursor < len(m.jobs)-1 {
 				m.cursor++
+			}
+
+		case key.Matches(msg, m.keyMap.GoToBottom):
+			if len(m.jobs) > 0 {
+				m.cursor = len(m.jobs) - 1
+			}
+
+		case key.Matches(msg, m.keyMap.PageUp):
+			pageSize := 10
+			m.cursor -= pageSize
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+
+		case key.Matches(msg, m.keyMap.PageDown):
+			pageSize := 10
+			m.cursor += pageSize
+			if m.cursor >= len(m.jobs) {
+				m.cursor = len(m.jobs) - 1
 			}
 
 		case key.Matches(msg, m.keyMap.Select):
@@ -397,31 +473,53 @@ func (m statusTUIModel) View() string {
 
 	var s strings.Builder
 
-	// Title and summary
-	s.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Plan: %s", m.plan.Name)))
+	// Title and summary with left margin
+	leftMargin := "  "
+	s.WriteString(leftMargin + theme.DefaultTheme.Header.Render(fmt.Sprintf("Plan: %s", m.plan.Name)))
 	s.WriteString("\n\n")
-	s.WriteString(m.statusSummary)
-	s.WriteString("\n")
+	
+	// Add left margin to status summary lines
+	summaryLines := strings.Split(m.statusSummary, "\n")
+	for _, line := range summaryLines {
+		if line != "" {
+			s.WriteString(leftMargin + line)
+		}
+		s.WriteString("\n")
+	}
 
-	// Job tree
-	s.WriteString(m.renderJobTree())
-	s.WriteString("\n")
+	// Job tree with left margin
+	jobTreeContent := m.renderJobTree()
+	jobTreeLines := strings.Split(jobTreeContent, "\n")
+	for _, line := range jobTreeLines {
+		if line != "" {
+			s.WriteString(leftMargin + line)
+		}
+		s.WriteString("\n")
+	}
 
 	// Show confirmation dialog if needed
 	if m.confirmArchive {
 		if m.cursor < len(m.jobs) {
 			job := m.jobs[m.cursor]
 			s.WriteString("\n")
-			s.WriteString(theme.DefaultTheme.Warning.
+			s.WriteString(leftMargin + theme.DefaultTheme.Warning.
 				Bold(true).
 				Render(fmt.Sprintf("Archive '%s'? (y/n)", job.Filename)))
 			s.WriteString("\n")
 		}
 	} else {
-		// Help text
+		// Help text with left margin
 		helpText := m.help.View()
-		s.WriteString("\n")
-		s.WriteString(helpText)
+		if helpText != "" {
+			s.WriteString("\n")
+			helpLines := strings.Split(helpText, "\n")
+			for _, line := range helpLines {
+				if line != "" {
+					s.WriteString(leftMargin + line)
+				}
+				s.WriteString("\n")
+			}
+		}
 	}
 
 	return s.String()
@@ -436,7 +534,6 @@ func stripANSI(str string) string {
 // renderJobTree renders the job tree with proper indentation
 func (m statusTUIModel) renderJobTree() string {
 	var s strings.Builder
-	s.WriteString(fmt.Sprintf("📁 %s\n", m.plan.Name))
 
 	// Use the pre-calculated parent and indent information
 	rendered := make(map[string]bool)

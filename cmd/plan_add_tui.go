@@ -24,6 +24,10 @@ type addTuiKeyMap struct {
 	Prev     key.Binding
 	Submit   key.Binding
 	Toggle   key.Binding
+	GoTop    key.Binding
+	GoBottom key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
 }
 
 var addKeys = addTuiKeyMap{
@@ -44,11 +48,28 @@ var addKeys = addTuiKeyMap{
 		key.WithKeys(" "),
 		key.WithHelp("space", "toggle"),
 	),
+	GoTop: key.NewBinding(
+		key.WithKeys("gg", "home"),
+		key.WithHelp("gg/home", "go to top"),
+	),
+	GoBottom: key.NewBinding(
+		key.WithKeys("G", "end"),
+		key.WithHelp("G/end", "go to bottom"),
+	),
+	PageUp: key.NewBinding(
+		key.WithKeys("ctrl+u", "pgup"),
+		key.WithHelp("ctrl+u/pgup", "page up"),
+	),
+	PageDown: key.NewBinding(
+		key.WithKeys("ctrl+d", "pgdown"),
+		key.WithHelp("ctrl+d/pgdown", "page down"),
+	),
 }
 
 // ShortHelp returns key bindings to show in the mini help view
 func (k addTuiKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Next, k.Toggle, k.Submit, k.Help, k.Quit}
+	// Return just the base help to show the help menu
+	return k.Base.ShortHelp()
 }
 
 // FullHelp returns keybindings for the expanded help view
@@ -59,6 +80,10 @@ func (k addTuiKeyMap) FullHelp() [][]key.Binding {
 			k.Next,
 			k.Prev,
 			key.NewBinding(key.WithHelp("↑/↓, j/k", "Navigate lists")),
+			k.GoTop,
+			k.GoBottom,
+			k.PageUp,
+			k.PageDown,
 			key.NewBinding(key.WithHelp("/", "Search lists")),
 			key.NewBinding(key.WithHelp("esc", "Clear search")),
 		},
@@ -66,6 +91,10 @@ func (k addTuiKeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithHelp("", "Actions")),
 			k.Toggle,
 			key.NewBinding(key.WithHelp("enter", "Confirm & Next")),
+			key.NewBinding(key.WithHelp("c", "Quick chat setup")),
+			key.NewBinding(key.WithHelp("a", "Quick agent setup")),
+			key.NewBinding(key.WithHelp("s", "Save and exit")),
+			key.NewBinding(key.WithHelp(":wq", "Vim save and exit")),
 			k.Submit,
 			k.Help,
 			k.Quit,
@@ -78,6 +107,7 @@ type tuiModel struct {
 	keys       addTuiKeyMap
 	helpModel  help.Model
 	focusIndex int
+	unfocused  bool // Track if we're in unfocused state
 	quitting   bool
 	err        error
 
@@ -211,20 +241,20 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 
 	// 1. Title Input (textinput)
 	m.titleInput = textinput.New()
-	m.titleInput.Placeholder = "Implement User Authentication"
+	m.titleInput.Placeholder = "New job title here"
 	m.titleInput.Focus()
 	m.titleInput.CharLimit = 156
 	m.titleInput.Width = 50
 
 	// 2. Job Type Input (list)
 	jobTypes := []list.Item{
+		item("interactive_agent"),
 		item("agent"),
 		item("oneshot"),
-		item("interactive_agent"),
 		item("shell"),
 		item("chat"),
 	}
-	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 5)
+	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 9)
 	m.jobTypeList.Title = ""
 	m.jobTypeList.SetShowTitle(false)
 	m.jobTypeList.SetShowStatusBar(false)
@@ -241,7 +271,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	for _, job := range plan.Jobs {
 		depItems = append(depItems, dependencyItem{job: job})
 	}
-	m.depList = list.New(depItems, dependencyDelegate{selectedDeps: &m.selectedDeps}, 45, 7)
+	m.depList = list.New(depItems, dependencyDelegate{selectedDeps: &m.selectedDeps}, 45, 11)
 	m.depList.Title = ""
 	m.depList.SetShowTitle(false)
 	m.depList.SetShowStatusBar(false)
@@ -260,7 +290,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	for i, t := range templates {
 		templateItems[i+1] = item(t.Name)
 	}
-	m.templateList = list.New(templateItems, itemDelegate{}, 20, 7)
+	m.templateList = list.New(templateItems, itemDelegate{}, 20, 11)
 	m.templateList.Title = ""
 	m.templateList.SetShowTitle(false)
 	m.templateList.SetShowStatusBar(false)
@@ -290,7 +320,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 			defaultIndex = i
 		}
 	}
-	m.modelList = list.New(modelItems, itemDelegate{}, 20, 6)
+	m.modelList = list.New(modelItems, itemDelegate{}, 20, 10)
 	m.modelList.Title = ""
 	m.modelList.SetShowTitle(false)
 	m.modelList.SetShowStatusBar(false)
@@ -306,13 +336,16 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.promptInput = textarea.New()
 	m.promptInput.Placeholder = "Enter prompt here..."
 	m.promptInput.SetWidth(41)
-	m.promptInput.SetHeight(5)
+	m.promptInput.SetHeight(6)
 
 	return m
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(
+		tea.ClearScreen,
+		textinput.Blink,
+	)
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -328,11 +361,18 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if we're in a text input field that should capture all keys
-		inTextInput := m.focusIndex == 0 || m.focusIndex == 2 || m.focusIndex == 6
+		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 2 || m.focusIndex == 6)
 		// Check if we're in a list that needs arrow keys
-		inList := m.focusIndex == 1 || m.focusIndex == 3 || m.focusIndex == 4 || m.focusIndex == 5
+		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 3 || m.focusIndex == 4 || m.focusIndex == 5)
 
 		switch msg.String() {
+		case "esc", "escape":
+			// ESC unfocuses any focused field (text inputs or lists)
+			m.unfocused = true
+			m.titleInput.Blur()
+			m.worktreeInput.Blur()
+			m.promptInput.Blur()
+			return m, nil
 		case "?":
 			m.helpModel.Toggle()
 			return m, nil
@@ -348,17 +388,132 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
+		case "gg", "home":
+			// Go to top (first field)
+			if inList {
+				// If in a list, go to top of list
+				switch m.focusIndex {
+				case 1: // Job type list
+					m.jobTypeList.Select(0)
+				case 3: // Template list
+					m.templateList.Select(0)
+				case 4: // Dependencies list
+					m.depList.Select(0)
+				case 5: // Model list
+					m.modelList.Select(0)
+				}
+			} else {
+				// Go to first field
+				m.focusIndex = 0
+				return m.updateFocus(), nil
+			}
+			return m, nil
+
+		case "G", "end":
+			// Go to bottom (last field)
+			if inList {
+				// If in a list, go to bottom of list
+				switch m.focusIndex {
+				case 1: // Job type list
+					m.jobTypeList.Select(len(m.jobTypeList.Items()) - 1)
+				case 3: // Template list
+					m.templateList.Select(len(m.templateList.Items()) - 1)
+				case 4: // Dependencies list
+					m.depList.Select(len(m.depList.Items()) - 1)
+				case 5: // Model list
+					m.modelList.Select(len(m.modelList.Items()) - 1)
+				}
+			} else {
+				// Go to last field
+				m.focusIndex = 6
+				return m.updateFocus(), nil
+			}
+			return m, nil
+
+		case "ctrl+u", "pgup":
+			// Page up in lists
+			if inList {
+				switch m.focusIndex {
+				case 1: // Job type list
+					current := m.jobTypeList.Index()
+					newIndex := current - 5
+					if newIndex < 0 {
+						newIndex = 0
+					}
+					m.jobTypeList.Select(newIndex)
+				case 3: // Template list
+					current := m.templateList.Index()
+					newIndex := current - 5
+					if newIndex < 0 {
+						newIndex = 0
+					}
+					m.templateList.Select(newIndex)
+				case 4: // Dependencies list
+					current := m.depList.Index()
+					newIndex := current - 5
+					if newIndex < 0 {
+						newIndex = 0
+					}
+					m.depList.Select(newIndex)
+				case 5: // Model list
+					current := m.modelList.Index()
+					newIndex := current - 5
+					if newIndex < 0 {
+						newIndex = 0
+					}
+					m.modelList.Select(newIndex)
+				}
+			}
+			return m, nil
+
+		case "ctrl+d", "pgdown":
+			// Page down in lists
+			if inList {
+				switch m.focusIndex {
+				case 1: // Job type list
+					current := m.jobTypeList.Index()
+					newIndex := current + 5
+					if newIndex >= len(m.jobTypeList.Items()) {
+						newIndex = len(m.jobTypeList.Items()) - 1
+					}
+					m.jobTypeList.Select(newIndex)
+				case 3: // Template list
+					current := m.templateList.Index()
+					newIndex := current + 5
+					if newIndex >= len(m.templateList.Items()) {
+						newIndex = len(m.templateList.Items()) - 1
+					}
+					m.templateList.Select(newIndex)
+				case 4: // Dependencies list
+					current := m.depList.Index()
+					newIndex := current + 5
+					if newIndex >= len(m.depList.Items()) {
+						newIndex = len(m.depList.Items()) - 1
+					}
+					m.depList.Select(newIndex)
+				case 5: // Model list
+					current := m.modelList.Index()
+					newIndex := current + 5
+					if newIndex >= len(m.modelList.Items()) {
+						newIndex = len(m.modelList.Items()) - 1
+					}
+					m.modelList.Select(newIndex)
+				}
+			}
+			return m, nil
+
 		case "tab":
-			// Tab always moves to next field
+			// Tab moves to next field, preserving unfocused state if already unfocused
 			m.focusIndex++
 			if m.focusIndex > 6 {
 				m.focusIndex = 0
 			}
 			return m.updateFocus(), nil
 
-		case "down":
-			// Down arrow only navigates fields when not in a list
-			if !inList {
+		case "down", "j":
+			// Down arrow and j navigate fields when not in a list or when unfocused, but never interrupt text input
+			if (!inList || m.unfocused) && !inTextInput {
+				// Keep unfocused state when navigating
 				m.focusIndex++
 				if m.focusIndex > 6 {
 					m.focusIndex = 0
@@ -367,20 +522,95 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "shift+tab":
-			// Shift+tab always moves to previous field
+			// Shift+tab moves to previous field, preserving unfocused state if already unfocused
 			m.focusIndex--
 			if m.focusIndex < 0 {
 				m.focusIndex = 6
 			}
 			return m.updateFocus(), nil
 
-		case "up":
-			// Up arrow only navigates fields when not in a list
-			if !inList {
+		case "up", "k":
+			// Up arrow and k navigate fields when not in a list or when unfocused, but never interrupt text input
+			if (!inList || m.unfocused) && !inTextInput {
+				// Keep unfocused state when navigating
 				m.focusIndex--
 				if m.focusIndex < 0 {
 					m.focusIndex = 6
 				}
+				return m.updateFocus(), nil
+			}
+
+		case "left", "h":
+			// Left arrow and h navigate fields when unfocused, but never interrupt text input
+			if m.unfocused && !inTextInput {
+				// Keep unfocused state when navigating
+				m.focusIndex--
+				if m.focusIndex < 0 {
+					m.focusIndex = 6
+				}
+				return m.updateFocus(), nil
+			}
+
+		case "right", "l":
+			// Right arrow and l navigate fields when unfocused, but never interrupt text input
+			if m.unfocused && !inTextInput {
+				// Keep unfocused state when navigating
+				m.focusIndex++
+				if m.focusIndex > 6 {
+					m.focusIndex = 0
+				}
+				return m.updateFocus(), nil
+			}
+
+		case "c":
+			// Quick chat setup - set type to chat and template to chat
+			if m.unfocused {
+				// Set job type to chat
+				for i, listItem := range m.jobTypeList.Items() {
+					if string(listItem.(item)) == "chat" {
+						m.jobTypeList.Select(i)
+						break
+					}
+				}
+				// Set template to chat (find it in the template list)
+				for i, listItem := range m.templateList.Items() {
+					if string(listItem.(item)) == "chat" {
+						m.templateList.Select(i)
+						break
+					}
+				}
+				return m, nil
+			}
+
+		case "a":
+			// Quick agent setup - set type to interactive_agent
+			if m.unfocused {
+				// Set job type to interactive_agent
+				for i, listItem := range m.jobTypeList.Items() {
+					if string(listItem.(item)) == "interactive_agent" {
+						m.jobTypeList.Select(i)
+						break
+					}
+				}
+				return m, nil
+			}
+
+		case "s":
+			// Save - extract values and quit (works in both normal and insert mode)
+			m.extractValues()
+			m.quitting = true
+			return m, tea.Quit
+
+		case ":wq":
+			// Vim-style save and quit
+			m.extractValues()
+			m.quitting = true
+			return m, tea.Quit
+
+		case "i":
+			// Insert mode - refocus current field (like vim)
+			if m.unfocused {
+				m.unfocused = false
 				return m.updateFocus(), nil
 			}
 
@@ -394,10 +624,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			} else if inList {
 				// For lists, enter confirms selection and moves to next field
+				m.unfocused = false
 				m.focusIndex++
 				if m.focusIndex > 6 {
 					m.focusIndex = 0
 				}
+				return m.updateFocus(), nil
+			} else if m.unfocused {
+				// If unfocused, enter refocuses current field
+				m.unfocused = false
 				return m.updateFocus(), nil
 			}
 		}
@@ -441,14 +676,16 @@ func (m tuiModel) updateFocus() tuiModel {
 	m.worktreeInput.Blur()
 	m.promptInput.Blur()
 
-	// Focus the current one
-	switch m.focusIndex {
-	case 0:
-		m.titleInput.Focus()
-	case 2:
-		m.worktreeInput.Focus()
-	case 6:
-		m.promptInput.Focus()
+	// Only focus if not in unfocused state
+	if !m.unfocused {
+		switch m.focusIndex {
+		case 0:
+			m.titleInput.Focus()
+		case 2:
+			m.worktreeInput.Focus()
+		case 6:
+			m.promptInput.Focus()
+		}
 	}
 
 	return m
@@ -511,41 +748,29 @@ func (m tuiModel) View() string {
 
 	var b strings.Builder
 
-	focusedStyle := theme.DefaultTheme.Selected
+	focusedStyle := theme.DefaultTheme.Highlight
 	headingStyle := theme.DefaultTheme.Bold
 
-	// Smaller width for two-column layout
-	borderStyle := theme.DefaultTheme.Box.
+	// Define a consistent base style for all panes.
+	// This has no background and, crucially, no vertical margin, preventing layout shifts.
+	borderStyle := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Border).
 		Padding(0, 1).
 		Width(45).
 		Height(8)
-	focusedBorderStyle := theme.DefaultTheme.Selected.
-		BorderStyle(lipgloss.RoundedBorder()).
-		Padding(0, 1).
-		Width(45).
-		Height(8)
 
-	// Create a stylish header
-	headerStyle := theme.DefaultTheme.Header.
-		Padding(0, 2).
-		MarginBottom(1).
-		Align(lipgloss.Center).
-		Width(95)
+	// Unfocused style - fainter orange border
+	unfocusedBorderStyle := borderStyle.Copy().
+		BorderForeground(lipgloss.Color("#CC8052")) // Fainter version of orange
 
-	planNameStyle := theme.DefaultTheme.Selected.
-		Background(theme.DefaultTheme.Header.GetBackground())
+	// The focused style uses a bright highlighted border color and bold border.
+	// This provides a clear, modern focus indicator.
+	focusedBorderStyle := borderStyle.Copy().
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(theme.DefaultColors.Orange) // Orange is the theme's highlight color.
 
-	// Build the header content
-	if m.plan != nil && m.plan.Name != "" {
-		header := theme.DefaultTheme.Header.Render("✨ Add New Job to ") +
-			planNameStyle.Render(m.plan.Name) +
-			theme.DefaultTheme.Header.Render(" ✨")
-		b.WriteString(headerStyle.Render(header))
-	} else {
-		b.WriteString(headerStyle.Render("✨ Add New Job ✨"))
-	}
-	b.WriteString("\n\n")
+	// No header - start directly with the form
 
 	// Helper to render each field with borders
 	renderField := func(index int, label string, view string, forceHeight int) string {
@@ -559,30 +784,32 @@ func (m tuiModel) View() string {
 		fieldContent.WriteString("\n")
 		fieldContent.WriteString(view)
 
-		// Apply border style
-		style := borderStyle
-		if m.focusIndex == index {
+		// Apply border style based on focus state
+		var style lipgloss.Style
+		if m.focusIndex == index && !m.unfocused {
 			style = focusedBorderStyle
+		} else if m.focusIndex == index && m.unfocused {
+			style = unfocusedBorderStyle
+		} else {
+			style = borderStyle
 		}
 
 		// Override height if specified
 		if forceHeight > 0 {
-			if m.focusIndex == index {
-				style = style.Copy().Height(forceHeight)
-			} else {
-				style = borderStyle.Copy().Height(forceHeight)
-			}
+			style = style.Copy().Height(forceHeight)
 		}
 
 		return style.Render(fieldContent.String())
 	}
 
-	// Row 1: Title (full width)
+	// Row 1: Title (full width) with left margin
 	var titleFieldStyle lipgloss.Style
-	if m.focusIndex == 0 {
-		titleFieldStyle = focusedBorderStyle.Copy().Width(93).Height(2)
+	if m.focusIndex == 0 && !m.unfocused {
+		titleFieldStyle = focusedBorderStyle.Copy().Width(93).Height(1).MarginLeft(2)
+	} else if m.focusIndex == 0 && m.unfocused {
+		titleFieldStyle = unfocusedBorderStyle.Copy().Width(93).Height(1).MarginLeft(2)
 	} else {
-		titleFieldStyle = borderStyle.Copy().Width(93).Height(2)
+		titleFieldStyle = borderStyle.Copy().Width(93).Height(1).MarginLeft(2)
 	}
 	var titleContent strings.Builder
 	if m.focusIndex == 0 {
@@ -598,11 +825,12 @@ func (m tuiModel) View() string {
 	// Row 2: Job Type | Worktree
 	jobTypeView := m.jobTypeList.View()
 	jobTypeField := renderField(1, "Job Type:", jobTypeView, 0)
-	worktreeField := renderField(2, "Worktree:", m.worktreeInput.View(), 0)
+	worktreeField := renderField(2, "Worktree:", m.worktreeInput.View(), 8)
 
-	// Join side by side
+	// Join side by side with left margin
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, jobTypeField, "  ", worktreeField)
-	b.WriteString(row2)
+	row2WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row2)
+	b.WriteString(row2WithMargin)
 	b.WriteString("\n")
 
 	// Row 3: Template | Dependencies
@@ -619,7 +847,8 @@ func (m tuiModel) View() string {
 	depField := renderField(4, "Dependencies:", depView, 10)
 
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, templateField, "  ", depField)
-	b.WriteString(row3)
+	row3WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row3)
+	b.WriteString(row3WithMargin)
 	b.WriteString("\n")
 
 	// Row 4: Model | Prompt
@@ -628,18 +857,27 @@ func (m tuiModel) View() string {
 	promptField := renderField(6, "Prompt:", m.promptInput.View(), 10)
 
 	row4 := lipgloss.JoinHorizontal(lipgloss.Top, modelField, "  ", promptField)
-	b.WriteString(row4)
+	row4WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row4)
+	b.WriteString(row4WithMargin)
 
-	// Help text
+	// Help text with left margin
 	helpStyle := theme.DefaultTheme.Muted.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderTop(true).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1, 0, 0, 0)
+		Padding(1, 0, 0, 0).
+		MarginLeft(2)
 
 	helpText := m.helpModel.View()
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render(helpText))
+	
+	// Add mode indicator
+	var modeIndicator string
+	if m.unfocused {
+		modeIndicator = theme.DefaultTheme.Muted.Render(" [NORMAL] hjkl navigate • i insert • q quit")
+	} else {
+		modeIndicator = theme.DefaultTheme.Muted.Render(" [INSERT] esc normal")
+	}
+	
+	// Combine help text with mode indicator
+	fullHelpText := helpText + modeIndicator
+	b.WriteString(helpStyle.Render(fullHelpText))
 
 	return b.String()
 }
