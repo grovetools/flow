@@ -1,4 +1,4 @@
-# Working with Jobs in Grove Flow
+# Working with Jobs 
 
 Jobs are the fundamental units of work in a Grove Flow plan. Each job is a single, executable step defined in a Markdown file. This document covers how to create, configure, and manage these jobs to build effective workflows.
 

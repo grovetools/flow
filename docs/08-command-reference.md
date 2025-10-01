@@ -1,3 +1,5 @@
+# Command Reference
+
 This document provides a reference for the `flow` command-line interface, covering all subcommands and their options.
 
 ## `flow plan`

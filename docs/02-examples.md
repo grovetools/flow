@@ -1,3 +1,5 @@
+# Examples
+
 This document provides examples for using `grove-flow` for single- and multi-step development workflows.
 
 ## Example 1: Basic Plan Execution
