@@ -1,4 +1,4 @@
-This document provides a comprehensive reference for the `flow` command-line interface, covering all subcommands and their options.
+This document provides a reference for the `flow` command-line interface, covering all subcommands and their options.
 
 ## `flow plan`
 
@@ -16,21 +16,21 @@ flow plan init <directory> [flags]
 
 **Description**
 
-Creates a new plan in the specified directory, including a `.grove-plan.yml` file for default configuration. Running the command without a directory name or with the `-t` flag launches an interactive TUI to guide plan creation.
+Creates a new plan in the specified directory, including a `.grove-plan.yml` file for default configuration. Running the command without a directory name or with the `-t` flag launches an interactive terminal interface to guide plan creation.
 
 **Flags**
 
-| Flag                       | Shorthand | Description                                                                   | Default          |
-| -------------------------- | --------- | ----------------------------------------------------------------------------- | ---------------- |
-| `--extract-all-from`       |           | Path to a markdown file to extract all content into an initial job.             |                  |
-| `--force`                  | `-f`      | Overwrite the destination directory if it already exists.                       | `false`          |
-| `--model`                  |           | Default model for jobs in this plan (e.g., `gemini-2.5-pro`).                 | (none)           |
-| `--open-session`           |           | Immediately open a tmux session for the plan's worktree.                        | `false`          |
-| `--recipe`                 |           | Initialize the plan from a pre-defined recipe template.                         | `chat-workflow`  |
-| `--recipe-vars`            |           | Variables for recipe templates (`key=value`). Can be used multiple times.     | (none)           |
-| `--target-agent-container` |           | Default container for agent jobs in the plan.                                 | (none)           |
-| `--tui`                    | `-t`      | Launch an interactive TUI to create a new plan.                                 | `false`          |
-| `--worktree`               |           | Set a default worktree. If no name is provided, uses the plan directory name. | (none)           |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--extract-all-from` | | Path to a markdown file to extract all content into an initial job. | |
+| `--force` | `-f` | Overwrite the destination directory if it already exists. | `false` |
+| `--model` | | Default model for jobs in this plan (e.g., `gemini-2.5-pro`). | (none) |
+| `--open-session` | | Immediately open a tmux session for the plan's worktree. | `false` |
+| `--recipe` | | Initialize the plan from a pre-defined recipe template. | `chat-workflow` |
+| `--recipe-vars` | | Variables for recipe templates (`key=value`). Can be used multiple times. | (none) |
+| `--target-agent-container` | | Default container for agent jobs in the plan. | (none) |
+| `--tui` | `-t` | Launch an interactive TUI to create a new plan. | `false` |
+| `--worktree` | | Set a default worktree. If no name is provided, uses the plan directory name. | (none) |
 
 **Examples**
 
@@ -38,11 +38,8 @@ Creates a new plan in the specified directory, including a `.grove-plan.yml` fil
 # Initialize a new plan in the 'new-feature' directory
 flow plan init new-feature
 
-# Initialize a plan with a dedicated git worktree named 'feature-branch'
+# Initialize a plan with a git worktree named 'feature-branch'
 flow plan init new-feature --worktree=feature-branch
-
-# Initialize a plan and extract content from an existing document
-flow plan init refactor-plan --extract-all-from=docs/refactor-notes.md
 
 # Initialize a plan from the 'standard-feature' recipe
 flow plan init user-auth --recipe standard-feature
@@ -64,19 +61,19 @@ Adds a new job file to a plan directory. If no directory is specified, it uses t
 
 **Flags**
 
-| Flag               | Shorthand | Description                                                                        | Default         |
-| ------------------ | --------- | ---------------------------------------------------------------------------------- | --------------- |
-| `--agent-continue` |           | Continue the last agent session (adds `--continue` flag to the agent command).     | `false`         |
-| `--depends-on`     | `-d`      | List of job filenames this job depends on.                                         | (none)          |
-| `--interactive`    | `-i`      | Launch an interactive TUI to create the new job.                                   | `false`         |
-| `--output-type`    |           | Output type: `file`, `commit`, `none`, or `generate_jobs`.                         | `file`          |
-| `--prompt`         | `-p`      | Inline prompt text for the job.                                                    | (from stdin)    |
-| `--prompt-file`    | `-f`      | Path to a file containing the prompt.                                              | (none)          |
-| `--source-files`   |           | Comma-separated list of source files for context.                                  | (none)          |
-| `--template`       |           | Name of a job template to use.                                                     | (none)          |
-| `--title`          |           | Title of the job.                                                                  | (required)      |
-| `--type`           | `-t`      | Job type: `agent`, `interactive_agent`, `headless_agent`, `oneshot`, `shell`, `chat`. | `agent`         |
-| `--worktree`       |           | Explicitly set the worktree for this job.                                          | (plan default)  |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--agent-continue` | | Continue the last agent session (adds `--continue` flag to the agent command). | `false` |
+| `--depends-on` | `-d` | List of job filenames this job depends on. | (none) |
+| `--interactive` | `-i` | Launch an interactive TUI to create the new job. | `false` |
+| `--output-type` | | Output type: `file`, `commit`, `none`, or `generate_jobs`. | `file` |
+| `--prompt` | `-p` | Inline prompt text for the job. | (from stdin) |
+| `--prompt-file` | `-f` | Path to a file containing the prompt. | (none) |
+| `--source-files` | | Comma-separated list of source files for context. | (none) |
+| `--template` | | Name of a job template to use. | (none) |
+| `--title` | | Title of the job. | (required) |
+| `--type` | `-t` | Job type: `agent`, `interactive_agent`, `headless_agent`, `oneshot`, `shell`, `chat`. | `agent` |
+| `--worktree` | | Explicitly set the worktree for this job. | (plan default) |
 
 **Examples**
 
@@ -103,14 +100,14 @@ flow plan list [flags]
 
 **Flags**
 
-| Flag                 | Shorthand | Description                              | Default |
-| -------------------- | --------- | ---------------------------------------- | ------- |
-| `--include-finished` |           | Include plans marked as "finished".      | `false` |
-| `--verbose`          | `-v`      | Show detailed information for each plan. | `false` |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--include-finished` | | Include plans marked as "finished". | `false` |
+| `--verbose` | `-v` | Show detailed information for each plan. | `false` |
 
 ### `flow plan tui`
 
-Launches an interactive TUI for browsing and managing plans.
+Launches an interactive terminal interface for browsing and managing plans.
 
 **Syntax**
 
@@ -142,12 +139,12 @@ flow plan status [directory] [flags]
 
 **Flags**
 
-| Flag      | Shorthand | Description                                | Default |
-| --------- | --------- | ------------------------------------------ | ------- |
-| `--format`| `-f`      | Output format: `tree`, `list`, `json`.     | `tree`  |
-| `--graph` | `-g`      | Show a dependency graph in Mermaid syntax. | `false` |
-| `--tui`   | `-t`      | Launch an interactive TUI status view.     | `false` |
-| `--verbose`| `-v`      | Show detailed job information.             | `false` |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--format`| `-f` | Output format: `tree`, `list`, `json`. | `tree` |
+| `--graph` | `-g` | Show a dependency graph in Mermaid syntax. | `false` |
+| `--tui` | `-t` | Launch an interactive terminal interface status view. | `false` |
+| `--verbose`| `-v` | Show detailed job information. | `false` |
 
 ### `flow plan graph`
 
@@ -161,12 +158,12 @@ flow plan graph [directory] [flags]
 
 **Flags**
 
-| Flag       | Shorthand | Description                                     | Default   |
-| ---------- | --------- | ----------------------------------------------- | --------- |
-| `--format` | `-f`      | Output format: `mermaid`, `dot`, `ascii`.       | `mermaid` |
-| `--output` | `-o`      | Output file path (defaults to stdout).          | (stdout)  |
-| `--port`   | `-p`      | Port for the web server when using `--serve`.   | `8080`    |
-| `--serve`  | `-s`      | Serve an interactive HTML visualization.        | `false`   |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--format` | `-f` | Output format: `mermaid`, `dot`, `ascii`. | `mermaid` |
+| `--output` | `-o` | Output file path (defaults to stdout). | (stdout) |
+| `--port` | `-p` | Port for the web server when using `--serve`. | `8080` |
+| `--serve` | `-s` | Serve an interactive HTML visualization. | `false` |
 
 ### `flow plan run`
 
@@ -184,15 +181,15 @@ Executes jobs in an orchestration plan. Without arguments, it runs the next avai
 
 **Flags**
 
-| Flag                 | Shorthand | Description                                            | Default |
-| -------------------- | --------- | ------------------------------------------------------ | ------- |
-| `--all`              | `-a`      | Run all pending jobs in the plan sequentially.         | `false` |
-| `--model`            |           | Override the LLM model for this run.                   | (none)  |
-| `--next`             | `-n`      | Run the next available jobs. (This is the default)     | `false` |
-| `--parallel`         | `-p`      | Maximum number of jobs to run in parallel.             | `3`     |
-| `--skip-interactive` |           | Skip any interactive agent jobs.                       | `false` |
-| `--watch`            | `-w`      | Watch plan progress in real-time.                      | `false` |
-| `--yes`              | `-y`      | Skip all confirmation prompts.                         | `false` |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--all` | `-a` | Run all pending jobs in the plan sequentially. | `false` |
+| `--model` | | Override the LLM model for this run. | (none) |
+| `--next` | `-n` | Run the next available jobs. (This is the default) | `false` |
+| `--parallel` | `-p` | Maximum number of jobs to run in parallel. | `3` |
+| `--skip-interactive` | | Skip any interactive agent jobs. | `false` |
+| `--watch` | `-w` | Watch plan progress in real-time. | `false` |
+| `--yes` | `-y` | Skip all confirmation prompts. | `false` |
 
 ### `flow plan complete`
 
@@ -230,9 +227,9 @@ flow plan launch <job-file> [flags]
 
 **Flags**
 
-| Flag     | Shorthand | Description                                                  | Default |
-| -------- | --------- | ------------------------------------------------------------ | ------- |
-| `--host` |           | Launch the agent on the host machine instead of in a container. | `false` |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--host` | | Launch the agent on the host machine instead of in a container. | `false` |
 
 ### `flow plan finish`
 
@@ -246,16 +243,16 @@ flow plan finish [directory] [flags]
 
 **Flags**
 
-| Flag                | Shorthand | Description                                           | Default |
-| ------------------- | --------- | ----------------------------------------------------- | ------- |
-| `--archive`         |           | Archive the plan directory using `nb archive`.        | `false` |
-| `--clean-dev-links` |           | Clean up development binary links from the worktree.  | `false` |
-| `--close-session`   |           | Close the associated tmux session.                    | `false` |
-| `--delete-branch`   |           | Delete the local git branch.                          | `false` |
-| `--delete-remote`   |           | Delete the remote git branch.                         | `false` |
-| `--force`           |           | Force git operations (e.g., deleting unmerged branches). | `false` |
-| `--prune-worktree`  |           | Remove the git worktree directory.                    | `false` |
-| `--yes`             | `-y`      | Automatically confirm all cleanup actions.            | `false` |
+| Flag | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--archive` | | Archive the plan directory using `nb archive`. | `false` |
+| `--clean-dev-links` | | Clean up development binary links from the worktree. | `false` |
+| `--close-session` | | Close the associated tmux session. | `false` |
+| `--delete-branch` | | Delete the local git branch. | `false` |
+| `--delete-remote` | | Delete the remote git branch. | `false` |
+| `--force` | | Force git operations (e.g., deleting unmerged branches). | `false` |
+| `--prune-worktree` | | Remove the git worktree directory. | `false` |
+| `--yes` | `-y` | Automatically confirm all cleanup actions. | `false` |
 
 ### `flow plan config`
 
@@ -269,11 +266,11 @@ flow plan config [directory] [flags]
 
 **Flags**
 
-| Flag     | Description                                      |
-| -------- | ------------------------------------------------ |
-| `--get`  | Get a specific configuration value by key.       |
-| `--set`  | Set a configuration value (e.g., `key=value`).   |
-| `--json` | Output the configuration in JSON format.         |
+| Flag | Description |
+| :--- | :--- |
+| `--get` | Get a specific configuration value by key. |
+| `--set` | Set a configuration value (e.g., `key=value`). |
+| `--json` | Output the configuration in JSON format. |
 
 ### `flow plan extract`
 
@@ -293,15 +290,15 @@ flow plan extract <block-id... | all | list> --file <source-file> --title <new-j
 
 **Flags**
 
-| Flag           | Shorthand | Description                         |
-| -------------- | --------- | ----------------------------------- |
-| `--depends-on` | `-d`      | Dependencies for the new job.       |
-| `--file`       |           | Source markdown file to extract from. |
-| `--model`      |           | LLM model for the new job.          |
-| `--output`     |           | Output type for the new job.        |
-| `--title`      |           | Title for the new job (required).   |
-| `--worktree`   |           | Worktree for the new job.           |
-| `--json`       |           | Output block list in JSON format (for `list` command). |
+| Flag | Shorthand | Description |
+| :--- | :--- | :--- |
+| `--depends-on` | `-d` | Dependencies for the new job. |
+| `--file` | | Source markdown file to extract from. |
+| `--model` | | LLM model for the new job. |
+| `--output` | | Output type for the new job. |
+| `--title` | | Title for the new job (required). |
+| `--worktree` | | Worktree for the new job. |
+| `--json` | | Output block list in JSON format (for `list` command). |
 
 ### `flow plan templates list`
 
@@ -311,6 +308,47 @@ Lists available job templates.
 
 ```bash
 flow plan templates list
+```
+
+### `flow plan jobs list`
+
+Lists available job types.
+
+**Syntax**
+
+```bash
+flow plan jobs list
+```
+
+### `flow plan rebase`
+
+Rebases branches for the plan's worktree(s).
+
+**Syntax**
+
+```bash
+flow plan rebase [target] [--yes | --abort | --continue]
+```
+
+### `flow plan step`
+
+Steps through plan execution interactively.
+
+**Syntax**
+
+```bash
+flow plan step [directory]
+```
+
+### `flow plan worktree`
+
+Manages worktrees for all jobs in a plan.
+
+**Syntax**
+
+```bash
+flow plan worktree set <plan-directory> <worktree-name>
+flow plan worktree unset <plan-directory>
 ```
 
 ---
@@ -334,7 +372,7 @@ flow chat run [title...]
 
 **Description**
 
-The `chat` subcommand is used for ideation and refinement. You can start with a markdown file, turn it into a `chat` job, and have a conversation with an LLM. The results can later be extracted into a formal plan.
+The `chat` subcommand is used for ideation and refinement. A markdown file can be turned into a `chat` job to have a conversation with an LLM. The results can later be extracted into a formal plan.
 
 ---
 
@@ -354,9 +392,22 @@ Displays a list of recommended LLM models that can be used in job and chat front
 
 **Flags**
 
-| Flag     | Description                         |
-| -------- | ----------------------------------- |
-| `--json` | Output the list in JSON format.     |
+| Flag | Description |
+| :--- | :--- |
+| `--json` | Output the list in JSON format. |
+
+---
+
+## `flow starship`
+
+Manages Starship prompt integration.
+
+**Syntax**
+
+```bash
+flow starship install
+flow starship status
+```
 
 ---
 
@@ -372,33 +423,34 @@ flow version [flags]
 
 **Flags**
 
-| Flag     | Description                         |
-| -------- | ----------------------------------- |
+| Flag | Description |
+| :--- | :--- |
 | `--json` | Output version info in JSON format. |
 
 ---
 
 ## Global Options
 
-| Flag       | Description                                  |
-| ---------- | -------------------------------------------- |
+| Flag | Description |
+| :--- | :--- |
 | `--config` | Path to a custom `grove.yml` configuration file. |
-| `--json`   | Output command results in JSON format.       |
-| `--verbose`| Enable verbose logging output.               |
-| `--quiet`  | Suppress all non-essential output.           |
-| `--help`   | Display help for any command.                |
+| `--json` | Output command results in JSON format. |
+| `--verbose`| Enable verbose logging output. |
+| `--quiet` | Suppress all non-essential output. |
+| `--help` | Display help for any command. |
 
 ---
 
 ## Environment Variables
 
--   `GROVE_ECOSYSTEM_ROOT`: Specifies the root directory of the Grove ecosystem repositories, used to locate shared resources.
--   `GROVE_FLOW_SKIP_DOCKER_CHECK`: If set to `true`, skips pre-flight checks for the Docker daemon (used in testing).
+- `GROVE_ECOSYSTEM_ROOT`: Specifies the root directory of the Grove ecosystem repositories, used to locate shared resources.
+- `GROVE_FLOW_SKIP_DOCKER_CHECK`: If set to `true`, skips pre-flight checks for the Docker daemon (used in testing).
+- `GROVE_CONFIG`: Specifies a path to a custom `grove.yml` configuration file.
 
 ---
 
 ## Configuration Files
 
--   **`grove.yml`**: The main project-level configuration file. `flow` settings are placed under the `flow:` key.
--   **`.grove-plan.yml`**: A plan-specific configuration file located inside a plan directory. Values here override the project-level `grove.yml`.
--   **`.grove/state.yml`**: A local file that stores the active plan for the current directory or worktree context. This file should not be committed to version control.
+- **`grove.yml`**: The main project-level configuration file. `flow` settings are placed under the `flow:` key.
+- **`.grove-plan.yml`**: A plan-specific configuration file located inside a plan directory. Values here override the project-level `grove.yml`.
+- **`.grove/state.yml`**: A local file that stores the active plan for the current directory or worktree context. This file should not be committed to version control.

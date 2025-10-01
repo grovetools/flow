@@ -2,13 +2,20 @@
 title: Grove Flow
 description: LLM job orchestration in Markdown for complex development workflows.
 category: "Developer Tools"
+enabled: true
+settings:
+  output_dir: docs
+  rules_file: docs.rules
+  structured_output_file: pkg/docs/docs.json
+  system_prompt: default
+  model: gemini-2.5-pro
+  regeneration_mode: reference
 readme:
   generate_toc: true
   template: docs/README.md.tpl
   output: README.md
   source_section: overview
   strip_lines: 2
-enabled: true
 sections:
   - name: overview
     order: 1
@@ -50,8 +57,3 @@ sections:
     output: 08-command-reference.md
     prompt: prompts/08-command-reference.md
     title: Command Reference
-settings:
-  output_dir: docs
-  rules_file: docs.rules
-  structured_output_file: pkg/docs/docs.json
-  system_prompt: default

@@ -2,33 +2,33 @@
 
 <img src="./images/grove-flow-readme.svg" width="60%" />
 
-Grove Flow is a command-line interface designed for orchestrating multi-step tasks that leverage Large Language Models (LLMs). It provides a structured way to define, execute, and manage complex development workflows—referred to as "Plans"—using a series of Markdown files. By integrating with Git worktrees, it ensures that each task runs in an isolated environment, keeping the main development branch clean and stable.
-
-Whether you are scaffolding a new feature, automating a series of code modifications, or building an emergent plan with AI assistance, Grove Flow offers the tooling to formalize and automate your development process.
+Grove Flow is a command-line tool for orchestrating multi-step LLM-assisted tasks using Markdown files as definitions. It uses Git worktrees facilitate parallel development. The tool is intended for formalizing and automating development workflows that involve code generation or analysis by LLMs. `grove-flow` is designed for stateful, local development workflows that wrap tools like Anthropic's Claude Code and the Google's Gemini API discrete, dependent steps.
 
 <!-- placeholder for animated gif -->
 
 ## Key Features
 
-Grove Flow is built around a set of core concepts that facilitate structured, reproducible, and automated workflows.
+*   **Job Orchestration**: Defines a workflow as a sequence of jobs in Markdown files with dependencies specified in YAML frontmatter. The tool manages the execution order, running jobs only after their prerequisites are met. It supports executing shell commands and running LLM-driven code generation tasks.
 
-*   **Job Orchestration**: Define complex workflows as a sequence of jobs with dependencies. Grove Flow manages the execution order, ensuring that each step runs only after its prerequisites are met. This allows for the creation of sophisticated, multi-stage tasks that can combine AI-driven code generation, shell command execution, and manual review steps.
+*   **Plan Management**: A "Plan" is a directory of Markdown files that represents a task. The `flow plan` command includes subcommands to `init`, `add`, `run`, `status`, `graph`, and `finish` these plans. A terminal interface (`flow plan status -t`) is available for managing and monitoring plan progress.
 
-*   **Plan Management**: Plans are living documents that capture the entire lifecycle of a complex task. They are organized in directories and defined by Markdown files, making them easy to read, version control, and share. The `flow plan` command provides a comprehensive suite of tools to `init`, `add`, `run`, `status`, `graph`, and `finish` your plans. An interactive terminal UI (`flow plan status -t`) offers a visual way to manage and monitor plan progress.
+*   **Chat Integration**: The `flow chat` command manages multi-turn conversations with an LLM, stored as a single Markdown file. The `flow plan extract` command can then be used to convert sections of the conversation into executable jobs within a plan.
 
-*   **Chat Integration**: Start with an idea in a conversational format and seamlessly transition to a structured plan. The `flow chat` command allows you to manage multi-turn AI interactions as Markdown files. As a conversation evolves, you can use the `flow plan extract` command to convert specific LLM responses into formal, executable jobs within a plan, bridging the gap between exploration and implementation.
+*   **Recipes and Templates**: The `flow plan init --recipe` command scaffolds a new plan from a predefined directory structure of job files. The `flow plan add --template` command creates a new job from a predefined Markdown file.
 
-*   **Recipes and Templates**: Accelerate common workflows using reusable components. Job templates provide pre-defined structures for frequent tasks, while plan recipes offer complete scaffolds for entire projects, such as implementing a new feature or generating documentation. You can use built-in recipes or create your own to standardize processes across your team.
+## How It Works
+
+A "Plan" is a directory containing numbered Markdown files, where each file represents a "Job". Each job file contains YAML frontmatter that defines its `type` (`agent`, `oneshot`, `shell`), `status` (`pending`, `completed`), and dependencies via a `depends_on` key.
+
+The orchestrator reads all job files in a plan directory, builds a dependency graph, and executes jobs whose dependencies have a `completed` status. Jobs of type `agent` or `interactive_agent` are executed within a Git worktree specified in the job's frontmatter, providing filesystem isolation.
 
 ## Ecosystem Integration
 
-Grove Flow is a component of the larger Grove ecosystem and is designed to work in concert with other specialized tools to provide a cohesive development environment.
+Grove Flow functions as a component of the Grove tool suite and executes other tools in the ecosystem as subprocesses.
 
-*   **Grove Meta-CLI (`grove`)**: The central tool for managing the entire ecosystem. `grove` handles the installation, updating, and version management of all Grove binaries, including `grove-flow`. It ensures that the correct versions of all tools are available in your `PATH`.
+*   **Grove Context (`cx`)**: Before executing a job, `grove-flow` calls `grove-context` to read `.grove/rules` files and generate a file-based context. This context is then provided to the LLM.
 
-*   **Grove Context (`cx`)**: Manages the context provided to LLMs. `grove-flow` uses `grove-context` to automatically gather relevant source code and documentation based on predefined rules (`.grove/rules`). This ensures that AI agents have the necessary information to perform their tasks accurately, without requiring manual context gathering for each job.
-
-*   **Grove Hooks (`grove-hooks`)**: Provides a system for tracking and responding to events within the ecosystem. `grove-flow` integrates with `grove-hooks` to emit events for job lifecycle stages, such as when a job starts, completes, or fails. This enables external systems, dashboards, or notification services to monitor the progress of orchestration plans.
+*   **Grove Hooks (`grove-hooks`)**: `grove-flow` emits events for job lifecycle stages (e.g., job start, completion, or failure). These events can be tracked by `grove-hooks` for monitoring and logging purposes.
 
 ## Installation
 

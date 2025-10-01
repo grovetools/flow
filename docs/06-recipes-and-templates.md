@@ -1,25 +1,25 @@
 # Recipes and Templates
 
-Grove Flow uses recipes and templates to automate common workflows and promote reusability. Recipes scaffold entire multi-job plans, while job templates provide blueprints for individual jobs.
+Grove Flow uses recipes for creating multi-job plans from a scaffold, and job templates for creating individual jobs from a blueprint.
 
 ## Job Templates
 
-Job templates are reusable definitions for a single job. They allow you to quickly add standardized jobs to any plan without rewriting the same prompt and configuration.
+A job template is a Markdown file containing frontmatter and a prompt body. It serves as a blueprint for creating new, individual jobs.
 
 ### Using a Job Template
 
-To use a template, use the `--template` flag with the `flow plan add` command. The template's default settings and prompt will be used to create the new job file.
+The `flow plan add --template` command creates a new job file using the frontmatter and body from a specified template file.
 
 ```bash
 # Add a new job using the 'code-review' template
 flow plan add --title "Review API Endpoints" --template code-review
 ```
 
-Any additional flags, such as `--prompt` or `--source-files`, will supplement the template's content.
+Flags like `--prompt` or `--source-files` provide additional content to the job being created from the template.
 
 ### Listing Available Templates
 
-To see all available job templates, including built-in, user-defined, and project-specific ones, use the `templates list` command:
+The `flow plan templates list` command displays all available job templates from built-in, user-global (`~/.config/grove/job-templates/`), and project-specific (`.grove/job-templates/`) locations.
 
 ```bash
 flow plan templates list
@@ -27,82 +27,86 @@ flow plan templates list
 
 ```text
 NAME                   SOURCE     DESCRIPTION
-agent-run                [Built-in] Generates a plan an LLM agent carries out
-api-design               [Built-in] Design a RESTful or GraphQL API
-architecture-overview    [Built-in] Generate an architecture overview
-chat                     [Built-in] 
-code-review              [Built-in] Perform a thorough code review
+agent-run              [Built-in] Generates a plan an LLM agent carries out
+api-design             [Built-in] Design a RESTful or GraphQL API
 ...
-my-custom-template       [User]     A custom template for team-specific tasks
+my-custom-template     [User]     A custom template for team-specific tasks
 ```
 
 ### Creating Custom Job Templates
 
-You can create your own job templates in two locations:
+Job templates are located in two directories, with project-specific templates overriding user-global ones:
 
-1.  **Project-specific**: Create a `.grove/job-templates/` directory in your project root. Any `.md` file in this directory is available as a template.
-2.  **User-global**: Create a `~/.config/grove/job-templates/` directory. Templates here are available across all your projects.
+1.  **Project-specific**: `.grove/job-templates/` within a project root.
+2.  **User-global**: `~/.config/grove/job-templates/`.
 
-A template is a standard Markdown job file. The frontmatter defines default settings, and the body serves as the base prompt.
+Each template is a Markdown file. The frontmatter defines default settings for the job, and the body serves as the base prompt.
 
 **Example: `.grove/job-templates/test-strategy.md`**
 
 ```yaml
 ---
-description: "Create a comprehensive test strategy"
+description: "Create a test strategy"
 type: "oneshot"
 model: "gemini-2.5-pro"
 ---
 
-Develop a comprehensive testing strategy for this feature. Analyze the existing test patterns and consider the balance between different test levels (unit, integration, e2e).
+Develop a testing strategy for this feature. Analyze existing test patterns and consider the balance between unit, integration, and e2e tests.
 ```
 
 ### Built-in Job Templates
 
-Grove Flow includes several built-in templates for common development tasks:
+Grove Flow includes several built-in templates.
 
 | Template Name            | Description                                        |
 | ------------------------ | -------------------------------------------------- |
-| `agent-run`              | Generates a detailed plan for an agent to execute. |
+| `agent-run`              | Generates a plan an LLM agent carries out.         |
+| `agent-xml`              | Generates a detailed XML plan an LLM agent carries out. |
 | `api-design`             | Designs a RESTful or GraphQL API.                  |
 | `architecture-overview`  | Generates an architecture overview of a codebase.  |
-| `code-review`            | Performs a thorough code review.                   |
+| `chat`                   | A template for conversational chat jobs.           |
+| `code-review`            | Performs a code review.                            |
 | `deployment-runbook`     | Creates a production deployment runbook.           |
 | `documentation`          | Updates project documentation.                     |
 | `generate-plan`          | Generates a multi-step plan from a specification.  |
 | `incident-postmortem`    | Analyzes an incident and creates action items.     |
 | `learning-guide`         | Creates a learning guide for a codebase.           |
+| `learning-lang`          | Creates a language learning guide from code.       |
+| `migration-plan`         | Plans a technology or database migration.          |
+| `performance-analysis`   | Analyzes and suggests optimizations for performance.|
 | `refactoring-plan`       | Plans a large-scale refactoring effort.            |
+| `refine-plan-generic`    | A generic template for refining a plan.            |
 | `security-audit`         | Conducts a security audit of a codebase.           |
-| `test-strategy`          | Creates a comprehensive test strategy.             |
+| `tech-debt-assessment`   | Assesses and prioritizes technical debt.           |
+| `test-strategy`          | Creates a test strategy.                           |
 
 ## Plan Recipes
 
-Plan recipes are complete, multi-job plan scaffolds. They are used with `flow plan init` to create a new plan directory pre-populated with a sequence of dependent jobs, providing a ready-to-run workflow for common tasks.
+Plan recipes are directories containing a set of job files that define a multi-job workflow. They are used to scaffold new plans.
 
 ### Using a Plan Recipe
 
-To initialize a plan from a recipe, use the `--recipe` flag with the `init` command.
+The `flow plan init --recipe` command creates a new directory and populates it with the job files defined in the specified recipe.
 
 ```bash
-# Initialize a new plan for a feature using the standard-feature recipe
+# Initialize a plan using the standard-feature recipe
 flow plan init new-auth-feature --recipe standard-feature
 ```
 
-This command creates the `plans/new-auth-feature` directory and populates it with the jobs defined in the `standard-feature` recipe, such as `01-spec.md`, `02-implement.md`, and so on.
+This command creates the `plans/new-auth-feature` directory and populates it with jobs like `01-spec.md` and `02-implement.md` from the recipe.
 
 ### Built-in Recipes
 
 Grove Flow provides several built-in recipes:
 
--   **`standard-feature`**: A typical feature development workflow: Spec -> Implement -> Git Status Checks -> Review.
--   **`chat-workflow`**: A workflow that starts with an open-ended `chat` job for exploration, followed by implementation and review.
--   **`chat`**: A minimal plan containing only a single `chat` job. This is the default recipe.
--   **`docgen-customize`**: A two-step workflow for generating project documentation: first, a chat job to plan the documentation structure, followed by an agent job to write the documentation.
+-   **`standard-feature`**: A workflow for feature development: Spec -> Implement -> Git Status Checks -> Review.
+-   **`chat-workflow`**: A workflow that starts with a `chat` job for exploration, followed by implementation and review.
+-   **`chat`**: A minimal plan containing only a single `chat` job. This is the default recipe for `flow plan init`.
+-   **`docgen-customize`**: A workflow for generating documentation: first a `chat` job to define the structure, then an `agent` job to write the content.
 
 ### Creating Custom Recipes
 
-You can create globally available recipes by adding them to `~/.config/grove/recipes/`. Each recipe is a directory containing the Markdown job files that make up the plan.
+User-defined recipes can be created by adding directories to `~/.config/grove/recipes/`. Each subdirectory is a recipe containing the `.md` job files that compose the plan.
 
 **Example Structure:**
 
@@ -114,15 +118,15 @@ You can create globally available recipes by adding them to `~/.config/grove/rec
     └── 03-tag-release.md
 ```
 
-With this structure, you can run `flow plan init my-project-release --recipe my-release-workflow`.
+This structure enables running `flow plan init my-project-release --recipe my-release-workflow`.
 
-### Template Variables in Recipes
+## Templating in Recipes
 
-Recipe files can be parameterized using Go's template syntax. This allows you to create dynamic and context-aware plans.
+Recipe files can contain template variables using Go's template syntax.
 
-#### Standard Variables
+### Standard Variables
 
--   `{{ .PlanName }}`: Automatically substituted with the name of the plan being initialized.
+-   `{{ .PlanName }}`: This variable is replaced with the name of the plan being initialized.
 
 **Example: `01-spec.md` from the `standard-feature` recipe**
 
@@ -134,27 +138,25 @@ status: pending
 type: oneshot
 ---
 
-Define the detailed specification for the "{{ .PlanName }}" feature.
+Define the specification for the "{{ .PlanName }}" feature.
 ```
 
-When you run `flow plan init new-login-flow --recipe standard-feature`, `{{ .PlanName }}` becomes `new-login-flow`.
+When running `flow plan init new-login-flow --recipe standard-feature`, `{{ .PlanName }}` is replaced with `new-login-flow`.
 
-#### Custom Variables
+### Custom Variables
 
-You can define and pass your own variables using the `--recipe-vars` flag.
+The `--recipe-vars` flag passes key-value pairs to a recipe. These are accessible via the `{{ .Vars.<key> }}` syntax.
 
--   **Syntax**: `{{ .Vars.<variable_name> }}`
 -   **Passing Variables**:
     -   Multiple flags: `--recipe-vars key1=val1 --recipe-vars key2=val2`
     -   Comma-delimited: `--recipe-vars "key1=val1,key2=val2"`
 
-**Example: A recipe job `01-chat.md` that uses a custom `model` variable:**
+**Example: A recipe job `01-chat.md` using a custom `model` variable:**
 
 ```yaml
 ---
 title: "Chat about {{ .PlanName }}"
 type: chat
-status: pending_user
 {{ if .Vars.model }}model: "{{ .Vars.model }}"{{ end }}
 ---
 
@@ -167,10 +169,10 @@ Let's discuss the plan.
 flow plan init my-plan --recipe my-chat-recipe --recipe-vars model=gemini-2.5-pro
 ```
 
-You can also set default variables for recipes in your `grove.yml` file:
+Default variables can be set for a recipe in `grove.yml`. CLI flags override `grove.yml` settings.
 
 ```yaml
-# .grove/config.yml or grove.yml
+# grove.yml
 flow:
   recipes:
     docgen-customize:
@@ -179,28 +181,25 @@ flow:
         rules_file: "docs/docs.rules"
 ```
 
-CLI flags will always override defaults set in `grove.yml`.
+## Dynamic Recipe Loading
 
-### Dynamic Recipe Loading
-
-For advanced use cases, Grove Flow can load recipes dynamically from an external command. This is configured in `grove.yml` with the `get_recipe_cmd` setting.
+Recipes can be loaded by executing an external command defined by `get_recipe_cmd` in `grove.yml`.
 
 ```yaml
 # grove.yml
 flow:
   recipes:
-    # This command must output a JSON object where keys are recipe names
     get_recipe_cmd: "my-cli-tool recipes --json"
 ```
 
-The specified command must output a JSON object where each key is a recipe name and the value is an object containing `description` and a `jobs` map.
+The command must output a JSON object where each key is a recipe name and the value is an object containing `description` and a `jobs` map.
 
-**Example JSON Output from `get_recipe_cmd`:**
+**Example JSON Output:**
 
 ```json
 {
   "company-microservice": {
-    "description": "Standard microservice template for our company.",
+    "description": "Standard microservice template.",
     "jobs": {
       "01-setup.md": "---\ntitle: Setup {{ .PlanName }}\n---\nSetup the service.",
       "02-deploy.md": "---\ntitle: Deploy {{ .PlanName }}\n---\nDeploy the service."
@@ -209,6 +208,4 @@ The specified command must output a JSON object where each key is a recipe name 
 }
 ```
 
-When listing or initializing recipes, Grove Flow will execute this command to discover available recipes.
-
-**Precedence Order**: When a recipe name exists in multiple sources, the order of precedence is: **User** > **Dynamic** > **Built-in**.
+When a recipe name exists in multiple sources, the order of precedence is: **User** > **Dynamic** > **Built-in**.

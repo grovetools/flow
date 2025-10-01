@@ -8,9 +8,11 @@ Generate comprehensive documentation for all aspects of managing plans in Grove 
 - Explain `flow plan init` with all its variations:
   - Basic initialization
   - Using `--worktree` (with and without custom branch names)
+    - Show that it's created in `.grove-worktrees/branch-name`
   - Using `--recipe` with built-in recipes
   - Using `--extract-all-from` to convert chats to plans
   - Combining options for complex workflows
+  - Show an example with the TUI (animated GIF)
 
 ### Listing and Browsing Plans
 - Detail `flow plan list` command and its output

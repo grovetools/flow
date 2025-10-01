@@ -4,11 +4,11 @@ Jobs are the fundamental units of work in a Grove Flow plan. Each job is a singl
 
 ## Creating Jobs
 
-The primary command for adding a new job to a plan is `flow plan add`. It can be used in two ways: interactively via a Terminal UI (TUI) or non-interactively with flags, making it suitable for both manual workflow creation and automated scripting.
+The primary command for adding a new job to a plan is `flow plan add`. It can be used interactively through a Terminal User Interface (TUI) or non-interactively with flags.
 
 ### Interactive Mode (TUI)
 
-Running `flow plan add` (or `flow plan add -i`) launches an interactive form to guide you through creating a new job. This is the recommended approach for manually adding jobs, as it provides helpful prompts and lists available options like job types, dependencies, and models.
+Running `flow plan add` or `flow plan add -i` launches an interactive form to guide you through creating a new job. This interface provides prompts and lists available options like job types, dependencies, and models.
 
 ```bash
 # If an active plan is set
@@ -56,9 +56,9 @@ This creates a new Markdown file (e.g., `02-implement-api-endpoints.md`) in the 
 
 ### Writing Effective Prompts
 
--   **Be Specific**: Clearly state the goal and constraints. Provide file paths, function names, and expected outcomes.
+-   **Be Specific**: State the goal and constraints. Provide file paths, function names, and expected outcomes.
 -   **Provide Context**: Use `--source-files` or reference outputs from previous jobs to give the LLM the context it needs.
--   **Structure for the Job Type**: An `agent` prompt should be a high-level task, while a `oneshot` prompt can be a more specific question or instruction. A `shell` prompt is simply the command to be executed.
+-   **Structure for the Job Type**: An `agent` prompt should be a high-level task, while a `oneshot` prompt can be a more specific question. A `shell` prompt is simply the command to be executed.
 
 ## Job Types Explained
 
@@ -76,7 +76,7 @@ Grove Flow supports several job types, each with a specific purpose and executor
 
 ## Dependencies Between Jobs
 
-You can create complex workflows by defining dependencies between jobs. A job will not run until all of its dependencies have the status `completed`.
+You can create workflows by defining dependencies between jobs. A job will not run until all of its dependencies have the status `completed`.
 
 Dependencies are defined using the `depends_on` key in the job's frontmatter, which contains a list of the filenames of the jobs it depends on.
 

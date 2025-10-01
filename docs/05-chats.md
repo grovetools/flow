@@ -1,37 +1,36 @@
-# Conversational Workflows with `flow chat`
+# Conversational Workflows
 
-Grove Flow includes a dedicated set of commands for managing conversational workflows with LLMs. The `flow chat` command provides an interactive, exploratory environment for ideation, problem-solving, and prototyping before committing to a structured, multi-step plan.
+Grove Flow includes `flow chat` commands for managing conversational workflows with LLMs. This provides an environment for exploration and problem-solving before creating a structured, multi-step plan.
 
 ## The Chat Workflow
 
-Chats are distinct from plans and serve a different purpose. While plans are structured for automated, sequential execution of discrete jobs, chats are designed for interactive, back-and-forth conversation.
+Chats are distinct from plans. Plans are structured for sequential execution of discrete jobs, while chats are designed for interactive, back-and-forth conversation.
 
-| Feature               | `flow plan`                                         | `flow chat`                                           |
-| --------------------- | --------------------------------------------------- | ----------------------------------------------------- |
-| **Purpose**           | Structured execution, automation, complex workflows | Exploration, ideation, refinement, problem-solving    |
-| **Structure**         | A DAG of interdependent jobs in separate files      | A single Markdown file capturing a linear conversation |
-| **Execution Model**   | Orchestrator runs jobs based on dependencies        | User and LLM take turns responding in the same file   |
-| **When to Use**       | When the steps of a task are reasonably well-defined | When exploring a problem or refining an idea          |
+| Feature         | `flow plan`                                      | `flow chat`                                        |
+| --------------- | ------------------------------------------------ | -------------------------------------------------- |
+| **Purpose**     | Structured execution, automation                 | Exploration, ideation, refinement, problem-solving |
+| **Structure**   | A directory of interdependent job files (a DAG)  | A single Markdown file capturing a linear conversation |
+| **Execution**   | Orchestrator runs jobs based on dependencies     | User and LLM respond sequentially in the same file   |
 
-The typical workflow involves starting with a `chat` to explore a concept and then using `flow plan extract` to convert valuable parts of the conversation into an executable `plan`.
+A common workflow is to start with a `chat` to explore a concept, then use `flow plan extract` to convert parts of the conversation into an executable `plan`.
 
 ## Starting and Managing Chats
 
-Conversations are managed as simple Markdown files in the directory specified by `flow.chat_directory` in your `grove.yml` configuration.
+Conversations are managed as Markdown files in the directory specified by `flow.chat_directory` in your `grove.yml` configuration.
 
-### Starting a New Chat
+### Initializing a Chat
 
-You can turn any Markdown file into a chat job by initializing it. This adds the necessary frontmatter to the file.
+Any Markdown file can be turned into a chat job by initializing it, which adds YAML frontmatter to the file.
 
 ```bash
-# Create a new markdown file for your idea
+# Create a markdown file for an idea
 touch chats/new-api-idea.md
 
 # Initialize it as a chat job
 flow chat -s chats/new-api-idea.md
 ```
 
-This command will add frontmatter like this to `chats/new-api-idea.md`:
+This command adds frontmatter to `chats/new-api-idea.md`:
 
 ```yaml
 ---
@@ -62,7 +61,7 @@ flow chat run
 flow chat run new-api-idea
 ```
 
-After running, the file will be updated with the LLM's response, ready for your next turn.
+After running, the file is updated with the LLM's response.
 
 ### Listing Chats
 
@@ -82,21 +81,19 @@ old-feature       completed     gemini-2.0-flash  old-feature.md
 
 ## Context in Chat Sessions
 
-Chat sessions automatically leverage the same context mechanisms as other Grove tools. When you run a chat, Grove Flow gathers context based on rules defined in your project's `.grove/rules` file. This ensures the LLM has relevant information from your codebase to inform its responses, making the conversation technically grounded and context-aware.
+When `flow chat run` is executed, it uses `grove-context` to gather file context based on rules defined in your project's `.grove/rules` file. This context is included in the request to the LLM.
 
-## From Chat to Action
+## From Conversation to Execution
 
-A key feature of the chat workflow is the ability to seamlessly transition from conversation to execution. Once you have refined an idea or received a useful code snippet, you can extract it into a formal plan.
+`chat` jobs are for conversation; their output is text. To execute code or run commands, content from a chat must be extracted into a `plan` containing an `agent` or `shell` job. An `interactive_agent` job created from a chat can then be launched into a `tmux` session with `flow plan launch`.
 
-While `chat` itself is for conversation, you can create an `interactive_agent` job from a chat and then launch it into a dedicated `tmux` session for hands-on development.
+## Extracting Jobs from Chats
 
-## Extracting Plans from Chats
-
-The `flow plan extract` command is the bridge between conversational chats and executable plans. It allows you to select specific LLM responses (or the entire conversation) and create a new job from them.
+The `flow plan extract` command converts parts of a conversation into executable jobs within a plan.
 
 ### Listing Extractable Blocks
 
-First, you can list all the extractable blocks within a chat file. Each LLM response is automatically assigned a unique ID.
+Each LLM response in a chat file is tagged with a unique ID inside a `<!-- grove: ... -->` comment. You can list all extractable blocks within a file.
 
 ```bash
 flow plan extract list --file chats/new-api-idea.md
@@ -119,19 +116,19 @@ Preview: The database schema could look like this...
 ---
 ```
 
-### Extracting Blocks into a New Job
+### Creating a Job from a Block
 
-Using the block IDs, you can create a new job in a plan.
+Using a block ID, you can create a new job in a plan directory.
 
 ```bash
 # First, ensure a plan exists
-flow plan init api-implementation --with-worktree
+flow plan init api-implementation --worktree
 
 # Extract a block into the new plan
-flow plan add api-implementation --title "Implement API Schema" --type agent --extract-from chats/new-api-idea.md --extract e5f6g7h8
+flow plan extract e5f6g7h8 --file ./chats/new-api-idea.md --title "Implement API Schema"
 ```
 
-This creates a new agent job in the `api-implementation` plan containing the database schema design from the chat, ready to be implemented by an agent.
+This creates a new job in the `api-implementation` plan containing the database schema design from the chat, ready to be implemented by an agent.
 
 You can also extract the entire body of a chat file using the `all` keyword:
 
@@ -157,12 +154,12 @@ You can override the model for a specific chat by setting the `model` key in the
 
 ## Use Cases and Examples
 
-Chats excel in exploratory and iterative scenarios.
+Chats are suitable for exploratory and iterative scenarios.
 
-*   **Brainstorming**: Start a chat to explore different approaches to a new feature.
-*   **Problem Exploration**: Work through a complex bug with an LLM, providing logs and code snippets.
-*   **Prototyping**: Ask the LLM to generate boilerplate code or a proof-of-concept.
-*   **Documentation**: Have a conversation to draft an outline for new documentation.
+*   **Brainstorming**: Explore different approaches to a new feature.
+*   **Problem Exploration**: Work through a bug with an LLM, providing logs and code snippets.
+*   **Prototyping**: Ask an LLM to generate boilerplate code or a proof-of-concept.
+*   **Documentation**: Draft an outline for new documentation.
 
 ### Example Workflow: From Idea to Plan
 
@@ -186,8 +183,8 @@ Chats excel in exploratory and iterative scenarios.
 
 4.  **Create a new plan and extract the final LLM response into it:**
     ```bash
-    flow plan init refactor-auth-service --with-worktree
-    flow plan add refactor-auth-service --title "Refactor Authentication" --type agent --extract-from chats/auth-refactor.md --extract a1b2c3
+    flow plan init refactor-auth-service --worktree
+    flow plan extract a1b2c3 --file ./chats/auth-refactor.md --title "Refactor Authentication"
     ```
 
 5.  **Run the new, structured plan:**
