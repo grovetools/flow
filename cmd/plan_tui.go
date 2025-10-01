@@ -8,9 +8,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
@@ -48,31 +51,68 @@ type planListTUIModel struct {
 	width          int
 	height         int
 	err            error
-	showHelp       bool
 	loading        bool
 	plansDirectory string
 	statusMessage  string
+	help           help.Model
+	keys           planListKeyMap
 }
 
 // TUI key mappings for plan list
 type planListKeyMap struct {
-	Up        string
-	Down      string
-	ViewPlan  string
-	FinishPlan string
-	Quit      string
-	Help      string
-	NewPlan   string
+	keymap.Base
+	Up         key.Binding
+	Down       key.Binding
+	ViewPlan   key.Binding
+	FinishPlan key.Binding
+	NewPlan    key.Binding
+}
+
+func (k planListKeyMap) ShortHelp() []key.Binding {
+	// Return empty to show no help in footer - all help goes in popup
+	return []key.Binding{}
+}
+
+func (k planListKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Navigation")),
+			k.Up,
+			k.Down,
+			k.ViewPlan,
+		},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
+			k.NewPlan,
+			k.FinishPlan,
+			k.Help,
+			k.Quit,
+		},
+	}
 }
 
 var planListKeys = planListKeyMap{
-	Up:        "k",
-	Down:      "j", 
-	ViewPlan:  "enter",
-	FinishPlan: "ctrl+x",
-	Quit:      "q",
-	Help:      "?",
-	NewPlan:    "n",
+	Base: keymap.NewBase(),
+	Up: key.NewBinding(
+		key.WithKeys("k", "up"),
+		key.WithHelp("k/↑", "move up"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("j", "down"),
+		key.WithHelp("j/↓", "move down"),
+	),
+	ViewPlan: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "view plan details"),
+	),
+	FinishPlan: key.NewBinding(
+		key.WithKeys("ctrl+x"),
+		key.WithHelp("ctrl+x", "finish plan"),
+	),
+	NewPlan: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "create new plan"),
+	),
 }
 
 // TUI styles for plan list
@@ -156,11 +196,18 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 }
 
 func newPlanListTUIModel(plansDirectory string) planListTUIModel {
+	helpModel := help.NewBuilder().
+		WithKeys(planListKeys).
+		WithTitle("Plan List - Help").
+		Build()
+
 	return planListTUIModel{
 		plans:          []PlanListItem{},
 		cursor:         0,
 		loading:        true,
 		plansDirectory: plansDirectory,
+		help:           helpModel,
+		keys:           planListKeys,
 	}
 }
 
@@ -189,15 +236,13 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:
-		// Handle help screen
-		if m.showHelp {
-			switch msg.String() {
-			case planListKeys.Help, planListKeys.Quit, "ctrl+c":
-				m.showHelp = false
-			}
+		// If help is visible, it consumes all key presses
+		if m.help.ShowAll {
+			m.help.Toggle() // Any key closes help
 			return m, nil
 		}
 
@@ -205,36 +250,37 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = ""
 
 		// Regular key handling
-		switch msg.String() {
-		case "ctrl+c", planListKeys.Quit:
+		switch {
+		case key.Matches(msg, m.keys.Quit), msg.String() == "ctrl+c":
 			return m, tea.Quit
 
-		case planListKeys.NewPlan:
+		case key.Matches(msg, m.keys.Help):
+			m.help.Toggle()
+			return m, nil
+
+		case key.Matches(msg, m.keys.NewPlan):
 			// Create a new plan init TUI, which will take over.
 			// It knows how to return to this list view when the user quits.
 			return newPlanInitTUIModel(m.plansDirectory, &PlanInitCmd{}), nil
 
-		case planListKeys.Help:
-			m.showHelp = true
-
-		case planListKeys.Up, "up":
+		case key.Matches(msg, m.keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
 			}
 
-		case planListKeys.Down, "down":
+		case key.Matches(msg, m.keys.Down):
 			if m.cursor < len(m.plans)-1 {
 				m.cursor++
 			}
 
-		case planListKeys.ViewPlan:
+		case key.Matches(msg, m.keys.ViewPlan):
 			// Enter key - view plan status TUI
 			if m.cursor < len(m.plans) {
 				plan := &m.plans[m.cursor]
 				return m, openPlanStatusTUI(plan.Plan)
 			}
 
-		case planListKeys.FinishPlan:
+		case key.Matches(msg, m.keys.FinishPlan):
 			// Ctrl+X key - execute plan finish command
 			if m.cursor < len(m.plans) {
 				plan := &m.plans[m.cursor]
@@ -263,14 +309,9 @@ func (m planListTUIModel) View() string {
 		s.WriteString("\n")
 	}
 
-	// Show help popup if active
-	if m.showHelp {
-		helpView := m.renderPlanListHelpScreen()
-		return lipgloss.NewStyle().
-			Width(m.width).
-			Height(m.height).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(helpView)
+	// If help is visible, show it and return
+	if m.help.ShowAll {
+		return m.help.View()
 	}
 
 	// Title
@@ -280,7 +321,7 @@ func (m planListTUIModel) View() string {
 	if len(m.plans) == 0 {
 		s.WriteString("No plans found in directory.\n")
 		s.WriteString("\n")
-		s.WriteString(m.renderPlanListHelp())
+		s.WriteString(planListHelpStyle.Render("Press ? for help"))
 		return s.String()
 	}
 
@@ -293,7 +334,7 @@ func (m planListTUIModel) View() string {
 
 	// Help text
 	s.WriteString("\n")
-	s.WriteString(m.renderPlanListHelp())
+	s.WriteString(planListHelpStyle.Render("Press ? for help"))
 
 	return s.String()
 }
@@ -378,56 +419,7 @@ func (m planListTUIModel) renderPlanListTable() string {
 	return s.String()
 }
 
-func (m planListTUIModel) renderPlanListHelp() string {
-	return planListHelpStyle.Render("Press ? for help")
-}
-
-func (m planListTUIModel) renderPlanListHelpScreen() string {
-	// Create styles matching grove-context
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("241")).
-		Padding(2, 3).
-		Width(60).
-		Align(lipgloss.Center)
-	
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("12")).
-		MarginBottom(1)
-	
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("34")).
-		Bold(true)
-	
-	// Navigation and actions
-	helpItems := []string{
-		"Navigation:",
-		"",
-		keyStyle.Render("↑/↓, j/k") + " - Navigate up/down through plans",
-		keyStyle.Render("◀") + " - Current position indicator",
-		"",
-		"Actions:",
-		"",
-		keyStyle.Render("Enter") + " - View plan status (opens plan status TUI)",
-		keyStyle.Render("Ctrl+X") + " - Finish plan (executes plan finish command)",
-		keyStyle.Render("n") + " - New plan",
-		"",
-		"General:",
-		"",
-		keyStyle.Render("q") + " - Quit",
-		keyStyle.Render("?") + " - Toggle this help",
-	}
-	
-	// Render content
-	content := strings.Join(helpItems, "\n")
-	
-	// Add title and wrap in box
-	title := titleStyle.Render("Plan List TUI - Help")
-	fullContent := lipgloss.JoinVertical(lipgloss.Center, title, content)
-	
-	return boxStyle.Render(fullContent)
-}
+// Old help functions removed - now using standardized help component
 
 // Helper functions
 func loadPlansListCmd(plansDirectory string) tea.Cmd {
