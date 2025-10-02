@@ -583,42 +583,49 @@ func (m statusTUIModel) renderJobTree() string {
 		// Build tree structure part
 		treePart := fmt.Sprintf("  %s%s", prefix, treeChar)
 
-		// Get status color style
-		statusStyles := getStatusStyles()
-		statusStyle := statusStyles[job.Status]
-
-		// Build job content with colored filename
+		// Build job content with status icon
 		statusIcon := m.getStatusIcon(job.Status)
-		coloredFilename := statusStyle.Render(job.Filename)
+
+		// Determine text style based on cursor/selection state
+		var filenameStyle lipgloss.Style
+		var titleStyle lipgloss.Style
+
+		if i == m.cursor {
+			// Cursor: normal filename, pink title with background
+			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			titleStyle = lipgloss.NewStyle().
+				Foreground(theme.DefaultColors.Pink).
+				Background(theme.DefaultColors.SelectedBackground)
+		} else if m.selected[job.ID] {
+			// Selected: use accent color
+			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet)
+			titleStyle = theme.DefaultTheme.Muted
+		} else {
+			// Normal: no color on filename, muted title
+			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			titleStyle = theme.DefaultTheme.Muted
+		}
+
+		coloredFilename := filenameStyle.Render(job.Filename)
 
 		// Get job type badge with subtle blue/cyan color
 		jobTypeBadge := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("69")). // Subtle blue
 			Render(fmt.Sprintf("[%s]", job.Type))
 
-		var jobContent string
+		// Build content without emoji (add emoji separately to avoid background bleed)
+		var textContent string
 		if job.Title != "" {
-			// Render title in muted color
-			jobContent = fmt.Sprintf("%s %s %s %s", statusIcon, coloredFilename,
-				theme.DefaultTheme.Muted.Render(fmt.Sprintf("(%s)", job.Title)),
+			// Render title in appropriate style
+			textContent = fmt.Sprintf("%s %s %s", coloredFilename,
+				titleStyle.Render(fmt.Sprintf("(%s)", job.Title)),
 				jobTypeBadge)
 		} else {
-			jobContent = fmt.Sprintf("%s %s %s", statusIcon, coloredFilename, jobTypeBadge)
+			textContent = fmt.Sprintf("%s %s", coloredFilename, jobTypeBadge)
 		}
 
-		// Apply styling based on cursor/selection state
-		// For cursor or selection, wrap the entire content
-		styledJobContent := jobContent
-		if i == m.cursor && m.selected[job.ID] {
-			// Both cursor and selected - use cursor style
-			styledJobContent = theme.DefaultTheme.Selected.Render(jobContent)
-		} else if i == m.cursor {
-			// Just cursor
-			styledJobContent = theme.DefaultTheme.Selected.Render(jobContent)
-		} else if m.selected[job.ID] {
-			// Just selected
-			styledJobContent = theme.DefaultTheme.Accent.Render(jobContent)
-		}
+		// Combine emoji (no background) with styled text content
+		styledJobContent := statusIcon + " " + textContent
 
 		// Build indicators separately with their own style (foreground only, no background)
 		indicators := ""
