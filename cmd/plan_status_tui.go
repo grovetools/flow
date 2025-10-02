@@ -161,7 +161,7 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 		orchestration.JobStatusPendingUser: lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet),
 		// Pending LLM: Soft blue
 		orchestration.JobStatusPendingLLM: lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue),
-		// Pending: Keep muted text
+		// Pending: Muted gray for both dot and text
 		orchestration.JobStatusPending: theme.DefaultTheme.Muted,
 	}
 }
@@ -601,8 +601,12 @@ func (m statusTUIModel) renderJobTree() string {
 			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet)
 			titleStyle = theme.DefaultTheme.Muted
 		} else {
-			// Normal: no color on filename, muted title
-			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			// Normal: check if pending status, use gray; otherwise light text
+			if job.Status == orchestration.JobStatusPending {
+				filenameStyle = theme.DefaultTheme.Muted
+			} else {
+				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			}
 			titleStyle = theme.DefaultTheme.Muted
 		}
 
@@ -658,41 +662,17 @@ func (m statusTUIModel) renderJobTree() string {
 	return s.String()
 }
 
-// getStatusIcon returns the icon for a job status
+// getStatusIcon returns a colored dot indicator for a job status
 func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 	statusStyles := getStatusStyles()
-	icon := ""
-	style := theme.DefaultTheme.Bold
-	
-	switch status {
-	case orchestration.JobStatusCompleted:
-		icon = "✓"
-		style = statusStyles[status]
-	case orchestration.JobStatusRunning:
-		icon = "⚡"
-		style = statusStyles[status]
-	case orchestration.JobStatusFailed:
-		icon = "✗"
-		style = statusStyles[status]
-	case orchestration.JobStatusBlocked:
-		icon = "🚫"
-		style = statusStyles[status]
-	case orchestration.JobStatusNeedsReview:
-		icon = "👁"
-		style = statusStyles[status]
-	case orchestration.JobStatusPendingUser:
-		icon = "💬"
-		style = statusStyles[status]
-	case orchestration.JobStatusPendingLLM:
-		icon = "🤖"
-		style = statusStyles[status]
-	default:
-		icon = "⏳"
-		if s, ok := statusStyles[orchestration.JobStatusPending]; ok {
-			style = s
-		}
+	icon := "●" // Solid dot for all statuses
+	style := theme.DefaultTheme.Muted
+
+	// Use the status style to color the dot
+	if s, ok := statusStyles[status]; ok {
+		style = s
 	}
-	
+
 	return style.Render(icon)
 }
 
