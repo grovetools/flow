@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/config"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
+	proxy_config "github.com/mattsolo1/grove-proxy/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -237,8 +237,12 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			e.prettyLog.Success(fmt.Sprintf("Session '%s' already exists.", sessionName))
 			
 			// Build agent command
-			fullCfg, _ := config.LoadFrom(".")
-			agentCommand, err := e.buildAgentCommand(job, plan, workDir, fullCfg.Agent.Args)
+			fullCfg, _ := proxy_config.LoadFrom(".")
+			var agentArgs []string
+			if fullCfg != nil && fullCfg.Agent != nil {
+				agentArgs = fullCfg.Agent.Args
+			}
+			agentCommand, err := e.buildAgentCommand(job, plan, workDir, agentArgs)
 			if err != nil {
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()
@@ -317,8 +321,12 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		}
 
 		// Build agent command
-		fullCfg, _ := config.LoadFrom(".")
-		agentCommand, err := e.buildAgentCommand(job, plan, workDir, fullCfg.Agent.Args)
+		fullCfg, _ := proxy_config.LoadFrom(".")
+		var agentArgs []string
+		if fullCfg != nil && fullCfg.Agent != nil {
+			agentArgs = fullCfg.Agent.Args
+		}
+		agentCommand, err := e.buildAgentCommand(job, plan, workDir, agentArgs)
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -453,13 +461,17 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	// Build and send command
-	fullCfg, err := config.LoadFrom(".")
+	fullCfg, err := proxy_config.LoadFrom(".")
 	if err != nil {
 		// Proceed with minimal config
-		fullCfg = &config.Config{}
+		fullCfg = &proxy_config.AppConfig{Agent: &proxy_config.AgentConfig{}}
 	}
-	
-	agentCommand, err := e.buildAgentCommand(job, plan, workDir, fullCfg.Agent.Args)
+
+	var agentArgs []string
+	if fullCfg != nil && fullCfg.Agent != nil {
+		agentArgs = fullCfg.Agent.Args
+	}
+	agentCommand, err := e.buildAgentCommand(job, plan, workDir, agentArgs)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()

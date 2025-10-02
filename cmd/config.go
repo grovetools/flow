@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"github.com/mattsolo1/grove-core/config"
+	proxy_config "github.com/mattsolo1/grove-proxy/pkg/config"
 )
 
 // FlowConfig defines the structure for the 'flow' section in grove.yml.
@@ -42,11 +43,15 @@ func loadFlowConfig() (*FlowConfig, error) {
 }
 
 // loadFullConfig loads the entire grove config including agent settings
-func loadFullConfig() (*config.Config, error) {
-	coreCfg, err := config.LoadFrom(".")
+func loadFullConfig() (*proxy_config.AppConfig, error) {
+	appCfg, err := proxy_config.LoadFrom(".")
 	if err != nil {
-		// It's okay if the core config doesn't exist, we'll just use an empty one.
-		coreCfg = &config.Config{}
+		// It's okay if the config doesn't exist, we'll just use an empty one.
+		appCfg = &proxy_config.AppConfig{
+			Core:  &config.Config{},
+			Proxy: &proxy_config.ProxyConfig{},
+			Agent: &proxy_config.AgentConfig{},
+		}
 	}
-	return coreCfg, nil
+	return appCfg, nil
 }

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	proxy_config "github.com/mattsolo1/grove-proxy/pkg/config"
 )
 
 // AgentRunner defines the interface for running agents.
@@ -221,11 +221,11 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 	}
 	defer log.Close()
 
-	// Load grove config to check mount_workspace_at_host_path setting
-	coreCfg, err := config.LoadFrom(".") // Use grove-core's loader
+	// Load grove config to get agent configuration
+	appCfg, err := proxy_config.LoadFrom(".") // Use grove-proxy's loader to get agent config
 	if err != nil {
 		// Proceed with default behavior if config can't be loaded
-		coreCfg = &config.Config{}
+		appCfg = &proxy_config.AppConfig{Agent: &proxy_config.AgentConfig{}}
 		fmt.Printf("Warning: could not load grove.yml for agent execution: %v\n", err)
 	}
 
@@ -233,12 +233,12 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 
 	// Always run in host mode - no container dependencies
 	fmt.Fprintf(os.Stdout, "Running job in host mode\n")
-	return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, coreCfg)
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, appCfg)
 }
 
 
 // runOnHost executes the agent directly on the host machine
-func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, coreCfg *config.Config) error {
+func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, appCfg *proxy_config.AppConfig) error {
 	// Change to the worktree directory
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -252,8 +252,8 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 
 	// Prepare the claude command
 	args := []string{"--dangerously-skip-permissions"}
-	if coreCfg.Agent.Args != nil {
-		args = append(args, coreCfg.Agent.Args...)
+	if appCfg.Agent.Args != nil {
+		args = append(args, appCfg.Agent.Args...)
 	}
 
 	// Create the command
