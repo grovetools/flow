@@ -1,3 +1,170 @@
+## v0.3.0 (2025-10-01)
+
+This release enhances user experience and workflow automation. The Terminal User Interfaces (TUIs) for adding, listing, and finishing plans have been completely overhauled with standardized help components, vim-style navigation, and a consistent visual theme aligned with the Grove ecosystem (adfb0ca, abf7eb7). The interactive TUI for `flow plan init` provides a guided way to create new plans with smart defaults (1bd36d1).
+
+A new `flow plan rebase` command has been introduced to manage branches within worktrees, supporting both standard updates and integration testing workflows (a1a43cc). Worktree management is now more robust, with `plan init` directly supporting `--worktree` creation (8bbe5a5) and enhanced handling for complex ecosystem projects involving submodules or multiple repositories (af96315, 99cb1e4).
+
+The recipe system has been improved with support for template variables via `--recipe-vars` and `grove.yml` configuration (f7eb185), as well as dynamic recipe loading from external commands (2bb0563), making workflows more reusable and configurable. As part of this evolution, the deprecated `flow chat launch` command has been removed in favor of a more integrated approach using `plan init` with extraction flags (b1d5993).
+
+Under the hood, `grove-flow` has been refactored to use centralized workspace and logging services from `grove-core`, streamlining its architecture and improving maintainability (52be20b, c08e32a). Additionally, a full documentation suite has been generated, providing comprehensive guides for all features (0e21ccd).
+
+### Features
+
+- Implement `plan rebase` command with dual-mode functionality for standard and integration rebasing (a1a43cc)
+- Implement comprehensive TUI styling improvements and navigation for `plan add` (abf7eb7)
+- Implement standardized help component in plan list and plan add TUIs (b18b132, 5d015d3)
+- Add interactive TUI for `flow plan init` for guided plan creation (1bd36d1)
+- Implement worktree creation directly in `plan init` using `--worktree` flag (8bbe5a5)
+- Add support for recipe variables via `--recipe-vars` and `grove.yml` (f7eb185)
+- Add support for dynamic recipe loading via `get_recipe_cmd` (2bb0563)
+- Make `--recipe` flag optional when `--recipe-cmd` is used (4aeb613)
+- Add `--recipe-cmd` flag to `plan init` for one-off recipe providers (d06d895)
+- Add `rules_file` support in job frontmatter for job-specific context (0dc5ea4)
+- Add README template generation and `docgen` integration (ec0148b)
+- Enhance `plan open` with convenience features to set active plan and launch status TUI (8bbe5a5)
+- Move `.grove-workspace` marker to `.grove/workspace` for cleaner project structure (b5fb963)
+- Add fallback paths for `rules_file` resolution (36338e7)
+- Generate new documentation for all features (0e21ccd)
+- Replace custom dependency tree with `list.Model` for improved UX in `plan add` TUI (e3fa6a9)
+- Enhance worktree management with automatic `cx reset` (d2d9d10)
+- Create `.grove-workspace` marker in worktrees for `grove-meta` integration (d4194d7, 74b546e)
+- Enhance logging throughout the orchestration package (1f55b65)
+- Enhance git-status recipe to show uncommitted and committed changes (1ec6d64)
+- Auto-create `.grove/rules` with `cx reset` when missing (74c8808)
+- Simplify ecosystem worktrees to create direct repo worktrees (99cb1e4)
+- Implement linked worktrees for ecosystem submodules (af96315)
+- Add initial draft documentation (a063b95)
+
+### Bug Fixes
+
+- Update README and workflow configurations (9252ecf, 962e6e6)
+- Clean up README.md.tpl template format (b2e322a)
+- Fix readme logo path (ca2bbf2)
+- Prevent save shortcut from hijacking insert mode in `plan add` TUI (10687ef)
+- Improve readability of `plan finish` congratulations message (6aa427c)
+- Properly separate stdout/stderr when calling `grove ws list` (e2747b0)
+- Improve ecosystem worktree handling and path resolution (a098796, 5c51b3c)
+- Resolve `Plan.ID` field reference to `plan.Name` (cf76273)
+- Remove deprecated `flow chat launch` command and references (b1d5993)
+- Fix `main...HEAD` diff for proper change tracking in git recipes (41985e4)
+- Ensure oneshot jobs update status to completed (c9a8f7c)
+- Add lifecycle hooks for all job types to track in `grove-hooks` (cd3a9dd)
+- Prevent `cx generate` from overwriting custom rules context in chat jobs (78f90df)
+- Improve test messages and mock setups (6ae4806)
+- Update `agent_continue` tests to match explicit opt-in behavior (5b601ca)
+- Set empty recipe as default for `plan init` (940d4a1)
+- Set `open-session` default to false in `plan init` (50a70fe)
+- Hide finished plans from Starship prompt (f290cbc)
+- Remove automatic worktree assignment from `plan init` (d1a4b2d)
+
+### Code Refactoring
+
+- Complete Phase II TUI unification for all plan TUIs to use `grove-core` theme system (adfb0ca)
+- Refactor `grove-flow` to use centralized workspace services from `grove-core` (52be20b)
+- Consolidate tmux session name sanitization to use `grove-core` (9ce25ac)
+- Update to use new dual-logger pattern from `grove-core` (c08e32a)
+- Migrate to centralized tmux client from `grove-core` (fd720ba)
+- Restore pretty logging alongside structured logging (c85e536)
+
+### Documentation
+
+- Update docgen configuration and README templates (d5d4879)
+- Make documentation more succinct and update `docs.rules` (3172d70, dfcce10)
+- Simplify installation instructions to point to main Grove guide (1b6e24d)
+- Rename Introduction sections to Overview (79c7faa)
+
+### Chores
+
+- Temporarily disable CI workflow (b5768c4)
+- Update `.gitignore` rules for `go.work` files (e1109f4)
+
+### File Changes
+
+```
+ .github/workflows/ci.yml                           |    4 +-
+ .github/workflows/release.yml                      |   10 +-
+ .gitignore                                         |    7 +
+ CLAUDE.md                                          |   31 +
+ Makefile                                           |    9 +-
+ README.md                                          |  162 +-
+ cmd/agent_continue_auto_test.go                    |   18 +-
+ cmd/chat.go                                        |  288 ----
+ cmd/config.go                                      |   24 +-
+ cmd/plan.go                                        |   56 +-
+ cmd/plan_add_tui.go                                |  766 ++++++---
+ cmd/plan_finish.go                                 |  340 +++-
+ cmd/plan_finish_tui.go                             |  205 +--
+ cmd/plan_helpers.go                                |   32 +
+ cmd/plan_init.go                                   |  286 +++-
+ cmd/plan_init_tui.go                               |  289 +++-
+ cmd/plan_launch.go                                 |   92 +-
+ cmd/plan_open.go                                   |   78 +-
+ cmd/plan_rebase.go                                 |  523 ++++++
+ cmd/plan_recipes_cmd.go                            |   15 +-
+ cmd/plan_run.go                                    |    5 +-
+ cmd/plan_session.go                                |   59 +-
+ cmd/plan_status_tui.go                             |  431 ++---
+ cmd/plan_tui.go                                    |  176 +-
+ cmd/starship.go                                    |    6 +
+ docs/01-overview.md                                |   45 +
+ docs/02-examples.md                                |  175 ++
+ docs/03-managing-plans.md                          |  137 ++
+ docs/04-working-with-jobs.md                       |  146 ++
+ docs/05-chats.md                                   |  193 +++
+ docs/06-recipes-and-templates.md                   |  211 +++
+ docs/07-configuration.md                           |  135 ++
+ docs/08-command-reference.md                       |  458 +++++
+ docs/README.md.tpl                                 |    6 +
+ docs/docgen.config.yml                             |   60 +
+ docs/docs.rules                                    |    1 +
+ docs/images/grove-flow-readme.svg                  | 1753 ++++++++++++++++++++
+ docs/prompts/01-overview.md                        |   33 +
+ docs/prompts/02-examples.md                        |   33 +
+ docs/prompts/03-managing-plans.md                  |   51 +
+ docs/prompts/04-working-with-jobs.md               |   55 +
+ docs/prompts/05-chats.md                           |   53 +
+ docs/prompts/06-recipes-and-templates.md           |   68 +
+ docs/prompts/07-configuration.md                   |   65 +
+ docs/prompts/08-command-reference.md               |   72 +
+ go.mod                                             |    2 +-
+ pkg/docs/docs.json                                 |  335 ++++
+ .../builtin_recipes/chat-workflow/01-chat.md       |    1 -
+ .../builtin_recipes/chat-workflow/02-implement.md  |    1 -
+ .../chat-workflow/03-git-changes.md                |    3 +-
+ .../builtin_recipes/chat-workflow/04-git-status.md |    7 +-
+ .../builtin_recipes/chat-workflow/05-review.md     |    1 -
+ pkg/orchestration/builtin_recipes/chat/01-chat.md  |    1 -
+ .../docgen-customize/01-customize-docs.md          |   38 +
+ .../docgen-customize/02-generate-docs.md           |   40 +
+ .../standard-feature/02-implement.md               |    1 -
+ .../standard-feature/03-git-changes.md             |    3 +-
+ .../standard-feature/04-git-status.md              |    5 +-
+ .../builtin_recipes/standard-feature/05-review.md  |    1 -
+ pkg/orchestration/go_workspace.go                  |  287 ----
+ pkg/orchestration/go_workspace_test.go             |  214 ---
+ pkg/orchestration/headless_agent_executor.go       |  154 +-
+ pkg/orchestration/hooks.go                         |   49 +-
+ pkg/orchestration/interactive_agent_executor.go    |  254 ++-
+ pkg/orchestration/job.go                           |    1 +
+ pkg/orchestration/llm_client.go                    |  106 +-
+ pkg/orchestration/oneshot_executor.go              |  520 ++++--
+ pkg/orchestration/orchestrator.go                  |   48 +-
+ pkg/orchestration/plan.go                          |    9 +-
+ pkg/orchestration/recipes.go                       |  161 +-
+ pkg/orchestration/shell_executor.go                |  139 +-
+ pkg/orchestration/worktree_manager.go              |   16 -
+ tests/e2e/tend/main.go                             |   11 +-
+ tests/e2e/tend/mocks/src/grove/main.go             |  116 +-
+ tests/e2e/tend/scenarios_chat.go                   |   49 -
+ tests/e2e/tend/scenarios_ecosystem_worktrees.go    |  699 ++++++++
+ tests/e2e/tend/scenarios_plan.go                   |  698 +++++++-
+ tests/e2e/tend/scenarios_plan_dynamic_recipes.go   |  301 ++++
+ tests/e2e/tend/scenarios_plan_recipe_vars.go       |  464 ++++++
+ tests/e2e/tend/scenarios_plan_recipes.go           |  120 +-
+ tests/e2e/tend/scenarios_rules_in_frontmatter.go   |  402 +++++
+ 81 files changed, 10426 insertions(+), 2493 deletions(-)
+```
+
 ## v0.2.18 (2025-09-17)
 
 ### Chores
