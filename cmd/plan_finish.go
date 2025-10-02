@@ -218,6 +218,245 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	// Define cleanup items
 	items := []*cleanupItem{
 		{
+			Name: "Merge/fast-forward submodules to main",
+			Check: func() (string, error) {
+				if worktreeName == "" || gitRoot == "" {
+					return "N/A", nil
+				}
+				// Check if .grove/workspace file exists at git root (for ecosystem)
+				workspaceFile := filepath.Join(gitRoot, ".grove", "workspace")
+
+				if _, err := os.Stat(workspaceFile); os.IsNotExist(err) {
+					return "N/A (not ecosystem)", nil
+				}
+
+				// Read and parse the workspace file
+				data, err := os.ReadFile(workspaceFile)
+				if err != nil {
+					return "N/A (read error)", nil
+				}
+
+				// WorkspaceMetadata matches grove-meta/cmd/dev_workspace.go:WorkspaceMetadata
+				var workspaceConfig struct {
+					Branch    string   `yaml:"branch"`
+					Plan      string   `yaml:"plan"`
+					CreatedAt string   `yaml:"created_at"`
+					Ecosystem bool     `yaml:"ecosystem"`
+					Repos     []string `yaml:"repos,omitempty"`
+				}
+
+				if err := yaml.Unmarshal(data, &workspaceConfig); err != nil {
+					return "N/A (parse error)", nil
+				}
+
+				if !workspaceConfig.Ecosystem || len(workspaceConfig.Repos) == 0 {
+					return "N/A (not ecosystem)", nil
+				}
+
+				// Discover local workspaces and check status of each repo
+				localWorkspaces, err := workspace.DiscoverLocalWorkspaces(context.Background())
+				if err != nil {
+					return color.YellowString("Available"), nil // Still show as available even if we can't check
+				}
+
+				totalRepos := len(workspaceConfig.Repos)
+				needsMerge := 0
+				alreadyMerged := 0
+				notFound := 0
+				needsRebase := 0
+
+				for _, repoName := range workspaceConfig.Repos {
+					repoPath, exists := localWorkspaces[repoName]
+					if !exists {
+						notFound++
+						continue
+					}
+
+					// Check if branch exists
+					branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName)
+					branchCheckCmd.Dir = repoPath
+					if err := branchCheckCmd.Run(); err != nil {
+						notFound++
+						continue
+					}
+
+					// Check if main exists
+					mainCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/main")
+					mainCheckCmd.Dir = repoPath
+					if err := mainCheckCmd.Run(); err != nil {
+						notFound++
+						continue
+					}
+
+					// Check commits ahead
+					aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName)
+					aheadCmd.Dir = repoPath
+					aheadOutput, err := aheadCmd.Output()
+					if err != nil {
+						continue
+					}
+					aheadCount := strings.TrimSpace(string(aheadOutput))
+
+					if aheadCount == "0" || aheadCount == "" {
+						alreadyMerged++
+						continue
+					}
+
+					// Check if fast-forward is possible
+					mergeBaseCmd := exec.Command("git", "merge-base", "main", worktreeName)
+					mergeBaseCmd.Dir = repoPath
+					mergeBaseOutput, err := mergeBaseCmd.Output()
+					if err != nil {
+						continue
+					}
+					mergeBase := strings.TrimSpace(string(mergeBaseOutput))
+
+					mainRevCmd := exec.Command("git", "rev-parse", "main")
+					mainRevCmd.Dir = repoPath
+					mainRevOutput, err := mainRevCmd.Output()
+					if err != nil {
+						continue
+					}
+					mainRev := strings.TrimSpace(string(mainRevOutput))
+
+					if mergeBase == mainRev {
+						needsMerge++
+					} else {
+						needsRebase++
+					}
+				}
+
+				// Build status message
+				var statusParts []string
+				if needsMerge > 0 {
+					statusParts = append(statusParts, color.YellowString("%d to merge", needsMerge))
+				}
+				if alreadyMerged > 0 {
+					statusParts = append(statusParts, color.GreenString("%d merged", alreadyMerged))
+				}
+				if needsRebase > 0 {
+					statusParts = append(statusParts, color.RedString("%d need rebase", needsRebase))
+				}
+				if notFound > 0 {
+					statusParts = append(statusParts, color.New(color.Faint).Sprintf("%d skipped", notFound))
+				}
+
+				if len(statusParts) == 0 {
+					return color.YellowString("Available"), nil
+				}
+
+				status := fmt.Sprintf("%d repos: %s", totalRepos, strings.Join(statusParts, ", "))
+				return status, nil
+			},
+			Action: func() error {
+				// Read the workspace file to get ecosystem configuration (at git root)
+				workspaceFile := filepath.Join(gitRoot, ".grove", "workspace")
+
+				data, err := os.ReadFile(workspaceFile)
+				if err != nil {
+					return fmt.Errorf("failed to read workspace file: %w", err)
+				}
+
+				// WorkspaceMetadata matches grove-meta/cmd/dev_workspace.go:WorkspaceMetadata
+				var workspaceConfig struct {
+					Branch    string   `yaml:"branch"`
+					Plan      string   `yaml:"plan"`
+					CreatedAt string   `yaml:"created_at"`
+					Ecosystem bool     `yaml:"ecosystem"`
+					Repos     []string `yaml:"repos,omitempty"`
+				}
+
+				if err := yaml.Unmarshal(data, &workspaceConfig); err != nil {
+					return fmt.Errorf("failed to parse workspace file: %w", err)
+				}
+
+				if !workspaceConfig.Ecosystem || len(workspaceConfig.Repos) == 0 {
+					return nil
+				}
+
+				fmt.Printf("    Merging/fast-forwarding submodule branches to main...\n")
+
+				// Discover local workspaces
+				localWorkspaces, err := workspace.DiscoverLocalWorkspaces(context.Background())
+				if err != nil {
+					return fmt.Errorf("failed to discover local workspaces: %w", err)
+				}
+
+				hasErrors := false
+				for _, repoName := range workspaceConfig.Repos {
+					repoPath, exists := localWorkspaces[repoName]
+					if !exists {
+						fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping\n", repoName)
+						continue
+					}
+
+					// Check if the branch exists
+					branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName)
+					branchCheckCmd.Dir = repoPath
+					if err := branchCheckCmd.Run(); err != nil {
+						// Branch doesn't exist, skip
+						continue
+					}
+
+					// Check if main branch exists
+					mainCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/main")
+					mainCheckCmd.Dir = repoPath
+					if err := mainCheckCmd.Run(); err != nil {
+						fmt.Printf("      Warning: main branch not found in %s, skipping\n", repoName)
+						continue
+					}
+
+					// Check if branch is ahead of main
+					aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName)
+					aheadCmd.Dir = repoPath
+					aheadOutput, err := aheadCmd.Output()
+					if err != nil {
+						fmt.Printf("      Warning: failed to check commits ahead for %s: %v\n", repoName, err)
+						continue
+					}
+					aheadCount := strings.TrimSpace(string(aheadOutput))
+
+					if aheadCount == "0" || aheadCount == "" {
+						// Already merged, skip
+						continue
+					}
+
+					fmt.Printf("      • %s: merging %s commits to main\n", repoName, aheadCount)
+
+					// Checkout main
+					checkoutCmd := exec.Command("git", "checkout", "main")
+					checkoutCmd.Dir = repoPath
+					if output, err := checkoutCmd.CombinedOutput(); err != nil {
+						fmt.Printf("        Error: failed to checkout main: %s\n", string(output))
+						hasErrors = true
+						continue
+					}
+
+					// Try to merge (fast-forward only)
+					mergeCmd := exec.Command("git", "merge", "--ff-only", worktreeName)
+					mergeCmd.Dir = repoPath
+					if output, err := mergeCmd.CombinedOutput(); err != nil {
+						outputStr := string(output)
+						if strings.Contains(outputStr, "Not possible to fast-forward") {
+							fmt.Printf("        Warning: cannot fast-forward %s (needs rebase), skipping\n", repoName)
+						} else {
+							fmt.Printf("        Error: failed to merge: %s\n", outputStr)
+							hasErrors = true
+						}
+						continue
+					}
+
+					fmt.Printf("        ✓ Merged successfully\n")
+				}
+
+				if hasErrors {
+					return fmt.Errorf("some submodules failed to merge")
+				}
+
+				return nil
+			},
+		},
+		{
 			Name: "Mark plan as finished in .grove-plan.yml",
 			Check: func() (string, error) {
 				configPath := filepath.Join(planPath, ".grove-plan.yml")
@@ -715,15 +954,16 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
-		// Always enable marking as finished
-		items[0].IsEnabled = items[0].IsAvailable                                          // Mark plan as finished
-		items[1].IsEnabled = planFinishPruneWorktree && items[1].IsAvailable              // Prune git worktree
-		items[2].IsEnabled = planFinishDeleteBranch && items[2].IsAvailable               // Delete submodule branches
-		items[3].IsEnabled = planFinishDeleteBranch && items[3].IsAvailable               // Delete local git branch
-		items[4].IsEnabled = planFinishDeleteRemote && items[4].IsAvailable               // Delete remote git branch
-		items[5].IsEnabled = planFinishCloseSession && items[5].IsAvailable               // Close tmux session
-		items[6].IsEnabled = planFinishCleanDevLinks && items[6].IsAvailable              // Clean up dev binaries
-		items[7].IsEnabled = planFinishArchive && items[7].IsAvailable                    // Archive plan directory
+		// Always enable merging submodules and marking as finished
+		items[0].IsEnabled = items[0].IsAvailable                                          // Merge/fast-forward submodules to main
+		items[1].IsEnabled = items[1].IsAvailable                                          // Mark plan as finished
+		items[2].IsEnabled = planFinishPruneWorktree && items[2].IsAvailable              // Prune git worktree
+		items[3].IsEnabled = planFinishDeleteBranch && items[3].IsAvailable               // Delete submodule branches
+		items[4].IsEnabled = planFinishDeleteBranch && items[4].IsAvailable               // Delete local git branch
+		items[5].IsEnabled = planFinishDeleteRemote && items[5].IsAvailable               // Delete remote git branch
+		items[6].IsEnabled = planFinishCloseSession && items[6].IsAvailable               // Close tmux session
+		items[7].IsEnabled = planFinishCleanDevLinks && items[7].IsAvailable              // Clean up dev binaries
+		items[8].IsEnabled = planFinishArchive && items[8].IsAvailable                    // Archive plan directory
 	} else {
 		// Interactive TUI mode
 		err := runFinishTUI(planName, items, branchIsMerged)
