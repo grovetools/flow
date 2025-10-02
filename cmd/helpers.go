@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 )
 
-// configureCanopyHooks copies the Claude hook settings to a worktree
-func configureCanopyHooks(worktreePath string) error {
+// configureGroveHooks copies the Claude hook settings to a worktree
+func configureGroveHooks(worktreePath string) error {
 	// Create .claude directory
 	claudeDir := filepath.Join(worktreePath, ".claude")
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
@@ -19,18 +19,18 @@ func configureCanopyHooks(worktreePath string) error {
 	if err != nil {
 		// Log warning but don't fail - hooks are optional
 		fmt.Printf("⚠️  Warning: Could not find grove ecosystem root: %v\n", err)
-		fmt.Printf("   Canopy hooks will not be configured.\n")
+		fmt.Printf("   Grove hooks will not be configured.\n")
 		return nil
 	}
 
-	sourceHookSettings := filepath.Join(ecosystemRoot, "grove-canopy", "configs", "claude-hooks-settings.json")
+	sourceHookSettings := filepath.Join(ecosystemRoot, "grove-hooks", "configs", "claude-hooks-settings.json")
 	destHookSettings := filepath.Join(claudeDir, "settings.local.json")
 
 	// Check if source file exists
 	if _, err := os.Stat(sourceHookSettings); err != nil {
 		if os.IsNotExist(err) {
 			fmt.Printf("⚠️  Warning: Hook settings file not found at %s\n", sourceHookSettings)
-			fmt.Printf("   Canopy hooks will not be configured.\n")
+			fmt.Printf("   Grove hooks will not be configured.\n")
 			return nil
 		}
 		return fmt.Errorf("failed to check hook settings file: %w", err)
@@ -46,7 +46,7 @@ func configureCanopyHooks(worktreePath string) error {
 		return fmt.Errorf("failed to write hook settings to %s: %w", destHookSettings, err)
 	}
 
-	fmt.Printf("✓ Configured canopy hooks in worktree.\n")
+	fmt.Printf("✓ Configured grove hooks in worktree.\n")
 	return nil
 }
 
@@ -61,14 +61,10 @@ func findGroveEcosystemRoot() (string, error) {
 	startDir := dir // Remember where we started for error message
 
 	for dir != "" {
-		// Check if this is the Grove ecosystem root (has grove-canopy, grove-core, etc. as subdirectories)
-		canopyPath := filepath.Join(dir, "grove-canopy")
+		// Check if this is the Grove ecosystem root (has grove-core as a subdirectory)
 		corePath := filepath.Join(dir, "grove-core")
-
-		if _, err := os.Stat(canopyPath); err == nil {
-			if _, err := os.Stat(corePath); err == nil {
-				return dir, nil
-			}
+		if _, err := os.Stat(corePath); err == nil {
+			return dir, nil
 		}
 
 		// Check if we've reached the root
@@ -81,13 +77,9 @@ func findGroveEcosystemRoot() (string, error) {
 
 	// If not found from current directory, check environment variable
 	if envPath := os.Getenv("GROVE_ECOSYSTEM_ROOT"); envPath != "" {
-		canopyPath := filepath.Join(envPath, "grove-canopy")
 		corePath := filepath.Join(envPath, "grove-core")
-
-		if _, err := os.Stat(canopyPath); err == nil {
-			if _, err := os.Stat(corePath); err == nil {
-				return envPath, nil
-			}
+		if _, err := os.Stat(corePath); err == nil {
+			return envPath, nil
 		}
 	}
 
@@ -103,13 +95,9 @@ func findGroveEcosystemRoot() (string, error) {
 	}
 
 	for _, path := range commonPaths {
-		canopyPath := filepath.Join(path, "grove-canopy")
 		corePath := filepath.Join(path, "grove-core")
-
-		if _, err := os.Stat(canopyPath); err == nil {
-			if _, err := os.Stat(corePath); err == nil {
-				return path, nil
-			}
+		if _, err := os.Stat(corePath); err == nil {
+			return path, nil
 		}
 	}
 
