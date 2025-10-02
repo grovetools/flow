@@ -7,13 +7,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
@@ -42,6 +45,7 @@ type PlanListItem struct {
 	JobCount    int
 	Status      string
 	StatusParts map[string]int // For detailed status breakdown
+	LastUpdated time.Time      // When the plan was last modified
 }
 
 // planListTUIModel represents the TUI state
@@ -115,48 +119,6 @@ var planListKeys = planListKeyMap{
 	),
 }
 
-// TUI styles for plan list
-var (
-	planListTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("205")).
-				PaddingBottom(1)
-
-	planListHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("240")).
-				PaddingLeft(2).
-				PaddingRight(2)
-
-	planListSelectedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("205")).
-				Background(lipgloss.Color("236"))
-
-	planListCursorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("214")).
-				Background(lipgloss.Color("238"))
-
-	planListIndicatorStyle = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("205"))
-
-	planListHelpStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("241")).
-				PaddingTop(1)
-
-	planListErrorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("9")).
-				Bold(true)
-
-	planListStatusStyles = map[string]lipgloss.Style{
-		"completed": lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
-		"running":   lipgloss.NewStyle().Foreground(lipgloss.Color("11")),
-		"pending":   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		"failed":    lipgloss.NewStyle().Foreground(lipgloss.Color("9")),
-		"blocked":   lipgloss.NewStyle().Foreground(lipgloss.Color("9")),
-		"mixed":     lipgloss.NewStyle().Foreground(lipgloss.Color("14")),
-		"no jobs":   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-	}
-)
 
 // Messages for the plan list TUI
 type planListLoadCompleteMsg struct{
@@ -298,14 +260,14 @@ func (m planListTUIModel) View() string {
 	}
 
 	if m.err != nil {
-		return planListErrorStyle.Render(fmt.Sprintf("Error: %v\n", m.err))
+		return theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v\n", m.err))
 	}
 
 	var s strings.Builder
 
 	// Display status message if any
 	if m.statusMessage != "" {
-		s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("10")).PaddingBottom(1).Render(m.statusMessage))
+		s.WriteString(theme.DefaultTheme.Success.PaddingBottom(1).Render(m.statusMessage))
 		s.WriteString("\n")
 	}
 
@@ -314,112 +276,162 @@ func (m planListTUIModel) View() string {
 		return m.help.View()
 	}
 
-	// Title
-	s.WriteString(planListTitleStyle.Render("Plan List"))
-	s.WriteString("\n")
+	// Header with emoji and count like grove ws plans list  
+	planCount := len(m.plans)
+	headerText := fmt.Sprintf("📋 Flow Plans (%d total)", planCount)
+	s.WriteString(components.RenderHeader(headerText))
+	s.WriteString("\n\n")
 
 	if len(m.plans) == 0 {
 		s.WriteString("No plans found in directory.\n")
 		s.WriteString("\n")
-		s.WriteString(planListHelpStyle.Render("Press ? for help"))
+		s.WriteString(theme.DefaultTheme.Muted.Render("Press ? for help"))
 		return s.String()
 	}
 
-	// Table header
-	s.WriteString(m.renderPlanListHeader())
-	s.WriteString("\n")
-
-	// Plan list
-	s.WriteString(m.renderPlanListTable())
+	// Render table using grove-core table component
+	s.WriteString(m.renderPlanTable())
 
 	// Help text
 	s.WriteString("\n")
-	s.WriteString(planListHelpStyle.Render("Press ? for help"))
+	s.WriteString(theme.DefaultTheme.Muted.Render("Press ? for help"))
 
 	return s.String()
 }
 
-func (m planListTUIModel) renderPlanListHeader() string {
-	nameHeader := planListHeaderStyle.Render("NAME")
-	jobsHeader := planListHeaderStyle.Render("JOBS")
-	statusHeader := planListHeaderStyle.Render("STATUS")
-	
-	// Calculate column widths based on terminal width
-	nameWidth := 20
-	jobsWidth := 6
-	statusWidth := max(30, m.width-nameWidth-jobsWidth-10) // Remaining space
-
-	if m.width > 80 {
-		nameWidth = 30
-		statusWidth = m.width - nameWidth - jobsWidth - 10
+func (m planListTUIModel) renderPlanTable() string {
+	if len(m.plans) == 0 {
+		return ""
 	}
 
-	line := fmt.Sprintf("  %-*s  %-*s  %-*s",
-		nameWidth, nameHeader,
-		jobsWidth, jobsHeader, 
-		statusWidth, statusHeader)
-	
-	return line
-}
+	// Prepare headers like grove ws plans list
+	headers := []string{"TITLE", "STATUS", "UPDATED"}
 
-func (m planListTUIModel) renderPlanListTable() string {
-	var s strings.Builder
-	
-	nameWidth := 20
-	jobsWidth := 6
-	statusWidth := max(30, m.width-nameWidth-jobsWidth-10)
-
-	if m.width > 80 {
-		nameWidth = 30
-		statusWidth = m.width - nameWidth - jobsWidth - 10
-	}
-
+	// Prepare rows with emoji status indicators and formatting
+	rows := make([][]string, len(m.plans))
 	for i, plan := range m.plans {
-		// Build the row content
-		name := truncateString(plan.Name, nameWidth)
-		jobs := fmt.Sprintf("%d", plan.JobCount)
-		status := truncateString(plan.Status, statusWidth)
-
-		// Apply status styling to status text
-		statusStyle := planListStatusStyles["mixed"] // default
-		if strings.Contains(plan.Status, "no jobs") {
-			statusStyle = planListStatusStyles["no jobs"]
-		} else if strings.Contains(plan.Status, "failed") {
-			statusStyle = planListStatusStyles["failed"]
-		} else if strings.Contains(plan.Status, "running") {
-			statusStyle = planListStatusStyles["running"]
-		} else if strings.Contains(plan.Status, "completed") && !strings.Contains(plan.Status, "pending") {
-			statusStyle = planListStatusStyles["completed"]
-		} else if strings.Contains(plan.Status, "pending") {
-			statusStyle = planListStatusStyles["pending"]
-		}
+		// Generate emoji status like the example
+		statusText := m.formatStatusWithEmoji(plan)
 		
-		styledStatus := statusStyle.Render(status)
+		// Format last updated with relative time
+		updatedText := theme.DefaultTheme.Muted.Render("◦ " + formatRelativeTime(plan.LastUpdated))
 
-		// Build the row
-		row := fmt.Sprintf("  %-*s  %-*s  %s",
-			nameWidth, name,
-			jobsWidth, jobs,
-			styledStatus)
-
-		// Apply cursor styling
-		if i == m.cursor {
-			row = planListCursorStyle.Render(row)
+		rows[i] = []string{
+			plan.Name,
+			statusText,
+			updatedText,
 		}
-
-		// Add cursor indicator
-		indicators := ""
-		if i == m.cursor {
-			indicators += planListIndicatorStyle.Render(" ◀")
-		}
-
-		s.WriteString(row + indicators + "\n")
 	}
 
-	return s.String()
+	// Use SelectableTable to handle cursor highlighting
+	return table.SelectableTable(headers, rows, m.cursor)
 }
 
-// Old help functions removed - now using standardized help component
+// formatStatusWithEmoji formats the status text with emoji indicators like grove ws plans list
+func (m planListTUIModel) formatStatusWithEmoji(plan PlanListItem) string {
+	if plan.StatusParts == nil || len(plan.StatusParts) == 0 {
+		return "⏳ no jobs"
+	}
+
+	// Count different status types
+	completed := plan.StatusParts["completed"]
+	running := plan.StatusParts["running"] 
+	pending := plan.StatusParts["pending"]
+	failed := plan.StatusParts["failed"]
+	blocked := plan.StatusParts["blocked"]
+
+	// Build status string with emojis
+	var parts []string
+	var emoji string
+
+	// Determine primary emoji based on dominant status
+	if failed > 0 || blocked > 0 {
+		emoji = "❌"
+	} else if running > 0 {
+		if completed > 0 || pending > 0 {
+			emoji = "🚧" // mixed with running
+		} else {
+			emoji = "⚡" // only running
+		}
+	} else if completed > 0 && pending > 0 {
+		emoji = "🚧" // mixed completed and pending
+	} else if completed > 0 {
+		emoji = "✓" // all completed
+	} else {
+		emoji = "⏳" // only pending
+	}
+
+	// Add count details
+	if completed > 0 {
+		parts = append(parts, fmt.Sprintf("%d completed", completed))
+	}
+	if running > 0 {
+		parts = append(parts, fmt.Sprintf("%d running", running))
+	}
+	if pending > 0 {
+		parts = append(parts, fmt.Sprintf("%d pending", pending))
+	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", failed))
+	}
+	if blocked > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocked", blocked))
+	}
+
+	statusText := emoji + " " + strings.Join(parts, ", ")
+	
+	// Apply color based on primary status
+	if failed > 0 || blocked > 0 {
+		return theme.DefaultTheme.Error.Render(statusText)
+	} else if running > 0 {
+		return theme.DefaultTheme.Warning.Render(statusText)
+	} else if completed > 0 {
+		return theme.DefaultTheme.Success.Render(statusText)
+	} else {
+		return theme.DefaultTheme.Info.Render(statusText)
+	}
+}
+
+// formatRelativeTime formats a time as a relative string like "2 hours ago"
+func formatRelativeTime(t time.Time) string {
+	now := time.Now()
+	diff := now.Sub(t)
+
+	switch {
+	case diff < time.Minute:
+		return "just now"
+	case diff < time.Hour:
+		minutes := int(diff.Minutes())
+		if minutes == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", minutes)
+	case diff < 24*time.Hour:
+		hours := int(diff.Hours())
+		if hours == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hours)
+	case diff < 7*24*time.Hour:
+		days := int(diff.Hours() / 24)
+		if days == 1 {
+			return "1 day ago"
+		}
+		return fmt.Sprintf("%d days ago", days)
+	case diff < 30*24*time.Hour:
+		weeks := int(diff.Hours() / (24 * 7))
+		if weeks == 1 {
+			return "1 week ago"
+		}
+		return fmt.Sprintf("%d weeks ago", weeks)
+	default:
+		months := int(diff.Hours() / (24 * 30))
+		if months == 1 {
+			return "1 month ago"
+		}
+		return fmt.Sprintf("%d months ago", months)
+	}
+}
 
 // Helper functions
 func loadPlansListCmd(plansDirectory string) tea.Cmd {
@@ -453,10 +465,20 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 					if plan.Config != nil && plan.Config.Status == "finished" {
 						continue
 					}
+					// Get last modification time of the plan directory
+					planInfo, err := os.Stat(planPath)
+					var lastUpdated time.Time
+					if err == nil {
+						lastUpdated = planInfo.ModTime()
+					} else {
+						lastUpdated = time.Now() // fallback to current time
+					}
+
 					item := PlanListItem{
-						Plan:     plan,
-						Name:     plan.Name,
-						JobCount: len(plan.Jobs),
+						Plan:        plan,
+						Name:        plan.Name,
+						JobCount:    len(plan.Jobs),
+						LastUpdated: lastUpdated,
 					}
 
 					// Calculate status summary
@@ -545,20 +567,3 @@ func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 	)
 }
 
-// Utility functions
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
