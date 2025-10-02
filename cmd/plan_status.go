@@ -160,45 +160,59 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 	fmt.Fprintf(writer, "Jobs: %d total\n", len(plan.Jobs))
 
 	if statusCounts[orchestration.JobStatusCompleted] > 0 {
-		fmt.Fprintf(writer, "%s Completed: %d\n",
+		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusCompleted),
+			color.GreenString("Completed"),
 			statusCounts[orchestration.JobStatusCompleted])
 	}
 
 	if statusCounts[orchestration.JobStatusRunning] > 0 {
-		fmt.Fprintf(writer, "%s Running: %d\n",
+		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusRunning),
+			color.YellowString("Running"),
 			statusCounts[orchestration.JobStatusRunning])
 	}
 
 	if statusCounts[orchestration.JobStatusPending] > 0 {
-		fmt.Fprintf(writer, "%s Pending: %d\n",
+		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusPending),
+			color.HiBlackString("Pending"),
 			statusCounts[orchestration.JobStatusPending])
 	}
 
 	if statusCounts[orchestration.JobStatusFailed] > 0 {
-		fmt.Fprintf(writer, "%s Failed: %d\n",
+		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusFailed),
+			color.RedString("Failed"),
 			statusCounts[orchestration.JobStatusFailed])
 	}
 
 	if statusCounts[orchestration.JobStatusBlocked] > 0 {
-		fmt.Fprintf(writer, "%s Blocked: %d\n",
+		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusBlocked),
+			color.RedString("Blocked"),
 			statusCounts[orchestration.JobStatusBlocked])
 	}
 
 	if statusCounts[orchestration.JobStatusPendingUser] > 0 {
-		fmt.Fprintf(writer, "%s Pending User: %d\n",
+		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusPendingUser),
+			color.CyanString("Pending User"),
 			statusCounts[orchestration.JobStatusPendingUser])
 	}
 
 	if statusCounts[orchestration.JobStatusPendingLLM] > 0 {
-		fmt.Fprintf(writer, "%s Pending LLM: %d\n",
+		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusPendingLLM),
+			color.YellowString("Pending LLM"),
 			statusCounts[orchestration.JobStatusPendingLLM])
+	}
+
+	if statusCounts[orchestration.JobStatusNeedsReview] > 0 {
+		fmt.Fprintf(writer, "%s %s: %d\n",
+			colorizeStatus(orchestration.JobStatusNeedsReview),
+			color.CyanString("Needs Review"),
+			statusCounts[orchestration.JobStatusNeedsReview])
 	}
 
 	return buf.String()

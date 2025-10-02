@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -89,8 +90,8 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 }
 
 func (k statusTUIKeyMap) ShortHelp() []key.Binding {
-	// Return empty to show no help in footer - all help goes in popup
-	return []key.Binding{}
+	// Return just quit - help is shown automatically by the help component
+	return []key.Binding{k.Quit}
 }
 
 func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
@@ -143,17 +144,25 @@ type statusTUIModel struct {
 }
 
 
-// getStatusStyles returns theme-based styles for job statuses
+// getStatusStyles returns theme-based styles for job statuses with subtle colors
 func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 	return map[orchestration.JobStatus]lipgloss.Style{
-		orchestration.JobStatusCompleted:    theme.DefaultTheme.Success,
-		orchestration.JobStatusRunning:      theme.DefaultTheme.Warning,
-		orchestration.JobStatusFailed:       theme.DefaultTheme.Error,
-		orchestration.JobStatusBlocked:      theme.DefaultTheme.Error,
-		orchestration.JobStatusNeedsReview:  theme.DefaultTheme.Info,
-		orchestration.JobStatusPendingUser:  theme.DefaultTheme.Info,
-		orchestration.JobStatusPendingLLM:   theme.DefaultTheme.Warning,
-		orchestration.JobStatusPending:      theme.DefaultTheme.Muted,
+		// Completed: Subtle spring green
+		orchestration.JobStatusCompleted: lipgloss.NewStyle().Foreground(theme.DefaultColors.Green),
+		// Running: Soft blue instead of bold yellow
+		orchestration.JobStatusRunning: lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue),
+		// Failed: Muted pink instead of bright red
+		orchestration.JobStatusFailed: lipgloss.NewStyle().Foreground(theme.DefaultColors.Pink),
+		// Blocked: Muted pink
+		orchestration.JobStatusBlocked: lipgloss.NewStyle().Foreground(theme.DefaultColors.Pink),
+		// Needs Review: Soft cyan
+		orchestration.JobStatusNeedsReview: lipgloss.NewStyle().Foreground(theme.DefaultColors.Cyan),
+		// Pending User: Soft violet accent
+		orchestration.JobStatusPendingUser: lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet),
+		// Pending LLM: Soft blue
+		orchestration.JobStatusPendingLLM: lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue),
+		// Pending: Keep muted text
+		orchestration.JobStatusPending: theme.DefaultTheme.Muted,
 	}
 }
 
@@ -462,7 +471,7 @@ func (m statusTUIModel) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n", m.err)
 	}
-	
+
 	// Show help if active
 	if m.help.ShowAll {
 		return lipgloss.JoinVertical(lipgloss.Left,
@@ -471,58 +480,71 @@ func (m statusTUIModel) View() string {
 		)
 	}
 
-	var s strings.Builder
-
-	// Title and summary with left margin
-	leftMargin := "  "
-	s.WriteString(leftMargin + theme.DefaultTheme.Header.Render(fmt.Sprintf("Plan: %s", m.plan.Name)))
-	s.WriteString("\n\n")
-	
-	// Add left margin to status summary lines
-	summaryLines := strings.Split(m.statusSummary, "\n")
-	for _, line := range summaryLines {
-		if line != "" {
-			s.WriteString(leftMargin + line)
-		}
-		s.WriteString("\n")
+	// Calculate content width accounting for margins
+	contentWidth := m.width - 4
+	if contentWidth < 40 {
+		contentWidth = 40
 	}
 
-	// Job tree with left margin
-	jobTreeContent := m.renderJobTree()
-	jobTreeLines := strings.Split(jobTreeContent, "\n")
-	for _, line := range jobTreeLines {
-		if line != "" {
-			s.WriteString(leftMargin + line)
-		}
-		s.WriteString("\n")
-	}
+	// 1. Create Header with subtle coloring
+	headerLabel := lipgloss.NewStyle().
+		Foreground(theme.DefaultTheme.Header.GetForeground()).
+		Bold(true).
+		Render("📈 Plan Status: ")
 
-	// Show confirmation dialog if needed
+	planName := lipgloss.NewStyle().
+		Foreground(theme.DefaultColors.Orange).
+		Bold(true).
+		Render(m.plan.Name)
+
+	headerText := headerLabel + planName
+
+	styledHeader := lipgloss.NewStyle().
+		Background(theme.DefaultTheme.Header.GetBackground()).
+		Align(lipgloss.Center).
+		Width(contentWidth).
+		MarginBottom(1).
+		Render(headerText)
+
+	// 2. Create Status Summary Box
+	summaryBox := components.RenderBox("Summary", m.statusSummary, contentWidth)
+
+	// 3. Render Job Tree
+	jobTree := m.renderJobTree()
+
+	// 4. Handle confirmation dialog or help footer
+	var footer string
 	if m.confirmArchive {
 		if m.cursor < len(m.jobs) {
 			job := m.jobs[m.cursor]
-			s.WriteString("\n")
-			s.WriteString(leftMargin + theme.DefaultTheme.Warning.
+			footer = "\n" + theme.DefaultTheme.Warning.
 				Bold(true).
-				Render(fmt.Sprintf("Archive '%s'? (y/n)", job.Filename)))
-			s.WriteString("\n")
+				Render(fmt.Sprintf("Archive '%s'? (y/n)", job.Filename))
 		}
 	} else {
-		// Help text with left margin
-		helpText := m.help.View()
-		if helpText != "" {
-			s.WriteString("\n")
-			helpLines := strings.Split(helpText, "\n")
-			for _, line := range helpLines {
-				if line != "" {
-					s.WriteString(leftMargin + line)
-				}
-				s.WriteString("\n")
-			}
-		}
+		// Render Footer
+		footer = m.help.View()
 	}
 
-	return s.String()
+	// 5. Combine everything
+	mainContent := lipgloss.JoinVertical(
+		lipgloss.Left,
+		styledHeader,
+		summaryBox,
+		"\n", // Add some space
+		jobTree,
+	)
+
+	// Add spacing before footer to push it to the bottom
+	finalView := lipgloss.JoinVertical(
+		lipgloss.Left,
+		mainContent,
+		"\n\n", // Extra spacing before footer
+		footer,
+	)
+
+	// Add overall margin
+	return lipgloss.NewStyle().Margin(1, 2).Render(finalView)
 }
 
 // stripANSI removes ANSI escape sequences from a string
@@ -557,32 +579,35 @@ func (m statusTUIModel) renderJobTree() string {
 		if isLast {
 			treeChar = "└── "
 		}
-		
+
 		// Build tree structure part
 		treePart := fmt.Sprintf("  %s%s", prefix, treeChar)
-		
-		// Build job content WITHOUT indicators first
-		jobContent := fmt.Sprintf("%s %s", m.getStatusIcon(job.Status), job.Filename)
+
+		// Get status color style
+		statusStyles := getStatusStyles()
+		statusStyle := statusStyles[job.Status]
+
+		// Build job content with colored filename
+		statusIcon := m.getStatusIcon(job.Status)
+		coloredFilename := statusStyle.Render(job.Filename)
+
+		// Get job type badge with subtle blue/cyan color
+		jobTypeBadge := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("69")). // Subtle blue
+			Render(fmt.Sprintf("[%s]", job.Type))
+
+		var jobContent string
 		if job.Title != "" {
-			jobContent += fmt.Sprintf(" (%s)", job.Title)
+			// Render title in muted color
+			jobContent = fmt.Sprintf("%s %s %s %s", statusIcon, coloredFilename,
+				theme.DefaultTheme.Muted.Render(fmt.Sprintf("(%s)", job.Title)),
+				jobTypeBadge)
+		} else {
+			jobContent = fmt.Sprintf("%s %s %s", statusIcon, coloredFilename, jobTypeBadge)
 		}
-		
-		// Add dependency annotations if job has multiple dependencies
-		var depAnnotation string
-		if len(job.Dependencies) > 1 && m.jobParents[job.ID] != nil {
-			var otherDeps []string
-			for _, dep := range job.Dependencies {
-				if dep != nil && dep.ID != m.jobParents[job.ID].ID {
-					otherDeps = append(otherDeps, dep.Filename)
-				}
-			}
-			if len(otherDeps) > 0 {
-				// Store annotation separately to apply different styling
-				depAnnotation = fmt.Sprintf(" ⚠️  Also: %s", strings.Join(otherDeps, ", "))
-			}
-		}
-		
-		// Apply styling to the job content based on state
+
+		// Apply styling based on cursor/selection state
+		// For cursor or selection, wrap the entire content
 		styledJobContent := jobContent
 		if i == m.cursor && m.selected[job.ID] {
 			// Both cursor and selected - use cursor style
@@ -591,27 +616,25 @@ func (m statusTUIModel) renderJobTree() string {
 			// Just cursor
 			styledJobContent = theme.DefaultTheme.Selected.Render(jobContent)
 		} else if m.selected[job.ID] {
-			// Just selected  
+			// Just selected
 			styledJobContent = theme.DefaultTheme.Accent.Render(jobContent)
 		}
-		
-		// Build indicators separately with their own style
+
+		// Build indicators separately with their own style (foreground only, no background)
 		indicators := ""
 		if m.selected[job.ID] {
-			indicators += theme.DefaultTheme.Accent.Render(" ◆")
+			indicators += lipgloss.NewStyle().
+				Foreground(theme.DefaultTheme.Accent.GetForeground()).
+				Render(" ◆")
 		}
 		if i == m.cursor {
-			indicators += theme.DefaultTheme.Selected.Render(" ◀")
+			indicators += lipgloss.NewStyle().
+				Foreground(theme.DefaultColors.Orange).
+				Render(" ◀")
 		}
-		
-		// Style the dependency annotation in grey
-		styledDepAnnotation := ""
-		if depAnnotation != "" {
-			styledDepAnnotation = theme.DefaultTheme.Muted.Render(depAnnotation)
-		}
-		
+
 		// Combine all parts
-		fullLine := treePart + styledJobContent + styledDepAnnotation + indicators
+		fullLine := treePart + styledJobContent + indicators
 		
 		// Add summary on a new line if toggled on and available
 		if m.showSummaries && job.Summary != "" {

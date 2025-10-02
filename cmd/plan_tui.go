@@ -237,15 +237,15 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.ViewPlan):
 			// Enter key - view plan status TUI
-			if m.cursor < len(m.plans) {
-				plan := &m.plans[m.cursor]
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				plan := m.plans[m.cursor]
 				return m, openPlanStatusTUI(plan.Plan)
 			}
 
 		case key.Matches(msg, m.keys.FinishPlan):
 			// Ctrl+X key - execute plan finish command
-			if m.cursor < len(m.plans) {
-				plan := &m.plans[m.cursor]
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				plan := m.plans[m.cursor]
 				return m, executePlanFinish(plan.Plan)
 			}
 		}
@@ -324,6 +324,7 @@ func (m planListTUIModel) renderPlanTable() string {
 	}
 
 	// Use SelectableTable to handle cursor highlighting
+	// Note: We pass m.cursor directly; the SelectableTable function handles the header offset
 	return table.SelectableTable(headers, rows, m.cursor)
 }
 
@@ -525,9 +526,9 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 		}
 	}
 
-	// Sort plans by name
+	// Sort plans by most recent first (descending by LastUpdated)
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].Name < items[j].Name
+		return items[i].LastUpdated.After(items[j].LastUpdated)
 	})
 
 	return items, nil
