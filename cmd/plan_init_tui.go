@@ -62,6 +62,8 @@ type planInitTUIKeyMap struct {
 	PrevField  key.Binding
 	Submit     key.Binding
 	Back       key.Binding
+	Escape     key.Binding
+	Insert     key.Binding
 }
 
 func newPlanInitTUIKeyMap() planInitTUIKeyMap {
@@ -87,24 +89,31 @@ func newPlanInitTUIKeyMap() planInitTUIKeyMap {
 			key.WithKeys("q"),
 			key.WithHelp("q", "back to plan list"),
 		),
+		Escape: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "normal mode"),
+		),
+		Insert: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", "insert mode"),
+		),
 	}
 }
 
 func (k planInitTUIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.NextField, k.PrevField, k.Toggle, k.Submit, k.Back}
+	return k.Base.ShortHelp()
 }
 
 func (k planInitTUIKeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.NextField, k.PrevField, k.Toggle},
-		{k.Submit, k.Back, k.Help},
-	}
+	return k.Base.FullHelp()
 }
 
 // planInitTUIModel represents the state of the new plan creation TUI.
 type planInitTUIModel struct {
 	plansDirectory   string
 	focusIndex       int
+	unfocused        bool // Track if we're in unfocused (normal) state
+	highestFocusIndex int // Track user's progress through the form
 	err              error
 	width, height    int
 
@@ -243,7 +252,10 @@ func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
 }
 
 func (m planInitTUIModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(
+		tea.ClearScreen,
+		textinput.Blink,
+	)
 }
 
 func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -254,72 +266,192 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 
 	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, m.keyMap.Back):
-			// Go back to the plan list view
-			listModel := newPlanListTUIModel(m.plansDirectory)
-			return listModel, loadPlansListCmd(m.plansDirectory)
+		// Let help model handle its own keys first
+		if m.help.ShowAll {
+			var helpCmd tea.Cmd
+			m.help, helpCmd = m.help.Update(msg)
+			return m, helpCmd
+		}
 
-		case key.Matches(msg, m.keyMap.Help):
+		// Check if we're in a text input field that should capture all keys
+		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 3 || m.focusIndex == 5 || m.focusIndex == 7)
+		// Check if we're in a list that needs arrow keys
+		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 4)
+
+		switch msg.String() {
+		case "esc", "escape":
+			// ESC unfocuses any focused field (enters normal mode)
+			m.unfocused = true
+			m.nameInput.Blur()
+			m.worktreeInput.Blur()
+			m.containerInput.Blur()
+			m.extractFromInput.Blur()
+			return m, nil
+
+		case "i":
+			// Insert mode - refocus current field (like vim)
+			if m.unfocused {
+				m.unfocused = false
+				return m.updateFocus(), nil
+			}
+
+
+		case "?":
+			// Toggle help
 			m.help.ShowAll = !m.help.ShowAll
+			return m, nil
 
-		case key.Matches(msg, m.keyMap.NextField):
+		case "ctrl+c":
+			m.quitting = true
+			return m, tea.Quit
+
+		case "q":
+			// Only quit on 'q' if not in text input or if in normal mode
+			if !inTextInput || m.unfocused {
+				// Go back to the plan list view
+				listModel := newPlanListTUIModel(m.plansDirectory)
+				return listModel, loadPlansListCmd(m.plansDirectory)
+			}
+
+		case "tab":
+			// Tab always moves to next field
 			m.focusIndex++
 			if m.focusIndex > 7 {
 				m.focusIndex = 0
 			}
+			// Update highest focus index for progress tracking
+			if m.focusIndex > m.highestFocusIndex {
+				m.highestFocusIndex = m.focusIndex
+			}
 			return m.updateFocus(), nil
 
-		case key.Matches(msg, m.keyMap.PrevField):
+		case "shift+tab":
+			// Shift+tab always moves to previous field
 			m.focusIndex--
 			if m.focusIndex < 0 {
 				m.focusIndex = 7
 			}
+			// Update highest focus index for progress tracking
+			if m.focusIndex > m.highestFocusIndex {
+				m.highestFocusIndex = m.focusIndex
+			}
 			return m.updateFocus(), nil
 
-		case key.Matches(msg, m.keyMap.Toggle):
+		case "j":
+			// j moves to next field only when not in text input or when unfocused
+			if !inTextInput || m.unfocused {
+				m.focusIndex++
+				if m.focusIndex > 7 {
+					m.focusIndex = 0
+				}
+				// Update highest focus index for progress tracking
+				if m.focusIndex > m.highestFocusIndex {
+					m.highestFocusIndex = m.focusIndex
+				}
+				return m.updateFocus(), nil
+			}
+
+		case "k":
+			// k moves to previous field only when not in text input or when unfocused
+			if !inTextInput || m.unfocused {
+				m.focusIndex--
+				if m.focusIndex < 0 {
+					m.focusIndex = 7
+				}
+				// Update highest focus index for progress tracking
+				if m.focusIndex > m.highestFocusIndex {
+					m.highestFocusIndex = m.focusIndex
+				}
+				return m.updateFocus(), nil
+			}
+
+		case "h":
+			// h moves to previous field when in normal mode
+			if m.unfocused && !inTextInput {
+				m.focusIndex--
+				if m.focusIndex < 0 {
+					m.focusIndex = 7
+				}
+				if m.focusIndex > m.highestFocusIndex {
+					m.highestFocusIndex = m.focusIndex
+				}
+				return m.updateFocus(), nil
+			}
+
+		case "l":
+			// l moves to next field when in normal mode
+			if m.unfocused && !inTextInput {
+				m.focusIndex++
+				if m.focusIndex > 7 {
+					m.focusIndex = 0
+				}
+				if m.focusIndex > m.highestFocusIndex {
+					m.highestFocusIndex = m.focusIndex
+				}
+				return m.updateFocus(), nil
+			}
+
+		case " ":
+			// Space toggles checkboxes
 			switch m.focusIndex {
-			case 2: // With Worktree
+			case 2: // Auto-create Worktree
 				m.withWorktree = !m.withWorktree
 				if m.withWorktree {
 					m.worktreeInput.SetValue("")
 				}
+				return m, nil
 			case 6: // Open Session
 				m.openSession = !m.openSession
+				return m, nil
 			}
 
-		case key.Matches(msg, m.keyMap.Submit):
-			if m.focusIndex == 7 { // Submit on the last field
+		case "enter":
+			// Enter submits the form or confirms selection
+			if inList {
+				// For lists, enter confirms selection and moves to next field
+				m.unfocused = false
+				m.focusIndex++
+				if m.focusIndex > 7 {
+					m.focusIndex = 0
+				}
+				if m.focusIndex > m.highestFocusIndex {
+					m.highestFocusIndex = m.focusIndex
+				}
+				return m.updateFocus(), nil
+			} else if m.unfocused {
+				// If unfocused, enter refocuses current field
+				m.unfocused = false
+				return m.updateFocus(), nil
+			} else {
+				// In insert mode, enter submits the form
 				// Validate input
 				if m.nameInput.Value() == "" {
 					m.err = fmt.Errorf("plan name cannot be empty")
 					return m, nil
 				}
-
-				// Build command
-				// The final command is built by the caller from the final model state.
-				// We just need to exit the TUI program.
 				return m, tea.Quit
 			}
 		}
 	}
 
-	// Delegate to the focused component
-	switch m.focusIndex {
-	case 0:
-		m.nameInput, cmd = m.nameInput.Update(msg)
-	case 1:
-		m.recipeList, cmd = m.recipeList.Update(msg)
-	case 3:
-		if !m.withWorktree {
-			m.worktreeInput, cmd = m.worktreeInput.Update(msg)
+	// Delegate to the focused component only if in insert mode
+	if !m.unfocused {
+		switch m.focusIndex {
+		case 0:
+			m.nameInput, cmd = m.nameInput.Update(msg)
+		case 1:
+			m.recipeList, cmd = m.recipeList.Update(msg)
+		case 3:
+			if !m.withWorktree {
+				m.worktreeInput, cmd = m.worktreeInput.Update(msg)
+			}
+		case 4:
+			m.modelList, cmd = m.modelList.Update(msg)
+		case 5:
+			m.containerInput, cmd = m.containerInput.Update(msg)
+		case 7:
+			m.extractFromInput, cmd = m.extractFromInput.Update(msg)
 		}
-	case 4:
-		m.modelList, cmd = m.modelList.Update(msg)
-	case 5:
-		m.containerInput, cmd = m.containerInput.Update(msg)
-	case 7:
-		m.extractFromInput, cmd = m.extractFromInput.Update(msg)
 	}
 
 	return m, cmd
@@ -327,22 +459,26 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // updateFocus updates focus state for all components
 func (m planInitTUIModel) updateFocus() planInitTUIModel {
+	// Blur all inputs
 	m.nameInput.Blur()
 	m.worktreeInput.Blur()
 	m.containerInput.Blur()
 	m.extractFromInput.Blur()
 
-	switch m.focusIndex {
-	case 0:
-		m.nameInput.Focus()
-	case 3:
-		if !m.withWorktree {
-			m.worktreeInput.Focus()
+	// Only focus if not in unfocused state
+	if !m.unfocused {
+		switch m.focusIndex {
+		case 0:
+			m.nameInput.Focus()
+		case 3:
+			if !m.withWorktree {
+				m.worktreeInput.Focus()
+			}
+		case 5:
+			m.containerInput.Focus()
+		case 7:
+			m.extractFromInput.Focus()
 		}
-	case 5:
-		m.containerInput.Focus()
-	case 7:
-		m.extractFromInput.Focus()
 	}
 	return m
 }
@@ -357,97 +493,175 @@ func (m planInitTUIModel) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render("✨ Create New Plan"))
+	// Header with progress indicator
+	progressText := fmt.Sprintf("[Step %d of 8]", m.highestFocusIndex+1)
+	header := fmt.Sprintf("🌲 ✨ Create New Plan                          %s", progressText)
+	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render(header))
 	b.WriteString("\n\n")
 
-	// Render fields
-	b.WriteString(renderTextInput("Plan Name:", m.nameInput, m.focusIndex == 0))
-	b.WriteString(renderList("Recipe:", m.recipeList, m.focusIndex == 1))
-	b.WriteString(renderCheckbox("Auto-create Worktree:", m.withWorktree, m.focusIndex == 2))
+	// Define border styles for 2-column layout
+	borderStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Border).
+		Padding(0, 1).
+		Width(40) // Narrower for 2-column layout
 
-	if m.withWorktree {
-		b.WriteString(renderTextInputDisabled("Worktree Name:", "(matches plan name)"))
-	} else {
-		b.WriteString(renderTextInput("Worktree Name:", m.worktreeInput, m.focusIndex == 3))
+	borderStyleWide := borderStyle.Copy().
+		Width(85) // Full width for single fields
+
+	unfocusedBorderStyle := borderStyle.Copy().
+		BorderForeground(lipgloss.Color("#CC8052")) // Fainter orange
+
+	unfocusedBorderStyleWide := borderStyleWide.Copy().
+		BorderForeground(lipgloss.Color("#CC8052"))
+
+	focusedBorderStyle := borderStyle.Copy().
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(theme.DefaultColors.Orange)
+
+	focusedBorderStyleWide := borderStyleWide.Copy().
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(theme.DefaultColors.Orange)
+
+	// renderField helper function with width option
+	renderField := func(index int, title string, content string, wide bool) string {
+		var fieldBuilder strings.Builder
+		
+		// Add checkmark if field has been visited
+		titlePrefix := "  "
+		if index <= m.highestFocusIndex {
+			titlePrefix = theme.DefaultTheme.Success.Render("✓ ")
+		}
+		
+		fieldBuilder.WriteString(titlePrefix + theme.DefaultTheme.Bold.Render(title))
+		fieldBuilder.WriteString("\n")
+		fieldBuilder.WriteString(content)
+
+		// Apply appropriate border style based on width and focus
+		var style lipgloss.Style
+		if wide {
+			if m.focusIndex == index && !m.unfocused {
+				style = focusedBorderStyleWide
+			} else if m.focusIndex == index && m.unfocused {
+				style = unfocusedBorderStyleWide
+			} else {
+				style = borderStyleWide
+			}
+		} else {
+			if m.focusIndex == index && !m.unfocused {
+				style = focusedBorderStyle
+			} else if m.focusIndex == index && m.unfocused {
+				style = unfocusedBorderStyle
+			} else {
+				style = borderStyle
+			}
+		}
+
+		return style.Render(fieldBuilder.String())
 	}
 
-	b.WriteString(renderList("Default Model:", m.modelList, m.focusIndex == 4))
-	b.WriteString(renderTextInput("Target Container:", m.containerInput, m.focusIndex == 5))
-	b.WriteString(renderCheckbox("Open Session on Create:", m.openSession, m.focusIndex == 6))
-	b.WriteString(renderTextInput("Extract from File:", m.extractFromInput, m.focusIndex == 7))
-
-	// Submit button
-	submitStyle := theme.DefaultTheme.Box.Padding(1, 2)
-	if m.focusIndex == 7 {
-		submitStyle = theme.DefaultTheme.Selected.Background(theme.DefaultTheme.Colors.SelectedBackground)
-	}
+	// Plan Configuration Section
+	b.WriteString(theme.DefaultTheme.Info.Render("Plan Configuration"))
 	b.WriteString("\n")
-	b.WriteString(submitStyle.Render("[ Submit ]"))
+	b.WriteString(strings.Repeat("─", 90))
+	b.WriteString("\n")
+
+	// Row 1: Plan Name (full width)
+	b.WriteString(renderField(0, "Plan Name", m.nameInput.View(), true))
+	b.WriteString("\n")
+
+	// Row 2: Recipe | Auto-create Worktree
+	recipeDisplay := "none"
+	if selected := m.recipeList.SelectedItem(); selected != nil {
+		if recipeItem, ok := selected.(item); ok {
+			recipeDisplay = fmt.Sprintf("[%s]", string(recipeItem))
+		}
+	}
+	autoWorktreeDisplay := "[ ]"
+	if m.withWorktree {
+		autoWorktreeDisplay = "[x]"
+	}
+	
+	recipeField := renderField(1, "Recipe", recipeDisplay, false)
+	autoWorktreeField := renderField(2, "Auto-create Worktree", autoWorktreeDisplay, false)
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, recipeField, "  ", autoWorktreeField)
+	b.WriteString(row2)
+	b.WriteString("\n")
+
+	// Worktree Settings Section  
+	b.WriteString(theme.DefaultTheme.Info.Render("Worktree Settings"))
+	b.WriteString("\n")
+	b.WriteString(strings.Repeat("─", 90))
+	b.WriteString("\n")
+
+	// Row 3: Worktree Name | Default Model
+	var worktreeDisplay string
+	if m.withWorktree {
+		worktreeDisplay = theme.DefaultTheme.Muted.Render("(matches plan name)")
+	} else {
+		worktreeDisplay = m.worktreeInput.View()
+	}
+	
+	modelDisplay := "(default)"
+	if selected := m.modelList.SelectedItem(); selected != nil {
+		if modelItem, ok := selected.(modelItem); ok {
+			modelDisplay = fmt.Sprintf("[%s]", modelItem.ID)
+		}
+	}
+	
+	worktreeField := renderField(3, "Worktree Name", worktreeDisplay, false)
+	modelField := renderField(4, "Default Model", modelDisplay, false)
+	row3 := lipgloss.JoinHorizontal(lipgloss.Top, worktreeField, "  ", modelField)
+	b.WriteString(row3)
+	b.WriteString("\n")
+
+	// Execution Options Section
+	b.WriteString(theme.DefaultTheme.Info.Render("Execution Options"))
+	b.WriteString("\n")
+	b.WriteString(strings.Repeat("─", 90))
+	b.WriteString("\n")
+
+	// Row 4: Target Container | Open Session
+	openSessionDisplay := "[ ]"
+	if m.openSession {
+		openSessionDisplay = "[x]"
+	}
+	
+	containerField := renderField(5, "Target Container", m.containerInput.View(), false)
+	openSessionField := renderField(6, "Open Session on Create", openSessionDisplay, false)
+	row4 := lipgloss.JoinHorizontal(lipgloss.Top, containerField, "  ", openSessionField)
+	b.WriteString(row4)
+	b.WriteString("\n")
+
+	// Row 5: Extract from File (full width)
+	b.WriteString(renderField(7, "Extract from File", m.extractFromInput.View(), true))
 	b.WriteString("\n")
 
 	// Error message
 	if m.err != nil {
 		b.WriteString("\n")
 		b.WriteString(theme.DefaultTheme.Error.Render(m.err.Error()))
+		b.WriteString("\n")
 	}
 
-	// Help footer
-	helpText := m.help.View()
+	// Footer with mode indicator and default help
 	b.WriteString("\n")
-	b.WriteString(helpText)
+	if m.unfocused {
+		b.WriteString(theme.DefaultTheme.Muted.Render("[NORMAL]"))
+	} else {
+		b.WriteString(theme.DefaultTheme.Muted.Render("[INSERT]"))
+	}
+	
+	// Add default help (? for help, q to quit)
+	helpText := m.help.View()
+	if helpText != "" {
+		b.WriteString(" • ")
+		b.WriteString(helpText)
+	}
 
 	return b.String()
 }
 
-// Helper rendering functions for consistency
-func renderTextInput(label string, input textinput.Model, focused bool) string {
-	style := theme.DefaultTheme.Bold.Padding(0, 1)
-	if focused {
-		style = theme.DefaultTheme.Selected
-	}
-	return style.Render(fmt.Sprintf("%-25s %s", label, input.View())) + "\n"
-}
-
-func renderTextInputDisabled(label, value string) string {
-	style := theme.DefaultTheme.Muted.Padding(0, 1)
-	return style.Render(fmt.Sprintf("%-25s %s", label, value)) + "\n"
-}
-
-func renderList(label string, l list.Model, focused bool) string {
-	style := theme.DefaultTheme.Bold.Padding(0, 1)
-	if focused {
-		style = theme.DefaultTheme.Selected
-	}
-	
-	// Handle different item types
-	var displayValue string
-	if selected := l.SelectedItem(); selected != nil {
-		switch v := selected.(type) {
-		case item:
-			displayValue = v.FilterValue()
-		case modelItem:
-			displayValue = v.FilterValue()
-		default:
-			displayValue = "unknown"
-		}
-	} else {
-		displayValue = "none"
-	}
-	
-	return style.Render(fmt.Sprintf("%-25s [%s]", label, displayValue)) + "\n"
-}
-
-func renderCheckbox(label string, checked bool, focused bool) string {
-	box := "[ ]"
-	if checked {
-		box = "[x]"
-	}
-	style := theme.DefaultTheme.Bold.Padding(0, 1)
-	if focused {
-		style = theme.DefaultTheme.Selected
-	}
-	return style.Render(fmt.Sprintf("%-25s %s", label, box)) + "\n"
-}
 
 // toPlanInitCmd converts the final TUI model state into a PlanInitCmd struct.
 func (m planInitTUIModel) toPlanInitCmd() *PlanInitCmd {
