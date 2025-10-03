@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/components/table"
@@ -47,6 +48,7 @@ type PlanListItem struct {
 	StatusParts map[string]int // For detailed status breakdown
 	LastUpdated time.Time      // When the plan was last modified
 	Worktree    string         // Worktree associated with the plan
+	GitStatus   *git.StatusInfo // Git status information for the worktree
 }
 
 // planListTUIModel represents the TUI state
@@ -333,7 +335,7 @@ func (m planListTUIModel) renderPlanTable() string {
 	}
 
 	// Prepare headers like grove ws plans list
-	headers := []string{"TITLE", "STATUS", "WORKTREE", "UPDATED"}
+	headers := []string{"TITLE", "STATUS", "WORKTREE", "GIT", "UPDATED"}
 
 	// Prepare rows with emoji status indicators and formatting
 	rows := make([][]string, len(m.plans))
@@ -357,10 +359,35 @@ func (m planListTUIModel) renderPlanTable() string {
 			worktreeText = theme.DefaultTheme.Muted.Render("-")
 		}
 
+		// Format git status text
+		var gitText string
+		if plan.GitStatus != nil {
+			gs := plan.GitStatus
+			var parts []string
+
+			if gs.IsDirty {
+				parts = append(parts, theme.DefaultTheme.Warning.Render("● Dirty"))
+			} else {
+				parts = append(parts, theme.DefaultTheme.Success.Render("✓ Clean"))
+			}
+
+			if gs.AheadCount > 0 {
+				parts = append(parts, theme.DefaultTheme.Success.Render(fmt.Sprintf("↑%d", gs.AheadCount)))
+			}
+			if gs.BehindCount > 0 {
+				parts = append(parts, theme.DefaultTheme.Error.Render(fmt.Sprintf("↓%d", gs.BehindCount)))
+			}
+
+			gitText = strings.Join(parts, " ")
+		} else {
+			gitText = theme.DefaultTheme.Muted.Render("-")
+		}
+
 		rows[i] = []string{
 			titleText,
 			statusText,
 			worktreeText,
+			gitText,
 			updatedText,
 		}
 	}
@@ -531,6 +558,35 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 						Worktree:    worktree,
 					}
 
+					// Fetch git status if this plan has a worktree
+					if worktree != "" {
+						// Try to get git root from current directory, fallback to plans directory
+						gitRoot, err := git.GetGitRoot(".")
+						if err != nil {
+							gitRoot, err = git.GetGitRoot(plansDirectory)
+						}
+						if err == nil {
+							// Handle case where we're already in a worktree
+							if strings.Contains(gitRoot, ".grove-worktrees") {
+								// Extract the main repo path from worktree path
+								parts := strings.Split(gitRoot, ".grove-worktrees")
+								if len(parts) > 0 {
+									gitRoot = strings.TrimSuffix(parts[0], string(filepath.Separator))
+								}
+							}
+							worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktree)
+							if _, statErr := os.Stat(worktreePath); statErr == nil {
+								gitStatus, statusErr := git.GetStatus(worktreePath)
+								if statusErr == nil {
+									// Override ahead/behind counts to compare against local main, not upstream
+									gitStatus.AheadCount = getCommitCount(worktreePath, "main..HEAD")
+									gitStatus.BehindCount = getCommitCount(worktreePath, "HEAD..main")
+									item.GitStatus = gitStatus
+								}
+							}
+						}
+					}
+
 					// Calculate status summary
 					statusCounts := make(map[orchestration.JobStatus]int)
 					for _, job := range plan.Jobs {
@@ -584,6 +640,19 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 }
 
 type childExitedMsg struct{}
+
+// getCommitCount returns the number of commits in a git rev-list range
+func getCommitCount(repoPath, revRange string) int {
+	cmd := exec.Command("git", "rev-list", "--count", revRange)
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	count := 0
+	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &count)
+	return count
+}
 
 func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
