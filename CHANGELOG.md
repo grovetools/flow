@@ -1,3 +1,5 @@
+## v0.3.1-nightly.7c6bbee (2025-10-03)
+
 ## v0.3.0 (2025-10-01)
 
 This release enhances user experience and workflow automation. The Terminal User Interfaces (TUIs) for adding, listing, and finishing plans have been completely overhauled with standardized help components, vim-style navigation, and a consistent visual theme aligned with the Grove ecosystem (adfb0ca, abf7eb7). The interactive TUI for `flow plan init` provides a guided way to create new plans with smart defaults (1bd36d1).
