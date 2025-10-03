@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -141,6 +141,7 @@ type statusTUIModel struct {
 	keyMap        statusTUIKeyMap
 	help          help.Model
 	waitingForG   bool   // Track if we're waiting for second 'g' in 'gg' sequence
+	cursorVisible bool   // Track cursor visibility for blinking animation
 }
 
 
@@ -170,7 +171,7 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph) statusTUIModel {
 	// Flatten the job tree for navigation with parent tracking
 	jobs, parents, indents := flattenJobTreeWithParents(plan)
-	
+
 	return statusTUIModel{
 		plan:          plan,
 		graph:         graph,
@@ -185,6 +186,7 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		planDir:       plan.Directory,
 		keyMap:        newStatusTUIKeyMap(),
 		help:          help.New(newStatusTUIKeyMap()),
+		cursorVisible: true,
 	}
 }
 
@@ -259,10 +261,18 @@ func addJobAndDependents(job *orchestration.Job, plan *orchestration.Plan, resul
 type refreshMsg struct{}
 type archiveConfirmedMsg struct{ job *orchestration.Job }
 type editFileAndQuitMsg struct{ filePath string }
+type tickMsg time.Time
+
+// blink returns a command that sends a tick message every 500ms for cursor blinking
+func blink() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
 
 // Init initializes the TUI
 func (m statusTUIModel) Init() tea.Cmd {
-	return nil
+	return blink()
 }
 
 // refreshPlan reloads the plan from disk
@@ -275,6 +285,11 @@ func refreshPlan(planDir string) tea.Cmd {
 // Update handles messages
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tickMsg:
+		// Toggle cursor visibility for blinking effect
+		m.cursorVisible = !m.cursorVisible
+		return m, blink() // Schedule next tick
+
 	case refreshMsg:
 		// Reload the plan
 		plan, err := orchestration.LoadPlan(m.planDir)
@@ -480,9 +495,15 @@ func (m statusTUIModel) View() string {
 
 	// Show help if active
 	if m.help.ShowAll {
+		iconLegend := lipgloss.NewStyle().
+			MarginTop(1).
+			MarginBottom(1).
+			Render("Status Icons:\n  ● Completed  ◐ Running  ✗ Failed/Blocked  ○ Pending")
+
 		return lipgloss.JoinVertical(lipgloss.Left,
 			theme.DefaultTheme.Header.Render("📈 Plan Status - Help"),
 			m.help.View(),
+			iconLegend,
 		)
 	}
 
@@ -507,18 +528,15 @@ func (m statusTUIModel) View() string {
 
 	styledHeader := lipgloss.NewStyle().
 		Background(theme.DefaultTheme.Header.GetBackground()).
-		Align(lipgloss.Center).
+		Align(lipgloss.Left).
 		Width(contentWidth).
 		MarginBottom(1).
 		Render(headerText)
 
-	// 2. Create Status Summary Box
-	summaryBox := components.RenderBox("Summary", m.statusSummary, contentWidth)
-
-	// 3. Render Job Tree
+	// 2. Render Job Tree
 	jobTree := m.renderJobTree()
 
-	// 4. Handle confirmation dialog or help footer
+	// 3. Handle confirmation dialog or help footer
 	var footer string
 	if m.confirmArchive {
 		if m.cursor < len(m.jobs) {
@@ -532,20 +550,12 @@ func (m statusTUIModel) View() string {
 		footer = m.help.View()
 	}
 
-	// 5. Combine everything
-	mainContent := lipgloss.JoinVertical(
-		lipgloss.Left,
-		styledHeader,
-		summaryBox,
-		"\n", // Add some space
-		jobTree,
-	)
-
-	// Add spacing before footer to push it to the bottom
+	// 4. Combine everything
 	finalView := lipgloss.JoinVertical(
 		lipgloss.Left,
-		mainContent,
-		"\n\n", // Extra spacing before footer
+		styledHeader,
+		jobTree,
+		"\n", // Space before footer
 		footer,
 	)
 
@@ -597,8 +607,12 @@ func (m statusTUIModel) renderJobTree() string {
 		var titleStyle lipgloss.Style
 
 		if i == m.cursor {
-			// Cursor: normal filename, pink title with background
-			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			// Cursor: check status for filename color
+			if job.Status == orchestration.JobStatusCompleted {
+				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			} else {
+				filenameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			}
 			titleStyle = lipgloss.NewStyle().
 				Foreground(theme.DefaultColors.Pink).
 				Background(theme.DefaultColors.SelectedBackground)
@@ -607,11 +621,11 @@ func (m statusTUIModel) renderJobTree() string {
 			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet)
 			titleStyle = theme.DefaultTheme.Muted
 		} else {
-			// Normal: check if pending status, use gray; otherwise light text
-			if job.Status == orchestration.JobStatusPending {
-				filenameStyle = theme.DefaultTheme.Muted
-			} else {
+			// Normal: check if completed, use light text; otherwise brighter gray
+			if job.Status == orchestration.JobStatusCompleted {
 				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			} else {
+				filenameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 			}
 			titleStyle = theme.DefaultTheme.Muted
 		}
@@ -645,9 +659,13 @@ func (m statusTUIModel) renderJobTree() string {
 				Render(" ◆")
 		}
 		if i == m.cursor {
+			cursorChar := " "
+			if m.cursorVisible {
+				cursorChar = "◀"
+			}
 			indicators += lipgloss.NewStyle().
 				Foreground(theme.DefaultColors.Orange).
-				Render(" ◀")
+				Render(" " + cursorChar)
 		}
 
 		// Combine all parts
@@ -671,10 +689,23 @@ func (m statusTUIModel) renderJobTree() string {
 // getStatusIcon returns a colored dot indicator for a job status
 func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 	statusStyles := getStatusStyles()
-	icon := "●" // Solid dot for all statuses
+	icon := "●" // Solid dot for completed
 	style := theme.DefaultTheme.Muted
 
-	// Use the status style to color the dot
+	// Use different icons for different statuses
+	switch status {
+	case orchestration.JobStatusCompleted:
+		icon = "●" // Solid dot
+	case orchestration.JobStatusRunning:
+		icon = "◐" // Half-filled circle
+	case orchestration.JobStatusFailed, orchestration.JobStatusBlocked:
+		icon = "✗" // X mark
+	default:
+		// Pending, PendingUser, PendingLLM, NeedsReview
+		icon = "○" // Hollow circle
+	}
+
+	// Use the status style to color the icon
 	if s, ok := statusStyles[status]; ok {
 		style = s
 	}
@@ -803,7 +834,7 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 // runStatusTUI runs the interactive TUI for plan status
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
 	model := newStatusTUIModel(plan, graph)
-	program := tea.NewProgram(model, tea.WithOutput(os.Stderr))
+	program := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
