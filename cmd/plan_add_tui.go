@@ -255,7 +255,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 		item("shell"),
 		item("chat"),
 	}
-	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 9)
+	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 5)
 	m.jobTypeList.Title = ""
 	m.jobTypeList.SetShowTitle(false)
 	m.jobTypeList.SetShowStatusBar(false)
@@ -272,7 +272,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	for _, job := range plan.Jobs {
 		depItems = append(depItems, dependencyItem{job: job})
 	}
-	m.depList = list.New(depItems, dependencyDelegate{selectedDeps: &m.selectedDeps}, 45, 11)
+	m.depList = list.New(depItems, dependencyDelegate{selectedDeps: &m.selectedDeps}, 45, 7)
 	m.depList.Title = ""
 	m.depList.SetShowTitle(false)
 	m.depList.SetShowStatusBar(false)
@@ -291,7 +291,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	for i, t := range templates {
 		templateItems[i+1] = item(t.Name)
 	}
-	m.templateList = list.New(templateItems, itemDelegate{}, 20, 11)
+	m.templateList = list.New(templateItems, itemDelegate{}, 20, 7)
 	m.templateList.Title = ""
 	m.templateList.SetShowTitle(false)
 	m.templateList.SetShowStatusBar(false)
@@ -321,7 +321,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 			defaultIndex = i
 		}
 	}
-	m.modelList = list.New(modelItems, itemDelegate{}, 20, 10)
+	m.modelList = list.New(modelItems, itemDelegate{}, 20, 6)
 	m.modelList.Title = ""
 	m.modelList.SetShowTitle(false)
 	m.modelList.SetShowStatusBar(false)
@@ -758,8 +758,7 @@ func (m tuiModel) View() string {
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultColors.Border).
 		Padding(0, 1).
-		Width(45).
-		Height(8)
+		Width(45)
 
 	// Unfocused style - fainter orange border
 	unfocusedBorderStyle := borderStyle.Copy().
@@ -826,7 +825,7 @@ func (m tuiModel) View() string {
 	// Row 2: Job Type | Worktree
 	jobTypeView := m.jobTypeList.View()
 	jobTypeField := renderField(1, "Job Type:", jobTypeView, 0)
-	worktreeField := renderField(2, "Worktree:", m.worktreeInput.View(), 8)
+	worktreeField := renderField(2, "Worktree:", m.worktreeInput.View(), 0)
 
 	// Join side by side with left margin
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, jobTypeField, "  ", worktreeField)
@@ -836,7 +835,7 @@ func (m tuiModel) View() string {
 
 	// Row 3: Template | Dependencies
 	templateView := m.templateList.View()
-	templateField := renderField(3, "Template:", templateView, 10)
+	templateField := renderField(3, "Template:", templateView, 0)
 
 	// Dependencies - use renderField for consistency
 	var depView string
@@ -845,7 +844,7 @@ func (m tuiModel) View() string {
 	} else {
 		depView = "  No existing jobs available"
 	}
-	depField := renderField(4, "Dependencies:", depView, 10)
+	depField := renderField(4, "Dependencies:", depView, 0)
 
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, templateField, "  ", depField)
 	row3WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row3)
@@ -854,8 +853,8 @@ func (m tuiModel) View() string {
 
 	// Row 4: Model | Prompt
 	modelView := m.modelList.View()
-	modelField := renderField(5, "Model:", modelView, 10)
-	promptField := renderField(6, "Prompt:", m.promptInput.View(), 10)
+	modelField := renderField(5, "Model:", modelView, 0)
+	promptField := renderField(6, "Prompt:", m.promptInput.View(), 0)
 
 	row4 := lipgloss.JoinHorizontal(lipgloss.Top, modelField, "  ", promptField)
 	row4WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row4)
