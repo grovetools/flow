@@ -179,6 +179,11 @@ func (m planListTUIModel) Init() tea.Cmd {
 
 func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case childExitedMsg:
+		// Child TUI (status) exited, likely due to edit action in Neovim
+		// Quit this parent TUI too
+		return m, tea.Quit
+
 	case planListLoadCompleteMsg:
 		m.loading = false
 		if msg.error != nil {
@@ -534,6 +539,8 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 	return items, nil
 }
 
+type childExitedMsg struct{}
+
 func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
 		// First set the active job programmatically
@@ -544,8 +551,12 @@ func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 			return nil
 		},
 		// Then run the status TUI
-		tea.ExecProcess(exec.Command("flow", "plan", "status", "--tui"), 
+		tea.ExecProcess(exec.Command("flow", "plan", "status", "--tui"),
 			func(err error) tea.Msg {
+				// When in Neovim, quit the parent when child exits (for edit action)
+				if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
+					return childExitedMsg{}
+				}
 				return nil
 			}),
 	)

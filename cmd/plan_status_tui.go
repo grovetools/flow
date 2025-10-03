@@ -834,7 +834,16 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 // runStatusTUI runs the interactive TUI for plan status
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
 	model := newStatusTUIModel(plan, graph)
-	program := tea.NewProgram(model, tea.WithOutput(os.Stderr))
+
+	// Use alt screen only when not in Neovim (to fix screen duplication)
+	// But disable it in Neovim to allow editor functionality
+	var opts []tea.ProgramOption
+	if os.Getenv("GROVE_NVIM_PLUGIN") != "true" {
+		opts = append(opts, tea.WithAltScreen())
+	}
+	opts = append(opts, tea.WithOutput(os.Stderr))
+
+	program := tea.NewProgram(model, opts...)
 
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
