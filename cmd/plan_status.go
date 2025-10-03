@@ -280,6 +280,18 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 		jobInfo = fmt.Sprintf("%s (%s)", job.Filename, job.Title)
 	}
 
+	// Check for any missing dependencies
+	var hasMissingDeps bool
+	for _, dep := range job.Dependencies {
+		if dep == nil {
+			hasMissingDeps = true
+			break
+		}
+	}
+	if hasMissingDeps {
+		jobInfo += " " + color.RedString("[? missing deps]")
+	}
+
 	// Check if this job has multiple dependencies and format inline
 	if len(job.Dependencies) > 1 && parent != nil {
 		// Find dependencies that are NOT the parent we came from
@@ -287,6 +299,8 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 		for _, dep := range job.Dependencies {
 			if dep != nil && dep.ID != parent.ID {
 				otherDeps = append(otherDeps, dep.Filename)
+			} else if dep == nil {
+				otherDeps = append(otherDeps, color.RedString("? missing"))
 			}
 		}
 		if len(otherDeps) > 0 {

@@ -648,6 +648,17 @@ func (m statusTUIModel) renderJobTree() string {
 			textContent = fmt.Sprintf("%s %s", coloredFilename, jobTypeBadge)
 		}
 
+		// Check for missing dependencies
+		var hasMissingDeps bool
+		for _, dep := range job.Dependencies {
+			if dep == nil {
+				hasMissingDeps = true
+				break
+			}
+		}
+		if hasMissingDeps {
+			textContent += " " + theme.DefaultTheme.Error.Render("[? missing deps]")
+		}
 		// Combine emoji (no background) with styled text content
 		styledJobContent := statusIcon + " " + textContent
 

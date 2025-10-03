@@ -199,7 +199,9 @@ func (p *Plan) ResolveDependencies() error {
 				// Try to resolve by filename
 				depJob, exists = jobsByFilename[depRef]
 				if !exists {
-					return fmt.Errorf("job %s depends on non-existent job: %s", job.ID, depRef)
+					// Append nil for missing dependency instead of failing
+					job.Dependencies = append(job.Dependencies, nil)
+					continue
 				}
 			}
 			job.Dependencies = append(job.Dependencies, depJob)
