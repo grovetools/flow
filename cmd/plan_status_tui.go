@@ -258,6 +258,7 @@ func addJobAndDependents(job *orchestration.Job, plan *orchestration.Plan, resul
 // Messages
 type refreshMsg struct{}
 type archiveConfirmedMsg struct{ job *orchestration.Job }
+type editFileAndQuitMsg struct{ filePath string }
 
 // Init initializes the TUI
 func (m statusTUIModel) Init() tea.Cmd {
@@ -325,6 +326,11 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			doArchiveJob(m.planDir, msg.job),
 			refreshPlan(m.planDir),
 		)
+
+	case editFileAndQuitMsg:
+		// Print protocol string and quit - Neovim plugin will handle the file opening
+		fmt.Printf("EDIT_FILE:%s\n", msg.filePath)
+		return m, tea.Quit
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -699,12 +705,19 @@ func doArchiveJob(planDir string, job *orchestration.Job) tea.Cmd {
 }
 
 func editJob(job *orchestration.Job) tea.Cmd {
+	// If running inside Neovim plugin, signal to quit and let plugin handle editing
+	if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
+		return func() tea.Msg {
+			return editFileAndQuitMsg{filePath: job.FilePath}
+		}
+	}
+
 	// Open the job file in the default editor
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vi"
 	}
-	
+
 	// Use tea.ExecProcess to properly handle terminal control
 	return tea.ExecProcess(exec.Command(editor, job.FilePath), func(err error) tea.Msg {
 		if err != nil {
@@ -790,11 +803,11 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 // runStatusTUI runs the interactive TUI for plan status
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
 	model := newStatusTUIModel(plan, graph)
-	program := tea.NewProgram(model, tea.WithAltScreen())
-	
+	program := tea.NewProgram(model, tea.WithOutput(os.Stderr))
+
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
 	}
-	
+
 	return nil
 }
