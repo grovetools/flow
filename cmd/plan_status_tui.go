@@ -834,7 +834,7 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 // runStatusTUI runs the interactive TUI for plan status
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
 	model := newStatusTUIModel(plan, graph)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
