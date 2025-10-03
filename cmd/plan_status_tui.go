@@ -28,6 +28,7 @@ type statusTUIKeyMap struct {
 	Run           key.Binding
 	SetCompleted  key.Binding
 	AddJob        key.Binding
+	Implement     key.Binding
 	ToggleSummaries key.Binding
 	GoToTop       key.Binding
 	GoToBottom    key.Binding
@@ -65,6 +66,10 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 		AddJob: key.NewBinding(
 			key.WithKeys("n"),
 			key.WithHelp("n", "add job"),
+		),
+		Implement: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", "implement selected"),
 		),
 		ToggleSummaries: key.NewBinding(
 			key.WithKeys("s"),
@@ -114,6 +119,7 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.Edit,
 			k.SetCompleted,
 			k.AddJob,
+			k.Implement,
 			k.Archive,
 			k.Help,
 			k.Quit,
@@ -497,7 +503,13 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				return m, addJobWithDependencies(m.plan.Directory, nil)
 			}
-		
+
+		case key.Matches(msg, m.keyMap.Implement):
+			if m.cursor < len(m.jobs) {
+				job := m.jobs[m.cursor]
+				return m, createImplementationJob(m.plan, job)
+			}
+
 		case key.Matches(msg, m.keyMap.ToggleSummaries):
 			m.showSummaries = !m.showSummaries
 		}
@@ -846,12 +858,12 @@ func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan) tea.Cmd {
 func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 	// Build the command
 	args := []string{"plan", "add", planDir, "-i"}
-	
+
 	// Add dependencies if provided
 	for _, dep := range dependencies {
 		args = append(args, "-d", dep)
 	}
-	
+
 	// Run flow plan add in interactive mode
 	return tea.ExecProcess(exec.Command("flow", args...), func(err error) tea.Msg {
 		if err != nil {
@@ -859,6 +871,40 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 		}
 		return refreshMsg{} // Refresh to show the new job
 	})
+}
+
+// createImplementationJob creates a new interactive_agent job with "impl-" prefix
+// that depends on the selected job
+func createImplementationJob(plan *orchestration.Plan, selectedJob *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		// Create the implementation job title
+		implTitle := fmt.Sprintf("impl-%s", selectedJob.Title)
+
+		// Generate a unique ID for the new job
+		implID := GenerateJobIDFromTitle(plan, implTitle)
+
+		// Create the new job
+		newJob := &orchestration.Job{
+			ID:        implID,
+			Title:     implTitle,
+			Type:      orchestration.JobTypeInteractiveAgent,
+			Status:    orchestration.JobStatusPending,
+			DependsOn: []string{selectedJob.ID},
+			Worktree:  selectedJob.Worktree,
+			Output: orchestration.OutputConfig{
+				Type: "file",
+			},
+		}
+
+		// Add the job to the plan
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return fmt.Errorf("failed to create implementation job: %w", err)
+		}
+
+		// Return refresh message to update the TUI
+		return refreshMsg{}
+	}
 }
 
 // runStatusTUI runs the interactive TUI for plan status
