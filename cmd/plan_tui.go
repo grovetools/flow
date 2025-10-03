@@ -46,6 +46,7 @@ type PlanListItem struct {
 	Status      string
 	StatusParts map[string]int // For detailed status breakdown
 	LastUpdated time.Time      // When the plan was last modified
+	Worktree    string         // Worktree associated with the plan
 }
 
 // planListTUIModel represents the TUI state
@@ -60,6 +61,7 @@ type planListTUIModel struct {
 	statusMessage  string
 	help           help.Model
 	keys           planListKeyMap
+	activePlan     string
 }
 
 // TUI key mappings for plan list
@@ -70,6 +72,7 @@ type planListKeyMap struct {
 	ViewPlan   key.Binding
 	FinishPlan key.Binding
 	NewPlan    key.Binding
+	SetActive  key.Binding
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
@@ -88,6 +91,7 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
 			k.NewPlan,
+			k.SetActive,
 			k.FinishPlan,
 			k.Help,
 			k.Quit,
@@ -116,6 +120,10 @@ var planListKeys = planListKeyMap{
 	NewPlan: key.NewBinding(
 		key.WithKeys("n"),
 		key.WithHelp("n", "create new plan"),
+	),
+	SetActive: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "set active plan"),
 	),
 }
 
@@ -163,6 +171,9 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 		WithTitle("Plan List - Help").
 		Build()
 
+	// Load active plan
+	activePlan, _ := state.GetActiveJob()
+
 	return planListTUIModel{
 		plans:          []PlanListItem{},
 		cursor:         0,
@@ -170,6 +181,7 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 		plansDirectory: plansDirectory,
 		help:           helpModel,
 		keys:           planListKeys,
+		activePlan:     activePlan,
 	}
 }
 
@@ -191,6 +203,9 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.plans = msg.plans
+		// Reload active plan as well
+		activePlan, _ := state.GetActiveJob()
+		m.activePlan = activePlan
 		// Adjust cursor if needed
 		if m.cursor >= len(m.plans) {
 			m.cursor = len(m.plans) - 1
@@ -207,14 +222,12 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// If help is visible, it consumes all key presses
+		// If help is visible, only allow closing it - no other actions
 		if m.help.ShowAll {
-			m.help.Toggle() // Any key closes help
+			// Any key closes help
+			m.help.ShowAll = false
 			return m, nil
 		}
-
-		// Clear status message on any key press
-		m.statusMessage = ""
 
 		// Regular key handling
 		switch {
@@ -231,11 +244,13 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return newPlanInitTUIModel(m.plansDirectory, &PlanInitCmd{}), nil
 
 		case key.Matches(msg, m.keys.Up):
+			m.statusMessage = "" // Clear status on navigation
 			if m.cursor > 0 {
 				m.cursor--
 			}
 
 		case key.Matches(msg, m.keys.Down):
+			m.statusMessage = "" // Clear status on navigation
 			if m.cursor < len(m.plans)-1 {
 				m.cursor++
 			}
@@ -245,6 +260,14 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				plan := m.plans[m.cursor]
 				return m, openPlanStatusTUI(plan.Plan)
+			}
+
+		case key.Matches(msg, m.keys.SetActive):
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				selectedPlan := m.plans[m.cursor]
+				if err := state.SetActiveJob(selectedPlan.Name); err == nil {
+					m.activePlan = selectedPlan.Name
+				}
 			}
 
 		case key.Matches(msg, m.keys.FinishPlan):
@@ -270,18 +293,12 @@ func (m planListTUIModel) View() string {
 
 	var s strings.Builder
 
-	// Display status message if any
-	if m.statusMessage != "" {
-		s.WriteString(theme.DefaultTheme.Success.PaddingBottom(1).Render(m.statusMessage))
-		s.WriteString("\n")
-	}
-
 	// If help is visible, show it and return
 	if m.help.ShowAll {
 		return m.help.View()
 	}
 
-	// Header with emoji and count like grove ws plans list  
+	// Header with emoji and count like grove ws plans list
 	planCount := len(m.plans)
 	headerText := fmt.Sprintf("📋 Flow Plans (%d total)", planCount)
 	s.WriteString(components.RenderHeader(headerText))
@@ -301,6 +318,12 @@ func (m planListTUIModel) View() string {
 	s.WriteString("\n")
 	s.WriteString(theme.DefaultTheme.Muted.Render("Press ? for help"))
 
+	// Display status message at the bottom if any
+	if m.statusMessage != "" {
+		s.WriteString("\n\n")
+		s.WriteString(theme.DefaultTheme.Success.Render(m.statusMessage))
+	}
+
 	return s.String()
 }
 
@@ -310,20 +333,34 @@ func (m planListTUIModel) renderPlanTable() string {
 	}
 
 	// Prepare headers like grove ws plans list
-	headers := []string{"TITLE", "STATUS", "UPDATED"}
+	headers := []string{"TITLE", "STATUS", "WORKTREE", "UPDATED"}
 
 	// Prepare rows with emoji status indicators and formatting
 	rows := make([][]string, len(m.plans))
 	for i, plan := range m.plans {
 		// Generate emoji status like the example
 		statusText := m.formatStatusWithEmoji(plan)
-		
+
 		// Format last updated with relative time
 		updatedText := theme.DefaultTheme.Muted.Render("◦ " + formatRelativeTime(plan.LastUpdated))
 
+		// Add active plan indicator with distinctive styling
+		titleText := plan.Name
+		if plan.Name == m.activePlan {
+			activeIndicator := theme.DefaultTheme.Info.Bold(true).Render("▶")
+			titleText = theme.DefaultTheme.Info.Bold(true).Render(fmt.Sprintf("%s %s", activeIndicator, titleText))
+		}
+
+		// Format worktree text
+		worktreeText := plan.Worktree
+		if worktreeText == "" {
+			worktreeText = theme.DefaultTheme.Muted.Render("-")
+		}
+
 		rows[i] = []string{
-			plan.Name,
+			titleText,
 			statusText,
+			worktreeText,
 			updatedText,
 		}
 	}
@@ -480,11 +517,18 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 						lastUpdated = time.Now() // fallback to current time
 					}
 
+					// Get worktree from plan config
+					worktree := ""
+					if plan.Config != nil {
+						worktree = plan.Config.Worktree
+					}
+
 					item := PlanListItem{
 						Plan:        plan,
 						Name:        plan.Name,
 						JobCount:    len(plan.Jobs),
 						LastUpdated: lastUpdated,
+						Worktree:    worktree,
 					}
 
 					// Calculate status summary
