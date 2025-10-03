@@ -1544,28 +1544,42 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// For jobs without custom rules, cx generate ensures we have the latest context
 		prettyLog.InfoPretty("Running cx generate before submission...")
 
-		// Try grove cx generate first (capture stderr to suppress error if fallback works)
-		var stderrBuf strings.Builder
+		// Create a log file for the cx generate output
+		logDir := ResolveLogDirectory(plan, job)
+		logFileName := fmt.Sprintf("%s-%s-cx.log", job.ID, time.Now().Format("150405"))
+		logFilePath := filepath.Join(logDir, logFileName)
+		logFile, logErr := os.Create(logFilePath)
+		if logErr == nil {
+			defer logFile.Close()
+			prettyLog.InfoPretty(fmt.Sprintf("`cx generate` output is being logged to: %s", logFilePath))
+		}
+
+		// Try grove cx generate first
 		cxCmd := exec.CommandContext(ctx, "grove", "cx", "generate")
 		cxCmd.Dir = worktreePath
-		cxCmd.Stdout = os.Stdout
-		cxCmd.Stderr = &stderrBuf
+		if logFile != nil {
+			cxCmd.Stdout = logFile
+			cxCmd.Stderr = logFile
+		} else {
+			cxCmd.Stdout = os.Stdout
+			cxCmd.Stderr = os.Stderr
+		}
 		groveErr := cxCmd.Run()
 
 		if groveErr != nil {
 			// Try cx generate directly as fallback
 			cxCmd = exec.CommandContext(ctx, "cx", "generate")
 			cxCmd.Dir = worktreePath
-			cxCmd.Stdout = os.Stdout
-			cxCmd.Stderr = os.Stderr
+			if logFile != nil {
+				cxCmd.Stdout = logFile
+				cxCmd.Stderr = logFile
+			} else {
+				cxCmd.Stdout = os.Stdout
+				cxCmd.Stderr = os.Stderr
+			}
 			if err := cxCmd.Run(); err != nil {
-				// Both commands failed, show the errors
-				if stderrBuf.Len() > 0 {
-					fmt.Fprintf(os.Stderr, "%s", stderrBuf.String())
-				}
 				prettyLog.WarnPretty(fmt.Sprintf("Failed to run cx generate: %v", err))
 			}
-			// If cx generate succeeded, we don't show the grove cx error
 		}
 	} else {
 		log.WithField("rules_file", job.RulesFile).Info("Skipping cx generate (using custom rules file)")

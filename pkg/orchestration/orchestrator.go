@@ -377,8 +377,8 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 	// Execute job
 	execErr := executor.Execute(ctx, job, o.plan)
 
-	// Update final status (skip for chat jobs - they manage their own status)
-	if job.Type != JobTypeChat {
+	// Update final status (skip for chat and interactive agent jobs - they manage their own status)
+	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
 		finalStatus := JobStatusCompleted
 		if execErr != nil {
 			finalStatus = JobStatusFailed

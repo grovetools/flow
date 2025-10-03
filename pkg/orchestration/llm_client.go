@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -178,10 +179,29 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	// Log start time
 	startTime := time.Now()
 
+	// Create a log file for the command output
+	logDir := ResolveLogDirectory(plan, job)
+	logFileName := fmt.Sprintf("%s-%s-llm.log", job.ID, requestStart.Format("150405"))
+	logFilePath := filepath.Join(logDir, logFileName)
+	logFile, err := os.Create(logFilePath)
+	if err != nil {
+		c.log.WithError(err).Warn("Could not create LLM log file")
+	} else {
+		defer logFile.Close()
+		grovelogging.NewPrettyLogger().InfoPretty(fmt.Sprintf("LLM output is being logged to: %s", logFilePath))
+	}
+
 	// Capture output
 	var stdout, stderr bytes.Buffer
-	execCmd.Stdout = &stdout
-	execCmd.Stderr = &stderr
+	if logFile != nil {
+		// Tee output to both buffers and the log file
+		execCmd.Stdout = io.MultiWriter(&stdout, logFile)
+		execCmd.Stderr = io.MultiWriter(&stderr, logFile)
+	} else {
+		// Fallback to just buffers if log file creation failed
+		execCmd.Stdout = &stdout
+		execCmd.Stderr = &stderr
+	}
 
 	if err := execCmd.Run(); err != nil {
 		duration := time.Since(startTime)

@@ -269,21 +269,17 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 
 	// Capture output
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Write any output we got even if there was an error
-		if len(output) > 0 {
-			fmt.Print(string(output))
-			if _, writeErr := log.Write(output); writeErr != nil {
-				fmt.Printf("Warning: failed to write output to log: %v\n", writeErr)
-			}
+
+	// Write output to log file regardless of success or failure
+	if len(output) > 0 {
+		if _, writeErr := log.Write(output); writeErr != nil {
+			// Log this, but don't fail the job over it
+			fmt.Printf("Warning: failed to write agent output to log: %v\n", writeErr)
 		}
-		return fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	// Write output to both log file and console
-	fmt.Print(string(output))
-	if _, writeErr := log.Write(output); writeErr != nil {
-		fmt.Printf("Warning: failed to write output to log: %v\n", writeErr)
+	if err != nil {
+		return fmt.Errorf("agent execution failed: %w", err)
 	}
 
 	// Handle output based on configuration (commit, etc.)
