@@ -188,7 +188,10 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 }
 
 func (m planListTUIModel) Init() tea.Cmd {
-	return loadPlansListCmd(m.plansDirectory)
+	return tea.Batch(
+		loadPlansListCmd(m.plansDirectory),
+		refreshTick(),
+	)
 }
 
 func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -216,6 +219,12 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 		}
 		return m, nil
+
+	case refreshTickMsg:
+		return m, tea.Batch(
+			loadPlansListCmd(m.plansDirectory),
+			refreshTick(),
+		)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -560,20 +569,10 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 
 					// Fetch git status if this plan has a worktree
 					if worktree != "" {
-						// Try to get git root from current directory, fallback to plans directory
-						gitRoot, err := git.GetGitRoot(".")
-						if err != nil {
-							gitRoot, err = git.GetGitRoot(plansDirectory)
-						}
-						if err == nil {
-							// Handle case where we're already in a worktree
-							if strings.Contains(gitRoot, ".grove-worktrees") {
-								// Extract the main repo path from worktree path
-								parts := strings.Split(gitRoot, ".grove-worktrees")
-								if len(parts) > 0 {
-									gitRoot = strings.TrimSuffix(parts[0], string(filepath.Separator))
-								}
-							}
+						// Infer git root from plan path to handle cross-repo scenarios
+						gitRoot := findGitRootForWorktree(planPath, worktree)
+
+						if gitRoot != "" {
 							worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktree)
 							if _, statErr := os.Stat(worktreePath); statErr == nil {
 								gitStatus, statusErr := git.GetStatus(worktreePath)
@@ -652,6 +651,67 @@ func getCommitCount(repoPath, revRange string) int {
 	count := 0
 	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &count)
 	return count
+}
+
+// findGitRootForWorktree attempts to find the git root directory for a worktree
+// by inferring from the plan path and checking known locations
+func findGitRootForWorktree(planPath, worktreeName string) string {
+	// Try to infer the repo name from the plan path
+	// Typical pattern: ~/Documents/nb/repos/{repo}/main/plans/{plan}
+	parts := strings.Split(planPath, string(filepath.Separator))
+	var repoName string
+	for i, part := range parts {
+		if part == "repos" && i+1 < len(parts) {
+			repoName = parts[i+1]
+			break
+		}
+	}
+
+	if repoName == "" {
+		return ""
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	cwd, _ := os.Getwd()
+
+	// Build list of candidate git roots to check
+	var candidates []string
+
+	// Special case: if repo name is "grove-ecosystem", check the ecosystem root itself
+	if repoName == "grove-ecosystem" {
+		ecosystemPath := filepath.Join(homeDir, "Code", "grove-ecosystem")
+		candidates = append(candidates, ecosystemPath)
+	} else {
+		// Look for the repo in the grove ecosystem
+		candidates = append(candidates,
+			filepath.Join(homeDir, "Code", "grove-ecosystem", repoName),
+			filepath.Join(homeDir, "Code", "grove-ecosystem", ".grove-worktrees", repoName),
+		)
+	}
+
+	// Also check current directory patterns
+	if strings.Contains(cwd, "grove-ecosystem") {
+		ecosystemRoot := cwd[:strings.Index(cwd, "grove-ecosystem")+len("grove-ecosystem")]
+		if repoName == "grove-ecosystem" {
+			candidates = append(candidates, ecosystemRoot)
+		} else {
+			candidates = append(candidates,
+				filepath.Join(ecosystemRoot, repoName),
+				filepath.Join(ecosystemRoot, ".grove-worktrees", repoName),
+			)
+		}
+	}
+
+	// Check each candidate
+	for _, candidate := range candidates {
+		// Check if worktree exists at this location
+		worktreePath := filepath.Join(candidate, ".grove-worktrees", worktreeName)
+		if _, err := os.Stat(worktreePath); err == nil {
+			return candidate
+		}
+	}
+
+	return ""
 }
 
 func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {

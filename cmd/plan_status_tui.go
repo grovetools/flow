@@ -262,6 +262,9 @@ type refreshMsg struct{}
 type archiveConfirmedMsg struct{ job *orchestration.Job }
 type editFileAndQuitMsg struct{ filePath string }
 type tickMsg time.Time
+type refreshTickMsg time.Time
+
+const refreshInterval = 2 * time.Second
 
 // blink returns a command that sends a tick message every 500ms for cursor blinking
 func blink() tea.Cmd {
@@ -270,9 +273,19 @@ func blink() tea.Cmd {
 	})
 }
 
+// refreshTick returns a command that sends a refresh message periodically
+func refreshTick() tea.Cmd {
+	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
+		return refreshTickMsg(t)
+	})
+}
+
 // Init initializes the TUI
 func (m statusTUIModel) Init() tea.Cmd {
-	return blink()
+	return tea.Batch(
+		blink(),
+		refreshTick(),
+	)
 }
 
 // refreshPlan reloads the plan from disk
@@ -289,6 +302,12 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Toggle cursor visibility for blinking effect
 		m.cursorVisible = !m.cursorVisible
 		return m, blink() // Schedule next tick
+
+	case refreshTickMsg:
+		return m, tea.Batch(
+			refreshPlan(m.planDir),
+			refreshTick(),
+		)
 
 	case refreshMsg:
 		// Reload the plan
