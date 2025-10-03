@@ -498,14 +498,9 @@ exit 0
 				}
 				
 				// Check that error message mentions the container isn't running
-				if !strings.Contains(result.Stderr, "not running") && 
+				if !strings.Contains(result.Stderr, "not running") &&
 				   !strings.Contains(result.Stderr, "not-running-container") {
 					return fmt.Errorf("error should mention container not running, got: %s", result.Stderr)
-				}
-				
-				// Check for the helpful hint about grove-proxy
-				if !strings.Contains(result.Stderr, "grove-proxy up") {
-					return fmt.Errorf("error should suggest running 'grove-proxy up', got: %s", result.Stderr)
 				}
 				
 				return nil

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/config"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
-	proxy_config "github.com/mattsolo1/grove-proxy/pkg/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -237,10 +237,15 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			e.prettyLog.Success(fmt.Sprintf("Session '%s' already exists.", sessionName))
 			
 			// Build agent command
-			fullCfg, _ := proxy_config.LoadFrom(".")
+			coreCfg, _ := config.LoadFrom(".")
 			var agentArgs []string
-			if fullCfg != nil && fullCfg.Agent != nil {
-				agentArgs = fullCfg.Agent.Args
+			if coreCfg != nil {
+				type agentConfig struct {
+					Args []string `yaml:"args"`
+				}
+				var agentCfg agentConfig
+				coreCfg.UnmarshalExtension("agent", &agentCfg)
+				agentArgs = agentCfg.Args
 			}
 			agentCommand, err := e.buildAgentCommand(job, plan, workDir, agentArgs)
 			if err != nil {
@@ -321,10 +326,15 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		}
 
 		// Build agent command
-		fullCfg, _ := proxy_config.LoadFrom(".")
+		coreCfg, _ := config.LoadFrom(".")
 		var agentArgs []string
-		if fullCfg != nil && fullCfg.Agent != nil {
-			agentArgs = fullCfg.Agent.Args
+		if coreCfg != nil {
+			type agentConfig struct {
+				Args []string `yaml:"args"`
+			}
+			var agentCfg agentConfig
+			coreCfg.UnmarshalExtension("agent", &agentCfg)
+			agentArgs = agentCfg.Args
 		}
 		agentCommand, err := e.buildAgentCommand(job, plan, workDir, agentArgs)
 		if err != nil {
@@ -461,15 +471,19 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	// Build and send command
-	fullCfg, err := proxy_config.LoadFrom(".")
+	coreCfg, err := config.LoadFrom(".")
 	if err != nil {
-		// Proceed with minimal config
-		fullCfg = &proxy_config.AppConfig{Agent: &proxy_config.AgentConfig{}}
+		coreCfg = &config.Config{}
 	}
 
 	var agentArgs []string
-	if fullCfg != nil && fullCfg.Agent != nil {
-		agentArgs = fullCfg.Agent.Args
+	if coreCfg != nil {
+		type agentConfig struct {
+			Args []string `yaml:"args"`
+		}
+		var agentCfg agentConfig
+		coreCfg.UnmarshalExtension("agent", &agentCfg)
+		agentArgs = agentCfg.Args
 	}
 	agentCommand, err := e.buildAgentCommand(job, plan, workDir, agentArgs)
 	if err != nil {

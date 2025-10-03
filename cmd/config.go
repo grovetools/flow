@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"github.com/mattsolo1/grove-core/config"
-	proxy_config "github.com/mattsolo1/grove-proxy/pkg/config"
 )
 
 // FlowConfig defines the structure for the 'flow' section in grove.yml.
@@ -25,6 +24,20 @@ type RecipeConfig struct {
 	Vars map[string]string `yaml:"vars"`
 }
 
+// AgentConfig defines the structure for the 'agent' section in grove.yml.
+type AgentConfig struct {
+	Args                      []string `yaml:"args"`
+	MountWorkspaceAtHostPath  bool     `yaml:"mount_workspace_at_host_path"`
+	UseSuperprojectRoot       bool     `yaml:"use_superproject_root"`
+}
+
+// AppConfig wraps the core config with flow-specific extensions.
+type AppConfig struct {
+	Core  *config.Config
+	Flow  *FlowConfig
+	Agent *AgentConfig
+}
+
 // loadFlowConfig loads the core grove config and unmarshals the 'flow' extension.
 func loadFlowConfig() (*FlowConfig, error) {
 	// Load the config using LoadFrom to get the full hierarchy (global -> project -> override)
@@ -43,15 +56,22 @@ func loadFlowConfig() (*FlowConfig, error) {
 }
 
 // loadFullConfig loads the entire grove config including agent settings
-func loadFullConfig() (*proxy_config.AppConfig, error) {
-	appCfg, err := proxy_config.LoadFrom(".")
+func loadFullConfig() (*AppConfig, error) {
+	coreCfg, err := config.LoadFrom(".")
 	if err != nil {
 		// It's okay if the config doesn't exist, we'll just use an empty one.
-		appCfg = &proxy_config.AppConfig{
-			Core:  &config.Config{},
-			Proxy: &proxy_config.ProxyConfig{},
-			Agent: &proxy_config.AgentConfig{},
-		}
+		coreCfg = &config.Config{}
 	}
-	return appCfg, nil
+
+	var flowCfg FlowConfig
+	coreCfg.UnmarshalExtension("flow", &flowCfg)
+
+	var agentCfg AgentConfig
+	coreCfg.UnmarshalExtension("agent", &agentCfg)
+
+	return &AppConfig{
+		Core:  coreCfg,
+		Flow:  &flowCfg,
+		Agent: &agentCfg,
+	}, nil
 }

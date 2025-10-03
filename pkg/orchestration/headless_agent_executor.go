@@ -10,8 +10,8 @@ import (
 	"time"
 
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	proxy_config "github.com/mattsolo1/grove-proxy/pkg/config"
 )
 
 // AgentRunner defines the interface for running agents.
@@ -222,23 +222,29 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 	defer log.Close()
 
 	// Load grove config to get agent configuration
-	appCfg, err := proxy_config.LoadFrom(".") // Use grove-proxy's loader to get agent config
+	coreCfg, err := config.LoadFrom(".")
 	if err != nil {
-		// Proceed with default behavior if config can't be loaded
-		appCfg = &proxy_config.AppConfig{Agent: &proxy_config.AgentConfig{}}
+		coreCfg = &config.Config{}
 		fmt.Printf("Warning: could not load grove.yml for agent execution: %v\n", err)
 	}
+
+	// Extract agent args from config
+	type agentConfig struct {
+		Args []string `yaml:"args"`
+	}
+	var agentCfg agentConfig
+	coreCfg.UnmarshalExtension("agent", &agentCfg)
 
 	// Git root is no longer needed since we removed container operations
 
 	// Always run in host mode - no container dependencies
 	fmt.Fprintf(os.Stdout, "Running job in host mode\n")
-	return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, appCfg)
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, agentCfg.Args)
 }
 
 
 // runOnHost executes the agent directly on the host machine
-func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, appCfg *proxy_config.AppConfig) error {
+func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, agentArgs []string) error {
 	// Change to the worktree directory
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -252,8 +258,8 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 
 	// Prepare the claude command
 	args := []string{"--dangerously-skip-permissions"}
-	if appCfg.Agent.Args != nil {
-		args = append(args, appCfg.Agent.Args...)
+	if agentArgs != nil {
+		args = append(args, agentArgs...)
 	}
 
 	// Create the command
