@@ -30,6 +30,12 @@ var (
 	planFinishForce           bool
 )
 
+// repoStatus represents the merge status of a single repository
+type repoStatus struct {
+	Name   string
+	Status string // "merged", "needs_merge", "needs_rebase", "not_found"
+}
+
 // cleanupItem represents a cleanup action that can be performed
 type cleanupItem struct {
 	Name        string
@@ -38,6 +44,7 @@ type cleanupItem struct {
 	Status      string
 	IsAvailable bool
 	IsEnabled   bool
+	Details     []repoStatus // Optional detailed status information for complex items
 }
 
 
@@ -191,22 +198,16 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
-	fmt.Printf("Finishing plan: %s\n\n", color.CyanString(planName))
-
 	// Gather information - check for git root from current working directory
 	cwd, _ := os.Getwd()
 	gitRoot, err := git.GetGitRoot(cwd)
 	if err != nil {
-		fmt.Println(color.YellowString("Warning: Not in a git repository. Some cleanup actions are unavailable."))
 		gitRoot = "" // Continue without git-related actions
 	}
 
 	worktreeName := ""
 	if plan.Config != nil {
 		worktreeName = plan.Config.Worktree
-	}
-	if worktreeName == "" {
-		fmt.Println(color.YellowString("Warning: No worktree configured in .grove-plan.yml. Some cleanup actions are unavailable."))
 	}
 
 	executor := &gexec.RealCommandExecutor{}
@@ -216,139 +217,156 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	sessionName := tmux.SanitizeForTmuxSession(worktreeName)
 
 	// Define cleanup items
-	items := []*cleanupItem{
-		{
-			Name: "Merge/fast-forward submodules to main",
-			Check: func() (string, error) {
-				if worktreeName == "" || gitRoot == "" {
-					return "N/A", nil
-				}
-				// Check if .grove/workspace file exists at git root (for ecosystem)
-				workspaceFile := filepath.Join(gitRoot, ".grove", "workspace")
+	// Use a shared variable for repo details that the Check function can populate
+	var sharedRepoDetails []repoStatus
 
-				if _, err := os.Stat(workspaceFile); os.IsNotExist(err) {
-					return "N/A (not ecosystem)", nil
+	mergeItem := &cleanupItem{
+		Name: "Merge/fast-forward submodules to main",
+		Check: func() (string, error) {
+			if worktreeName == "" || gitRoot == "" {
+				return "N/A", nil
+			}
+			// Check if .grove/workspace file exists at git root (for ecosystem)
+			workspaceFile := filepath.Join(gitRoot, ".grove", "workspace")
+
+			if _, err := os.Stat(workspaceFile); os.IsNotExist(err) {
+				return "N/A (not ecosystem)", nil
+			}
+
+			// Read and parse the workspace file
+			data, err := os.ReadFile(workspaceFile)
+			if err != nil {
+				return "N/A (read error)", nil
+			}
+
+			// WorkspaceMetadata matches grove-meta/cmd/dev_workspace.go:WorkspaceMetadata
+			var workspaceConfig struct {
+				Branch    string   `yaml:"branch"`
+				Plan      string   `yaml:"plan"`
+				CreatedAt string   `yaml:"created_at"`
+				Ecosystem bool     `yaml:"ecosystem"`
+				Repos     []string `yaml:"repos,omitempty"`
+			}
+
+			if err := yaml.Unmarshal(data, &workspaceConfig); err != nil {
+				return "N/A (parse error)", nil
+			}
+
+			if !workspaceConfig.Ecosystem || len(workspaceConfig.Repos) == 0 {
+				return "N/A (not ecosystem)", nil
+			}
+
+			// Discover local workspaces and check status of each repo
+			localWorkspaces, err := workspace.DiscoverLocalWorkspaces(context.Background())
+			if err != nil {
+				return color.YellowString("Available"), nil // Still show as available even if we can't check
+			}
+
+			totalRepos := len(workspaceConfig.Repos)
+			needsMerge := 0
+			alreadyMerged := 0
+			notFound := 0
+			needsRebase := 0
+
+			// Collect detailed status for each repo
+			var repoDetails []repoStatus
+
+			for _, repoName := range workspaceConfig.Repos {
+				repoPath, exists := localWorkspaces[repoName]
+				if !exists {
+					notFound++
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "not_found"})
+					continue
 				}
 
-				// Read and parse the workspace file
-				data, err := os.ReadFile(workspaceFile)
+				// Check if branch exists
+				branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName)
+				branchCheckCmd.Dir = repoPath
+				if err := branchCheckCmd.Run(); err != nil {
+					notFound++
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "not_found"})
+					continue
+				}
+
+				// Check if main exists
+				mainCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/main")
+				mainCheckCmd.Dir = repoPath
+				if err := mainCheckCmd.Run(); err != nil {
+					notFound++
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "not_found"})
+					continue
+				}
+
+				// Check commits ahead
+				aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName)
+				aheadCmd.Dir = repoPath
+				aheadOutput, err := aheadCmd.Output()
 				if err != nil {
-					return "N/A (read error)", nil
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "not_found"})
+					continue
+				}
+				aheadCount := strings.TrimSpace(string(aheadOutput))
+
+				if aheadCount == "0" || aheadCount == "" {
+					alreadyMerged++
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "merged"})
+					continue
 				}
 
-				// WorkspaceMetadata matches grove-meta/cmd/dev_workspace.go:WorkspaceMetadata
-				var workspaceConfig struct {
-					Branch    string   `yaml:"branch"`
-					Plan      string   `yaml:"plan"`
-					CreatedAt string   `yaml:"created_at"`
-					Ecosystem bool     `yaml:"ecosystem"`
-					Repos     []string `yaml:"repos,omitempty"`
-				}
-
-				if err := yaml.Unmarshal(data, &workspaceConfig); err != nil {
-					return "N/A (parse error)", nil
-				}
-
-				if !workspaceConfig.Ecosystem || len(workspaceConfig.Repos) == 0 {
-					return "N/A (not ecosystem)", nil
-				}
-
-				// Discover local workspaces and check status of each repo
-				localWorkspaces, err := workspace.DiscoverLocalWorkspaces(context.Background())
+				// Check if fast-forward is possible
+				mergeBaseCmd := exec.Command("git", "merge-base", "main", worktreeName)
+				mergeBaseCmd.Dir = repoPath
+				mergeBaseOutput, err := mergeBaseCmd.Output()
 				if err != nil {
-					return color.YellowString("Available"), nil // Still show as available even if we can't check
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "not_found"})
+					continue
 				}
+				mergeBase := strings.TrimSpace(string(mergeBaseOutput))
 
-				totalRepos := len(workspaceConfig.Repos)
-				needsMerge := 0
-				alreadyMerged := 0
-				notFound := 0
-				needsRebase := 0
-
-				for _, repoName := range workspaceConfig.Repos {
-					repoPath, exists := localWorkspaces[repoName]
-					if !exists {
-						notFound++
-						continue
-					}
-
-					// Check if branch exists
-					branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName)
-					branchCheckCmd.Dir = repoPath
-					if err := branchCheckCmd.Run(); err != nil {
-						notFound++
-						continue
-					}
-
-					// Check if main exists
-					mainCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/main")
-					mainCheckCmd.Dir = repoPath
-					if err := mainCheckCmd.Run(); err != nil {
-						notFound++
-						continue
-					}
-
-					// Check commits ahead
-					aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName)
-					aheadCmd.Dir = repoPath
-					aheadOutput, err := aheadCmd.Output()
-					if err != nil {
-						continue
-					}
-					aheadCount := strings.TrimSpace(string(aheadOutput))
-
-					if aheadCount == "0" || aheadCount == "" {
-						alreadyMerged++
-						continue
-					}
-
-					// Check if fast-forward is possible
-					mergeBaseCmd := exec.Command("git", "merge-base", "main", worktreeName)
-					mergeBaseCmd.Dir = repoPath
-					mergeBaseOutput, err := mergeBaseCmd.Output()
-					if err != nil {
-						continue
-					}
-					mergeBase := strings.TrimSpace(string(mergeBaseOutput))
-
-					mainRevCmd := exec.Command("git", "rev-parse", "main")
-					mainRevCmd.Dir = repoPath
-					mainRevOutput, err := mainRevCmd.Output()
-					if err != nil {
-						continue
-					}
-					mainRev := strings.TrimSpace(string(mainRevOutput))
-
-					if mergeBase == mainRev {
-						needsMerge++
-					} else {
-						needsRebase++
-					}
+				mainRevCmd := exec.Command("git", "rev-parse", "main")
+				mainRevCmd.Dir = repoPath
+				mainRevOutput, err := mainRevCmd.Output()
+				if err != nil {
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "not_found"})
+					continue
 				}
+				mainRev := strings.TrimSpace(string(mainRevOutput))
 
-				// Build status message
-				var statusParts []string
-				if needsMerge > 0 {
-					statusParts = append(statusParts, color.YellowString("%d to merge", needsMerge))
+				if mergeBase == mainRev {
+					needsMerge++
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "needs_merge"})
+				} else {
+					needsRebase++
+					repoDetails = append(repoDetails, repoStatus{Name: repoName, Status: "needs_rebase"})
 				}
-				if alreadyMerged > 0 {
-					statusParts = append(statusParts, color.GreenString("%d merged", alreadyMerged))
-				}
-				if needsRebase > 0 {
-					statusParts = append(statusParts, color.RedString("%d need rebase", needsRebase))
-				}
-				if notFound > 0 {
-					statusParts = append(statusParts, color.New(color.Faint).Sprintf("%d skipped", notFound))
-				}
+			}
 
-				if len(statusParts) == 0 {
-					return color.YellowString("Available"), nil
-				}
+			// Store details in the shared variable
+			sharedRepoDetails = repoDetails
 
-				status := fmt.Sprintf("%d repos: %s", totalRepos, strings.Join(statusParts, ", "))
-				return status, nil
-			},
-			Action: func() error {
+			// Build status message
+			var statusParts []string
+			if needsMerge > 0 {
+				statusParts = append(statusParts, color.YellowString("%d to merge", needsMerge))
+			}
+			if alreadyMerged > 0 {
+				statusParts = append(statusParts, color.GreenString("%d merged", alreadyMerged))
+			}
+			if needsRebase > 0 {
+				statusParts = append(statusParts, color.RedString("%d need rebase", needsRebase))
+			}
+			if notFound > 0 {
+				statusParts = append(statusParts, color.New(color.Faint).Sprintf("%d skipped", notFound))
+			}
+
+			if len(statusParts) == 0 {
+				return color.YellowString("Available"), nil
+			}
+
+			status := fmt.Sprintf("%d repos: %s", totalRepos, strings.Join(statusParts, ", "))
+			return status, nil
+		},
+		Action: func() error {
 				// Read the workspace file to get ecosystem configuration (at git root)
 				workspaceFile := filepath.Join(gitRoot, ".grove", "workspace")
 
@@ -455,7 +473,10 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 
 				return nil
 			},
-		},
+	}
+
+	items := []*cleanupItem{
+		mergeItem,
 		{
 			Name: "Mark plan as finished in .grove-plan.yml",
 			Check: func() (string, error) {
@@ -912,6 +933,12 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	for _, item := range items {
 		status, _ := item.Check()
 		item.Status = status
+
+		// Copy shared repo details to mergeItem after its Check has been called
+		if item == mergeItem && len(sharedRepoDetails) > 0 {
+			item.Details = sharedRepoDetails
+		}
+
 		// Mark as available if it's a positive state (yellow/green) or warning state (red) that can still be attempted
 		if status == color.YellowString("Available") || 
 		   status == color.YellowString("Exists") || 

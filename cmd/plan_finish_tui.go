@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fatih/color"
+	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -15,10 +16,10 @@ import (
 
 type finishTUIKeyMap struct {
 	keymap.Base
-	Toggle    key.Binding
-	SelectAll key.Binding
+	Toggle     key.Binding
+	SelectAll  key.Binding
 	SelectNone key.Binding
-	Confirm   key.Binding
+	Confirm    key.Binding
 }
 
 func newFinishTUIKeyMap() finishTUIKeyMap {
@@ -55,14 +56,14 @@ func (k finishTUIKeyMap) FullHelp() [][]key.Binding {
 }
 
 type finishTUIModel struct {
-	planName      string
-	items         []*cleanupItem
-	cursor        int
-	confirmed     bool
-	quitting      bool
+	planName       string
+	items          []*cleanupItem
+	cursor         int
+	confirmed      bool
+	quitting       bool
 	branchIsMerged bool // Whether the branch is already merged/rebased
-	keyMap        finishTUIKeyMap
-	help          help.Model
+	keyMap         finishTUIKeyMap
+	help           help.Model
 }
 
 func initialFinishTUIModel(planName string, items []*cleanupItem, branchIsMerged bool) finishTUIModel {
@@ -98,7 +99,7 @@ func (m finishTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Quit):
 			m.quitting = true
 			return m, tea.Quit
-			
+
 		case key.Matches(msg, m.keyMap.Help):
 			m.help.ShowAll = !m.help.ShowAll
 
@@ -146,6 +147,56 @@ func (m finishTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// renderInlineDetails shows detailed repository status inline below the table
+func (m finishTUIModel) renderInlineDetails(item *cleanupItem) string {
+	var b strings.Builder
+
+	// Group repos by status
+	merged := []string{}
+	needsMerge := []string{}
+	needsRebase := []string{}
+	notFound := []string{}
+
+	for _, repo := range item.Details {
+		switch repo.Status {
+		case "merged":
+			merged = append(merged, repo.Name)
+		case "needs_merge":
+			needsMerge = append(needsMerge, repo.Name)
+		case "needs_rebase":
+			needsRebase = append(needsRebase, repo.Name)
+		case "not_found":
+			notFound = append(notFound, repo.Name)
+		}
+	}
+
+	if len(needsRebase) > 0 {
+		b.WriteString(theme.DefaultTheme.Error.Bold(true).Render(fmt.Sprintf("Needs rebase (%d): ", len(needsRebase))))
+		b.WriteString(theme.DefaultTheme.Error.Render(strings.Join(needsRebase, ", ")))
+		b.WriteString("\n")
+	}
+
+	if len(needsMerge) > 0 {
+		b.WriteString(theme.DefaultTheme.Warning.Bold(true).Render(fmt.Sprintf("Ready to merge (%d): ", len(needsMerge))))
+		b.WriteString(theme.DefaultTheme.Warning.Render(strings.Join(needsMerge, ", ")))
+		b.WriteString("\n")
+	}
+
+	if len(merged) > 0 {
+		b.WriteString(theme.DefaultTheme.Success.Bold(true).Render(fmt.Sprintf("Merged (%d): ", len(merged))))
+		b.WriteString(theme.DefaultTheme.Success.Render(strings.Join(merged, ", ")))
+		b.WriteString("\n")
+	}
+
+	if len(notFound) > 0 {
+		b.WriteString(theme.DefaultTheme.Muted.Bold(true).Render(fmt.Sprintf("Skipped (%d): ", len(notFound))))
+		b.WriteString(theme.DefaultTheme.Muted.Render(strings.Join(notFound, ", ")))
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
 // getStatusStyle returns the appropriate lipgloss style for a status string
 func getStatusStyle(status string) lipgloss.Style {
 	// Strip ANSI colors to get the plain text
@@ -181,44 +232,8 @@ func (m finishTUIModel) View() string {
 	var b strings.Builder
 
 	// Header
-	headerStyle := theme.DefaultTheme.Header.
-		Padding(0, 2).
-		MarginBottom(1).
-		Align(lipgloss.Center).
-		Width(95)
-
-	planNameStyle := theme.DefaultTheme.Selected.
-		Background(theme.DefaultTheme.Header.GetBackground())
-
-	header := theme.DefaultTheme.Header.Render("🏁 Finishing Plan: ") +
-		planNameStyle.Render(m.planName) +
-		theme.DefaultTheme.Header.Render(" 🏁")
-	b.WriteString("  ") // Left padding
-	b.WriteString(headerStyle.Render(header))
+	b.WriteString(components.RenderHeader("Finishing plan: " + m.planName))
 	b.WriteString("\n\n")
-
-	// Instructions
-	instructionStyle := theme.DefaultTheme.Bold.
-		MarginBottom(1)
-	b.WriteString("  ") // Left padding
-	b.WriteString(instructionStyle.Render("Select cleanup actions to perform:"))
-	b.WriteString("\n")
-	
-	// Add congratulatory message if branch is merged
-	if m.branchIsMerged {
-		congratsStyle := theme.DefaultTheme.Success.
-			Bold(true).
-			Padding(0, 1).
-			Margin(0, 0, 1, 0)
-		
-		congratsMessage := "🎉 Branch successfully merged into main! 🎉"
-		b.WriteString("\n")
-		b.WriteString("  ") // Left padding
-		b.WriteString(congratsStyle.Render(congratsMessage))
-		b.WriteString("\n")
-	}
-	
-	b.WriteString("\n")
 
 	// Styles
 	focusedStyle := theme.DefaultTheme.Selected
@@ -226,27 +241,24 @@ func (m finishTUIModel) View() string {
 	enabledCheckboxStyle := theme.DefaultTheme.Success.Bold(true)
 	disabledCheckboxStyle := theme.DefaultTheme.Muted
 	
-	// List items with better spacing and alignment
+	// List items
 	for i, item := range m.items {
 		var line strings.Builder
-		
-		// Left padding
-		line.WriteString("  ")
-		
+
 		// Cursor indicator
 		if m.cursor == i && item.IsAvailable {
-			line.WriteString(focusedStyle.Render("▸ "))
+			line.WriteString(focusedStyle.Render("> "))
 		} else {
 			line.WriteString("  ")
 		}
 
-		// Checkbox with better styling
+		// Checkbox
 		if item.IsEnabled {
-			line.WriteString(enabledCheckboxStyle.Render("[✓] "))
+			line.WriteString(enabledCheckboxStyle.Render("[x] "))
 		} else if item.IsAvailable {
-			line.WriteString("[  ] ")
+			line.WriteString("[ ] ")
 		} else {
-			line.WriteString(disabledCheckboxStyle.Render("[  ] "))
+			line.WriteString(disabledCheckboxStyle.Render("[ ] "))
 		}
 
 		// Item name with proper width
@@ -278,6 +290,15 @@ func (m finishTUIModel) View() string {
 		b.WriteString("\n")
 	}
 
+	// Show detailed repo status if available (after the list of items)
+	for _, item := range m.items {
+		if len(item.Details) > 0 {
+			b.WriteString("\n")
+			b.WriteString(m.renderInlineDetails(item))
+			break // Only one item has details currently
+		}
+	}
+
 	// Count selected items
 	selectedCount := 0
 	for _, item := range m.items {
@@ -286,27 +307,17 @@ func (m finishTUIModel) View() string {
 		}
 	}
 
-	// Status line
-	statusStyle := theme.DefaultTheme.Bold.
-		MarginTop(1).
-		MarginBottom(1)
-	
-	statusText := fmt.Sprintf("Selected: %d actions", selectedCount)
+	// Help footer - minimal
 	b.WriteString("\n")
-	b.WriteString("  ") // Left padding
-	b.WriteString(statusStyle.Render(statusText))
-
-	// Help footer
-	helpText := m.help.View()
-	b.WriteString("\n")
-	b.WriteString(helpText)
+	helpStyle := theme.DefaultTheme.Muted
+	b.WriteString(helpStyle.Render("? help • q quit"))
 
 	return b.String()
 }
 
 func runFinishTUI(planName string, items []*cleanupItem, branchIsMerged bool) error {
 	model := initialFinishTUIModel(planName, items, branchIsMerged)
-	p := tea.NewProgram(model)
+	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
 	if err != nil {
