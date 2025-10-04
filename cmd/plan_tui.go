@@ -165,11 +165,24 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 	// Create and run TUI
 	model := newPlanListTUIModel(plansDirectory)
 	program := tea.NewProgram(model, tea.WithAltScreen())
-	
-	if _, err := program.Run(); err != nil {
+
+	finalModel, err := program.Run() // Capture the final model
+	if err != nil {
 		return fmt.Errorf("error running plan list TUI: %w", err)
 	}
 
+	// If the TUI exited on the 'new plan' screen, it means the user created a plan.
+	// We need to process it.
+	if m, ok := finalModel.(planInitTUIModel); ok {
+		// User submitted the 'new plan' form, and didn't just quit.
+		if !m.quitting && m.nameInput.Value() != "" {
+			finalCmd := m.toPlanInitCmd()
+			// Execute the plan creation using the same logic as `plan init`
+			return RunPlanInit(finalCmd)
+		}
+	}
+
+	// Otherwise, the user just quit from the list view, so we do nothing.
 	return nil
 }
 
