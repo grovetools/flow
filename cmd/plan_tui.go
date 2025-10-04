@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/git"
@@ -21,6 +22,7 @@ import (
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 // Plan TUI command - interactive version of `flow plan list`
@@ -45,10 +47,11 @@ type PlanListItem struct {
 	Name        string
 	JobCount    int
 	Status      string
-	StatusParts map[string]int // For detailed status breakdown
-	LastUpdated time.Time      // When the plan was last modified
-	Worktree    string         // Worktree associated with the plan
+	StatusParts map[string]int  // For detailed status breakdown
+	LastUpdated time.Time       // When the plan was last modified
+	Worktree    string          // Worktree associated with the plan
 	GitStatus   *git.StatusInfo // Git status information for the worktree
+	Notes       string          // User notes/description
 }
 
 // planListTUIModel represents the TUI state
@@ -64,6 +67,9 @@ type planListTUIModel struct {
 	help           help.Model
 	keys           planListKeyMap
 	activePlan     string
+	editingNotes   bool
+	notesInput     textinput.Model
+	editPlanIndex  int
 }
 
 // TUI key mappings for plan list
@@ -76,6 +82,7 @@ type planListKeyMap struct {
 	FinishPlan key.Binding
 	NewPlan    key.Binding
 	SetActive  key.Binding
+	EditNotes  key.Binding
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
@@ -96,6 +103,7 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
 			k.NewPlan,
 			k.SetActive,
+			k.EditNotes,
 			k.FinishPlan,
 			k.Help,
 			k.Quit,
@@ -132,6 +140,10 @@ var planListKeys = planListKeyMap{
 	SetActive: key.NewBinding(
 		key.WithKeys("s"),
 		key.WithHelp("s", "set active plan"),
+	),
+	EditNotes: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "edit notes"),
 	),
 }
 
@@ -259,6 +271,47 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// If editing notes, handle input
+		if m.editingNotes {
+			switch msg.String() {
+			case "enter":
+				// Save notes
+				if m.editPlanIndex >= 0 && m.editPlanIndex < len(m.plans) {
+					plan := m.plans[m.editPlanIndex].Plan
+					newNotes := m.notesInput.Value()
+
+					// Update the config
+					if plan.Config == nil {
+						plan.Config = &orchestration.PlanConfig{}
+					}
+					plan.Config.Notes = newNotes
+
+					// Save to .grove-plan.yml
+					configPath := filepath.Join(plan.Directory, ".grove-plan.yml")
+					data, err := yaml.Marshal(plan.Config)
+					if err == nil {
+						os.WriteFile(configPath, data, 0644)
+					}
+
+					// Update local model
+					m.plans[m.editPlanIndex].Notes = newNotes
+				}
+				m.editingNotes = false
+				return m, nil
+
+			case "esc":
+				// Cancel editing
+				m.editingNotes = false
+				return m, nil
+
+			default:
+				// Update the input
+				var cmd tea.Cmd
+				m.notesInput, cmd = m.notesInput.Update(msg)
+				return m, cmd
+			}
+		}
+
 		// Regular key handling
 		switch {
 		case key.Matches(msg, m.keys.Quit), msg.String() == "ctrl+c":
@@ -307,6 +360,25 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case key.Matches(msg, m.keys.EditNotes):
+			// E key - edit plan notes
+			if m.cursor >= 0 && m.cursor < len(m.plans) && !m.editingNotes {
+				// Enter edit mode
+				m.editingNotes = true
+				m.editPlanIndex = m.cursor
+				ti := textinput.New()
+				ti.Placeholder = "Enter notes for this plan..."
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				// Set initial value from existing notes
+				if m.plans[m.cursor].Notes != "" {
+					ti.SetValue(m.plans[m.cursor].Notes)
+				}
+				m.notesInput = ti
+				return m, textinput.Blink
+			}
+
 		case key.Matches(msg, m.keys.FinishPlan):
 			// Ctrl+X key - execute plan finish command
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
@@ -333,6 +405,21 @@ func (m planListTUIModel) View() string {
 	// If help is visible, show it and return
 	if m.help.ShowAll {
 		return m.help.View()
+	}
+
+	// If editing notes, show the input field
+	if m.editingNotes {
+		s.WriteString(components.RenderHeader("Edit Plan Notes"))
+		s.WriteString("\n\n")
+		if m.editPlanIndex >= 0 && m.editPlanIndex < len(m.plans) {
+			s.WriteString(theme.DefaultTheme.Muted.Render("Plan: "))
+			s.WriteString(m.plans[m.editPlanIndex].Name)
+			s.WriteString("\n\n")
+		}
+		s.WriteString(m.notesInput.View())
+		s.WriteString("\n\n")
+		s.WriteString(theme.DefaultTheme.Muted.Render("Press Enter to save, Esc to cancel"))
+		return s.String()
 	}
 
 	// Header with emoji and count like grove ws plans list
@@ -370,7 +457,7 @@ func (m planListTUIModel) renderPlanTable() string {
 	}
 
 	// Prepare headers like grove ws plans list
-	headers := []string{"TITLE", "STATUS", "WORKTREE", "GIT", "UPDATED"}
+	headers := []string{"TITLE", "STATUS", "WORKTREE", "GIT", "NOTES", "UPDATED"}
 
 	// Prepare rows with emoji status indicators and formatting
 	rows := make([][]string, len(m.plans))
@@ -418,11 +505,20 @@ func (m planListTUIModel) renderPlanTable() string {
 			gitText = theme.DefaultTheme.Muted.Render("-")
 		}
 
+		// Format notes text (truncate if too long)
+		notesText := plan.Notes
+		if notesText == "" {
+			notesText = theme.DefaultTheme.Muted.Render("-")
+		} else if len(notesText) > 30 {
+			notesText = notesText[:27] + "..."
+		}
+
 		rows[i] = []string{
 			titleText,
 			statusText,
 			worktreeText,
 			gitText,
+			notesText,
 			updatedText,
 		}
 	}
@@ -579,10 +675,12 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 						lastUpdated = time.Now() // fallback to current time
 					}
 
-					// Get worktree from plan config
+					// Get worktree and notes from plan config
 					worktree := ""
+					notes := ""
 					if plan.Config != nil {
 						worktree = plan.Config.Worktree
+						notes = plan.Config.Notes
 					}
 
 					item := PlanListItem{
@@ -591,6 +689,7 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 						JobCount:    len(plan.Jobs),
 						LastUpdated: lastUpdated,
 						Worktree:    worktree,
+						Notes:       notes,
 					}
 
 					// Fetch git status if this plan has a worktree
@@ -795,4 +894,5 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 			}),
 	)
 }
+
 

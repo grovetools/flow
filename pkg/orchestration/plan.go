@@ -7,6 +7,7 @@ type PlanConfig struct {
 	TargetAgentContainer string   `yaml:"target_agent_container,omitempty"`
 	Status               string   `yaml:"status,omitempty"`
 	Repos                []string `yaml:"repos,omitempty"` // List of repos to include in ecosystem worktree
+	Notes                string   `yaml:"notes,omitempty"` // User notes/description for the plan
 }
 
 // Plan represents a collection of orchestration jobs.
