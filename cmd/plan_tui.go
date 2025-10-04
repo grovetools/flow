@@ -790,8 +790,8 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 		// Then run the open command
 		tea.ExecProcess(exec.Command("flow", "plan", "open"),
 			func(err error) tea.Msg {
-				// When plan open completes, quit the TUI
-				return tea.Quit()
+				// When plan open completes, stay in the TUI
+				return nil
 			}),
 	)
 }
