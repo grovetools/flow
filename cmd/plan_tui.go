@@ -72,6 +72,7 @@ type planListKeyMap struct {
 	Up         key.Binding
 	Down       key.Binding
 	ViewPlan   key.Binding
+	OpenPlan   key.Binding
 	FinishPlan key.Binding
 	NewPlan    key.Binding
 	SetActive  key.Binding
@@ -89,6 +90,7 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 			k.Up,
 			k.Down,
 			k.ViewPlan,
+			k.OpenPlan,
 		},
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
@@ -114,6 +116,10 @@ var planListKeys = planListKeyMap{
 	ViewPlan: key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "view plan details"),
+	),
+	OpenPlan: key.NewBinding(
+		key.WithKeys("o"),
+		key.WithHelp("o", "open plan workspace"),
 	),
 	FinishPlan: key.NewBinding(
 		key.WithKeys("ctrl+x"),
@@ -271,6 +277,13 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				plan := m.plans[m.cursor]
 				return m, openPlanStatusTUI(plan.Plan)
+			}
+
+		case key.Matches(msg, m.keys.OpenPlan):
+			// O key - open plan workspace
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				plan := m.plans[m.cursor]
+				return m, executePlanOpen(plan.Plan)
 			}
 
 		case key.Matches(msg, m.keys.SetActive):
@@ -737,7 +750,7 @@ func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 
 func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
-		// First set the active job programmatically  
+		// First set the active job programmatically
 		func() tea.Msg {
 			if err := state.SetActiveJob(plan.Name); err != nil {
 				return err
@@ -748,6 +761,24 @@ func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 		tea.ExecProcess(exec.Command("flow", "plan", "finish"),
 			func(err error) tea.Msg {
 				return nil
+			}),
+	)
+}
+
+func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
+	return tea.Sequence(
+		// First set the active job programmatically
+		func() tea.Msg {
+			if err := state.SetActiveJob(plan.Name); err != nil {
+				return err
+			}
+			return nil
+		},
+		// Then run the open command
+		tea.ExecProcess(exec.Command("flow", "plan", "open"),
+			func(err error) tea.Msg {
+				// When plan open completes, quit the TUI
+				return tea.Quit()
 			}),
 	)
 }

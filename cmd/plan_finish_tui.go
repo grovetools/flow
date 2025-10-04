@@ -62,11 +62,12 @@ type finishTUIModel struct {
 	confirmed      bool
 	quitting       bool
 	branchIsMerged bool // Whether the branch is already merged/rebased
+	branchExists   bool // Whether the branch exists
 	keyMap         finishTUIKeyMap
 	help           help.Model
 }
 
-func initialFinishTUIModel(planName string, items []*cleanupItem, branchIsMerged bool) finishTUIModel {
+func initialFinishTUIModel(planName string, items []*cleanupItem, branchIsMerged bool, branchExists bool) finishTUIModel {
 	// Find first available item for initial cursor position
 	cursor := 0
 	for i, item := range items {
@@ -83,6 +84,7 @@ func initialFinishTUIModel(planName string, items []*cleanupItem, branchIsMerged
 		confirmed:      false,
 		quitting:       false,
 		branchIsMerged: branchIsMerged,
+		branchExists:   branchExists,
 		keyMap:         newFinishTUIKeyMap(),
 		help:           help.New(newFinishTUIKeyMap()),
 	}
@@ -233,7 +235,20 @@ func (m finishTUIModel) View() string {
 
 	// Header
 	b.WriteString(components.RenderHeader("Finishing plan: " + m.planName))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	// Branch merge status
+	if m.branchExists {
+		if m.branchIsMerged {
+			b.WriteString(theme.DefaultTheme.Success.Render("✓ Branch merged into main - safe to delete"))
+		} else {
+			b.WriteString(theme.DefaultTheme.Warning.Render("✗ Branch has commits not in main - review before deleting"))
+		}
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString(theme.DefaultTheme.Muted.Render("Branch does not exist"))
+		b.WriteString("\n\n")
+	}
 
 	// Styles
 	focusedStyle := theme.DefaultTheme.Selected
@@ -315,8 +330,8 @@ func (m finishTUIModel) View() string {
 	return b.String()
 }
 
-func runFinishTUI(planName string, items []*cleanupItem, branchIsMerged bool) error {
-	model := initialFinishTUIModel(planName, items, branchIsMerged)
+func runFinishTUI(planName string, items []*cleanupItem, branchIsMerged bool, branchExists bool) error {
+	model := initialFinishTUIModel(planName, items, branchIsMerged, branchExists)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	finalModel, err := p.Run()

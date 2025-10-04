@@ -48,6 +48,31 @@ type cleanupItem struct {
 }
 
 
+// copyDir recursively copies a directory tree
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Get the relative path
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		dstPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			// Create directory
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		// Copy file (uses copyFile from plan_init.go)
+		return copyFile(path, dstPath)
+	})
+}
+
 // parseGitmodules reads and parses the .gitmodules file
 func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
 	file, err := os.Open(gitmodulesPath)
@@ -917,14 +942,56 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		{
 			Name: "Archive plan directory with 'nb'",
 			Check: func() (string, error) {
-				_, err := exec.LookPath("nb")
-				if err != nil {
-					return "N/A (nb not found)", nil
+				// Check if plan is inside an nb workspace with /plans/ directory
+				// Expected format: ~/Documents/nb/repos/{repo}/main/plans/{plan}
+				homeDir, _ := os.UserHomeDir()
+				nbRoot := filepath.Join(homeDir, "Documents", "nb")
+
+				if !strings.HasPrefix(planPath, nbRoot) {
+					return "N/A (not in nb workspace)", nil
 				}
+
+				// Check if path contains /plans/
+				if !strings.Contains(planPath, string(filepath.Separator)+"plans"+string(filepath.Separator)) {
+					return "N/A (not in plans directory)", nil
+				}
+
 				return color.YellowString("Available"), nil
 			},
 			Action: func() error {
-				return executor.Execute("nb", "archive", planPath)
+				// Move plan from /plans/ to /archive/
+				// Example: ~/Documents/nb/repos/grove-hooks/main/plans/my-plan
+				//       -> ~/Documents/nb/repos/grove-hooks/main/archive/my-plan
+
+				// Find the /plans/ part in the path
+				plansIndex := strings.LastIndex(planPath, string(filepath.Separator)+"plans"+string(filepath.Separator))
+				if plansIndex == -1 {
+					return fmt.Errorf("path does not contain /plans/ directory")
+				}
+
+				// Construct archive path by replacing /plans/ with /archive/
+				baseDir := planPath[:plansIndex]
+				planName := filepath.Base(planPath)
+				archiveDir := filepath.Join(baseDir, "archive")
+				archivePath := filepath.Join(archiveDir, planName)
+
+				// Create archive directory if it doesn't exist
+				if err := os.MkdirAll(archiveDir, 0755); err != nil {
+					return fmt.Errorf("failed to create archive directory: %w", err)
+				}
+
+				// Check if destination already exists
+				if _, err := os.Stat(archivePath); err == nil {
+					return fmt.Errorf("archive destination already exists: %s", archivePath)
+				}
+
+				// Copy the directory recursively
+				if err := copyDir(planPath, archivePath); err != nil {
+					return fmt.Errorf("failed to copy plan to archive: %w", err)
+				}
+
+				fmt.Printf("    Archived plan to: %s\n", archivePath)
+				return nil
 			},
 		},
 	}
@@ -952,25 +1019,33 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check if branch is merged (no commits ahead of main)
+	// Check if branch exists and is merged (no commits ahead of main)
 	branchIsMerged := false
+	branchExists := false
 	if branchName != "" && gitRoot != "" {
-		baseBranches := []string{"main", "master"}
-		for _, baseBranch := range baseBranches {
-			// Check if base branch exists
-			_, branchCheckErr := exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Output()
-			if branchCheckErr != nil {
-				continue // Base branch doesn't exist, try next
-			}
-			
-			aheadOutput, aheadErr := exec.Command("git", "-C", gitRoot, "rev-list", "--count", baseBranch+".."+branchName).Output()
-			if aheadErr == nil {
-				aheadCount := strings.TrimSpace(string(aheadOutput))
-				if aheadCount == "0" || aheadCount == "" {
-					branchIsMerged = true
+		// First check if the branch exists
+		branchCheckCmd := exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
+		if branchCheckCmd.Run() == nil {
+			branchExists = true
+
+			// Branch exists, now check if it's merged
+			baseBranches := []string{"main", "master"}
+			for _, baseBranch := range baseBranches {
+				// Check if base branch exists
+				_, baseCheckErr := exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Output()
+				if baseCheckErr != nil {
+					continue // Base branch doesn't exist, try next
 				}
+
+				aheadOutput, aheadErr := exec.Command("git", "-C", gitRoot, "rev-list", "--count", baseBranch+".."+branchName).Output()
+				if aheadErr == nil {
+					aheadCount := strings.TrimSpace(string(aheadOutput))
+					if aheadCount == "0" || aheadCount == "" {
+						branchIsMerged = true
+					}
+				}
+				break // Found a valid base branch, stop checking
 			}
-			break // Found a valid base branch, stop checking
 		}
 	}
 
@@ -993,7 +1068,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		items[8].IsEnabled = planFinishArchive && items[8].IsAvailable                    // Archive plan directory
 	} else {
 		// Interactive TUI mode
-		err := runFinishTUI(planName, items, branchIsMerged)
+		err := runFinishTUI(planName, items, branchIsMerged, branchExists)
 		if err != nil {
 			if err.Error() == "user aborted" {
 				fmt.Println("\nCleanup aborted.")
