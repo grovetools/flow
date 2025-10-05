@@ -10,8 +10,8 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -106,11 +106,12 @@ func RunPlanLaunch(cmd *cobra.Command, jobPath string) error {
 	}
 
 	// Prepare launch parameters
-	repoName := filepath.Base(gitRoot)
-	// Use the job title for session name, sanitized for tmux
-	sessionTitle := tmux.SanitizeForTmuxSession(job.Title)
+	projInfo, err := workspace.GetProjectByPath(worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to get project info for session naming: %w", err)
+	}
 	params := LaunchParameters{
-		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
+		SessionName:      projInfo.Identifier(),
 		HostWorktreePath: worktreePath,
 		AgentCommand:     agentCommand,
 	}
@@ -315,10 +316,13 @@ func runPlanLaunchHost(jobPath string) error {
 		workDir = gitRoot
 	}
 
-	// Get repo name and create session/window names
-	repoName := filepath.Base(gitRoot)
-	sessionName := tmux.SanitizeForTmuxSession(repoName)
-	windowName := "job-" + tmux.SanitizeForTmuxSession(job.Title)
+	// Get project info to generate the correct session name
+	projInfo, err := workspace.GetProjectByPath(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to get project info for session naming: %w", err)
+	}
+	sessionName := projInfo.Identifier()
+	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
 	executor := &exec.RealCommandExecutor{}
 

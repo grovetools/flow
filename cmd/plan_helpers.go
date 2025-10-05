@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 )
 
@@ -25,33 +23,12 @@ func resolvePlanPath(planName string) (string, error) {
 	}
 
 	// A custom plans directory is configured.
-	basePath := flowCfg.PlansDirectory
-
-	// 1. Expand home directory character '~'.
-	if strings.HasPrefix(basePath, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("could not get user home directory: %w", err)
-		}
-		basePath = filepath.Join(home, basePath[2:])
-	}
-
-	// 2. Expand git-related variables.
-	repo, branch, err := git.GetRepoInfo(".")
+	expandedBasePath, err := pathutil.Expand(flowCfg.PlansDirectory)
 	if err != nil {
-		// Don't fail, just proceed without these variables.
-		// Note: Do not print warnings here as it interferes with JSON output
-	} else {
-		// Support both ${VAR} and {{VAR}} patterns
-		basePath = strings.ReplaceAll(basePath, "${REPO}", repo)
-		basePath = strings.ReplaceAll(basePath, "${BRANCH}", branch)
-		basePath = strings.ReplaceAll(basePath, "{{REPO}}", repo)
-		basePath = strings.ReplaceAll(basePath, "{{BRANCH}}", branch)
+		return "", fmt.Errorf("could not expand plans_directory path: %w", err)
 	}
 
-	// 3. Join the base path with the plan name.
-	fullPath := filepath.Join(basePath, planName)
-
+	fullPath := filepath.Join(expandedBasePath, planName)
 	return filepath.Abs(fullPath)
 }
 

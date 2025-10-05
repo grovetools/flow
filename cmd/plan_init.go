@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"context"
 	"fmt"
 	"os"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -808,7 +808,7 @@ func launchWorktreeSession(ctx context.Context, worktreeName string, agentComman
 
 	// Prepare launch parameters
 	repoName := filepath.Base(gitRoot)
-	sessionTitle := tmux.SanitizeForTmuxSession(worktreeName)
+	sessionTitle := sanitize.SanitizeForTmuxSession(worktreeName)
 	params := LaunchParameters{
 		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
 		Container:        container,

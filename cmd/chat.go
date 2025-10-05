@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -68,29 +68,7 @@ You can optionally specify chat titles to run only specific chats:
 
 // expandChatPath expands home directory and git variables in a path.
 func expandChatPath(path string) (string, error) {
-	// 1. Expand home directory character '~'.
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("could not get user home directory: %w", err)
-		}
-		path = filepath.Join(home, path[2:])
-	}
-
-	// 2. Expand git-related variables.
-	repo, branch, err := git.GetRepoInfo(".")
-	if err != nil {
-		// Don't fail, just proceed without these variables.
-		fmt.Printf("Warning: could not get git info for path expansion: %v\n", err)
-	} else {
-		// Support both ${VAR} and {{VAR}} patterns
-		path = strings.ReplaceAll(path, "${REPO}", repo)
-		path = strings.ReplaceAll(path, "${BRANCH}", branch)
-		path = strings.ReplaceAll(path, "{{REPO}}", repo)
-		path = strings.ReplaceAll(path, "{{BRANCH}}", branch)
-	}
-
-	return filepath.Abs(path)
+	return pathutil.Expand(path)
 }
 
 // ensureChatJob ensures a file is initialized as a chat job, initializing it if necessary

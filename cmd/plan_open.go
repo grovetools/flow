@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -107,7 +107,7 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 
 // setupPlanConveniences sets up convenience features in the tmux session
 func setupPlanConveniences(worktreeName, planDirectory string) error {
-	sessionName := tmux.SanitizeForTmuxSession(worktreeName)
+	sessionName := sanitize.SanitizeForTmuxSession(worktreeName)
 	targetPane := fmt.Sprintf("%s:workspace", sessionName)
 	
 	// Small delay to let the session initialize

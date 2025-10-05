@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"context"
 	"fmt"
 	"os"
@@ -11,7 +12,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
@@ -131,8 +132,20 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 				currentTmuxSession = strings.TrimSpace(string(output))
 			}
 		}
-		
-		expectedSessionName := tmux.SanitizeForTmuxSession(worktreeName)
+
+		// Use the same session naming logic as the rest of the system
+		var expectedSessionName string
+		if gitRoot != "" {
+			worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+			if projInfo, err := workspace.GetProjectByPath(worktreePath); err == nil {
+				expectedSessionName = projInfo.Identifier()
+			} else {
+				// Fallback to old logic if we can't get project info
+				expectedSessionName = sanitize.SanitizeForTmuxSession(worktreeName)
+			}
+		} else {
+			expectedSessionName = sanitize.SanitizeForTmuxSession(worktreeName)
+		}
 		alreadyInCorrectSession := currentTmuxSession == expectedSessionName
 
 		// Only prompt if we're not already in the worktree or the correct session

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"bufio"
 	"context"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	gexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -239,7 +239,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	wm := git.NewWorktreeManager()
 
 	branchName := worktreeName // Simple assumption: branch name matches worktree name
-	sessionName := tmux.SanitizeForTmuxSession(worktreeName)
+	sessionName := sanitize.SanitizeForTmuxSession(worktreeName)
 
 	// Define cleanup items
 	// Use a shared variable for repo details that the Check function can populate

@@ -12,6 +12,7 @@ import (
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
@@ -106,45 +107,12 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 }
 
 // generateSessionName creates a unique session name for the interactive job.
-func (e *InteractiveAgentExecutor) generateSessionName(plan *Plan, job *Job) string {
-	// Use worktree name if available, otherwise fall back to plan name and job title
-	var sessionName string
-	if job.Worktree != "" {
-		// Use just the worktree name
-		sessionName = job.Worktree
-	} else {
-		// Fall back to original behavior: plan name + job title
-		sanitized := strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-				return r
-			}
-			return '-'
-		}, job.Title)
-
-		// Limit length and remove leading/trailing dashes
-		if len(sanitized) > 50 {
-			sanitized = sanitized[:50]
-		}
-		sanitized = strings.Trim(sanitized, "-")
-
-		sessionName = fmt.Sprintf("%s__%s", plan.Name, sanitized)
+func (e *InteractiveAgentExecutor) generateSessionName(workDir string) (string, error) {
+	projInfo, err := workspace.GetProjectByPath(workDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
-
-	// Sanitize the final session name for tmux compatibility
-	sessionName = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, sessionName)
-
-	// Limit length and remove leading/trailing dashes
-	if len(sessionName) > 100 {
-		sessionName = sessionName[:100]
-	}
-	sessionName = strings.Trim(sessionName, "-")
-
-	return sessionName
+	return projInfo.Identifier(), nil
 }
 
 // executeHostMode runs the job directly on the host machine with tmux
@@ -234,104 +202,40 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		return fmt.Errorf("tmux not available: %w", err)
 	}
 
-	// Check if job has a worktree - if so, create a new session; otherwise use existing behavior
+	// Check if job has a worktree - if so, create/reuse a session; otherwise use existing behavior
 	if job.Worktree != "" {
-		// For jobs with worktrees, create a new isolated session
-		sessionName := e.generateSessionName(plan, job)
-		
+		// For jobs with worktrees, create/reuse a session based on the project identifier
+		sessionName, err := e.generateSessionName(workDir)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return err
+		}
+
 		// Check if session already exists
 		sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
-		if sessionExists {
-			e.log.WithField("session", sessionName).Info("Session already exists")
-			e.prettyLog.Success(fmt.Sprintf("Session '%s' already exists.", sessionName))
-			
-			// Build agent command
-			coreCfg, _ := config.LoadFrom(".")
-			var agentArgs []string
-			if coreCfg != nil {
-				type agentConfig struct {
-					Args []string `yaml:"args"`
-				}
-				var agentCfg agentConfig
-				coreCfg.UnmarshalExtension("agent", &agentCfg)
-				agentArgs = agentCfg.Args
+		executor := &exec.RealCommandExecutor{}
+
+		if !sessionExists {
+			// Create new session with a blank "workspace" window
+			opts := tmux.LaunchOptions{
+				SessionName:      sessionName,
+				WorkingDirectory: workDir,
+				WindowName:       "workspace",
+				Panes: []tmux.PaneOptions{
+					{
+						Command: "", // Empty command = default shell
+					},
+				},
 			}
-			agentCommand, err := e.buildAgentCommand(job, plan, workDir, agentArgs)
-			if err != nil {
+			e.log.WithField("session", sessionName).Info("Creating new tmux session for interactive job")
+			if err := tmuxClient.Launch(ctx, opts); err != nil {
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()
-				return fmt.Errorf("failed to build agent command: %w", err)
+				return fmt.Errorf("failed to create tmux session: %w", err)
 			}
-
-			// Create a new window for this agent job in the existing session
-			executor := &exec.RealCommandExecutor{}
-			agentWindowName := tmux.SanitizeForTmuxSession(job.Title)
-			
-			// Create new window for the agent
-			e.log.WithField("window", agentWindowName).Info("Creating window for agent")
-			e.prettyLog.InfoPretty(fmt.Sprintf("Creating window '%s' for agent...", agentWindowName))
-			if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
-				e.log.WithError(err).Warn("Failed to create agent window")
-				e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to create agent window: %v", err))
-			} else {
-				// Send the agent command to the new window
-				targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
-				if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
-					e.log.WithError(err).Warn("Failed to send agent command")
-					e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to send agent command: %v", err))
-				}
-				
-				// Switch to the agent window
-				if os.Getenv("TMUX") != "" {
-					if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
-						e.log.WithError(err).Warn("Failed to switch to agent window")
-						e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to switch to agent window: %v", err))
-					}
-				}
-			}
-			
-			e.prettyLog.Blank()
-			e.prettyLog.InfoPretty("👉 Exit the tmux session when done to continue the plan.")
-			e.prettyLog.InfoPretty("💡 To mark as complete without closing, run in another terminal:")
-			e.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
-
-			// Wait for the existing session to close
-			err = tmuxClient.WaitForSessionClose(ctx, sessionName, 2*time.Second)
-
-			// Handle interruption
-			if err != nil {
-				if ctx.Err() != nil {
-					e.log.WithField("session", sessionName).Warn("Interrupted. Session will continue running")
-					e.prettyLog.WarnPretty(fmt.Sprintf("Interrupted. Session '%s' will continue running.", sessionName))
-					job.Status = JobStatusFailed
-					job.EndTime = time.Now()
-					return fmt.Errorf("interrupted by user")
-				}
-				job.Status = JobStatusFailed
-				job.EndTime = time.Now()
-				return fmt.Errorf("wait for session failed: %w", err)
-			}
-
-			// Success - prompt for job status
-			status := e.promptForJobStatus(sessionName)
-
-			switch status {
-			case "c":
-				e.log.WithField("session", sessionName).Info("Session marked as completed")
-				e.prettyLog.Success(fmt.Sprintf("Session '%s' marked as completed. Continuing plan...", sessionName))
-				job.Status = JobStatusCompleted
-			case "f":
-				e.log.WithField("session", sessionName).Info("Session marked as failed")
-				e.prettyLog.ErrorPretty(fmt.Sprintf("Session '%s' marked as failed.", sessionName), nil)
-				job.Status = JobStatusFailed
-			case "q":
-				e.log.WithField("session", sessionName).Info("Session closed with no status change")
-				e.prettyLog.InfoPretty(fmt.Sprintf("⏸️  Session '%s' closed with no status change.", sessionName))
-				// Keep current status (should still be Running)
-			}
-
-			job.EndTime = time.Now()
-			return nil
+		} else {
+			e.log.WithField("session", sessionName).Info("Using existing session for interactive job")
 		}
 
 		// Build agent command
@@ -352,63 +256,34 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			return fmt.Errorf("failed to build agent command: %w", err)
 		}
 
-		// Launch a NEW tmux session with two windows
-		// First window is a blank shell in the worktree
-		opts := tmux.LaunchOptions{
-			SessionName:      sessionName,
-			WorkingDirectory: workDir,
-			WindowName:       "workspace",  // First window for working in the worktree
-			Panes: []tmux.PaneOptions{
-				{
-					Command: "", // Empty command = default shell
-				},
-			},
+		// Create a new window for this specific agent job in the session
+		agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+
+		e.log.WithField("window", agentWindowName).Info("Creating window for agent")
+		e.prettyLog.InfoPretty(fmt.Sprintf("Creating window '%s' for agent...", agentWindowName))
+		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
+			e.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
+			// Don't return error, just log and proceed.
 		}
 
-		e.log.WithField("session", sessionName).Info("Launching interactive session")
-		e.prettyLog.InfoPretty(fmt.Sprintf("🚀 Launching interactive session '%s'...", sessionName))
-		if err := tmuxClient.Launch(ctx, opts); err != nil {
+		// Send the agent command to the new window
+		targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
+		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+			e.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			return fmt.Errorf("failed to launch tmux session: %w", err)
+			return fmt.Errorf("failed to send agent command: %w", err)
 		}
 
-		// Create second window for the agent
-		executor := &exec.RealCommandExecutor{}
-		agentWindowName := tmux.SanitizeForTmuxSession(job.Title)
-		
-		// Create new window for the agent
-		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
-			e.log.WithError(err).Warn("Failed to create agent window")
-			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to create agent window: %v", err))
-		} else {
-			// Send the agent command to the new window
-			targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
-			if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
-				e.log.WithError(err).Warn("Failed to send agent command")
-				e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to send agent command: %v", err))
+		// Switch to the agent window if inside tmux
+		if os.Getenv("TMUX") != "" {
+			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+				e.log.WithError(err).Warn("Failed to switch to session")
 			}
-			
-			// Switch to the agent window
 			if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
 				e.log.WithError(err).Warn("Failed to switch to agent window")
-				e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to switch to agent window: %v", err))
-			}
-		}
-
-		// Check if we're already in a tmux session
-		if os.Getenv("TMUX") != "" {
-			// We're already in tmux, so switch to the new session
-			e.log.WithField("session", sessionName).Info("Switching to session")
-			e.prettyLog.Success(fmt.Sprintf("Switching to session '%s'...", sessionName))
-			executor := &exec.RealCommandExecutor{}
-			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
-				// If switch fails, just print instructions
-				e.log.WithError(err).Warn("Could not switch to session")
-				e.prettyLog.InfoPretty(fmt.Sprintf("   Could not switch to session. Attach with: tmux attach -t %s", sessionName))
 			}
 		} else {
-			// Not in tmux, just print instructions
 			e.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
 		}
 
@@ -419,15 +294,14 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		e.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
 
 		// Return immediately - the orchestrator will poll for completion
-		// Set execErr to nil to indicate successful launch
 		execErr = nil
 		return nil
 	}
 
 	// Original behavior for jobs without worktrees - use repository-based session with new window
 	repoName := filepath.Base(gitRoot)
-	sessionName := tmux.SanitizeForTmuxSession(repoName)
-	windowName := "job-" + tmux.SanitizeForTmuxSession(job.Title)
+	sessionName := sanitize.SanitizeForTmuxSession(repoName)
+	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
 	// Ensure session exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)

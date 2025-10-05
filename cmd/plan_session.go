@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -34,28 +36,69 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 
-	// Prepare the worktree using the centralized helper
-	opts := workspace.PrepareOptions{
-		GitRoot:      gitRoot,
-		WorktreeName: worktreeName,
-		BranchName:   worktreeName,
-		PlanName:     plan.Name,
+	// If gitRoot is itself a worktree, use the centralized logic to find the actual main repository root
+	gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
+	if err == nil && gitRootInfo.IsWorktree && gitRootInfo.ParentPath != "" {
+		gitRoot = gitRootInfo.ParentPath
 	}
 
-	if plan.Config != nil && len(plan.Config.Repos) > 0 {
-		opts.Repos = plan.Config.Repos
+	// Check if we're already in the target worktree
+	currentDir, _ := os.Getwd()
+	expectedWorktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	var worktreePath string
+
+	if currentDir != "" && strings.HasPrefix(currentDir, expectedWorktreePath) {
+		// We're already in the worktree, just use it
+		worktreePath = expectedWorktreePath
+	} else {
+		// Prepare the worktree using the centralized helper
+		opts := workspace.PrepareOptions{
+			GitRoot:      gitRoot,
+			WorktreeName: worktreeName,
+			BranchName:   worktreeName,
+			PlanName:     plan.Name,
+		}
+
+		if plan.Config != nil && len(plan.Config.Repos) > 0 {
+			opts.Repos = plan.Config.Repos
+		}
+
+		worktreePath, err = workspace.Prepare(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("failed to prepare worktree: %w", err)
+		}
 	}
 
-	worktreePath, err := workspace.Prepare(ctx, opts)
+	// Session name is derived from the project identifier
+	projInfo, err := workspace.GetProjectByPath(worktreePath)
 	if err != nil {
-		return fmt.Errorf("failed to prepare worktree: %w", err)
+		return fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
-
-	// Session name is derived from the worktree name
-	sessionName := tmux.SanitizeForTmuxSession(worktreeName)
+	sessionName := projInfo.Identifier()
 
 	// Check if session already exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+
+	// Check if we're currently in that session
+	inTargetSession := false
+	if os.Getenv("TMUX") != "" {
+		cmd := exec.Command("tmux", "display-message", "-p", "#S")
+		output, err := cmd.Output()
+		if err == nil && strings.TrimSpace(string(output)) == sessionName {
+			inTargetSession = true
+		}
+	}
+
+	// If we're already in the target session, just run the command directly without creating a new window
+	if inTargetSession {
+		// Just execute the command in the current shell
+		executor := &groveexec.RealCommandExecutor{}
+		commandStr := strings.Join(commandToRun, " ")
+		if err := executor.Execute("sh", "-c", commandStr); err != nil {
+			return fmt.Errorf("failed to execute command: %w", err)
+		}
+		return nil
+	}
 
 	if !sessionExists {
 		// Create new session with workspace window
@@ -159,7 +202,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	
 	repoName := filepath.Base(gitRoot)
 	sessionTitle := fmt.Sprintf("%s-plan", planName)
-	sessionName := fmt.Sprintf("%s__%s", repoName, tmux.SanitizeForTmuxSession(sessionTitle))
+	sessionName := fmt.Sprintf("%s__%s", repoName, sanitize.SanitizeForTmuxSession(sessionTitle))
 
 	// Check if session already exists
 	executor := &groveexec.RealCommandExecutor{}
