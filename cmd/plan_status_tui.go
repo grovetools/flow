@@ -135,6 +135,7 @@ type statusTUIModel struct {
 	jobParents    map[string]*orchestration.Job // Track parent in tree structure
 	jobIndents    map[string]int               // Track indentation level
 	cursor        int
+	scrollOffset  int                         // Track scroll position for viewport
 	selected      map[string]bool // For multi-select
 	multiSelect   bool
 	showSummaries bool   // Toggle for showing job summaries
@@ -185,6 +186,7 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		jobParents:    parents,
 		jobIndents:    indents,
 		cursor:        0,
+		scrollOffset:  0,
 		selected:      make(map[string]bool),
 		multiSelect:   false,
 		statusSummary: formatStatusSummary(plan),
@@ -193,6 +195,50 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		keyMap:        newStatusTUIKeyMap(),
 		help:          help.New(newStatusTUIKeyMap()),
 		cursorVisible: true,
+	}
+}
+
+// getVisibleJobCount returns how many jobs can be displayed in the viewport
+func (m *statusTUIModel) getVisibleJobCount() int {
+	if m.height == 0 {
+		return 10 // default
+	}
+
+	// Calculate available height for job list
+	// Account for: header (2 lines), scroll indicator (1 line), footer (1 line), margins (4 lines)
+	// Total UI chrome: ~8 lines
+	availableHeight := m.height - 8
+	if availableHeight < 1 {
+		availableHeight = 1
+	}
+
+	// If summaries are shown, each job might take 2 lines
+	if m.showSummaries {
+		availableHeight = availableHeight / 2
+		if availableHeight < 1 {
+			availableHeight = 1
+		}
+	}
+
+	return availableHeight
+}
+
+// adjustScrollOffset ensures the cursor is visible within the viewport
+func (m *statusTUIModel) adjustScrollOffset() {
+	visibleLines := m.getVisibleJobCount()
+
+	// Adjust scroll offset to keep cursor visible
+	if m.cursor < m.scrollOffset {
+		// Cursor is above viewport, scroll up
+		m.scrollOffset = m.cursor
+	} else if m.cursor >= m.scrollOffset+visibleLines {
+		// Cursor is below viewport, scroll down
+		m.scrollOffset = m.cursor - visibleLines + 1
+	}
+
+	// Ensure scrollOffset doesn't go negative
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
 	}
 }
 
@@ -397,6 +443,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.waitingForG {
 				// Second 'g' - go to top
 				m.cursor = 0
+				m.scrollOffset = 0
 				m.waitingForG = false
 			} else {
 				// First 'g' - wait for second
@@ -418,16 +465,19 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.Up):
 			if m.cursor > 0 {
 				m.cursor--
+				m.adjustScrollOffset()
 			}
 
 		case key.Matches(msg, m.keyMap.Down):
 			if m.cursor < len(m.jobs)-1 {
 				m.cursor++
+				m.adjustScrollOffset()
 			}
 
 		case key.Matches(msg, m.keyMap.GoToBottom):
 			if len(m.jobs) > 0 {
 				m.cursor = len(m.jobs) - 1
+				m.adjustScrollOffset()
 			}
 
 		case key.Matches(msg, m.keyMap.PageUp):
@@ -436,6 +486,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < 0 {
 				m.cursor = 0
 			}
+			m.adjustScrollOffset()
 
 		case key.Matches(msg, m.keyMap.PageDown):
 			pageSize := 10
@@ -443,6 +494,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= len(m.jobs) {
 				m.cursor = len(m.jobs) - 1
 			}
+			m.adjustScrollOffset()
 
 		case key.Matches(msg, m.keyMap.Select):
 			if m.multiSelect && m.cursor < len(m.jobs) {
@@ -567,6 +619,26 @@ func (m statusTUIModel) View() string {
 	// 2. Render Job Tree
 	jobTree := m.renderJobTree()
 
+	// 2b. Add scroll indicators if needed
+	scrollIndicator := ""
+	if len(m.jobs) > 0 {
+		visibleLines := m.getVisibleJobCount()
+		hasMore := m.scrollOffset+visibleLines < len(m.jobs)
+		hasLess := m.scrollOffset > 0
+
+		if hasLess || hasMore {
+			indicator := ""
+			if hasLess {
+				indicator += "↑ "
+			}
+			indicator += fmt.Sprintf("[%d/%d]", m.cursor+1, len(m.jobs))
+			if hasMore {
+				indicator += " ↓"
+			}
+			scrollIndicator = "\n" + theme.DefaultTheme.Muted.Render(indicator)
+		}
+	}
+
 	// 3. Handle confirmation dialog or help footer
 	var footer string
 	if m.confirmArchive {
@@ -586,6 +658,7 @@ func (m statusTUIModel) View() string {
 		lipgloss.Left,
 		styledHeader,
 		jobTree,
+		scrollIndicator,
 		"\n", // Space before footer
 		footer,
 	)
@@ -604,11 +677,26 @@ func stripANSI(str string) string {
 func (m statusTUIModel) renderJobTree() string {
 	var s strings.Builder
 
+	// Calculate viewport bounds using the shared helper
+	visibleLines := m.getVisibleJobCount()
+	visibleStart := m.scrollOffset
+	visibleEnd := m.scrollOffset + visibleLines
+
+	// Ensure we don't go past the end
+	if visibleEnd > len(m.jobs) {
+		visibleEnd = len(m.jobs)
+	}
+
 	// Use the pre-calculated parent and indent information
 	rendered := make(map[string]bool)
 
-	// Render with tree characters
+	// Render with tree characters - only render visible jobs
 	for i, job := range m.jobs {
+		// Skip jobs outside the visible viewport
+		if i < visibleStart || i >= visibleEnd {
+			continue
+		}
+
 		indent := m.jobIndents[job.ID]
 		prefix := strings.Repeat("    ", indent)
 		
