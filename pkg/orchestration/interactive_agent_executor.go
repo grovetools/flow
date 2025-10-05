@@ -217,6 +217,15 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		workDir = gitRoot
 	}
 
+	// Regenerate context before launching the agent
+	// We'll use the helper from the oneshot executor
+	oneShotExec := NewOneShotExecutor(nil)
+	if err := oneShotExec.regenerateContextInWorktree(workDir, "interactive-agent", job, plan); err != nil {
+		// A context failure shouldn't block an interactive session, but we should warn the user.
+		e.log.WithError(err).Warn("Failed to generate job-specific context for interactive session")
+		e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
+	}
+
 	// Create tmux client
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {

@@ -71,8 +71,18 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		// Otherwise use the resolved working directory
 		workDir = ResolveWorkingDirectory(plan)
 	}
-	
+
 	e.log.WithField("workdir", workDir).Debug("Working directory resolved")
+
+	// Generate context if a rules file is specified
+	if job.RulesFile != "" {
+		oneShotExec := NewOneShotExecutor(nil) // Use for helper method
+		if err := oneShotExec.regenerateContextInWorktree(workDir, "shell", job, plan); err != nil {
+			// Warn but do not fail the job for a context error
+			e.log.WithError(err).Warn("Failed to generate job-specific context for shell job")
+			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
+		}
+	}
 
 	// The PromptBody contains the shell command to run
 	// Use "sh" instead of "/bin/sh" to be more portable
