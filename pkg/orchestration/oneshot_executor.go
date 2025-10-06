@@ -362,14 +362,67 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 	var parts []string
 	var promptSourceFiles []string // Resolved paths for prompt source files
 	var contextFiles []string      // Context files (.grove/context, CLAUDE.md)
+	var finalPromptBody string
 
-	// Add dependency files to the prompt source list
-	if len(job.Dependencies) > 0 {
-		for _, dep := range job.Dependencies {
-			if dep != nil && dep.FilePath != "" {
-				promptSourceFiles = append(promptSourceFiles, dep.FilePath)
+	// Handle dependencies based on prepend_dependencies flag
+	if job.PrependDependencies {
+		// Prepend dependency content directly to the prompt body
+		fmt.Println("🔗 prepend_dependencies enabled - inlining dependency content into prompt body")
+		var dependencyContentBuilder strings.Builder
+		if len(job.Dependencies) > 0 {
+			// Sort dependencies by filename for consistent order
+			sortedDeps := make([]*Job, len(job.Dependencies))
+			copy(sortedDeps, job.Dependencies)
+			sort.Slice(sortedDeps, func(i, j int) bool {
+				if sortedDeps[i] == nil || sortedDeps[j] == nil {
+					return false
+				}
+				return sortedDeps[i].Filename < sortedDeps[j].Filename
+			})
+
+			fmt.Printf("   Prepending %d dependenc%s to prompt:\n", len(sortedDeps), func() string {
+				if len(sortedDeps) == 1 {
+					return "y"
+				}
+				return "ies"
+			}())
+			for _, dep := range sortedDeps {
+				if dep != nil && dep.FilePath != "" {
+					depContent, err := os.ReadFile(dep.FilePath)
+					if err != nil {
+						return "", nil, nil, fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
+					}
+					fmt.Printf("     • %s (inlined, not uploaded as file)\n", dep.Filename)
+					dependencyContentBuilder.WriteString(fmt.Sprintf("\n\n---\n## Context from %s\n\n", dep.Filename))
+					_, depBody, _ := ParseFrontmatter(depContent)
+					dependencyContentBuilder.Write(depBody)
+				}
+			}
+			dependencyContentBuilder.WriteString("\n\n---\n\n")
+		}
+		finalPromptBody = dependencyContentBuilder.String() + job.PromptBody
+	} else {
+		// Original logic: add dependencies to promptSourceFiles
+		if len(job.Dependencies) > 0 {
+			fmt.Printf("📎 Adding %d dependenc%s as separate file%s:\n", len(job.Dependencies), func() string {
+				if len(job.Dependencies) == 1 {
+					return "y"
+				}
+				return "ies"
+			}(), func() string {
+				if len(job.Dependencies) == 1 {
+					return ""
+				}
+				return "s"
+			}())
+			for _, dep := range job.Dependencies {
+				if dep != nil && dep.FilePath != "" {
+					fmt.Printf("     • %s (uploaded as file attachment)\n", dep.Filename)
+					promptSourceFiles = append(promptSourceFiles, dep.FilePath)
+				}
 			}
 		}
+		finalPromptBody = job.PromptBody
 	}
 
 	// If a template is specified, use the reference-based prompt structure
@@ -423,9 +476,9 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		}
 
 		// Add user's prompt/request last with clear marking
-		if strings.TrimSpace(job.PromptBody) != "" {
+		if strings.TrimSpace(finalPromptBody) != "" {
 			parts = append(parts, fmt.Sprintf("\n<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>",
-				strings.TrimSpace(job.PromptBody)))
+				strings.TrimSpace(finalPromptBody)))
 		}
 
 		// Collect Grove context files (just paths)
@@ -498,8 +551,8 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		parts = append(parts, "<prompt>")
 
 		// Add job prompt body with clear marking
-		if job.PromptBody != "" {
-			parts = append(parts, fmt.Sprintf("<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>", job.PromptBody))
+		if finalPromptBody != "" {
+			parts = append(parts, fmt.Sprintf("<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>", finalPromptBody))
 		}
 
 		// Collect Grove context files (just paths)
@@ -1422,6 +1475,45 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		return execErr
 	}
 	conversationHistory := string(bodyContent)
+
+	// Prepend dependency content if prepend_dependencies is true
+	if job.PrependDependencies {
+		fmt.Println("🔗 prepend_dependencies enabled - inlining dependency content into chat history")
+		var dependencyContentBuilder strings.Builder
+		if len(job.Dependencies) > 0 {
+			// Sort dependencies by filename for consistent order
+			sortedDeps := make([]*Job, len(job.Dependencies))
+			copy(sortedDeps, job.Dependencies)
+			sort.Slice(sortedDeps, func(i, j int) bool {
+				if sortedDeps[i] == nil || sortedDeps[j] == nil {
+					return false
+				}
+				return sortedDeps[i].Filename < sortedDeps[j].Filename
+			})
+
+			fmt.Printf("   Prepending %d dependenc%s to chat:\n", len(sortedDeps), func() string {
+				if len(sortedDeps) == 1 {
+					return "y"
+				}
+				return "ies"
+			}())
+			for _, dep := range sortedDeps {
+				if dep != nil && dep.FilePath != "" {
+					depContent, err := os.ReadFile(dep.FilePath)
+					if err != nil {
+						execErr = fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
+						return execErr
+					}
+					fmt.Printf("     • %s (inlined, not uploaded as file)\n", dep.Filename)
+					dependencyContentBuilder.WriteString(fmt.Sprintf("\n\n---\n## Context from %s\n\n", dep.Filename))
+					_, depBody, _ := ParseFrontmatter(depContent)
+					dependencyContentBuilder.Write(depBody)
+				}
+			}
+			dependencyContentBuilder.WriteString("\n\n---\n\n")
+		}
+		conversationHistory = dependencyContentBuilder.String() + conversationHistory
+	}
 
 	// Load the template using TemplateManager
 	templateManager := NewTemplateManager()

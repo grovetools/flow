@@ -55,24 +55,36 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 // buildAgentCommand constructs the agent command for the interactive session.
 func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, worktreePath string, agentArgs []string) (string, error) {
 	// Build instruction for the agent
-	instruction := fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath)
+	var instructionBuilder strings.Builder
 
 	// Add dependency files if the job has dependencies
 	if len(job.Dependencies) > 0 {
-		instruction += "For additional context from previous jobs, also read: "
 		var depFiles []string
 		for _, dep := range job.Dependencies {
 			if dep != nil && dep.FilePath != "" {
 				depFiles = append(depFiles, dep.FilePath)
 			}
 		}
-		instruction += strings.Join(depFiles, ", ")
-		instruction += ". "
+
+		if job.PrependDependencies {
+			// New logic: Emphasize dependencies
+			instructionBuilder.WriteString(fmt.Sprintf("CRITICAL CONTEXT: Before you do anything else, you MUST read and fully understand the content of the following files in order. They provide the primary context and requirements for your task: %s. ", strings.Join(depFiles, ", ")))
+			instructionBuilder.WriteString(fmt.Sprintf("After you have processed that context, execute the agent job defined in %s. ", job.FilePath))
+		} else {
+			// Original logic
+			instructionBuilder.WriteString(fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath))
+			instructionBuilder.WriteString("For additional context from previous jobs, also read: ")
+			instructionBuilder.WriteString(strings.Join(depFiles, ", "))
+			instructionBuilder.WriteString(". ")
+		}
+	} else {
+		// No dependencies, original logic
+		instructionBuilder.WriteString(fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath))
 	}
 
 	// Add context files if specified
 	if len(job.PromptSource) > 0 {
-		instruction += "Also read these context files: "
+		instructionBuilder.WriteString("Also read these context files: ")
 		var contextFiles []string
 		for _, source := range job.PromptSource {
 			resolved, err := ResolvePromptSource(source, plan)
@@ -86,8 +98,10 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 			}
 			contextFiles = append(contextFiles, relPath)
 		}
-		instruction += strings.Join(contextFiles, ", ")
+		instructionBuilder.WriteString(strings.Join(contextFiles, ", "))
 	}
+
+	instruction := instructionBuilder.String()
 
 	// Shell escape the instruction
 	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"
@@ -99,7 +113,7 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 		cmdParts = append(cmdParts, agentArgs...)
 		return fmt.Sprintf("echo %s | %s", escapedInstruction, strings.Join(cmdParts, " ")), nil
 	}
-	
+
 	cmdParts = append(cmdParts, agentArgs...)
 	cmdParts = append(cmdParts, escapedInstruction)
 

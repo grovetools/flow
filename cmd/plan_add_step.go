@@ -15,19 +15,20 @@ import (
 )
 
 type PlanAddStepCmd struct {
-	Dir           string   `arg:"" help:"Plan directory"`
-	Template      string   `flag:"" help:"Name of the job template to use"`
-	Type          string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, chat, interactive_agent, headless_agent, or shell"`
-	Title         string   `flag:"" help:"Job title"`
-	DependsOn     []string `flag:"d" help:"Dependencies (job filenames)"`
-	PromptFile    string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
-	SourceFiles   []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
-	Prompt        string   `flag:"p" help:"Inline prompt text"`
-	OutputType    string   `flag:"" default:"file" help:"Output type: file, commit, none, or generate_jobs"`
-	Interactive   bool     `flag:"i" help:"Interactive mode"`
-	Worktree      string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
-	Model         string   `flag:"" help:"LLM model to use for this job"`
-	AgentContinue bool     `flag:"" help:"Continue the last agent session (adds --continue flag)"`
+	Dir                 string   `arg:"" help:"Plan directory"`
+	Template            string   `flag:"" help:"Name of the job template to use"`
+	Type                string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, chat, interactive_agent, headless_agent, or shell"`
+	Title               string   `flag:"" help:"Job title"`
+	DependsOn           []string `flag:"d" help:"Dependencies (job filenames)"`
+	PromptFile          string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
+	SourceFiles         []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
+	Prompt              string   `flag:"p" help:"Inline prompt text"`
+	OutputType          string   `flag:"" default:"file" help:"Output type: file, commit, none, or generate_jobs"`
+	Interactive         bool     `flag:"i" help:"Interactive mode"`
+	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
+	Model               string   `flag:"" help:"LLM model to use for this job"`
+	AgentContinue       bool     `flag:"" help:"Continue the last agent session (adds --continue flag)"`
+	PrependDependencies bool     `flag:"" help:"Inline dependency content into prompt body instead of uploading as separate files"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -170,13 +171,14 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 
 		// Build job structure
 		job := &orchestration.Job{
-			ID:           jobID,
-			Title:        cmd.Title,
-			Type:         orchestration.JobType(cmd.Type),
-			Status:       "pending",
-			DependsOn:    cmd.DependsOn,
-			PromptSource: relativeSourceFiles,
-			Model:        cmd.Model,
+			ID:                  jobID,
+			Title:               cmd.Title,
+			Type:                orchestration.JobType(cmd.Type),
+			Status:              "pending",
+			DependsOn:           cmd.DependsOn,
+			PromptSource:        relativeSourceFiles,
+			Model:               cmd.Model,
+			PrependDependencies: cmd.PrependDependencies,
 			Output: orchestration.OutputConfig{
 				Type: cmd.OutputType,
 			},
@@ -229,6 +231,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 			job.Worktree = plan.Config.Worktree
 		}
+		// Apply prepend_dependencies default if not explicitly set via flag
+		if !cmd.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+			job.PrependDependencies = true
+		}
 
 		return job, nil
 	}
@@ -273,14 +279,15 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 
 	// Build job structure
 	job := &orchestration.Job{
-		ID:            jobID,
-		Title:         cmd.Title,
-		Type:          orchestration.JobType(cmd.Type),
-		Status:        "pending",
-		DependsOn:     cmd.DependsOn,
-		PromptBody:    strings.TrimSpace(prompt),
-		Model:         cmd.Model,
-		AgentContinue: cmd.AgentContinue,
+		ID:                  jobID,
+		Title:               cmd.Title,
+		Type:                orchestration.JobType(cmd.Type),
+		Status:              "pending",
+		DependsOn:           cmd.DependsOn,
+		PromptBody:          strings.TrimSpace(prompt),
+		Model:               cmd.Model,
+		AgentContinue:       cmd.AgentContinue,
+		PrependDependencies: cmd.PrependDependencies,
 		Output: orchestration.OutputConfig{
 			Type: cmd.OutputType,
 		},
@@ -303,6 +310,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	}
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
+	}
+	// Apply prepend_dependencies default if not explicitly set via flag
+	if !cmd.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+		job.PrependDependencies = true
 	}
 
 	return job, nil
@@ -344,6 +355,10 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 	}
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
+	}
+	// Apply prepend_dependencies default from plan config
+	if !job.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+		job.PrependDependencies = true
 	}
 
 	// Set agent_continue to false by default for interactive_agent jobs
@@ -456,6 +471,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if cmd.AgentContinue {
 		job.AgentContinue = true
+	}
+	if cmd.PrependDependencies {
+		job.PrependDependencies = true
 	}
 
 	// Validate dependencies
@@ -588,6 +606,10 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
+	}
+	// Apply prepend_dependencies default if not explicitly set via flag
+	if !cmd.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+		job.PrependDependencies = true
 	}
 
 	// Set agent_continue to false by default for interactive_agent jobs

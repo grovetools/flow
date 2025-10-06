@@ -6,8 +6,9 @@ type PlanConfig struct {
 	Worktree             string   `yaml:"worktree,omitempty"`
 	TargetAgentContainer string   `yaml:"target_agent_container,omitempty"`
 	Status               string   `yaml:"status,omitempty"`
-	Repos                []string `yaml:"repos,omitempty"` // List of repos to include in ecosystem worktree
-	Notes                string   `yaml:"notes,omitempty"` // User notes/description for the plan
+	Repos                []string `yaml:"repos,omitempty"`             // List of repos to include in ecosystem worktree
+	Notes                string   `yaml:"notes,omitempty"`             // User notes/description for the plan
+	PrependDependencies  bool     `yaml:"prepend_dependencies,omitempty"` // Inline dependency content into prompt body by default
 }
 
 // Plan represents a collection of orchestration jobs.

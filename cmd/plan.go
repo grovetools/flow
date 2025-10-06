@@ -142,10 +142,11 @@ var (
 	planAddPromptFile    string
 	planAddPrompt        string
 	planAddOutputType    string
-	planAddInteractive   bool
-	planAddSourceFiles   []string
-	planAddWorktree      string
-	planAddAgentContinue bool
+	planAddInteractive       bool
+	planAddSourceFiles       []string
+	planAddWorktree          string
+	planAddAgentContinue     bool
+	planAddPrependDependencies bool
 
 	// Graph flags
 	planGraphFormat string
@@ -199,6 +200,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringSliceVar(&planAddSourceFiles, "source-files", nil, "Comma-separated list of source files for reference-based prompts")
 	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 	planAddCmd.Flags().BoolVar(&planAddAgentContinue, "agent-continue", false, "Continue the last agent session (adds --continue flag)")
+	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "Inline dependency content into prompt body instead of uploading as separate files")
 
 	// Graph command flags
 	planGraphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
@@ -329,18 +331,19 @@ func runPlanAddStep(cmd *cobra.Command, args []string) error {
 		dir = args[0]
 	}
 	addStepCmd := &PlanAddStepCmd{
-		Dir:           dir,
-		Template:      planAddTemplate,
-		Type:          planAddType,
-		Title:         planAddTitle,
-		DependsOn:     planAddDependsOn,
-		PromptFile:    planAddPromptFile,
-		Prompt:        planAddPrompt,
-		OutputType:    planAddOutputType,
-		Interactive:   planAddInteractive,
-		SourceFiles:   planAddSourceFiles,
-		Worktree:      planAddWorktree,
-		AgentContinue: planAddAgentContinue,
+		Dir:                  dir,
+		Template:             planAddTemplate,
+		Type:                 planAddType,
+		Title:                planAddTitle,
+		DependsOn:            planAddDependsOn,
+		PromptFile:           planAddPromptFile,
+		Prompt:               planAddPrompt,
+		OutputType:           planAddOutputType,
+		Interactive:          planAddInteractive,
+		SourceFiles:          planAddSourceFiles,
+		Worktree:             planAddWorktree,
+		AgentContinue:        planAddAgentContinue,
+		PrependDependencies:  planAddPrependDependencies,
 	}
 	return RunPlanAddStep(addStepCmd)
 }

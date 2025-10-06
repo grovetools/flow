@@ -58,6 +58,7 @@ func main() {
 		// Phase 3: Complex Orchestration
 		SimpleOrchestrationScenario(),
 		// ComplexOrchestrationScenario(), // Tests generate_jobs - needs investigation on how flow processes job output
+		PrependDependenciesScenario(), // Tests prepend_dependencies feature for inline dependency content
 		EcosystemWorktreeScenario(), // Tests submodule handling in superproject worktrees
 		EcosystemWorktreeReposFilterScenario(), // Tests --repos flag for selective repo inclusion
 		EcosystemWorktreeCaseSensitivePathScenario(), // Tests case-sensitive path handling and is_main:false flags
