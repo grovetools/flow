@@ -28,11 +28,12 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Determine target - either a job file or plan directory
+	// Determine target - either job files or plan directory
 	var planDir string
-	var targetJob string
+	var targetJobs []string
 
 	if len(args) > 0 {
+		// Check if first arg is a directory
 		target := args[0]
 		info, err := os.Stat(target)
 		if err != nil {
@@ -51,9 +52,11 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		if info.IsDir() {
 			planDir = target
 		} else {
-			// It's a single file (like a chat job)
+			// It's one or more job files
 			planDir = filepath.Dir(target)
-			targetJob = filepath.Base(target)
+			for _, arg := range args {
+				targetJobs = append(targetJobs, filepath.Base(arg))
+			}
 		}
 	} else {
 		// No target specified, try to use active job
@@ -249,9 +252,13 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 
 	// Handle different run modes
 	var runErr error
-	if targetJob != "" {
-		// Run single job
-		runErr = runSingleJob(ctx, orch, plan, targetJob)
+	if len(targetJobs) > 0 {
+		// Run one or more specific jobs
+		if len(targetJobs) == 1 {
+			runErr = runSingleJob(ctx, orch, plan, targetJobs[0])
+		} else {
+			runErr = runMultipleJobs(ctx, orch, plan, targetJobs)
+		}
 	} else if planRunAll {
 		// Check if this is a chat-style plan
 		planMDPath := filepath.Join(plan.Directory, "plan.md")
@@ -339,6 +346,96 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 	}
 
 	fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
+	return nil
+}
+
+// runMultipleJobs executes multiple specific jobs in parallel.
+func runMultipleJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orchestration.Plan, jobFiles []string) error {
+	// Validate all jobs first
+	jobs := make([]*orchestration.Job, 0, len(jobFiles))
+	for _, jobFile := range jobFiles {
+		job, found := plan.GetJobByFilename(jobFile)
+		if !found {
+			return fmt.Errorf("job not found: %s", jobFile)
+		}
+
+		// Check if runnable
+		if job.Status == orchestration.JobStatusCompleted {
+			return fmt.Errorf("job already completed: %s", jobFile)
+		}
+
+		if job.Status == orchestration.JobStatusRunning {
+			return fmt.Errorf("job already running: %s", jobFile)
+		}
+
+		if job.Status == orchestration.JobStatusFailed {
+			// Allow re-running failed jobs by resetting status to pending
+			job.Status = orchestration.JobStatusPending
+		}
+
+		// Check dependencies
+		unmetDeps := getUnmetDependencies(job, plan)
+		if len(unmetDeps) > 0 {
+			return fmt.Errorf("dependencies not satisfied for job %s: %s",
+				jobFile, strings.Join(unmetDeps, ", "))
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	// Show jobs to be run
+	fmt.Printf("Running %d jobs in parallel:\n", len(jobs))
+	for _, job := range jobs {
+		fmt.Printf("- %s (%s)\n", color.CyanString(job.Filename), job.Title)
+	}
+
+	// Confirm execution unless --yes
+	if !planRunYes {
+		fmt.Print("\nExecute these jobs in parallel? [Y/n]: ")
+		var response string
+		fmt.Scanln(&response)
+		if response != "" && response != "y" && response != "Y" {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	// Execute jobs in parallel using goroutines
+	fmt.Printf("\n%s Running %d jobs in parallel...\n",
+		color.YellowString("⚡"), len(jobs))
+
+	type jobResult struct {
+		filename string
+		err      error
+	}
+
+	results := make(chan jobResult, len(jobs))
+
+	for _, job := range jobs {
+		go func(j *orchestration.Job) {
+			jobPath := filepath.Join(plan.Directory, j.Filename)
+			err := orch.RunJob(ctx, jobPath)
+			results <- jobResult{filename: j.Filename, err: err}
+		}(job)
+	}
+
+	// Collect results
+	var failures []string
+	for i := 0; i < len(jobs); i++ {
+		result := <-results
+		if result.err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", result.filename, result.err))
+			fmt.Printf("%s Job failed: %s - %v\n", color.RedString("✗"), result.filename, result.err)
+		} else {
+			fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), result.filename)
+		}
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("some jobs failed:\n%s", strings.Join(failures, "\n"))
+	}
+
+	fmt.Printf("\n%s All jobs completed successfully\n", color.GreenString("✓"))
 	return nil
 }
 

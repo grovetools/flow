@@ -101,22 +101,44 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	}
 
 	if !sessionExists {
+		// First pane needs to set the active plan before running status
+		planName := plan.Name
+		setPlanCmd := fmt.Sprintf("flow plan set %s && %s", planName, strings.Join(commandToRun, " "))
+
+		panes := []tmux.PaneOptions{
+			{
+				Command: setPlanCmd, // Set active plan then run flow plan status -t
+			},
+		}
+
 		// Create new session with workspace window
 		opts := tmux.LaunchOptions{
 			SessionName:      sessionName,
 			WorkingDirectory: worktreePath,
 			WindowName:       "workspace",
-			Panes: []tmux.PaneOptions{
-				{
-					Command: "", // Empty = default shell
-				},
-			},
+			Panes:            panes,
 		}
 
 		fmt.Printf("🚀 Creating tmux session '%s' for worktree...\n", sessionName)
 		if err := tmuxClient.Launch(ctx, opts); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
+
+		// Session created successfully
+		fmt.Printf("✓ Session '%s' created\n", sessionName)
+
+		// Switch to the new session if we're already in tmux
+		if os.Getenv("TMUX") != "" {
+			executor := &groveexec.RealCommandExecutor{}
+			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+				fmt.Printf("Note: Could not switch to session (attach manually): tmux attach -t %s\n", sessionName)
+			} else {
+				fmt.Printf("✓ Switched to session '%s'\n", sessionName)
+			}
+		} else {
+			fmt.Printf("  Attach with: tmux attach -t %s\n", sessionName)
+		}
+		return nil
 	}
 
 	// Build the command string

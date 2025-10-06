@@ -35,12 +35,12 @@ If no directory is specified, uses the active job if set.`,
 }
 
 var planRunCmd = &cobra.Command{
-	Use:   "run [job-file]",
+	Use:   "run [job-file...]",
 	Short: "Run jobs",
-	Long: `Run jobs in an orchestration plan. 
+	Long: `Run jobs in an orchestration plan.
 Without arguments, runs the next available jobs.
-With a job file argument, runs that specific job.`,
-	Args: cobra.MaximumNArgs(1),
+With a single job file argument, runs that specific job.
+With multiple job file arguments, runs those jobs in parallel.`,
 	RunE: runPlanRun,
 }
 
@@ -121,11 +121,11 @@ var (
 	planInitForce          bool
 	planInitModel          string
 	planInitWorktree       string
-	planInitContainer      string
-	planInitExtractAllFrom string
-	planInitOpenSession    bool
-	planInitRecipe         string
-	planInitTUI            bool
+	planInitContainer       string
+	planInitExtractAllFrom  string
+	planInitOpenSession     bool
+	planInitRecipe          string
+	planInitTUI             bool
 	planInitRecipeVars     []string
 	planInitRecipeCmd      string
 	planInitRepos          []string
@@ -273,11 +273,11 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		Force:          planInitForce,
 		Model:          planInitModel,
 		Worktree:       planInitWorktree,
-		Container:      planInitContainer,
-		ExtractAllFrom: planInitExtractAllFrom,
-		OpenSession:    planInitOpenSession,
-		Recipe:         planInitRecipe,
-		RecipeVars:     planInitRecipeVars,
+		Container:       planInitContainer,
+		ExtractAllFrom:  planInitExtractAllFrom,
+		OpenSession:     planInitOpenSession,
+		Recipe:          planInitRecipe,
+		RecipeVars:      planInitRecipeVars,
 		RecipeCmd:      planInitRecipeCmd,
 		Repos:          planInitRepos,
 	}
@@ -351,11 +351,11 @@ type PlanInitCmd struct {
 	Force          bool
 	Model          string
 	Worktree       string
-	Container      string
-	ExtractAllFrom string
-	OpenSession    bool
-	Recipe         string
-	RecipeVars     []string
+	Container       string
+	ExtractAllFrom  string
+	OpenSession     bool
+	Recipe          string
+	RecipeVars      []string
 	RecipeCmd      string
 	Repos          []string // List of repos to include in ecosystem worktree
 }
