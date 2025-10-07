@@ -106,15 +106,51 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	// Determine which jobs will actually be run
+	var jobsToRun []*orchestration.Job
+	if len(targetJobs) > 0 {
+		// Specific jobs were requested
+		for _, jobFile := range targetJobs {
+			job, found := plan.GetJobByFilename(jobFile)
+			if found {
+				jobsToRun = append(jobsToRun, job)
+			}
+		}
+	} else if !planRunAll {
+		// Running next jobs - get runnable jobs
+		graph, _ := orchestration.BuildDependencyGraph(plan)
+		jobsToRun = graph.GetRunnableJobs()
+	}
+	// Note: if planRunAll is true, we don't check because we want to avoid the prompt for batch runs
+
 	// If plan uses a single worktree and we're not already in that session, create/switch to it
+	// Only do this for interactive_agent job type
 	if len(worktrees) == 1 && !hasMainRepo {
-		worktreeName := ""
-		for wt := range worktrees {
-			worktreeName = wt
-			break
+		// Check if the jobs we're about to run include any interactive_agent jobs
+		hasInteractiveJobs := false
+		if len(jobsToRun) > 0 {
+			// Check only the specific jobs we're about to run
+			for _, job := range jobsToRun {
+				// Only interactive_agent jobs need tmux sessions
+				// headless_agent, agent, oneshot, chat, shell all run directly
+				if job.Type == orchestration.JobTypeInteractiveAgent {
+					hasInteractiveJobs = true
+					break
+				}
+			}
 		}
 
-		// Get git root to check if we're already in the worktree
+		// Only prompt for tmux session if we have interactive_agent jobs to run
+		if !hasInteractiveJobs {
+			// Skip tmux session management for all other job types
+		} else {
+			worktreeName := ""
+			for wt := range worktrees {
+				worktreeName = wt
+				break
+			}
+
+			// Get git root to check if we're already in the worktree
 		gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
 		if err != nil {
 			gitRoot = ""
@@ -191,6 +227,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 					return nil
 				}
 			}
+		}
 		}
 	}
 
