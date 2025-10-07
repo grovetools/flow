@@ -313,8 +313,12 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	}
 
 	// Original behavior for jobs without worktrees - use repository-based session with new window
-	repoName := filepath.Base(gitRoot)
-	sessionName := sanitize.SanitizeForTmuxSession(repoName)
+	sessionName, err := e.generateSessionName(gitRoot)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return err
+	}
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
 	// Ensure session exists

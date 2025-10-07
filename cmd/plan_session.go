@@ -221,10 +221,20 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	if err != nil {
 		return fmt.Errorf("could not find git root: %w", err)
 	}
-	
-	repoName := filepath.Base(gitRoot)
-	sessionTitle := fmt.Sprintf("%s-plan", planName)
-	sessionName := fmt.Sprintf("%s__%s", repoName, sanitize.SanitizeForTmuxSession(sessionTitle))
+
+	// If gitRoot is itself a worktree, resolve to the parent repository
+	gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
+	if err == nil && gitRootInfo.IsWorktree && gitRootInfo.ParentPath != "" {
+		gitRoot = gitRootInfo.ParentPath
+	}
+
+	// Generate session name using the project identifier
+	projInfo, err := workspace.GetProjectByPath(gitRoot)
+	if err != nil {
+		return fmt.Errorf("failed to get project info for session naming: %w", err)
+	}
+	sessionTitle := fmt.Sprintf("plan-%s", sanitize.SanitizeForTmuxSession(planName))
+	sessionName := fmt.Sprintf("%s__%s", projInfo.Identifier(), sessionTitle)
 
 	// Check if session already exists
 	executor := &groveexec.RealCommandExecutor{}

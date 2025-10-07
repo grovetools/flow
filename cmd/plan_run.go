@@ -156,6 +156,14 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			gitRoot = ""
 		}
 
+		// If gitRoot is itself a worktree, resolve to the parent repository
+		if gitRoot != "" {
+			gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
+			if err == nil && gitRootInfo.IsWorktree && gitRootInfo.ParentPath != "" {
+				gitRoot = gitRootInfo.ParentPath
+			}
+		}
+
 		// Check if we're already in the worktree directory
 		currentDir, _ := os.Getwd()
 		expectedWorktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
