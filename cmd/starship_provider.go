@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"gopkg.in/yaml.v3"
@@ -100,19 +101,24 @@ func FlowStatusProvider(s state.State) (string, error) {
 	if err == nil && len(plan.Jobs) > 0 {
 		stats := GetPlanStatistics(plan)
 
-		// Add job statistics with symbols matching flow plan status TUI
+		// Add job statistics with symbols and colors matching flow plan status TUI
+		// Colors match grove-core/tui/theme: Green, Blue, Pink, Muted
 		var statsParts []string
 		if stats.Completed > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("● %d", stats.Completed))
+			// Green for completed (solid dot)
+			statsParts = append(statsParts, color.New(color.FgGreen).Sprintf("● %d", stats.Completed))
 		}
 		if stats.Running > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("◐ %d", stats.Running))
+			// Blue for running (half-filled circle)
+			statsParts = append(statsParts, color.New(color.FgBlue).Sprintf("◐ %d", stats.Running))
 		}
 		if stats.Pending > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("○ %d", stats.Pending))
+			// Gray for pending (hollow circle)
+			statsParts = append(statsParts, color.New(color.FgHiBlack).Sprintf("○ %d", stats.Pending))
 		}
 		if stats.Failed > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("✗ %d", stats.Failed))
+			// Magenta/Pink for failed (X mark)
+			statsParts = append(statsParts, color.New(color.FgMagenta).Sprintf("✗ %d", stats.Failed))
 		}
 		if len(statsParts) > 0 {
 			output += fmt.Sprintf(" (%s)", strings.Join(statsParts, " "))
