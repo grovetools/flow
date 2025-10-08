@@ -33,23 +33,20 @@ func (e *ShellExecutor) Name() string {
 
 // Execute runs a shell job.
 func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
-	// Notify grove-hooks about job start
-	notifyJobStart(job, plan)
-
-	// Ensure we notify completion/failure when we exit
-	var execErr error
-	defer func() {
-		notifyJobComplete(job, execErr)
-	}()
+	// Create lock file with the current process's PID.
+	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
+		return fmt.Errorf("failed to create lock file: %w", err)
+	}
+	// Ensure lock file is removed when execution finishes.
+	defer RemoveLockFile(job.FilePath)
 
 	// Update job status to running
 	persister := NewStatePersister()
 	job.StartTime = time.Now()
 	if err := job.UpdateStatus(persister, JobStatusRunning); err != nil {
-		execErr = fmt.Errorf("updating job status: %w", err)
-		return execErr
+		return fmt.Errorf("updating job status: %w", err)
 	}
-	
+
 	// Log execution details for debugging
 	e.log.WithFields(logrus.Fields{
 		"job_id":  job.ID,
@@ -101,9 +98,8 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to create working directory %s: %w", workDir, err)
 	}
-	
-	output, err := cmd.CombinedOutput()
-	execErr = err // Capture the execution error for the deferred hook
+
+	output, execErr := cmd.CombinedOutput()
 
 	// Persist the output of the shell command to the job file for easy debugging and audit
 	if writeErr := job.AppendOutput(persister, string(output)); writeErr != nil {

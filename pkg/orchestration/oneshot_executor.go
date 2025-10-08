@@ -124,8 +124,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					prettyLog.InfoPretty("Marking chat as complete.")
 					job.Status = JobStatusCompleted
 					job.EndTime = time.Now()
-					notifyJobStart(job, plan)  // Notify start if not already done
-					notifyJobComplete(job, nil) // Notify completion with no error
 					return updateJobFile(job)
 				case "e", "edit":
 					editor := os.Getenv("EDITOR")
@@ -153,40 +151,21 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return e.executeChatJob(ctx, job, plan)
 	}
 
-	// Notify grove-hooks about job start
-	notifyJobStart(job, plan)
-
-	// Log job execution start
-	execStart := time.Now()
-	log.WithFields(logrus.Fields{
-		"job_id": job.ID,
-		"job_type": job.Type,
-		"job_title": job.Title,
-		"dependencies": job.DependsOn,
-		"model": job.Model,
-		"worktree": job.Worktree,
-		"plan_name": plan.Name,
-	}).Info("Starting job execution")
-
-	// Ensure we notify completion/failure when we exit
-	var execErr error
-	defer func() {
-		log.WithFields(logrus.Fields{
-			"job_id": job.ID,
-			"duration_ms": time.Since(execStart).Milliseconds(),
-			"status": job.Status,
-			"error": execErr,
-		}).Info("Job execution completed")
-		notifyJobComplete(job, execErr)
-	}()
+	// Create lock file with the current process's PID.
+	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
+		return fmt.Errorf("failed to create lock file: %w", err)
+	}
+	// Ensure lock file is removed when execution finishes.
+	defer RemoveLockFile(job.FilePath)
 
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
 	if err := updateJobFile(job); err != nil {
-		execErr = fmt.Errorf("updating job status: %w", err)
-		return execErr
+		return fmt.Errorf("updating job status: %w", err)
 	}
+
+	var execErr error
 
 	// Determine the working directory for the job
 	var workDir string
@@ -960,22 +939,6 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", err
 	}
 
-	// Check if grove-hooks is available and install hooks in the worktree
-	if _, err := exec.LookPath(GetHooksBinaryPath()); err == nil {
-		cmd := exec.Command(GetHooksBinaryPath(), "install")
-		cmd.Dir = worktreePath
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.WithFields(logrus.Fields{
-				"error": err,
-				"output": string(output),
-			}).Warn("grove-hooks install failed")
-			prettyLog.WarnPretty(fmt.Sprintf("grove-hooks install failed: %v (output: %s)", err, string(output)))
-		} else {
-			log.WithField("worktree", worktreePath).Info("Installed grove-hooks in worktree")
-			prettyLog.Success(fmt.Sprintf("Installed grove-hooks in worktree: %s", worktreePath))
-		}
-	}
-
 	// Automatically initialize state within the new worktree for a better UX.
 	groveDir := filepath.Join(worktreePath, ".grove")
 	if err := os.MkdirAll(groveDir, 0o755); err != nil {
@@ -1323,22 +1286,14 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
-	// Ensure we notify completion/failure when we exit
-	var execErr error
-	defer func() {
-		notifyJobComplete(job, execErr)
-	}()
-
 	// Update job status to running FIRST
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
 	if err := updateJobFile(job); err != nil {
-		execErr = fmt.Errorf("updating job status: %w", err)
-		return execErr
+		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// Notify grove-hooks about job start AFTER status is set
-	notifyJobStart(job, plan)
+	var execErr error
 
 	// Read the job file content
 	content, err := os.ReadFile(job.FilePath)

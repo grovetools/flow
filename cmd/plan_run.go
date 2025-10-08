@@ -326,9 +326,6 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		runErr = runNextJobs(ctx, orch, plan, cmd)
 	}
 
-	// Wait for any pending hooks to complete. This is the crucial addition.
-	orchestration.WaitForHooks()
-
 	return runErr
 }
 

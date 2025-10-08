@@ -138,16 +138,6 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// Notify grove-hooks about job start
-	notifyJobStart(job, plan)
-
-	// Ensure we notify completion/failure when we exit
-	var execErr error
-	defer func() {
-		notifyJobComplete(job, execErr)
-	}()
-
-
 	// Determine the working directory for the job on the host
 	var workDir string
 	gitRoot, err := GetGitRootSafe(plan.Directory)
@@ -248,6 +238,15 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 				job.EndTime = time.Now()
 				return fmt.Errorf("failed to create tmux session: %w", err)
 			}
+
+			// Get the tmux session PID and create the lock file.
+			tmuxPID, err := tmuxClient.GetSessionPID(ctx, sessionName)
+			if err != nil {
+				return fmt.Errorf("could not get tmux session PID to create lock file: %w", err)
+			}
+			if err := CreateLockFile(job.FilePath, tmuxPID); err != nil {
+				return fmt.Errorf("failed to create lock file with tmux PID: %w", err)
+			}
 		} else {
 			e.log.WithField("session", sessionName).Info("Using existing session for interactive job")
 		}
@@ -307,8 +306,7 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 		e.prettyLog.Blank()
 		e.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
 
-		// Return immediately - the orchestrator will poll for completion
-		execErr = nil
+		// Return immediately. The lock file indicates the running state.
 		return nil
 	}
 
@@ -334,6 +332,15 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+
+		// Get the tmux session PID and create the lock file.
+		tmuxPID, err := tmuxClient.GetSessionPID(ctx, sessionName)
+		if err != nil {
+			return fmt.Errorf("could not get tmux session PID to create lock file: %w", err)
+		}
+		if err := CreateLockFile(job.FilePath, tmuxPID); err != nil {
+			return fmt.Errorf("failed to create lock file with tmux PID: %w", err)
 		}
 	}
 
@@ -416,9 +423,7 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	e.prettyLog.Blank()
 	e.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
 
-	// Return immediately - the orchestrator will poll for completion
-	// Set execErr to nil to indicate successful launch
-	execErr = nil
+	// Return immediately. The lock file indicates the running state.
 	return nil
 }
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/fatih/color"
@@ -110,11 +111,9 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Notify grove-hooks if this is an interactive agent job
-	if job.Type == orchestration.JobTypeInteractiveAgent {
-		// Use the completion hook to mark the job as completed in grove-hooks
-		orchestration.NotifyJobCompleteExternal(job, nil)
-	}
+	// Remove lock file if it exists
+	lockFilePath := job.FilePath + ".lock"
+	os.Remove(lockFilePath) // Ignore errors - file might not exist
 
 	// Success message
 	fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
