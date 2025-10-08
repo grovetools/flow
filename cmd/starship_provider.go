@@ -69,7 +69,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 	planPath, err := resolvePlanPathWithActiveJob(activePlanStr)
 	if err != nil {
 		// Can't resolve path, just show the plan name
-		return fmt.Sprintf("📈 Plan: %s", activePlanStr), nil
+		return activePlanStr, nil
 	}
 
 	// Read the plan config
@@ -77,7 +77,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		// Config file not found, just show the plan name
-		return fmt.Sprintf("📈 Plan: %s", activePlanStr), nil
+		return activePlanStr, nil
 	}
 
 	var config struct {
@@ -87,7 +87,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 	}
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		// Invalid config, just show the plan name
-		return fmt.Sprintf("📈 Plan: %s", activePlanStr), nil
+		return activePlanStr, nil
 	}
 
 	// If the plan is marked as finished, don't show it in the prompt
@@ -95,8 +95,8 @@ func FlowStatusProvider(s state.State) (string, error) {
 		return "", nil
 	}
 
-	// Format: 📈 Plan: plan-name (stats) 🤖 model-name 🌲 in worktree (or worktree name)
-	output := fmt.Sprintf("📈 Plan: %s", activePlanStr)
+	// Format: plan-name (stats [WT]) 🤖 model-name
+	output := activePlanStr
 
 	// Load the plan to get job statistics
 	plan, err := orchestration.LoadPlan(planPath)
@@ -127,6 +127,12 @@ func FlowStatusProvider(s state.State) (string, error) {
 			style := lipgloss.NewStyle().Foreground(theme.Pink)
 			statsParts = append(statsParts, style.Render(fmt.Sprintf("✗ %d", stats.Failed)))
 		}
+
+		// Add [WT] indicator if in worktree
+		if config.Worktree != "" {
+			statsParts = append(statsParts, "[WT]")
+		}
+
 		if len(statsParts) > 0 {
 			output += fmt.Sprintf(" (%s)", strings.Join(statsParts, " "))
 		}
@@ -134,14 +140,6 @@ func FlowStatusProvider(s state.State) (string, error) {
 
 	if config.Model != "" {
 		output += fmt.Sprintf(" 🤖 %s", config.Model)
-	}
-
-	if config.Worktree != "" {
-		if config.Worktree == activePlanStr {
-			output += " 🌲 in worktree"
-		} else {
-			output += fmt.Sprintf(" 🌲 %s", config.Worktree)
-		}
 	}
 
 	return output, nil
