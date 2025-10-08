@@ -18,6 +18,7 @@ func main() {
 	rootCmd.AddCommand(cmd.GetChatCommand())
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewModelsCmd())
+	rootCmd.AddCommand(cmd.NewStarshipCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
