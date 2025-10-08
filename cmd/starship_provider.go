@@ -95,17 +95,23 @@ func FlowStatusProvider(s state.State) (string, error) {
 		return "", nil
 	}
 
-	// Format: plan-name (stats [WT]) 🤖 model-name
-	output := activePlanStr
+	// Strip ".grove" prefix if present
+	displayName := activePlanStr
+	if strings.HasPrefix(displayName, ".grove") {
+		displayName = strings.TrimPrefix(displayName, ".grove")
+	}
+
+	// Force color output for shell prompts
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	// Color the plan name with Cyan
+	planNameStyle := lipgloss.NewStyle().Foreground(theme.Cyan)
+	output := planNameStyle.Render(displayName)
 
 	// Load the plan to get job statistics
 	plan, err := orchestration.LoadPlan(planPath)
 	if err == nil && len(plan.Jobs) > 0 {
 		stats := GetPlanStatistics(plan)
-
-		// Add job statistics with symbols and colors from grove-core/tui/theme
-		// Force color output for shell prompts
-		lipgloss.SetColorProfile(termenv.TrueColor)
 
 		var statsParts []string
 		if stats.Completed > 0 {
