@@ -103,16 +103,16 @@ func FlowStatusProvider(s state.State) (string, error) {
 		// Add job statistics with symbols matching flow plan status TUI
 		var statsParts []string
 		if stats.Completed > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("●%d", stats.Completed))
+			statsParts = append(statsParts, fmt.Sprintf("● %d", stats.Completed))
 		}
 		if stats.Running > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("◐%d", stats.Running))
+			statsParts = append(statsParts, fmt.Sprintf("◐ %d", stats.Running))
 		}
 		if stats.Pending > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("○%d", stats.Pending))
+			statsParts = append(statsParts, fmt.Sprintf("○ %d", stats.Pending))
 		}
 		if stats.Failed > 0 {
-			statsParts = append(statsParts, fmt.Sprintf("✗%d", stats.Failed))
+			statsParts = append(statsParts, fmt.Sprintf("✗ %d", stats.Failed))
 		}
 		if len(statsParts) > 0 {
 			output += fmt.Sprintf(" (%s)", strings.Join(statsParts, " "))
