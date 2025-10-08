@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/state"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/muesli/termenv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -101,24 +103,29 @@ func FlowStatusProvider(s state.State) (string, error) {
 	if err == nil && len(plan.Jobs) > 0 {
 		stats := GetPlanStatistics(plan)
 
-		// Add job statistics with symbols and colors matching flow plan status TUI
-		// Colors match grove-core/tui/theme: Green, Blue, Pink, Muted
+		// Add job statistics with symbols and colors from grove-core/tui/theme
+		// Force color output for shell prompts
+		lipgloss.SetColorProfile(termenv.TrueColor)
+
 		var statsParts []string
 		if stats.Completed > 0 {
 			// Green for completed (solid dot)
-			statsParts = append(statsParts, color.New(color.FgGreen).Sprintf("● %d", stats.Completed))
+			style := lipgloss.NewStyle().Foreground(theme.Green)
+			statsParts = append(statsParts, style.Render(fmt.Sprintf("● %d", stats.Completed)))
 		}
 		if stats.Running > 0 {
 			// Blue for running (half-filled circle)
-			statsParts = append(statsParts, color.New(color.FgBlue).Sprintf("◐ %d", stats.Running))
+			style := lipgloss.NewStyle().Foreground(theme.Blue)
+			statsParts = append(statsParts, style.Render(fmt.Sprintf("◐ %d", stats.Running)))
 		}
 		if stats.Pending > 0 {
-			// Gray for pending (hollow circle)
-			statsParts = append(statsParts, color.New(color.FgHiBlack).Sprintf("○ %d", stats.Pending))
+			// Muted gray for pending (hollow circle)
+			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("○ %d", stats.Pending)))
 		}
 		if stats.Failed > 0 {
-			// Magenta/Pink for failed (X mark)
-			statsParts = append(statsParts, color.New(color.FgMagenta).Sprintf("✗ %d", stats.Failed))
+			// Pink for failed (X mark)
+			style := lipgloss.NewStyle().Foreground(theme.Pink)
+			statsParts = append(statsParts, style.Render(fmt.Sprintf("✗ %d", stats.Failed)))
 		}
 		if len(statsParts) > 0 {
 			output += fmt.Sprintf(" (%s)", strings.Join(statsParts, " "))
