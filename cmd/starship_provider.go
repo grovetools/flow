@@ -134,9 +134,10 @@ func FlowStatusProvider(s state.State) (string, error) {
 			statsParts = append(statsParts, style.Render(fmt.Sprintf("✗ %d", stats.Failed)))
 		}
 
-		// Add [WT] indicator if in worktree
+		// Add WT indicator if in worktree
 		if config.Worktree != "" {
-			statsParts = append(statsParts, "[WT]")
+			wtStyle := lipgloss.NewStyle().Foreground(theme.Violet)
+			statsParts = append(statsParts, wtStyle.Render("WT"))
 		}
 
 		if len(statsParts) > 0 {
