@@ -13,9 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-flow/pkg/state"
 )
 
 // RunPlanInitTUI launches the interactive TUI for creating a new plan.
@@ -135,7 +135,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	result.WriteString("✓ Created .grove-plan.yml with default configuration\n")
 
 	// Set the new plan as active
-	if err := state.SetActiveJob(planName); err != nil {
+	if err := state.Set("flow.active_plan", planName); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
 	} else {
 		result.WriteString(fmt.Sprintf("✓ Set active plan to: %s\n", planName))
@@ -418,7 +418,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	}
 
 	// Set the new plan as active
-	if err := state.SetActiveJob(planName); err != nil {
+	if err := state.Set("flow.active_plan", planName); err != nil {
 		fmt.Printf("Warning: failed to set active job: %v\n", err)
 	} else {
 		fmt.Printf("✓ Set active plan to: %s\n", planName)

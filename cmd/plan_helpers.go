@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 
 	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-core/util/pathutil"
-	"github.com/mattsolo1/grove-flow/pkg/state"
 )
 
 // resolvePlanPath determines the absolute path for a plan directory.
@@ -36,7 +36,7 @@ func resolvePlanPath(planName string) (string, error) {
 func resolvePlanPathWithActiveJob(planName string) (string, error) {
 	// If no plan name provided, try to use active job
 	if planName == "" {
-		activeJob, err := state.GetActiveJob()
+		activeJob, err := state.GetString("flow.active_plan")
 		if err != nil {
 			return "", fmt.Errorf("get active job: %w", err)
 		}

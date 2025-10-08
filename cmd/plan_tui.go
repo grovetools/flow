@@ -19,8 +19,8 @@ import (
 	"github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-flow/pkg/state"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -205,7 +205,7 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 		Build()
 
 	// Load active plan
-	activePlan, _ := state.GetActiveJob()
+	activePlan, _ := state.GetString("flow.active_plan")
 
 	return planListTUIModel{
 		plans:          []PlanListItem{},
@@ -240,7 +240,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.plans = msg.plans
 		// Reload active plan as well
-		activePlan, _ := state.GetActiveJob()
+		activePlan, _ := state.GetString("flow.active_plan")
 		m.activePlan = activePlan
 		// Adjust cursor if needed
 		if m.cursor >= len(m.plans) {
@@ -355,7 +355,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.SetActive):
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				selectedPlan := m.plans[m.cursor]
-				if err := state.SetActiveJob(selectedPlan.Name); err == nil {
+				if err := state.Set("flow.active_plan", selectedPlan.Name); err == nil {
 					m.activePlan = selectedPlan.Name
 				}
 			}
@@ -843,7 +843,7 @@ func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
 		// First set the active job programmatically
 		func() tea.Msg {
-			if err := state.SetActiveJob(plan.Name); err != nil {
+			if err := state.Set("flow.active_plan", plan.Name); err != nil {
 				return err
 			}
 			return nil
@@ -864,7 +864,7 @@ func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
 		// First set the active job programmatically
 		func() tea.Msg {
-			if err := state.SetActiveJob(plan.Name); err != nil {
+			if err := state.Set("flow.active_plan", plan.Name); err != nil {
 				return err
 			}
 			return nil
@@ -881,7 +881,7 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
 		// First set the active job programmatically
 		func() tea.Msg {
-			if err := state.SetActiveJob(plan.Name); err != nil {
+			if err := state.Set("flow.active_plan", plan.Name); err != nil {
 				return err
 			}
 			return nil

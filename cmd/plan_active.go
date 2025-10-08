@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/mattsolo1/grove-flow/pkg/state"
+	"github.com/mattsolo1/grove-core/state"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +20,7 @@ Examples:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planDir := args[0]
-			if err := state.SetActiveJob(planDir); err != nil {
+			if err := state.Set("flow.active_plan", planDir); err != nil {
 				return fmt.Errorf("set active job: %w", err)
 			}
 			fmt.Printf("Set active job to: %s\n", planDir)
@@ -39,7 +39,7 @@ func NewPlanCurrentCmd() *cobra.Command {
 If no active job is set, this command will indicate that.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			activeJob, err := state.GetActiveJob()
+			activeJob, err := state.GetString("flow.active_plan")
 			if err != nil {
 				return fmt.Errorf("get active job: %w", err)
 			}
@@ -61,7 +61,7 @@ func NewPlanUnsetCmd() *cobra.Command {
 		Long:  `Clear the active job plan directory.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := state.ClearActiveJob(); err != nil {
+			if err := state.Delete("flow.active_plan"); err != nil {
 				return fmt.Errorf("clear active job: %w", err)
 			}
 			fmt.Println("Cleared active job")
