@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/mattsolo1/grove-core/config"
@@ -32,11 +33,44 @@ func resolvePlanPath(planName string) (string, error) {
 	return filepath.Abs(fullPath)
 }
 
+// getActivePlanWithMigration gets the active plan and automatically migrates old state format to new format.
+func getActivePlanWithMigration() (string, error) {
+	// Try new key first
+	activePlan, err := state.GetString("flow.active_plan")
+	if err != nil {
+		return "", err
+	}
+
+	if activePlan != "" {
+		return activePlan, nil
+	}
+
+	// Check for old key
+	oldActivePlan, err := state.GetString("active_plan")
+	if err != nil {
+		return "", err
+	}
+
+	if oldActivePlan != "" {
+		// Migrate: set new key and delete old key
+		if err := state.Set("flow.active_plan", oldActivePlan); err != nil {
+			return "", fmt.Errorf("migrate state: %w", err)
+		}
+		if err := state.Delete("active_plan"); err != nil {
+			// Log but don't fail - the new key is set
+			fmt.Fprintf(os.Stderr, "Warning: failed to delete old state key: %v\n", err)
+		}
+		return oldActivePlan, nil
+	}
+
+	return "", nil
+}
+
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.
 func resolvePlanPathWithActiveJob(planName string) (string, error) {
 	// If no plan name provided, try to use active job
 	if planName == "" {
-		activeJob, err := state.GetString("flow.active_plan")
+		activeJob, err := getActivePlanWithMigration()
 		if err != nil {
 			return "", fmt.Errorf("get active job: %w", err)
 		}

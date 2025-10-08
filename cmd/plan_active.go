@@ -39,7 +39,7 @@ func NewPlanCurrentCmd() *cobra.Command {
 If no active job is set, this command will indicate that.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			activeJob, err := state.GetString("flow.active_plan")
+			activeJob, err := getActivePlanWithMigration()
 			if err != nil {
 				return fmt.Errorf("get active job: %w", err)
 			}
@@ -61,9 +61,12 @@ func NewPlanUnsetCmd() *cobra.Command {
 		Long:  `Clear the active job plan directory.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Clear both old and new keys
 			if err := state.Delete("flow.active_plan"); err != nil {
 				return fmt.Errorf("clear active job: %w", err)
 			}
+			// Also try to delete old key (ignore errors)
+			_ = state.Delete("active_plan")
 			fmt.Println("Cleared active job")
 			return nil
 		},
