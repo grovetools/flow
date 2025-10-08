@@ -12,6 +12,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -60,6 +61,9 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("build dependency graph: %w", err)
 	}
+
+	// Verify the status of running jobs using PID liveness checks
+	verifyRunningJobStatus(plan)
 
 	// Launch TUI if requested
 	if statusTUI {
@@ -113,6 +117,29 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// verifyRunningJobStatus checks the PID liveness for jobs marked as running.
+// If a job's process is dead, its status is updated in-memory to "interrupted".
+func verifyRunningJobStatus(plan *orchestration.Plan) {
+	// We use a custom "interrupted" status string for display purposes.
+	// This is not persisted to disk - it's only updated in memory.
+	const JobStatusInterrupted = orchestration.JobStatus("interrupted")
+
+	for _, job := range plan.Jobs {
+		if job.Status == orchestration.JobStatusRunning {
+			pid, err := orchestration.ReadLockFile(job.FilePath)
+			if err != nil {
+				// Lock file missing, but status is running. Mark as interrupted.
+				job.Status = JobStatusInterrupted
+				continue
+			}
+			if !process.IsProcessAlive(pid) {
+				// Process is dead. Mark as interrupted.
+				job.Status = JobStatusInterrupted
+			}
+		}
+	}
 }
 
 // formatStatusSummary creates the summary statistics.
@@ -213,6 +240,13 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 			colorizeStatus(orchestration.JobStatusNeedsReview),
 			color.CyanString("Needs Review"),
 			statusCounts[orchestration.JobStatusNeedsReview])
+	}
+
+	if statusCounts[orchestration.JobStatus("interrupted")] > 0 {
+		fmt.Fprintf(writer, "%s %s: %d\n",
+			colorizeStatus(orchestration.JobStatus("interrupted")),
+			color.RedString("Interrupted"),
+			statusCounts[orchestration.JobStatus("interrupted")])
 	}
 
 	return buf.String()
@@ -481,6 +515,8 @@ func colorizeStatus(status orchestration.JobStatus) string {
 		return color.CyanString("💬")
 	case orchestration.JobStatusPendingLLM:
 		return color.YellowString("🤖")
+	case "interrupted": // Jobs that were running but process is dead
+		return color.RedString("💔")
 	default: // Pending
 		return "⏳"
 	}
