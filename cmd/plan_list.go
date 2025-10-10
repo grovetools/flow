@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
@@ -273,23 +272,7 @@ func createPlanSummary(plan *orchestration.Plan, expandedPath string) PlanSummar
 
 // expandPath expands ~ and git variables in a path string.
 func expandPath(path string) (string, error) {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("could not get user home directory: %w", err)
-		}
-		path = filepath.Join(home, path[2:])
-	}
-
-	repo, branch, err := git.GetRepoInfo(".")
-	if err == nil {
-		path = strings.ReplaceAll(path, "${REPO}", repo)
-		path = strings.ReplaceAll(path, "${BRANCH}", branch)
-		path = strings.ReplaceAll(path, "{{REPO}}", repo)
-		path = strings.ReplaceAll(path, "{{BRANCH}}", branch)
-	}
-
-	return filepath.Abs(path)
+	return expandFlowPath(path)
 }
 
 // outputPlansJSON outputs the plans in JSON format

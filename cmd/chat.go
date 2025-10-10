@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-core/util/pathutil"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -68,7 +67,7 @@ You can optionally specify chat titles to run only specific chats:
 
 // expandChatPath expands home directory and git variables in a path.
 func expandChatPath(path string) (string, error) {
-	return pathutil.Expand(path)
+	return expandFlowPath(path)
 }
 
 // ensureChatJob ensures a file is initialized as a chat job, initializing it if necessary
