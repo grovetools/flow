@@ -63,7 +63,7 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify the status of running jobs using PID liveness checks
-	verifyRunningJobStatus(plan)
+	VerifyRunningJobStatus(plan)
 
 	// Launch TUI if requested
 	if statusTUI {
@@ -119,9 +119,9 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// verifyRunningJobStatus checks the PID liveness for jobs marked as running.
+// VerifyRunningJobStatus checks the PID liveness for jobs marked as running.
 // If a job's process is dead, its status is updated in-memory to "interrupted".
-func verifyRunningJobStatus(plan *orchestration.Plan) {
+func VerifyRunningJobStatus(plan *orchestration.Plan) {
 	// We use a custom "interrupted" status string for display purposes.
 	// This is not persisted to disk - it's only updated in memory.
 	const JobStatusInterrupted = orchestration.JobStatus("interrupted")

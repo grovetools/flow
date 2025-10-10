@@ -204,6 +204,9 @@ func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummar
 			if _, err := os.Stat(planConfigPath); err == nil || len(mdFiles) > 0 {
 				plan, err := orchestration.LoadPlan(planPath)
 				if err == nil {
+					// Perform liveness check on running jobs to report accurate status
+					VerifyRunningJobStatus(plan)
+
 					if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
 						continue
 					}
