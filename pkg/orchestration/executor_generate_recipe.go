@@ -53,6 +53,13 @@ func (e *GenerateRecipeExecutor) Name() string {
 
 // Execute runs a generate-recipe job
 func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Create lock file with the current process's PID.
+	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
+		return fmt.Errorf("failed to create lock file: %w", err)
+	}
+	// Ensure lock file is removed when execution finishes.
+	defer RemoveLockFile(job.FilePath)
+
 	// Determine the working directory for the job
 	var workDir string
 	if job.Worktree != "" {

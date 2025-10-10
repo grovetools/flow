@@ -1286,6 +1286,13 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
+	// Create lock file with the current process's PID.
+	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
+		return fmt.Errorf("failed to create lock file: %w", err)
+	}
+	// Ensure lock file is removed when execution finishes.
+	defer RemoveLockFile(job.FilePath)
+
 	// Update job status to running FIRST
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
