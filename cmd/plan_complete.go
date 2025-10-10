@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/fatih/color"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -107,6 +109,34 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 				fmt.Printf("Warning: failed to add summary to job file: %v\n", err)
 			} else {
 				fmt.Println(color.GreenString("✓") + " Added summary to job frontmatter.")
+			}
+		}
+	}
+
+	// If this was an interactive agent, try to kill its associated tmux session.
+	if job.Type == orchestration.JobTypeInteractiveAgent && job.Worktree != "" {
+		fmt.Println("Attempting to clean up associated tmux session...")
+		// Reconstruct the session name. This logic must match the InteractiveAgentExecutor.
+
+		// We need the git root to construct the full worktree path for the project identifier.
+		gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
+		if err != nil {
+			fmt.Printf("Warning: could not find git root to determine session name: %v\n", err)
+		} else {
+			worktreePath := filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
+			projInfo, err := workspace.GetProjectByPath(worktreePath)
+			if err != nil {
+				fmt.Printf("Warning: could not get project info to determine session name: %v\n", err)
+			} else {
+				sessionName := projInfo.Identifier()
+				fmt.Printf("  Killing session: %s\n", sessionName)
+				cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+				if err := cmd.Run(); err != nil {
+					// This is not a fatal error; the session might already be closed.
+					fmt.Printf("  Note: could not kill session (it may already be closed): %v\n", err)
+				} else {
+					fmt.Println("  ✓ Session killed.")
+				}
 			}
 		}
 	}

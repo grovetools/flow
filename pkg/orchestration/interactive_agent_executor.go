@@ -107,6 +107,8 @@ func (e *InteractiveAgentExecutor) buildAgentCommand(job *Job, plan *Plan, workt
 	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"
 
 	// Build command with agent args
+	// Note: Environment variables for grove-flow integration are set via tmux set-environment
+	// before this command is executed
 	cmdParts := []string{"claude"}
 	if job.AgentContinue {
 		cmdParts = append(cmdParts, "--continue")
@@ -279,8 +281,25 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 			// Don't return error, just log and proceed.
 		}
 
-		// Send the agent command to the new window
+		// Set environment variables in the window's shell so they're available to the claude process
+		// Note: We export them directly in the shell instead of using tmux set-environment
+		// because set-environment is session-level and would be shared across all windows
 		targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
+
+		// Export environment variables in the window's shell
+		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID=%s GROVE_FLOW_JOB_PATH=%s GROVE_FLOW_PLAN_NAME=%s GROVE_FLOW_JOB_TITLE=%s",
+			job.ID, job.FilePath, plan.Name, job.Title)
+		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
+			e.log.WithError(err).Error("Failed to set environment variables")
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to set environment variables: %w", err)
+		}
+
+		// Small delay to ensure environment variables are set
+		time.Sleep(100 * time.Millisecond)
+
+		// Send the agent command to the new window
 		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
 			e.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
@@ -403,8 +422,25 @@ func (e *InteractiveAgentExecutor) executeHostMode(ctx context.Context, job *Job
 	// Small delay to ensure window is ready
 	time.Sleep(300 * time.Millisecond)
 
-	// Send agent command to the window using executor pattern
+	// Set environment variables in the window's shell so they're available to the claude process
+	// Note: We export them directly in the shell instead of using tmux set-environment
+	// because set-environment is session-level and would be shared across all windows
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+
+	// Export environment variables in the window's shell
+	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID=%s GROVE_FLOW_JOB_PATH=%s GROVE_FLOW_PLAN_NAME=%s GROVE_FLOW_JOB_TITLE=%s",
+		job.ID, job.FilePath, plan.Name, job.Title)
+	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
+		e.log.WithError(err).Error("Failed to set environment variables")
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("failed to set environment variables: %w", err)
+	}
+
+	// Small delay to ensure environment variables are set
+	time.Sleep(100 * time.Millisecond)
+
+	// Send agent command to the window using executor pattern
 	e.log.WithField("pane", targetPane).Info("Sending command to tmux pane")
 	e.prettyLog.InfoPretty(fmt.Sprintf("Sending command to tmux pane: %s", targetPane))
 	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
