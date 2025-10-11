@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -113,29 +117,38 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// If this was an interactive agent, try to kill its associated tmux session.
-	if job.Type == orchestration.JobTypeInteractiveAgent && job.Worktree != "" {
-		fmt.Println("Attempting to clean up associated tmux session...")
-		// Reconstruct the session name. This logic must match the InteractiveAgentExecutor.
+	// If this was an interactive agent, try to kill its associated Claude process and tmux session.
+	if job.Type == orchestration.JobTypeInteractiveAgent {
+		fmt.Println("Attempting to clean up associated Claude session...")
 
-		// We need the git root to construct the full worktree path for the project identifier.
-		gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
-		if err != nil {
-			fmt.Printf("Warning: could not find git root to determine session name: %v\n", err)
+		// Kill the Claude process by reading the PID from grove-hooks session metadata
+		if err := killClaudeSession(job.ID); err != nil {
+			fmt.Printf("  Note: could not kill Claude session: %v\n", err)
 		} else {
-			worktreePath := filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
-			projInfo, err := workspace.GetProjectByPath(worktreePath)
+			fmt.Println("  ✓ Claude process killed.")
+		}
+
+		// Also kill the tmux session if worktree is specified
+		if job.Worktree != "" {
+			// We need the git root to construct the full worktree path for the project identifier.
+			gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
 			if err != nil {
-				fmt.Printf("Warning: could not get project info to determine session name: %v\n", err)
+				fmt.Printf("Warning: could not find git root to determine session name: %v\n", err)
 			} else {
-				sessionName := projInfo.Identifier()
-				fmt.Printf("  Killing session: %s\n", sessionName)
-				cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
-				if err := cmd.Run(); err != nil {
-					// This is not a fatal error; the session might already be closed.
-					fmt.Printf("  Note: could not kill session (it may already be closed): %v\n", err)
+				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
+				projInfo, err := workspace.GetProjectByPath(worktreePath)
+				if err != nil {
+					fmt.Printf("Warning: could not get project info to determine session name: %v\n", err)
 				} else {
-					fmt.Println("  ✓ Session killed.")
+					sessionName := projInfo.Identifier()
+					fmt.Printf("  Killing tmux session: %s\n", sessionName)
+					cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+					if err := cmd.Run(); err != nil {
+						// This is not a fatal error; the session might already be closed.
+						fmt.Printf("  Note: could not kill tmux session (it may already be closed): %v\n", err)
+					} else {
+						fmt.Println("  ✓ Tmux session killed.")
+					}
 				}
 			}
 		}
@@ -157,4 +170,76 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// killClaudeSession kills the Claude process associated with the given job ID
+// by reading the PID from grove-hooks session metadata.
+func killClaudeSession(jobID string) error {
+	// Expand home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("get home directory: %w", err)
+	}
+
+	sessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
+
+	// Look for any session directory that contains this job ID in its metadata
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return fmt.Errorf("read sessions directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		sessionDir := filepath.Join(sessionsDir, entry.Name())
+		metadataFile := filepath.Join(sessionDir, "metadata.json")
+
+		// Read metadata to check if it matches our job ID
+		metadataBytes, err := os.ReadFile(metadataFile)
+		if err != nil {
+			continue // Skip if we can't read metadata
+		}
+
+		var metadata struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			continue // Skip if metadata is invalid
+		}
+
+		// Check if this session matches our job ID
+		if metadata.SessionID == jobID {
+			// Read the PID
+			pidFile := filepath.Join(sessionDir, "pid.lock")
+			pidBytes, err := os.ReadFile(pidFile)
+			if err != nil {
+				return fmt.Errorf("read pid file: %w", err)
+			}
+
+			pidStr := strings.TrimSpace(string(pidBytes))
+			pid, err := strconv.Atoi(pidStr)
+			if err != nil {
+				return fmt.Errorf("parse pid: %w", err)
+			}
+
+			// Check if process exists
+			process, err := os.FindProcess(pid)
+			if err != nil {
+				return fmt.Errorf("find process: %w", err)
+			}
+
+			// Send SIGTERM to gracefully terminate
+			if err := process.Signal(syscall.SIGTERM); err != nil {
+				// Process might already be dead, which is fine
+				return fmt.Errorf("kill process: %w", err)
+			}
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no session found for job ID: %s", jobID)
 }
