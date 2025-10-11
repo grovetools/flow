@@ -135,6 +135,12 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 	projectInfos := workspace.TransformToProjectInfo(result)
 
 	for _, proj := range projectInfos {
+		// Skip ecosystem worktrees to avoid duplicate plan discoveries
+		// Ecosystem worktrees share the same plans directory as their parent ecosystem
+		if proj.IsWorktree && proj.IsEcosystem {
+			continue
+		}
+
 		// Try to load the workspace's flow config
 		originalDir, _ := os.Getwd()
 		os.Chdir(proj.Path)
@@ -185,6 +191,7 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 			allSummaries = append(allSummaries, summaries...)
 		}
 	}
+
 	return allSummaries, nil
 }
 
