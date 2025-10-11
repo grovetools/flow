@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -900,45 +899,10 @@ func runJob(planDir string, job *orchestration.Job) tea.Cmd {
 
 func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan) tea.Cmd {
 	return func() tea.Msg {
-		// Create a state persister to update the job status
-		sp := orchestration.NewStatePersister()
-		
-		// Update the job status to completed
-		if err := sp.UpdateJobStatus(job, orchestration.JobStatusCompleted); err != nil {
+		// Use the shared completion function (silent mode for TUI)
+		if err := completeJob(job, plan, true); err != nil {
 			return err
 		}
-		
-		// Append transcript if it's an interactive agent job
-		if job.Type == orchestration.JobTypeInteractiveAgent {
-			if err := orchestration.AppendInteractiveTranscript(job, plan); err != nil {
-				// Return the error to be displayed by the TUI
-				return err
-			}
-		}
-		
-		// Summarize the job content if enabled
-		flowCfg, err := loadFlowConfig()
-		if err != nil {
-			// Don't fail the whole operation, just return the error to be displayed
-			return fmt.Errorf("could not load flow config for summarization: %w", err)
-		}
-		
-		if flowCfg.SummarizeOnComplete {
-			summaryCfg := orchestration.SummaryConfig{
-				Enabled:  flowCfg.SummarizeOnComplete,
-				Model:    flowCfg.SummaryModel,
-				Prompt:   flowCfg.SummaryPrompt,
-				MaxChars: flowCfg.SummaryMaxChars,
-			}
-			
-			summary, err := orchestration.SummarizeJobContent(context.Background(), job, plan, summaryCfg)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to generate summary: %v\n", err)
-			} else if summary != "" {
-				_ = orchestration.AddSummaryToJobFile(job, summary) // Ignore error in TUI for now
-			}
-		}
-		
 		return refreshMsg{} // Refresh to show the status change
 	}
 }

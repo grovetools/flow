@@ -13,6 +13,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -31,6 +32,155 @@ Examples:
   flow plan complete my-project/01-design-api.md`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPlanComplete,
+}
+
+// completeJob is the shared function that handles job completion logic
+// It can be called from both the CLI and TUI
+// Set silent=true to suppress output (useful for TUI)
+func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) error {
+	// Check current status
+	alreadyCompleted := job.Status == orchestration.JobStatusCompleted
+	if alreadyCompleted && !silent {
+		fmt.Printf("Job already completed: %s\n", job.Filename)
+		// Still need to clean up associated resources (Claude process, tmux window)
+	}
+
+	// Update status (skip if already completed)
+	oldStatus := job.Status
+	if !alreadyCompleted {
+		job.Status = orchestration.JobStatusCompleted
+
+		// Use the state persister to update the job file
+		persister := orchestration.NewStatePersister()
+		if err := persister.UpdateJobStatus(job, orchestration.JobStatusCompleted); err != nil {
+			return fmt.Errorf("update job status: %w", err)
+		}
+
+		// Append transcript if it's an interactive agent job
+		if job.Type == orchestration.JobTypeInteractiveAgent {
+			if !silent {
+				fmt.Println("Appending interactive session transcript...")
+			}
+			if err := orchestration.AppendInteractiveTranscript(job, plan); err != nil {
+				// Log warning but don't fail the command
+				if !silent {
+					fmt.Printf("Warning: failed to append transcript: %v\n", err)
+				}
+			} else if !silent {
+				fmt.Println(color.GreenString("✓") + " Appended session transcript.")
+			}
+		}
+
+		// Summarize the job content if enabled
+		flowCfg, err := loadFlowConfig()
+		if err != nil {
+			// Don't fail the command, just log a warning
+			if !silent {
+				fmt.Printf("Warning: could not load flow config for summarization: %v\n", err)
+			}
+		} else if flowCfg.SummarizeOnComplete {
+			summaryCfg := orchestration.SummaryConfig{
+				Enabled:  flowCfg.SummarizeOnComplete,
+				Model:    flowCfg.SummaryModel,
+				Prompt:   flowCfg.SummaryPrompt,
+				MaxChars: flowCfg.SummaryMaxChars,
+			}
+
+			if !silent {
+				fmt.Println("Generating job summary...")
+			}
+			summary, err := orchestration.SummarizeJobContent(context.Background(), job, plan, summaryCfg)
+			if err != nil {
+				if !silent {
+					fmt.Printf("Warning: failed to generate job summary: %v\n", err)
+				}
+			} else if summary != "" {
+				// Add summary to frontmatter
+				if err := orchestration.AddSummaryToJobFile(job, summary); err != nil {
+					if !silent {
+						fmt.Printf("Warning: failed to add summary to job file: %v\n", err)
+					}
+				} else if !silent {
+					fmt.Println(color.GreenString("✓") + " Added summary to job frontmatter.")
+				}
+			}
+		}
+	}
+
+	// If this was an interactive agent, try to kill its associated Claude process and tmux session.
+	if job.Type == orchestration.JobTypeInteractiveAgent {
+		if !silent {
+			fmt.Println("Attempting to clean up associated Claude session...")
+		}
+
+		// Kill the Claude process by reading the PID from grove-hooks session metadata
+		if err := killClaudeSession(job.ID); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not kill Claude session: %v\n", err)
+			}
+		} else if !silent {
+			fmt.Println("  ✓ Claude process killed.")
+		}
+
+		// Also kill the tmux window if worktree is specified
+		if job.Worktree != "" {
+			// Try to read the session metadata to get the working directory
+			worktreePath, err := getWorktreePathFromSession(job.ID)
+			if err != nil {
+				if !silent {
+					fmt.Printf("Warning: could not determine worktree path from session: %v\n", err)
+				}
+			} else {
+				projInfo, err := workspace.GetProjectByPath(worktreePath)
+				if err != nil {
+					if !silent {
+						fmt.Printf("Warning: could not get project info to determine session name: %v\n", err)
+					}
+				} else {
+					sessionName := projInfo.Identifier()
+					// Replicate window name logic from interactive_agent_executor
+					windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+					targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
+
+					if !silent {
+						fmt.Printf("  Closing tmux window: %s\n", targetWindow)
+					}
+					cmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
+					if err := cmd.Run(); err != nil {
+						// This is not a fatal error; the window might already be closed.
+						if !silent {
+							fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
+						}
+					} else if !silent {
+						fmt.Println("  ✓ Tmux window closed.")
+					}
+				}
+			}
+		}
+	}
+
+	// Remove lock file if it exists
+	lockFilePath := job.FilePath + ".lock"
+	os.Remove(lockFilePath) // Ignore errors - file might not exist
+
+	// Success message
+	if !silent {
+		if !alreadyCompleted {
+			fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
+			fmt.Printf("Status: %s → %s\n", oldStatus, orchestration.JobStatusCompleted)
+		} else {
+			fmt.Printf("%s Cleaned up resources for: %s\n", color.GreenString("✓"), job.Title)
+		}
+
+		// Special message for chat jobs
+		if job.Type == orchestration.JobTypeChat && !alreadyCompleted {
+			fmt.Printf("\nChat conversation ended. You can transform this chat into executable jobs using:\n")
+			fmt.Printf("  flow plan add %s --template generate-plan --prompt-file %s\n",
+				plan.Directory, job.Filename)
+		}
+	}
+
+	return nil
 }
 
 func runPlanComplete(cmd *cobra.Command, args []string) error {
@@ -63,113 +213,55 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("job not found: %s", jobFile)
 	}
 
-	// Check current status
-	if job.Status == orchestration.JobStatusCompleted {
-		fmt.Printf("Job already completed: %s\n", jobFile)
-		return nil
-	}
+	// Use the shared completion function (not silent for CLI)
+	return completeJob(job, plan, false)
+}
 
-	// Update status
-	oldStatus := job.Status
-	job.Status = orchestration.JobStatusCompleted
-
-	// Use the state persister to update the job file
-	persister := orchestration.NewStatePersister()
-	if err := persister.UpdateJobStatus(job, orchestration.JobStatusCompleted); err != nil {
-		return fmt.Errorf("update job status: %w", err)
-	}
-
-	// Append transcript if it's an interactive agent job
-	if job.Type == orchestration.JobTypeInteractiveAgent {
-		fmt.Println("Appending interactive session transcript...")
-		if err := orchestration.AppendInteractiveTranscript(job, plan); err != nil {
-			// Log warning but don't fail the command
-			fmt.Printf("Warning: failed to append transcript: %v\n", err)
-		} else {
-			fmt.Println(color.GreenString("✓") + " Appended session transcript.")
-		}
-	}
-
-	// Summarize the job content if enabled
-	flowCfg, err := loadFlowConfig()
+// getWorktreePathFromSession reads the working_directory from the session metadata.
+func getWorktreePathFromSession(jobID string) (string, error) {
+	// Expand home directory
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		// Don't fail the command, just log a warning
-		fmt.Printf("Warning: could not load flow config for summarization: %v\n", err)
-	} else if flowCfg.SummarizeOnComplete {
-		summaryCfg := orchestration.SummaryConfig{
-			Enabled:  flowCfg.SummarizeOnComplete,
-			Model:    flowCfg.SummaryModel,
-			Prompt:   flowCfg.SummaryPrompt,
-			MaxChars: flowCfg.SummaryMaxChars,
+		return "", fmt.Errorf("get home directory: %w", err)
+	}
+
+	sessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
+
+	// Look for any session directory that contains this job ID in its metadata
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return "", fmt.Errorf("read sessions directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
 
-		fmt.Println("Generating job summary...")
-		summary, err := orchestration.SummarizeJobContent(context.Background(), job, plan, summaryCfg)
+		sessionDir := filepath.Join(sessionsDir, entry.Name())
+		metadataFile := filepath.Join(sessionDir, "metadata.json")
+
+		// Read metadata to check if it matches our job ID
+		metadataBytes, err := os.ReadFile(metadataFile)
 		if err != nil {
-			fmt.Printf("Warning: failed to generate job summary: %v\n", err)
-		} else if summary != "" {
-			// Add summary to frontmatter
-			if err := orchestration.AddSummaryToJobFile(job, summary); err != nil {
-				fmt.Printf("Warning: failed to add summary to job file: %v\n", err)
-			} else {
-				fmt.Println(color.GreenString("✓") + " Added summary to job frontmatter.")
-			}
+			continue // Skip if we can't read metadata
+		}
+
+		var metadata struct {
+			SessionID        string `json:"session_id"`
+			WorkingDirectory string `json:"working_directory"`
+		}
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			continue // Skip if metadata is invalid
+		}
+
+		// Check if this session matches our job ID
+		if metadata.SessionID == jobID {
+			return metadata.WorkingDirectory, nil
 		}
 	}
 
-	// If this was an interactive agent, try to kill its associated Claude process and tmux session.
-	if job.Type == orchestration.JobTypeInteractiveAgent {
-		fmt.Println("Attempting to clean up associated Claude session...")
-
-		// Kill the Claude process by reading the PID from grove-hooks session metadata
-		if err := killClaudeSession(job.ID); err != nil {
-			fmt.Printf("  Note: could not kill Claude session: %v\n", err)
-		} else {
-			fmt.Println("  ✓ Claude process killed.")
-		}
-
-		// Also kill the tmux session if worktree is specified
-		if job.Worktree != "" {
-			// We need the git root to construct the full worktree path for the project identifier.
-			gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
-			if err != nil {
-				fmt.Printf("Warning: could not find git root to determine session name: %v\n", err)
-			} else {
-				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
-				projInfo, err := workspace.GetProjectByPath(worktreePath)
-				if err != nil {
-					fmt.Printf("Warning: could not get project info to determine session name: %v\n", err)
-				} else {
-					sessionName := projInfo.Identifier()
-					fmt.Printf("  Killing tmux session: %s\n", sessionName)
-					cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
-					if err := cmd.Run(); err != nil {
-						// This is not a fatal error; the session might already be closed.
-						fmt.Printf("  Note: could not kill tmux session (it may already be closed): %v\n", err)
-					} else {
-						fmt.Println("  ✓ Tmux session killed.")
-					}
-				}
-			}
-		}
-	}
-
-	// Remove lock file if it exists
-	lockFilePath := job.FilePath + ".lock"
-	os.Remove(lockFilePath) // Ignore errors - file might not exist
-
-	// Success message
-	fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
-	fmt.Printf("Status: %s → %s\n", oldStatus, orchestration.JobStatusCompleted)
-
-	// Special message for chat jobs
-	if job.Type == orchestration.JobTypeChat {
-		fmt.Printf("\nChat conversation ended. You can transform this chat into executable jobs using:\n")
-		fmt.Printf("  flow plan add %s --template generate-plan --prompt-file %s\n",
-			planDir, jobFile)
-	}
-
-	return nil
+	return "", fmt.Errorf("no session found for job ID: %s", jobID)
 }
 
 // killClaudeSession kills the Claude process associated with the given job ID
