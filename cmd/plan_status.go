@@ -157,7 +157,8 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 	overallStatus := "Complete"
 	if statusCounts[orchestration.JobStatusRunning] > 0 {
 		overallStatus = "In Progress"
-	} else if statusCounts[orchestration.JobStatusPending] > 0 ||
+	} else if statusCounts[orchestration.JobStatusPending] > 0 || statusCounts[orchestration.JobStatusTodo] > 0 ||
+		statusCounts[orchestration.JobStatusHold] > 0 ||
 		statusCounts[orchestration.JobStatusPendingUser] > 0 ||
 		statusCounts[orchestration.JobStatusPendingLLM] > 0 {
 		overallStatus = "Ready"
@@ -198,6 +199,20 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 			colorizeStatus(orchestration.JobStatusRunning),
 			color.YellowString("Running"),
 			statusCounts[orchestration.JobStatusRunning])
+	}
+
+	if statusCounts[orchestration.JobStatusTodo] > 0 {
+		fmt.Fprintf(writer, "%s %s: %d\n",
+			colorizeStatus(orchestration.JobStatusTodo),
+			color.HiBlackString("Todo"),
+			statusCounts[orchestration.JobStatusTodo])
+	}
+
+	if statusCounts[orchestration.JobStatusHold] > 0 {
+		fmt.Fprintf(writer, "%s %s: %d\n",
+			colorizeStatus(orchestration.JobStatusHold),
+			color.YellowString("On Hold"),
+			statusCounts[orchestration.JobStatusHold])
 	}
 
 	if statusCounts[orchestration.JobStatusPending] > 0 {
@@ -247,6 +262,13 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 			colorizeStatus(orchestration.JobStatus("interrupted")),
 			color.RedString("Interrupted"),
 			statusCounts[orchestration.JobStatus("interrupted")])
+	}
+
+	if statusCounts[orchestration.JobStatusAbandoned] > 0 {
+		fmt.Fprintf(writer, "%s %s: %d\n",
+			colorizeStatus(orchestration.JobStatusAbandoned),
+			color.HiBlackString("Abandoned"),
+			statusCounts[orchestration.JobStatusAbandoned])
 	}
 
 	return buf.String()
@@ -517,6 +539,12 @@ func colorizeStatus(status orchestration.JobStatus) string {
 		return color.YellowString("🤖")
 	case "interrupted": // Jobs that were running but process is dead
 		return color.RedString("💔")
+	case orchestration.JobStatusTodo:
+		return color.BlueString("📝")
+	case orchestration.JobStatusHold:
+		return color.YellowString("⏸")
+	case orchestration.JobStatusAbandoned:
+		return color.HiBlackString("🗑️")
 	default: // Pending
 		return "⏳"
 	}

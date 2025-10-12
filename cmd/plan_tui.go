@@ -536,17 +536,19 @@ func (m planListTUIModel) formatStatusWithEmoji(plan PlanListItem) string {
 
 	// Count different status types
 	completed := plan.StatusParts["completed"]
-	running := plan.StatusParts["running"] 
+	running := plan.StatusParts["running"]
 	pending := plan.StatusParts["pending"]
 	failed := plan.StatusParts["failed"]
 	blocked := plan.StatusParts["blocked"]
+	hold := plan.StatusParts["hold"]
+	abandoned := plan.StatusParts["abandoned"]
 
 	// Build status string with emojis
 	var parts []string
 	var emoji string
 
 	// Determine primary emoji based on dominant status
-	if failed > 0 || blocked > 0 {
+	if failed > 0 || blocked > 0 || abandoned > 0 {
 		emoji = "❌"
 	} else if running > 0 {
 		if completed > 0 || pending > 0 {
@@ -556,6 +558,8 @@ func (m planListTUIModel) formatStatusWithEmoji(plan PlanListItem) string {
 		}
 	} else if completed > 0 && pending > 0 {
 		emoji = "🚧" // mixed completed and pending
+	} else if hold > 0 {
+		emoji = "⏸" // on hold
 	} else if completed > 0 {
 		emoji = "✓" // all completed
 	} else {
@@ -577,6 +581,9 @@ func (m planListTUIModel) formatStatusWithEmoji(plan PlanListItem) string {
 	}
 	if blocked > 0 {
 		parts = append(parts, fmt.Sprintf("%d blocked", blocked))
+	}
+	if hold > 0 {
+		parts = append(parts, fmt.Sprintf("%d on hold", hold))
 	}
 
 	statusText := emoji + " " + strings.Join(parts, ", ")
@@ -729,7 +736,7 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 						statusStrParts = append(statusStrParts, fmt.Sprintf("%d running", c))
 						statusParts["running"] = c
 					}
-					if c := statusCounts[orchestration.JobStatusPending] + statusCounts[orchestration.JobStatusPendingUser]; c > 0 {
+					if c := statusCounts[orchestration.JobStatusPending] + statusCounts[orchestration.JobStatusPendingUser] + statusCounts[orchestration.JobStatusTodo]; c > 0 {
 						statusStrParts = append(statusStrParts, fmt.Sprintf("%d pending", c))
 						statusParts["pending"] = c
 					}
@@ -740,6 +747,14 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 					if c := statusCounts[orchestration.JobStatusBlocked]; c > 0 {
 						statusStrParts = append(statusStrParts, fmt.Sprintf("%d blocked", c))
 						statusParts["blocked"] = c
+					}
+					if c := statusCounts[orchestration.JobStatusHold]; c > 0 {
+						statusStrParts = append(statusStrParts, fmt.Sprintf("%d on hold", c))
+						statusParts["hold"] = c
+					}
+					if c := statusCounts[orchestration.JobStatusAbandoned]; c > 0 {
+						statusStrParts = append(statusStrParts, fmt.Sprintf("%d abandoned", c))
+						statusParts["abandoned"] = c
 					}
 
 					item.StatusParts = statusParts

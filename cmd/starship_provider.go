@@ -20,6 +20,9 @@ type PlanStatistics struct {
 	Running   int
 	Pending   int
 	Failed    int
+	Todo      int
+	Hold      int
+	Abandoned int
 	Total     int
 }
 
@@ -40,6 +43,12 @@ func GetPlanStatistics(plan *orchestration.Plan) PlanStatistics {
 			stats.Pending++
 		case orchestration.JobStatusFailed:
 			stats.Failed++
+		case orchestration.JobStatusTodo:
+			stats.Todo++
+		case orchestration.JobStatusHold:
+			stats.Hold++
+		case orchestration.JobStatusAbandoned:
+			stats.Abandoned++
 		}
 	}
 
@@ -132,6 +141,16 @@ func FlowStatusProvider(s state.State) (string, error) {
 			// Pink for failed (X mark)
 			style := lipgloss.NewStyle().Foreground(theme.Pink)
 			statsParts = append(statsParts, style.Render(fmt.Sprintf("✗ %d", stats.Failed)))
+		}
+		if stats.Todo > 0 {
+			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("📝 %d", stats.Todo)))
+		}
+		if stats.Hold > 0 {
+			style := lipgloss.NewStyle().Foreground(theme.Yellow)
+			statsParts = append(statsParts, style.Render(fmt.Sprintf("⏸ %d", stats.Hold)))
+		}
+		if stats.Abandoned > 0 {
+			statsParts = append(statsParts, theme.DefaultTheme.Faint.Render(fmt.Sprintf("🗑️ %d", stats.Abandoned)))
 		}
 
 		// Add WT indicator if in worktree

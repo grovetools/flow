@@ -26,6 +26,7 @@ type statusTUIKeyMap struct {
 	Edit          key.Binding
 	Run           key.Binding
 	SetCompleted  key.Binding
+	SetStatus     key.Binding
 	AddJob        key.Binding
 	Implement     key.Binding
 	ToggleSummaries key.Binding
@@ -61,6 +62,10 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 		SetCompleted: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "mark completed"),
+		),
+		SetStatus: key.NewBinding(
+			key.WithKeys("S"),
+			key.WithHelp("S", "set status"),
 		),
 		AddJob: key.NewBinding(
 			key.WithKeys("n"),
@@ -117,6 +122,7 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.Run,
 			k.Edit,
 			k.SetCompleted,
+			k.SetStatus,
 			k.AddJob,
 			k.Implement,
 			k.Archive,
@@ -143,6 +149,8 @@ type statusTUIModel struct {
 	width         int
 	height        int
 	confirmArchive bool  // Show archive confirmation
+	showStatusPicker bool // Show status picker
+	statusPickerCursor int // Cursor position in status picker
 	planDir       string // Store plan directory for refresh
 	keyMap        statusTUIKeyMap
 	help          help.Model
@@ -170,6 +178,10 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 		orchestration.JobStatusPendingLLM: lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue),
 		// Pending: Muted gray for both dot and text
 		orchestration.JobStatusPending: theme.DefaultTheme.Muted,
+		// New statuses
+		orchestration.JobStatusTodo:      theme.DefaultTheme.Muted,
+		orchestration.JobStatusHold:      lipgloss.NewStyle().Foreground(theme.DefaultColors.Yellow),
+		orchestration.JobStatusAbandoned: theme.DefaultTheme.Faint,
 	}
 }
 
@@ -423,7 +435,50 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Handle confirmation dialog first
+		// Handle status picker first
+		if m.showStatusPicker {
+			switch msg.String() {
+			case "up", "k":
+				if m.statusPickerCursor > 0 {
+					m.statusPickerCursor--
+				}
+				return m, nil
+			case "down", "j":
+				if m.statusPickerCursor < 8 { // 9 status options (0-8)
+					m.statusPickerCursor++
+				}
+				return m, nil
+			case "enter":
+				m.showStatusPicker = false
+				if m.cursor < len(m.jobs) {
+					job := m.jobs[m.cursor]
+					statuses := []orchestration.JobStatus{
+						orchestration.JobStatusPending,
+						orchestration.JobStatusTodo,
+						orchestration.JobStatusHold,
+						orchestration.JobStatusRunning,
+						orchestration.JobStatusCompleted,
+						orchestration.JobStatusFailed,
+						orchestration.JobStatusBlocked,
+						orchestration.JobStatusNeedsReview,
+						orchestration.JobStatusAbandoned,
+					}
+					return m, tea.Sequence(
+						setJobStatus(job, m.plan, statuses[m.statusPickerCursor]),
+						refreshPlan(m.planDir),
+					)
+				}
+				return m, nil
+			case "esc", "ctrl+c", "q", "b":
+				m.showStatusPicker = false
+				return m, nil
+			default:
+				// Any other key while status picker is open - just consume it
+				return m, nil
+			}
+		}
+
+		// Handle confirmation dialog
 		if m.confirmArchive {
 			switch msg.String() {
 			case "y", "Y":
@@ -538,6 +593,12 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 			}
 
+		case key.Matches(msg, m.keyMap.SetStatus):
+			if m.cursor < len(m.jobs) {
+				m.showStatusPicker = true
+				m.statusPickerCursor = 0
+			}
+
 		case key.Matches(msg, m.keyMap.AddJob):
 			if m.multiSelect && len(m.selected) > 0 {
 				// Get selected job IDs for dependencies
@@ -573,6 +634,11 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m statusTUIModel) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n", m.err)
+	}
+
+	// Show status picker if active
+	if m.showStatusPicker {
+		return m.renderStatusPicker()
 	}
 
 	// Show help if active
@@ -833,6 +899,14 @@ func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 		// Pending, PendingUser, PendingLLM, NeedsReview
 		icon = "○" // Hollow circle
 	}
+	// New statuses
+	if status == orchestration.JobStatusTodo {
+		icon = "○" // Same as pending
+	} else if status == orchestration.JobStatusHold {
+		icon = "⏸" // Pause symbol
+	} else if status == orchestration.JobStatusAbandoned {
+		icon = "-" // Dash for abandoned
+	}
 
 	// Use the status style to color the icon
 	if s, ok := statusStyles[status]; ok {
@@ -905,6 +979,90 @@ func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan) tea.Cmd {
 		}
 		return refreshMsg{} // Refresh to show the status change
 	}
+}
+
+func setJobStatus(job *orchestration.Job, plan *orchestration.Plan, status orchestration.JobStatus) tea.Cmd {
+	return func() tea.Msg {
+		sp := orchestration.NewStatePersister()
+		if err := sp.UpdateJobStatus(job, status); err != nil {
+			return err
+		}
+		return refreshMsg{} // Refresh to show the status change
+	}
+}
+
+func (m statusTUIModel) renderStatusPicker() string {
+	t := theme.DefaultTheme
+
+	statusOptions := []struct {
+		status orchestration.JobStatus
+		label  string
+		icon   string
+	}{
+		{orchestration.JobStatusPending, "Pending", "⏳"},
+		{orchestration.JobStatusTodo, "Todo", "📝"},
+		{orchestration.JobStatusHold, "On Hold", "⏸"},
+		{orchestration.JobStatusRunning, "Running", "⚡"},
+		{orchestration.JobStatusCompleted, "Completed", "✓"},
+		{orchestration.JobStatusFailed, "Failed", "✗"},
+		{orchestration.JobStatusBlocked, "Blocked", "🚫"},
+		{orchestration.JobStatusNeedsReview, "Needs Review", "👁"},
+		{orchestration.JobStatusAbandoned, "Abandoned", "🗑️"},
+	}
+
+	var lines []string
+
+	// Add title
+	if m.cursor < len(m.jobs) {
+		job := m.jobs[m.cursor]
+		title := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(theme.DefaultColors.Cyan).
+			Render(fmt.Sprintf("Set Status for: %s", job.Filename))
+		lines = append(lines, title)
+		lines = append(lines, "")
+	}
+
+	// Add status options
+	for i, opt := range statusOptions {
+		prefix := "  "
+		var style lipgloss.Style
+
+		if i == m.statusPickerCursor {
+			prefix = "▸ "
+			style = lipgloss.NewStyle().
+				Foreground(theme.DefaultColors.Cyan).
+				Bold(true).
+				Background(theme.DefaultColors.SubtleBackground)
+		} else {
+			style = t.Muted
+		}
+
+		line := fmt.Sprintf("%s%s %s", prefix, opt.icon, opt.label)
+		lines = append(lines, style.Render(line))
+	}
+
+	lines = append(lines, "")
+
+	// Add help text at bottom
+	help := lipgloss.NewStyle().
+		Foreground(theme.DefaultColors.MutedText).
+		Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
+	lines = append(lines, help)
+
+	content := strings.Join(lines, "\n")
+
+	// Wrap in a box with border
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Border).
+		Padding(1, 2).
+		Render(content)
+
+	// Add margin to position it slightly from the edge
+	return lipgloss.NewStyle().
+		Margin(1, 2).
+		Render(box)
 }
 
 func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {

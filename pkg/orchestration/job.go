@@ -14,6 +14,9 @@ const (
 	JobStatusNeedsReview JobStatus = "needs_review"
 	JobStatusPendingUser JobStatus = "pending_user"
 	JobStatusPendingLLM  JobStatus = "pending_llm"
+	JobStatusHold        JobStatus = "hold"
+	JobStatusTodo        JobStatus = "todo"
+	JobStatusAbandoned   JobStatus = "abandoned"
 )
 
 // JobType represents the type of job execution.
