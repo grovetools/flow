@@ -895,17 +895,15 @@ func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 		icon = "◐" // Half-filled circle
 	case orchestration.JobStatusFailed, orchestration.JobStatusBlocked:
 		icon = "✗" // X mark
+	case orchestration.JobStatusTodo:
+		icon = "📝" // Todo icon
+	case orchestration.JobStatusHold:
+		icon = "⏸" // Pause symbol
+	case orchestration.JobStatusAbandoned:
+		icon = "-" // Dash for abandoned
 	default:
 		// Pending, PendingUser, PendingLLM, NeedsReview
 		icon = "○" // Hollow circle
-	}
-	// New statuses
-	if status == orchestration.JobStatusTodo {
-		icon = "○" // Same as pending
-	} else if status == orchestration.JobStatusHold {
-		icon = "⏸" // Pause symbol
-	} else if status == orchestration.JobStatusAbandoned {
-		icon = "-" // Dash for abandoned
 	}
 
 	// Use the status style to color the icon
