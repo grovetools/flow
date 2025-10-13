@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"github.com/mattsolo1/grove-core/util/sanitize"
 	"context"
 	"fmt"
 	"os"
@@ -11,10 +10,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/state"
-	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
@@ -768,67 +765,6 @@ func copyFile(src, dst string) error {
 	}
 
 	return nil
-}
-
-// launchWorktreeSession is a helper to launch a tmux session for a worktree with container support, adapted from plan_launch and chat_launch.
-// This is kept for backward compatibility with agent launch commands that require containers.
-func launchWorktreeSession(ctx context.Context, worktreeName string, agentCommand string) error {
-	// Load configuration
-	flowCfg, err := loadFlowConfig()
-	if err != nil {
-		return err
-	}
-	fullCfg, err := loadFullConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	container := flowCfg.TargetAgentContainer
-	if container == "" {
-		return fmt.Errorf("'flow.target_agent_container' is not set in your grove.yml")
-	}
-
-	// Get git root
-	gitRoot, err := git.GetGitRoot(".")
-	if err != nil {
-		return fmt.Errorf("could not find git root: %w", err)
-	}
-
-	// Prepare the worktree using the centralized helper
-	opts := workspace.PrepareOptions{
-		GitRoot:      gitRoot,
-		WorktreeName: worktreeName,
-		BranchName:   worktreeName,
-		PlanName:     worktreeName,
-	}
-
-	worktreePath, err := workspace.Prepare(ctx, opts)
-	if err != nil {
-		return fmt.Errorf("failed to prepare worktree: %w", err)
-	}
-
-	// Prepare launch parameters
-	repoName := filepath.Base(gitRoot)
-	sessionTitle := sanitize.SanitizeForTmuxSession(worktreeName)
-	params := LaunchParameters{
-		SessionName:      fmt.Sprintf("%s__%s", repoName, sessionTitle),
-		Container:        container,
-		HostWorktreePath: worktreePath,
-		AgentCommand:     agentCommand,
-	}
-
-	// Calculate container work directory
-	relPath, err := filepath.Rel(gitRoot, worktreePath)
-	if err != nil {
-		return fmt.Errorf("failed to calculate relative path: %w", err)
-	}
-	if fullCfg.Agent.MountWorkspaceAtHostPath {
-		params.ContainerWorkDir = filepath.Join(gitRoot, relPath)
-	} else {
-		params.ContainerWorkDir = filepath.Join("/workspace", repoName, relPath)
-	}
-
-	executor := &exec.RealCommandExecutor{}
-	return LaunchTmuxSession(executor, params)
 }
 
 // createWorktreeIfRequested creates a git worktree with the given name

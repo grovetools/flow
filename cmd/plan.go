@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"

@@ -105,25 +105,27 @@ func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
 }
 
 // removeLinkedSubmoduleWorktrees removes linked worktrees from submodule source repositories
-func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string) error {
+func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string, provider *workspace.Provider) error {
 	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 	gitmodulesPath := filepath.Join(worktreePath, ".gitmodules")
-	
+
 	// Check if .gitmodules exists
 	if _, err := os.Stat(gitmodulesPath); os.IsNotExist(err) {
 		// No submodules to clean up
 		return nil
 	}
-	
+
 	// Parse .gitmodules
 	submodulePaths, err := parseGitmodules(gitmodulesPath)
 	if err != nil {
 		return fmt.Errorf("failed to parse .gitmodules: %w", err)
 	}
-	
+
 	// Discover local workspaces
-	localWorkspaces, err := workspace.DiscoverLocalWorkspaces(ctx)
-	if err != nil {
+	var localWorkspaces map[string]string
+	if provider != nil {
+		localWorkspaces = provider.LocalWorkspaces()
+	} else {
 		// If we can't discover workspaces, we can't clean up linked worktrees
 		// but this shouldn't fail the entire cleanup
 		return nil
@@ -230,6 +232,17 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		gitRoot = "" // Continue without git-related actions
 	}
 
+	// Create a workspace provider for efficient lookups
+	discoveryService := workspace.NewDiscoveryService(nil) // logger is optional
+	discoveryResult, err := discoveryService.DiscoverAll()
+	if err != nil {
+		fmt.Printf("Warning: failed to discover workspaces for cleanup: %v\n", err)
+	}
+	var provider *workspace.Provider
+	if discoveryResult != nil {
+		provider = workspace.NewProvider(discoveryResult)
+	}
+
 	worktreeName := ""
 	if plan.Config != nil {
 		worktreeName = plan.Config.Worktree
@@ -282,10 +295,10 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			}
 
 			// Discover local workspaces and check status of each repo
-			localWorkspaces, err := workspace.DiscoverLocalWorkspaces(context.Background())
-			if err != nil {
-				return color.YellowString("Available"), nil // Still show as available even if we can't check
+			if provider == nil {
+				return color.YellowString("Available (discovery failed)"), nil
 			}
+			localWorkspaces := provider.LocalWorkspaces()
 
 			totalRepos := len(workspaceConfig.Repos)
 			needsMerge := 0
@@ -420,10 +433,10 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				fmt.Printf("    Merging/fast-forwarding submodule branches to main...\n")
 
 				// Discover local workspaces
-				localWorkspaces, err := workspace.DiscoverLocalWorkspaces(context.Background())
-				if err != nil {
-					return fmt.Errorf("failed to discover local workspaces: %w", err)
+				if provider == nil {
+					return fmt.Errorf("cannot merge submodules; workspace discovery failed")
 				}
+				localWorkspaces := provider.LocalWorkspaces()
 
 				hasErrors := false
 				for _, repoName := range workspaceConfig.Repos {
@@ -573,7 +586,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				
 				// Check if this is an ecosystem worktree (has repos configuration)
 				if plan.Config != nil && len(plan.Config.Repos) > 0 {
-					return cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos)
+					return cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos, provider)
 				}
 				
 				// Check if worktree has submodules
@@ -584,7 +597,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				
 				// First, remove any linked submodule worktrees
 				if hasSubmodules {
-					if err := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName); err != nil {
+					if err := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider); err != nil {
 						fmt.Printf("    Warning: failed to remove linked submodule worktrees: %v\n", err)
 					}
 				}
@@ -664,10 +677,15 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				if _, err := os.Stat(gitmodulesPath); err == nil {
 					// Parse .gitmodules
 					submodulePaths, _ := parseGitmodules(gitmodulesPath)
-					
+
 					// Discover local workspaces
-					localWorkspaces, _ := workspace.DiscoverLocalWorkspaces(context.Background())
-					
+					var localWorkspaces map[string]string
+					if provider != nil {
+						localWorkspaces = provider.LocalWorkspaces()
+					} else {
+						localWorkspaces = make(map[string]string)
+					}
+
 					// Delete branches and worktrees from repositories
 					for submoduleName, submodulePath := range submodulePaths {
 						worktreePath := filepath.Join(gitRoot, ".grove-worktrees", branchName, submodulePath)
@@ -1104,14 +1122,17 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 }
 
 // cleanupEcosystemWorktree removes an ecosystem worktree by cleaning up individual repo worktrees
-func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string) error {
+func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider) error {
 	ecosystemDir := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 	fmt.Printf("    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
-	
+
 	// Discover local workspace paths
-	localWorkspaces, err := workspace.DiscoverLocalWorkspaces(ctx)
-	if err != nil {
-		fmt.Printf("    Warning: failed to discover local workspaces: %v\n", err)
+	var localWorkspaces map[string]string
+	if provider != nil {
+		localWorkspaces = provider.LocalWorkspaces()
+	} else {
+		fmt.Printf("    Warning: workspace discovery failed, cannot clean up submodule branches\n")
+		localWorkspaces = make(map[string]string)
 	}
 
 	// Remove individual repo worktrees and delete branches

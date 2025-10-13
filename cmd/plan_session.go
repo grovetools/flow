@@ -38,8 +38,8 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 
 	// If gitRoot is itself a worktree, use the centralized logic to find the actual main repository root
 	gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
-	if err == nil && gitRootInfo.IsWorktree && gitRootInfo.ParentPath != "" {
-		gitRoot = gitRootInfo.ParentPath
+	if err == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
+		gitRoot = gitRootInfo.ParentProjectPath
 	}
 
 	// Check if we're already in the target worktree
@@ -224,8 +224,8 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 
 	// If gitRoot is itself a worktree, resolve to the parent repository
 	gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
-	if err == nil && gitRootInfo.IsWorktree && gitRootInfo.ParentPath != "" {
-		gitRoot = gitRootInfo.ParentPath
+	if err == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
+		gitRoot = gitRootInfo.ParentProjectPath
 	}
 
 	// Generate session name using the project identifier

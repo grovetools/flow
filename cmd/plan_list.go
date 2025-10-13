@@ -132,28 +132,28 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover workspaces: %w", err)
 	}
-	projectInfos := workspace.TransformToProjectInfo(result)
+	nodes := workspace.TransformToWorkspaceNodes(result)
 
-	for _, proj := range projectInfos {
+	for _, node := range nodes {
 		// Skip ecosystem worktrees to avoid duplicate plan discoveries
 		// Ecosystem worktrees share the same plans directory as their parent ecosystem
-		if proj.IsWorktree && proj.IsEcosystem {
+		if node.IsWorktree() && node.IsEcosystem() {
 			continue
 		}
 
 		// Try to load the workspace's flow config
 		originalDir, _ := os.Getwd()
-		os.Chdir(proj.Path)
+		os.Chdir(node.Path)
 		flowCfg, err := loadFlowConfig()
 		os.Chdir(originalDir)
 
 		if err != nil || flowCfg.PlansDirectory == "" {
 			// Fall back to convention: look for a 'plans' directory
-			plansDir := filepath.Join(proj.Path, "plans")
+			plansDir := filepath.Join(node.Path, "plans")
 			if _, err := os.Stat(plansDir); os.IsNotExist(err) {
 				continue
 			}
-			summaries, err := findPlansInDir(plansDir, proj.Name, proj.Path)
+			summaries, err := findPlansInDir(plansDir, node.Name, node.Path)
 			if err == nil {
 				allSummaries = append(allSummaries, summaries...)
 			}
@@ -162,9 +162,9 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 
 		// Use the configured plans directory
 		basePath := flowCfg.PlansDirectory
-		// Handle relative paths by making them relative to proj.Path
+		// Handle relative paths by making them relative to node.Path
 		if !filepath.IsAbs(basePath) {
-			basePath = filepath.Join(proj.Path, basePath)
+			basePath = filepath.Join(node.Path, basePath)
 		}
 		// Expand ~ and git variables relative to the workspace
 		if strings.HasPrefix(basePath, "~/") {
@@ -174,7 +174,7 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 		// Replace git variables
 		if strings.Contains(basePath, "${REPO}") || strings.Contains(basePath, "{{REPO}}") ||
 		   strings.Contains(basePath, "${BRANCH}") || strings.Contains(basePath, "{{BRANCH}}") {
-			os.Chdir(proj.Path)
+			os.Chdir(node.Path)
 			expandedPath, err := expandPath(flowCfg.PlansDirectory)
 			os.Chdir(originalDir)
 			if err == nil {
@@ -186,7 +186,7 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 			continue
 		}
 
-		summaries, err := findPlansInDir(basePath, proj.Name, proj.Path)
+		summaries, err := findPlansInDir(basePath, node.Name, node.Path)
 		if err == nil {
 			allSummaries = append(allSummaries, summaries...)
 		}

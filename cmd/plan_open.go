@@ -1,15 +1,9 @@
 package cmd
 
 import (
-	"github.com/mattsolo1/grove-core/util/sanitize"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -70,70 +64,26 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf(errorMsg.String())
 	}
 
-	// The new core logic:
-	logger := grovelogging.NewPrettyLogger()
-	logger.InfoPretty(fmt.Sprintf("Delegating to 'grove ws open %s'...", worktreeName))
-
-	// Check if grove-meta is available
-	if _, err := exec.LookPath("grove"); err != nil {
-		return fmt.Errorf("failed to open workspace session: 'grove' command not found in PATH. Please ensure grove-meta is installed")
+	// Create a minimal plan object for the session helper.
+	planForSession := &orchestration.Plan{
+		Name:      plan.Name,
+		Directory: plan.Directory,
 	}
 
-	execCmd := exec.Command("grove", "ws", "open", worktreeName)
-	execCmd.Stdin = os.Stdin
-	execCmd.Stdout = os.Stdout
-	execCmd.Stderr = os.Stderr
+	// The command to run after setting the active plan in the new session.
+	// This provides a good user experience by showing the plan's status.
+	commandToRun := []string{"flow", "plan", "status", "-t"}
 
-	err = execCmd.Run()
+	// Call the session helper.
+	err = CreateOrSwitchToWorktreeSessionAndRunCommand(
+		cmd.Context(),
+		planForSession,
+		worktreeName,
+		commandToRun,
+	)
 	if err != nil {
-		// Provide more informative error message
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 127 {
-				return fmt.Errorf("failed to open workspace session for '%s': 'grove' command not found. Please ensure grove-meta is installed and in your PATH", worktreeName)
-			}
-			return fmt.Errorf("failed to open workspace session for '%s': command exited with code %d. Please ensure the workspace exists. You can create it with: grove ws create %s", worktreeName, exitErr.ExitCode(), worktreeName)
-		}
-		return fmt.Errorf("failed to open workspace session for '%s'. Please ensure grove-meta is installed and the workspace exists. Error: %w", worktreeName, err)
-	}
-
-	// Add convenience features: set active plan and run status TUI
-	if err := setupPlanConveniences(worktreeName, plan.Directory); err != nil {
-		// Don't fail the whole command if conveniences fail
-		fmt.Printf("Note: %v\n", err)
+		return fmt.Errorf("failed to open workspace session for '%s': %w", worktreeName, err)
 	}
 
 	return nil
-}
-
-// setupPlanConveniences sets up convenience features in the tmux session
-func setupPlanConveniences(worktreeName, planDirectory string) error {
-	sessionName := sanitize.SanitizeForTmuxSession(worktreeName)
-	targetPane := fmt.Sprintf("%s:workspace", sessionName)
-	
-	// Small delay to let the session initialize
-	time.Sleep(500 * time.Millisecond)
-
-	// Set the active plan by updating the state file in the worktree
-	planName := filepath.Base(planDirectory)
-	setPlanCmd := fmt.Sprintf("flow plan set %s", planName)
-	if err := execTmuxSendKeys(targetPane, setPlanCmd); err != nil {
-		return fmt.Errorf("failed to set active plan: %w", err)
-	}
-
-	// Small delay to let the set command complete
-	time.Sleep(300 * time.Millisecond)
-
-	// Run flow plan status -t (will use the active plan)
-	statusCmd := "flow plan status -t"
-	if err := execTmuxSendKeys(targetPane, statusCmd); err != nil {
-		return fmt.Errorf("failed to run status TUI: %w", err)
-	}
-
-	return nil
-}
-
-// execTmuxSendKeys is a helper to send commands to tmux
-func execTmuxSendKeys(targetPane, command string) error {
-	cmd := exec.Command("tmux", "send-keys", "-t", targetPane, command, "C-m")
-	return cmd.Run()
 }

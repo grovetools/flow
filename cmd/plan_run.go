@@ -159,8 +159,8 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		// If gitRoot is itself a worktree, resolve to the parent repository
 		if gitRoot != "" {
 			gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
-			if err == nil && gitRootInfo.IsWorktree && gitRootInfo.ParentPath != "" {
-				gitRoot = gitRootInfo.ParentPath
+			if err == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
+				gitRoot = gitRootInfo.ParentProjectPath
 			}
 		}
 
