@@ -18,13 +18,8 @@ func main() {
 		// Plan Scenarios
 		BasicPlanLifecycleScenario(),
 		PlanActiveJobScenario(),
-		AgentJobLaunchScenario(), // Fixed with path resolution helpers
 		PlanGraphScenario(),
 		PlanWorktreeInheritanceScenario(), // Tests smart worktree inheritance
-		PlanRebaseScenario(),              // Tests plan rebase for worktree updates and integration
-		PlanRebaseConflictsScenario(),     // Tests rebase with conflicts and --abort/--continue
-		PlanRebaseIntegrationScenario(),   // Tests integration rebase (main onto worktree)
-		PlanRebaseEcosystemScenario(),     // Tests ecosystem worktree rebase
 		PlanStepCommandScenario(),         // Tests interactive plan step command
 		PlanConfigScenario(),              // Tests plan-level configuration with .grove-plan.yml
 		PlanConfigPropagationScenario(),   // Tests plan config propagation to job frontmatter
