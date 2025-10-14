@@ -105,8 +105,14 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Create the actual worktree if requested
 	if worktreeToSet != "" {
-		if err := createWorktreeIfRequested(worktreeToSet); err != nil {
+		worktreePath, err := createWorktreeIfRequested(worktreeToSet, cmd.Repos)
+		if err != nil {
 			return "", err
+		}
+
+		// After creating the worktree(s), apply default context rules.
+		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
+			fmt.Printf("⚠️  Warning: could not apply default context rules: %v\n", err)
 		}
 	}
 
@@ -356,8 +362,14 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// Create the actual worktree if requested
 	if worktreeOverride != "" {
-		if err := createWorktreeIfRequested(worktreeOverride); err != nil {
+		worktreePath, err := createWorktreeIfRequested(worktreeOverride, cmd.Repos)
+		if err != nil {
 			return err
+		}
+
+		// After creating the worktree(s), apply default context rules.
+		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
+			fmt.Printf("⚠️  Warning: could not apply default context rules: %v\n", err)
 		}
 	}
 
@@ -767,23 +779,75 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
+// applyDefaultContextRulesToWorktree applies default context rules to a worktree.
+// It detects whether the worktree is a single-repo or ecosystem worktree and applies
+// rules accordingly.
+func applyDefaultContextRulesToWorktree(worktreePath string, explicitRepos []string) error {
+	// Determine which repos to apply rules to
+	var reposToProcess []string
+
+	if len(explicitRepos) > 0 {
+		// Use explicitly specified repos
+		reposToProcess = explicitRepos
+	} else {
+		// Auto-detect ecosystem repos by checking for subdirectories with grove.yml
+		entries, err := os.ReadDir(worktreePath)
+		if err != nil {
+			return fmt.Errorf("failed to read worktree directory: %w", err)
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+
+			// Check if this directory has a grove.yml file (indicating it's a Grove repo)
+			groveYmlPath := filepath.Join(worktreePath, entry.Name(), "grove.yml")
+			if _, err := os.Stat(groveYmlPath); err == nil {
+				reposToProcess = append(reposToProcess, entry.Name())
+			}
+		}
+	}
+
+	// Apply rules based on what we found
+	if len(reposToProcess) > 0 {
+		// Ecosystem worktree: apply rules to each sub-repo
+		fmt.Println("Applying default context rules to ecosystem sub-projects...")
+		for _, repoName := range reposToProcess {
+			subRepoPath := filepath.Join(worktreePath, repoName)
+			if err := configureDefaultContextRules(subRepoPath); err != nil {
+				// Non-fatal warning for individual repos
+				fmt.Printf("⚠️  Warning: could not apply default rules to '%s': %v\n", repoName, err)
+			}
+		}
+	} else {
+		// Single-repo worktree
+		if err := configureDefaultContextRules(worktreePath); err != nil {
+			return fmt.Errorf("could not apply default context rules: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // createWorktreeIfRequested creates a git worktree with the given name
-func createWorktreeIfRequested(worktreeName string) error {
+func createWorktreeIfRequested(worktreeName string, repos []string) (string, error) {
 	gitRoot, err := orchestration.GetGitRootSafe(".")
 	if err != nil {
-		return fmt.Errorf("failed to find git root: %w", err)
+		return "", fmt.Errorf("failed to find git root: %w", err)
 	}
-	
+
 	opts := workspace.PrepareOptions{
 		GitRoot:      gitRoot,
 		WorktreeName: worktreeName,
 		BranchName:   worktreeName,
+		Repos:        repos,
 	}
-	
-	_, err = workspace.Prepare(context.Background(), opts)
+
+	worktreePath, err := workspace.Prepare(context.Background(), opts)
 	if err != nil {
-		return fmt.Errorf("failed to create worktree: %w", err)
+		return "", fmt.Errorf("failed to create worktree: %w", err)
 	}
-	
-	return nil
+
+	return worktreePath, nil
 }

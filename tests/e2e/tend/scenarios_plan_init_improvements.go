@@ -434,3 +434,125 @@ This is the specification for my new feature.
 		},
 	}
 }
+
+// PlanInitContextRulesScenario tests that default context rules are applied on plan init.
+func PlanInitContextRulesScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "flow-plan-init-context-rules",
+		Description: "Tests that default context rules are applied to new worktrees during plan init",
+		Tags:        []string{"plan", "init", "context", "rules"},
+		Steps: []harness.Step{
+			// Step 1: Setup project with default context rules defined in grove.yml
+			harness.NewStep("Setup project with default context rules in grove.yml", func(ctx *harness.Context) error {
+				git.Init(ctx.RootDir)
+				git.SetupTestConfig(ctx.RootDir)
+				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
+				git.Add(ctx.RootDir, ".")
+				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Create grove.yml with context.default_rules_path
+				groveConfig := `name: test-project
+flow:
+  plans_directory: ./plans
+context:
+  default_rules_path: .grove/default.rules
+`
+				if err := fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig); err != nil {
+					return err
+				}
+
+				// Create the default rules file that grove.yml points to
+				defaultRulesContent := `# Default rules from grove.yml
+*.go
+!*_test.go
+`
+				return fs.WriteString(filepath.Join(ctx.RootDir, ".grove", "default.rules"), defaultRulesContent)
+			}),
+
+			// Step 2: Initialize a plan with a worktree
+			harness.NewStep("Initialize plan with worktree", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "init", "context-rules-test", "--worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("plan init failed: %w", result.Error)
+				}
+
+				// Verify the output mentions applying rules
+				if !strings.Contains(result.Stdout, "Applied default context rules to:") {
+					return fmt.Errorf("expected output to mention applying default context rules")
+				}
+				return nil
+			}),
+
+			// Step 3: Verify the worktree contains the correct default rules
+			harness.NewStep("Verify worktree contains default rules", func(ctx *harness.Context) error {
+				worktreePath := filepath.Join(ctx.RootDir, ".grove-worktrees", "context-rules-test")
+				rulesPath := filepath.Join(worktreePath, ".grove", "rules")
+
+				if !fs.Exists(rulesPath) {
+					return fmt.Errorf("expected .grove/rules to be created in the worktree")
+				}
+
+				content, err := fs.ReadString(rulesPath)
+				if err != nil {
+					return fmt.Errorf("failed to read worktree rules file: %w", err)
+				}
+
+				if !strings.Contains(content, "# Default rules from grove.yml") {
+					return fmt.Errorf("worktree rules file does not match the default rules content")
+				}
+				if !strings.Contains(content, "*.go") || !strings.Contains(content, "!*_test.go") {
+					return fmt.Errorf("worktree rules file is missing expected patterns")
+				}
+				return nil
+			}),
+
+			// Step 4: Test boilerplate fallback when default_rules_path is not configured
+			harness.NewStep("Modify grove.yml to remove default rules config", func(ctx *harness.Context) error {
+				groveConfig := `name: test-project
+flow:
+  plans_directory: ./plans
+`
+				return fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
+			}),
+
+			harness.NewStep("Initialize a new plan for boilerplate test", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				cmd := command.New(flow, "plan", "init", "boilerplate-rules-test", "--worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("plan init failed for boilerplate test: %w", result.Error)
+				}
+
+				// Verify output mentions applying rules
+				if !strings.Contains(result.Stdout, "Applied default context rules to:") {
+					return fmt.Errorf("expected output to mention applying default context rules")
+				}
+				return nil
+			}),
+
+			harness.NewStep("Verify worktree contains boilerplate rules", func(ctx *harness.Context) error {
+				worktreePath := filepath.Join(ctx.RootDir, ".grove-worktrees", "boilerplate-rules-test")
+				rulesPath := filepath.Join(worktreePath, ".grove", "rules")
+
+				if !fs.Exists(rulesPath) {
+					return fmt.Errorf("expected .grove/rules to be created in the worktree")
+				}
+
+				content, err := fs.ReadString(rulesPath)
+				if err != nil {
+					return fmt.Errorf("failed to read worktree rules file: %w", err)
+				}
+
+				// Check for boilerplate content (should include "*" pattern)
+				if !strings.Contains(content, "*") {
+					return fmt.Errorf("worktree rules file missing boilerplate pattern, got:\n%s", content)
+				}
+				return nil
+			}),
+		},
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/mattsolo1/grove-context/pkg/context"
 )
 
 // configureGroveHooks copies the Claude hook settings to a worktree
@@ -47,6 +49,36 @@ func configureGroveHooks(worktreePath string) error {
 	}
 
 	fmt.Printf("✓ Configured grove hooks in worktree.\n")
+	return nil
+}
+
+// configureDefaultContextRules applies default context rules to a given repository path.
+func configureDefaultContextRules(repoPath string) error {
+	// Create a context manager scoped to the repository path. This is crucial
+	// for it to find the correct grove.yml for that specific repository.
+	mgr := context.NewManager(repoPath)
+
+	// Load only the default rules content as defined by the repo's grove.yml.
+	// This function doesn't read any existing .grove/rules file.
+	defaultContent, rulesDestPath := mgr.LoadDefaultRulesContent()
+
+	// If no default is configured in grove.yml, create a basic boilerplate.
+	if defaultContent == nil {
+		defaultContent = []byte("# Default context rules: include all non-gitignored files.\n*\n")
+	}
+
+	// Ensure the .grove directory exists within the target repo path.
+	groveDir := filepath.Dir(rulesDestPath)
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .grove directory in %s: %w", repoPath, err)
+	}
+
+	// Write the rules to .grove/rules within the target repo.
+	if err := os.WriteFile(rulesDestPath, defaultContent, 0644); err != nil {
+		return fmt.Errorf("failed to write default rules to %s: %w", rulesDestPath, err)
+	}
+
+	fmt.Printf("✓ Applied default context rules to: %s\n", repoPath)
 	return nil
 }
 

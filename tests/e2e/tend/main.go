@@ -26,6 +26,7 @@ func main() {
 		GoWorkspaceWorktreeScenario(),     // Tests go.work file creation in worktrees
 		StatusTUIScenario(),                 // Tests enhanced status command with TUI flag
 		PlanInitImprovementsScenario(),      // Tests plan init improvements: empty plan listing, --with-worktree, oneshot_model default
+		PlanInitContextRulesScenario(),      // Tests that default context rules are applied on plan init
 		PlanFinishScenario(),                 // Tests interactive plan cleanup workflow
 		PlanFinishFlagsScenario(),            // Tests flag-based plan cleanup
 		PlanFinishDevLinksScenario(),         // Tests dev links cleanup functionality
