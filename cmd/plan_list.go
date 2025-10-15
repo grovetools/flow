@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
@@ -101,25 +102,32 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 }
 
 func listCurrentWorkspacePlans() ([]PlanSummary, error) {
-	flowCfg, err := loadFlowConfig()
+	// Get current workspace node
+	node, err := workspace.GetProjectByPath(".")
 	if err != nil {
-		return nil, err
-	}
-	if flowCfg.PlansDirectory == "" {
-		return nil, fmt.Errorf("'flow.plans_directory' is not set in your grove.yml configuration")
+		return nil, fmt.Errorf("could not determine current workspace: %w", err)
 	}
 
-	basePath, err := expandPath(flowCfg.PlansDirectory)
+	// Load config and initialize NotebookLocator
+	coreCfg, err := config.LoadDefault()
 	if err != nil {
-		return nil, fmt.Errorf("could not expand plans_directory path: %w", err)
+		coreCfg = &config.Config{}
+	}
+	locator := workspace.NewNotebookLocator(coreCfg)
+
+	// Check for deprecated config
+	flowCfg, _ := loadFlowConfig()
+	if flowCfg != nil && flowCfg.PlansDirectory != "" {
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
 	}
 
-	// Get current workspace info
-	cwd, _ := os.Getwd()
-	workspaceName := filepath.Base(cwd)
-	workspacePath := cwd
+	// Get plans directory for current workspace
+	plansDir, err := locator.GetPlansDir(node)
+	if err != nil {
+		return nil, fmt.Errorf("could not resolve plans directory: %w", err)
+	}
 
-	return findPlansInDir(basePath, workspaceName, workspacePath)
+	return findPlansInDir(plansDir, node.Name, node.Path)
 }
 
 func listAllWorkspacePlans() ([]PlanSummary, error) {
@@ -127,68 +135,50 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.WarnLevel) // Suppress discoverer's debug output
 
+	// Discover all workspaces
 	discoverer := workspace.NewDiscoveryService(logger)
 	result, err := discoverer.DiscoverAll()
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover workspaces: %w", err)
 	}
-	nodes := workspace.TransformToWorkspaceNodes(result)
+	provider := workspace.NewProvider(result)
 
-	for _, node := range nodes {
-		// Skip ecosystem worktrees to avoid duplicate plan discoveries
-		// Ecosystem worktrees share the same plans directory as their parent ecosystem
-		if node.IsWorktree() && node.IsEcosystem() {
+	// Load config and initialize NotebookLocator
+	coreCfg, err := config.LoadDefault()
+	if err != nil {
+		coreCfg = &config.Config{}
+	}
+	locator := workspace.NewNotebookLocator(coreCfg)
+
+	// Get all plan directories using NotebookLocator
+	planDirs, err := locator.ScanForAllPlans(provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan for plans: %w", err)
+	}
+
+	// Track seen plans to avoid duplicates
+	seenPlans := make(map[string]bool)
+
+	// For each plan directory, scan for plans
+	for _, planDir := range planDirs {
+		// Determine the workspace for this plan directory
+		workspaceNode := provider.FindByPath(planDir)
+		if workspaceNode == nil {
+			workspaceNode = provider.FindByPath(filepath.Dir(planDir))
+		}
+		if workspaceNode == nil {
 			continue
 		}
 
-		// Try to load the workspace's flow config
-		originalDir, _ := os.Getwd()
-		os.Chdir(node.Path)
-		flowCfg, err := loadFlowConfig()
-		os.Chdir(originalDir)
-
-		if err != nil || flowCfg.PlansDirectory == "" {
-			// Fall back to convention: look for a 'plans' directory
-			plansDir := filepath.Join(node.Path, "plans")
-			if _, err := os.Stat(plansDir); os.IsNotExist(err) {
-				continue
-			}
-			summaries, err := findPlansInDir(plansDir, node.Name, node.Path)
-			if err == nil {
-				allSummaries = append(allSummaries, summaries...)
-			}
-			continue
-		}
-
-		// Use the configured plans directory
-		basePath := flowCfg.PlansDirectory
-		// Handle relative paths by making them relative to node.Path
-		if !filepath.IsAbs(basePath) {
-			basePath = filepath.Join(node.Path, basePath)
-		}
-		// Expand ~ and git variables relative to the workspace
-		if strings.HasPrefix(basePath, "~/") {
-			home, _ := os.UserHomeDir()
-			basePath = filepath.Join(home, basePath[2:])
-		}
-		// Replace git variables
-		if strings.Contains(basePath, "${REPO}") || strings.Contains(basePath, "{{REPO}}") ||
-		   strings.Contains(basePath, "${BRANCH}") || strings.Contains(basePath, "{{BRANCH}}") {
-			os.Chdir(node.Path)
-			expandedPath, err := expandPath(flowCfg.PlansDirectory)
-			os.Chdir(originalDir)
-			if err == nil {
-				basePath = expandedPath
-			}
-		}
-
-		if _, err := os.Stat(basePath); os.IsNotExist(err) {
-			continue
-		}
-
-		summaries, err := findPlansInDir(basePath, node.Name, node.Path)
+		summaries, err := findPlansInDir(planDir, workspaceNode.Name, workspaceNode.Path)
 		if err == nil {
-			allSummaries = append(allSummaries, summaries...)
+			for _, summary := range summaries {
+				// Deduplicate by plan path
+				if !seenPlans[summary.Path] {
+					allSummaries = append(allSummaries, summary)
+					seenPlans[summary.Path] = true
+				}
+			}
 		}
 	}
 

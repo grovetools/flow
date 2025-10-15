@@ -13,13 +13,15 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -160,18 +162,27 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("TUI mode requires an interactive terminal")
 	}
 
-	// Get plans directory from config
-	flowCfg, err := loadFlowConfig()
+	// Get plans directory using NotebookLocator
+	node, err := workspace.GetProjectByPath(".")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if flowCfg.PlansDirectory == "" {
-		return fmt.Errorf("'flow.plans_directory' is not set in your grove.yml configuration")
+		return fmt.Errorf("could not determine current workspace: %w", err)
 	}
 
-	plansDirectory, err := expandPath(flowCfg.PlansDirectory)
+	coreCfg, err := config.LoadDefault()
 	if err != nil {
-		return fmt.Errorf("could not expand plans_directory path: %w", err)
+		coreCfg = &config.Config{}
+	}
+	locator := workspace.NewNotebookLocator(coreCfg)
+
+	// Check for deprecated config
+	flowCfg, _ := loadFlowConfig()
+	if flowCfg != nil && flowCfg.PlansDirectory != "" {
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+	}
+
+	plansDirectory, err := locator.GetPlansDir(node)
+	if err != nil {
+		return fmt.Errorf("could not resolve plans directory: %w", err)
 	}
 
 	// Create and run TUI

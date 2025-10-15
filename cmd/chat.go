@@ -237,17 +237,9 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 }
 
 func runChatList(cmd *cobra.Command, args []string) error {
-	flowCfg, err := loadFlowConfig()
+	chatDir, err := resolveChatsDir()
 	if err != nil {
-		return err
-	}
-	if flowCfg.ChatDirectory == "" {
-		return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
-	}
-
-	chatDir, err := expandChatPath(flowCfg.ChatDirectory)
-	if err != nil {
-		return fmt.Errorf("failed to expand chat directory path: %w", err)
+		return fmt.Errorf("failed to resolve chat directory: %w", err)
 	}
 
 	// Recursively find all .md files in the chat directory
@@ -371,17 +363,9 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 	// If we don't have specific file paths, scan the chat directory
 	if len(runnableChats) == 0 {
 		// Scan chat directory
-		flowCfg, err := loadFlowConfig()
+		chatDir, err := resolveChatsDir()
 		if err != nil {
-			return err
-		}
-		if flowCfg.ChatDirectory == "" {
-			return fmt.Errorf("'flow.chat_directory' is not set in your grove.yml configuration")
-		}
-
-		chatDir, err := expandChatPath(flowCfg.ChatDirectory)
-		if err != nil {
-			return fmt.Errorf("failed to expand chat directory path: %w", err)
+			return fmt.Errorf("failed to resolve chat directory: %w", err)
 		}
 
 		// Find all runnable chats by walking the directory
@@ -441,9 +425,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			fmt.Printf("No runnable chats found with the specified title(s): %s\n", strings.Join(args, ", "))
 			fmt.Println("\nAvailable chats:")
 			// Show available chats by running list logic
-			flowCfg, _ := loadFlowConfig()
-			if flowCfg != nil && flowCfg.ChatDirectory != "" {
-				chatDir, _ := expandChatPath(flowCfg.ChatDirectory)
+			if chatDir, err := resolveChatsDir(); err == nil {
 				filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
 					if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
 						return nil

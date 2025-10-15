@@ -10,6 +10,7 @@ import (
 	"github.com/mattsolo1/grove-core/command"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/state"
 )
 
@@ -88,26 +89,80 @@ func getRepositoryName(dir string) (string, error) {
 }
 
 // resolvePlanPath determines the absolute path for a plan directory.
+// It uses the new NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).
 func resolvePlanPath(planName string) (string, error) {
-	flowCfg, err := loadFlowConfig()
+	// 1. Get the current workspace node.
+	node, err := workspace.GetProjectByPath(".")
 	if err != nil {
-		// It's okay if config doesn't exist, we just won't use PlansDirectory.
-		flowCfg = &FlowConfig{}
-	}
-
-	if flowCfg.PlansDirectory == "" {
-		// No custom directory configured, use the provided name as-is.
+		// Fallback: if we can't determine workspace, use local directory
 		return filepath.Abs(planName)
 	}
 
-	// A custom plans directory is configured.
-	expandedBasePath, err := expandFlowPath(flowCfg.PlansDirectory)
+	// 2. Load config and initialize the locator.
+	coreCfg, err := config.LoadDefault()
 	if err != nil {
-		return "", fmt.Errorf("could not expand plans_directory path: %w", err)
+		// Proceed with default config if none exists (Local Mode).
+		coreCfg = &config.Config{}
+	}
+	locator := workspace.NewNotebookLocator(coreCfg)
+
+	// 3. Check for deprecated flow.plans_directory configuration
+	flowCfg, err := loadFlowConfig()
+	if err == nil && flowCfg.PlansDirectory != "" {
+		// Legacy configuration detected - use it for backward compatibility
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+		expandedBasePath, err := expandFlowPath(flowCfg.PlansDirectory)
+		if err != nil {
+			return "", fmt.Errorf("could not expand plans_directory path: %w", err)
+		}
+		fullPath := filepath.Join(expandedBasePath, planName)
+		return filepath.Abs(fullPath)
 	}
 
-	fullPath := filepath.Join(expandedBasePath, planName)
+	// 4. Get the base plans directory for the current workspace using NotebookLocator.
+	plansDir, err := locator.GetPlansDir(node)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve plans directory: %w", err)
+	}
+
+	// 5. Join with the specific plan name.
+	fullPath := filepath.Join(plansDir, planName)
 	return filepath.Abs(fullPath)
+}
+
+// resolveChatsDir determines the absolute path to the chats directory for the current workspace.
+// It uses the new NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).
+func resolveChatsDir() (string, error) {
+	// 1. Get the current workspace node.
+	node, err := workspace.GetProjectByPath(".")
+	if err != nil {
+		// Fallback: if we can't determine workspace, use local directory
+		return filepath.Abs("chats")
+	}
+
+	// 2. Load config and initialize the locator.
+	coreCfg, err := config.LoadDefault()
+	if err != nil {
+		// Proceed with default config if none exists (Local Mode).
+		coreCfg = &config.Config{}
+	}
+	locator := workspace.NewNotebookLocator(coreCfg)
+
+	// 3. Check for deprecated flow.chat_directory configuration
+	flowCfg, err := loadFlowConfig()
+	if err == nil && flowCfg.ChatDirectory != "" {
+		// Legacy configuration detected - use it for backward compatibility
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.chat_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+		return expandFlowPath(flowCfg.ChatDirectory)
+	}
+
+	// 4. Get the chats directory for the current workspace using NotebookLocator.
+	chatsDir, err := locator.GetChatsDir(node)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve chats directory: %w", err)
+	}
+
+	return filepath.Abs(chatsDir)
 }
 
 // getActivePlanWithMigration gets the active plan and automatically migrates old state format to new format.
