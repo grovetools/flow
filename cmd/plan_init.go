@@ -85,6 +85,17 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		return "", err
 	}
 
+	// Create a workspace provider to discover local repositories.
+	discoveryService := workspace.NewDiscoveryService(nil) // logger is optional
+	discoveryResult, err := discoveryService.DiscoverAll()
+	if err != nil {
+		fmt.Printf("⚠️  Warning: failed to discover workspaces for go.work generation: %v\n", err)
+	}
+	var provider *workspace.Provider
+	if discoveryResult != nil {
+		provider = workspace.NewProvider(discoveryResult)
+	}
+
 	var result strings.Builder
 
 	// NEW: Recipe-based initialization (can be combined with extraction)
@@ -113,6 +124,12 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		// After creating the worktree(s), apply default context rules.
 		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
 			fmt.Printf("⚠️  Warning: could not apply default context rules: %v\n", err)
+		}
+
+		// Configure go.work file for the worktree.
+		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {
+			// This is not a fatal error, but the user should be aware of it.
+			fmt.Printf("⚠️  Warning: could not configure go.work file: %v\n", err)
 		}
 	}
 
@@ -227,6 +244,17 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
 func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) error {
+	// Create a workspace provider to discover local repositories.
+	discoveryService := workspace.NewDiscoveryService(nil) // logger is optional
+	discoveryResult, err := discoveryService.DiscoverAll()
+	if err != nil {
+		fmt.Printf("⚠️  Warning: failed to discover workspaces for go.work generation: %v\n", err)
+	}
+	var provider *workspace.Provider
+	if discoveryResult != nil {
+		provider = workspace.NewProvider(discoveryResult)
+	}
+
 	// Determine the recipe command to use
 	var getRecipeCmd string
 	if cmd.RecipeCmd != "" {
@@ -370,6 +398,12 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		// After creating the worktree(s), apply default context rules.
 		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
 			fmt.Printf("⚠️  Warning: could not apply default context rules: %v\n", err)
+		}
+
+		// Configure go.work file for the worktree.
+		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {
+			// This is not a fatal error, but the user should be aware of it.
+			fmt.Printf("⚠️  Warning: could not configure go.work file: %v\n", err)
 		}
 	}
 

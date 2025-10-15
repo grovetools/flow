@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mattsolo1/grove-context/pkg/context"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"golang.org/x/mod/modfile"
 )
 
 // configureGroveHooks copies the Claude hook settings to a worktree
@@ -134,4 +137,114 @@ func findGroveEcosystemRoot() (string, error) {
 	}
 
 	return "", fmt.Errorf("grove ecosystem root not found (started from %s)", startDir)
+}
+
+// configureGoWorkspace creates a go.work file for both ecosystem and single-repo worktrees.
+func configureGoWorkspace(worktreePath string, repos []string, provider *workspace.Provider) error {
+	if len(repos) > 0 {
+		// Case 1: Ecosystem worktree (multiple repos inside).
+		// First, check if any of the repos are Go modules.
+		var goRepos []string
+		for _, repo := range repos {
+			repoGoModPath := filepath.Join(worktreePath, repo, "go.mod")
+			if _, err := os.Stat(repoGoModPath); err == nil {
+				goRepos = append(goRepos, repo)
+			}
+		}
+
+		// Only create go.work if we found at least one Go module.
+		if len(goRepos) == 0 {
+			return nil
+		}
+
+		var content strings.Builder
+		content.WriteString("go 1.24.4\n\n") // Using Go version from project's go.mod
+		content.WriteString("use (\n")
+		content.WriteString("\t.\n") // The root of an ecosystem worktree can also be a module.
+		for _, repo := range goRepos {
+			content.WriteString(fmt.Sprintf("\t./%s\n", repo))
+		}
+		content.WriteString(")\n")
+
+		goWorkPath := filepath.Join(worktreePath, "go.work")
+		if err := os.WriteFile(goWorkPath, []byte(content.String()), 0644); err != nil {
+			return fmt.Errorf("failed to write go.work for ecosystem worktree: %w", err)
+		}
+		fmt.Printf("✓ Configured go.work in ecosystem worktree with %d Go modules.\n", len(goRepos))
+	} else {
+		// Case 2: Single-repo worktree.
+		// Parse its go.mod to find local dependencies within the ecosystem.
+		goModPath := filepath.Join(worktreePath, "go.mod")
+		if _, err := os.Stat(goModPath); os.IsNotExist(err) {
+			// Not a Go module, so there's nothing to do.
+			return nil
+		}
+
+		if provider == nil {
+			fmt.Printf("⚠️  Warning: cannot generate go.work, workspace provider not available.\n")
+			return nil
+		}
+
+		content, err := os.ReadFile(goModPath)
+		if err != nil {
+			return fmt.Errorf("failed to read go.mod in worktree: %w", err)
+		}
+
+		modFile, err := modfile.Parse(goModPath, content, nil)
+		if err != nil {
+			return fmt.Errorf("failed to parse go.mod: %w", err)
+		}
+
+		// Find the worktree's workspace node to determine its ecosystem
+		worktreeNode := provider.FindByPath(worktreePath)
+		if worktreeNode == nil {
+			return nil // Worktree not found in workspace discovery
+		}
+
+		// Get the root ecosystem path for this worktree
+		ecosystemRoot := worktreeNode.RootEcosystemPath
+		if ecosystemRoot == "" {
+			return nil // Not part of an ecosystem
+		}
+
+		// Get workspaces from the same ecosystem (avoids name collisions with other ecosystems)
+		localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
+		if len(localWorkspaces) == 0 {
+			return nil // No other local repos to link to.
+		}
+
+		// Find which of the go.mod dependencies are present locally.
+		var localDeps []string
+		modulePrefix := "github.com/mattsolo1/" // The common module prefix for the ecosystem.
+
+		for _, require := range modFile.Require {
+			if strings.HasPrefix(require.Mod.Path, modulePrefix) {
+				// This is an ecosystem module. Check if we have it locally.
+				repoName := strings.TrimPrefix(require.Mod.Path, modulePrefix)
+				if localPath, ok := localWorkspaces[repoName]; ok {
+					localDeps = append(localDeps, localPath)
+				}
+			}
+		}
+
+		// If we found local dependencies, generate the go.work file.
+		if len(localDeps) > 0 {
+			var goWorkContent strings.Builder
+			goWorkContent.WriteString("go 1.24.4\n\n")
+			goWorkContent.WriteString("use (\n")
+			goWorkContent.WriteString("\t.\n") // Include the current worktree itself.
+
+			for _, depPath := range localDeps {
+				goWorkContent.WriteString(fmt.Sprintf("\t%s\n", depPath))
+			}
+			goWorkContent.WriteString(")\n")
+
+			goWorkPath := filepath.Join(worktreePath, "go.work")
+			if err := os.WriteFile(goWorkPath, []byte(goWorkContent.String()), 0644); err != nil {
+				return fmt.Errorf("failed to write go.work for single-repo worktree: %w", err)
+			}
+			fmt.Printf("✓ Configured go.work with %d local dependencies.\n", len(localDeps))
+		}
+	}
+	return nil
 }
