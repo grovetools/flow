@@ -13,4 +13,5 @@ type: "oneshot"
 - IMPORTANT: Be specific about file paths (e.g., "backend/src/routes/todos.ts"). Tell the agent which files it should read for context.
 - If files are located outside the current project/repo, list the full path to that file.
 - IMPORTANT: write specific changes to make in XLM format 
-
+- Focus on the specific code changes that will be needed. Embed the edits in with markdown explaining each change.
+- Don't write out extensive code sections that won't be changing, rather just the lines that will change
