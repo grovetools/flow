@@ -151,7 +151,7 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 	locator := workspace.NewNotebookLocator(coreCfg)
 
 	// Get all plan directories using NotebookLocator
-	planDirs, err := locator.ScanForAllPlans(provider)
+	scannedDirs, err := locator.ScanForAllPlans(provider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan for plans: %w", err)
 	}
@@ -160,17 +160,11 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 	seenPlans := make(map[string]bool)
 
 	// For each plan directory, scan for plans
-	for _, planDir := range planDirs {
-		// Determine the workspace for this plan directory
-		workspaceNode := provider.FindByPath(planDir)
-		if workspaceNode == nil {
-			workspaceNode = provider.FindByPath(filepath.Dir(planDir))
-		}
-		if workspaceNode == nil {
-			continue
-		}
+	for _, scannedDir := range scannedDirs {
+		ownerNode := scannedDir.Owner
+		planDir := scannedDir.Path
 
-		summaries, err := findPlansInDir(planDir, workspaceNode.Name, workspaceNode.Path)
+		summaries, err := findPlansInDir(planDir, ownerNode.Name, ownerNode.Path)
 		if err == nil {
 			for _, summary := range summaries {
 				// Deduplicate by plan path
