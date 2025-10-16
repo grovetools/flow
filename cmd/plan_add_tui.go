@@ -885,7 +885,7 @@ func (m tuiModel) View() string {
 // toJob converts the TUI model data into a Job struct
 func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 	// Generate job ID from title
-	jobID := GenerateJobIDFromTitle(plan, m.jobTitle)
+	jobID := orchestration.GenerateUniqueJobID(plan, m.jobTitle)
 
 	// Default job type if none selected
 	jobType := m.jobType

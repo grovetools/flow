@@ -637,20 +637,22 @@ func (e *OneShotExecutor) processGeneratedJobs(output string, job *Job, plan *Pl
 		filename string
 	}
 
-	// First pass: generate IDs for all jobs
+	// First pass: generate unique IDs and map titles to them
 	titleToID := make(map[string]string)
 	titleToFilename := make(map[string]string)
-	for i, jobDef := range result.Jobs {
-		// Generate a unique ID for the job
-		jobID := fmt.Sprintf("job-%d-%s", i+1, strings.ToLower(strings.ReplaceAll(jobDef.Title, " ", "-")))
+	for _, jobDef := range result.Jobs {
+		// Generate a globally unique ID for the job
+		jobID := GenerateUniqueJobID(plan, jobDef.Title)
 		titleToID[jobDef.Title] = jobID
 	}
 
-	// Second pass: create job files with resolved dependencies and context updates
+	// Second pass: create job files with resolved dependencies
 	for _, jobDef := range result.Jobs {
-		// Skip shell jobs that are context updates (they should not be counted)
-		if jobDef.Type == "shell" && strings.Contains(strings.ToLower(jobDef.Title), "context") {
-			continue
+		// Get the unique ID we generated in the first pass
+		jobID := titleToID[jobDef.Title]
+		if jobID == "" {
+			// This should not happen if the title is present, but as a fallback:
+			jobID = GenerateUniqueJobID(plan, "generated-job")
 		}
 
 		// Get next job number for filename
@@ -660,19 +662,29 @@ func (e *OneShotExecutor) processGeneratedJobs(output string, job *Job, plan *Pl
 		}
 
 		filename := GenerateJobFilename(nextNum, jobDef.Title)
-		jobID := titleToID[jobDef.Title]
-
-		// Store the filename for this title
 		titleToFilename[jobDef.Title] = filename
 
-		// Resolve dependencies using titleToFilename map
+		// Resolve dependencies: map the titles from the LLM to the new unique IDs
 		var resolvedDeps []string
 		for _, depTitle := range jobDef.DependsOn {
-			if depFilename, ok := titleToFilename[depTitle]; ok {
-				resolvedDeps = append(resolvedDeps, depFilename)
+			if depID, ok := titleToID[depTitle]; ok {
+				resolvedDeps = append(resolvedDeps, depID)
 			} else {
-				// If not found, assume it's already a filename
-				resolvedDeps = append(resolvedDeps, depTitle)
+				// If a dependency title doesn't match a generated job title,
+				// it might refer to an existing job in the plan.
+				// We can try to find it by title.
+				found := false
+				for _, existingJob := range plan.Jobs {
+					if existingJob.Title == depTitle {
+						resolvedDeps = append(resolvedDeps, existingJob.ID)
+						found = true
+						break
+					}
+				}
+				if !found {
+					// Log a warning if a dependency can't be resolved.
+					log.Warnf("Could not resolve dependency title '%s' for generated job '%s'", depTitle, jobDef.Title)
+				}
 			}
 		}
 
@@ -681,12 +693,15 @@ func (e *OneShotExecutor) processGeneratedJobs(output string, job *Job, plan *Pl
 		jobDefWithResolvedDeps.DependsOn = resolvedDeps
 
 		// Ensure all job types have the correct worktree
-		// Override if not specified or if it's the example "todo-app"
 		if jobDefWithResolvedDeps.Worktree == "" || jobDefWithResolvedDeps.Worktree == "todo-app" {
-			jobDefWithResolvedDeps.Worktree = plan.Name
+			if plan.Config != nil && plan.Config.Worktree != "" {
+				jobDefWithResolvedDeps.Worktree = plan.Config.Worktree
+			} else {
+				jobDefWithResolvedDeps.Worktree = plan.Name
+			}
 		}
 
-		// Create job content with resolved dependencies
+		// Create job content with the new unique ID and resolved dependencies
 		jobContent := e.createJobContent(jobID, jobDefWithResolvedDeps)
 
 		// Write job file
@@ -697,7 +712,6 @@ func (e *OneShotExecutor) processGeneratedJobs(output string, job *Job, plan *Pl
 		log.WithField("file", filename).Info("Generated new job")
 		prettyLog.Success(fmt.Sprintf("Generated new job: %s", filename))
 
-		// Track the created job
 		createdJobs = append(createdJobs, struct {
 			id       string
 			title    string

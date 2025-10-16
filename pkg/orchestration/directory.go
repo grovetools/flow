@@ -11,6 +11,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // sanitizeForFilename sanitizes a string for use in a filename (kebab-case).
@@ -28,6 +30,36 @@ func sanitizeForFilename(s string) string {
 		s = strings.TrimRight(s, "-")
 	}
 	return s
+}
+
+// GenerateUniqueJobID creates a globally unique job ID from a title string.
+// This is the single source of truth for job ID generation across grove-flow.
+func GenerateUniqueJobID(plan *Plan, title string) string {
+	// Sanitize the title to create a human-readable slug
+	slug := sanitizeForFilename(title)
+
+	// Use a short UUID to guarantee uniqueness
+	shortUUID := uuid.New().String()[:8]
+
+	// Combine for a unique but still readable ID
+	uniqueID := fmt.Sprintf("%s-%s", slug, shortUUID)
+
+	// Final check for an extremely unlikely collision within the same plan
+	if plan != nil {
+		exists := false
+		for _, job := range plan.Jobs {
+			if job.ID == uniqueID {
+				exists = true
+				break
+			}
+		}
+		if exists {
+			// If collision, just use a different UUID
+			return fmt.Sprintf("%s-%s", slug, uuid.New().String()[:8])
+		}
+	}
+
+	return uniqueID
 }
 
 // InitPlan creates a new plan directory with initial structure.

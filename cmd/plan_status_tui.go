@@ -1089,7 +1089,7 @@ func createImplementationJob(plan *orchestration.Plan, selectedJob *orchestratio
 		implTitle := fmt.Sprintf("impl-%s", selectedJob.Title)
 
 		// Generate a unique ID for the new job
-		implID := GenerateJobIDFromTitle(plan, implTitle)
+		implID := orchestration.GenerateUniqueJobID(plan, implTitle)
 
 		// Create the new job
 		newJob := &orchestration.Job{

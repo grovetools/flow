@@ -187,7 +187,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			Title:      jobTitle,
 			Type:       orchestration.JobTypeChat, // Extracts become chat jobs
 			Status:     orchestration.JobStatusPending,
-			ID:         GenerateJobIDFromTitle(plan, jobTitle),
+			ID:         orchestration.GenerateUniqueJobID(plan, jobTitle),
 			PromptBody: string(body),
 		}
 		
@@ -409,25 +409,92 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// Track if this is the first job for content merging
 	isFirstJob := true
-	
-	// Process each job file from the recipe
+
+	// Map original recipe IDs to new unique IDs for dependency resolution
+	recipeIDToUniqueID := make(map[string]string)
+
+	// First pass: Generate unique IDs for all jobs and build the mapping
 	for _, filename := range jobFiles {
 		renderedContent, err := recipe.RenderJob(filename, templateData)
 		if err != nil {
 			return fmt.Errorf("rendering recipe job %s: %w", filename, err)
 		}
-		
+
+		// Parse the frontmatter to get the original ID and title
+		frontmatter, _, err := orchestration.ParseFrontmatter(renderedContent)
+		if err != nil {
+			return fmt.Errorf("parsing frontmatter from recipe job %s: %w", filename, err)
+		}
+
+		// Get the original ID from the recipe
+		originalID, _ := frontmatter["id"].(string)
+
+		// Get the title for ID generation
+		var title string
+		if titleVal, ok := frontmatter["title"].(string); ok {
+			title = titleVal
+		} else {
+			// Fallback to filename if no title
+			title = strings.TrimSuffix(filename, filepath.Ext(filename))
+		}
+
+		// Generate a unique ID (pass nil for plan since we don't have it loaded yet)
+		uniqueID := orchestration.GenerateUniqueJobID(nil, title)
+
+		// Map the original recipe ID to the new unique ID
+		if originalID != "" {
+			recipeIDToUniqueID[originalID] = uniqueID
+		}
+	}
+
+	// Second pass: Process each job file with unique IDs and remapped dependencies
+	for _, filename := range jobFiles {
+		renderedContent, err := recipe.RenderJob(filename, templateData)
+		if err != nil {
+			return fmt.Errorf("rendering recipe job %s: %w", filename, err)
+		}
+
 		// Parse the frontmatter and body from the rendered job content
 		frontmatter, body, err := orchestration.ParseFrontmatter(renderedContent)
 		if err != nil {
 			return fmt.Errorf("parsing frontmatter from recipe job %s: %w", filename, err)
 		}
 
+		// Get the original ID and replace it with the unique ID
+		originalID, _ := frontmatter["id"].(string)
+		if originalID != "" && recipeIDToUniqueID[originalID] != "" {
+			frontmatter["id"] = recipeIDToUniqueID[originalID]
+		}
+
+		// Remap dependencies from original recipe IDs to new unique IDs
+		if depends, ok := frontmatter["depends_on"].([]interface{}); ok {
+			var remappedDeps []string
+			for _, dep := range depends {
+				if depStr, ok := dep.(string); ok {
+					// Check if this dependency is an ID that we've remapped
+					if newID, found := recipeIDToUniqueID[depStr]; found {
+						remappedDeps = append(remappedDeps, newID)
+					} else {
+						// Keep the original if not found (might be a filename)
+						remappedDeps = append(remappedDeps, depStr)
+					}
+				}
+			}
+			if len(remappedDeps) > 0 {
+				// Convert to []interface{} for frontmatter
+				var depsInterface []interface{}
+				for _, d := range remappedDeps {
+					depsInterface = append(depsInterface, d)
+				}
+				frontmatter["depends_on"] = depsInterface
+			}
+		}
+
 		// If a worktree was specified via the CLI, apply it to every job
 		if worktreeOverride != "" {
 			frontmatter["worktree"] = worktreeOverride
 		}
-		
+
 		// If we have extracted content and this is the first job, merge it into the body
 		if extractedBody != nil && isFirstJob {
 			body = extractedBody // Replace the template's body with the extracted content

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
@@ -103,6 +104,21 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 }
 
 func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeToUse string) (*orchestration.Job, error) {
+	// Auto-detect worktree context if not explicitly provided
+	if worktreeToUse == "" {
+		currentNode, err := workspace.GetProjectByPath(".")
+		if err == nil && currentNode != nil && currentNode.IsWorktree() && currentNode.RootEcosystemPath != "" {
+			// This is an ecosystem worktree context. Find the name of the ecosystem worktree.
+			// This is typically the base name of the ParentEcosystemPath for a sub-project worktree.
+			if currentNode.ParentEcosystemPath != "" && strings.Contains(currentNode.ParentEcosystemPath, ".grove-worktrees") {
+				worktreeToUse = filepath.Base(currentNode.ParentEcosystemPath)
+			} else if currentNode.IsEcosystem() {
+				// This is the ecosystem worktree itself
+				worktreeToUse = currentNode.Name
+			}
+		}
+	}
+
 	if cmd.Interactive {
 		// Check if we're in a TTY before launching interactive mode
 		if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
@@ -167,7 +183,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		}
 
 		// Generate job ID
-		jobID := GenerateJobIDFromTitle(plan, cmd.Title)
+		jobID := orchestration.GenerateUniqueJobID(plan, cmd.Title)
 
 		// Build job structure
 		job := &orchestration.Job{
@@ -275,7 +291,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	}
 
 	// Generate job ID
-	jobID := GenerateJobIDFromTitle(plan, cmd.Title)
+	jobID := orchestration.GenerateUniqueJobID(plan, cmd.Title)
 
 	// Build job structure
 	job := &orchestration.Job{
@@ -414,6 +430,21 @@ func selectDependencies(plan *orchestration.Plan, reader *bufio.Reader) ([]strin
 }
 
 func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate, worktreeToUse string) (*orchestration.Job, error) {
+	// Auto-detect worktree context if not explicitly provided
+	if worktreeToUse == "" {
+		currentNode, err := workspace.GetProjectByPath(".")
+		if err == nil && currentNode != nil && currentNode.IsWorktree() && currentNode.RootEcosystemPath != "" {
+			// This is an ecosystem worktree context. Find the name of the ecosystem worktree.
+			// This is typically the base name of the ParentEcosystemPath for a sub-project worktree.
+			if currentNode.ParentEcosystemPath != "" && strings.Contains(currentNode.ParentEcosystemPath, ".grove-worktrees") {
+				worktreeToUse = filepath.Base(currentNode.ParentEcosystemPath)
+			} else if currentNode.IsEcosystem() {
+				// This is the ecosystem worktree itself
+				worktreeToUse = currentNode.Name
+			}
+		}
+	}
+
 	// Title is required even with template
 	if cmd.Title == "" {
 		return nil, fmt.Errorf("title is required (use --title)")
@@ -593,7 +624,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 
 	// Generate job ID
-	job.ID = GenerateJobIDFromTitle(plan, job.Title)
+	job.ID = orchestration.GenerateUniqueJobID(plan, job.Title)
 
 	// Command line --worktree flag overrides template worktree
 	if worktreeToUse != "" {
@@ -620,50 +651,3 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 
 	return job, nil
 }
-
-// GenerateJobIDFromTitle creates a unique job ID from a title string.
-func GenerateJobIDFromTitle(plan *orchestration.Plan, title string) string {
-	// Convert title to ID format
-	base := strings.ToLower(title)
-	base = strings.ReplaceAll(base, " ", "-")
-	base = strings.ReplaceAll(base, "_", "-")
-
-	// Remove non-alphanumeric characters
-	var cleaned strings.Builder
-	for _, r := range base {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			cleaned.WriteRune(r)
-		}
-	}
-
-	id := cleaned.String()
-
-	// Ensure uniqueness
-	exists := false
-	for _, job := range plan.Jobs {
-		if job.ID == id {
-			exists = true
-			break
-		}
-	}
-
-	if exists {
-		// Add number suffix
-		for i := 2; ; i++ {
-			testID := fmt.Sprintf("%s-%d", id, i)
-			found := false
-			for _, job := range plan.Jobs {
-				if job.ID == testID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return testID
-			}
-		}
-	}
-
-	return id
-}
-
