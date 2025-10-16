@@ -122,38 +122,36 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 			fmt.Println("  ✓ Claude process killed.")
 		}
 
-		// Also kill the tmux window if worktree is specified
-		if job.Worktree != "" {
-			// Try to read the session metadata to get the working directory
-			worktreePath, err := getWorktreePathFromSession(job.ID)
+		// Also kill the tmux window for any interactive_agent job
+		// Try to read the session metadata to get the working directory
+		worktreePath, err := getWorktreePathFromSession(job.ID)
+		if err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not determine working directory from session: %v\n", err)
+			}
+		} else {
+			projInfo, err := workspace.GetProjectByPath(worktreePath)
 			if err != nil {
 				if !silent {
-					fmt.Printf("Warning: could not determine worktree path from session: %v\n", err)
+					fmt.Printf("  Note: could not get project info to determine session name: %v\n", err)
 				}
 			} else {
-				projInfo, err := workspace.GetProjectByPath(worktreePath)
-				if err != nil {
-					if !silent {
-						fmt.Printf("Warning: could not get project info to determine session name: %v\n", err)
-					}
-				} else {
-					sessionName := projInfo.Identifier()
-					// Replicate window name logic from interactive_agent_executor
-					windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
-					targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
+				sessionName := projInfo.Identifier()
+				// Replicate window name logic from interactive_agent_executor
+				windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+				targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
 
+				if !silent {
+					fmt.Printf("  Closing tmux window: %s\n", targetWindow)
+				}
+				cmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
+				if err := cmd.Run(); err != nil {
+					// This is not a fatal error; the window might already be closed.
 					if !silent {
-						fmt.Printf("  Closing tmux window: %s\n", targetWindow)
+						fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
 					}
-					cmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
-					if err := cmd.Run(); err != nil {
-						// This is not a fatal error; the window might already be closed.
-						if !silent {
-							fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
-						}
-					} else if !silent {
-						fmt.Println("  ✓ Tmux window closed.")
-					}
+				} else if !silent {
+					fmt.Println("  ✓ Tmux window closed.")
 				}
 			}
 		}
