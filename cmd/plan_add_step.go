@@ -309,12 +309,6 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		},
 	}
 
-	// Set agent_continue to false by default for interactive_agent jobs
-	// Users can explicitly enable it with --agent-continue flag if needed
-	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
-		job.AgentContinue = false
-	}
-
 	// Set worktree only if explicitly provided
 	if worktreeToUse != "" {
 		job.Worktree = worktreeToUse
@@ -375,12 +369,6 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 	// Apply prepend_dependencies default from plan config
 	if !job.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
 		job.PrependDependencies = true
-	}
-
-	// Set agent_continue to false by default for interactive_agent jobs
-	// Users can explicitly enable it with --agent-continue flag if needed
-	if job.Type == orchestration.JobTypeInteractiveAgent && !job.AgentContinue {
-		job.AgentContinue = false
 	}
 
 	return job, nil
@@ -641,12 +629,6 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// Apply prepend_dependencies default if not explicitly set via flag
 	if !cmd.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
 		job.PrependDependencies = true
-	}
-
-	// Set agent_continue to false by default for interactive_agent jobs
-	// Users can explicitly enable it with --agent-continue flag if needed
-	if job.Type == orchestration.JobTypeInteractiveAgent && !cmd.AgentContinue {
-		job.AgentContinue = false
 	}
 
 	return job, nil

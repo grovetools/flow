@@ -101,7 +101,7 @@ flow:
 			harness.NewStep("Run the first shell job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Execute the first shell job specifically
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "my-plan", "01-create-hello-file.md")).Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "my-plan", "01-create-hello-file.md"), "-y").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -132,7 +132,7 @@ flow:
 			harness.NewStep("Run the second shell job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Execute the second shell job that depends on the first
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "my-plan", "02-copy-file-using-shell.md")).Dir(ctx.RootDir)
+				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "my-plan", "02-copy-file-using-shell.md"), "-y").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error

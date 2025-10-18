@@ -190,13 +190,13 @@ echo "Task completed successfully."
 			
 			harness.NewStep("Try to run job with unmet dependencies", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				// Try to run job 3 (should fail)
 				// First set the active plan
 				setCmd := ctx.Command(flow, "plan", "set", "simple-plan").Dir(ctx.RootDir)
 				setCmd.Run()
-				
-				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md")).Dir(ctx.RootDir)
+
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md"), "-y").Dir(ctx.RootDir)
 				result := cmd.Run()
 				
 				// This should fail
@@ -220,25 +220,25 @@ echo "Task completed successfully."
 				setCmd.Run()
 				
 				// Run job 1
-				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "01-setup-environment.md")).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "01-setup-environment.md"), "-y").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("setup job failed: %v", result.Error)
 				}
-				
+
 				// Run job 2
-				cmd = ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "02-install-dependencies.md")).Dir(ctx.RootDir)
+				cmd = ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "02-install-dependencies.md"), "-y").Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("install job failed: %v", result.Error)
 				}
-				
+
 				// Now job 3 should succeed
-				cmd = ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md")).Dir(ctx.RootDir)
+				cmd = ctx.Command(flow, "plan", "run", filepath.Join("plans", "simple-plan", "03-run-tests.md"), "-y").Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
