@@ -19,8 +19,9 @@ func main() {
 		BasicPlanLifecycleScenario(),
 		PlanActiveJobScenario(),
 		PlanGraphScenario(),
-		PlanWorktreeInheritanceScenario(), // Tests smart worktree inheritance
-		PlanStepCommandScenario(),         // Tests interactive plan step command
+		PlanWorktreeInheritanceScenario(),        // Tests smart worktree inheritance
+		PlanWorktreeCentralizedNotebookScenario(), // Tests plan path resolution in worktrees with centralized notebooks
+		PlanStepCommandScenario(),                 // Tests interactive plan step command
 		PlanConfigScenario(),              // Tests plan-level configuration with .grove-plan.yml
 		PlanConfigPropagationScenario(),   // Tests plan config propagation to job frontmatter
 		GoWorkspaceWorktreeScenario(),     // Tests go.work file creation in worktrees

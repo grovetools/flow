@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -355,6 +356,150 @@ flow:
 				if !strings.Contains(content, "worktree: inheritance-plan") {
 					return fmt.Errorf("dependent job should inherit worktree: inheritance-plan from its dependency")
 				}
+				return nil
+			}),
+		},
+	}
+}
+
+// PlanWorktreeCentralizedNotebookScenario tests that plan path resolution works correctly
+// when initializing a plan from a worktree in an ecosystem with centralized notebooks.
+func PlanWorktreeCentralizedNotebookScenario() *harness.Scenario {
+	return &harness.Scenario{
+		Name:        "flow-plan-worktree-centralized-notebook",
+		Description: "Tests that plan paths resolve correctly in worktrees with centralized notebook configuration",
+		Tags:        []string{"plan", "worktree", "ecosystem", "notebook"},
+		Steps: []harness.Step{
+			harness.NewStep("Setup ecosystem with centralized notebook", func(ctx *harness.Context) error {
+				// Create ecosystem directory
+				ecosystemPath := filepath.Join(ctx.RootDir, "grove-ecosystem")
+				fs.CreateDir(ecosystemPath)
+				git.Init(ecosystemPath)
+				git.SetupTestConfig(ecosystemPath)
+
+				// Create centralized notebook directory
+				notebookPath := filepath.Join(ctx.RootDir, "notebook")
+				fs.CreateDir(notebookPath)
+
+				// Create ecosystem grove.yml with centralized notebook config
+				ecosystemConfig := fmt.Sprintf(`name: grove-ecosystem
+notebook:
+  root_dir: %s
+  plans_path_template: "repos/{{ .Workspace.Name }}/main/plans"
+`, notebookPath)
+				fs.WriteString(filepath.Join(ecosystemPath, "grove.yml"), ecosystemConfig)
+
+				// Create a subproject within the ecosystem
+				subprojectPath := filepath.Join(ecosystemPath, "grove-mcp")
+				fs.CreateDir(subprojectPath)
+				git.Init(subprojectPath)
+				git.SetupTestConfig(subprojectPath)
+				fs.WriteString(filepath.Join(subprojectPath, "README.md"), "Subproject")
+				git.Add(subprojectPath, ".")
+				git.Commit(subprojectPath, "Initial commit")
+
+				// Commit ecosystem
+				git.Add(ecosystemPath, ".")
+				git.Commit(ecosystemPath, "Initial ecosystem commit")
+
+				ctx.Set("ecosystem_path", ecosystemPath)
+				ctx.Set("subproject_path", subprojectPath)
+				ctx.Set("notebook_path", notebookPath)
+				return nil
+			}),
+			harness.NewStep("Setup test environment with workspace mocking", func(ctx *harness.Context) error {
+				// First run the standard setup
+				if err := setupTestEnvironment().Func(ctx); err != nil {
+					return err
+				}
+
+				// Set up mock workspace discovery to prevent discovering real system workspaces
+				// This ensures the test stays isolated within the test directory
+				ecosystemPath := ctx.GetString("ecosystem_path")
+				subprojectPath := ctx.GetString("subproject_path")
+
+				workspaceData := fmt.Sprintf(`[{"name":"grove-ecosystem","path":"%s","worktrees":[{"path":"%s","branch":"main","is_main":true}]},{"name":"grove-mcp","path":"%s","worktrees":[{"path":"%s","branch":"main","is_main":true}]}]`,
+					ecosystemPath, ecosystemPath, subprojectPath, subprojectPath)
+
+				// Set both environment variables - one for the mock, one for the actual code
+				os.Setenv("MOCK_GROVE_WS_LIST", workspaceData)
+				os.Setenv("GROVE_TEST_WORKSPACES", workspaceData)
+
+				return nil
+			}),
+			harness.NewStep("Initialize a plan with worktree from the subproject", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				subprojectPath := ctx.GetString("subproject_path")
+				ecosystemPath := ctx.GetString("ecosystem_path")
+
+				// Initialize plan with --worktree flag to create both plan and worktree
+				// Use --force to allow re-running in debug mode
+				// Explicitly specify the config path to use the test ecosystem's grove.yml
+				configPath := filepath.Join(ecosystemPath, "grove.yml")
+				cmd := command.New(flow, "plan", "init", "test-plan", "--worktree", "--force", "--config", configPath).Dir(subprojectPath)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("failed to init plan: %w", result.Error)
+				}
+
+				// Set worktree path for subsequent steps
+				worktreePath := filepath.Join(subprojectPath, ".grove-worktrees", "test-plan")
+				ctx.Set("worktree_path", worktreePath)
+
+				// Verify worktree was created
+				if !fs.Exists(worktreePath) {
+					return fmt.Errorf("worktree should be created at %s", worktreePath)
+				}
+
+				// Verify plan was created in the centralized notebook location
+				notebookPath := ctx.GetString("notebook_path")
+				expectedPlanPath := filepath.Join(notebookPath, "repos", "grove-mcp", "main", "plans", "test-plan")
+				if !fs.Exists(expectedPlanPath) {
+					return fmt.Errorf("plan should exist at %s", expectedPlanPath)
+				}
+
+				ctx.Set("expected_plan_path", expectedPlanPath)
+				return nil
+			}),
+			harness.NewStep("Navigate to worktree and set active plan", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				worktreePath := ctx.GetString("worktree_path")
+				ecosystemPath := ctx.GetString("ecosystem_path")
+				configPath := filepath.Join(ecosystemPath, "grove.yml")
+
+				// Set the active plan
+				cmd := command.New(flow, "plan", "set", "test-plan", "--config", configPath).Dir(worktreePath)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					return fmt.Errorf("failed to set active plan: %w", result.Error)
+				}
+				if !strings.Contains(result.Stdout, "Set active job to: test-plan") {
+					return fmt.Errorf("unexpected output when setting active plan")
+				}
+
+				return nil
+			}),
+			harness.NewStep("Verify plan status resolves correct path", func(ctx *harness.Context) error {
+				flow, _ := getFlowBinary()
+				worktreePath := ctx.GetString("worktree_path")
+				expectedPlanPath := ctx.GetString("expected_plan_path")
+				ecosystemPath := ctx.GetString("ecosystem_path")
+				configPath := filepath.Join(ecosystemPath, "grove.yml")
+
+				// Run plan status - should resolve to the correct centralized notebook path
+				cmd := command.New(flow, "plan", "status", "test-plan", "--config", configPath).Dir(worktreePath)
+				result := cmd.Run()
+				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+				if result.Error != nil {
+					// Check if error message reveals path resolution issue
+					if strings.Contains(result.Stderr, "grove-ecosystem/main/plans") {
+						return fmt.Errorf("plan path incorrectly resolved to ecosystem path instead of subproject path")
+					}
+					return fmt.Errorf("plan status failed (should find plan at %s): %w", expectedPlanPath, result.Error)
+				}
+
 				return nil
 			}),
 		},
