@@ -70,6 +70,17 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 
 // executePlanInit contains the core logic for initializing a plan and returns a result string.
 func executePlanInit(cmd *PlanInitCmd) (string, error) {
+	// Auto-detect worktree context when running inside a sub-project of an ecosystem worktree.
+	currentNode, err := workspace.GetProjectByPath(".")
+	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		// If we are in this context, the worktree for any new plan should
+		// automatically be the parent ecosystem worktree.
+		if cmd.Worktree == "" || cmd.Worktree == "__AUTO__" {
+			parentWorktreeName := filepath.Base(currentNode.ParentEcosystemPath)
+			cmd.Worktree = parentWorktreeName
+		}
+	}
+
 	// Resolve the full path for the new plan directory.
 	planDirArg := cmd.Dir
 	planPath, err := resolvePlanPath(planDirArg)
@@ -109,13 +120,20 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Determine worktree to set in config
 	worktreeToSet := cmd.Worktree
+	isInheritedWorktree := false
+	if currentNode != nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		// We're in a sub-project worktree, so the worktree is inherited from the parent ecosystem
+		if worktreeToSet != "" && worktreeToSet != "__AUTO__" {
+			isInheritedWorktree = true
+		}
+	}
 	if worktreeToSet == "__AUTO__" {
 		// User used --worktree without a value, use plan name
 		worktreeToSet = planName
 	}
 
-	// Create the actual worktree if requested
-	if worktreeToSet != "" {
+	// Create the actual worktree if requested (but skip if it's inherited)
+	if worktreeToSet != "" && !isInheritedWorktree {
 		worktreePath, err := createWorktreeIfRequested(worktreeToSet, cmd.Repos)
 		if err != nil {
 			return "", err
@@ -244,6 +262,17 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
 func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) error {
+	// Auto-detect worktree context when running inside a sub-project of an ecosystem worktree.
+	currentNode, err := workspace.GetProjectByPath(".")
+	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		// If we are in this context, the worktree for any new plan should
+		// automatically be the parent ecosystem worktree.
+		if cmd.Worktree == "" || cmd.Worktree == "__AUTO__" {
+			parentWorktreeName := filepath.Base(currentNode.ParentEcosystemPath)
+			cmd.Worktree = parentWorktreeName
+		}
+	}
+
 	// Create a workspace provider to discover local repositories.
 	discoveryService := workspace.NewDiscoveryService(nil) // logger is optional
 	discoveryResult, err := discoveryService.DiscoverAll()
@@ -382,14 +411,21 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// Determine worktree from command-line flag
 	var worktreeOverride string
+	isInheritedWorktree := false
+	if currentNode != nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		// We're in a sub-project worktree, so the worktree is inherited from the parent ecosystem
+		if cmd.Worktree != "" && cmd.Worktree != "__AUTO__" {
+			isInheritedWorktree = true
+		}
+	}
 	if cmd.Worktree == "__AUTO__" {
 		worktreeOverride = planName
 	} else if cmd.Worktree != "" {
 		worktreeOverride = cmd.Worktree
 	}
 
-	// Create the actual worktree if requested
-	if worktreeOverride != "" {
+	// Create the actual worktree if requested (but skip if it's inherited)
+	if worktreeOverride != "" && !isInheritedWorktree {
 		worktreePath, err := createWorktreeIfRequested(worktreeOverride, cmd.Repos)
 		if err != nil {
 			return err

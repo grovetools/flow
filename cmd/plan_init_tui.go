@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -10,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -198,6 +200,14 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 
 	// Apply pre-populated values from CLI flags (this may override defaults)
 	m.prePopulate(initialCmd)
+
+	// Auto-detect if we're in a sub-project worktree and pre-configure the form.
+	currentNode, err := workspace.GetProjectByPath(".")
+	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		parentWorktreeName := filepath.Base(currentNode.ParentEcosystemPath)
+		m.worktreeInput.SetValue(parentWorktreeName)
+		m.withWorktree = false // Disable auto-creation; we are inheriting.
+	}
 
 	return m
 }
@@ -577,18 +587,29 @@ func (m planInitTUIModel) View() string {
 			recipeDisplay = fmt.Sprintf("[%s]", string(recipeItem))
 		}
 	}
+
+	// Check if we're in an inherited context
+	isInheritedContext := false
+	currentNode, err := workspace.GetProjectByPath(".")
+	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		isInheritedContext = true
+	}
+
 	autoWorktreeDisplay := "[ ]"
 	if m.withWorktree {
 		autoWorktreeDisplay = "[x]"
 	}
-	
+	if isInheritedContext {
+		autoWorktreeDisplay = theme.DefaultTheme.Muted.Render("[ ] (Inherited)")
+	}
+
 	recipeField := renderField(1, "Recipe", recipeDisplay, false)
 	autoWorktreeField := renderField(2, "Auto-create Worktree", autoWorktreeDisplay, false)
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, recipeField, "  ", autoWorktreeField)
 	b.WriteString(row2)
 	b.WriteString("\n")
 
-	// Worktree Settings Section  
+	// Worktree Settings Section
 	b.WriteString(theme.DefaultTheme.Info.Render("Worktree Settings"))
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("─", 90))
@@ -598,6 +619,9 @@ func (m planInitTUIModel) View() string {
 	var worktreeDisplay string
 	if m.withWorktree {
 		worktreeDisplay = theme.DefaultTheme.Muted.Render("(matches plan name)")
+	} else if isInheritedContext {
+		// Show the inherited worktree name but make it clear it's not editable here.
+		worktreeDisplay = theme.DefaultTheme.Info.Render(m.worktreeInput.Value())
 	} else {
 		worktreeDisplay = m.worktreeInput.View()
 	}
