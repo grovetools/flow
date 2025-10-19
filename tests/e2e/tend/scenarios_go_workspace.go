@@ -145,7 +145,7 @@ go 1.21
 					return fmt.Errorf("job file not found at %s: %w", jobFile, err)
 				}
 				
-				cmd := ctx.Command(flow, "plan", "launch", "--host", jobFile).Dir(moduleDir)
+				cmd := ctx.Command(flow, "plan", "run", jobFile, "--yes").Dir(moduleDir)
 				// Set environment variables for testing
 				cmd.Env("GROVE_FLOW_SKIP_DOCKER_CHECK=true")
 				result := cmd.Run()

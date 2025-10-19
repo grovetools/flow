@@ -116,20 +116,8 @@ flow:
 				}
 
 				// Verify the job file was created correctly
-				// First check if plan directory exists
-				planDir1 := filepath.Join(ctx.RootDir, "test-dynamic")
-				planDir2 := filepath.Join(ctx.RootDir, "plans", "test-dynamic")
-				
-				var jobPath string
-				if fs.Exists(filepath.Join(planDir2, "01-test.md")) {
-					jobPath = filepath.Join(planDir2, "01-test.md")
-				} else if fs.Exists(filepath.Join(planDir1, "01-test.md")) {
-					// Plan was created at root level
-					jobPath = filepath.Join(planDir1, "01-test.md")
-				} else {
-					return fmt.Errorf("job file 01-test.md not found in expected locations")
-				}
-				
+				jobPath := filepath.Join(ctx.RootDir, "plans", "test-dynamic", "01-test.md")
+
 				content, err := fs.ReadString(jobPath)
 				if err != nil {
 					return fmt.Errorf("failed to read job file at %s: %w", jobPath, err)
