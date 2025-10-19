@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"github.com/mattsolo1/grove-core/util/sanitize"
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -205,8 +206,8 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 					fmt.Println("No TTY available, continuing without tmux session...")
 				} else {
 					fmt.Printf("This plan uses worktree '%s'. Launch in dedicated tmux session? [Y/n]: ", color.CyanString(worktreeName))
-					var response string
-					fmt.Scanln(&response)
+					reader := bufio.NewReader(os.Stdin)
+					response, _ := reader.ReadString('\n')
 					response = strings.ToLower(strings.TrimSpace(response))
 					
 					// If user says no, continue with normal execution
@@ -367,8 +368,9 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 	// Confirm execution unless --yes
 	if !planRunYes {
 		fmt.Print("\nExecute this job? [Y/n]: ")
-		var response string
-		fmt.Scanln(&response)
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
 		if response != "" && response != "y" && response != "Y" {
 			fmt.Println("Aborted.")
 			return nil
@@ -434,8 +436,9 @@ func runMultipleJobs(ctx context.Context, orch *orchestration.Orchestrator, plan
 	// Confirm execution unless --yes
 	if !planRunYes {
 		fmt.Print("\nExecute these jobs in parallel? [Y/n]: ")
-		var response string
-		fmt.Scanln(&response)
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
 		if response != "" && response != "y" && response != "Y" {
 			fmt.Println("Aborted.")
 			return nil
@@ -514,8 +517,9 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 	// Confirm unless --yes
 	if !planRunYes {
 		fmt.Printf("\nRun %d job(s)? [Y/n]: ", len(runnable))
-		var response string
-		fmt.Scanln(&response)
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
 		if response != "" && response != "y" && response != "Y" {
 			fmt.Println("Aborted.")
 			return nil
@@ -557,8 +561,9 @@ func runAllJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orc
 	// Confirm unless --yes
 	if !planRunYes {
 		fmt.Print("\nThis will run all remaining jobs. Continue? [Y/n]: ")
-		var response string
-		fmt.Scanln(&response)
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(response)
 		if response != "" && response != "y" && response != "Y" {
 			fmt.Println("Aborted.")
 			return nil
