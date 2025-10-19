@@ -1034,7 +1034,8 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 		}
 		
 		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
-		
+		prettyLog.InfoPretty(fmt.Sprintf("Using job-specific context from: %s", rulesFilePath))
+
 		// Generate context using the custom rules file
 		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
 			return fmt.Errorf("failed to generate job-specific context: %w", err)
@@ -1088,7 +1089,8 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 				// Check if we should skip interactive prompts
 				if e.config.SkipInteractive {
 					prettyLog.WarnPretty("Could not create .grove/rules file.")
-					log.WithField("job_type", jobType).Info("Skipping interactive prompt and proceeding without context")
+					prettyLog.InfoPretty(fmt.Sprintf("Skipping interactive prompt and proceeding without context for %s job", jobType))
+					log.WithField("job_type", jobType).Info(fmt.Sprintf("Skipping interactive prompt and proceeding without context for %s job", jobType))
 					return e.displayContextInfo(worktreePath)
 				}
 
