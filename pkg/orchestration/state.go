@@ -262,11 +262,23 @@ type FileLock struct {
 
 func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 	lockPath := path + ".lock"
+	currentPID := os.Getpid()
 
 	// Try to create lock file exclusively
 	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 	if err != nil {
 		if os.IsExist(err) {
+			// Check if lock belongs to current process (for executor-created locks)
+			if content, err := os.ReadFile(lockPath); err == nil {
+				var pidInLock int
+				if _, err := fmt.Sscanf(string(content), "%d", &pidInLock); err == nil && pidInLock == currentPID {
+					// Lock file belongs to us - we can proceed
+					// This happens when the executor creates the lock file first
+					// Return a "no-op" lock that won't try to unlock the executor's lock
+					return &FileLock{path: lockPath, file: nil}, nil
+				}
+			}
+
 			// Check if lock is stale (older than 5 minutes)
 			if info, err := os.Stat(lockPath); err == nil {
 				if time.Since(info.ModTime()) > 5*time.Minute {
@@ -286,9 +298,11 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 		}
 	}
 
-	// Write PID for debugging
-	fmt.Fprintf(file, "%d\n", os.Getpid())
-	file.Sync()
+	// Write PID for debugging (only if we created the lock)
+	if file != nil {
+		fmt.Fprintf(file, "%d\n", currentPID)
+		file.Sync()
+	}
 
 	return &FileLock{path: lockPath, file: file}, nil
 }
@@ -297,8 +311,11 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 func (fl *FileLock) Unlock() error {
 	if fl.file != nil {
 		fl.file.Close()
+		// Only remove the lock file if we created it
+		return os.Remove(fl.path)
 	}
-	return os.Remove(fl.path)
+	// No-op lock (created by executor) - don't remove it
+	return nil
 }
 
 // Atomic file operations
