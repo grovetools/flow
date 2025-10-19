@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -208,50 +209,45 @@ func setConfigValues(configPath string, pairs []string) error {
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid format for set flag: %s (expected key=value)", pair)
 		}
-		
+
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
-		
-		// Validate key
+
+		// Validate key and handle type conversion
 		switch key {
-		case "model", "worktree", "target_agent_container":
+		case "model", "worktree", "target_agent_container", "notes", "status":
 			config[key] = value
+		case "prepend_dependencies":
+			// Handle boolean conversion
+			boolVal, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("invalid boolean value for prepend_dependencies: %s", value)
+			}
+			config[key] = boolVal
+		case "repos":
+			// Handle array - split by comma
+			if value == "" {
+				config[key] = []string{}
+			} else {
+				repos := strings.Split(value, ",")
+				for i := range repos {
+					repos[i] = strings.TrimSpace(repos[i])
+				}
+				config[key] = repos
+			}
 		default:
 			return fmt.Errorf("unknown configuration key: %s", key)
 		}
 	}
 
-	// Generate YAML with comments
-	var output strings.Builder
-	
-	// Model
-	output.WriteString("# Default model for jobs in this plan\n")
-	if model, ok := config["model"].(string); ok && model != "" {
-		output.WriteString(fmt.Sprintf("model: %s\n", model))
-	} else {
-		output.WriteString("# model: gemini-2.5-pro\n")
-	}
-	output.WriteString("\n")
-	
-	// Worktree
-	output.WriteString("# Default worktree for agent jobs\n")
-	if worktree, ok := config["worktree"].(string); ok && worktree != "" {
-		output.WriteString(fmt.Sprintf("worktree: %s\n", worktree))
-	} else {
-		output.WriteString("# worktree: feature-branch\n")
-	}
-	output.WriteString("\n")
-	
-	// Container
-	output.WriteString("# Default container for agent jobs\n")
-	if container, ok := config["target_agent_container"].(string); ok && container != "" {
-		output.WriteString(fmt.Sprintf("target_agent_container: %s\n", container))
-	} else {
-		output.WriteString("# target_agent_container: grove-agent-ide\n")
+	// Marshal config to YAML
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
 	// Write the file
-	if err := os.WriteFile(configPath, []byte(output.String()), 0644); err != nil {
+	if err := os.WriteFile(configPath, yamlData, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
