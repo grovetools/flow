@@ -181,8 +181,34 @@ func listAllWorkspacePlans() ([]PlanSummary, error) {
 
 func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummary, error) {
 	var summaries []PlanSummary
+
+	// First check if basePath itself is a plan directory
+	planConfigPath := filepath.Join(basePath, ".grove-plan.yml")
+	if _, err := os.Stat(planConfigPath); err == nil {
+		// basePath itself is a plan directory
+		plan, err := orchestration.LoadPlan(basePath)
+		if err == nil {
+			VerifyRunningJobStatus(plan)
+			if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
+				// Skip finished plan
+			} else {
+				summary := createPlanSummary(plan, basePath)
+				summary.WorkspaceName = workspaceName
+				summary.WorkspacePath = workspacePath
+				summaries = append(summaries, summary)
+			}
+		}
+		// Don't scan subdirectories if basePath itself is a plan
+		return summaries, nil
+	}
+
+	// basePath is not a plan itself, so scan for plan subdirectories
 	entries, err := os.ReadDir(basePath)
 	if err != nil {
+		// If we can't read the directory, it's fine if it doesn't exist
+		if os.IsNotExist(err) {
+			return summaries, nil
+		}
 		return nil, fmt.Errorf("failed to read plans directory %s: %w", basePath, err)
 	}
 

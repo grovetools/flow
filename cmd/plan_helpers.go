@@ -91,6 +91,15 @@ func getRepositoryName(dir string) (string, error) {
 // resolvePlanPath determines the absolute path for a plan directory.
 // It uses the new NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).
 func resolvePlanPath(planName string) (string, error) {
+	// If planName is already an absolute path, use it directly.
+	if filepath.IsAbs(planName) {
+		return planName, nil
+	}
+	// If planName contains directory separators, it's a relative path from the CWD's perspective.
+	if strings.Contains(planName, string(filepath.Separator)) {
+		return filepath.Abs(planName)
+	}
+
 	// 1. Get the current workspace node.
 	node, err := workspace.GetProjectByPath(".")
 	if err != nil {
