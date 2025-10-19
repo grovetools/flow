@@ -193,28 +193,28 @@ Please perform a general analysis of the project.
 			
 			harness.NewStep("Run job with Go-only rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				
+
 				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "01-go-analysis.md"), "-y").
 					Dir(ctx.RootDir)
-				
+
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-				
+
 				if result.Error != nil {
 					return fmt.Errorf("failed to run job with Go-only rules: %v", result.Error)
 				}
-				
-				// Verify that job used the custom rules file
-				if !strings.Contains(result.Stdout, "Using job-specific context from") ||
-				   !strings.Contains(result.Stdout, "go-only.rules") {
+
+				// Verify that job used the custom rules file (prettyLog outputs to stderr)
+				if !strings.Contains(result.Stderr, "Using job-specific context from") ||
+				   !strings.Contains(result.Stderr, "go-only.rules") {
 					return fmt.Errorf("job should have used go-only.rules file")
 				}
-				
+
 				// Verify job completed successfully
 				if !strings.Contains(result.Stdout, "✓ Job completed: Analyze Go files") {
 					return fmt.Errorf("job should have completed successfully")
 				}
-				
+
 				return nil
 			}),
 			
@@ -231,9 +231,9 @@ Please perform a general analysis of the project.
 					return fmt.Errorf("failed to run job with docs-only rules: %v", result.Error)
 				}
 				
-				// Verify that job used the custom rules file
-				if !strings.Contains(result.Stdout, "Using job-specific context from") ||
-				   !strings.Contains(result.Stdout, "docs-only.rules") {
+				// Verify that job used the custom rules file (prettyLog outputs to stderr)
+				if !strings.Contains(result.Stderr, "Using job-specific context from") ||
+				   !strings.Contains(result.Stderr, "docs-only.rules") {
 					return fmt.Errorf("job should have used docs-only.rules file")
 				}
 				
@@ -266,8 +266,8 @@ README.md
 					return fmt.Errorf("failed to run job without custom rules: %v", result.Error)
 				}
 				
-				// Verify that job did NOT use a custom rules file
-				if strings.Contains(result.Stdout, "Using job-specific context from") {
+				// Verify that job did NOT use a custom rules file (prettyLog outputs to stderr)
+				if strings.Contains(result.Stderr, "Using job-specific context from") {
 					return fmt.Errorf("job should not have used a custom rules file")
 				}
 				
@@ -330,9 +330,9 @@ Please test the fallback resolution for rules files.
 					return fmt.Errorf("failed to run job with git-root rules: %v", result.Error)
 				}
 				
-				// Verify that job found and used the rules file from git root
-				if !strings.Contains(result.Stdout, "Using job-specific context from") ||
-				   !strings.Contains(result.Stdout, "root-level.rules") {
+				// Verify that job found and used the rules file from git root (prettyLog outputs to stderr)
+				if !strings.Contains(result.Stderr, "Using job-specific context from") ||
+				   !strings.Contains(result.Stderr, "root-level.rules") {
 					return fmt.Errorf("job should have found root-level.rules file in git root")
 				}
 				
@@ -384,9 +384,9 @@ Please test the subdirectory fallback resolution for rules files.
 					return fmt.Errorf("failed to run job with subdirectory rules: %v", result.Error)
 				}
 				
-				// Verify that job found and used the rules file from git root/docs
-				if !strings.Contains(result.Stdout, "Using job-specific context from") ||
-				   !strings.Contains(result.Stdout, "docs/root-level.rules") {
+				// Verify that job found and used the rules file from git root/docs (prettyLog outputs to stderr)
+				if !strings.Contains(result.Stderr, "Using job-specific context from") ||
+				   !strings.Contains(result.Stderr, "docs/root-level.rules") {
 					return fmt.Errorf("job should have found docs/root-level.rules file in git root")
 				}
 				
