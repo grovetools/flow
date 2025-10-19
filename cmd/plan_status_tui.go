@@ -292,7 +292,7 @@ func addJobAndDependentsWithParent(job *orchestration.Job, plan *orchestration.P
 	
 	// Find and add dependents using the same logic as vanilla status
 	// This ensures jobs appear under their dependency with maximum height
-	dependents := findDependents(job, plan)
+	dependents := findAllDependents(job, plan)
 	for _, dep := range dependents {
 		addJobAndDependentsWithParent(dep, plan, result, visited, parents, indents, job, indent+1)
 	}
@@ -311,10 +311,10 @@ func addJobAndDependents(job *orchestration.Job, plan *orchestration.Plan, resul
 	}
 	visited[job.ID] = true
 	*result = append(*result, job)
-	
+
 	// Find and add dependents using the same logic as vanilla status
 	// This ensures jobs appear under their dependency with maximum height
-	dependents := findDependents(job, plan)
+	dependents := findAllDependents(job, plan)
 	for _, dep := range dependents {
 		addJobAndDependents(dep, plan, result, visited)
 	}

@@ -375,74 +375,10 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 	}
 
 	// Find jobs that depend on this one
-	dependents := findDependents(job, plan)
+	dependents := findAllDependents(job, plan)
 	for i, dep := range dependents {
 		printJobTree(w, dep, newPrefix, i == len(dependents)-1, plan, printed, job)
 	}
-}
-
-// findDependents returns jobs that depend on the given job, but only if this job
-// is the dependency closest to a leaf (has the fewest downstream dependents).
-func findDependents(job *orchestration.Job, plan *orchestration.Plan) []*orchestration.Job {
-	var dependents []*orchestration.Job
-	for _, candidate := range plan.Jobs {
-		// Check if candidate depends on the given job
-		dependsOnThis := false
-		var closestToLeafDep *orchestration.Job
-		minDistance := int(^uint(0) >> 1) // Max int
-		
-		for _, dep := range candidate.Dependencies {
-			if dep != nil {
-				if dep.ID == job.ID {
-					dependsOnThis = true
-				}
-				// Find the dependency closest to a leaf (minimum distance to leaf)
-				distance := getDistanceToLeaf(dep, plan)
-				if closestToLeafDep == nil || distance < minDistance {
-					closestToLeafDep = dep
-					minDistance = distance
-				}
-			}
-		}
-		
-		// Only include this dependent if the current job is its dependency closest to a leaf
-		if dependsOnThis && closestToLeafDep != nil && closestToLeafDep.ID == job.ID {
-			dependents = append(dependents, candidate)
-		}
-	}
-	return dependents
-}
-
-// getDistanceToLeaf returns the minimum distance from this job to any leaf node
-// (a job with no dependents). Distance 0 means this job is a leaf.
-func getDistanceToLeaf(job *orchestration.Job, plan *orchestration.Plan) int {
-	// Memoization to avoid recalculation
-	distanceCache := make(map[string]int)
-	return getDistanceToLeafCached(job, plan, distanceCache)
-}
-
-func getDistanceToLeafCached(job *orchestration.Job, plan *orchestration.Plan, cache map[string]int) int {
-	if distance, ok := cache[job.ID]; ok {
-		return distance
-	}
-	
-	dependents := findAllDependents(job, plan)
-	if len(dependents) == 0 {
-		// This is a leaf node
-		cache[job.ID] = 0
-		return 0
-	}
-	
-	minDistance := int(^uint(0) >> 1) // Max int
-	for _, dep := range dependents {
-		distance := getDistanceToLeafCached(dep, plan, cache) + 1
-		if distance < minDistance {
-			minDistance = distance
-		}
-	}
-	
-	cache[job.ID] = minDistance
-	return minDistance
 }
 
 // findAllDependents returns ALL jobs that depend on the given job (not filtered).
