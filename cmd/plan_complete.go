@@ -215,20 +215,20 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 	return completeJob(job, plan, false)
 }
 
-// getWorktreePathFromSession reads the working_directory from the session metadata.
-func getWorktreePathFromSession(jobID string) (string, error) {
-	// Expand home directory
+// findClaudeSessionInfo finds the PID and session directory for a Claude session associated with a job ID.
+func findClaudeSessionInfo(jobID string) (pid int, sessionDir string, err error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("get home directory: %w", err)
+		return 0, "", fmt.Errorf("get home directory: %w", err)
 	}
 
 	sessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
-
-	// Look for any session directory that contains this job ID in its metadata
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
-		return "", fmt.Errorf("read sessions directory: %w", err)
+		if os.IsNotExist(err) {
+			return 0, "", fmt.Errorf("sessions directory not found: %s", sessionsDir)
+		}
+		return 0, "", fmt.Errorf("read sessions directory: %w", err)
 	}
 
 	for _, entry := range entries {
@@ -236,100 +236,86 @@ func getWorktreePathFromSession(jobID string) (string, error) {
 			continue
 		}
 
-		sessionDir := filepath.Join(sessionsDir, entry.Name())
-		metadataFile := filepath.Join(sessionDir, "metadata.json")
+		currentSessionDir := filepath.Join(sessionsDir, entry.Name())
+		metadataFile := filepath.Join(currentSessionDir, "metadata.json")
 
-		// Read metadata to check if it matches our job ID
 		metadataBytes, err := os.ReadFile(metadataFile)
 		if err != nil {
-			continue // Skip if we can't read metadata
-		}
-
-		var metadata struct {
-			SessionID        string `json:"session_id"`
-			WorkingDirectory string `json:"working_directory"`
-		}
-		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-			continue // Skip if metadata is invalid
-		}
-
-		// Check if this session matches our job ID
-		if metadata.SessionID == jobID {
-			return metadata.WorkingDirectory, nil
-		}
-	}
-
-	return "", fmt.Errorf("no session found for job ID: %s", jobID)
-}
-
-// killClaudeSession kills the Claude process associated with the given job ID
-// by reading the PID from grove-hooks session metadata.
-func killClaudeSession(jobID string) error {
-	// Expand home directory
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("get home directory: %w", err)
-	}
-
-	sessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
-
-	// Look for any session directory that contains this job ID in its metadata
-	entries, err := os.ReadDir(sessionsDir)
-	if err != nil {
-		return fmt.Errorf("read sessions directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
 			continue
-		}
-
-		sessionDir := filepath.Join(sessionsDir, entry.Name())
-		metadataFile := filepath.Join(sessionDir, "metadata.json")
-
-		// Read metadata to check if it matches our job ID
-		metadataBytes, err := os.ReadFile(metadataFile)
-		if err != nil {
-			continue // Skip if we can't read metadata
 		}
 
 		var metadata struct {
 			SessionID string `json:"session_id"`
 		}
 		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-			continue // Skip if metadata is invalid
+			continue
 		}
 
-		// Check if this session matches our job ID
 		if metadata.SessionID == jobID {
-			// Read the PID
-			pidFile := filepath.Join(sessionDir, "pid.lock")
+			// Found the session, now get the PID
+			pidFile := filepath.Join(currentSessionDir, "pid.lock")
 			pidBytes, err := os.ReadFile(pidFile)
 			if err != nil {
-				return fmt.Errorf("read pid file: %w", err)
+				return 0, "", fmt.Errorf("read pid file for session %s: %w", jobID, err)
 			}
 
 			pidStr := strings.TrimSpace(string(pidBytes))
 			pid, err := strconv.Atoi(pidStr)
 			if err != nil {
-				return fmt.Errorf("parse pid: %w", err)
+				return 0, "", fmt.Errorf("parse pid for session %s: %w", jobID, err)
 			}
 
-			// Check if process exists
-			process, err := os.FindProcess(pid)
-			if err != nil {
-				return fmt.Errorf("find process: %w", err)
-			}
-
-			// Send SIGTERM to gracefully terminate
-			if err := process.Signal(syscall.SIGTERM); err != nil {
-				// Process might already be dead, which is fine
-				return fmt.Errorf("kill process: %w", err)
-			}
-
-			return nil
+			return pid, currentSessionDir, nil
 		}
 	}
 
-	return fmt.Errorf("no session found for job ID: %s", jobID)
+	return 0, "", fmt.Errorf("no session found for job ID: %s", jobID)
+}
+
+// getWorktreePathFromSession reads the working_directory from the session metadata.
+func getWorktreePathFromSession(jobID string) (string, error) {
+	_, sessionDir, err := findClaudeSessionInfo(jobID)
+	if err != nil {
+		return "", err
+	}
+
+	metadataFile := filepath.Join(sessionDir, "metadata.json")
+	metadataBytes, err := os.ReadFile(metadataFile)
+	if err != nil {
+		return "", fmt.Errorf("could not read metadata from found session: %w", err)
+	}
+
+	var metadata struct {
+		WorkingDirectory string `json:"working_directory"`
+	}
+	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		return "", fmt.Errorf("could not parse metadata from found session: %w", err)
+	}
+
+	return metadata.WorkingDirectory, nil
+}
+
+// killClaudeSession kills the Claude process associated with the given job ID
+// by reading the PID from grove-hooks session metadata.
+func killClaudeSession(jobID string) error {
+	pid, _, err := findClaudeSessionInfo(jobID)
+	if err != nil {
+		return err // The error from findClaudeSessionInfo is already descriptive
+	}
+
+	// Check if process exists
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("find process: %w", err)
+	}
+
+	// Send SIGTERM to gracefully terminate
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		// Process might already be dead, which is fine
+		if !strings.Contains(err.Error(), "process already finished") {
+			return fmt.Errorf("kill process: %w", err)
+		}
+	}
+
+	return nil
 }

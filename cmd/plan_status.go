@@ -127,15 +127,27 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 	const JobStatusInterrupted = orchestration.JobStatus("interrupted")
 
 	for _, job := range plan.Jobs {
-		if job.Status == orchestration.JobStatusRunning {
-			pid, err := orchestration.ReadLockFile(job.FilePath)
+		if job.Status != orchestration.JobStatusRunning {
+			continue
+		}
+
+		// Special handling for interactive agent jobs
+		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent {
+			pid, _, err := findClaudeSessionInfo(job.ID)
 			if err != nil {
-				// Lock file missing, but status is running. Mark as interrupted.
+				// Could not find session info (e.g., session directory deleted), mark as interrupted
 				job.Status = JobStatusInterrupted
 				continue
 			}
 			if !process.IsProcessAlive(pid) {
-				// Process is dead. Mark as interrupted.
+				// Associated Claude process is dead
+				job.Status = JobStatusInterrupted
+			}
+		} else {
+			// Original logic for other job types
+			pid, err := orchestration.ReadLockFile(job.FilePath)
+			if err != nil || !process.IsProcessAlive(pid) {
+				// Lock file missing or process is dead, mark as interrupted.
 				job.Status = JobStatusInterrupted
 			}
 		}
