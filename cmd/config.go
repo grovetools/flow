@@ -29,6 +29,7 @@ type AgentConfig struct {
 	Args                      []string `yaml:"args"`
 	MountWorkspaceAtHostPath  bool     `yaml:"mount_workspace_at_host_path"`
 	UseSuperprojectRoot       bool     `yaml:"use_superproject_root"`
+	InteractiveProvider       string   `yaml:"interactive_provider,omitempty"` // "claude" or "codex"
 }
 
 // AppConfig wraps the core config with flow-specific extensions.

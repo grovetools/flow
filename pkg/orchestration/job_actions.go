@@ -15,7 +15,7 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 	}
 
 	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
-	cmd := exec.Command("clogs", "read", jobSpec)
+	cmd := exec.Command("aglogs", "read", jobSpec)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -23,7 +23,7 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 		// This can happen if the agent session was never started.
 		// Log a warning and continue.
 		fmt.Printf("Warning: could not get transcript for %s: %v\n", jobSpec, err)
-		fmt.Printf("         'clogs' output: %s\n", string(output))
+		fmt.Printf("         'aglogs' output: %s\n", string(output))
 		return nil
 	}
 
