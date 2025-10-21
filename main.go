@@ -19,6 +19,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewModelsCmd())
 	rootCmd.AddCommand(cmd.NewStarshipCmd())
+	rootCmd.AddCommand(cmd.GetRegisterCodexSessionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

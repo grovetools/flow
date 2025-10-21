@@ -141,8 +141,23 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		return fmt.Errorf("failed to send agent command: %w", err)
 	}
 
-	// Discover and register the session in a background goroutine
-	go p.discoverAndRegisterSession(job, plan, workDir, targetPane)
+	// Launch session registration in a detached background process
+	// This process will survive after the flow command exits
+	go func() {
+		// Detach from parent by forking a new process
+		cmd := osexec.Command("/bin/sh", "-c", fmt.Sprintf(
+			"(sleep 3 && %s register-session-codex %s %s %s %s '%s' '%s' > /tmp/codex-reg-%s.log 2>&1) &",
+			"/Users/solom4/Code/grove-ecosystem/.grove-worktrees/codex-support/grove-flow/bin/flow",
+			job.ID,
+			plan.Name,
+			targetPane,
+			workDir,
+			job.Title,
+			job.FilePath,
+			job.ID,
+		))
+		cmd.Start()  // Fire and forget
+	}()
 
 	// Switch to the agent window if inside tmux
 	if os.Getenv("TMUX") != "" {
@@ -245,32 +260,97 @@ func (p *CodexAgentProvider) generateSessionName(workDir string) (string, error)
 
 // discoverAndRegisterSession discovers the codex session ID and registers it with grove-core
 func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, workDir, targetPane string) {
+	// Create debug log file
+	debugFile, _ := os.Create(filepath.Join(os.TempDir(), fmt.Sprintf("grove-flow-codex-registration-%s.log", job.ID)))
+	if debugFile != nil {
+		defer func() {
+			debugFile.WriteString(fmt.Sprintf("Goroutine exiting at %s\n", time.Now().Format(time.RFC3339)))
+			debugFile.Sync()
+			debugFile.Close()
+		}()
+		debugFile.WriteString(fmt.Sprintf("Starting registration for job %s at %s\n", job.ID, time.Now().Format(time.RFC3339)))
+		debugFile.Sync()
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("❌ Panic in session registration: %v\n", r)
+			fmt.Fprintf(os.Stderr, msg)
+			if debugFile != nil {
+				debugFile.WriteString(msg)
+				debugFile.Sync()
+			}
+		}
+	}()
+
+	p.log.WithFields(logrus.Fields{
+		"job_id":      job.ID,
+		"plan":        plan.Name,
+		"target_pane": targetPane,
+	}).Info("Starting codex session discovery and registration")
+
 	// Wait a moment for the log file to be created.
+	msg := fmt.Sprintf("⏳ Waiting 2s for Codex log file to be created...\n")
+	fmt.Fprintf(os.Stderr, msg)
+	if debugFile != nil {
+		debugFile.WriteString(msg)
+		debugFile.Sync() // Flush to disk
+	}
 	time.Sleep(2 * time.Second)
 
+	if debugFile != nil {
+		debugFile.WriteString("After sleep, continuing...\n")
+		debugFile.Sync()
+	}
+
 	codexSessionsDir := filepath.Join(os.Getenv("HOME"), ".codex", "sessions")
-	latestFile, err := findMostRecentFile(codexSessionsDir)
+	if debugFile != nil {
+		debugFile.WriteString(fmt.Sprintf("Looking in: %s\n", codexSessionsDir))
+		debugFile.Sync()
+	}
+	p.log.WithField("sessions_dir", codexSessionsDir).Debug("Looking for codex session files")
+	latestFile, err := findMostRecentFile(codexSessionsDir, debugFile)
 	if err != nil {
+		msg := fmt.Sprintf("❌ Failed to find Codex session file: %v\n", err)
+		fmt.Fprintf(os.Stderr, msg)
+		if debugFile != nil {
+			debugFile.WriteString(msg)
+		}
 		p.log.WithError(err).Error("Failed to find most recent codex session file")
 		return
 	}
+	msg = fmt.Sprintf("✓ Found Codex log: %s\n", latestFile)
+	fmt.Fprintf(os.Stderr, msg)
+	if debugFile != nil {
+		debugFile.WriteString(msg)
+	}
+	p.log.WithField("latest_file", latestFile).Info("Found codex session file")
 
 	// Parse session ID from filename: rollout-2025-10-20T16-43-18-019a035c-b544-7552-b739-8573c821aaea.jsonl
 	base := filepath.Base(latestFile)
 	parts := strings.Split(strings.TrimSuffix(base, ".jsonl"), "-")
 	if len(parts) < 6 {
-		p.log.Error("Failed to parse session ID from codex log filename")
+		p.log.WithFields(logrus.Fields{
+			"filename": base,
+			"parts":    len(parts),
+		}).Error("Failed to parse session ID from codex log filename")
 		return
 	}
 	// UUID is the last 5 dash-separated segments
 	codexSessionID := strings.Join(parts[len(parts)-5:], "-")
+	p.log.WithField("codex_session_id", codexSessionID).Info("Parsed codex session ID")
 
 	// Find the PID of the codex process.
-	pid, err := findCodexPIDForWindow(targetPane)
+	fmt.Printf("🔍 Looking for Codex PID in pane: %s\n", targetPane)
+	p.log.WithField("target_pane", targetPane).Debug("Finding codex PID for pane")
+	pid, err := FindCodexPIDForPane(targetPane)
 	if err != nil {
+		fmt.Printf("❌ Failed to find Codex PID: %v\n", err)
 		p.log.WithError(err).Error("Failed to find codex PID")
 		return
 	}
+	fmt.Printf("✓ Found Codex PID: %d\n", pid)
+	p.log.WithField("pid", pid).Info("Found codex PID")
 
 	// Register the session using the core registry.
 	registry, err := sessions.NewFileSystemRegistry()
@@ -304,9 +384,12 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 		TranscriptPath:   latestFile,
 	}
 
+	fmt.Printf("📝 Registering session %s (PID %d) with registry...\n", codexSessionID, pid)
 	if err := registry.Register(metadata); err != nil {
+		fmt.Printf("❌ Failed to register session: %v\n", err)
 		p.log.WithError(err).Error("Failed to register codex session")
 	} else {
+		fmt.Printf("✅ Successfully registered Codex session %s\n", codexSessionID)
 		p.log.WithFields(logrus.Fields{
 			"session_id": codexSessionID,
 			"pid":        pid,
@@ -315,34 +398,117 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 }
 
 // findMostRecentFile finds the most recently modified file in a directory tree.
-func findMostRecentFile(dir string) (string, error) {
+func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
+	msg := fmt.Sprintf("🔍 Searching for .jsonl files in: %s\n", dir)
+	fmt.Fprintf(os.Stderr, msg)
+	if debugFile != nil {
+		debugFile.WriteString(msg)
+	}
+
 	var latestFile string
 	var latestModTime time.Time
+	fileCount := 0
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			msg := fmt.Sprintf("  ⚠️  Walk error at %s: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, msg)
+			if debugFile != nil {
+				debugFile.WriteString(msg)
+			}
 			return err
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".jsonl") {
+			fileCount++
 			if info.ModTime().After(latestModTime) {
 				latestModTime = info.ModTime()
 				latestFile = path
+				msg := fmt.Sprintf("  📄 Found newer file: %s (modified: %s)\n", filepath.Base(path), info.ModTime().Format("15:04:05"))
+				if debugFile != nil {
+					debugFile.WriteString(msg)
+				}
 			}
 		}
 		return nil
 	})
 
 	if err != nil {
+		msg := fmt.Sprintf("❌ Walk failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, msg)
+		if debugFile != nil {
+			debugFile.WriteString(msg)
+		}
 		return "", err
 	}
 	if latestFile == "" {
+		msg := fmt.Sprintf("❌ No .jsonl files found (searched %d files)\n", fileCount)
+		fmt.Fprintf(os.Stderr, msg)
+		if debugFile != nil {
+			debugFile.WriteString(msg)
+		}
 		return "", fmt.Errorf("no jsonl files found in %s", dir)
+	}
+	msg = fmt.Sprintf("✓ Selected most recent file: %s\n", filepath.Base(latestFile))
+	if debugFile != nil {
+		debugFile.WriteString(msg)
 	}
 	return latestFile, nil
 }
 
-// findCodexPIDForWindow finds the PID of the 'codex' process running within a specific tmux pane.
-func findCodexPIDForWindow(targetPane string) (int, error) {
+// findDescendantPID recursively finds a descendant process with a given name.
+func findDescendantPID(parentPID int, targetComm string) (int, error) {
+	// 1. Get all processes
+	cmd := osexec.Command("ps", "-o", "pid,ppid,comm")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	// 2. Build a process tree (map of ppid to children) and a pid-to-command map
+	tree := make(map[int][]int)
+	pidToComm := make(map[int]string)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines[1:] { // skip header
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			pid, _ := strconv.Atoi(fields[0])
+			ppid, _ := strconv.Atoi(fields[1])
+			comm := fields[2]
+			tree[ppid] = append(tree[ppid], pid)
+			pidToComm[pid] = comm
+		}
+	}
+
+	// 3. Traverse from parentPID using breadth-first search
+	queue := []int{parentPID}
+	visited := make(map[int]bool)
+
+	for len(queue) > 0 {
+		currentPID := queue[0]
+		queue = queue[1:]
+
+		if visited[currentPID] {
+			continue
+		}
+		visited[currentPID] = true
+
+		// Check if the current process is the target
+		if comm, ok := pidToComm[currentPID]; ok && strings.Contains(comm, targetComm) {
+			return currentPID, nil
+		}
+
+		// Add children to the queue
+		if children, ok := tree[currentPID]; ok {
+			queue = append(queue, children...)
+		}
+	}
+
+	return 0, fmt.Errorf("descendant process '%s' not found for parent PID %d", targetComm, parentPID)
+}
+
+// FindCodexPIDForPane finds the PID of the 'codex' process running within a specific tmux pane
+// by traversing the process tree from the pane's shell.
+func FindCodexPIDForPane(targetPane string) (int, error) {
 	// Use tmux display-message to get the pane PID
 	cmd := osexec.Command("tmux", "display-message", "-p", "-t", targetPane, "#{pane_pid}")
 	output, err := cmd.Output()
@@ -355,30 +521,8 @@ func findCodexPIDForWindow(targetPane string) (int, error) {
 		return 0, fmt.Errorf("failed to parse pane PID: %w", err)
 	}
 
-	// Find the 'codex' process that is a child of that shell.
-	cmd = osexec.Command("ps", "-o", "pid,ppid,comm")
-	output, err = cmd.Output()
-	if err != nil {
-		return 0, fmt.Errorf("failed to run 'ps': %w", err)
-	}
-
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 {
-			// Check if the command name contains 'codex'
-			if strings.Contains(fields[2], "codex") {
-				ppid, _ := strconv.Atoi(fields[1])
-				// If its parent is our shell, we've found our process.
-				if ppid == shellPID {
-					pid, _ := strconv.Atoi(fields[0])
-					return pid, nil
-				}
-			}
-		}
-	}
-
-	return 0, fmt.Errorf("could not find a 'codex' process as a child of shell with PID %d", shellPID)
+	// Find the 'codex' process that is a descendant of that shell.
+	return findDescendantPID(shellPID, "codex")
 }
 
 // getGitInfo returns the repo name and current branch for the given directory
