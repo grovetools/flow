@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mattsolo1/grove-flow/cmd/flow-config",
+  "$defs": {
+    "RecipeConfig": {
+      "properties": {
+        "vars": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object",
+      "required": [
+        "vars"
+      ]
+    }
+  },
+  "properties": {
+    "chat_directory": {
+      "type": "string"
+    },
+    "oneshot_model": {
+      "type": "string"
+    },
+    "target_agent_container": {
+      "type": "string"
+    },
+    "plans_directory": {
+      "type": "string"
+    },
+    "max_consecutive_steps": {
+      "type": "integer"
+    },
+    "summarize_on_complete": {
+      "type": "boolean"
+    },
+    "summary_model": {
+      "type": "string"
+    },
+    "summary_prompt": {
+      "type": "string"
+    },
+    "summary_max_chars": {
+      "type": "integer"
+    },
+    "recipes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RecipeConfig"
+      },
+      "type": "object"
+    }
+  },
+  "type": "object",
+  "title": "Grove Flow Configuration",
+  "description": "Schema for the 'flow' extension in grove.yml."
+}

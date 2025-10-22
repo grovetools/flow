@@ -5,6 +5,8 @@ import (
 	"github.com/mattsolo1/grove-core/config"
 )
 
+//go:generate sh -c "cd .. && go run ./tools/schema-generator/"
+
 // FlowConfig defines the structure for the 'flow' section in grove.yml.
 type FlowConfig struct {
 	ChatDirectory        string                  `yaml:"chat_directory"`
