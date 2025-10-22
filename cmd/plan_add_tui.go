@@ -161,27 +161,23 @@ func (d itemDelegate) Spacing() int                              { return 0 }
 func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	var str string
-	cursor := " "
+	cursor := "  "
 	if index == m.Index() {
-		cursor = ">"
+		cursor = theme.DefaultTheme.Highlight.Render("▶ ")
 	}
 
 	switch item := listItem.(type) {
 	case modelItem:
 		// Just show the model ID, no description
-		str = fmt.Sprintf("%s %s", cursor, item.ID)
+		str = fmt.Sprintf("%s%s", cursor, item.ID)
 	case item:
 		// Regular items
-		str = fmt.Sprintf("%s %s", cursor, item)
+		str = fmt.Sprintf("%s%s", cursor, item)
 	default:
 		return
 	}
 
-	if index == m.Index() {
-		fmt.Fprint(w, theme.DefaultTheme.Selected.Render(str))
-	} else {
-		fmt.Fprint(w, str)
-	}
+	fmt.Fprint(w, str)
 }
 
 // dependencyDelegate handles rendering for dependency items with checkboxes
@@ -199,9 +195,9 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 	}
 
 	var str string
-	cursor := " "
+	cursor := "  "
 	if index == m.Index() {
-		cursor = ">"
+		cursor = theme.DefaultTheme.Highlight.Render("▶ ")
 	}
 
 	checkbox := "[ ]"
@@ -211,18 +207,16 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 
 	// Format the display text
 	displayText := fmt.Sprintf("%s (%s)", depItem.job.Filename, depItem.job.Title)
-	
+
 	// Truncate to prevent wrapping (account for cursor and checkbox = 6 chars)
 	maxWidth := 35 // Conservative width for 45-char list minus cursor/checkbox
 	if len(displayText) > maxWidth {
 		displayText = displayText[:maxWidth-3] + "..."
 	}
-	
-	str = fmt.Sprintf("%s %s %s", cursor, checkbox, displayText)
 
-	if index == m.Index() {
-		fmt.Fprint(w, theme.DefaultTheme.Selected.Render(str))
-	} else if (*d.selectedDeps)[depItem.job.ID] {
+	str = fmt.Sprintf("%s%s %s", cursor, checkbox, displayText)
+
+	if (*d.selectedDeps)[depItem.job.ID] {
 		fmt.Fprint(w, theme.DefaultTheme.Bold.Render(str))
 	} else {
 		fmt.Fprint(w, theme.DefaultTheme.Muted.Render(str))

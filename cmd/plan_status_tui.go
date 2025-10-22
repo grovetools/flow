@@ -780,8 +780,16 @@ func (m statusTUIModel) renderJobTree() string {
 			treeChar = "└── "
 		}
 
+		// Add arrow indicator at the very left for selected row
+		var arrowIndicator string
+		if i == m.cursor {
+			arrowIndicator = theme.DefaultTheme.Highlight.Render("▶ ")
+		} else {
+			arrowIndicator = "  "
+		}
+
 		// Build tree structure part
-		treePart := fmt.Sprintf("  %s%s", prefix, treeChar)
+		treePart := fmt.Sprintf("%s%s", prefix, treeChar)
 
 		// Build job content with status icon
 		statusIcon := m.getStatusIcon(job.Status)
@@ -791,34 +799,32 @@ func (m statusTUIModel) renderJobTree() string {
 		var titleStyle lipgloss.Style
 
 		if i == m.cursor {
-			// Cursor: check status for filename color
+			// Cursor: check status for filename color, use theme-aware colors
 			if job.Status == orchestration.JobStatusCompleted {
 				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
 			} else {
-				filenameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText)
 			}
-			titleStyle = lipgloss.NewStyle().
-				Foreground(theme.DefaultColors.Pink).
-				Background(theme.DefaultColors.SelectedBackground)
+			titleStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Pink)
 		} else if m.selected[job.ID] {
 			// Selected: use accent color
 			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet)
 			titleStyle = theme.DefaultTheme.Muted
 		} else {
-			// Normal: check if completed, use light text; otherwise brighter gray
+			// Normal: check if completed, use light text; otherwise use theme muted color
 			if job.Status == orchestration.JobStatusCompleted {
 				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
 			} else {
-				filenameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText)
 			}
 			titleStyle = theme.DefaultTheme.Muted
 		}
 
 		coloredFilename := filenameStyle.Render(job.Filename)
 
-		// Get job type badge with subtle blue/cyan color
+		// Get job type badge with theme-aware color
 		jobTypeBadge := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("69")). // Subtle blue
+			Foreground(theme.DefaultColors.Cyan).
 			Render(fmt.Sprintf("[%s]", job.Type))
 
 		// Build content without emoji (add emoji separately to avoid background bleed)
@@ -846,31 +852,24 @@ func (m statusTUIModel) renderJobTree() string {
 		// Combine emoji (no background) with styled text content
 		styledJobContent := statusIcon + " " + textContent
 
-		// Build indicators separately with their own style (foreground only, no background)
-		indicators := ""
+		// Build selection indicator on the right if needed
+		selectionIndicator := ""
 		if m.selected[job.ID] {
-			indicators += lipgloss.NewStyle().
+			selectionIndicator = lipgloss.NewStyle().
 				Foreground(theme.DefaultTheme.Accent.GetForeground()).
 				Render(" ◆")
 		}
-		if i == m.cursor {
-			cursorChar := " "
-			if m.cursorVisible {
-				cursorChar = "◀"
-			}
-			indicators += lipgloss.NewStyle().
-				Foreground(theme.DefaultColors.Orange).
-				Render(" " + cursorChar)
-		}
 
-		// Combine all parts
-		fullLine := treePart + styledJobContent + indicators
-		
+		// Combine all parts: arrow + tree + content + selection
+		fullLine := arrowIndicator + treePart + styledJobContent + selectionIndicator
+
 		// Add summary on a new line if toggled on and available
 		if m.showSummaries && job.Summary != "" {
+			// Padding: 2 (arrow) + (indent * 4) + 4 (tree chars) + 2 (status icon + space)
+			summaryPadding := 2 + (indent * 4) + 4 + 2
 			summaryStyle := theme.DefaultTheme.Info.
-				PaddingLeft(indent*4 + 6) // indent level * 4 spaces + tree chars + space
-			
+				PaddingLeft(summaryPadding)
+
 			fullLine += "\n" + summaryStyle.Render("↳ "+job.Summary)
 		}
 		
