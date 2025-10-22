@@ -520,10 +520,10 @@ func (m planInitTUIModel) View() string {
 		Width(85) // Full width for single fields
 
 	unfocusedBorderStyle := borderStyle.Copy().
-		BorderForeground(lipgloss.Color("#CC8052")) // Fainter orange
+		BorderForeground(theme.DefaultColors.Border)
 
 	unfocusedBorderStyleWide := borderStyleWide.Copy().
-		BorderForeground(lipgloss.Color("#CC8052"))
+		BorderForeground(theme.DefaultColors.Border)
 
 	focusedBorderStyle := borderStyle.Copy().
 		BorderStyle(lipgloss.ThickBorder()).

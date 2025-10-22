@@ -760,9 +760,9 @@ func (m tuiModel) View() string {
 		Padding(0, 1).
 		Width(45)
 
-	// Unfocused style - fainter orange border
+	// Unfocused style - use theme border color
 	unfocusedBorderStyle := borderStyle.Copy().
-		BorderForeground(lipgloss.Color("#CC8052")) // Fainter version of orange
+		BorderForeground(theme.DefaultColors.Border)
 
 	// The focused style uses a bright highlighted border color and bold border.
 	// This provides a clear, modern focus indicator.

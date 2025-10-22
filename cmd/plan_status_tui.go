@@ -162,25 +162,25 @@ type statusTUIModel struct {
 // getStatusStyles returns theme-based styles for job statuses with subtle colors
 func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 	return map[orchestration.JobStatus]lipgloss.Style{
-		// Completed: Subtle spring green
-		orchestration.JobStatusCompleted: lipgloss.NewStyle().Foreground(theme.DefaultColors.Green),
-		// Running: Soft blue instead of bold yellow
-		orchestration.JobStatusRunning: lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue),
-		// Failed: Muted pink instead of bright red
-		orchestration.JobStatusFailed: lipgloss.NewStyle().Foreground(theme.DefaultColors.Pink),
-		// Blocked: Muted pink
-		orchestration.JobStatusBlocked: lipgloss.NewStyle().Foreground(theme.DefaultColors.Pink),
-		// Needs Review: Soft cyan
-		orchestration.JobStatusNeedsReview: lipgloss.NewStyle().Foreground(theme.DefaultColors.Cyan),
-		// Pending User: Soft violet accent
-		orchestration.JobStatusPendingUser: lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet),
-		// Pending LLM: Soft blue
-		orchestration.JobStatusPendingLLM: lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue),
-		// Pending: Muted gray for both dot and text
+		// Completed: Success style
+		orchestration.JobStatusCompleted: theme.DefaultTheme.Success,
+		// Running: Info style
+		orchestration.JobStatusRunning: theme.DefaultTheme.Info,
+		// Failed: Error style
+		orchestration.JobStatusFailed: theme.DefaultTheme.Error,
+		// Blocked: Error style
+		orchestration.JobStatusBlocked: theme.DefaultTheme.Error,
+		// Needs Review: Info style
+		orchestration.JobStatusNeedsReview: theme.DefaultTheme.Info,
+		// Pending User: Highlight style
+		orchestration.JobStatusPendingUser: theme.DefaultTheme.Highlight,
+		// Pending LLM: Info style
+		orchestration.JobStatusPendingLLM: theme.DefaultTheme.Info,
+		// Pending: Muted style
 		orchestration.JobStatusPending: theme.DefaultTheme.Muted,
 		// New statuses
 		orchestration.JobStatusTodo:      theme.DefaultTheme.Muted,
-		orchestration.JobStatusHold:      lipgloss.NewStyle().Foreground(theme.DefaultColors.Yellow),
+		orchestration.JobStatusHold:      theme.DefaultTheme.Warning,
 		orchestration.JobStatusAbandoned: theme.DefaultTheme.Faint,
 	}
 }
