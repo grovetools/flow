@@ -959,8 +959,8 @@ func editJob(job *orchestration.Job) tea.Cmd {
 }
 
 func runJob(planDir string, job *orchestration.Job) tea.Cmd {
-	// Run the job using flow plan run
-	return tea.ExecProcess(exec.Command("flow", "plan", "run", job.FilePath), func(err error) tea.Msg {
+	// Run the job using 'grove flow plan run' for workspace-awareness
+	return tea.ExecProcess(exec.Command("grove", "flow", "plan", "run", job.FilePath), func(err error) tea.Msg {
 		if err != nil {
 			return err
 		}
@@ -1071,8 +1071,9 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 		args = append(args, "-d", dep)
 	}
 
-	// Run flow plan add in interactive mode
-	return tea.ExecProcess(exec.Command("flow", args...), func(err error) tea.Msg {
+	// Run 'grove flow plan add' in interactive mode for workspace-awareness
+	flowArgs := append([]string{"flow"}, args...)
+	return tea.ExecProcess(exec.Command("grove", flowArgs...), func(err error) tea.Msg {
 		if err != nil {
 			return err
 		}

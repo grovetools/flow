@@ -1064,7 +1064,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 			
 			if resetErr != nil {
 				// Try cx reset directly as fallback
-				resetCmd = exec.Command("cx", "reset")
+				// Fallback removed - always use grove cx for workspace awareness
 				resetCmd.Dir = worktreePath
 				resetCmd.Stdout = os.Stdout
 				resetCmd.Stderr = os.Stderr
@@ -1134,7 +1134,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 
 						// Run cx edit in the worktree
 						prettyLog.InfoPretty(fmt.Sprintf("Opening rules editor with '%s edit'...", cxBinary))
-						cmd := exec.Command(cxBinary, "edit")
+						cmd := exec.Command("grove", "cx", "edit")
 						cmd.Dir = worktreePath
 						cmd.Stdin = os.Stdin
 						cmd.Stdout = os.Stdout
@@ -1638,7 +1638,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 		if groveErr != nil {
 			// Try cx generate directly as fallback
-			cxCmd = exec.CommandContext(ctx, "cx", "generate")
+			// Fallback removed - always use grove cx for workspace awareness
 			cxCmd.Dir = worktreePath
 			if logFile != nil {
 				cxCmd.Stdout = logFile

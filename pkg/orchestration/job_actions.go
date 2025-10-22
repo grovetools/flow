@@ -15,7 +15,7 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 	}
 
 	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
-	cmd := exec.Command("aglogs", "read", jobSpec)
+	cmd := exec.Command("grove", "aglogs", "read", jobSpec)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

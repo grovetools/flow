@@ -874,8 +874,8 @@ func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 			}
 			return nil
 		},
-		// Then run the status TUI
-		tea.ExecProcess(exec.Command("flow", "plan", "status", "--tui"),
+		// Then run the status TUI via 'grove' for workspace-awareness
+		tea.ExecProcess(exec.Command("grove", "flow", "plan", "status", "--tui"),
 			func(err error) tea.Msg {
 				// When in Neovim, quit the parent when child exits (for edit action)
 				if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
@@ -895,8 +895,8 @@ func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 			}
 			return nil
 		},
-		// Then run the finish command
-		tea.ExecProcess(exec.Command("flow", "plan", "finish"),
+		// Then run the finish command via 'grove' for workspace-awareness
+		tea.ExecProcess(exec.Command("grove", "flow", "plan", "finish"),
 			func(err error) tea.Msg {
 				return nil
 			}),
@@ -912,8 +912,8 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 			}
 			return nil
 		},
-		// Then run the open command
-		tea.ExecProcess(exec.Command("flow", "plan", "open"),
+		// Then run the open command via 'grove' for workspace-awareness
+		tea.ExecProcess(exec.Command("grove", "flow", "plan", "open"),
 			func(err error) tea.Msg {
 				// When plan open completes, stay in the TUI
 				return nil

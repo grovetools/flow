@@ -151,9 +151,9 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		}
 	
 	// Log full command being executed
-	c.log.WithField("args", strings.Join(args, " ")).Debug("Building llm command")
-	
-	cmd, err := c.cmdBuilder.Build(ctx, "llm", args...)
+	c.log.WithField("args", strings.Join(args, " ")).Debug("Building grove llm command")
+
+	cmd, err := c.cmdBuilder.Build(ctx, "grove", append([]string{"llm"}, args...)...)
 	if err != nil {
 		return "", fmt.Errorf("building llm command: %w", err)
 	}
