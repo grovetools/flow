@@ -113,9 +113,8 @@ func FlowStatusProvider(s state.State) (string, error) {
 	// Force color output for shell prompts
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
-	// Color the plan name with Cyan
-	planNameStyle := lipgloss.NewStyle().Foreground(theme.Cyan)
-	output := planNameStyle.Render(displayName)
+	// Color the plan name with Info style
+	output := theme.DefaultTheme.Info.Render(displayName)
 
 	// Load the plan to get job statistics
 	plan, err := orchestration.LoadPlan(planPath)
@@ -124,30 +123,26 @@ func FlowStatusProvider(s state.State) (string, error) {
 
 		var statsParts []string
 		if stats.Completed > 0 {
-			// Green for completed (solid dot)
-			style := lipgloss.NewStyle().Foreground(theme.Green)
-			statsParts = append(statsParts, style.Render(fmt.Sprintf("● %d", stats.Completed)))
+			// Success style for completed (solid dot)
+			statsParts = append(statsParts, theme.DefaultTheme.Success.Render(fmt.Sprintf("● %d", stats.Completed)))
 		}
 		if stats.Running > 0 {
-			// Blue for running (half-filled circle)
-			style := lipgloss.NewStyle().Foreground(theme.Blue)
-			statsParts = append(statsParts, style.Render(fmt.Sprintf("◐ %d", stats.Running)))
+			// Info style for running (half-filled circle)
+			statsParts = append(statsParts, theme.DefaultTheme.Info.Render(fmt.Sprintf("◐ %d", stats.Running)))
 		}
 		if stats.Pending > 0 {
 			// Muted gray for pending (hollow circle)
 			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("○ %d", stats.Pending)))
 		}
 		if stats.Failed > 0 {
-			// Pink for failed (X mark)
-			style := lipgloss.NewStyle().Foreground(theme.Pink)
-			statsParts = append(statsParts, style.Render(fmt.Sprintf("✗ %d", stats.Failed)))
+			// Error style for failed (X mark)
+			statsParts = append(statsParts, theme.DefaultTheme.Error.Render(fmt.Sprintf("✗ %d", stats.Failed)))
 		}
 		if stats.Todo > 0 {
 			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("📝 %d", stats.Todo)))
 		}
 		if stats.Hold > 0 {
-			style := lipgloss.NewStyle().Foreground(theme.Yellow)
-			statsParts = append(statsParts, style.Render(fmt.Sprintf("⏸ %d", stats.Hold)))
+			statsParts = append(statsParts, theme.DefaultTheme.Warning.Render(fmt.Sprintf("⏸ %d", stats.Hold)))
 		}
 		if stats.Abandoned > 0 {
 			statsParts = append(statsParts, theme.DefaultTheme.Faint.Render(fmt.Sprintf("🗑️ %d", stats.Abandoned)))
@@ -155,8 +150,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 
 		// Add WT indicator if in worktree
 		if config.Worktree != "" {
-			wtStyle := lipgloss.NewStyle().Foreground(theme.Violet)
-			statsParts = append(statsParts, wtStyle.Render("WT"))
+			statsParts = append(statsParts, theme.DefaultTheme.Accent.Render("WT"))
 		}
 
 		if len(statsParts) > 0 {

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
@@ -94,8 +95,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	}
 
 	// Display success
-	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	fmt.Println(successStyle.Render("✓") + " Created " + filename)
+	fmt.Println(theme.DefaultTheme.Success.Render("✓") + " Created " + filename)
 	fmt.Println("\nNext steps:")
 	fmt.Println("- Review the job file")
 	fmt.Printf("- Run with: flow plan run %s/%s\n", cmd.Dir, filename)

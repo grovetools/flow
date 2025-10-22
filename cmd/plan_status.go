@@ -9,10 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/pkg/process"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -178,7 +179,7 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 		overallStatus = "Failed"
 	}
 
-	fmt.Fprintf(writer, "Plan: %s\n", color.CyanString(plan.Name))
+	fmt.Fprintf(writer, "Plan: %s\n", renderInfo(plan.Name))
 	fmt.Fprintf(writer, "Status: %s\n", overallStatus)
 
 	// Check for Grove context files
@@ -202,84 +203,84 @@ func formatStatusSummary(plan *orchestration.Plan) string {
 	if statusCounts[orchestration.JobStatusCompleted] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusCompleted),
-			color.GreenString("Completed"),
+			renderSuccess("Completed"),
 			statusCounts[orchestration.JobStatusCompleted])
 	}
 
 	if statusCounts[orchestration.JobStatusRunning] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusRunning),
-			color.YellowString("Running"),
+			renderWarning("Running"),
 			statusCounts[orchestration.JobStatusRunning])
 	}
 
 	if statusCounts[orchestration.JobStatusTodo] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusTodo),
-			color.HiBlackString("Todo"),
+			renderMuted("Todo"),
 			statusCounts[orchestration.JobStatusTodo])
 	}
 
 	if statusCounts[orchestration.JobStatusHold] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusHold),
-			color.YellowString("On Hold"),
+			renderWarning("On Hold"),
 			statusCounts[orchestration.JobStatusHold])
 	}
 
 	if statusCounts[orchestration.JobStatusPending] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusPending),
-			color.HiBlackString("Pending"),
+			renderMuted("Pending"),
 			statusCounts[orchestration.JobStatusPending])
 	}
 
 	if statusCounts[orchestration.JobStatusFailed] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusFailed),
-			color.RedString("Failed"),
+			renderError("Failed"),
 			statusCounts[orchestration.JobStatusFailed])
 	}
 
 	if statusCounts[orchestration.JobStatusBlocked] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusBlocked),
-			color.RedString("Blocked"),
+			renderError("Blocked"),
 			statusCounts[orchestration.JobStatusBlocked])
 	}
 
 	if statusCounts[orchestration.JobStatusPendingUser] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusPendingUser),
-			color.CyanString("Pending User"),
+			renderInfo("Pending User"),
 			statusCounts[orchestration.JobStatusPendingUser])
 	}
 
 	if statusCounts[orchestration.JobStatusPendingLLM] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusPendingLLM),
-			color.YellowString("Pending LLM"),
+			renderWarning("Pending LLM"),
 			statusCounts[orchestration.JobStatusPendingLLM])
 	}
 
 	if statusCounts[orchestration.JobStatusNeedsReview] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusNeedsReview),
-			color.CyanString("Needs Review"),
+			renderInfo("Needs Review"),
 			statusCounts[orchestration.JobStatusNeedsReview])
 	}
 
 	if statusCounts[orchestration.JobStatus("interrupted")] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatus("interrupted")),
-			color.RedString("Interrupted"),
+			renderError("Interrupted"),
 			statusCounts[orchestration.JobStatus("interrupted")])
 	}
 
 	if statusCounts[orchestration.JobStatusAbandoned] > 0 {
 		fmt.Fprintf(writer, "%s %s: %d\n",
 			colorizeStatus(orchestration.JobStatusAbandoned),
-			color.HiBlackString("Abandoned"),
+			renderMuted("Abandoned"),
 			statusCounts[orchestration.JobStatusAbandoned])
 	}
 
@@ -298,7 +299,7 @@ func formatStatusTree(plan *orchestration.Plan, graph *orchestration.DependencyG
 	printed := make(map[string]bool)
 
 	// Print directory header
-	fmt.Fprintf(writer, "%s %s\n", "📁", color.CyanString(plan.Name))
+	fmt.Fprintf(writer, "%s %s\n", "📁", renderInfo(plan.Name))
 
 	// Print each root and its dependents
 	for i, root := range roots {
@@ -357,7 +358,7 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 		}
 	}
 	if hasMissingDeps {
-		jobInfo += " " + color.RedString("[? missing deps]")
+		jobInfo += " " + renderError("[? missing deps]")
 	}
 
 	// Check if this job has multiple dependencies and format inline
@@ -368,7 +369,7 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 			if dep != nil && dep.ID != parent.ID {
 				otherDeps = append(otherDeps, dep.Filename)
 			} else if dep == nil {
-				otherDeps = append(otherDeps, color.RedString("? missing"))
+				otherDeps = append(otherDeps, renderError("? missing"))
 			}
 		}
 		if len(otherDeps) > 0 {
@@ -468,31 +469,52 @@ func formatStatusJSON(plan *orchestration.Plan) (string, error) {
 	return string(data), nil
 }
 
+// Helper functions for rendering styled text
+func renderSuccess(text string) string {
+	return theme.DefaultTheme.Success.Render(text)
+}
+
+func renderError(text string) string {
+	return theme.DefaultTheme.Error.Render(text)
+}
+
+func renderWarning(text string) string {
+	return theme.DefaultTheme.Warning.Render(text)
+}
+
+func renderInfo(text string) string {
+	return theme.DefaultTheme.Info.Render(text)
+}
+
+func renderMuted(text string) string {
+	return theme.DefaultTheme.Muted.Render(text)
+}
+
 // colorizeStatus returns a colored status icon.
 func colorizeStatus(status orchestration.JobStatus) string {
 	switch status {
 	case orchestration.JobStatusCompleted:
-		return color.GreenString("✓")
+		return theme.DefaultTheme.Success.Render("✓")
 	case orchestration.JobStatusRunning:
-		return color.YellowString("⚡")
+		return theme.DefaultTheme.Warning.Render("⚡")
 	case orchestration.JobStatusFailed:
-		return color.RedString("✗")
+		return theme.DefaultTheme.Error.Render("✗")
 	case orchestration.JobStatusBlocked:
-		return color.RedString("🚫")
+		return theme.DefaultTheme.Error.Render("🚫")
 	case orchestration.JobStatusNeedsReview:
-		return color.BlueString("👁")
+		return theme.DefaultTheme.Info.Render("👁")
 	case orchestration.JobStatusPendingUser:
-		return color.CyanString("💬")
+		return theme.DefaultTheme.Info.Render("💬")
 	case orchestration.JobStatusPendingLLM:
-		return color.YellowString("🤖")
+		return theme.DefaultTheme.Warning.Render("🤖")
 	case "interrupted": // Jobs that were running but process is dead
-		return color.RedString("💔")
+		return theme.DefaultTheme.Error.Render("💔")
 	case orchestration.JobStatusTodo:
-		return color.BlueString("📝")
+		return theme.DefaultTheme.Info.Render("📝")
 	case orchestration.JobStatusHold:
-		return color.YellowString("⏸")
+		return theme.DefaultTheme.Warning.Render("⏸")
 	case orchestration.JobStatusAbandoned:
-		return color.HiBlackString("🗑️")
+		return theme.DefaultTheme.Muted.Render("🗑️")
 	default: // Pending
 		return "⏳"
 	}
