@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/pkg/process"
