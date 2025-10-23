@@ -297,8 +297,11 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 
 		// Export environment variables in the window's shell
-		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID=%s GROVE_FLOW_JOB_PATH=%s GROVE_FLOW_PLAN_NAME=%s GROVE_FLOW_JOB_TITLE=%s",
-			job.ID, job.FilePath, plan.Name, job.Title)
+		// Use separate export commands for shell compatibility (bash/zsh/fish)
+		// and properly quote the title to handle spaces and special characters.
+		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
+		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
+			job.ID, job.FilePath, plan.Name, escapedTitle)
 		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to set environment variables")
 			job.Status = JobStatusFailed
@@ -417,8 +420,11 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID=%s GROVE_FLOW_JOB_PATH=%s GROVE_FLOW_PLAN_NAME=%s GROVE_FLOW_JOB_TITLE=%s",
-		job.ID, job.FilePath, plan.Name, job.Title)
+	// Use separate export commands for shell compatibility (bash/zsh/fish)
+	// and properly quote the title to handle spaces and special characters.
+	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
+	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
+		job.ID, job.FilePath, plan.Name, escapedTitle)
 	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to set environment variables")
 		job.Status = JobStatusFailed
