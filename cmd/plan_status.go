@@ -509,9 +509,9 @@ func colorizeStatus(status orchestration.JobStatus) string {
 	case "interrupted": // Jobs that were running but process is dead
 		return theme.DefaultTheme.Error.Render("💔")
 	case orchestration.JobStatusTodo:
-		return theme.DefaultTheme.Info.Render("📝")
+		return theme.DefaultTheme.Info.Render(theme.IconStatusTodo)
 	case orchestration.JobStatusHold:
-		return theme.DefaultTheme.Warning.Render("⏸")
+		return theme.DefaultTheme.Warning.Render(theme.IconStatusHold)
 	case orchestration.JobStatusAbandoned:
 		return theme.DefaultTheme.Muted.Render("🗑️")
 	default: // Pending

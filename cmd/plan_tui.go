@@ -569,7 +569,7 @@ func (m planListTUIModel) formatStatusWithEmoji(plan PlanListItem) string {
 	} else if completed > 0 && pending > 0 {
 		emoji = "🚧" // mixed completed and pending
 	} else if hold > 0 {
-		emoji = "⏸" // on hold
+		emoji = theme.IconStatusHold // on hold
 	} else if completed > 0 {
 		emoji = "✓" // all completed
 	} else {

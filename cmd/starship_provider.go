@@ -128,7 +128,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 		}
 		if stats.Running > 0 {
 			// Info style for running (half-filled circle)
-			statsParts = append(statsParts, theme.DefaultTheme.Info.Render(fmt.Sprintf("◐ %d", stats.Running)))
+			statsParts = append(statsParts, theme.DefaultTheme.Info.Render(fmt.Sprintf("%s %d", theme.IconStatusRunning, stats.Running)))
 		}
 		if stats.Pending > 0 {
 			// Muted gray for pending (hollow circle)
@@ -142,7 +142,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("📝 %d", stats.Todo)))
 		}
 		if stats.Hold > 0 {
-			statsParts = append(statsParts, theme.DefaultTheme.Warning.Render(fmt.Sprintf("⏸ %d", stats.Hold)))
+			statsParts = append(statsParts, theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s %d", theme.IconStatusHold, stats.Hold)))
 		}
 		if stats.Abandoned > 0 {
 			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("🗑️ %d", stats.Abandoned)))

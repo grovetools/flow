@@ -818,11 +818,11 @@ func (m statusTUIModel) renderJobTree() string {
 		var jobTypeSymbol string
 		switch job.Type {
 		case "interactive_agent":
-			jobTypeSymbol = "⚙ "
+			jobTypeSymbol = theme.IconInteractiveAgent + " "
 		case "chat":
-			jobTypeSymbol = "★ "
+			jobTypeSymbol = theme.IconChat + " "
 		case "oneshot":
-			jobTypeSymbol = "● "
+			jobTypeSymbol = theme.IconOneshot + " "
 		default:
 			jobTypeSymbol = ""
 		}
@@ -890,20 +890,20 @@ func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 	// Use different icons for different statuses
 	switch status {
 	case orchestration.JobStatusCompleted:
-		icon = "●" // Solid dot
+		icon = theme.IconStatusCompleted
 	case orchestration.JobStatusRunning:
-		icon = "◐" // Half-filled circle
+		icon = theme.IconStatusRunning
 	case orchestration.JobStatusFailed, orchestration.JobStatusBlocked:
-		icon = "✗" // X mark
+		icon = theme.IconStatusFailed
 	case orchestration.JobStatusTodo:
-		icon = "📝" // Todo icon
+		icon = theme.IconStatusTodo
 	case orchestration.JobStatusHold:
-		icon = "⏸" // Pause symbol
+		icon = theme.IconStatusHold
 	case orchestration.JobStatusAbandoned:
-		icon = "-" // Dash for abandoned
+		icon = theme.IconStatusAbandoned
 	default:
 		// Pending, PendingUser, PendingLLM, NeedsReview
-		icon = "○" // Hollow circle
+		icon = theme.IconStatusPendingUser
 	}
 
 	// Use the status style to color the icon
@@ -997,10 +997,10 @@ func (m statusTUIModel) renderStatusPicker() string {
 		label  string
 		icon   string
 	}{
-		{orchestration.JobStatusPending, "Pending", "⏳"},
-		{orchestration.JobStatusTodo, "Todo", "📝"},
-		{orchestration.JobStatusHold, "On Hold", "⏸"},
-		{orchestration.JobStatusRunning, "Running", "⚡"},
+		{orchestration.JobStatusPending, "Pending", theme.IconPending},
+		{orchestration.JobStatusTodo, "Todo", theme.IconStatusTodo},
+		{orchestration.JobStatusHold, "On Hold", theme.IconStatusHold},
+		{orchestration.JobStatusRunning, "Running", theme.IconStatusRunning},
 		{orchestration.JobStatusCompleted, "Completed", "✓"},
 		{orchestration.JobStatusFailed, "Failed", "✗"},
 		{orchestration.JobStatusBlocked, "Blocked", "🚫"},
@@ -1062,16 +1062,19 @@ func (m statusTUIModel) renderStatusPicker() string {
 
 func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 	// Build the command
-	args := []string{"plan", "add", planDir, "-i"}
+	args := []string{"flow", "plan", "add", "-i", "."}
 
 	// Add dependencies if provided
 	for _, dep := range dependencies {
 		args = append(args, "-d", dep)
 	}
 
+	// Create command and set working directory to plan directory
+	cmd := exec.Command("grove", args...)
+	cmd.Dir = planDir
+
 	// Run 'grove flow plan add' in interactive mode for workspace-awareness
-	flowArgs := append([]string{"flow"}, args...)
-	return tea.ExecProcess(exec.Command("grove", flowArgs...), func(err error) tea.Msg {
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return err
 		}

@@ -259,23 +259,6 @@ func runPlanStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runPlanAdd(cmd *cobra.Command, args []string) error {
-	return runPlanAddStep(cmd, args)
-}
-
-func runPlanGraph(cmd *cobra.Command, args []string) error {
-	graphCmd := &PlanGraphCmd{
-		Format: planGraphFormat,
-		Serve:  planGraphServe,
-		Port:   planGraphPort,
-		Output: planGraphOutput,
-	}
-	if len(args) > 0 {
-		graphCmd.Directory = args[0]
-	}
-	return RunPlanGraph(graphCmd)
-}
-
-func runPlanAddStep(cmd *cobra.Command, args []string) error {
 	var dir string
 	if len(args) > 0 {
 		dir = args[0]
@@ -296,6 +279,19 @@ func runPlanAddStep(cmd *cobra.Command, args []string) error {
 		PrependDependencies:  planAddPrependDependencies,
 	}
 	return RunPlanAddStep(addStepCmd)
+}
+
+func runPlanGraph(cmd *cobra.Command, args []string) error {
+	graphCmd := &PlanGraphCmd{
+		Format: planGraphFormat,
+		Serve:  planGraphServe,
+		Port:   planGraphPort,
+		Output: planGraphOutput,
+	}
+	if len(args) > 0 {
+		graphCmd.Directory = args[0]
+	}
+	return RunPlanGraph(graphCmd)
 }
 
 // PlanInitCmd holds the parameters for the init command.
