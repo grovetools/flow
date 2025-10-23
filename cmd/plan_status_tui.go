@@ -181,7 +181,7 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 		// New statuses
 		orchestration.JobStatusTodo:      theme.DefaultTheme.Muted,
 		orchestration.JobStatusHold:      theme.DefaultTheme.Warning,
-		orchestration.JobStatusAbandoned: theme.DefaultTheme.Faint,
+		orchestration.JobStatusAbandoned: theme.DefaultTheme.Muted, // Very subtle for abandoned jobs
 	}
 }
 
@@ -662,16 +662,10 @@ func (m statusTUIModel) View() string {
 	}
 
 	// 1. Create Header with subtle coloring
-	headerLabel := lipgloss.NewStyle().
-		Foreground(theme.DefaultTheme.Header.GetForeground()).
-		Bold(true).
-		Render("📈 Plan Status: ")
-
-	planName := lipgloss.NewStyle().
-		Foreground(theme.DefaultColors.Orange).
-		Bold(true).
-		Render(m.plan.Name)
-
+	// Header uses terminal default colors with bold for emphasis.
+	// See: plans/tui-updates/14-terminal-ui-styling-philosophy.md
+	headerLabel := theme.DefaultTheme.Bold.Render("📈 Plan Status: ")
+	planName := theme.DefaultTheme.Bold.Render(m.plan.Name)
 	headerText := headerLabel + planName
 
 	styledHeader := lipgloss.NewStyle().
@@ -795,37 +789,44 @@ func (m statusTUIModel) renderJobTree() string {
 		statusIcon := m.getStatusIcon(job.Status)
 
 		// Determine text style based on cursor/selection state
+		// Use weight/emphasis instead of explicit colors for hierarchy.
 		var filenameStyle lipgloss.Style
 		var titleStyle lipgloss.Style
 
 		if i == m.cursor {
-			// Cursor: check status for filename color, use theme-aware colors
-			if job.Status == orchestration.JobStatusCompleted {
-				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
-			} else {
-				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText)
-			}
-			titleStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Pink)
+			// Cursor: use bold for emphasis on the current row
+			filenameStyle = lipgloss.NewStyle().Bold(true)
+			titleStyle = lipgloss.NewStyle()
 		} else if m.selected[job.ID] {
-			// Selected: use accent color
-			filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet)
-			titleStyle = theme.DefaultTheme.Muted
+			// Selected: use bold to indicate selection
+			filenameStyle = lipgloss.NewStyle().Bold(true)
+			titleStyle = lipgloss.NewStyle().Faint(true)
 		} else {
-			// Normal: check if completed, use light text; otherwise use theme muted color
-			if job.Status == orchestration.JobStatusCompleted {
-				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.LightText)
+			// Normal: use faint for completed and abandoned jobs to de-emphasize them
+			if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+				filenameStyle = lipgloss.NewStyle().Faint(true)
+				titleStyle = lipgloss.NewStyle().Faint(true)
 			} else {
-				filenameStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText)
+				filenameStyle = lipgloss.NewStyle()
+				titleStyle = lipgloss.NewStyle().Faint(true)
 			}
-			titleStyle = theme.DefaultTheme.Muted
 		}
 
 		coloredFilename := filenameStyle.Render(job.Filename)
 
-		// Get job type badge with theme-aware color
-		jobTypeBadge := lipgloss.NewStyle().
-			Foreground(theme.DefaultColors.Cyan).
-			Render(fmt.Sprintf("[%s]", job.Type))
+		// Get job type badge with symbol prefix
+		var jobTypeSymbol string
+		switch job.Type {
+		case "interactive_agent":
+			jobTypeSymbol = "⚙ "
+		case "chat":
+			jobTypeSymbol = "★ "
+		case "oneshot":
+			jobTypeSymbol = "● "
+		default:
+			jobTypeSymbol = ""
+		}
+		jobTypeBadge := fmt.Sprintf("%s[%s]", jobTypeSymbol, job.Type)
 
 		// Build content without emoji (add emoji separately to avoid background bleed)
 		var textContent string
@@ -1014,7 +1015,6 @@ func (m statusTUIModel) renderStatusPicker() string {
 		job := m.jobs[m.cursor]
 		title := lipgloss.NewStyle().
 			Bold(true).
-			Foreground(theme.DefaultColors.Cyan).
 			Render(fmt.Sprintf("Set Status for: %s", job.Filename))
 		lines = append(lines, title)
 		lines = append(lines, "")
@@ -1027,8 +1027,8 @@ func (m statusTUIModel) renderStatusPicker() string {
 
 		if i == m.statusPickerCursor {
 			prefix = "▸ "
+			// Use background color for selection highlight, text uses terminal default
 			style = lipgloss.NewStyle().
-				Foreground(theme.DefaultColors.Cyan).
 				Bold(true).
 				Background(theme.DefaultColors.SubtleBackground)
 		} else {
@@ -1042,9 +1042,7 @@ func (m statusTUIModel) renderStatusPicker() string {
 	lines = append(lines, "")
 
 	// Add help text at bottom
-	help := lipgloss.NewStyle().
-		Foreground(theme.DefaultColors.MutedText).
-		Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
+	help := t.Muted.Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
 	lines = append(lines, help)
 
 	content := strings.Join(lines, "\n")

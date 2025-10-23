@@ -145,7 +145,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 			statsParts = append(statsParts, theme.DefaultTheme.Warning.Render(fmt.Sprintf("⏸ %d", stats.Hold)))
 		}
 		if stats.Abandoned > 0 {
-			statsParts = append(statsParts, theme.DefaultTheme.Faint.Render(fmt.Sprintf("🗑️ %d", stats.Abandoned)))
+			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("🗑️ %d", stats.Abandoned)))
 		}
 
 		// Add WT indicator if in worktree

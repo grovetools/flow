@@ -479,11 +479,10 @@ func (m planListTUIModel) renderPlanTable() string {
 		// Format last updated with relative time
 		updatedText := theme.DefaultTheme.Muted.Render("◦ " + formatRelativeTime(plan.LastUpdated))
 
-		// Add active plan indicator with distinctive styling
+		// Add active plan indicator - use bold for emphasis without explicit color
 		titleText := plan.Name
 		if plan.Name == m.activePlan {
-			activeIndicator := theme.DefaultTheme.Info.Bold(true).Render("▶")
-			titleText = theme.DefaultTheme.Info.Bold(true).Render(fmt.Sprintf("%s %s", activeIndicator, titleText))
+			titleText = theme.DefaultTheme.Bold.Render(fmt.Sprintf("▶ %s", titleText))
 		}
 
 		// Format worktree text
