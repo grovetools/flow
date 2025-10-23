@@ -45,7 +45,7 @@ func newFinishTUIKeyMap() finishTUIKeyMap {
 }
 
 func (k finishTUIKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Toggle, k.Confirm, k.Help, k.Quit}
+	return []key.Binding{k.Toggle, k.Confirm, k.Quit}
 }
 
 func (k finishTUIKeyMap) FullHelp() [][]key.Binding {

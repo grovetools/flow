@@ -88,8 +88,8 @@ type planListKeyMap struct {
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
-	// Return empty to show no help in footer - all help goes in popup
-	return []key.Binding{}
+	// Return just the quit binding for the short help view.
+	return []key.Binding{k.Quit}
 }
 
 func (k planListKeyMap) FullHelp() [][]key.Binding {
@@ -442,7 +442,7 @@ func (m planListTUIModel) View() string {
 	if len(m.plans) == 0 {
 		s.WriteString("No plans found in directory.\n")
 		s.WriteString("\n")
-		s.WriteString(theme.DefaultTheme.Muted.Render("Press ? for help"))
+		s.WriteString(m.help.View())
 		return s.String()
 	}
 
@@ -451,7 +451,7 @@ func (m planListTUIModel) View() string {
 
 	// Help text
 	s.WriteString("\n")
-	s.WriteString(theme.DefaultTheme.Muted.Render("Press ? for help"))
+	s.WriteString(m.help.View())
 
 	// Display status message at the bottom if any
 	if m.statusMessage != "" {
