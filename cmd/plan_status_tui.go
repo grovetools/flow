@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/tui/components/help"
+	gtable "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -30,6 +31,7 @@ type statusTUIKeyMap struct {
 	AddJob        key.Binding
 	Implement     key.Binding
 	ToggleSummaries key.Binding
+	ToggleView    key.Binding
 	GoToTop       key.Binding
 	GoToBottom    key.Binding
 	PageUp        key.Binding
@@ -79,6 +81,10 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "toggle summaries"),
 		),
+		ToggleView: key.NewBinding(
+			key.WithKeys("t"),
+			key.WithHelp("t", "toggle view"),
+		),
 		GoToTop: key.NewBinding(
 			key.WithKeys("g"),
 			key.WithHelp("gg", "go to top"),
@@ -115,6 +121,10 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.PageDown,
 			k.Select,
 			k.ToggleMulti,
+		},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Views")),
+			k.ToggleView,
 			k.ToggleSummaries,
 		},
 		{
@@ -130,6 +140,17 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.Quit,
 		},
 	}
+}
+
+type viewMode int
+
+const (
+	tableView viewMode = iota
+	treeView
+)
+
+func (v viewMode) String() string {
+	return [...]string{"table", "tree"}[v]
 }
 
 // Status TUI model represents the state of the TUI
@@ -154,8 +175,9 @@ type statusTUIModel struct {
 	planDir       string // Store plan directory for refresh
 	keyMap        statusTUIKeyMap
 	help          help.Model
-	waitingForG   bool   // Track if we're waiting for second 'g' in 'gg' sequence
-	cursorVisible bool   // Track cursor visibility for blinking animation
+	waitingForG   bool      // Track if we're waiting for second 'g' in 'gg' sequence
+	cursorVisible bool      // Track cursor visibility for blinking animation
+	viewMode      viewMode  // Current view mode (table or tree)
 }
 
 
@@ -206,6 +228,7 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		keyMap:        newStatusTUIKeyMap(),
 		help:          help.New(newStatusTUIKeyMap()),
 		cursorVisible: true,
+		viewMode:      tableView, // Default to table view
 	}
 }
 
@@ -624,6 +647,13 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keyMap.ToggleSummaries):
 			m.showSummaries = !m.showSummaries
+
+		case key.Matches(msg, m.keyMap.ToggleView):
+			if m.viewMode == treeView {
+				m.viewMode = tableView
+			} else {
+				m.viewMode = treeView
+			}
 		}
 	}
 
@@ -675,8 +705,14 @@ func (m statusTUIModel) View() string {
 		MarginBottom(1).
 		Render(headerText)
 
-	// 2. Render Job Tree
-	jobTree := m.renderJobTree()
+	// 2. Render Main Content (Table or Tree)
+	var mainContent string
+	switch m.viewMode {
+	case tableView:
+		mainContent = m.renderTableView()
+	default: // treeView
+		mainContent = m.renderJobTree()
+	}
 
 	// 2b. Add scroll indicators if needed
 	scrollIndicator := ""
@@ -712,11 +748,15 @@ func (m statusTUIModel) View() string {
 		footer = m.help.View()
 	}
 
+	// Add view mode to footer
+	viewModeIndicator := theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%s view]", m.viewMode))
+	footer += " " + viewModeIndicator
+
 	// 4. Combine everything
 	finalView := lipgloss.JoinVertical(
 		lipgloss.Left,
 		styledHeader,
-		jobTree,
+		mainContent,
 		scrollIndicator,
 		"\n", // Space before footer
 		footer,
@@ -730,6 +770,122 @@ func (m statusTUIModel) View() string {
 func stripANSI(str string) string {
 	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	return ansiRegex.ReplaceAllString(str, "")
+}
+
+// getVisibleJobs returns the jobs that should be visible in the current viewport
+func (m *statusTUIModel) getVisibleJobs() []*orchestration.Job {
+	// Calculate visible jobs based on scroll offset and viewport height
+	visibleCount := m.getVisibleJobCount()
+	start := m.scrollOffset
+	end := start + visibleCount
+	if end > len(m.jobs) {
+		end = len(m.jobs)
+	}
+	if start >= end {
+		return []*orchestration.Job{}
+	}
+	return m.jobs[start:end]
+}
+
+// renderTableView renders the jobs as a table with JOB, TYPE, and STATUS columns
+func (m statusTUIModel) renderTableView() string {
+	t := theme.DefaultTheme
+	headers := []string{"JOB", "TYPE", "STATUS"}
+	var rows [][]string
+
+	visibleJobs := m.getVisibleJobs()
+	statusStyles := getStatusStyles()
+
+	for i, job := range visibleJobs {
+		// JOB column (with tree indentation and connectors)
+		indent := m.jobIndents[job.ID]
+
+		// Build tree prefix with connectors
+		var treePrefix string
+		if indent > 0 {
+			// Add spacing for parent levels
+			treePrefix = strings.Repeat("  ", indent-1)
+
+			// Determine if this is the last child at this level
+			globalIndex := m.scrollOffset + i
+			isLast := true
+			for j := globalIndex + 1; j < len(m.jobs); j++ {
+				if m.jobIndents[m.jobs[j].ID] == indent {
+					isLast = false
+					break
+				}
+				if m.jobIndents[m.jobs[j].ID] < indent {
+					break
+				}
+			}
+
+			// Add tree connector
+			if isLast {
+				treePrefix += "└─ "
+			} else {
+				treePrefix += "├─ "
+			}
+		}
+
+		statusIcon := m.getStatusIcon(job.Status)
+
+		// Apply muted styling to filename for completed/abandoned jobs
+		var filename string
+		if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+			filename = t.Muted.Render(job.Filename)
+		} else {
+			filename = job.Filename
+		}
+
+		jobCol := fmt.Sprintf("%s%s %s", treePrefix, statusIcon, filename)
+
+		// TYPE column with icon
+		var jobTypeSymbol string
+		switch job.Type {
+		case "interactive_agent":
+			jobTypeSymbol = theme.IconInteractiveAgent
+		case "chat":
+			jobTypeSymbol = theme.IconChat
+		case "oneshot":
+			jobTypeSymbol = theme.IconOneshot
+		default:
+			jobTypeSymbol = ""
+		}
+		var typeCol string
+		if jobTypeSymbol != "" {
+			typeCol = fmt.Sprintf("%s %s", jobTypeSymbol, job.Type)
+		} else {
+			typeCol = string(job.Type)
+		}
+
+		// STATUS column
+		statusStyle := theme.DefaultTheme.Muted
+		if style, ok := statusStyles[job.Status]; ok {
+			statusStyle = style
+		}
+		statusText := statusStyle.Render(string(job.Status))
+
+		// Apply muted styling to type and status for completed/abandoned jobs
+		var finalTypeCol, finalStatusCol string
+		if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+			finalTypeCol = t.Muted.Render(typeCol)
+			finalStatusCol = t.Muted.Render(string(job.Status))
+		} else {
+			finalTypeCol = typeCol
+			finalStatusCol = statusText
+		}
+
+		rows = append(rows, []string{jobCol, finalTypeCol, finalStatusCol})
+	}
+
+	if len(rows) == 0 {
+		return "\n" + t.Muted.Render("No jobs to display.")
+	}
+
+	// Use gtable.SelectableTable
+	tableStr := gtable.SelectableTable(headers, rows, m.cursor-m.scrollOffset)
+
+	return tableStr
 }
 
 // renderJobTree renders the job tree with proper indentation
@@ -791,24 +947,19 @@ func (m statusTUIModel) renderJobTree() string {
 		// Determine text style based on cursor/selection state
 		// Use weight/emphasis instead of explicit colors for hierarchy.
 		var filenameStyle lipgloss.Style
-		var titleStyle lipgloss.Style
 
 		if i == m.cursor {
 			// Cursor: use bold for emphasis on the current row
 			filenameStyle = lipgloss.NewStyle().Bold(true)
-			titleStyle = lipgloss.NewStyle()
 		} else if m.selected[job.ID] {
 			// Selected: use bold to indicate selection
 			filenameStyle = lipgloss.NewStyle().Bold(true)
-			titleStyle = lipgloss.NewStyle().Faint(true)
 		} else {
 			// Normal: use faint for completed and abandoned jobs to de-emphasize them
 			if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
 				filenameStyle = lipgloss.NewStyle().Faint(true)
-				titleStyle = lipgloss.NewStyle().Faint(true)
 			} else {
 				filenameStyle = lipgloss.NewStyle()
-				titleStyle = lipgloss.NewStyle().Faint(true)
 			}
 		}
 
@@ -830,14 +981,7 @@ func (m statusTUIModel) renderJobTree() string {
 
 		// Build content without emoji (add emoji separately to avoid background bleed)
 		var textContent string
-		if job.Title != "" {
-			// Render title in appropriate style
-			textContent = fmt.Sprintf("%s %s %s", coloredFilename,
-				titleStyle.Render(fmt.Sprintf("(%s)", job.Title)),
-				jobTypeBadge)
-		} else {
-			textContent = fmt.Sprintf("%s %s", coloredFilename, jobTypeBadge)
-		}
+		textContent = fmt.Sprintf("%s %s", coloredFilename, jobTypeBadge)
 
 		// Check for missing dependencies
 		var hasMissingDeps bool
@@ -1062,19 +1206,15 @@ func (m statusTUIModel) renderStatusPicker() string {
 
 func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 	// Build the command
-	args := []string{"flow", "plan", "add", "-i", "."}
+	args := []string{"plan", "add", planDir, "-i"}
 
 	// Add dependencies if provided
 	for _, dep := range dependencies {
 		args = append(args, "-d", dep)
 	}
 
-	// Create command and set working directory to plan directory
-	cmd := exec.Command("grove", args...)
-	cmd.Dir = planDir
-
-	// Run 'grove flow plan add' in interactive mode for workspace-awareness
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+	// Run flow directly - delegation through grove breaks interactive TUI
+	return tea.ExecProcess(exec.Command("flow", args...), func(err error) tea.Msg {
 		if err != nil {
 			return err
 		}
