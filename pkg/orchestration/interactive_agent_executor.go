@@ -141,7 +141,7 @@ func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Jo
 				opts.Repos = plan.Config.Repos
 			}
 
-			worktreePath, err := workspace.Prepare(ctx, opts)
+			worktreePath, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
 			if err != nil {
 				return "", fmt.Errorf("failed to prepare host worktree: %w", err)
 			}

@@ -219,7 +219,7 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		opts.Repos = plan.Config.Repos
 	}
 
-	return workspace.Prepare(ctx, opts)
+	return workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
 }
 
 // runAgentInWorktree executes the agent in the worktree context.

@@ -894,28 +894,6 @@ func generateJobID() string {
 	return "job-" + id[:8]
 }
 
-// copyFile copies a file from source to destination.
-func copyFile(src, dst string) error {
-	// Read source file
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("read source file: %w", err)
-	}
-
-	// Create destination directory if needed
-	dstDir := filepath.Dir(dst)
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
-		return fmt.Errorf("create destination directory: %w", err)
-	}
-
-	// Write destination file
-	if err := os.WriteFile(dst, data, 0644); err != nil {
-		return fmt.Errorf("write destination file: %w", err)
-	}
-
-	return nil
-}
-
 // applyDefaultContextRulesToWorktree applies default context rules to a worktree.
 // It detects whether the worktree is a single-repo or ecosystem worktree and applies
 // rules accordingly.
@@ -981,7 +959,7 @@ func createWorktreeIfRequested(worktreeName string, repos []string) (string, err
 		Repos:        repos,
 	}
 
-	worktreePath, err := workspace.Prepare(context.Background(), opts)
+	worktreePath, err := workspace.Prepare(context.Background(), opts, orchestration.CopyProjectFilesToWorktree)
 	if err != nil {
 		return "", fmt.Errorf("failed to create worktree: %w", err)
 	}

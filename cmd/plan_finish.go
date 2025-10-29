@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"github.com/mattsolo1/grove-core/util/sanitize"
 	"bufio"
 	"context"
 	"fmt"
@@ -11,8 +10,10 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/mattsolo1/grove-core/fs"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/sanitize"
 	gexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -45,32 +46,6 @@ type cleanupItem struct {
 	IsAvailable bool
 	IsEnabled   bool
 	Details     []repoStatus // Optional detailed status information for complex items
-}
-
-
-// copyDir recursively copies a directory tree
-func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Get the relative path
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		dstPath := filepath.Join(dst, relPath)
-
-		if info.IsDir() {
-			// Create directory
-			return os.MkdirAll(dstPath, info.Mode())
-		}
-
-		// Copy file (uses copyFile from plan_init.go)
-		return copyFile(path, dstPath)
-	})
 }
 
 // parseGitmodules reads and parses the .gitmodules file
@@ -1004,7 +979,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				}
 
 				// Copy the directory recursively
-				if err := copyDir(planPath, archivePath); err != nil {
+				if err := fs.CopyDir(planPath, archivePath); err != nil {
 					return fmt.Errorf("failed to copy plan to archive: %w", err)
 				}
 
