@@ -21,6 +21,7 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 	}
 	dirsToCopy := []string{
 		".cx",
+		".cx.work",
 	}
 
 	fmt.Println("› Copying project configuration to new worktree...")
