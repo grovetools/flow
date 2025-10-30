@@ -1,10 +1,4 @@
-# Development rules: Code with tests
-
-**/*.go
-main.go
+*.go
 Makefile
 go.mod
 grove.yml
-
-!go.sum
-!docs
