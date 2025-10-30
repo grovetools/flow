@@ -246,6 +246,43 @@ func TestDependencyGraph_GetRunnableJobs(t *testing.T) {
 	}
 }
 
+func TestDependencyGraph_GetRunnableJobs_InteractiveAgentWithPendingUserChat(t *testing.T) {
+	// Test that interactive_agent can run when its chat dependency is in pending_user status
+	plan := createTestPlan([]*Job{
+		{ID: "chat1", Type: JobTypeChat, Status: JobStatusPendingUser, DependsOn: []string{}},
+		{ID: "agent1", Type: JobTypeInteractiveAgent, Status: JobStatusPending, DependsOn: []string{"chat1"}},
+		{ID: "agent2", Type: JobTypeAgent, Status: JobStatusPending, DependsOn: []string{"chat1"}},
+		{ID: "oneshot1", Type: JobTypeOneshot, Status: JobStatusPending, DependsOn: []string{"chat1"}},
+	})
+
+	graph, err := BuildDependencyGraph(plan)
+	if err != nil {
+		t.Fatalf("Failed to build graph: %v", err)
+	}
+
+	runnable := graph.GetRunnableJobs()
+
+	// Should have chat1 (pending_user chats are runnable), agent1 and agent2 (can run with pending_user chat dependency)
+	// Should NOT have oneshot1 (regular jobs still require completed dependencies)
+	runnableMap := make(map[string]bool)
+	for _, job := range runnable {
+		runnableMap[job.ID] = true
+	}
+
+	if !runnableMap["chat1"] {
+		t.Errorf("Expected chat1 (pending_user) to be runnable")
+	}
+	if !runnableMap["agent1"] {
+		t.Errorf("Expected agent1 (interactive_agent) to be runnable with pending_user chat dependency")
+	}
+	if !runnableMap["agent2"] {
+		t.Errorf("Expected agent2 (agent) to be runnable with pending_user chat dependency")
+	}
+	if runnableMap["oneshot1"] {
+		t.Errorf("oneshot1 should NOT be runnable (requires completed dependencies)")
+	}
+}
+
 func TestDependencyGraph_DetectCycles(t *testing.T) {
 	// Test with a complex cycle
 	// We can't use createTestPlan because it would fail on circular dependency
@@ -260,12 +297,12 @@ func TestDependencyGraph_DetectCycles(t *testing.T) {
 		},
 		JobsByID: make(map[string]*Job),
 	}
-	
+
 	// Populate JobsByID
 	for _, job := range plan.Jobs {
 		plan.JobsByID[job.ID] = job
 	}
-	
+
 	// ResolveDependencies will fail due to circular dependency
 	err := plan.ResolveDependencies()
 	if err == nil {

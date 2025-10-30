@@ -98,23 +98,29 @@ type JobOptions struct {
 
 // IsRunnable checks if a job can be executed.
 func (j *Job) IsRunnable() bool {
-	// Chat jobs have special status handling
-	if j.Type == JobTypeChat {
-		// Chat jobs are runnable when pending or pending_user (waiting for user input)
-		// pending_llm means waiting for LLM response, which happens during execution
-		if j.Status != JobStatusPending && j.Status != JobStatusPendingUser {
-			return false
-		}
-	} else {
-		// Non-chat jobs must be pending
-		if j.Status != JobStatusPending {
-			return false
-		}
+	// A job is runnable if its own status is valid for starting...
+	isReadyToStart := (j.Status == JobStatusPending) ||
+		(j.Type == JobTypeChat && j.Status == JobStatusPendingUser)
+
+	if !isReadyToStart {
+		return false
 	}
 
-	// All dependencies must be completed
+	// ...and all of its dependencies are met.
 	for _, dep := range j.Dependencies {
-		if dep.Status != JobStatusCompleted {
+		if dep == nil { // A missing/unresolved dependency is not met.
+			return false
+		}
+
+		dependencyMet := false
+		if dep.Status == JobStatusCompleted {
+			dependencyMet = true
+		} else if (j.Type == JobTypeInteractiveAgent || j.Type == JobTypeAgent) && dep.Type == JobTypeChat && dep.Status == JobStatusPendingUser {
+			// Special case: an interactive agent can run if its chat dependency is pending user input.
+			dependencyMet = true
+		}
+
+		if !dependencyMet {
 			return false
 		}
 	}

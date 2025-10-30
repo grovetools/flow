@@ -112,23 +112,8 @@ func (dg *DependencyGraph) UpdateJobStatus(jobID string, status JobStatus) {
 func (dg *DependencyGraph) GetRunnableJobs() []*Job {
 	runnable := []*Job{}
 
-	for jobID, job := range dg.nodes {
-		// Skip non-pending jobs (except chat jobs in pending_user status)
-		if job.Status != JobStatusPending && !(job.Type == JobTypeChat && job.Status == JobStatusPendingUser) {
-			continue
-		}
-
-		// Check all dependencies are completed
-		canRun := true
-		for _, depID := range dg.edges[jobID] {
-			dep, exists := dg.nodes[depID]
-			if !exists || dep.Status != JobStatusCompleted {
-				canRun = false
-				break
-			}
-		}
-
-		if canRun {
+	for _, job := range dg.nodes {
+		if job.IsRunnable() {
 			runnable = append(runnable, job)
 		}
 	}

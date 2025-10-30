@@ -6,3 +6,7 @@ grove.yml
 # Exclude test files
 !tests
 !*_test.go
+
+@a:grove-ecosystem:grove-core::dev-no-tests
+@a:grove-ecosystem:grove-context::dev-no-tests
+@a:grove-ecosystem:grove-gemini::dev-no-tests
