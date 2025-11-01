@@ -59,13 +59,13 @@ func runPlanInitTUI(plansDir string, initialCmd *PlanInitCmd) (*PlanInitCmd, err
 
 type planInitTUIKeyMap struct {
 	keymap.Base
-	Toggle     key.Binding
-	NextField  key.Binding
-	PrevField  key.Binding
-	Submit     key.Binding
-	Back       key.Binding
-	Escape     key.Binding
-	Insert     key.Binding
+	Toggle    key.Binding
+	NextField key.Binding
+	PrevField key.Binding
+	Submit    key.Binding
+	Back      key.Binding
+	Escape    key.Binding
+	Insert    key.Binding
 }
 
 func newPlanInitTUIKeyMap() planInitTUIKeyMap {
@@ -112,12 +112,12 @@ func (k planInitTUIKeyMap) FullHelp() [][]key.Binding {
 
 // planInitTUIModel represents the state of the new plan creation TUI.
 type planInitTUIModel struct {
-	plansDirectory   string
-	focusIndex       int
-	unfocused        bool // Track if we're in unfocused (normal) state
-	highestFocusIndex int // Track user's progress through the form
-	err              error
-	width, height    int
+	plansDirectory    string
+	focusIndex        int
+	unfocused         bool // Track if we're in unfocused (normal) state
+	highestFocusIndex int  // Track user's progress through the form
+	err               error
+	width, height     int
 
 	standalone bool
 	quitting   bool
@@ -155,7 +155,7 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	defaultRecipeIndex := 0
 	for i, r := range recipes {
 		recipeItems[i+1] = item(r.Name)
-		if r.Name == "chat-workflow" {
+		if r.Name == "chat" {
 			defaultRecipeIndex = i + 1
 		}
 	}
@@ -304,7 +304,6 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.unfocused = false
 				return m.updateFocus(), nil
 			}
-
 
 		case "?":
 			// Toggle help
@@ -536,13 +535,13 @@ func (m planInitTUIModel) View() string {
 	// renderField helper function with width option
 	renderField := func(index int, title string, content string, wide bool) string {
 		var fieldBuilder strings.Builder
-		
+
 		// Add checkmark if field has been visited
 		titlePrefix := "  "
 		if index <= m.highestFocusIndex {
 			titlePrefix = theme.DefaultTheme.Success.Render("✓ ")
 		}
-		
+
 		fieldBuilder.WriteString(titlePrefix + theme.DefaultTheme.Bold.Render(title))
 		fieldBuilder.WriteString("\n")
 		fieldBuilder.WriteString(content)
@@ -625,14 +624,14 @@ func (m planInitTUIModel) View() string {
 	} else {
 		worktreeDisplay = m.worktreeInput.View()
 	}
-	
+
 	modelDisplay := "(default)"
 	if selected := m.modelList.SelectedItem(); selected != nil {
 		if modelItem, ok := selected.(modelItem); ok {
 			modelDisplay = fmt.Sprintf("[%s]", modelItem.ID)
 		}
 	}
-	
+
 	worktreeField := renderField(3, "Worktree Name", worktreeDisplay, false)
 	modelField := renderField(4, "Default Model", modelDisplay, false)
 	row3 := lipgloss.JoinHorizontal(lipgloss.Top, worktreeField, "  ", modelField)
@@ -650,7 +649,7 @@ func (m planInitTUIModel) View() string {
 	if m.openSession {
 		openSessionDisplay = "[x]"
 	}
-	
+
 	containerField := renderField(5, "Target Container", m.containerInput.View(), false)
 	openSessionField := renderField(6, "Open Session on Create", openSessionDisplay, false)
 	row4 := lipgloss.JoinHorizontal(lipgloss.Top, containerField, "  ", openSessionField)
@@ -675,7 +674,7 @@ func (m planInitTUIModel) View() string {
 	} else {
 		b.WriteString(theme.DefaultTheme.Muted.Render("[INSERT]"))
 	}
-	
+
 	// Add default help (? for help, q to quit)
 	helpText := m.help.View()
 	if helpText != "" {
@@ -685,7 +684,6 @@ func (m planInitTUIModel) View() string {
 
 	return b.String()
 }
-
 
 // toPlanInitCmd converts the final TUI model state into a PlanInitCmd struct.
 func (m planInitTUIModel) toPlanInitCmd() *PlanInitCmd {
@@ -721,3 +719,4 @@ func (m planInitTUIModel) toPlanInitCmd() *PlanInitCmd {
 
 	return cmd
 }
+
