@@ -56,7 +56,10 @@ type Job struct {
 	Model                string       `yaml:"model,omitempty" json:"model,omitempty"`
 	DependsOn            []string     `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
 	PromptSource         []string     `yaml:"prompt_source,omitempty" json:"prompt_source,omitempty"`
+	SourceBlock          string       `yaml:"source_block,omitempty" json:"source_block,omitempty"`
 	Template             string       `yaml:"template,omitempty" json:"template,omitempty"`
+	Repository           string       `yaml:"repository,omitempty" json:"repository,omitempty"`
+	Branch               string       `yaml:"branch,omitempty" json:"branch,omitempty"`
 	Worktree             string       `yaml:"worktree" json:"worktree,omitempty"`
 	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
 	AgentContinue        bool         `yaml:"agent_continue,omitempty" json:"agent_continue,omitempty"`

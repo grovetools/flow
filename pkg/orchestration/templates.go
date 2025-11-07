@@ -88,12 +88,15 @@ const AgentJobTemplate = `---
 id: {{ .ID }}
 title: "{{ .Title }}"
 status: pending
-type: {{ .Type }}{{ if .DependsOn }}
+type: {{ .Type }}
+plan_type: {{ .PlanType }}{{ if .DependsOn }}
 depends_on:{{ range .DependsOn }}
   - {{ . }}{{ end }}{{ end }}{{ if .PromptSource }}
 prompt_source:{{ range .PromptSource }}
-  - {{ . }}{{ end }}{{ end }}
-worktree: {{ .Worktree }}{{ if .AgentContinue }}
+  - {{ . }}{{ end }}{{ end }}{{ if .Repository }}
+repository: {{ .Repository }}{{ end }}{{ if .Branch }}
+branch: {{ .Branch }}{{ end }}{{ if .Worktree }}
+worktree: {{ .Worktree }}{{ end }}{{ if .AgentContinue }}
 agent_continue: true{{ end }}
 output:
   type: {{ .OutputType }}

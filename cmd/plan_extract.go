@@ -115,26 +115,29 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		return fmt.Errorf("read %s: %w", file, err)
 	}
 
-	var extractedContent strings.Builder
+	var sourceBlockRef string
 	foundBlocks := 0
+
+	// Get relative path from plan directory to source file
+	relPath, err := filepath.Rel(currentPlanPath, chatFilePath)
+	if err != nil {
+		// If relative path fails, use the filename
+		relPath = filepath.Base(chatFilePath)
+	}
 
 	// Check if "all" argument is specified
 	if len(blockIDs) == 1 && blockIDs[0] == "all" {
-		// Extract all content below the frontmatter
-		_, bodyContent, err := orchestration.ParseFrontmatter(content)
-		if err != nil {
-			return fmt.Errorf("parse frontmatter: %w", err)
-		}
-		extractedContent.Write(bodyContent)
+		// Create reference to entire file content
+		sourceBlockRef = relPath
 		foundBlocks = 1
 	} else {
-		// Original behavior: extract specific blocks
+		// Verify that the requested blocks exist
 		turns, err := orchestration.ParseChatFile(content)
 		if err != nil {
 			return fmt.Errorf("parse chat file: %w", err)
 		}
 
-		// Create a map of block IDs to content
+		// Create a map of block IDs to content for validation
 		blockMap := make(map[string]*orchestration.ChatTurn)
 		for _, turn := range turns {
 			if turn.Directive != nil && turn.Directive.ID != "" {
@@ -142,17 +145,20 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 			}
 		}
 
-		// Extract the requested blocks
+		// Validate requested blocks and build reference
+		var validBlockIDs []string
 		for _, blockID := range blockIDs {
-			if turn, ok := blockMap[blockID]; ok {
-				if foundBlocks > 0 {
-					extractedContent.WriteString("\n\n---\n\n")
-				}
-				extractedContent.WriteString(turn.Content)
+			if _, ok := blockMap[blockID]; ok {
+				validBlockIDs = append(validBlockIDs, blockID)
 				foundBlocks++
 			} else {
 				fmt.Printf("Warning: block ID '%s' not found\n", blockID)
 			}
+		}
+
+		// Create reference string: path/to/file.md#block-id1,block-id2
+		if len(validBlockIDs) > 0 {
+			sourceBlockRef = relPath + "#" + strings.Join(validBlockIDs, ",")
 		}
 	}
 
@@ -174,14 +180,15 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		}
 	}
 
-	// Create a new chat job
+	// Create a new chat job with source block reference
 	job := &orchestration.Job{
-		Title:      title,
-		Type:       orchestration.JobTypeChat,
-		Status:     orchestration.JobStatusPending,
-		ID:         sanitizeForFilename(title),
-		PromptBody: extractedContent.String(),
-		DependsOn:  dependsOn,
+		Title:       title,
+		Type:        orchestration.JobTypeChat,
+		Status:      orchestration.JobStatusPending,
+		ID:          sanitizeForFilename(title),
+		SourceBlock: sourceBlockRef,
+		PromptBody:  "", // Empty - content will be resolved from source_block at runtime
+		DependsOn:   dependsOn,
 		Output: orchestration.OutputConfig{
 			Type: outputType,
 		},

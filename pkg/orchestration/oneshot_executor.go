@@ -404,6 +404,20 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		finalPromptBody = job.PromptBody
 	}
 
+	// Handle source_block reference if present
+	if job.SourceBlock != "" {
+		extractedContent, err := e.resolveSourceBlock(job.SourceBlock, plan)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("resolving source_block: %w", err)
+		}
+		// Prepend extracted content to the prompt body
+		if finalPromptBody != "" {
+			finalPromptBody = extractedContent + "\n\n" + finalPromptBody
+		} else {
+			finalPromptBody = extractedContent
+		}
+	}
+
 	// If a template is specified, use the reference-based prompt structure
 	if job.Template != "" {
 		// Reference-based prompt assembly
@@ -1725,4 +1739,70 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	updateJobFile(job)
 
 	return nil
+}
+
+// resolveSourceBlock reads and extracts content from a source_block reference
+// Format: path/to/file.md#block-id1,block-id2 or path/to/file.md (for entire file)
+func (e *OneShotExecutor) resolveSourceBlock(sourceBlock string, plan *Plan) (string, error) {
+	// Parse the source block reference
+	parts := strings.SplitN(sourceBlock, "#", 2)
+	filePath := parts[0]
+
+	// Resolve file path relative to plan directory
+	if !filepath.IsAbs(filePath) {
+		filePath = filepath.Join(plan.Directory, filePath)
+	}
+
+	// Read the source file
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("reading source file %s: %w", filePath, err)
+	}
+
+	// If no block IDs specified, return entire file content (without frontmatter)
+	if len(parts) == 1 {
+		_, bodyContent, err := ParseFrontmatter(content)
+		if err != nil {
+			return "", fmt.Errorf("parsing frontmatter: %w", err)
+		}
+		return string(bodyContent), nil
+	}
+
+	// Extract specific blocks
+	blockIDs := strings.Split(parts[1], ",")
+
+	// Parse the chat file to find blocks
+	turns, err := ParseChatFile(content)
+	if err != nil {
+		return "", fmt.Errorf("parsing chat file: %w", err)
+	}
+
+	// Create a map of block IDs to content
+	blockMap := make(map[string]*ChatTurn)
+	for _, turn := range turns {
+		if turn.Directive != nil && turn.Directive.ID != "" {
+			blockMap[turn.Directive.ID] = turn
+		}
+	}
+
+	// Extract requested blocks
+	var extractedContent strings.Builder
+	foundCount := 0
+	for _, blockID := range blockIDs {
+		if turn, ok := blockMap[blockID]; ok {
+			if foundCount > 0 {
+				extractedContent.WriteString("\n\n---\n\n")
+			}
+			extractedContent.WriteString(turn.Content)
+			foundCount++
+		} else {
+			return "", fmt.Errorf("block ID '%s' not found in source file", blockID)
+		}
+	}
+
+	if foundCount == 0 {
+		return "", fmt.Errorf("no valid blocks found")
+	}
+
+	return extractedContent.String(), nil
 }

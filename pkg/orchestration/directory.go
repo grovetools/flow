@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 )
 
 // sanitizeForFilename sanitizes a string for use in a filename (kebab-case).
@@ -118,6 +120,21 @@ func InitPlan(dir string, specFile string) error {
 	return nil
 }
 
+// getWorkspaceContext retrieves repository and branch information from the current directory.
+func getWorkspaceContext() (repository, branch, worktree string) {
+	// Get repository name and branch from git
+	repoName, branchName, _ := git.GetRepoInfo(".")
+
+	// Get workspace node to check if we're in a worktree
+	node, err := workspace.GetProjectByPath(".")
+	if err == nil && node.IsWorktree() {
+		// If we're in a worktree, extract the worktree name from the path
+		worktree = filepath.Base(node.Path)
+	}
+
+	return repoName, branchName, worktree
+}
+
 // AddJob adds a new job to the plan directory.
 func AddJob(plan *Plan, job *Job) (string, error) {
 	// Validate job
@@ -132,6 +149,20 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 	}
 	if job.Status == "" {
 		job.Status = JobStatusPending
+	}
+
+	// Populate workspace context if not already set
+	if job.Repository == "" || job.Branch == "" {
+		repo, branch, worktree := getWorkspaceContext()
+		if job.Repository == "" {
+			job.Repository = repo
+		}
+		if job.Branch == "" {
+			job.Branch = branch
+		}
+		if job.Worktree == "" && worktree != "" {
+			job.Worktree = worktree
+		}
 	}
 
 	// Check for duplicate ID
@@ -248,6 +279,9 @@ func generateJobContent(job *Job) ([]byte, error) {
 		"type":   job.Type,
 	}
 
+	// Add plan_type field (same as type for consistency)
+	frontmatter["plan_type"] = string(job.Type)
+
 	if len(job.DependsOn) > 0 {
 		frontmatter["depends_on"] = job.DependsOn
 	}
@@ -256,6 +290,12 @@ func generateJobContent(job *Job) ([]byte, error) {
 	}
 	if job.Template != "" {
 		frontmatter["template"] = job.Template
+	}
+	if job.Repository != "" {
+		frontmatter["repository"] = job.Repository
+	}
+	if job.Branch != "" {
+		frontmatter["branch"] = job.Branch
 	}
 	if job.Worktree != "" {
 		frontmatter["worktree"] = job.Worktree
@@ -319,8 +359,11 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		ID            string
 		Title         string
 		Type          string
+		PlanType      string
 		DependsOn     []string
 		PromptSource  []string
+		Repository    string
+		Branch        string
 		Worktree      string
 		OutputType    string
 		Prompt        string
@@ -329,8 +372,11 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		ID:            job.ID,
 		Title:         job.Title,
 		Type:          string(job.Type),
+		PlanType:      string(job.Type),
 		DependsOn:     job.DependsOn,
 		PromptSource:  job.PromptSource,
+		Repository:    job.Repository,
+		Branch:        job.Branch,
 		Worktree:      job.Worktree,
 		OutputType:    job.Output.Type,
 		Prompt:        job.PromptBody,

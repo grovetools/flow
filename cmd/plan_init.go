@@ -208,10 +208,15 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			ID:         orchestration.GenerateUniqueJobID(plan, jobTitle),
 			PromptBody: string(body),
 		}
-		
+
 		// Apply worktree from plan config if set
 		if plan.Config != nil && plan.Config.Worktree != "" {
 			job.Worktree = plan.Config.Worktree
+		}
+
+		// Apply repository from current workspace context
+		if currentNode != nil && currentNode.Name != "" {
+			job.Repository = currentNode.Name
 		}
 
 		// 5. Add the job to the plan
@@ -531,6 +536,11 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			frontmatter["worktree"] = worktreeOverride
 		}
 
+		// Add repository field from current workspace context
+		if currentNode != nil && currentNode.Name != "" {
+			frontmatter["repository"] = currentNode.Name
+		}
+
 		// If we have extracted content and this is the first job, merge it into the body
 		if extractedBody != nil && isFirstJob {
 			body = extractedBody // Replace the template's body with the extracted content
@@ -692,6 +702,12 @@ func createDefaultPlanConfig(planPath, model, worktree, container string, repos 
 		configContent.WriteString("#   - grove-core\n")
 		configContent.WriteString("#   - grove-flow\n")
 	}
+	configContent.WriteString("\n")
+
+	configContent.WriteString("# Issue tracker integration (future feature)\n")
+	configContent.WriteString("# issue_tracker:\n")
+	configContent.WriteString("#   provider: github # e.g., github, jira\n")
+	configContent.WriteString("#   url: https://github.com/my-org/my-repo/issues/123\n")
 
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
 	return os.WriteFile(configPath, []byte(configContent.String()), 0644)

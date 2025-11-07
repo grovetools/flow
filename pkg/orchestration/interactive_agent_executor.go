@@ -101,6 +101,27 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		agentArgs = argsCfg.Args
 	}
 
+	// Handle source_block reference if present
+	// Resolve it before launching the agent so the agent has the content to work with
+	if job.SourceBlock != "" {
+		extractedContent, err := resolveSourceBlockForAgent(job.SourceBlock, plan)
+		if err != nil {
+			return fmt.Errorf("resolving source_block: %w", err)
+		}
+		// Update the job's PromptBody with the resolved content
+		if job.PromptBody != "" {
+			job.PromptBody = extractedContent + "\n\n" + job.PromptBody
+		} else {
+			job.PromptBody = extractedContent
+		}
+		// Clear the source_block field as it's now resolved
+		job.SourceBlock = ""
+		// Update the job file with the resolved content
+		if err := updateJobFile(job); err != nil {
+			return fmt.Errorf("updating job file with resolved source_block: %w", err)
+		}
+	}
+
 	// Delegate to the selected provider
 	return provider.Launch(ctx, job, plan, workDir, agentArgs)
 }
@@ -526,6 +547,72 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
 	return projInfo.Identifier(), nil
+}
+
+// resolveSourceBlockForAgent reads and extracts content from a source_block reference
+// Format: path/to/file.md#block-id1,block-id2 or path/to/file.md (for entire file)
+func resolveSourceBlockForAgent(sourceBlock string, plan *Plan) (string, error) {
+	// Parse the source block reference
+	parts := strings.SplitN(sourceBlock, "#", 2)
+	filePath := parts[0]
+
+	// Resolve file path relative to plan directory
+	if !filepath.IsAbs(filePath) {
+		filePath = filepath.Join(plan.Directory, filePath)
+	}
+
+	// Read the source file
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("reading source file %s: %w", filePath, err)
+	}
+
+	// If no block IDs specified, return entire file content (without frontmatter)
+	if len(parts) == 1 {
+		_, bodyContent, err := ParseFrontmatter(content)
+		if err != nil {
+			return "", fmt.Errorf("parsing frontmatter: %w", err)
+		}
+		return string(bodyContent), nil
+	}
+
+	// Extract specific blocks
+	blockIDs := strings.Split(parts[1], ",")
+
+	// Parse the chat file to find blocks
+	turns, err := ParseChatFile(content)
+	if err != nil {
+		return "", fmt.Errorf("parsing chat file: %w", err)
+	}
+
+	// Create a map of block IDs to content
+	blockMap := make(map[string]*ChatTurn)
+	for _, turn := range turns {
+		if turn.Directive != nil && turn.Directive.ID != "" {
+			blockMap[turn.Directive.ID] = turn
+		}
+	}
+
+	// Extract requested blocks
+	var extractedContent strings.Builder
+	foundCount := 0
+	for _, blockID := range blockIDs {
+		if turn, ok := blockMap[blockID]; ok {
+			if foundCount > 0 {
+				extractedContent.WriteString("\n\n---\n\n")
+			}
+			extractedContent.WriteString(turn.Content)
+			foundCount++
+		} else {
+			return "", fmt.Errorf("block ID '%s' not found in source file", blockID)
+		}
+	}
+
+	if foundCount == 0 {
+		return "", fmt.Errorf("no valid blocks found")
+	}
+
+	return extractedContent.String(), nil
 }
 
 

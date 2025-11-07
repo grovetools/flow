@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/fs"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -953,20 +954,40 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				return color.YellowString("Available"), nil
 			},
 			Action: func() error {
-				// Move plan from /plans/ to /archive/
-				// Example: ~/Documents/nb/repos/grove-hooks/main/plans/my-plan
-				//       -> ~/Documents/nb/repos/grove-hooks/main/archive/my-plan
-
-				// Find the /plans/ part in the path
-				plansIndex := strings.LastIndex(planPath, string(filepath.Separator)+"plans"+string(filepath.Separator))
-				if plansIndex == -1 {
-					return fmt.Errorf("path does not contain /plans/ directory")
+				// Use NotebookLocator to determine the correct archive path
+				// Load config and create NotebookLocator
+				coreCfg, err := config.LoadDefault()
+				if err != nil {
+					// Proceed with empty config if none exists (Local Mode)
+					coreCfg = &config.Config{}
 				}
 
-				// Construct archive path by replacing /plans/ with /archive/
-				baseDir := planPath[:plansIndex]
+				locator := workspace.NewNotebookLocator(coreCfg)
+
+				// Get the workspace context for the current plan
+				// We need to find the workspace node for this plan
+				gitRoot, err := git.GetGitRoot(planPath)
+				if err != nil {
+					return fmt.Errorf("failed to find git root: %w", err)
+				}
+
+				// Get the workspace node
+				workspaceNode, err := workspace.GetProjectByPath(gitRoot)
+				if err != nil {
+					return fmt.Errorf("failed to get workspace node: %w", err)
+				}
+
+				// Get the archive directory for plans using NotebookLocator
+				// For centralized mode: notebooks/{workspace}/notes/archive/
+				// For local mode: {project}/.notebook/notes/archive/
+				archiveNotesDir, err := locator.GetNotesDir(workspaceNode, "archive")
+				if err != nil {
+					return fmt.Errorf("failed to get archive notes dir: %w", err)
+				}
+
+				// Plans should go into archive/plans/ subdirectory
+				archiveDir := filepath.Join(archiveNotesDir, "plans")
 				planName := filepath.Base(planPath)
-				archiveDir := filepath.Join(baseDir, "archive")
 				archivePath := filepath.Join(archiveDir, planName)
 
 				// Create archive directory if it doesn't exist
@@ -979,9 +1000,16 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("archive destination already exists: %s", archivePath)
 				}
 
-				// Copy the directory recursively
-				if err := fs.CopyDir(planPath, archivePath); err != nil {
-					return fmt.Errorf("failed to copy plan to archive: %w", err)
+				// Move the directory (rename is more efficient than copy+delete)
+				if err := os.Rename(planPath, archivePath); err != nil {
+					// If rename fails (e.g., cross-device), fall back to copy
+					if err := fs.CopyDir(planPath, archivePath); err != nil {
+						return fmt.Errorf("failed to copy plan to archive: %w", err)
+					}
+					// Remove original after successful copy
+					if err := os.RemoveAll(planPath); err != nil {
+						return fmt.Errorf("failed to remove original plan directory: %w", err)
+					}
 				}
 
 				fmt.Printf("    Archived plan to: %s\n", archivePath)
