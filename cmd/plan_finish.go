@@ -13,6 +13,7 @@ import (
 	"github.com/mattsolo1/grove-core/fs"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	gexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -1090,6 +1091,18 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 
 	if !executed {
 		fmt.Println("No actions selected.")
+	}
+
+	// Check if the finished plan was the active plan and unset it
+	activePlan, err := getActivePlanWithMigration()
+	if err == nil && activePlan == planName {
+		if err := state.Delete("flow.active_plan"); err != nil {
+			fmt.Printf("Warning: could not unset active plan: %v\n", err)
+		} else {
+			// Also delete legacy key
+			_ = state.Delete("active_plan")
+			fmt.Println("\n✓ Unset active plan")
+		}
 	}
 
 	fmt.Println("\nPlan cleanup finished.")
