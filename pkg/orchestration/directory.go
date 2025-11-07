@@ -288,6 +288,9 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if len(job.PromptSource) > 0 {
 		frontmatter["prompt_source"] = job.PromptSource
 	}
+	if job.SourceBlock != "" {
+		frontmatter["source_block"] = job.SourceBlock
+	}
 	if job.Template != "" {
 		frontmatter["template"] = job.Template
 	}

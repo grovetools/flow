@@ -134,7 +134,7 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 				if err != nil {
 					return err
 				}
-				
+
 				var extractedFile string
 				for _, file := range files {
 					if strings.Contains(file, "double-chocolate-variant") {
@@ -142,16 +142,16 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 						break
 					}
 				}
-				
+
 				if extractedFile == "" {
 					return fmt.Errorf("extracted file not found")
 				}
-				
+
 				content, err := fs.ReadString(filepath.Join(planDir, extractedFile))
 				if err != nil {
 					return err
 				}
-				
+
 				// Check frontmatter
 				if !strings.Contains(content, "title: double-chocolate-variant") {
 					return fmt.Errorf("missing or incorrect title in frontmatter")
@@ -165,18 +165,32 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 				if !strings.Contains(content, "worktree: test-worktree") {
 					return fmt.Errorf("worktree not inherited from .grove-plan.yml")
 				}
-				
-				// Check content includes the heading
-				if !strings.Contains(content, "## LLM Response (2025-08-20 08:26:19)") {
-					return fmt.Errorf("extracted content missing the heading")
+
+				// Check source_block reference is present (new behavior)
+				if !strings.Contains(content, "source_block: 01-recipe-chat.md#cfa5f7") {
+					return fmt.Errorf("missing source_block reference in frontmatter")
 				}
-				if !strings.Contains(content, "Double Chocolate Espresso Cookies") {
-					return fmt.Errorf("extracted content missing expected text")
+
+				// Verify body is empty (content is referenced, not copied)
+				lines := strings.Split(content, "\n")
+				frontmatterDelimiters := 0
+				bodyHasContent := false
+				for _, line := range lines {
+					if line == "---" {
+						frontmatterDelimiters++
+						continue
+					}
+					// After second delimiter, we're in the body
+					if frontmatterDelimiters >= 2 && strings.TrimSpace(line) != "" {
+						bodyHasContent = true
+						break
+					}
 				}
-				if !strings.Contains(content, "Each variation maintains the basic cookie structure") {
-					return fmt.Errorf("extracted content incomplete")
+
+				if bodyHasContent {
+					return fmt.Errorf("body should be empty with source_block reference")
 				}
-				
+
 				return nil
 			}),
 			harness.NewStep("Extract multiple blocks", func(ctx *harness.Context) error {
@@ -215,7 +229,7 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 				if err != nil {
 					return err
 				}
-				
+
 				var targetFile string
 				for _, file := range files {
 					if strings.Contains(file, "brown-butter-recipe") {
@@ -223,16 +237,16 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 						break
 					}
 				}
-				
+
 				if targetFile == "" {
 					return fmt.Errorf("brown-butter-recipe file not found")
 				}
-				
+
 				content, err := fs.ReadString(filepath.Join(planDir, targetFile))
 				if err != nil {
 					return err
 				}
-				
+
 				// Check custom flags override defaults
 				if !strings.Contains(content, "model: gpt-4") {
 					return fmt.Errorf("custom model not applied")
@@ -246,12 +260,32 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 				if !strings.Contains(content, "depends_on:") || !strings.Contains(content, "02-double-chocolate-variant.md") {
 					return fmt.Errorf("dependency not applied")
 				}
-				
-				// Check content
-				if !strings.Contains(content, "Brown Butter Toffee Cookie") {
-					return fmt.Errorf("extracted content incorrect")
+
+				// Check source_block reference is present
+				if !strings.Contains(content, "source_block: 01-recipe-chat.md#161603") {
+					return fmt.Errorf("missing source_block reference")
 				}
-				
+
+				// Body should be empty with source_block reference
+				lines := strings.Split(content, "\n")
+				frontmatterDelimiters := 0
+				bodyHasContent := false
+				for _, line := range lines {
+					if line == "---" {
+						frontmatterDelimiters++
+						continue
+					}
+					// After second delimiter, we're in the body
+					if frontmatterDelimiters >= 2 && strings.TrimSpace(line) != "" {
+						bodyHasContent = true
+						break
+					}
+				}
+
+				if bodyHasContent {
+					return fmt.Errorf("body should be empty with source_block reference")
+				}
+
 				return nil
 			}),
 		},
@@ -442,7 +476,7 @@ This specification provides the foundation for implementing advanced text intera
 				if err != nil {
 					return err
 				}
-				
+
 				var extractedFile string
 				for _, file := range files {
 					if strings.Contains(file, "extracted-spec") {
@@ -450,16 +484,16 @@ This specification provides the foundation for implementing advanced text intera
 						break
 					}
 				}
-				
+
 				if extractedFile == "" {
 					return fmt.Errorf("extracted file not found")
 				}
-				
+
 				content, err := fs.ReadString(filepath.Join(planDir, extractedFile))
 				if err != nil {
 					return err
 				}
-				
+
 				// Check frontmatter
 				if !strings.Contains(content, "title: extracted-spec") {
 					return fmt.Errorf("missing or incorrect title in frontmatter")
@@ -467,34 +501,33 @@ This specification provides the foundation for implementing advanced text intera
 				if !strings.Contains(content, "type: chat") {
 					return fmt.Errorf("missing type: chat in frontmatter")
 				}
-				
-				// Check that all content below original frontmatter is included
-				if !strings.Contains(content, "# Grove NeoVim Text Interaction Specification") {
-					return fmt.Errorf("missing main heading")
+
+				// Check source_block reference is present (new behavior with "all")
+				if !strings.Contains(content, "source_block: spec-document.md") {
+					return fmt.Errorf("missing source_block reference in frontmatter")
 				}
-				if !strings.Contains(content, "## Overview") {
-					return fmt.Errorf("missing overview section")
+
+				// Verify body is empty (content is referenced, not copied)
+				lines := strings.Split(content, "\n")
+				frontmatterDelimiters := 0
+				bodyHasContent := false
+				for _, line := range lines {
+					if line == "---" {
+						frontmatterDelimiters++
+						continue
+					}
+					// After second delimiter, we're in the body
+					if frontmatterDelimiters >= 2 && strings.TrimSpace(line) != "" {
+						bodyHasContent = true
+						break
+					}
 				}
-				if !strings.Contains(content, "### Key Features") {
-					return fmt.Errorf("missing key features section")
+
+				if bodyHasContent {
+					return fmt.Errorf("body should be empty with source_block reference")
 				}
-				if !strings.Contains(content, "1. **Smart Selection**: Intelligent text selection based on context") {
-					return fmt.Errorf("missing smart selection feature")
-				}
-				if !strings.Contains(content, "## Implementation Details") {
-					return fmt.Errorf("missing implementation details section")
-				}
-				if !strings.Contains(content, "### Technical Requirements") {
-					return fmt.Errorf("missing technical requirements section")
-				}
-				if !strings.Contains(content, "## Conclusion") {
-					return fmt.Errorf("missing conclusion section")
-				}
-				if !strings.Contains(content, "This specification provides the foundation") {
-					return fmt.Errorf("missing conclusion text")
-				}
-				
-				// Ensure original frontmatter is NOT included
+
+				// Ensure original frontmatter metadata is NOT included
 				if strings.Contains(content, "metadata:") && strings.Contains(content, "author: Test Author") {
 					return fmt.Errorf("original frontmatter should not be included in extracted content")
 				}
@@ -523,7 +556,7 @@ This specification provides the foundation for implementing advanced text intera
 				if err != nil {
 					return err
 				}
-				
+
 				var targetFile string
 				for _, file := range files {
 					if strings.Contains(file, "full-spec-custom") {
@@ -531,16 +564,16 @@ This specification provides the foundation for implementing advanced text intera
 						break
 					}
 				}
-				
+
 				if targetFile == "" {
 					return fmt.Errorf("full-spec-custom file not found")
 				}
-				
+
 				content, err := fs.ReadString(filepath.Join(planDir, targetFile))
 				if err != nil {
 					return err
 				}
-				
+
 				// Check custom parameters
 				if !strings.Contains(content, "model: gpt-4-turbo") {
 					return fmt.Errorf("custom model not applied")
@@ -551,12 +584,32 @@ This specification provides the foundation for implementing advanced text intera
 				if !strings.Contains(content, "type: generate_jobs") {
 					return fmt.Errorf("custom output type not applied")
 				}
-				
-				// Verify full content is still there
-				if !strings.Contains(content, "# Grove NeoVim Text Interaction Specification") {
-					return fmt.Errorf("content not properly extracted with 'all'")
+
+				// Check source_block reference is present
+				if !strings.Contains(content, "source_block: spec-document.md") {
+					return fmt.Errorf("missing source_block reference")
 				}
-				
+
+				// Body should be empty with source_block reference
+				lines := strings.Split(content, "\n")
+				frontmatterDelimiters := 0
+				bodyHasContent := false
+				for _, line := range lines {
+					if line == "---" {
+						frontmatterDelimiters++
+						continue
+					}
+					// After second delimiter, we're in the body
+					if frontmatterDelimiters >= 2 && strings.TrimSpace(line) != "" {
+						bodyHasContent = true
+						break
+					}
+				}
+
+				if bodyHasContent {
+					return fmt.Errorf("body should be empty with source_block reference")
+				}
+
 				return nil
 			}),
 			harness.NewStep("Setup external markdown file", func(ctx *harness.Context) error {
@@ -606,7 +659,7 @@ More content to include in the extraction.
 				if err != nil {
 					return err
 				}
-				
+
 				var externalFile string
 				for _, file := range files {
 					if strings.Contains(file, "external-content") {
@@ -614,30 +667,42 @@ More content to include in the extraction.
 						break
 					}
 				}
-				
+
 				if externalFile == "" {
 					return fmt.Errorf("external-content file not found")
 				}
-				
+
 				content, err := fs.ReadString(filepath.Join(planDir, externalFile))
 				if err != nil {
 					return err
 				}
-				
-				// Verify content
-				if !strings.Contains(content, "# External Content") {
-					return fmt.Errorf("external content not properly extracted")
+
+				// Check source_block reference is present
+				// When using absolute path, it should use the basename
+				if !strings.Contains(content, "source_block: external.md") {
+					return fmt.Errorf("missing source_block reference for external file")
 				}
-				if !strings.Contains(content, "This content is outside the plan directory") {
-					return fmt.Errorf("missing expected external content")
+
+				// Body should be empty with source_block reference
+				lines := strings.Split(content, "\n")
+				frontmatterDelimiters := 0
+				bodyHasContent := false
+				for _, line := range lines {
+					if line == "---" {
+						frontmatterDelimiters++
+						continue
+					}
+					// After second delimiter, we're in the body
+					if frontmatterDelimiters >= 2 && strings.TrimSpace(line) != "" {
+						bodyHasContent = true
+						break
+					}
 				}
-				if !strings.Contains(content, "## Section 1") {
-					return fmt.Errorf("missing section 1")
+
+				if bodyHasContent {
+					return fmt.Errorf("body should be empty with source_block reference")
 				}
-				if !strings.Contains(content, "## Section 2") {
-					return fmt.Errorf("missing section 2")
-				}
-				
+
 				return nil
 			}),
 		},
