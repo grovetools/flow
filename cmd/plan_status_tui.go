@@ -56,8 +56,8 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithHelp("a", "archive job"),
 		),
 		Edit: key.NewBinding(
-			key.WithKeys("e"),
-			key.WithHelp("e", "edit job"),
+			key.WithKeys("e", "enter"),
+			key.WithHelp("e/enter", "edit job"),
 		),
 		Run: key.NewBinding(
 			key.WithKeys("r"),
