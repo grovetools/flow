@@ -53,7 +53,9 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(plan.Jobs) == 0 {
-		return fmt.Errorf("no jobs found in directory: %s", dir)
+		// Use plan.Name which is derived from the directory name for a clear message.
+		fmt.Printf("No jobs found in plan '%s'\n", plan.Name)
+		return nil
 	}
 
 	// Build dependency graph

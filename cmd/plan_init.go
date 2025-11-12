@@ -134,7 +134,12 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Create the actual worktree if requested (but skip if it's inherited)
 	if worktreeToSet != "" && !isInheritedWorktree {
-		worktreePath, err := createWorktreeIfRequested(worktreeToSet, cmd.Repos)
+		// Use the workspace path from currentNode to find the git root
+		var workspacePath string
+		if currentNode != nil {
+			workspacePath = currentNode.Path
+		}
+		worktreePath, err := createWorktreeIfRequested(worktreeToSet, cmd.Repos, workspacePath)
 		if err != nil {
 			return "", err
 		}
@@ -431,7 +436,12 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// Create the actual worktree if requested (but skip if it's inherited)
 	if worktreeOverride != "" && !isInheritedWorktree {
-		worktreePath, err := createWorktreeIfRequested(worktreeOverride, cmd.Repos)
+		// Use the workspace path from currentNode to find the git root
+		var workspacePath string
+		if currentNode != nil {
+			workspacePath = currentNode.Path
+		}
+		worktreePath, err := createWorktreeIfRequested(worktreeOverride, cmd.Repos, workspacePath)
 		if err != nil {
 			return err
 		}
@@ -962,8 +972,14 @@ func applyDefaultContextRulesToWorktree(worktreePath string, explicitRepos []str
 }
 
 // createWorktreeIfRequested creates a git worktree with the given name
-func createWorktreeIfRequested(worktreeName string, repos []string) (string, error) {
-	gitRoot, err := orchestration.GetGitRootSafe(".")
+func createWorktreeIfRequested(worktreeName string, repos []string, workspacePath string) (string, error) {
+	// Use workspace path if provided, otherwise fall back to current directory
+	searchPath := workspacePath
+	if searchPath == "" {
+		searchPath = "."
+	}
+
+	gitRoot, err := orchestration.GetGitRootSafe(searchPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to find git root: %w", err)
 	}
