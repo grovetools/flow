@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/fs"
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -179,7 +178,7 @@ This can include removing the git worktree, deleting the branch, closing tmux se
 	cmd.Flags().BoolVar(&planFinishPruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
 	cmd.Flags().BoolVar(&planFinishCloseSession, "close-session", false, "Close the associated tmux session")
 	cmd.Flags().BoolVar(&planFinishCleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
-	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory using 'nb archive'")
+	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
 	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
 
 	return cmd
@@ -935,65 +934,24 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			},
 		},
 		{
-			Name: "Archive plan directory with 'nb'",
+			Name: "Archive plan directory",
 			Check: func() (string, error) {
-				// Check if plan is inside an nb workspace with /plans/ directory
-				// Expected format: ~/Documents/nb/repos/{repo}/main/plans/{plan}
-				homeDir, _ := os.UserHomeDir()
-				nbRoot := filepath.Join(homeDir, "Documents", "nb")
-
-				if !strings.HasPrefix(planPath, nbRoot) {
-					return "N/A (not in nb workspace)", nil
-				}
-
-				// Check if path contains /plans/
-				if !strings.Contains(planPath, string(filepath.Separator)+"plans"+string(filepath.Separator)) {
-					return "N/A (not in plans directory)", nil
-				}
-
+				// Archiving is available for any plan
 				return color.YellowString("Available"), nil
 			},
 			Action: func() error {
-				// Use NotebookLocator to determine the correct archive path
-				// Load config and create NotebookLocator
-				coreCfg, err := config.LoadDefault()
-				if err != nil {
-					// Proceed with empty config if none exists (Local Mode)
-					coreCfg = &config.Config{}
-				}
-
-				locator := workspace.NewNotebookLocator(coreCfg)
-
-				// Get the workspace context for the current plan
-				// We need to find the workspace node for this plan
-				gitRoot, err := git.GetGitRoot(planPath)
-				if err != nil {
-					return fmt.Errorf("failed to find git root: %w", err)
-				}
-
-				// Get the workspace node
-				workspaceNode, err := workspace.GetProjectByPath(gitRoot)
-				if err != nil {
-					return fmt.Errorf("failed to get workspace node: %w", err)
-				}
-
-				// Get the archive directory for plans using NotebookLocator
-				// For centralized mode: notebooks/{workspace}/notes/archive/
-				// For local mode: {project}/.notebook/notes/archive/
-				archiveNotesDir, err := locator.GetNotesDir(workspaceNode, "archive")
-				if err != nil {
-					return fmt.Errorf("failed to get archive notes dir: %w", err)
-				}
-
-				// Plans should go into archive/plans/ subdirectory
-				archiveDir := filepath.Join(archiveNotesDir, "plans")
+				// Get the parent directory of the plan (e.g., .../plans/)
+				plansParentDir := filepath.Dir(planPath)
 				planName := filepath.Base(planPath)
-				archivePath := filepath.Join(archiveDir, planName)
 
-				// Create archive directory if it doesn't exist
+				// Create the .archive subdirectory in the plans parent directory
+				archiveDir := filepath.Join(plansParentDir, ".archive")
 				if err := os.MkdirAll(archiveDir, 0755); err != nil {
 					return fmt.Errorf("failed to create archive directory: %w", err)
 				}
+
+				// Determine the destination path
+				archivePath := filepath.Join(archiveDir, planName)
 
 				// Check if destination already exists
 				if _, err := os.Stat(archivePath); err == nil {
