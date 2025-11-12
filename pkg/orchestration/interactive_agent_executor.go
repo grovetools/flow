@@ -353,11 +353,14 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
 		}
 
-		p.prettyLog.Blank()
-		p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
-		p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
-		p.prettyLog.Blank()
-		p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+		// Only show completion instructions if not running from the TUI
+		if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
+			p.prettyLog.Blank()
+			p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
+			p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
+			p.prettyLog.Blank()
+			p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+		}
 
 		return nil
 	}
@@ -466,11 +469,15 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	p.log.WithField("window", windowName).Info("Interactive host session launched")
 	p.prettyLog.InfoPretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName))
 	p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
-	p.prettyLog.Blank()
-	p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
-	p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
-	p.prettyLog.Blank()
-	p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+
+	// Only show completion instructions if not running from the TUI
+	if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
+		p.prettyLog.Blank()
+		p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
+		p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
+		p.prettyLog.Blank()
+		p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+	}
 
 	return nil
 }

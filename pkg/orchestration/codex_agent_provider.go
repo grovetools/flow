@@ -174,11 +174,13 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
 	}
 
-	p.prettyLog.Blank()
-	p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
-	p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
-	p.prettyLog.Blank()
-	p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+	if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
+		p.prettyLog.Blank()
+		p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
+		p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
+		p.prettyLog.Blank()
+		p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+	}
 
 	// Return immediately. The lock file indicates the running state.
 	return nil

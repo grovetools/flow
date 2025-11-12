@@ -1105,7 +1105,11 @@ func editJob(job *orchestration.Job) tea.Cmd {
 
 func runJob(planDir string, job *orchestration.Job) tea.Cmd {
 	// Run the job using 'grove flow plan run' for workspace-awareness
-	return tea.ExecProcess(exec.Command("grove", "flow", "plan", "run", job.FilePath), func(err error) tea.Msg {
+	cmd := exec.Command("grove", "flow", "plan", "run", job.FilePath)
+	// Set an environment variable to indicate the job is run from the TUI
+	cmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return err
 		}
