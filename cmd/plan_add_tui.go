@@ -112,37 +112,24 @@ type tuiModel struct {
 	err        error
 
 	// Form inputs
-	titleInput    textinput.Model
-	jobTypeList   list.Model
-	depList       list.Model
-	selectedDeps  map[string]bool  // Track selected dependencies
-	templateList  list.Model
-	worktreeInput textinput.Model
-	modelList     list.Model
-	promptInput   textarea.Model
+	titleInput   textinput.Model
+	jobTypeList  list.Model
+	depList      list.Model
+	selectedDeps map[string]bool // Track selected dependencies
+	templateList list.Model
+	promptInput  textarea.Model
 
 	// Fields to store the final job data
 	jobTitle        string
 	jobType         string
 	jobDependencies []string
 	jobTemplate     string
-	jobWorktree     string
-	jobModel        string
 	jobPrompt       string
 }
 
 type item string
 
 func (i item) FilterValue() string { return string(i) }
-
-// modelItem represents a model in the list
-type modelItem struct {
-	Model
-}
-
-func (m modelItem) FilterValue() string { return m.ID }
-func (m modelItem) Title() string       { return m.ID }
-func (m modelItem) Description() string { return fmt.Sprintf("%s - %s", m.Provider, m.Note) }
 
 // dependencyItem represents a job that can be selected as a dependency
 type dependencyItem struct {
@@ -167,9 +154,6 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	}
 
 	switch item := listItem.(type) {
-	case modelItem:
-		// Just show the model ID, no description
-		str = fmt.Sprintf("%s%s", cursor, item.ID)
 	case item:
 		// Regular items
 		str = fmt.Sprintf("%s%s", cursor, item)
@@ -249,7 +233,7 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 		item("shell"),
 		item("chat"),
 	}
-	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 5)
+	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 7)
 	m.jobTypeList.Title = ""
 	m.jobTypeList.SetShowTitle(false)
 	m.jobTypeList.SetShowStatusBar(false)
@@ -296,42 +280,11 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 	m.templateList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
 	m.templateList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 
-	// 5. Worktree Input (textinput with default)
-	m.worktreeInput = textinput.New()
-	m.worktreeInput.Placeholder = "feature-branch"
-	m.worktreeInput.Width = 41
-	if plan.Config != nil && plan.Config.Worktree != "" {
-		m.worktreeInput.SetValue(plan.Config.Worktree)
-	}
-
-	// 6. Model Input (list)
-	models := getAvailableModels()
-	modelItems := make([]list.Item, len(models))
-	defaultIndex := 0
-	for i, model := range models {
-		modelItems[i] = modelItem{model}
-		// Set default selection based on plan config
-		if plan.Config != nil && plan.Config.Model == model.ID {
-			defaultIndex = i
-		}
-	}
-	m.modelList = list.New(modelItems, itemDelegate{}, 20, 6)
-	m.modelList.Title = ""
-	m.modelList.SetShowTitle(false)
-	m.modelList.SetShowStatusBar(false)
-	m.modelList.SetFilteringEnabled(true)
-	m.modelList.SetShowHelp(false)
-	m.modelList.SetShowPagination(true)
-	m.modelList.FilterInput.Prompt = "🔍 "
-	m.modelList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
-	m.modelList.FilterInput.TextStyle = theme.DefaultTheme.Selected
-	m.modelList.Select(defaultIndex)
-
-	// 7. Prompt Input (textarea)
+	// 5. Prompt Input (textarea)
 	m.promptInput = textarea.New()
 	m.promptInput.Placeholder = "Enter prompt here..."
 	m.promptInput.SetWidth(41)
-	m.promptInput.SetHeight(6)
+	m.promptInput.SetHeight(7)
 
 	return m
 }
@@ -356,16 +309,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if we're in a text input field that should capture all keys
-		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 2 || m.focusIndex == 6)
+		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 4)
 		// Check if we're in a list that needs arrow keys
-		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 3 || m.focusIndex == 4 || m.focusIndex == 5)
+		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 2 || m.focusIndex == 3)
 
 		switch msg.String() {
 		case "esc", "escape":
 			// ESC unfocuses any focused field (text inputs or lists)
 			m.unfocused = true
 			m.titleInput.Blur()
-			m.worktreeInput.Blur()
 			m.promptInput.Blur()
 			return m, nil
 		case "?":
@@ -390,12 +342,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch m.focusIndex {
 				case 1: // Job type list
 					m.jobTypeList.Select(0)
-				case 3: // Template list
+				case 2: // Template list
 					m.templateList.Select(0)
-				case 4: // Dependencies list
+				case 3: // Dependencies list
 					m.depList.Select(0)
-				case 5: // Model list
-					m.modelList.Select(0)
 				}
 			} else {
 				// Go to first field
@@ -411,16 +361,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch m.focusIndex {
 				case 1: // Job type list
 					m.jobTypeList.Select(len(m.jobTypeList.Items()) - 1)
-				case 3: // Template list
+				case 2: // Template list
 					m.templateList.Select(len(m.templateList.Items()) - 1)
-				case 4: // Dependencies list
+				case 3: // Dependencies list
 					m.depList.Select(len(m.depList.Items()) - 1)
-				case 5: // Model list
-					m.modelList.Select(len(m.modelList.Items()) - 1)
 				}
 			} else {
 				// Go to last field
-				m.focusIndex = 6
+				m.focusIndex = 4
 				return m.updateFocus(), nil
 			}
 			return m, nil
@@ -436,27 +384,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						newIndex = 0
 					}
 					m.jobTypeList.Select(newIndex)
-				case 3: // Template list
+				case 2: // Template list
 					current := m.templateList.Index()
 					newIndex := current - 5
 					if newIndex < 0 {
 						newIndex = 0
 					}
 					m.templateList.Select(newIndex)
-				case 4: // Dependencies list
+				case 3: // Dependencies list
 					current := m.depList.Index()
 					newIndex := current - 5
 					if newIndex < 0 {
 						newIndex = 0
 					}
 					m.depList.Select(newIndex)
-				case 5: // Model list
-					current := m.modelList.Index()
-					newIndex := current - 5
-					if newIndex < 0 {
-						newIndex = 0
-					}
-					m.modelList.Select(newIndex)
 				}
 			}
 			return m, nil
@@ -472,27 +413,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						newIndex = len(m.jobTypeList.Items()) - 1
 					}
 					m.jobTypeList.Select(newIndex)
-				case 3: // Template list
+				case 2: // Template list
 					current := m.templateList.Index()
 					newIndex := current + 5
 					if newIndex >= len(m.templateList.Items()) {
 						newIndex = len(m.templateList.Items()) - 1
 					}
 					m.templateList.Select(newIndex)
-				case 4: // Dependencies list
+				case 3: // Dependencies list
 					current := m.depList.Index()
 					newIndex := current + 5
 					if newIndex >= len(m.depList.Items()) {
 						newIndex = len(m.depList.Items()) - 1
 					}
 					m.depList.Select(newIndex)
-				case 5: // Model list
-					current := m.modelList.Index()
-					newIndex := current + 5
-					if newIndex >= len(m.modelList.Items()) {
-						newIndex = len(m.modelList.Items()) - 1
-					}
-					m.modelList.Select(newIndex)
 				}
 			}
 			return m, nil
@@ -500,7 +434,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			// Tab moves to next field, preserving unfocused state if already unfocused
 			m.focusIndex++
-			if m.focusIndex > 6 {
+			if m.focusIndex > 4 {
 				m.focusIndex = 0
 			}
 			return m.updateFocus(), nil
@@ -510,7 +444,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if (!inList || m.unfocused) && !inTextInput {
 				// Keep unfocused state when navigating
 				m.focusIndex++
-				if m.focusIndex > 6 {
+				if m.focusIndex > 4 {
 					m.focusIndex = 0
 				}
 				return m.updateFocus(), nil
@@ -520,7 +454,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Shift+tab moves to previous field, preserving unfocused state if already unfocused
 			m.focusIndex--
 			if m.focusIndex < 0 {
-				m.focusIndex = 6
+				m.focusIndex = 4
 			}
 			return m.updateFocus(), nil
 
@@ -530,7 +464,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Keep unfocused state when navigating
 				m.focusIndex--
 				if m.focusIndex < 0 {
-					m.focusIndex = 6
+					m.focusIndex = 4
 				}
 				return m.updateFocus(), nil
 			}
@@ -541,7 +475,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Keep unfocused state when navigating
 				m.focusIndex--
 				if m.focusIndex < 0 {
-					m.focusIndex = 6
+					m.focusIndex = 4
 				}
 				return m.updateFocus(), nil
 			}
@@ -551,7 +485,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.unfocused && !inTextInput {
 				// Keep unfocused state when navigating
 				m.focusIndex++
-				if m.focusIndex > 6 {
+				if m.focusIndex > 4 {
 					m.focusIndex = 0
 				}
 				return m.updateFocus(), nil
@@ -611,7 +545,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			// Special handling for certain fields
-			if m.focusIndex == 6 {
+			if m.focusIndex == 4 {
 				// On the last field (prompt), enter confirms the form
 				// Extract values from all inputs
 				m.extractValues()
@@ -621,7 +555,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// For lists, enter confirms selection and moves to next field
 				m.unfocused = false
 				m.focusIndex++
-				if m.focusIndex > 6 {
+				if m.focusIndex > 4 {
 					m.focusIndex = 0
 				}
 				return m.updateFocus(), nil
@@ -639,11 +573,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.titleInput, cmd = m.titleInput.Update(msg)
 	case 1: // Job type list
 		m.jobTypeList, cmd = m.jobTypeList.Update(msg)
-	case 2: // Worktree input
-		m.worktreeInput, cmd = m.worktreeInput.Update(msg)
-	case 3: // Template list
+	case 2: // Template list
 		m.templateList, cmd = m.templateList.Update(msg)
-	case 4: // Dependency list
+	case 3: // Dependency list
 		// Handle space key for toggling selection
 		if key, ok := msg.(tea.KeyMsg); ok && key.String() == " " {
 			if selectedItem := m.depList.SelectedItem(); selectedItem != nil {
@@ -655,9 +587,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.depList, cmd = m.depList.Update(msg)
 		}
-	case 5: // Model list
-		m.modelList, cmd = m.modelList.Update(msg)
-	case 6: // Prompt textarea
+	case 4: // Prompt textarea
 		m.promptInput, cmd = m.promptInput.Update(msg)
 	}
 
@@ -668,7 +598,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m tuiModel) updateFocus() tuiModel {
 	// Blur all inputs
 	m.titleInput.Blur()
-	m.worktreeInput.Blur()
 	m.promptInput.Blur()
 
 	// Only focus if not in unfocused state
@@ -676,9 +605,7 @@ func (m tuiModel) updateFocus() tuiModel {
 		switch m.focusIndex {
 		case 0:
 			m.titleInput.Focus()
-		case 2:
-			m.worktreeInput.Focus()
-		case 6:
+		case 4:
 			m.promptInput.Focus()
 		}
 	}
@@ -718,15 +645,6 @@ func (m *tuiModel) extractValues() {
 		}
 	}
 
-	m.jobWorktree = m.worktreeInput.Value()
-
-	// Get selected model
-	if selected := m.modelList.SelectedItem(); selected != nil {
-		if modelItem, ok := selected.(modelItem); ok {
-			m.jobModel = modelItem.ID
-		}
-	}
-
 	m.jobPrompt = m.promptInput.Value()
 }
 
@@ -737,7 +655,7 @@ func (m tuiModel) View() string {
 
 	// If help is visible, show it and return
 	if m.helpModel.ShowAll {
-		m.helpModel.SetSize(95, m.jobTypeList.Height()+m.templateList.Height()+m.modelList.Height()+10) // estimate height
+		m.helpModel.SetSize(95, m.jobTypeList.Height()+m.templateList.Height()+10) // estimate height
 		return m.helpModel.View()
 	}
 
@@ -751,7 +669,7 @@ func (m tuiModel) View() string {
 	borderStyle := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultColors.Border).
-		Padding(0, 1).
+		Padding(0, 0).
 		Width(45)
 
 	// Unfocused style - use theme border color
@@ -799,11 +717,11 @@ func (m tuiModel) View() string {
 	// Row 1: Title (full width) with left margin
 	var titleFieldStyle lipgloss.Style
 	if m.focusIndex == 0 && !m.unfocused {
-		titleFieldStyle = focusedBorderStyle.Copy().Width(93).Height(1).MarginLeft(2)
+		titleFieldStyle = focusedBorderStyle.Copy().Width(93).MarginLeft(2)
 	} else if m.focusIndex == 0 && m.unfocused {
-		titleFieldStyle = unfocusedBorderStyle.Copy().Width(93).Height(1).MarginLeft(2)
+		titleFieldStyle = unfocusedBorderStyle.Copy().Width(93).MarginLeft(2)
 	} else {
-		titleFieldStyle = borderStyle.Copy().Width(93).Height(1).MarginLeft(2)
+		titleFieldStyle = borderStyle.Copy().Width(93).MarginLeft(2)
 	}
 	var titleContent strings.Builder
 	if m.focusIndex == 0 {
@@ -813,24 +731,19 @@ func (m tuiModel) View() string {
 	}
 	titleContent.WriteString("\n")
 	titleContent.WriteString(m.titleInput.View())
-	b.WriteString(titleFieldStyle.Render(titleContent.String()))
-	b.WriteString("\n")
+	titleRow := titleFieldStyle.Render(titleContent.String())
 
-	// Row 2: Job Type | Worktree
+	// Row 2: Job Type | Template
 	jobTypeView := m.jobTypeList.View()
 	jobTypeField := renderField(1, "Job Type:", jobTypeView, 0)
-	worktreeField := renderField(2, "Worktree:", m.worktreeInput.View(), 0)
 
-	// Join side by side with left margin
-	row2 := lipgloss.JoinHorizontal(lipgloss.Top, jobTypeField, "  ", worktreeField)
-	row2WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row2)
-	b.WriteString(row2WithMargin)
-	b.WriteString("\n")
-
-	// Row 3: Template | Dependencies
 	templateView := m.templateList.View()
-	templateField := renderField(3, "Template:", templateView, 0)
+	templateField := renderField(2, "Template:", templateView, 0)
 
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, jobTypeField, "  ", templateField)
+	row2WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row2)
+
+	// Row 3: Dependencies | Prompt
 	// Dependencies - use renderField for consistency
 	var depView string
 	if len(m.plan.Jobs) > 0 {
@@ -838,21 +751,16 @@ func (m tuiModel) View() string {
 	} else {
 		depView = "  No existing jobs available"
 	}
-	depField := renderField(4, "Dependencies:", depView, 0)
+	depField := renderField(3, "Dependencies:", depView, 0)
 
-	row3 := lipgloss.JoinHorizontal(lipgloss.Top, templateField, "  ", depField)
+	promptField := renderField(4, "Prompt:", m.promptInput.View(), 0)
+
+	row3 := lipgloss.JoinHorizontal(lipgloss.Top, depField, "  ", promptField)
 	row3WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row3)
-	b.WriteString(row3WithMargin)
-	b.WriteString("\n")
 
-	// Row 4: Model | Prompt
-	modelView := m.modelList.View()
-	modelField := renderField(5, "Model:", modelView, 0)
-	promptField := renderField(6, "Prompt:", m.promptInput.View(), 0)
-
-	row4 := lipgloss.JoinHorizontal(lipgloss.Top, modelField, "  ", promptField)
-	row4WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row4)
-	b.WriteString(row4WithMargin)
+	// Join all rows vertically for a compact layout
+	allRows := lipgloss.JoinVertical(lipgloss.Left, titleRow, row2WithMargin, row3WithMargin)
+	b.WriteString(allRows)
 
 	// Help text with left margin
 	helpStyle := theme.DefaultTheme.Muted.
@@ -899,8 +807,6 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 		Type:       orchestration.JobType(jobType),
 		Status:     "pending",
 		DependsOn:  m.jobDependencies,
-		Worktree:   m.jobWorktree,
-		Model:      m.jobModel,
 		PromptBody: promptBody,
 		Template:   m.jobTemplate,
 		Output: orchestration.OutputConfig{
@@ -917,6 +823,15 @@ type Model struct {
 	Provider string
 	Note     string
 }
+
+// modelItem represents a model in the list
+type modelItem struct {
+	Model
+}
+
+func (m modelItem) FilterValue() string { return m.ID }
+func (m modelItem) Title() string       { return m.ID }
+func (m modelItem) Description() string { return fmt.Sprintf("%s - %s", m.Provider, m.Note) }
 
 // getAvailableModels returns the list of available LLM models
 func getAvailableModels() []Model {

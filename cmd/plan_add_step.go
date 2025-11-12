@@ -332,10 +332,8 @@ func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (
 	// Create the initial TUI model
 	model := initialModel(plan)
 
-	// Set explicit worktree if provided
-	if explicitWorktree != "" {
-		model.worktreeInput.SetValue(explicitWorktree)
-	}
+	// Note: worktree is no longer configurable in the TUI
+	// explicitWorktree parameter is ignored
 
 	// Run the TUI
 	p := tea.NewProgram(model)
