@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	gtable "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
@@ -347,6 +349,7 @@ func addJobAndDependents(job *orchestration.Job, plan *orchestration.Plan, resul
 type refreshMsg struct{}
 type archiveConfirmedMsg struct{ job *orchestration.Job }
 type editFileAndQuitMsg struct{ filePath string }
+type editFileInTmuxMsg struct{ err error }
 type tickMsg time.Time
 type refreshTickMsg time.Time
 
@@ -384,6 +387,13 @@ func refreshPlan(planDir string) tea.Cmd {
 // Update handles messages
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case editFileInTmuxMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		return m, tea.Quit
+
 	case tickMsg:
 		// Toggle cursor visibility for blinking effect
 		m.cursorVisible = !m.cursorVisible
@@ -1088,7 +1098,34 @@ func editJob(job *orchestration.Job) tea.Cmd {
 		}
 	}
 
-	// Open the job file in the default editor
+	// Check for tmux popup
+	if os.Getenv("TMUX") != "" {
+		client, err := tmux.NewClient()
+		if err == nil { // Silently ignore if tmux client fails
+			isPopup, _ := client.IsPopup(context.Background())
+			if isPopup {
+				return func() tea.Msg {
+					editor := os.Getenv("EDITOR")
+					if editor == "" {
+						editor = "vi" // Fallback editor
+					}
+					ctx := context.Background()
+					err := client.OpenFileInEditor(ctx, editor, job.FilePath, "plan", 2)
+					if err != nil {
+						return editFileInTmuxMsg{err: err}
+					}
+					// Close the popup explicitly before quitting
+					if err := client.ClosePopup(ctx); err != nil {
+						// Log error but continue - the file was opened successfully
+						return editFileInTmuxMsg{err: fmt.Errorf("failed to close popup: %w", err)}
+					}
+					return editFileInTmuxMsg{err: nil}
+				}
+			}
+		}
+	}
+
+	// Original behavior: open editor in the current pane
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vi"
