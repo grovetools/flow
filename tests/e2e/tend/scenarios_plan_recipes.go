@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -27,6 +26,11 @@ func PlanRecipesScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				groveConfig := `name: test-project
 flow:
   plans_directory: ./plans
@@ -36,7 +40,7 @@ flow:
 			}),
 			harness.NewStep("List available recipes", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -52,7 +56,7 @@ flow:
 			}),
 			harness.NewStep("List recipes as JSON", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "recipes", "list", "--json").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "recipes", "list", "--json").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -80,7 +84,7 @@ flow:
 			}),
 			harness.NewStep("Initialize plan from recipe", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "my-feature-plan", "--recipe", "standard-feature").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "my-feature-plan", "--recipe", "standard-feature").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -167,7 +171,7 @@ flow:
 			}),
 			harness.NewStep("Verify status of the new plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "status", "my-feature-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "my-feature-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -183,7 +187,7 @@ flow:
 			}),
 			harness.NewStep("Test recipe with --worktree flag", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "my-worktree-plan", "--recipe", "standard-feature", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "my-worktree-plan", "--recipe", "standard-feature", "--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -223,7 +227,7 @@ flow:
 			}),
 			harness.NewStep("Test recipe with --worktree=custom-name flag", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "my-custom-plan", "--recipe", "chat-workflow", "--worktree=custom-worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "my-custom-plan", "--recipe", "chat-workflow", "--worktree=custom-worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {

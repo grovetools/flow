@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -35,6 +34,11 @@ func ChatExtractBasicScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create config
 				configContent := `name: test-project
@@ -116,7 +120,7 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 			}),
 			harness.NewStep("Extract single block", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "cfa5f7", "--title", "double-chocolate-variant", "--file", "01-recipe-chat.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "cfa5f7", "--title", "double-chocolate-variant", "--file", "01-recipe-chat.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -195,7 +199,7 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 			}),
 			harness.NewStep("Extract multiple blocks", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "cfa5f7", "161603", "--title", "all-recipes", "--file", "01-recipe-chat.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "cfa5f7", "161603", "--title", "all-recipes", "--file", "01-recipe-chat.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -208,7 +212,7 @@ The brown butter adds a nutty, caramelized flavor that complements the toffee pe
 			}),
 			harness.NewStep("Extract with dependencies and custom flags", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "161603", 
+				cmd := ctx.Command(flow, "plan", "extract", "161603", 
 					"--title", "brown-butter-recipe",
 					"--file", "01-recipe-chat.md",
 					"--depends-on", "02-double-chocolate-variant.md",
@@ -335,7 +339,7 @@ This is a response.
 			}),
 			harness.NewStep("Extract with invalid block ID", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "invalid-id", "--title", "test", "--file", "test.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "invalid-id", "--title", "test", "--file", "test.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error == nil {
@@ -348,7 +352,7 @@ This is a response.
 			}),
 			harness.NewStep("Extract with non-existent file", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "block1", "--title", "test", "--file", "nonexistent.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "block1", "--title", "test", "--file", "nonexistent.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error == nil {
@@ -361,7 +365,7 @@ This is a response.
 			}),
 			harness.NewStep("Extract with invalid dependency", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "block1", 
+				cmd := ctx.Command(flow, "plan", "extract", "block1", 
 					"--title", "test",
 					"--file", "test.md",
 					"--depends-on", "nonexistent-job.md",
@@ -394,6 +398,11 @@ func ChatExtractAllScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create config
 				configContent := `name: test-project
@@ -458,7 +467,7 @@ This specification provides the foundation for implementing advanced text intera
 			}),
 			harness.NewStep("Extract all content with 'all' argument", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "all", "--title", "extracted-spec", "--file", "spec-document.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "all", "--title", "extracted-spec", "--file", "spec-document.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -536,7 +545,7 @@ This specification provides the foundation for implementing advanced text intera
 			}),
 			harness.NewStep("Extract all with custom parameters", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "all", 
+				cmd := ctx.Command(flow, "plan", "extract", "all", 
 					"--title", "full-spec-custom",
 					"--file", "spec-document.md",
 					"--model", "gpt-4-turbo",
@@ -639,7 +648,7 @@ More content to include in the extraction.
 			harness.NewStep("Extract all from absolute path", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				absolutePath := filepath.Join(ctx.RootDir, "external-docs", "external.md")
-				cmd := command.New(flow, "plan", "extract", "all", 
+				cmd := ctx.Command(flow, "plan", "extract", "all", 
 					"--title", "external-content",
 					"--file", absolutePath,
 				).Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
@@ -724,6 +733,11 @@ func ChatExtractListScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create config
 				configContent := `name: test-project
 flow:
@@ -776,7 +790,7 @@ The last response in the conversation with even more detailed information.
 			}),
 			harness.NewStep("List blocks in text format", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "list", "--file", "chat-session.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "list", "--file", "chat-session.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -810,7 +824,7 @@ The last response in the conversation with even more detailed information.
 			}),
 			harness.NewStep("List blocks in JSON format", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "list", "--file", "chat-session.md", "--json").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "list", "--file", "chat-session.md", "--json").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -874,7 +888,7 @@ Response in external file.
 				
 				flow, _ := getFlowBinary()
 				absolutePath := filepath.Join(externalDir, "external-chat.md")
-				cmd := command.New(flow, "plan", "extract", "list", "--file", absolutePath).Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "extract", "list", "--file", absolutePath).Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -908,7 +922,7 @@ Just plain content here.
 				fs.WriteString(filepath.Join(planDir, "no-blocks.md"), noBlocksContent)
 				
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "list", "--file", "no-blocks.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "list", "--file", "no-blocks.md").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -924,7 +938,7 @@ Just plain content here.
 			}),
 			harness.NewStep("List from file with no blocks (JSON)", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "extract", "list", "--file", "no-blocks.md", "--json").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
+				cmd := ctx.Command(flow, "plan", "extract", "list", "--file", "no-blocks.md", "--json").Dir(filepath.Join(ctx.RootDir, "plans", "test-plan"))
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -25,7 +24,12 @@ func StatusTUIScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create grove.yml config
 				groveConfig := `name: test-project
 flow:
@@ -38,14 +42,14 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Initialize plan
-				cmd := command.New(flow, "plan", "init", "tui-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "tui-test").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
 				
 				// Create a job hierarchy with different statuses
 				// Job 1: Completed root job
-				cmd = command.New(flow, "plan", "add", "tui-test",
+				cmd = ctx.Command(flow, "plan", "add", "tui-test",
 					"--title", "Setup",
 					"--type", "shell",
 					"-p", "echo 'Setup complete'").Dir(ctx.RootDir)
@@ -60,7 +64,7 @@ flow:
 				fs.WriteString(job1Path, content)
 				
 				// Job 2: Pending job depending on job 1
-				cmd = command.New(flow, "plan", "add", "tui-test",
+				cmd = ctx.Command(flow, "plan", "add", "tui-test",
 					"--title", "Build",
 					"--type", "shell",
 					"--depends-on", "01-setup.md",
@@ -70,7 +74,7 @@ flow:
 				}
 				
 				// Job 3: Running job depending on job 1
-				cmd = command.New(flow, "plan", "add", "tui-test",
+				cmd = ctx.Command(flow, "plan", "add", "tui-test",
 					"--title", "Test",
 					"--type", "shell",
 					"--depends-on", "01-setup.md",
@@ -86,7 +90,7 @@ flow:
 				fs.WriteString(job3Path, content)
 				
 				// Job 4: Failed job depending on job 2
-				cmd = command.New(flow, "plan", "add", "tui-test",
+				cmd = ctx.Command(flow, "plan", "add", "tui-test",
 					"--title", "Deploy",
 					"--type", "shell",
 					"--depends-on", "02-build.md",
@@ -107,7 +111,7 @@ flow:
 				flow, _ := getFlowBinary()
 
 				// Run regular status command
-				cmd := command.New(flow, "plan", "status", "tui-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "tui-test").Dir(ctx.RootDir)
 				// Skip PID checks for test environment (fake jobs have no running process)
 				cmd.Env("GROVE_SKIP_PID_CHECK=true")
 				result := cmd.Run()
@@ -161,7 +165,7 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Try to run with TUI flag - it will fail due to no TTY, but should recognize the flag
-				cmd := command.New(flow, "plan", "status", "tui-test", "--tui").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "tui-test", "--tui").Dir(ctx.RootDir)
 				result := cmd.Run()
 				
 				// We expect it to fail with TTY error, not flag error
@@ -179,7 +183,7 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Run status with verbose flag
-				cmd := command.New(flow, "plan", "status", "tui-test", "-v").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "tui-test", "-v").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

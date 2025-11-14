@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -27,7 +26,12 @@ func SimpleOrchestrationScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Write grove.yml with LLM config
 				configContent := `name: test-project
 flow:
@@ -58,7 +62,7 @@ echo "Task completed successfully."
 			harness.NewStep("Initialize new plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "init", "simple-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "simple-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -77,7 +81,7 @@ echo "Task completed successfully."
 			harness.NewStep("Add first job with no dependencies", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "add", "simple-plan",
+				cmd := ctx.Command(flow, "plan", "add", "simple-plan",
 					"--title", "Setup Environment",
 					"--type", "shell",
 					"-p", "echo 'Setting up environment'",
@@ -113,7 +117,7 @@ echo "Task completed successfully."
 			harness.NewStep("Add second job depending on first", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "add", "simple-plan",
+				cmd := ctx.Command(flow, "plan", "add", "simple-plan",
 					"--title", "Install Dependencies",
 					"--type", "shell",
 					"-p", "echo 'Installing dependencies'",
@@ -139,7 +143,7 @@ echo "Task completed successfully."
 			harness.NewStep("Add third job depending on second", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "add", "simple-plan",
+				cmd := ctx.Command(flow, "plan", "add", "simple-plan",
 					"--title", "Run Tests",
 					"--type", "shell",
 					"-p", "echo 'Running tests'",

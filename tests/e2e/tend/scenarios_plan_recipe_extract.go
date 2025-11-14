@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -26,9 +25,18 @@ func PlanRecipeWithExtractScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				groveConfig := `name: test-project
-flow:
-  plans_directory: ./plans
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
 				return nil
@@ -105,7 +113,7 @@ We need to implement a comprehensive authentication system for our application.
 				}
 
 				// Initialize with recipe and extraction
-				cmd := command.New(flow, "plan", "init", "auth-system",
+				cmd := ctx.Command(flow, "plan", "init", "auth-system",
 					"--recipe", "standard-feature",
 					"--extract-all-from", specFile,
 					"--worktree").Dir(ctx.RootDir)
@@ -123,7 +131,7 @@ We need to implement a comprehensive authentication system for our application.
 					return fmt.Errorf("expected extraction message")
 				}
 
-				planDir := filepath.Join(ctx.RootDir, "plans", "auth-system")
+				planDir := filepath.Join(ctx.RootDir, ".notebook", "plans", "auth-system")
 				
 				// The first job in standard-feature recipe is 01-spec.md
 				// Verify it exists and contains the extracted content
@@ -206,7 +214,7 @@ The system currently lacks proper error handling.
 				}
 
 				// Initialize with just extraction (no recipe)
-				cmd := command.New(flow, "plan", "init", "error-handling",
+				cmd := ctx.Command(flow, "plan", "init", "error-handling",
 					"--extract-all-from", docFile,
 					"--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -215,7 +223,7 @@ The system currently lacks proper error handling.
 					return fmt.Errorf("flow plan init failed: %w", result.Error)
 				}
 
-				planDir := filepath.Join(ctx.RootDir, "plans", "error-handling")
+				planDir := filepath.Join(ctx.RootDir, ".notebook", "plans", "error-handling")
 				
 				// Should have exactly 2 files: .grove-plan.yml and extracted job
 				files, err := os.ReadDir(planDir)
@@ -266,7 +274,7 @@ All endpoints require Bearer token authentication.
 				}
 
 				// Initialize with different recipe
-				cmd := command.New(flow, "plan", "init", "api-feature",
+				cmd := ctx.Command(flow, "plan", "init", "api-feature",
 					"--recipe", "standard-feature", 
 					"--extract-all-from", specFile,
 					"--worktree=api-wt").Dir(ctx.RootDir)
@@ -276,7 +284,7 @@ All endpoints require Bearer token authentication.
 					return fmt.Errorf("flow plan init failed: %w", result.Error)
 				}
 
-				planDir := filepath.Join(ctx.RootDir, "plans", "api-feature")
+				planDir := filepath.Join(ctx.RootDir, ".notebook", "plans", "api-feature")
 				
 				// Verify the merged spec file (01-spec.md from recipe with extracted content)
 				specPath := filepath.Join(planDir, "01-spec.md")
@@ -329,7 +337,7 @@ All endpoints require Bearer token authentication.
 				}
 
 				// Initialize with path (testing that base name is used)
-				cmd := command.New(flow, "plan", "init", "frontend/ui-components",
+				cmd := ctx.Command(flow, "plan", "init", "frontend/ui-components",
 					"--recipe", "standard-feature",
 					"--extract-all-from", specFile,
 					"--worktree").Dir(ctx.RootDir)
@@ -340,7 +348,7 @@ All endpoints require Bearer token authentication.
 				}
 
 				// Plan should be created at the path but use base name for worktree
-				planDir := filepath.Join(ctx.RootDir, "plans", "frontend", "ui-components")
+				planDir := filepath.Join(ctx.RootDir, ".notebook", "plans", "frontend", "ui-components")
 				
 				// Verify merged spec file (01-spec.md from recipe)
 				specPath := filepath.Join(planDir, "01-spec.md")
@@ -453,7 +461,7 @@ The implementation should preserve all formatting exactly as specified above.
 				}
 
 				// Initialize with extraction
-				cmd := command.New(flow, "plan", "init", "complex-feature",
+				cmd := ctx.Command(flow, "plan", "init", "complex-feature",
 					"--extract-all-from", complexFile).Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
@@ -461,7 +469,7 @@ The implementation should preserve all formatting exactly as specified above.
 				}
 
 				// Read the extracted file
-				planDir := filepath.Join(ctx.RootDir, "plans", "complex-feature")
+				planDir := filepath.Join(ctx.RootDir, ".notebook", "plans", "complex-feature")
 				extractedPath := filepath.Join(planDir, "01-complex-spec.md")
 				content, err := os.ReadFile(extractedPath)
 				if err != nil {

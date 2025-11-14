@@ -19,6 +19,7 @@ import (
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	gexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -222,7 +223,9 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create a workspace provider for efficient lookups
-	discoveryService := workspace.NewDiscoveryService(nil) // logger is optional
+	logger := logrus.New()
+	logger.SetLevel(logrus.WarnLevel) // Suppress discoverer's debug output
+	discoveryService := workspace.NewDiscoveryService(logger)
 	discoveryResult, err := discoveryService.DiscoverAll()
 	if err != nil {
 		fmt.Printf("Warning: failed to discover workspaces for cleanup: %v\n", err)

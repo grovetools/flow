@@ -1,11 +1,11 @@
 package main
 
 import (
+	"github.com/mattsolo1/grove-tend/pkg/command"
 	"fmt"
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
@@ -39,7 +39,7 @@ func setupPlanInExpectedLocation(ctx *harness.Context, planName string) (string,
 		return "", err
 	}
 	
-	cmd := command.New(flow, "plan", "init", planName).Dir(ctx.RootDir)
+	cmd := ctx.Command(flow, "plan", "init", planName).Dir(ctx.RootDir)
 	result := cmd.Run()
 	if result.Error != nil {
 		return "", fmt.Errorf("failed to init plan: %w", result.Error)
@@ -105,6 +105,18 @@ func createTestGroveConfig(ctx *harness.Context) error {
   target_agent_container: fake-container
   plans_directory: ./plans`
 	return fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), config)
+}
+
+// setupEmptyGlobalConfig creates an empty global grove config in the sandboxed XDG_CONFIG_HOME.
+// This is required when using ctx.Command() which sandboxes the config directory.
+// Should be called after git.Commit() in test setup steps.
+func setupEmptyGlobalConfig(ctx *harness.Context) error {
+	globalConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
+	if err := fs.CreateDir(globalConfigDir); err != nil {
+		return err
+	}
+	emptyGlobalConfig := "version: \"1.0\"\n"
+	return fs.WriteString(filepath.Join(globalConfigDir, "grove.yml"), emptyGlobalConfig)
 }
 
 // contains is a simple string contains helper

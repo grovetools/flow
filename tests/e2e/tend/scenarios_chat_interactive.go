@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -27,7 +26,12 @@ func ChatInteractivePromptScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create grove.yml config
 				configContent := `name: test-project
 flow:
@@ -41,13 +45,13 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Initialize plan
-				cmd := command.New(flow, "plan", "init", "multi-job-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "multi-job-plan").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
 				
 				// Add chat job first
-				cmd = command.New(flow, "plan", "add", "multi-job-plan",
+				cmd = ctx.Command(flow, "plan", "add", "multi-job-plan",
 					"--title", "Design Discussion",
 					"--type", "chat",
 					"-p", "Let's discuss the design for our new feature").Dir(ctx.RootDir)
@@ -56,7 +60,7 @@ flow:
 				}
 				
 				// Add oneshot job that depends on chat
-				cmd = command.New(flow, "plan", "add", "multi-job-plan",
+				cmd = ctx.Command(flow, "plan", "add", "multi-job-plan",
 					"--title", "Implement Design",
 					"--type", "oneshot",
 					"--depends-on", "01-design-discussion.md",

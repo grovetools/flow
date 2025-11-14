@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-tend/pkg/assert"
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -41,7 +40,12 @@ func RulesInFrontmatterScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Write grove.yml with a mock LLM model
 				configContent := `name: test-project
 flow:
@@ -91,7 +95,7 @@ exit 0
 			harness.NewStep("Initialize new plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "init", "test-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "test-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -194,7 +198,7 @@ Please perform a general analysis of the project.
 			harness.NewStep("Run job with Go-only rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "01-go-analysis.md"), "-y").
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "test-plan", "01-go-analysis.md"), "-y").
 					Dir(ctx.RootDir)
 
 				result := cmd.Run()
@@ -221,7 +225,7 @@ Please perform a general analysis of the project.
 			harness.NewStep("Run job with docs-only rules", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "02-docs-review.md"), "-y").
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "test-plan", "02-docs-review.md"), "-y").
 					Dir(ctx.RootDir)
 				
 				result := cmd.Run()
@@ -256,7 +260,7 @@ README.md
 `
 				fs.WriteString(filepath.Join(groveDir, "rules"), defaultRules)
 				
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "03-general-task.md"), "-y").
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "test-plan", "03-general-task.md"), "-y").
 					Dir(ctx.RootDir)
 				
 				result := cmd.Run()
@@ -282,7 +286,7 @@ README.md
 			harness.NewStep("Verify job status after runs", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "status", "test-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "test-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -320,7 +324,7 @@ Please test the fallback resolution for rules files.
 				
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "04-fallback-test.md"), "-y").
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "test-plan", "04-fallback-test.md"), "-y").
 					Dir(ctx.RootDir)
 				
 				result := cmd.Run()
@@ -374,7 +378,7 @@ Please test the subdirectory fallback resolution for rules files.
 				
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "test-plan", "05-subdirectory-fallback-test.md"), "-y").
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "test-plan", "05-subdirectory-fallback-test.md"), "-y").
 					Dir(ctx.RootDir)
 				
 				result := cmd.Run()

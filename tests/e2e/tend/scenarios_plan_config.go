@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 )
@@ -24,13 +23,27 @@ func PlanConfigScenario() *harness.Scenario {
 			git.Init(ctx.RootDir)
 			git.SetupTestConfig(ctx.RootDir)
 
-			// Create grove.yml
+			// Create grove.yml using new notebooks config
 			groveConfig := `
 flow:
   oneshot_model: claude-3-5-sonnet-20241022
-  plans_directory: plans
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 `
 			fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
+			fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
+			git.Add(ctx.RootDir, ".")
+			git.Commit(ctx.RootDir, "Initial commit")
+
+			// Setup empty global config in sandboxed environment
+			if err := setupEmptyGlobalConfig(ctx); err != nil {
+				return err
+			}
+
 			return nil
 		}),
 
@@ -39,7 +52,7 @@ flow:
 			flow, _ := getFlowBinary()
 
 			// Initialize plan with all config flags
-			cmd := command.New(flow, "plan", "init", "test-config",
+			cmd := ctx.Command(flow, "plan", "init", "test-config",
 				"--model", "gemini-2.0-flash",
 				"--worktree=feature/test",
 				"--target-agent-container", "grove-agent-fast",
@@ -52,7 +65,7 @@ flow:
 			}
 
 			// Verify .grove-plan.yml was created with correct values
-			planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-config", ".grove-plan.yml")
+			planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-config", ".grove-plan.yml")
 			content, err := fs.ReadString(planConfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
@@ -77,7 +90,7 @@ flow:
 		harness.NewStep("Show all config", func(ctx *harness.Context) error {
 			flow, _ := getFlowBinary()
 
-			cmd := command.New(flow, "plan", "config", "test-config").Dir(ctx.RootDir)
+			cmd := ctx.Command(flow, "plan", "config", "test-config").Dir(ctx.RootDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -97,7 +110,7 @@ flow:
 		harness.NewStep("Test config get", func(ctx *harness.Context) error {
 			flow, _ := getFlowBinary()
 
-			cmd := command.New(flow, "plan", "config", "test-config", "--get", "model").Dir(ctx.RootDir)
+			cmd := ctx.Command(flow, "plan", "config", "test-config", "--get", "model").Dir(ctx.RootDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -116,7 +129,7 @@ flow:
 		harness.NewStep("Test config set", func(ctx *harness.Context) error {
 			flow, _ := getFlowBinary()
 
-			cmd := command.New(flow, "plan", "config", "test-config",
+			cmd := ctx.Command(flow, "plan", "config", "test-config",
 				"--set", "model=claude-3-5-sonnet-20241022",
 				"--set", "worktree=main",
 			).Dir(ctx.RootDir)
@@ -128,7 +141,7 @@ flow:
 			}
 
 			// Verify the values were updated
-			cmd = command.New(flow, "plan", "config", "test-config", "--get", "model").Dir(ctx.RootDir)
+			cmd = ctx.Command(flow, "plan", "config", "test-config", "--get", "model").Dir(ctx.RootDir)
 			result = cmd.Run()
 
 			if strings.TrimSpace(result.Stdout) != "claude-3-5-sonnet-20241022" {
@@ -142,7 +155,7 @@ flow:
 		harness.NewStep("Test config JSON output", func(ctx *harness.Context) error {
 			flow, _ := getFlowBinary()
 
-			cmd := command.New(flow, "plan", "config", "test-config", "--json").Dir(ctx.RootDir)
+			cmd := ctx.Command(flow, "plan", "config", "test-config", "--json").Dir(ctx.RootDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -171,12 +184,12 @@ flow:
 			flow, _ := getFlowBinary()
 
 			// First check what's in the plan config
-			cmd := command.New(flow, "plan", "config", "test-config").Dir(ctx.RootDir)
+			cmd := ctx.Command(flow, "plan", "config", "test-config").Dir(ctx.RootDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput("Checking plan config before add:", result.Stdout, result.Stderr)
 
 			// Add a job without specifying model or worktree
-			cmd = command.New(flow, "plan", "add", "test-config",
+			cmd = ctx.Command(flow, "plan", "add", "test-config",
 				"--title", "Test Job",
 				"--type", "oneshot",
 				"--prompt", "Do something",
@@ -189,7 +202,7 @@ flow:
 			}
 
 			// Read the created job file
-			jobPath := filepath.Join(ctx.RootDir, "plans", "test-config", "01-test-job.md")
+			jobPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-config", "01-test-job.md")
 			jobContent, err := fs.ReadString(jobPath)
 			if err != nil {
 				return fmt.Errorf("failed to read job file: %w", err)
@@ -216,7 +229,7 @@ flow:
 			flow, _ := getFlowBinary()
 
 			// Clear worktree
-			cmd := command.New(flow, "plan", "config", "test-config",
+			cmd := ctx.Command(flow, "plan", "config", "test-config",
 				"--set", "worktree=",
 			).Dir(ctx.RootDir)
 			result := cmd.Run()
@@ -227,7 +240,7 @@ flow:
 			}
 
 			// Verify worktree is now commented out
-			planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-config", ".grove-plan.yml")
+			planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-config", ".grove-plan.yml")
 			content, err := fs.ReadString(planConfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
@@ -245,7 +258,7 @@ flow:
 			flow, _ := getFlowBinary()
 
 			// Initialize plan without any config flags
-			cmd := command.New(flow, "plan", "init", "test-defaults").Dir(ctx.RootDir)
+			cmd := ctx.Command(flow, "plan", "init", "test-defaults").Dir(ctx.RootDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -254,7 +267,7 @@ flow:
 			}
 
 			// Verify .grove-plan.yml has all fields commented out
-			planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-defaults", ".grove-plan.yml")
+			planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-defaults", ".grove-plan.yml")
 			content, err := fs.ReadString(planConfigPath)
 			if err != nil {
 				return fmt.Errorf("failed to read .grove-plan.yml: %w", err)

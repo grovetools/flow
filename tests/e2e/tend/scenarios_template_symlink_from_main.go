@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -77,6 +76,11 @@ You are a critic. Please review the provided code critically.
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit with custom templates")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				return nil
 			}),
 			harness.NewStep("Initialize plan with worktree", func(ctx *harness.Context) error {
@@ -84,7 +88,7 @@ You are a critic. Please review the provided code critically.
 				if err != nil {
 					return err
 				}
-				cmd := command.New(flow, "plan", "init", "ramen").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "ramen").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to init plan: %w\nStdout: %s\nStderr: %s", result.Error, result.Stdout, result.Stderr)
@@ -111,7 +115,7 @@ You are a critic. Please review the provided code critically.
 				}
 
 				for i, job := range jobs {
-					cmdAdd := command.New(flow, "plan", "add", planPath,
+					cmdAdd := ctx.Command(flow, "plan", "add", planPath,
 						"--title", job.title,
 						"--type", "oneshot",
 						"--template", job.template,
@@ -143,7 +147,7 @@ You are a critic. Please review the provided code critically.
 			}),
 			harness.NewStep("Set active plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "set", "ramen").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "set", "ramen").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -173,7 +177,7 @@ This response confirms the template was accessible.
 
 				// Run from the main project directory (NOT from within the worktree)
 				// This simulates exactly what the user is doing
-				cmd := command.New(flow, "plan", "run", "--yes").
+				cmd := ctx.Command(flow, "plan", "run", "--yes").
 					Dir(ctx.RootDir). // Running from main directory
 					Env(env...)
 				result := cmd.Run()

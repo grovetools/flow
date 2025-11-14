@@ -1,12 +1,12 @@
 package main
 
 import (
+	"github.com/mattsolo1/grove-tend/pkg/command"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -29,6 +29,10 @@ func EcosystemWorktreeScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(coreRepoPath, "README.md"), "This is grove-core.")
 				git.Add(coreRepoPath, ".")
 				git.Commit(coreRepoPath, "Initial commit for core")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				contextRepoPath := filepath.Join(ctx.RootDir, "grove-context.git")
 				fs.CreateDir(contextRepoPath)
@@ -37,6 +41,10 @@ func EcosystemWorktreeScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(contextRepoPath, "README.md"), "This is grove-context.")
 				git.Add(contextRepoPath, ".")
 				git.Commit(contextRepoPath, "Initial commit for context")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Now, setup the superproject
 				superprojectPath := filepath.Join(ctx.RootDir, "grove-ecosystem")
@@ -64,7 +72,12 @@ func EcosystemWorktreeScenario() *harness.Scenario {
 				// Commit everything including .gitmodules
 				git.Add(superprojectPath, ".")
 				git.Commit(superprojectPath, "Initial commit with submodules")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Debug: verify .gitmodules was committed and show HEAD content
 				headResult := command.New("git", "ls-tree", "HEAD").Dir(superprojectPath).Run()
 				fmt.Printf("DEBUG: Files in HEAD commit:\n%s\n", headResult.Stdout)
@@ -106,7 +119,7 @@ func EcosystemWorktreeScenario() *harness.Scenario {
 			harness.NewStep("Initialize a plan with a worktree", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				superprojectPath := ctx.GetString("superproject_path")
-				cmd := command.New(flow, "plan", "init", "feature-x", "--worktree").Dir(superprojectPath)
+				cmd := ctx.Command(flow, "plan", "init", "feature-x", "--worktree").Dir(superprojectPath)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -117,7 +130,7 @@ func EcosystemWorktreeScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				
 				// Add a shell job that will use the worktree
-				cmd := command.New(flow, "plan", "add", "--type", "shell", "--title", "Init", "--prompt", "echo 'Initializing worktree'").Dir(superprojectPath)
+				cmd := ctx.Command(flow, "plan", "add", "--type", "shell", "--title", "Init", "--prompt", "echo 'Initializing worktree'").Dir(superprojectPath)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to add shell job: %w\nOutput: %s\nError: %s", result.Error, result.Stdout, result.Stderr)
@@ -125,7 +138,7 @@ func EcosystemWorktreeScenario() *harness.Scenario {
 				
 				// Run the shell job - this will trigger PrepareWorktree with submodule init
 				planDir := filepath.Join(superprojectPath, "plans", "feature-x")
-				cmd = command.New(flow, "plan", "run", "01-init.md").Dir(planDir)
+				cmd = ctx.Command(flow, "plan", "run", "01-init.md").Dir(planDir)
 				runResult := cmd.Run()
 				// The command should succeed and create the worktree
 				fmt.Printf("Plan run output:\nStdout: %s\nStderr: %s\n", runResult.Stdout, runResult.Stderr)
@@ -256,7 +269,7 @@ func EcosystemWorktreeScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				superprojectPath := ctx.GetString("superproject_path")
 				// Use --yes and --prune-worktree to automate the cleanup prompts
-				cmd := command.New(flow, "plan", "finish", "feature-x", "--yes", "--delete-branch", "--prune-worktree").Dir(superprojectPath)
+				cmd := ctx.Command(flow, "plan", "finish", "feature-x", "--yes", "--delete-branch", "--prune-worktree").Dir(superprojectPath)
 				result := cmd.Run()
 				fmt.Printf("Plan finish output:\nStdout: %s\nStderr: %s\n", result.Stdout, result.Stderr)
 				
@@ -330,6 +343,10 @@ func EcosystemWorktreeReposFilterScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(coreRepoPath, "README.md"), "This is grove-core.")
 				git.Add(coreRepoPath, ".")
 				git.Commit(coreRepoPath, "Initial commit for core")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				contextRepoPath := filepath.Join(ctx.RootDir, "grove-context.git")
 				fs.CreateDir(contextRepoPath)
@@ -338,6 +355,10 @@ func EcosystemWorktreeReposFilterScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(contextRepoPath, "README.md"), "This is grove-context.")
 				git.Add(contextRepoPath, ".")
 				git.Commit(contextRepoPath, "Initial commit for context")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Now, setup the superproject
 				superprojectPath := filepath.Join(ctx.RootDir, "grove-ecosystem")
@@ -365,6 +386,11 @@ func EcosystemWorktreeReposFilterScenario() *harness.Scenario {
 				// Commit everything including .gitmodules
 				git.Add(superprojectPath, ".")
 				git.Commit(superprojectPath, "Initial commit with submodules")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Store the paths for subsequent steps
 				ctx.Set("superproject_path", superprojectPath)
@@ -398,7 +424,7 @@ func EcosystemWorktreeReposFilterScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				superprojectPath := ctx.GetString("superproject_path")
 				// Only include grove-core in the repos filter
-				cmd := command.New(flow, "plan", "init", "filtered-plan", "--worktree", "--repos", "grove-core").Dir(superprojectPath)
+				cmd := ctx.Command(flow, "plan", "init", "filtered-plan", "--worktree", "--repos", "grove-core").Dir(superprojectPath)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -433,7 +459,7 @@ func EcosystemWorktreeReposFilterScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				
 				// Add a simple shell job that will use the worktree
-				cmd := command.New(flow, "plan", "add", "--title", "init", "--type", "shell", "--prompt", "echo 'Testing repos filter'").Dir(superprojectPath)
+				cmd := ctx.Command(flow, "plan", "add", "--title", "init", "--type", "shell", "--prompt", "echo 'Testing repos filter'").Dir(superprojectPath)
 				result := cmd.Run()
 				ctx.ShowCommandOutput("Add job", result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -441,7 +467,7 @@ func EcosystemWorktreeReposFilterScenario() *harness.Scenario {
 				}
 
 				// Run the job to trigger worktree creation
-				cmd = command.New(flow, "plan", "run", "--yes").Dir(superprojectPath)
+				cmd = ctx.Command(flow, "plan", "run", "--yes").Dir(superprojectPath)
 				result = cmd.Run()
 				ctx.ShowCommandOutput("Plan run", result.Stdout, result.Stderr)
 				
@@ -508,6 +534,10 @@ func EcosystemWorktreeCaseSensitivePathScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(coreRepoPath, "go.mod"), "module github.com/mattsolo1/grove-core\n\ngo 1.21\n")
 				git.Add(coreRepoPath, ".")
 				git.Commit(coreRepoPath, "Initial commit for core")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				contextRepoPath := filepath.Join(ctx.RootDir, "grove-context.git")
 				fs.CreateDir(contextRepoPath)
@@ -517,6 +547,10 @@ func EcosystemWorktreeCaseSensitivePathScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(contextRepoPath, "go.mod"), "module github.com/mattsolo1/grove-context\n\ngo 1.21\n")
 				git.Add(contextRepoPath, ".")
 				git.Commit(contextRepoPath, "Initial commit for context")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				flowRepoPath := filepath.Join(ctx.RootDir, "grove-flow.git")
 				fs.CreateDir(flowRepoPath)
@@ -526,6 +560,10 @@ func EcosystemWorktreeCaseSensitivePathScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(flowRepoPath, "go.mod"), "module github.com/mattsolo1/grove-flow\n\ngo 1.21\n")
 				git.Add(flowRepoPath, ".")
 				git.Commit(flowRepoPath, "Initial commit for flow")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Setup the superproject
 				superprojectPath := filepath.Join(ctx.RootDir, "grove-ecosystem")
@@ -537,6 +575,11 @@ func EcosystemWorktreeCaseSensitivePathScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(superprojectPath, "grove.yml"), "name: grove-ecosystem\nflow:\n  plans_directory: ./plans\n")
 				git.Add(superprojectPath, ".")
 				git.Commit(superprojectPath, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Store paths
 				ctx.Set("superproject_path", superprojectPath)
@@ -614,7 +657,7 @@ func EcosystemWorktreeCaseSensitivePathScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				superprojectPath := ctx.GetString("superproject_path")
 				// Try to create ecosystem worktree with specific repos
-				cmd := command.New(flow, "plan", "init", "case-test", "--worktree", "--repos", "grove-core,grove-context,grove-flow").Dir(superprojectPath)
+				cmd := ctx.Command(flow, "plan", "init", "case-test", "--worktree", "--repos", "grove-core,grove-context,grove-flow").Dir(superprojectPath)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -625,7 +668,7 @@ func EcosystemWorktreeCaseSensitivePathScenario() *harness.Scenario {
 				flow, _ := getFlowBinary()
 				
 				// Add a simple job to trigger worktree creation
-				cmd := command.New(flow, "plan", "add", "--title", "test", "--type", "shell", "--prompt", "echo 'Testing path resolution'").Dir(superprojectPath)
+				cmd := ctx.Command(flow, "plan", "add", "--title", "test", "--type", "shell", "--prompt", "echo 'Testing path resolution'").Dir(superprojectPath)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to add job: %w", result.Error)

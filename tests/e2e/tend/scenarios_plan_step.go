@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -26,6 +25,11 @@ func PlanStepCommandScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create grove.yml config
 				groveConfig := `name: test-project
 flow:
@@ -39,14 +43,14 @@ flow:
 				flow, _ := getFlowBinary()
 
 				// Initialize plan
-				cmd := command.New(flow, "plan", "init", "step-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "step-plan").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
 
 				// Create a three-job linear dependency chain
 				// Job 1: Shell job (no dependencies)
-				cmd = command.New(flow, "plan", "add", "step-plan",
+				cmd = ctx.Command(flow, "plan", "add", "step-plan",
 					"--title", "Setup Environment",
 					"--type", "shell",
 					"-p", "echo 'Setting up environment'").Dir(ctx.RootDir)
@@ -55,7 +59,7 @@ flow:
 				}
 
 				// Job 2: Oneshot job (depends on job 1)
-				cmd = command.New(flow, "plan", "add", "step-plan",
+				cmd = ctx.Command(flow, "plan", "add", "step-plan",
 					"--title", "Analyze Code",
 					"--type", "oneshot",
 					"--depends-on", "01-setup-environment.md",
@@ -65,7 +69,7 @@ flow:
 				}
 
 				// Job 3: Agent job (depends on job 2)
-				cmd = command.New(flow, "plan", "add", "step-plan",
+				cmd = ctx.Command(flow, "plan", "add", "step-plan",
 					"--title", "Implement Feature",
 					"--type", "agent",
 					"--depends-on", "02-analyze-code.md",

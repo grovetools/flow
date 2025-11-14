@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -50,7 +49,7 @@ flow:
 				fs.WriteString(chatFile, initialContent)
 				
 				// Initialize the chat using flow with mock model
-				cmd := command.New(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to initialize chat1: %v", result.Error)
@@ -77,7 +76,7 @@ flow:
 				fs.WriteString(chatFile, initialContent)
 				
 				// Initialize the chat with mock model
-				cmd := command.New(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to initialize chat2: %v", result.Error)
@@ -99,7 +98,7 @@ flow:
 				fs.WriteString(chatFile, initialContent)
 				
 				// Initialize the chat with mock model
-				cmd := command.New(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to initialize chat3: %v", result.Error)
@@ -117,7 +116,7 @@ flow:
 				fs.WriteString(chatFile, initialContent)
 				
 				// Initialize the chat with mock model
-				cmd := command.New(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "chat", "-s", chatFile, "-m", "mock").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to initialize chat4: %v", result.Error)

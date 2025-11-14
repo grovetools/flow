@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -29,6 +28,11 @@ func WorktreeContextIsolationScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), "package main\n\nfunc main() {\n\t// Original code\n}\n")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create grove.yml with flow configuration
 				groveYml := `version: "1.0"
@@ -111,7 +115,7 @@ The Feature A implementation looks good.
 
 				// Run the oneshot job
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
-				cmd := command.New(flow, "plan", "run", "01-review-feature-a.md").
+				cmd := ctx.Command(flow, "plan", "run", "01-review-feature-a.md").
 					Dir(planDir).
 					Env(env...)
 				result := cmd.Run()
@@ -172,6 +176,11 @@ excludes:
 `)
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create grove.yml
 				groveYml := `version: "1.0"
@@ -241,7 +250,7 @@ Analyze the new feature implementation and check if context was regenerated.
 				planDir := filepath.Join(ctx.RootDir, "plans", "test-plan")
 				jobPath := filepath.Join(planDir, "01-analyze-feature.md")
 				
-				cmd := command.New(flow, "plan", "run", jobPath).
+				cmd := ctx.Command(flow, "plan", "run", jobPath).
 					Dir(ctx.RootDir).
 					Env(env...)
 				result := cmd.Run()
@@ -289,6 +298,11 @@ func InteractiveAgentToOneshotWorkflowScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), "package main\n\nfunc main() {\n\t// TODO: implement\n}\n")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create grove.yml
 				groveYml := `version: "1.0"
@@ -364,7 +378,7 @@ The implementation looks good.
 				planDir := filepath.Join(ctx.RootDir, "plans", "workflow-test")
 				
 				// Run the plan with skip-interactive flag
-				cmd := command.New(flow, "plan", "run", "--all", "--skip-interactive").
+				cmd := ctx.Command(flow, "plan", "run", "--all", "--skip-interactive").
 					Dir(planDir).
 					Env(env...)
 				result := cmd.Run()

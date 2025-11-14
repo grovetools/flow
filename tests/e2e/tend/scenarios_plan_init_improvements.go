@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -27,12 +26,22 @@ func PlanInitImprovementsScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
-				// Create grove.yml with oneshot_model
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
+				// Create grove.yml with oneshot_model using new notebooks config
 				groveConfig := `name: test-project
 flow:
-  plans_directory: ./plans
   oneshot_model: gemini-2.5-pro
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
 				return nil
@@ -45,7 +54,7 @@ flow:
 				}
 				
 				// Initialize plan with --worktree (no value)
-				cmd := command.New(flow, "plan", "init", "test-auto-worktree", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "test-auto-worktree", "--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -58,7 +67,7 @@ flow:
 				}
 				
 				// Verify .grove-plan.yml was created with correct content
-				planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-auto-worktree", ".grove-plan.yml")
+				planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-auto-worktree", ".grove-plan.yml")
 				content, err := os.ReadFile(planConfigPath)
 				if err != nil {
 					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
@@ -79,7 +88,7 @@ flow:
 				}
 				
 				// Initialize plan with --worktree=custom-name
-				cmd := command.New(flow, "plan", "init", "test-custom-worktree", "--worktree=my-custom-wt").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "test-custom-worktree", "--worktree=my-custom-wt").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -87,7 +96,7 @@ flow:
 				}
 				
 				// Verify .grove-plan.yml was created with custom worktree
-				planConfigPath := filepath.Join(ctx.RootDir, "plans", "test-custom-worktree", ".grove-plan.yml")
+				planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-custom-worktree", ".grove-plan.yml")
 				content, err := os.ReadFile(planConfigPath)
 				if err != nil {
 					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
@@ -108,7 +117,7 @@ flow:
 				}
 				
 				// Create another empty plan without --with-worktree
-				cmd := command.New(flow, "plan", "init", "empty-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "empty-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("flow plan init failed: %w", result.Error)
@@ -120,7 +129,7 @@ flow:
 				}
 				
 				// List plans
-				cmd = command.New(flow, "plan", "list").Dir(ctx.RootDir)
+				cmd = ctx.Command(flow, "plan", "list").Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -176,7 +185,7 @@ flow:
 				}
 				
 				// Initialize plan with explicit model override
-				cmd := command.New(flow, "plan", "init", "model-override-plan", "--model", "claude-3-5-sonnet-20241022").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "model-override-plan", "--model", "claude-3-5-sonnet-20241022").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -184,7 +193,7 @@ flow:
 				}
 				
 				// Verify model was overridden
-				planConfigPath := filepath.Join(ctx.RootDir, "plans", "model-override-plan", ".grove-plan.yml")
+				planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "model-override-plan", ".grove-plan.yml")
 				content, err := os.ReadFile(planConfigPath)
 				if err != nil {
 					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
@@ -224,7 +233,7 @@ This is the second job.
 				}
 				
 				// Initialize plan with --extract-all-from and --worktree (auto mode)
-				cmd := command.New(flow, "plan", "init", "extract-worktree-test", 
+				cmd := ctx.Command(flow, "plan", "init", "extract-worktree-test", 
 					"--extract-all-from", sourceFile,
 					"--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -239,7 +248,7 @@ This is the second job.
 				}
 				
 				// Verify .grove-plan.yml has correct worktree
-				planConfigPath := filepath.Join(ctx.RootDir, "plans", "extract-worktree-test", ".grove-plan.yml")
+				planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "extract-worktree-test", ".grove-plan.yml")
 				content, err := os.ReadFile(planConfigPath)
 				if err != nil {
 					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
@@ -251,7 +260,7 @@ This is the second job.
 				}
 				
 				// Verify jobs were extracted
-				planDir := filepath.Join(ctx.RootDir, "plans", "extract-worktree-test")
+				planDir := filepath.Join(ctx.RootDir, ".notebook", "plans", "extract-worktree-test")
 				files, err := os.ReadDir(planDir)
 				if err != nil {
 					return fmt.Errorf("failed to read plan directory: %w", err)
@@ -306,7 +315,7 @@ This is the second job.
 				}
 				
 				// Initialize plan with a path argument that includes directory separators
-				cmd := command.New(flow, "plan", "init", "subplans/path-test-plan", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "subplans/path-test-plan", "--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -319,7 +328,7 @@ This is the second job.
 				}
 				
 				// Verify .grove-plan.yml has correct worktree (should be base name)
-				planConfigPath := filepath.Join(ctx.RootDir, "plans", "subplans", "path-test-plan", ".grove-plan.yml")
+				planConfigPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "subplans", "path-test-plan", ".grove-plan.yml")
 				content, err := os.ReadFile(planConfigPath)
 				if err != nil {
 					return fmt.Errorf("failed to read .grove-plan.yml: %w", err)
@@ -356,7 +365,7 @@ This is the specification for my new feature.
 				}
 				
 				// Initialize plan with both recipe and extraction
-				cmd := command.New(flow, "plan", "init", "recipe-with-extract",
+				cmd := ctx.Command(flow, "plan", "init", "recipe-with-extract",
 					"--recipe", "standard-feature",
 					"--extract-all-from", sourceFile,
 					"--worktree").Dir(ctx.RootDir)
@@ -375,7 +384,7 @@ This is the specification for my new feature.
 				}
 				
 				// Verify files were created
-				planDir := filepath.Join(ctx.RootDir, "plans", "recipe-with-extract")
+				planDir := filepath.Join(ctx.RootDir, ".notebook", "plans", "recipe-with-extract")
 				files, err := os.ReadDir(planDir)
 				if err != nil {
 					return fmt.Errorf("failed to read plan directory: %w", err)
@@ -450,10 +459,19 @@ func PlanInitContextRulesScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
-				// Create grove.yml with context.default_rules_path
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
+				// Create grove.yml with context.default_rules_path and new notebooks config
 				groveConfig := `name: test-project
-flow:
-  plans_directory: ./plans
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 context:
   default_rules_path: .grove/default.rules
 `
@@ -472,7 +490,7 @@ context:
 			// Step 2: Initialize a plan with a worktree
 			harness.NewStep("Initialize plan with worktree", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "context-rules-test", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "context-rules-test", "--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -520,7 +538,7 @@ flow:
 
 			harness.NewStep("Initialize a new plan for boilerplate test", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "boilerplate-rules-test", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "boilerplate-rules-test", "--worktree").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {

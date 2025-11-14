@@ -2,12 +2,12 @@
 package main
 
 import (
+	"github.com/mattsolo1/grove-tend/pkg/command"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -71,11 +71,20 @@ func main() {
 				if err := fs.WriteString(filepath.Join(moduleDir, "main.go"), mainContent); err != nil {
 					return err
 				}
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create grove.yml configuration in my-module
 				groveConfig := `name: my-module
-flow:
-  plans_directory: ./plans
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 `
 				if err := fs.WriteString(filepath.Join(moduleDir, "grove.yml"), groveConfig); err != nil {
 					return err
@@ -99,7 +108,11 @@ go 1.21
 				// Add all files and make initial commit at workspace root
 				git.Add(workspaceRoot, ".")
 				git.Commit(workspaceRoot, "Initial commit with Go workspace")
-				
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Store module directory for later use
 				ctx.Set("module_dir", moduleDir)
 				
@@ -112,7 +125,7 @@ go 1.21
 				}
 				// Use the stored module directory
 				moduleDir := ctx.GetString("module_dir")
-				cmd := command.New(flow, "plan", "init", "go-workspace-test").Dir(moduleDir)
+				cmd := ctx.Command(flow, "plan", "init", "go-workspace-test").Dir(moduleDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to init plan: %w\nStdout: %s\nStderr: %s", result.Error, result.Stdout, result.Stderr)
@@ -122,10 +135,10 @@ go 1.21
 			harness.NewStep("Add an agent job with worktree", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				moduleDir := ctx.GetString("module_dir")
-				planPath := filepath.Join(moduleDir, "plans", "go-workspace-test")
+				planPath := filepath.Join(moduleDir, ".notebook", "plans", "go-workspace-test")
 				
 				// Add the agent job with a worktree
-				cmdAdd := command.New(flow, "plan", "add", planPath,
+				cmdAdd := ctx.Command(flow, "plan", "add", planPath,
 					"--title", "Test Go Build",
 					"--type", "agent",
 					"--worktree", "test-go-build",
@@ -138,7 +151,7 @@ go 1.21
 			harness.NewStep("Launch the agent job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				moduleDir := ctx.GetString("module_dir")
-				jobFile := filepath.Join(moduleDir, "plans", "go-workspace-test", "01-test-go-build.md")
+				jobFile := filepath.Join(moduleDir, ".notebook", "plans", "go-workspace-test", "01-test-go-build.md")
 				
 				// Check if job file exists
 				if _, err := os.Stat(jobFile); err != nil {

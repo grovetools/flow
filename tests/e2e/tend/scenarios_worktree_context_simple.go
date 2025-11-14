@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -30,6 +29,11 @@ func SimpleWorktreeContextTestScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), "package main\n\nfunc main() {\n\t// Main repo code\n}\n")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create grove.yml
 				groveYml := `version: "1.0"
@@ -102,7 +106,7 @@ echo "This context is specific to the feature-branch worktree." >> CLAUDE.md
 				fs.WriteString(filepath.Join(plansDir, "00-setup-worktree.md"), setupJob)
 
 				// Run the setup job to create the worktree
-				cmd := command.New(flow, "plan", "run", "00-setup-worktree.md", "-y").
+				cmd := ctx.Command(flow, "plan", "run", "00-setup-worktree.md", "-y").
 					Dir(plansDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -126,7 +130,7 @@ echo "This context is specific to the feature-branch worktree." >> CLAUDE.md
 
 				// Run the analysis job
 				plansDir := filepath.Join(ctx.RootDir, "plans", "test-worktree-context")
-				cmd := command.New(flow, "plan", "run", "01-analyze-context.md", "-y").
+				cmd := ctx.Command(flow, "plan", "run", "01-analyze-context.md", "-y").
 					Dir(plansDir).
 					Env(env...)
 				result := cmd.Run()

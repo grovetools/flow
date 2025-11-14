@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -28,6 +27,11 @@ func BasicPlanLifecycleScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
 flow:
@@ -41,7 +45,7 @@ flow:
 				if err != nil {
 					return fmt.Errorf("failed to get flow binary: %w", err)
 				}
-				cmd := command.New(flow, "plan", "init", "my-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "my-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -56,7 +60,7 @@ flow:
 			harness.NewStep("Add first shell job to create a file", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Add a shell job that creates a file - this tests shell command execution
-				cmd := command.New(flow, "plan", "add", "my-plan", "--title", "Create Hello File", "--type", "shell", "-p", "echo 'hello from shell job' > plans/my-plan/hello.txt").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "add", "my-plan", "--title", "Create Hello File", "--type", "shell", "-p", "echo 'hello from shell job' > plans/my-plan/hello.txt").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -83,7 +87,7 @@ flow:
 			harness.NewStep("Add second shell job with dependency", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Add another shell job that depends on the first - tests shell job dependencies
-				cmd := command.New(flow, "plan", "add", "my-plan", "--title", "Copy File Using Shell", "--type", "shell", "-p", "cp plans/my-plan/hello.txt plans/my-plan/world.txt", "--depends-on", "01-create-hello-file.md").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "add", "my-plan", "--title", "Copy File Using Shell", "--type", "shell", "-p", "cp plans/my-plan/hello.txt plans/my-plan/world.txt", "--depends-on", "01-create-hello-file.md").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -101,7 +105,7 @@ flow:
 			harness.NewStep("Run the first shell job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Execute the first shell job specifically
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "my-plan", "01-create-hello-file.md"), "-y").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "my-plan", "01-create-hello-file.md"), "-y").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -118,7 +122,7 @@ flow:
 				}
 
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "status", "my-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "my-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if !strings.Contains(result.Stdout, "Completed: 1") {
@@ -132,7 +136,7 @@ flow:
 			harness.NewStep("Run the second shell job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Execute the second shell job that depends on the first
-				cmd := command.New(flow, "plan", "run", filepath.Join("plans", "my-plan", "02-copy-file-using-shell.md"), "-y").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "run", filepath.Join("plans", "my-plan", "02-copy-file-using-shell.md"), "-y").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
@@ -149,7 +153,7 @@ flow:
 				}
 
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "status", "my-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "my-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if !strings.Contains(result.Stdout, "Completed: 2") {
@@ -174,6 +178,10 @@ func PlanActiveJobScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
@@ -183,12 +191,12 @@ flow:
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
 
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "active-plan-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "active-plan-test").Dir(ctx.RootDir)
 				return cmd.Run().Error
 			}),
 			harness.NewStep("Set the active job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "set", "active-plan-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "set", "active-plan-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if !strings.Contains(result.Stdout, "Set active job to: active-plan-test") {
@@ -198,7 +206,7 @@ flow:
 			}),
 			harness.NewStep("Show the current job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "current").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "current").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if !strings.Contains(result.Stdout, "Active job: active-plan-test") {
@@ -208,14 +216,14 @@ flow:
 			}),
 			harness.NewStep("Unset the active job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "unset").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "unset").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				return result.Error
 			}),
 			harness.NewStep("Verify active job is cleared", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "current").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "current").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if !strings.Contains(result.Stdout, "No active job set") {
@@ -240,6 +248,10 @@ func PlanGraphScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
@@ -249,16 +261,16 @@ flow:
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), groveConfig)
 
 				flow, _ := getFlowBinary()
-				command.New(flow, "plan", "init", "graph-plan").Dir(ctx.RootDir).Run()
+				ctx.Command(flow, "plan", "init", "graph-plan").Dir(ctx.RootDir).Run()
 				// Add three shell jobs to test dependency graph visualization
-				command.New(flow, "plan", "add", "graph-plan", "--title", "A", "--type", "shell", "-p", "echo A").Dir(ctx.RootDir).Run()
-				command.New(flow, "plan", "add", "graph-plan", "--title", "B", "--type", "shell", "-p", "echo B", "--depends-on", "01-a.md").Dir(ctx.RootDir).Run()
-				command.New(flow, "plan", "add", "graph-plan", "--title", "C", "--type", "shell", "-p", "echo C", "--depends-on", "01-a.md").Dir(ctx.RootDir).Run()
+				ctx.Command(flow, "plan", "add", "graph-plan", "--title", "A", "--type", "shell", "-p", "echo A").Dir(ctx.RootDir).Run()
+				ctx.Command(flow, "plan", "add", "graph-plan", "--title", "B", "--type", "shell", "-p", "echo B", "--depends-on", "01-a.md").Dir(ctx.RootDir).Run()
+				ctx.Command(flow, "plan", "add", "graph-plan", "--title", "C", "--type", "shell", "-p", "echo C", "--depends-on", "01-a.md").Dir(ctx.RootDir).Run()
 				return nil
 			}),
 			harness.NewStep("Generate Mermaid graph", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "graph", "graph-plan", "--format", "mermaid").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "graph", "graph-plan", "--format", "mermaid").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -290,6 +302,10 @@ func PlanWorktreeInheritanceScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create a test-specific grove.yml with local plans_directory
 				groveConfig := `name: test-project
@@ -302,7 +318,7 @@ flow:
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Initialize plan with a default worktree
-				cmd := command.New(flow, "plan", "init", "inheritance-plan", "--worktree=inheritance-plan").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "inheritance-plan", "--worktree=inheritance-plan").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to init plan: %w", result.Error)
@@ -312,7 +328,7 @@ flow:
 			harness.NewStep("Add first agent job", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Add the agent job - it should get worktree=inheritance-plan by default
-				cmd := command.New(flow, "plan", "add", "inheritance-plan",
+				cmd := ctx.Command(flow, "plan", "add", "inheritance-plan",
 					"--title", "Implement API",
 					"--type", "agent",
 					"-p", "Implement the API").Dir(ctx.RootDir)
@@ -336,7 +352,7 @@ flow:
 			harness.NewStep("Add dependent job without specifying worktree", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Add dependent job - it should inherit worktree from dependency
-				cmd := command.New(flow, "plan", "add", "inheritance-plan",
+				cmd := ctx.Command(flow, "plan", "add", "inheritance-plan",
 					"--title", "Review API",
 					"--type", "oneshot",
 					"--depends-on", "01-implement-api.md",
@@ -397,10 +413,18 @@ notebook:
 				fs.WriteString(filepath.Join(subprojectPath, "README.md"), "Subproject")
 				git.Add(subprojectPath, ".")
 				git.Commit(subprojectPath, "Initial commit")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Commit ecosystem
 				git.Add(ecosystemPath, ".")
 				git.Commit(ecosystemPath, "Initial ecosystem commit")
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				ctx.Set("ecosystem_path", ecosystemPath)
 				ctx.Set("subproject_path", subprojectPath)
@@ -436,7 +460,7 @@ notebook:
 				// Use --force to allow re-running in debug mode
 				// Explicitly specify the config path to use the test ecosystem's grove.yml
 				configPath := filepath.Join(ecosystemPath, "grove.yml")
-				cmd := command.New(flow, "plan", "init", "test-plan", "--worktree", "--force", "--config", configPath).Dir(subprojectPath)
+				cmd := ctx.Command(flow, "plan", "init", "test-plan", "--worktree", "--force", "--config", configPath).Dir(subprojectPath)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -469,7 +493,7 @@ notebook:
 				configPath := filepath.Join(ecosystemPath, "grove.yml")
 
 				// Set the active plan
-				cmd := command.New(flow, "plan", "set", "test-plan", "--config", configPath).Dir(worktreePath)
+				cmd := ctx.Command(flow, "plan", "set", "test-plan", "--config", configPath).Dir(worktreePath)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -489,7 +513,7 @@ notebook:
 				configPath := filepath.Join(ecosystemPath, "grove.yml")
 
 				// Run plan status - should resolve to the correct centralized notebook path
-				cmd := command.New(flow, "plan", "status", "test-plan", "--config", configPath).Dir(worktreePath)
+				cmd := ctx.Command(flow, "plan", "status", "test-plan", "--config", configPath).Dir(worktreePath)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {

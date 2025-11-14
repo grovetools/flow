@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -26,7 +25,12 @@ func AgentContinueScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Write grove.yml with required config
 				configContent := `name: test-project
 flow:
@@ -45,7 +49,7 @@ agent:
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "init", "continue-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "continue-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -59,7 +63,7 @@ agent:
 			harness.NewStep("Add first interactive agent job without continue", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "add", "continue-test",
+				cmd := ctx.Command(flow, "plan", "add", "continue-test",
 					"--title", "First Agent Job",
 					"--type", "interactive_agent",
 					"-p", "This is the first agent job",
@@ -90,7 +94,7 @@ agent:
 			harness.NewStep("Add second interactive agent job with --agent-continue", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "add", "continue-test",
+				cmd := ctx.Command(flow, "plan", "add", "continue-test",
 					"--title", "Second Agent Job with Continue",
 					"--type", "interactive_agent",
 					"--depends-on", "01-first-agent-job.md",
@@ -128,7 +132,7 @@ agent:
 			harness.NewStep("Verify plan status shows both jobs", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "status", "continue-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "status", "continue-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -212,7 +216,12 @@ func AgentContinueAutoEnableScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Write grove.yml
 				configContent := `name: test-project
 flow:
@@ -226,7 +235,7 @@ flow:
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "init", "auto-continue-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "auto-continue-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				
 				if result.Error != nil {
@@ -240,7 +249,7 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Note: NOT using --agent-continue flag
-				cmd := command.New(flow, "plan", "add", "auto-continue-test",
+				cmd := ctx.Command(flow, "plan", "add", "auto-continue-test",
 					"--title", "First Interactive Agent",
 					"--type", "interactive_agent",
 					"-p", "This is the first interactive agent job",
@@ -268,7 +277,7 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Note: NOT using --agent-continue flag, and it should NOT be auto-enabled
-				cmd := command.New(flow, "plan", "add", "auto-continue-test",
+				cmd := ctx.Command(flow, "plan", "add", "auto-continue-test",
 					"--title", "Second Interactive Agent Auto",
 					"--type", "interactive_agent",
 					"-p", "This should NOT have continue flag enabled by default",
@@ -296,7 +305,7 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Add an agent job (which is now an alias for interactive_agent)
-				cmd := command.New(flow, "plan", "add", "auto-continue-test",
+				cmd := ctx.Command(flow, "plan", "add", "auto-continue-test",
 					"--title", "Agent Job (Alias)",
 					"--type", "agent",
 					"--worktree", "test-worktree",
@@ -338,7 +347,12 @@ func AgentContinueFlagPropagationScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
-				
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Write grove.yml
 				configContent := `name: test-project
 flow:
@@ -354,14 +368,14 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Initialize plan
-				cmd := command.New(flow, "plan", "init", "command-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "command-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("plan init failed: %v", result.Error)
 				}
 				
 				// Add agent job with continue flag and a worktree
-				cmd = command.New(flow, "plan", "add", "command-test",
+				cmd = ctx.Command(flow, "plan", "add", "command-test",
 					"--title", "Continue Test Job",
 					"--type", "agent",  // Use 'agent' type which is supported by launch
 					"--worktree", "test-worktree",
@@ -398,7 +412,7 @@ flow:
 			harness.NewStep("Verify help shows --agent-continue flag", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				
-				cmd := command.New(flow, "plan", "add", "--help").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "add", "--help").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

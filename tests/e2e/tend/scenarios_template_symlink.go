@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -59,6 +58,11 @@ Please analyze the provided code.
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit with custom template")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				return nil
 			}),
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
@@ -66,7 +70,7 @@ Please analyze the provided code.
 				if err != nil {
 					return err
 				}
-				cmd := command.New(flow, "plan", "init", "template-test").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "template-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("failed to init plan: %w\nStdout: %s\nStderr: %s", result.Error, result.Stdout, result.Stderr)
@@ -78,7 +82,7 @@ Please analyze the provided code.
 				planPath := filepath.Join(ctx.RootDir, "plans", "template-test")
 
 				// Add a job with custom template and worktree
-				cmdAdd := command.New(flow, "plan", "add", planPath,
+				cmdAdd := ctx.Command(flow, "plan", "add", planPath,
 					"--title", "Test Template Job",
 					"--type", "oneshot",
 					"--template", "test-template",
@@ -113,7 +117,7 @@ This is working correctly.
 
 				// Run the job to trigger worktree creation
 				planDir := filepath.Join(ctx.RootDir, "plans", "template-test")
-				cmd := command.New(flow, "plan", "run", "01-test-template-job.md").
+				cmd := ctx.Command(flow, "plan", "run", "01-test-template-job.md").
 					Dir(planDir).
 					Env(env...)
 				result := cmd.Run()

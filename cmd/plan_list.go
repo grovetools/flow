@@ -44,7 +44,7 @@ func newPlanListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all plans in the configured plans directory or across all workspaces",
 		Long: `Scans for and lists orchestration plans. By default, it scans the directory specified in
-'flow.plans_directory'. With --all-workspaces, it discovers all projects and scans for plans within them.`,
+the notebooks configuration. With --all-workspaces, it discovers all projects and scans for plans within them.`,
 		RunE: runPlanList,
 	}
 
@@ -115,13 +115,19 @@ func listCurrentWorkspacePlans() ([]PlanSummary, error) {
 	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 
-	// Check for deprecated config
+	// Check for deprecated config and use it as fallback
 	flowCfg, _ := loadFlowConfig()
 	if flowCfg != nil && flowCfg.PlansDirectory != "" {
 		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+		// Use deprecated config as fallback
+		plansDir, err := expandFlowPath(flowCfg.PlansDirectory)
+		if err != nil {
+			return nil, fmt.Errorf("could not expand plans_directory path: %w", err)
+		}
+		return findPlansInDir(plansDir, node.Name, node.Path)
 	}
 
-	// Get plans directory for current workspace
+	// Get plans directory for current workspace using NotebookLocator
 	plansDir, err := locator.GetPlansDir(node)
 	if err != nil {
 		return nil, fmt.Errorf("could not resolve plans directory: %w", err)
@@ -187,7 +193,10 @@ func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummar
 	if _, err := os.Stat(planConfigPath); err == nil {
 		// basePath itself is a plan directory
 		plan, err := orchestration.LoadPlan(basePath)
-		if err == nil {
+		if err != nil {
+			// If loading fails, log the error for visibility
+			logrus.Warnf("Could not load plan at %s: %v", basePath, err)
+		} else {
 			VerifyRunningJobStatus(plan)
 			if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
 				// Skip finished plan
@@ -220,18 +229,22 @@ func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummar
 
 			if _, err := os.Stat(planConfigPath); err == nil || len(mdFiles) > 0 {
 				plan, err := orchestration.LoadPlan(planPath)
-				if err == nil {
-					// Perform liveness check on running jobs to report accurate status
-					VerifyRunningJobStatus(plan)
-
-					if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
-						continue
-					}
-					summary := createPlanSummary(plan, planPath)
-					summary.WorkspaceName = workspaceName
-					summary.WorkspacePath = workspacePath
-					summaries = append(summaries, summary)
+				if err != nil {
+					// If loading fails, we should not proceed, but also not fail the whole command.
+					// Log the error for visibility, especially during tests.
+					logrus.Warnf("Could not load plan at %s: %v", planPath, err)
+					continue
 				}
+				// Perform liveness check on running jobs to report accurate status
+				VerifyRunningJobStatus(plan)
+
+				if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
+					continue
+				}
+				summary := createPlanSummary(plan, planPath)
+				summary.WorkspaceName = workspaceName
+				summary.WorkspacePath = workspacePath
+				summaries = append(summaries, summary)
 			}
 		}
 	}

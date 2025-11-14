@@ -16,6 +16,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/sirupsen/logrus"
 )
 
 // RunPlanInitTUI launches the interactive TUI for creating a new plan.
@@ -100,7 +101,9 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create a workspace provider to discover local repositories.
-	discoveryService := workspace.NewDiscoveryService(nil) // logger is optional
+	logger := logrus.New()
+	logger.SetLevel(logrus.WarnLevel) // Suppress discoverer's debug output
+	discoveryService := workspace.NewDiscoveryService(logger)
 	discoveryResult, err := discoveryService.DiscoverAll()
 	if err != nil {
 		fmt.Printf("⚠️  Warning: failed to discover workspaces for go.work generation: %v\n", err)
@@ -296,7 +299,9 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	}
 
 	// Create a workspace provider to discover local repositories.
-	discoveryService := workspace.NewDiscoveryService(nil) // logger is optional
+	logger := logrus.New()
+	logger.SetLevel(logrus.WarnLevel) // Suppress discoverer's debug output
+	discoveryService := workspace.NewDiscoveryService(logger)
 	discoveryResult, err := discoveryService.DiscoverAll()
 	if err != nil {
 		fmt.Printf("⚠️  Warning: failed to discover workspaces for go.work generation: %v\n", err)

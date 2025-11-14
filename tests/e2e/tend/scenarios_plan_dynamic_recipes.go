@@ -2,12 +2,12 @@
 package main
 
 import (
+	"github.com/mattsolo1/grove-tend/pkg/command"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -26,6 +26,12 @@ func PlanDynamicRecipesScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "Test project")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				return nil
 			}),
 			harness.NewStep("Create a mock recipe provider script", func(ctx *harness.Context) error {
@@ -66,8 +72,13 @@ EOF
 			harness.NewStep("Create grove.yml with get_recipe_cmd", func(ctx *harness.Context) error {
 				scriptPath := ctx.GetString("recipe_provider_script")
 				groveConfig := fmt.Sprintf(`name: test-project
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 flow:
-  plans_directory: ./plans
   recipes:
     get_recipe_cmd: "%s"
 `, scriptPath)
@@ -75,7 +86,7 @@ flow:
 			}),
 			harness.NewStep("List recipes to verify dynamic loading", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -102,7 +113,7 @@ flow:
 			}),
 			harness.NewStep("Initialize plan with dynamic recipe", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "test-dynamic", 
+				cmd := ctx.Command(flow, "plan", "init", "test-dynamic", 
 					"--recipe", "dynamic-test").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -131,7 +142,7 @@ flow:
 			}),
 			harness.NewStep("Test JSON output for recipes list", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "recipes", "list", "--json").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "recipes", "list", "--json").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				if result.Error != nil {
@@ -171,7 +182,7 @@ flow:
 			harness.NewStep("Test with built-in recipe to verify dynamic doesn't break built-ins", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Initialize a plan with a built-in recipe to verify they still work
-				cmd := command.New(flow, "plan", "init", "test-builtin", 
+				cmd := ctx.Command(flow, "plan", "init", "test-builtin", 
 					"--recipe", "chat").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -201,8 +212,13 @@ flow:
 			harness.NewStep("Test broken recipe provider command", func(ctx *harness.Context) error {
 				// Update grove.yml with a broken command
 				groveConfig := `name: test-project
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 flow:
-  plans_directory: ./plans
   recipes:
     get_recipe_cmd: "/nonexistent/command"
 `
@@ -213,7 +229,7 @@ flow:
 
 				// List recipes - should still work but show warning
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -252,8 +268,13 @@ echo "not valid json {{"
 
 				// Update grove.yml
 				groveConfig := fmt.Sprintf(`name: test-project
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 flow:
-  plans_directory: ./plans
   recipes:
     get_recipe_cmd: "%s"
 `, scriptPath)
@@ -264,7 +285,7 @@ flow:
 
 				// List recipes - should show warning but not fail
 				flow, _ := getFlowBinary()
-				cmd = command.New(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
+				cmd = ctx.Command(flow, "plan", "recipes", "list").Dir(ctx.RootDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

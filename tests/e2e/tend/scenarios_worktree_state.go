@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -28,6 +27,11 @@ func WorktreeStateIsolationScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "README.md"), "# Test Project\n")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create grove.yml
 				groveYml := `version: "1.0"
@@ -94,7 +98,7 @@ Implement feature B in a different worktree.
 
 				// Run the first job
 				plan1Dir := filepath.Join(ctx.RootDir, "plans", "feature-a")
-				cmd := command.New(flow, "plan", "run", "01-implement-a.md").
+				cmd := ctx.Command(flow, "plan", "run", "01-implement-a.md").
 					Dir(plan1Dir).
 					Env(env...)
 				result := cmd.Run()
@@ -142,7 +146,7 @@ Implement feature B in a different worktree.
 
 				// Run the second job
 				plan2Dir := filepath.Join(ctx.RootDir, "plans", "feature-b")
-				cmd := command.New(flow, "plan", "run", "01-implement-b.md").
+				cmd := ctx.Command(flow, "plan", "run", "01-implement-b.md").
 					Dir(plan2Dir).
 					Env(env...)
 				result := cmd.Run()
@@ -197,7 +201,7 @@ Implement feature B in a different worktree.
 
 				// Test that 'flow plan status' works in worktree A
 				worktreeA := filepath.Join(ctx.RootDir, ".grove-worktrees", "feature-a")
-				cmd := command.New(flow, "plan", "status").Dir(worktreeA)
+				cmd := ctx.Command(flow, "plan", "status").Dir(worktreeA)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -215,7 +219,7 @@ Implement feature B in a different worktree.
 
 				// Test that 'flow plan status' works in worktree B
 				worktreeB := filepath.Join(ctx.RootDir, ".grove-worktrees", "feature-b")
-				cmd = command.New(flow, "plan", "status").Dir(worktreeB)
+				cmd = ctx.Command(flow, "plan", "status").Dir(worktreeB)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -239,7 +243,7 @@ Implement feature B in a different worktree.
 				}
 
 				// Run 'flow plan current' in the main repo
-				cmd := command.New(flow, "plan", "current").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "current").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -280,6 +284,11 @@ func WorktreeStateDirectNavigationScenario() *harness.Scenario {
 				fs.WriteString(filepath.Join(ctx.RootDir, "main.go"), "package main\n\nfunc main() {\n\t// TODO\n}\n")
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
+
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
 
 				// Create grove.yml
 				groveYml := `version: "1.0"
@@ -338,7 +347,7 @@ Refactor the main.go file to improve structure.
 				worktreeDir := filepath.Join(ctx.RootDir, ".grove-worktrees", "refactor-work")
 
 				// Test 1: flow plan status should work immediately
-				cmd := command.New(flow, "plan", "status").Dir(worktreeDir)
+				cmd := ctx.Command(flow, "plan", "status").Dir(worktreeDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -356,7 +365,7 @@ Refactor the main.go file to improve structure.
 				}
 
 				// Test 2: flow plan current should also work
-				cmd = command.New(flow, "plan", "current").Dir(worktreeDir)
+				cmd = ctx.Command(flow, "plan", "current").Dir(worktreeDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -380,7 +389,7 @@ Refactor the main.go file to improve structure.
 				worktreeDir := filepath.Join(ctx.RootDir, ".grove-worktrees", "refactor-work")
 
 				// Test unset
-				cmd := command.New(flow, "plan", "unset").Dir(worktreeDir)
+				cmd := ctx.Command(flow, "plan", "unset").Dir(worktreeDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				
@@ -400,7 +409,7 @@ Refactor the main.go file to improve structure.
 				}
 
 				// Test set with a different plan
-				cmd = command.New(flow, "plan", "set", "../plans/refactor-task").Dir(worktreeDir)
+				cmd = ctx.Command(flow, "plan", "set", "../plans/refactor-task").Dir(worktreeDir)
 				result = cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 				

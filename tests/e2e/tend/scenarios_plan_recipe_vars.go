@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-tend/pkg/assert"
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -27,6 +26,11 @@ func PlanRecipeVarsScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				groveConfig := `name: test-project
 flow:
   plans_directory: ./plans
@@ -35,7 +39,7 @@ flow:
 			}),
 			harness.NewStep("Initialize plan with multiple recipe-vars", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "docgen-test", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-test", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=claude-3-5-sonnet-20241022",
 					"--recipe-vars", "rules_file=custom.rules",
@@ -105,7 +109,7 @@ flow:
 			harness.NewStep("Test with missing variable values (should use defaults)", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Create a plan with only some vars specified
-				cmd := command.New(flow, "plan", "init", "docgen-defaults", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-defaults", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=gemini-2.0-flash").Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -140,7 +144,7 @@ flow:
 			}),
 			harness.NewStep("Test invalid recipe-vars format (warning)", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "docgen-invalid", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-invalid", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=gpt-4",
 					"--recipe-vars", "invalid_no_equals").Dir(ctx.RootDir)
@@ -162,7 +166,7 @@ flow:
 			harness.NewStep("Verify recipe without vars support still works", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// standard-feature recipe doesn't use Vars
-				cmd := command.New(flow, "plan", "init", "standard-test", 
+				cmd := ctx.Command(flow, "plan", "init", "standard-test", 
 					"--recipe", "standard-feature",
 					"--recipe-vars", "unused=value").Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -191,7 +195,7 @@ flow:
 			harness.NewStep("Test comma-delimited format for multiple variables", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Use comma-delimited format instead of multiple flags
-				cmd := command.New(flow, "plan", "init", "docgen-comma", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-comma", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=gemini-2.5-flash,rules_file=api.rules,output_dir=api-docs").Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -224,7 +228,7 @@ flow:
 			harness.NewStep("Test mixed format (comma-delimited + multiple flags)", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
 				// Mix comma-delimited with multiple flags
-				cmd := command.New(flow, "plan", "init", "docgen-mixed", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-mixed", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=claude-3-opus-20240229,rules_file=backend.rules",
 					"--recipe-vars", "output_dir=backend-docs").Dir(ctx.RootDir)
@@ -280,7 +284,7 @@ flow:
 			harness.NewStep("Test recipe vars loaded from grove.yml (no CLI vars)", func(ctx *harness.Context) error {
 				// Initialize with just the recipe (no --recipe-vars)
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "docgen-config", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-config", 
 					"--recipe", "docgen-customize").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -330,7 +334,7 @@ flow:
 				// grove.yml still has the defaults from setup step
 				// Override only some variables with command-line vars
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "docgen-partial-override", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-partial-override", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=claude-3-5-sonnet-20241022",  // Override only model
 					"--recipe-vars", "output_dir=override-docs").Dir(ctx.RootDir)  // Override only output_dir
@@ -371,7 +375,7 @@ flow:
 			harness.NewStep("Test recipe not configured in grove.yml", func(ctx *harness.Context) error {
 				// Try to use standard-feature recipe which is NOT in our grove.yml config
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "standard-no-config", 
+				cmd := ctx.Command(flow, "plan", "init", "standard-no-config", 
 					"--recipe", "standard-feature").Dir(ctx.RootDir)
 				result := cmd.Run()
 				ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -395,7 +399,7 @@ flow:
 			harness.NewStep("Test config + comma-delimited CLI vars", func(ctx *harness.Context) error {
 				// Test that config defaults work with comma-delimited CLI overrides
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "docgen-config-comma", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-config-comma", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=gemini-2.5-pro,output_dir=comma-docs").Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -435,7 +439,7 @@ flow:
 			}),
 			harness.NewStep("Test multiple values for same key (last wins)", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "docgen-override", 
+				cmd := ctx.Command(flow, "plan", "init", "docgen-override", 
 					"--recipe", "docgen-customize",
 					"--recipe-vars", "model=gpt-4",
 					"--recipe-vars", "model=claude-3-5-sonnet-20241022").Dir(ctx.RootDir)

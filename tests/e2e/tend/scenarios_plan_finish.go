@@ -1,11 +1,11 @@
 package main
 
 import (
+	"github.com/mattsolo1/grove-tend/pkg/command"
 	"fmt"
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -26,18 +26,29 @@ func PlanFinishScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create grove.yml
 				configContent := `name: test-project
-flow:
-  plans_directory: ./plans
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
 				// Create plan and set its worktree
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "finish-test", "--worktree").Dir(ctx.RootDir)
-				if err := cmd.Run().Error; err != nil {
-					return fmt.Errorf("failed to init plan: %w", err)
+				cmd := ctx.Command(flow, "plan", "init", "finish-test", "--worktree").Dir(ctx.RootDir)
+				result := cmd.Run()
+				if result.Error != nil {
+					ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+					return fmt.Errorf("failed to init plan: %w", result.Error)
 				}
 
 				// Manually create the worktree and branch to simulate a real scenario
@@ -86,7 +97,7 @@ flow:
 			}),
 			harness.NewStep("Verify plan state after finish", func(ctx *harness.Context) error {
 				// Verify .grove-plan.yml is marked as finished
-				configPath := filepath.Join(ctx.RootDir, "plans", "finish-test", ".grove-plan.yml")
+				configPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "finish-test", ".grove-plan.yml")
 				content, _ := fs.ReadString(configPath)
 				if !strings.Contains(content, "status: finished") {
 					return fmt.Errorf(".grove-plan.yml was not marked as finished")
@@ -119,16 +130,25 @@ func PlanFinishFlagsScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create grove.yml
 				configContent := `name: test-project
-flow:
-  plans_directory: ./plans
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
 				// Create plan with worktree
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "flags-test", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "flags-test", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -171,7 +191,7 @@ flow:
 			harness.NewStep("Test finish with --yes flag", func(ctx *harness.Context) error {
 				// Create another plan for this test
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "yes-test", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "yes-test", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -221,16 +241,25 @@ func PlanFinishDevLinksScenario() *harness.Scenario {
 				git.Add(ctx.RootDir, ".")
 				git.Commit(ctx.RootDir, "Initial commit")
 
+				// Setup empty global config in sandboxed environment
+				if err := setupEmptyGlobalConfig(ctx); err != nil {
+					return err
+				}
+
 				// Create grove.yml
 				configContent := `name: test-project
-flow:
-  plans_directory: ./plans
+notebooks:
+  rules:
+    default: "local"
+  definitions:
+    local:
+      root_dir: ""
 `
 				fs.WriteString(filepath.Join(ctx.RootDir, "grove.yml"), configContent)
 
 				// Create plan
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "devlinks-test", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "devlinks-test", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}
@@ -270,7 +299,7 @@ flow:
 			harness.NewStep("Test finish with specific dev links flag", func(ctx *harness.Context) error {
 				// Create another plan
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "interactive-devlinks", "--worktree").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "interactive-devlinks", "--worktree").Dir(ctx.RootDir)
 				if err := cmd.Run().Error; err != nil {
 					return fmt.Errorf("failed to init plan: %w", err)
 				}

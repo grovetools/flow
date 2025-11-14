@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-tend/pkg/command"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -33,7 +32,7 @@ flow:
 			
 			harness.NewStep("Initialize plan", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "init", "test-propagation").Dir(ctx.RootDir)
+				cmd := ctx.Command(flow, "plan", "init", "test-propagation").Dir(ctx.RootDir)
 				result := cmd.Run()
 				if result.Error != nil {
 					return fmt.Errorf("plan init failed: %w", result.Error)
@@ -45,7 +44,7 @@ flow:
 				flow, _ := getFlowBinary()
 				
 				// Add first job without model
-				cmd := command.New(flow, "plan", "add", "test-propagation",
+				cmd := ctx.Command(flow, "plan", "add", "test-propagation",
 					"--title", "Job Without Model",
 					"--type", "oneshot",
 					"-p", "Do something",
@@ -73,7 +72,7 @@ Do something else`
 				}
 				
 				// Add third job without model
-				cmd = command.New(flow, "plan", "add", "test-propagation",
+				cmd = ctx.Command(flow, "plan", "add", "test-propagation",
 					"--title", "Another Job Without Model",
 					"--type", "shell",
 					"-p", "echo hello",
@@ -122,7 +121,7 @@ Do something else`
 			
 			harness.NewStep("Set model in plan config", func(ctx *harness.Context) error {
 				flow, _ := getFlowBinary()
-				cmd := command.New(flow, "plan", "config", "test-propagation",
+				cmd := ctx.Command(flow, "plan", "config", "test-propagation",
 					"--set", "model=claude-3-5-sonnet-20241022",
 				).Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -181,7 +180,7 @@ Do something else`
 				flow, _ := getFlowBinary()
 				
 				// Set worktree in plan config
-				cmd := command.New(flow, "plan", "config", "test-propagation",
+				cmd := ctx.Command(flow, "plan", "config", "test-propagation",
 					"--set", "worktree=feature-branch",
 				).Dir(ctx.RootDir)
 				result := cmd.Run()
@@ -236,7 +235,7 @@ Do something else`
 				flow, _ := getFlowBinary()
 				
 				// Clear model in plan config
-				cmd := command.New(flow, "plan", "config", "test-propagation",
+				cmd := ctx.Command(flow, "plan", "config", "test-propagation",
 					"--set", "model=",
 				).Dir(ctx.RootDir)
 				result := cmd.Run()
