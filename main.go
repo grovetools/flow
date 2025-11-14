@@ -20,6 +20,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewModelsCmd())
 	rootCmd.AddCommand(cmd.NewStarshipCmd())
 	rootCmd.AddCommand(cmd.GetRegisterCodexSessionCmd())
+	rootCmd.AddCommand(cmd.NewTmuxCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

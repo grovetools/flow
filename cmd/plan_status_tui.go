@@ -1110,7 +1110,7 @@ func editJob(job *orchestration.Job) tea.Cmd {
 						editor = "vi" // Fallback editor
 					}
 					ctx := context.Background()
-					err := client.OpenFileInEditor(ctx, editor, job.FilePath, "plan", 3)
+					err := client.OpenInEditorWindow(ctx, editor, job.FilePath, "plan", 3, false)
 					if err != nil {
 						return editFileInTmuxMsg{err: err}
 					}
