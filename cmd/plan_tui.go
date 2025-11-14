@@ -1140,7 +1140,18 @@ func fastForwardMainCmd(plan PlanListItem) tea.Cmd {
 			return fastForwardMsg{err: fmt.Errorf("fast-forward merge failed: %s", strings.TrimSpace(string(output)))}
 		}
 
-		return fastForwardMsg{message: fmt.Sprintf("Successfully rebased and fast-forwarded '%s' to '%s'", currentBranch, worktreeBranch)}
+		// Now, update the worktree's branch to point to the new HEAD of main.
+		// We do this by running `git reset --hard` inside the worktree itself.
+		worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeBranch)
+		resetCmd := exec.Command("git", "reset", "--hard", defaultBranch)
+		resetCmd.Dir = worktreePath // CRITICAL: Execute the command within the worktree directory.
+		if output, err := resetCmd.CombinedOutput(); err != nil {
+			// This is a critical failure. If this doesn't work, the cleanup will fail later.
+			// We must report this error clearly.
+			return fastForwardMsg{err: fmt.Errorf("failed to reset worktree branch '%s': %s", worktreeBranch, strings.TrimSpace(string(output)))}
+		}
+
+		return fastForwardMsg{message: fmt.Sprintf("Successfully merged '%s' into '%s' and synchronized the worktree.", worktreeBranch, defaultBranch)}
 	}
 }
 
