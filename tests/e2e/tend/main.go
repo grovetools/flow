@@ -40,6 +40,7 @@ func main() {
 		JobSummaryScenario(),                 // Tests job summarization on completion
 		InteractiveAgentJobSummaryScenario(), // Tests interactive_agent job summarization with transcripts
 		// OneshotJobSummaryScenario(),       // DISABLED: Tests oneshot job summarization via orchestrator - fails due to async goroutine not inheriting test PATH
+		NoteToPlanWorkflowScenario(),        // Tests the new two-stage plan completion workflow
 
 		// Chat Scenarios
 		// BasicChatWorkflowScenario(), // Temporarily disabled - hanging issue

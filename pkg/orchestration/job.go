@@ -72,6 +72,7 @@ type Job struct {
 	SourcePlan           string       `yaml:"source_plan,omitempty" json:"source_plan,omitempty"`
 	RecipeName           string       `yaml:"recipe_name,omitempty" json:"recipe_name,omitempty"`
 	RulesFile            string       `yaml:"rules_file,omitempty" json:"rules_file,omitempty"`
+	NoteRef              string       `yaml:"note_ref,omitempty" json:"note_ref,omitempty"`
 
 	// Derived fields
 	Filename     string      `json:"filename,omitempty"`     // The markdown filename

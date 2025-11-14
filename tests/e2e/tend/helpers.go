@@ -22,6 +22,7 @@ func getFlowBinary() (string, error) {
 // - mockLLMResponse: Custom LLM response (default is a generic helpful response)
 // - mockDockerContainer: Container name for docker mock (default is "fake-container")
 // - statefulGroveHooks: Use stateful grove-hooks mock (default is false)
+// - subprocessSafe: Use subprocess-safe mock setup for commands that spawn subshells (default is false)
 func setupTestEnvironment(options ...map[string]interface{}) harness.Step {
 	// Parse options
 	opts := make(map[string]interface{})
@@ -74,9 +75,14 @@ func setupTestEnvironment(options ...map[string]interface{}) harness.Step {
 		}
 	}
 
-	// Use the framework's SetupMocks builder
-	setupStep := harness.SetupMocks(mocks...)
-	
+	// Use the framework's SetupMocks builder (subprocess-safe if requested)
+	var setupStep harness.Step
+	if subprocessSafe, ok := opts["subprocessSafe"].(bool); ok && subprocessSafe {
+		setupStep = harness.SetupMocksWithSubprocessSupport(mocks...)
+	} else {
+		setupStep = harness.SetupMocks(mocks...)
+	}
+
 	// Wrap the setup step to also set GROVE_HOOKS_BINARY environment variable
 	return harness.NewStep("Setup test environment", func(ctx *harness.Context) error {
 		// First run the original setup

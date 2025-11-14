@@ -201,6 +201,17 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
+	// Check if plan is ready for cleanup (must be in review or finished status)
+	if plan.Config == nil || (plan.Config.Status != "review" && plan.Config.Status != "finished") {
+		return fmt.Errorf("plan is not ready for cleanup. Please run 'flow plan review %s' first.", planName)
+	}
+
+	// If status is finished, it's a legacy plan or already processed, so we allow cleanup but warn.
+	if plan.Config != nil && plan.Config.Status == "finished" {
+		fmt.Println("⚠️  Warning: This plan is already 'finished'. The new workflow uses a 'review' step.")
+		fmt.Println("   Running cleanup directly. In the future, please run 'flow plan review' first.")
+	}
+
 	// Gather information - check for git root from current working directory
 	cwd, _ := os.Getwd()
 	gitRoot, err := git.GetGitRoot(cwd)
@@ -1055,6 +1066,16 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				return nil
 			}
 			return err
+		}
+	}
+
+	// Mark plan as finished before performing cleanup actions if it's in review state
+	if plan.Config != nil && plan.Config.Status == "review" {
+		plan.Config.Status = "finished"
+		configPath := filepath.Join(planPath, ".grove-plan.yml")
+		if data, err := yaml.Marshal(plan.Config); err == nil {
+			os.WriteFile(configPath, data, 0644)
+			fmt.Println("  - Marked plan as finished... Done")
 		}
 	}
 

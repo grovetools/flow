@@ -165,7 +165,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.NoteRef, cmd.Repos); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -183,6 +183,9 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	} else {
 		result.WriteString(fmt.Sprintf("✓ Set active plan to: %s\n", planName))
 	}
+
+	// Note: note_ref enrichment is now handled by enrichJobFrontmatter() and enrichJob()
+	// in both the recipe and extraction code paths, so no post-hoc updates are needed.
 
 	// Extraction Logic
 	if cmd.ExtractAllFrom != "" {
@@ -214,15 +217,21 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			PromptBody: string(body),
 		}
 
-		// Apply worktree from plan config if set
+		// Enrich the job with common fields (worktree, repository, note_ref)
+		var repoName, worktreeName string
+		if currentNode != nil {
+			repoName = currentNode.Name
+		}
 		if plan.Config != nil && plan.Config.Worktree != "" {
-			job.Worktree = plan.Config.Worktree
+			worktreeName = plan.Config.Worktree
 		}
-
-		// Apply repository from current workspace context
-		if currentNode != nil && currentNode.Name != "" {
-			job.Repository = currentNode.Name
+		enrichOpts := JobEnrichmentOptions{
+			NoteRef:    cmd.NoteRef,
+			Repository: repoName,
+			Worktree:   worktreeName,
+			IsFirstJob: true, // Extraction creates the first job
 		}
+		enrichJob(job, enrichOpts)
 
 		// 5. Add the job to the plan
 		filename, err := orchestration.AddJob(plan, job)
@@ -541,15 +550,18 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			}
 		}
 
-		// If a worktree was specified via the CLI, apply it to every job
-		if worktreeOverride != "" {
-			frontmatter["worktree"] = worktreeOverride
+		// Enrich the job frontmatter with common fields (worktree, repository, note_ref)
+		var repoName string
+		if currentNode != nil {
+			repoName = currentNode.Name
 		}
-
-		// Add repository field from current workspace context
-		if currentNode != nil && currentNode.Name != "" {
-			frontmatter["repository"] = currentNode.Name
+		enrichOpts := JobEnrichmentOptions{
+			NoteRef:    cmd.NoteRef,
+			Repository: repoName,
+			Worktree:   worktreeOverride,
+			IsFirstJob: isFirstJob,
 		}
+		enrichJobFrontmatter(frontmatter, enrichOpts)
 
 		// If we have extracted content and this is the first job, merge it into the body
 		if extractedBody != nil && isFirstJob {
@@ -577,7 +589,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	finalWorktree := worktreeOverride
 	
 	// Create a default .grove-plan.yml, using the determined worktree
-	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.NoteRef, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("✓ Created .grove-plan.yml")
@@ -671,8 +683,55 @@ func createPlanDirectory(dir string, force bool) error {
 	return nil
 }
 
+// JobEnrichmentOptions holds context for enriching job frontmatter during plan init.
+// This ensures consistent behavior across recipe-based and manual job creation.
+type JobEnrichmentOptions struct {
+	NoteRef    string
+	Repository string
+	Worktree   string
+	IsFirstJob bool
+}
+
+// enrichJobFrontmatter applies common frontmatter enrichments based on plan context.
+// This centralizes the logic that was previously duplicated across multiple code paths.
+func enrichJobFrontmatter(frontmatter map[string]interface{}, opts JobEnrichmentOptions) {
+	// Apply worktree override if specified
+	if opts.Worktree != "" {
+		frontmatter["worktree"] = opts.Worktree
+	}
+
+	// Add repository field from current workspace context
+	if opts.Repository != "" {
+		frontmatter["repository"] = opts.Repository
+	}
+
+	// Add note_ref to first job if provided
+	if opts.NoteRef != "" && opts.IsFirstJob {
+		frontmatter["note_ref"] = opts.NoteRef
+	}
+}
+
+// enrichJob applies common field enrichments to a Job struct during plan init.
+// This is the Job struct equivalent of enrichJobFrontmatter.
+func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
+	// Apply worktree if specified
+	if opts.Worktree != "" {
+		job.Worktree = opts.Worktree
+	}
+
+	// Add repository from current workspace context
+	if opts.Repository != "" {
+		job.Repository = opts.Repository
+	}
+
+	// Add note_ref to first job if provided
+	if opts.NoteRef != "" && opts.IsFirstJob {
+		job.NoteRef = opts.NoteRef
+	}
+}
+
 // createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
-func createDefaultPlanConfig(planPath, model, worktree, container string, repos []string) error {
+func createDefaultPlanConfig(planPath, model, worktree, container, noteRef string, repos []string) error {
 	var configContent strings.Builder
 
 	configContent.WriteString("# Default model for jobs in this plan\n")
@@ -718,6 +777,19 @@ func createDefaultPlanConfig(planPath, model, worktree, container string, repos 
 	configContent.WriteString("# issue_tracker:\n")
 	configContent.WriteString("#   provider: github # e.g., github, jira\n")
 	configContent.WriteString("#   url: https://github.com/my-org/my-repo/issues/123\n")
+	configContent.WriteString("\n")
+
+	configContent.WriteString("# Hooks to run at different plan lifecycle events\n")
+	if noteRef != "" {
+		configContent.WriteString("hooks:\n")
+		configContent.WriteString("  on_review: |\n")
+		configContent.WriteString(`    nb internal update-note --path "{{.NoteRef}}" --append-content "\n\n---\n**Completed by plan:** [[plans/{{.PlanName}}]]"` + "\n")
+		configContent.WriteString(`    nb move "{{.NoteRef}}" completed --force` + "\n")
+	} else {
+		configContent.WriteString("# hooks:\n")
+		configContent.WriteString("#   on_review: |\n")
+		configContent.WriteString(`#     echo "Plan {{.PlanName}} is now in review."` + "\n")
+	}
 
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
 	return os.WriteFile(configPath, []byte(configContent.String()), 0644)
