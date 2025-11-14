@@ -24,8 +24,10 @@ import (
 type statusTUIKeyMap struct {
 	keymap.Base
 	Select        key.Binding
-	ToggleMulti   key.Binding
+	SelectAll     key.Binding
+	SelectNone    key.Binding
 	Archive       key.Binding
+	AddXmlPlan    key.Binding
 	Edit          key.Binding
 	Run           key.Binding
 	SetCompleted  key.Binding
@@ -45,15 +47,23 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 		Base: keymap.NewBase(),
 		Select: key.NewBinding(
 			key.WithKeys(" "),
-			key.WithHelp("space", "select/deselect"),
+			key.WithHelp("space", "toggle select"),
 		),
-		ToggleMulti: key.NewBinding(
-			key.WithKeys("m"),
-			key.WithHelp("m", "toggle multi-select"),
+		SelectAll: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "select all"),
+		),
+		SelectNone: key.NewBinding(
+			key.WithKeys("N"),
+			key.WithHelp("N", "deselect all"),
 		),
 		Archive: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "archive job"),
+			key.WithKeys("X"),
+			key.WithHelp("X", "archive selected"),
+		),
+		AddXmlPlan: key.NewBinding(
+			key.WithKeys("x"),
+			key.WithHelp("x", "add XML plan job"),
 		),
 		Edit: key.NewBinding(
 			key.WithKeys("e", "enter"),
@@ -72,8 +82,8 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithHelp("S", "set status"),
 		),
 		AddJob: key.NewBinding(
-			key.WithKeys("n"),
-			key.WithHelp("n", "add job"),
+			key.WithKeys("A"),
+			key.WithHelp("A", "add job"),
 		),
 		Implement: key.NewBinding(
 			key.WithKeys("i"),
@@ -121,8 +131,12 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.GoToBottom,
 			k.PageUp,
 			k.PageDown,
+		},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Selection")),
 			k.Select,
-			k.ToggleMulti,
+			k.SelectAll,
+			k.SelectNone,
 		},
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Views")),
@@ -136,6 +150,7 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.SetCompleted,
 			k.SetStatus,
 			k.AddJob,
+			k.AddXmlPlan,
 			k.Implement,
 			k.Archive,
 			k.Help,
@@ -163,10 +178,9 @@ type statusTUIModel struct {
 	jobParents    map[string]*orchestration.Job // Track parent in tree structure
 	jobIndents    map[string]int               // Track indentation level
 	cursor        int
-	scrollOffset  int                         // Track scroll position for viewport
+	scrollOffset  int             // Track scroll position for viewport
 	selected      map[string]bool // For multi-select
-	multiSelect   bool
-	showSummaries bool   // Toggle for showing job summaries
+	showSummaries bool            // Toggle for showing job summaries
 	statusSummary string
 	err           error
 	width         int
@@ -214,23 +228,28 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 	// Flatten the job tree for navigation with parent tracking
 	jobs, parents, indents := flattenJobTreeWithParents(plan)
 
+	keyMap := newStatusTUIKeyMap()
+	helpModel := help.NewBuilder().
+		WithKeys(keyMap).
+		WithTitle("Plan Status - Help").
+		Build()
+
 	return statusTUIModel{
-		plan:          plan,
-		graph:         graph,
-		jobs:          jobs,
-		jobParents:    parents,
-		jobIndents:    indents,
-		cursor:        0,
-		scrollOffset:  0,
-		selected:      make(map[string]bool),
-		multiSelect:   false,
-		statusSummary: formatStatusSummary(plan),
+		plan:           plan,
+		graph:          graph,
+		jobs:           jobs,
+		jobParents:     parents,
+		jobIndents:     indents,
+		cursor:         0,
+		scrollOffset:   0,
+		selected:       make(map[string]bool),
+		statusSummary:  formatStatusSummary(plan),
 		confirmArchive: false,
-		planDir:       plan.Directory,
-		keyMap:        newStatusTUIKeyMap(),
-		help:          help.New(newStatusTUIKeyMap()),
-		cursorVisible: true,
-		viewMode:      tableView, // Default to table view
+		planDir:        plan.Directory,
+		keyMap:         keyMap,
+		help:           helpModel,
+		cursorVisible:  true,
+		viewMode:       tableView, // Default to table view
 	}
 }
 
@@ -465,6 +484,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.Width = msg.Width
+		m.help.Height = msg.Height
+		m.help, _ = m.help.Update(msg)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -516,7 +538,22 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "y", "Y":
 				m.confirmArchive = false
-				if m.cursor < len(m.jobs) {
+				if len(m.selected) > 0 {
+					// Archive all selected jobs
+					var jobsToArchive []*orchestration.Job
+					for id := range m.selected {
+						for _, job := range m.jobs {
+							if job.ID == id {
+								jobsToArchive = append(jobsToArchive, job)
+								break
+							}
+						}
+					}
+					return m, tea.Sequence(
+						doArchiveJobs(m.planDir, jobsToArchive),
+						refreshPlan(m.planDir),
+					)
+				} else if m.cursor < len(m.jobs) {
 					job := m.jobs[m.cursor]
 					return m, func() tea.Msg { return archiveConfirmedMsg{job: job} }
 				}
@@ -525,6 +562,14 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+
+		// If help is showing, let it handle key messages (for scrolling and closing)
+		if m.help.ShowAll {
+			var cmd tea.Cmd
+			m.help, cmd = m.help.Update(msg)
+			return m, cmd
+		}
+
 		// Handle 'gg' sequence for going to top
 		if msg.String() == "g" {
 			if m.waitingForG {
@@ -547,7 +592,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, m.keyMap.Help):
-			m.help.ShowAll = !m.help.ShowAll
+			m.help.Toggle()
 
 		case key.Matches(msg, m.keyMap.Up):
 			if m.cursor > 0 {
@@ -584,7 +629,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.adjustScrollOffset()
 
 		case key.Matches(msg, m.keyMap.Select):
-			if m.multiSelect && m.cursor < len(m.jobs) {
+			if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				if m.selected[job.ID] {
 					delete(m.selected, job.ID)
@@ -593,15 +638,17 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case key.Matches(msg, m.keyMap.ToggleMulti):
-			m.multiSelect = !m.multiSelect
-			if !m.multiSelect {
-				// Clear selections when exiting multi-select mode
-				m.selected = make(map[string]bool)
+		case key.Matches(msg, m.keyMap.SelectAll):
+			for _, job := range m.jobs {
+				m.selected[job.ID] = true
 			}
 
+		case key.Matches(msg, m.keyMap.SelectNone):
+			m.selected = make(map[string]bool)
+
 		case key.Matches(msg, m.keyMap.Archive):
-			if m.cursor < len(m.jobs) {
+			// Archive selected jobs or current job if none selected
+			if len(m.selected) > 0 || m.cursor < len(m.jobs) {
 				m.confirmArchive = true
 			}
 
@@ -612,7 +659,18 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keyMap.Run):
-			if m.cursor < len(m.jobs) {
+			if len(m.selected) > 0 {
+				var selectedJobs []*orchestration.Job
+				for id := range m.selected {
+					for _, job := range m.jobs {
+						if job.ID == id {
+							selectedJobs = append(selectedJobs, job)
+							break
+						}
+					}
+				}
+				return m, runJobs(m.plan.Directory, selectedJobs)
+			} else if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				return m, runJob(m.plan.Directory, job)
 			}
@@ -632,8 +690,26 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusPickerCursor = 0
 			}
 
+		case key.Matches(msg, m.keyMap.AddXmlPlan):
+			if len(m.selected) > 0 {
+				// Get selected jobs for dependencies
+				var selectedJobs []*orchestration.Job
+				for id := range m.selected {
+					for _, job := range m.jobs {
+						if job.ID == id {
+							selectedJobs = append(selectedJobs, job)
+							break
+						}
+					}
+				}
+				return m, createXmlPlanJobWithDeps(m.plan, selectedJobs)
+			} else if m.cursor < len(m.jobs) {
+				job := m.jobs[m.cursor]
+				return m, createXmlPlanJob(m.plan, job)
+			}
+
 		case key.Matches(msg, m.keyMap.AddJob):
-			if m.multiSelect && len(m.selected) > 0 {
+			if len(m.selected) > 0 {
 				// Get selected job IDs for dependencies
 				var deps []string
 				for id := range m.selected {
@@ -650,7 +726,19 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keyMap.Implement):
-			if m.cursor < len(m.jobs) {
+			if len(m.selected) > 0 {
+				// Get selected jobs for dependencies
+				var selectedJobs []*orchestration.Job
+				for id := range m.selected {
+					for _, job := range m.jobs {
+						if job.ID == id {
+							selectedJobs = append(selectedJobs, job)
+							break
+						}
+					}
+				}
+				return m, createImplementationJobWithDeps(m.plan, selectedJobs)
+			} else if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				return m, createImplementationJob(m.plan, job)
 			}
@@ -683,16 +771,7 @@ func (m statusTUIModel) View() string {
 
 	// Show help if active
 	if m.help.ShowAll {
-		iconLegend := lipgloss.NewStyle().
-			MarginTop(1).
-			MarginBottom(1).
-			Render("Status Icons:\n  ● Completed  ◐ Running  ✗ Failed/Blocked  ○ Pending")
-
-		return lipgloss.JoinVertical(lipgloss.Left,
-			theme.DefaultTheme.Header.Render("📈 Plan Status - Help"),
-			m.help.View(),
-			iconLegend,
-		)
+		return m.help.View()
 	}
 
 	// Calculate content width accounting for margins
@@ -747,7 +826,11 @@ func (m statusTUIModel) View() string {
 	// 3. Handle confirmation dialog or help footer
 	var footer string
 	if m.confirmArchive {
-		if m.cursor < len(m.jobs) {
+		if len(m.selected) > 0 {
+			footer = "\n" + theme.DefaultTheme.Warning.
+				Bold(true).
+				Render(fmt.Sprintf("Archive %d selected job(s)? (y/n)", len(m.selected)))
+		} else if m.cursor < len(m.jobs) {
 			job := m.jobs[m.cursor]
 			footer = "\n" + theme.DefaultTheme.Warning.
 				Bold(true).
@@ -755,12 +838,10 @@ func (m statusTUIModel) View() string {
 		}
 	} else {
 		// Render Footer
-		footer = m.help.View()
+		helpView := m.help.View()
+		viewModeIndicator := theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%s]", m.viewMode))
+		footer = helpView + viewModeIndicator
 	}
-
-	// Add view mode to footer
-	viewModeIndicator := theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%s view]", m.viewMode))
-	footer += " " + viewModeIndicator
 
 	// 4. Combine everything
 	finalView := lipgloss.JoinVertical(
@@ -800,13 +881,20 @@ func (m *statusTUIModel) getVisibleJobs() []*orchestration.Job {
 // renderTableView renders the jobs as a table with JOB, TYPE, and STATUS columns
 func (m statusTUIModel) renderTableView() string {
 	t := theme.DefaultTheme
-	headers := []string{"JOB", "TYPE", "STATUS"}
+	headers := []string{"SEL", "JOB", "TYPE", "STATUS"}
 	var rows [][]string
 
 	visibleJobs := m.getVisibleJobs()
 	statusStyles := getStatusStyles()
 
 	for i, job := range visibleJobs {
+		// Selection checkbox
+		var selCheckbox string
+		if m.selected[job.ID] {
+			selCheckbox = t.Success.Render("[x]")
+		} else {
+			selCheckbox = "[ ]"
+		}
 		// JOB column (with tree indentation and connectors)
 		indent := m.jobIndents[job.ID]
 
@@ -885,7 +973,7 @@ func (m statusTUIModel) renderTableView() string {
 			finalStatusCol = statusText
 		}
 
-		rows = append(rows, []string{jobCol, finalTypeCol, finalStatusCol})
+		rows = append(rows, []string{selCheckbox, jobCol, finalTypeCol, finalStatusCol})
 	}
 
 	if len(rows) == 0 {
@@ -1010,9 +1098,9 @@ func (m statusTUIModel) renderJobTree() string {
 		// Build selection indicator on the right if needed
 		selectionIndicator := ""
 		if m.selected[job.ID] {
-			selectionIndicator = lipgloss.NewStyle().
-				Foreground(theme.DefaultTheme.Accent.GetForeground()).
-				Render(" ◆")
+			selectionIndicator = " " + theme.DefaultTheme.Success.Render("[x]")
+		} else {
+			selectionIndicator = " [ ]"
 		}
 
 		// Combine all parts: arrow + tree + content + selection
@@ -1078,14 +1166,35 @@ func doArchiveJob(planDir string, job *orchestration.Job) tea.Cmd {
 		if err := os.MkdirAll(archiveDir, 0755); err != nil {
 			return err
 		}
-		
+
 		oldPath := filepath.Join(planDir, job.Filename)
 		newPath := filepath.Join(archiveDir, job.Filename)
-		
+
 		if err := os.Rename(oldPath, newPath); err != nil {
 			return err
 		}
-		
+
+		return nil // Just return nil, we'll refresh after
+	}
+}
+
+func doArchiveJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		// Archive the jobs by moving them to an archive directory
+		archiveDir := filepath.Join(planDir, ".archive")
+		if err := os.MkdirAll(archiveDir, 0755); err != nil {
+			return err
+		}
+
+		for _, job := range jobs {
+			oldPath := filepath.Join(planDir, job.Filename)
+			newPath := filepath.Join(archiveDir, job.Filename)
+
+			if err := os.Rename(oldPath, newPath); err != nil {
+				return err
+			}
+		}
+
 		return nil // Just return nil, we'll refresh after
 	}
 }
@@ -1151,6 +1260,23 @@ func runJob(planDir string, job *orchestration.Job) tea.Cmd {
 			return err
 		}
 		return refreshMsg{} // Refresh to show status changes
+	})
+}
+
+func runJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {
+	args := []string{"flow", "plan", "run"}
+	for _, job := range jobs {
+		args = append(args, job.FilePath)
+	}
+
+	cmd := exec.Command("grove", args...)
+	cmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return err
+		}
+		return refreshMsg{}
 	})
 }
 
@@ -1265,6 +1391,93 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 
 // createImplementationJob creates a new interactive_agent job with "impl-" prefix
 // that depends on the selected job
+// createXmlPlanJob creates a new oneshot job with the "agent-xml" template
+// that depends on the selected job.
+func createXmlPlanJob(plan *orchestration.Plan, selectedJob *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		// Create the xml plan job title
+		xmlTitle := fmt.Sprintf("xml-plan-%s", selectedJob.Title)
+
+		// Generate a unique ID for the new job
+		xmlID := orchestration.GenerateUniqueJobID(plan, xmlTitle)
+
+		// Create the new job
+		newJob := &orchestration.Job{
+			ID:                  xmlID,
+			Title:               xmlTitle,
+			Type:                orchestration.JobTypeOneshot,
+			Status:              orchestration.JobStatusPending,
+			DependsOn:           []string{selectedJob.ID},
+			Worktree:            selectedJob.Worktree,
+			Template:            "agent-xml",
+			PromptBody:          "generate a detailed plan",
+			PrependDependencies: true,
+			Output: orchestration.OutputConfig{
+				Type: "file",
+			},
+		}
+
+		// Add the job to the plan
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return fmt.Errorf("failed to create xml plan job: %w", err)
+		}
+
+		// Return refresh message to update the TUI
+		return refreshMsg{}
+	}
+}
+
+// createXmlPlanJobWithDeps creates a new oneshot job with the "agent-xml" template
+// that depends on multiple selected jobs.
+func createXmlPlanJobWithDeps(plan *orchestration.Plan, selectedJobs []*orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		if len(selectedJobs) == 0 {
+			return fmt.Errorf("no jobs selected")
+		}
+
+		// Create the xml plan job title - use first job's title
+		xmlTitle := fmt.Sprintf("xml-plan-%s", selectedJobs[0].Title)
+
+		// Generate a unique ID for the new job
+		xmlID := orchestration.GenerateUniqueJobID(plan, xmlTitle)
+
+		// Collect all dependency IDs
+		var depIDs []string
+		for _, job := range selectedJobs {
+			depIDs = append(depIDs, job.ID)
+		}
+
+		// Use the worktree from the first selected job
+		worktree := selectedJobs[0].Worktree
+
+		// Create the new job
+		newJob := &orchestration.Job{
+			ID:                  xmlID,
+			Title:               xmlTitle,
+			Type:                orchestration.JobTypeOneshot,
+			Status:              orchestration.JobStatusPending,
+			DependsOn:           depIDs,
+			Worktree:            worktree,
+			Template:            "agent-xml",
+			PromptBody:          "generate a detailed plan",
+			PrependDependencies: true,
+			Output: orchestration.OutputConfig{
+				Type: "file",
+			},
+		}
+
+		// Add the job to the plan
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return fmt.Errorf("failed to create xml plan job: %w", err)
+		}
+
+		// Return refresh message to update the TUI
+		return refreshMsg{}
+	}
+}
+
 func createImplementationJob(plan *orchestration.Plan, selectedJob *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		// Create the implementation job title
@@ -1281,6 +1494,53 @@ func createImplementationJob(plan *orchestration.Plan, selectedJob *orchestratio
 			Status:    orchestration.JobStatusPending,
 			DependsOn: []string{selectedJob.ID},
 			Worktree:  selectedJob.Worktree,
+			Output: orchestration.OutputConfig{
+				Type: "file",
+			},
+		}
+
+		// Add the job to the plan
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return fmt.Errorf("failed to create implementation job: %w", err)
+		}
+
+		// Return refresh message to update the TUI
+		return refreshMsg{}
+	}
+}
+
+// createImplementationJobWithDeps creates a new interactive_agent job with "impl-" prefix
+// that depends on multiple selected jobs.
+func createImplementationJobWithDeps(plan *orchestration.Plan, selectedJobs []*orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		if len(selectedJobs) == 0 {
+			return fmt.Errorf("no jobs selected")
+		}
+
+		// Create the implementation job title - use first job's title
+		implTitle := fmt.Sprintf("impl-%s", selectedJobs[0].Title)
+
+		// Generate a unique ID for the new job
+		implID := orchestration.GenerateUniqueJobID(plan, implTitle)
+
+		// Collect all dependency IDs
+		var depIDs []string
+		for _, job := range selectedJobs {
+			depIDs = append(depIDs, job.ID)
+		}
+
+		// Use the worktree from the first selected job
+		worktree := selectedJobs[0].Worktree
+
+		// Create the new job
+		newJob := &orchestration.Job{
+			ID:        implID,
+			Title:     implTitle,
+			Type:      orchestration.JobTypeInteractiveAgent,
+			Status:    orchestration.JobStatusPending,
+			DependsOn: depIDs,
+			Worktree:  worktree,
 			Output: orchestration.OutputConfig{
 				Type: "file",
 			},

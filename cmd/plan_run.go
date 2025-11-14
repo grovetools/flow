@@ -303,7 +303,78 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		if len(targetJobs) == 1 {
 			runErr = runSingleJob(ctx, orch, plan, targetJobs[0])
 		} else {
-			runErr = runMultipleJobs(ctx, orch, plan, targetJobs)
+			// Create a sub-plan with selected jobs and their dependencies
+			subPlan := &orchestration.Plan{
+				Name:          plan.Name + "-selection",
+				Directory:     plan.Directory,
+				Jobs:          []*orchestration.Job{},
+				JobsByID:      make(map[string]*orchestration.Job),
+				Config:        plan.Config,
+				Orchestration: plan.Orchestration,
+			}
+
+			// Collect selected jobs and all their transitive dependencies
+			jobMap := make(map[string]*orchestration.Job)
+			var collectDeps func(job *orchestration.Job)
+			collectDeps = func(job *orchestration.Job) {
+				if _, exists := jobMap[job.ID]; exists {
+					return // Already added
+				}
+				jobMap[job.ID] = job
+
+				// Recursively add dependencies
+				for _, depID := range job.DependsOn {
+					if depJob, found := plan.GetJobByID(depID); found {
+						collectDeps(depJob)
+					} else if depJob, found := plan.GetJobByFilename(depID); found {
+						collectDeps(depJob)
+					}
+				}
+			}
+
+			// Start with the selected jobs
+			for _, jobFile := range targetJobs {
+				job, found := plan.GetJobByFilename(jobFile)
+				if found {
+					collectDeps(job)
+				}
+			}
+
+			// Build the jobs list from the map
+			for _, job := range jobMap {
+				subPlan.Jobs = append(subPlan.Jobs, job)
+			}
+			subPlan.JobsByID = jobMap
+
+			if err := subPlan.ResolveDependencies(); err != nil {
+				return fmt.Errorf("resolving dependencies for job subset: %w", err)
+			}
+
+			// Create a new orchestrator for the sub-plan
+			subOrch, err := orchestration.NewOrchestrator(subPlan, orchConfig)
+			if err != nil {
+				return fmt.Errorf("create orchestrator for subset: %w", err)
+			}
+
+			// Count how many jobs were originally selected vs dependencies
+			selectedCount := len(targetJobs)
+			depCount := len(subPlan.Jobs) - selectedCount
+
+			// Run all jobs in the sub-plan
+			if depCount > 0 {
+				fmt.Printf("\n%s Running %d selected jobs (+%d dependencies) respecting dependencies...\n",
+					color.YellowString("⚡"), selectedCount, depCount)
+			} else {
+				fmt.Printf("\n%s Running %d selected jobs respecting dependencies...\n",
+					color.YellowString("⚡"), selectedCount)
+			}
+
+			runErr = subOrch.RunAll(ctx)
+			if runErr != nil {
+				fmt.Printf("\n%s Some selected jobs failed.\n", color.RedString("✗"))
+			} else {
+				fmt.Printf("\n%s All selected jobs completed successfully.\n", color.GreenString("✓"))
+			}
 		}
 	} else if planRunAll {
 		// Check if this is a chat-style plan
@@ -390,97 +461,6 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 	}
 
 	fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
-	return nil
-}
-
-// runMultipleJobs executes multiple specific jobs in parallel.
-func runMultipleJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *orchestration.Plan, jobFiles []string) error {
-	// Validate all jobs first
-	jobs := make([]*orchestration.Job, 0, len(jobFiles))
-	for _, jobFile := range jobFiles {
-		job, found := plan.GetJobByFilename(jobFile)
-		if !found {
-			return fmt.Errorf("job not found: %s", jobFile)
-		}
-
-		// Check if runnable
-		if job.Status == orchestration.JobStatusCompleted {
-			return fmt.Errorf("job already completed: %s", jobFile)
-		}
-
-		if job.Status == orchestration.JobStatusRunning {
-			return fmt.Errorf("job already running: %s", jobFile)
-		}
-
-		if job.Status == orchestration.JobStatusFailed {
-			// Allow re-running failed jobs by resetting status to pending
-			job.Status = orchestration.JobStatusPending
-		}
-
-		// Check dependencies
-		unmetDeps := getUnmetDependencies(job, plan)
-		if len(unmetDeps) > 0 {
-			return fmt.Errorf("dependencies not satisfied for job %s: %s",
-				jobFile, strings.Join(unmetDeps, ", "))
-		}
-
-		jobs = append(jobs, job)
-	}
-
-	// Show jobs to be run
-	fmt.Printf("Running %d jobs in parallel:\n", len(jobs))
-	for _, job := range jobs {
-		fmt.Printf("- %s (%s)\n", color.CyanString(job.Filename), job.Title)
-	}
-
-	// Confirm execution unless --yes
-	if !planRunYes {
-		fmt.Print("\nExecute these jobs in parallel? [Y/n]: ")
-		reader := bufio.NewReader(os.Stdin)
-		response, _ := reader.ReadString('\n')
-		response = strings.TrimSpace(response)
-		if response != "" && response != "y" && response != "Y" {
-			fmt.Println("Aborted.")
-			return nil
-		}
-	}
-
-	// Execute jobs in parallel using goroutines
-	fmt.Printf("\n%s Running %d jobs in parallel...\n",
-		color.YellowString("⚡"), len(jobs))
-
-	type jobResult struct {
-		filename string
-		err      error
-	}
-
-	results := make(chan jobResult, len(jobs))
-
-	for _, job := range jobs {
-		go func(j *orchestration.Job) {
-			jobPath := filepath.Join(plan.Directory, j.Filename)
-			err := orch.RunJob(ctx, jobPath)
-			results <- jobResult{filename: j.Filename, err: err}
-		}(job)
-	}
-
-	// Collect results
-	var failures []string
-	for i := 0; i < len(jobs); i++ {
-		result := <-results
-		if result.err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", result.filename, result.err))
-			fmt.Printf("%s Job failed: %s - %v\n", color.RedString("✗"), result.filename, result.err)
-		} else {
-			fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), result.filename)
-		}
-	}
-
-	if len(failures) > 0 {
-		return fmt.Errorf("some jobs failed:\n%s", strings.Join(failures, "\n"))
-	}
-
-	fmt.Printf("\n%s All jobs completed successfully\n", color.GreenString("✓"))
 	return nil
 }
 

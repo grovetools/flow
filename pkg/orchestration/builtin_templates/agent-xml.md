@@ -1,6 +1,9 @@
 ---
 description: "Generates a detailed XML plan an LLM agent carries out"
 type: "oneshot"
+output:
+  type: file
+prepend_dependencies: true
 ---
 
 - Given a high level plan, structure a detailed plan for LLM agent execution
