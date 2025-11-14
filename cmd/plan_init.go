@@ -164,6 +164,14 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Only use the model if explicitly provided via --model flag
 	effectiveModel := cmd.Model
+	effectiveContainer := cmd.Container
+
+	// Load flow config to get default container if not specified by flag
+	if effectiveContainer == "" {
+		if flowCfg, err := loadFlowConfig(); err == nil && flowCfg.TargetAgentContainer != "" {
+			effectiveContainer = flowCfg.TargetAgentContainer
+		}
+	}
 
 	// Create directory using the resolved path
 	if err := createPlanDirectory(planPath, cmd.Force); err != nil {
@@ -171,7 +179,11 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
+<<<<<<< HEAD
 	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.NoteRef, cmd.Repos); err != nil {
+=======
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, effectiveContainer, cmd.Repos); err != nil {
+>>>>>>> 977ced9 (fix: respect target_agent_container from grove.yml config in plan init)
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -595,7 +607,15 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// The final worktree to use in .grove-plan.yml is simply the one from the CLI flag
 	finalWorktree := worktreeOverride
-	
+
+	// Load flow config to get default container if not specified by flag
+	effectiveContainer := cmd.Container
+	if effectiveContainer == "" {
+		if flowCfg, err := loadFlowConfig(); err == nil && flowCfg.TargetAgentContainer != "" {
+			effectiveContainer = flowCfg.TargetAgentContainer
+		}
+	}
+
 	// Create a default .grove-plan.yml, using the determined worktree
 	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.NoteRef, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
