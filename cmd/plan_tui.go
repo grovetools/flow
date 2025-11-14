@@ -78,15 +78,16 @@ type planListTUIModel struct {
 // TUI key mappings for plan list
 type planListKeyMap struct {
 	keymap.Base
-	Up         key.Binding
-	Down       key.Binding
-	ViewPlan   key.Binding
-	OpenPlan   key.Binding
-	FinishPlan key.Binding
-	NewPlan    key.Binding
-	SetActive  key.Binding
-	ReviewPlan key.Binding
-	EditNotes  key.Binding
+	Up              key.Binding
+	Down            key.Binding
+	ViewPlan        key.Binding
+	OpenPlan        key.Binding
+	FinishPlan      key.Binding
+	NewPlan         key.Binding
+	SetActive       key.Binding
+	ReviewPlan      key.Binding
+	EditNotes       key.Binding
+	FastForwardMain key.Binding
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
@@ -110,6 +111,7 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 			k.EditNotes,
 			k.ReviewPlan,
 			k.FinishPlan,
+			k.FastForwardMain,
 			k.Help,
 			k.Quit,
 		},
@@ -154,6 +156,10 @@ var planListKeys = planListKeyMap{
 		key.WithKeys("e"),
 		key.WithHelp("e", "edit notes"),
 	),
+	FastForwardMain: key.NewBinding(
+		key.WithKeys("F"),
+		key.WithHelp("F", "ff-main"),
+	),
 }
 
 
@@ -161,6 +167,12 @@ var planListKeys = planListKeyMap{
 type planListLoadCompleteMsg struct{
 	plans []PlanListItem
 	error error
+}
+
+// fastForwardMsg is sent when the git fast-forward operation is complete
+type fastForwardMsg struct {
+	err     error
+	message string
 }
 
 func runPlanTUI(cmd *cobra.Command, args []string) error {
@@ -249,6 +261,14 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Child TUI (status) exited, likely due to edit action in Neovim
 		// Quit this parent TUI too
 		return m, tea.Quit
+
+	case fastForwardMsg:
+		if msg.err != nil {
+			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %s", msg.err.Error()))
+		} else {
+			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("✓ %s", msg.message))
+		}
+		return m, nil
 
 	case planListLoadCompleteMsg:
 		m.loading = false
@@ -412,6 +432,14 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				plan := m.plans[m.cursor]
 				return m, executePlanFinish(plan.Plan)
+			}
+
+		case key.Matches(msg, m.keys.FastForwardMain):
+			// F key - fast-forward main to worktree branch
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				selectedPlan := m.plans[m.cursor]
+				m.statusMessage = "Attempting to fast-forward main branch..."
+				return m, fastForwardMainCmd(selectedPlan)
 			}
 		}
 	}
@@ -1035,6 +1063,57 @@ func executePlanReview(plan *orchestration.Plan) tea.Cmd {
 				return nil
 			}),
 	)
+}
+
+func fastForwardMainCmd(plan PlanListItem) tea.Cmd {
+	return func() tea.Msg {
+		if plan.Worktree == "" {
+			return fastForwardMsg{err: fmt.Errorf("selected plan has no associated worktree")}
+		}
+
+		gitRoot, err := git.GetGitRoot(".")
+		if err != nil {
+			return fastForwardMsg{err: fmt.Errorf("not in a git repository: %w", err)}
+		}
+
+		// Check current branch of the main repo
+		_, currentBranch, err := git.GetRepoInfo(gitRoot)
+		if err != nil {
+			return fastForwardMsg{err: fmt.Errorf("could not determine current branch: %w", err)}
+		}
+
+		defaultBranch := "main"
+		// check if main exists
+		checkMainCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/main")
+		checkMainCmd.Dir = gitRoot
+		if checkMainCmd.Run() != nil {
+			// main doesn't exist, check master
+			checkMasterCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/master")
+			checkMasterCmd.Dir = gitRoot
+			if checkMasterCmd.Run() == nil {
+				defaultBranch = "master"
+			} else {
+				return fastForwardMsg{err: fmt.Errorf("neither 'main' nor 'master' branch found")}
+			}
+		}
+
+		if currentBranch != defaultBranch {
+			return fastForwardMsg{err: fmt.Errorf("must be on '%s' branch to fast-forward. current branch: '%s'", defaultBranch, currentBranch)}
+		}
+
+		worktreeBranch := plan.Worktree
+
+		// Perform the merge
+		cmd := exec.Command("git", "merge", "--ff-only", worktreeBranch)
+		cmd.Dir = gitRoot
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			// The output might have useful info, so include it.
+			return fastForwardMsg{err: fmt.Errorf("fast-forward merge failed: %s", strings.TrimSpace(string(output)))}
+		}
+
+		return fastForwardMsg{message: fmt.Sprintf("Successfully fast-forwarded '%s' to '%s'", currentBranch, worktreeBranch)}
+	}
 }
 
 
