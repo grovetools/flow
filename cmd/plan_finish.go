@@ -561,7 +561,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 					if strings.HasSuffix(wt.Path, worktreeName) {
 						// Check if worktree has modifications or untracked files
 						worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-						statusOutput, statusErr := exec.Command("git", "-C", worktreePath, "status", "--porcelain").Output()
+						statusOutput, statusErr := exec.Command("git", "-C", worktreePath, "status", "--porcelain", "--ignore-submodules").Output()
 						if statusErr != nil {
 							return color.YellowString("Exists"), nil // Default to exists if we can't check
 						}
@@ -772,10 +772,10 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 				worktreeLines := strings.Split(string(worktreeList), "\n")
 				for _, line := range worktreeLines {
 					if strings.Contains(line, "["+branchName+"]") {
-						return color.RedString("Checked out in worktree"), nil
+						return color.YellowString("Checked out in worktree"), nil
 					}
 				}
-				
+
 				return color.YellowString("Exists"), nil
 			},
 			Action: func() error {
@@ -1003,13 +1003,13 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		}
 
 		// Mark as available if it's a positive state (yellow/green) or warning state (red) that can still be attempted
-		if status == color.YellowString("Available") || 
-		   status == color.YellowString("Exists") || 
+		if status == color.YellowString("Available") ||
+		   status == color.YellowString("Exists") ||
 		   status == color.YellowString("Exists on origin") ||
 		   status == color.YellowString("Running") ||
 		   status == color.YellowString("Has links") ||
+		   status == color.YellowString("Checked out in worktree") ||
 		   status == color.RedString("Has changes (needs --force)") ||
-		   status == color.RedString("Checked out in worktree") ||
 		   strings.Contains(status, "commits ahead of") {
 			item.IsAvailable = true
 		}
