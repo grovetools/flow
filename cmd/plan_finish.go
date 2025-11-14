@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/fs"
@@ -1069,8 +1071,55 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Mark plan as finished before performing cleanup actions if it's in review state
+	// Execute on_finish hook before marking as finished
 	if plan.Config != nil && plan.Config.Status == "review" {
+		// Find the first job with a note_ref
+		var noteRef string
+		for _, job := range plan.Jobs {
+			if job.NoteRef != "" {
+				noteRef = job.NoteRef
+				break
+			}
+		}
+
+		// Execute on_finish hook if it exists
+		if plan.Config.Hooks != nil {
+			if hookCmdStr, ok := plan.Config.Hooks["on_finish"]; ok && hookCmdStr != "" {
+				fmt.Println("▶️  Executing on_finish hook...")
+
+				// Prepare template data
+				templateData := struct {
+					PlanName string
+					NoteRef  string
+				}{
+					PlanName: planName,
+					NoteRef:  noteRef,
+				}
+
+				// Render the hook command
+				tmpl, err := template.New("hook").Parse(hookCmdStr)
+				if err != nil {
+					fmt.Printf("Warning: failed to parse on_finish hook template: %v\n", err)
+				} else {
+					var renderedCmd bytes.Buffer
+					if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
+						fmt.Printf("Warning: failed to render on_finish hook command: %v\n", err)
+					} else {
+						// Execute the command
+						hookCmd := exec.Command("sh", "-c", renderedCmd.String())
+						hookCmd.Stdout = os.Stdout
+						hookCmd.Stderr = os.Stderr
+						if err := hookCmd.Run(); err != nil {
+							fmt.Printf("Warning: on_finish hook execution failed: %v\n", err)
+						} else {
+							fmt.Println("✓ on_finish hook executed successfully.")
+						}
+					}
+				}
+			}
+		}
+
+		// Now mark plan as finished
 		plan.Config.Status = "finished"
 		configPath := filepath.Join(planPath, ".grove-plan.yml")
 		if data, err := yaml.Marshal(plan.Config); err == nil {

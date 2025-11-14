@@ -1,13 +1,16 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"text/template"
 
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -602,6 +605,47 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		fmt.Printf("✓ Set active plan to: %s\n", planName)
 	}
 
+	// Execute on_start hook if plan was initialized with --open-session and note-ref
+	if cmd.OpenSession && cmd.NoteRef != "" {
+		// Load the plan to get the config
+		plan, err := orchestration.LoadPlan(planPath)
+		if err == nil && plan.Config != nil && plan.Config.Hooks != nil {
+			if hookCmdStr, ok := plan.Config.Hooks["on_start"]; ok && hookCmdStr != "" {
+				fmt.Println("▶️  Executing on_start hook...")
+
+				// Prepare template data
+				templateData := struct {
+					PlanName string
+					NoteRef  string
+				}{
+					PlanName: planName,
+					NoteRef:  cmd.NoteRef,
+				}
+
+				// Render the hook command
+				tmpl, err := template.New("hook").Parse(hookCmdStr)
+				if err != nil {
+					fmt.Printf("Warning: failed to parse on_start hook template: %v\n", err)
+				} else {
+					var renderedCmd bytes.Buffer
+					if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
+						fmt.Printf("Warning: failed to render on_start hook command: %v\n", err)
+					} else {
+						// Execute the command
+						hookCmd := exec.Command("sh", "-c", renderedCmd.String())
+						hookCmd.Stdout = os.Stdout
+						hookCmd.Stderr = os.Stderr
+						if err := hookCmd.Run(); err != nil {
+							fmt.Printf("Warning: on_start hook execution failed: %v\n", err)
+						} else {
+							fmt.Println("✓ on_start hook executed successfully.")
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Handle --open-session for recipe flow
 	if cmd.OpenSession {
 		fmt.Println("\n🚀 Launching new session...")
@@ -782,13 +826,27 @@ func createDefaultPlanConfig(planPath, model, worktree, container, noteRef strin
 	configContent.WriteString("# Hooks to run at different plan lifecycle events\n")
 	if noteRef != "" {
 		configContent.WriteString("hooks:\n")
+		configContent.WriteString("  on_start: |\n")
+		configContent.WriteString(`    OLD_PATH="{{.NoteRef}}"` + "\n")
+		configContent.WriteString(`    nb internal update-frontmatter --path "$OLD_PATH" --field plan_ref --value "plans/{{.PlanName}}"` + "\n")
+		configContent.WriteString(`    NEW_PATH=$(nb move "$OLD_PATH" in_progress --force | grep "To:" | awk '{print $2}')` + "\n")
+		configContent.WriteString(`    flow plan update-note-ref "{{.PlanName}}" "$NEW_PATH"` + "\n")
 		configContent.WriteString("  on_review: |\n")
-		configContent.WriteString(`    nb internal update-note --path "{{.NoteRef}}" --append-content "\n\n---\n**Completed by plan:** [[plans/{{.PlanName}}]]"` + "\n")
-		configContent.WriteString(`    nb move "{{.NoteRef}}" completed --force` + "\n")
+		configContent.WriteString(`    OLD_PATH="{{.NoteRef}}"` + "\n")
+		configContent.WriteString(`    nb internal update-note --path "$OLD_PATH" --append-content "\n\n---\n**Completed by plan:** [[plans/{{.PlanName}}]]"` + "\n")
+		configContent.WriteString(`    NEW_PATH=$(nb move "$OLD_PATH" review --force | grep "To:" | awk '{print $2}')` + "\n")
+		configContent.WriteString(`    flow plan update-note-ref "{{.PlanName}}" "$NEW_PATH"` + "\n")
+		configContent.WriteString("  on_finish: |\n")
+		configContent.WriteString(`    OLD_PATH="{{.NoteRef}}"` + "\n")
+		configContent.WriteString(`    nb move "$OLD_PATH" completed --force` + "\n")
 	} else {
 		configContent.WriteString("# hooks:\n")
+		configContent.WriteString("#   on_start: |\n")
+		configContent.WriteString(`#     echo "Plan {{.PlanName}} is starting..."` + "\n")
 		configContent.WriteString("#   on_review: |\n")
 		configContent.WriteString(`#     echo "Plan {{.PlanName}} is now in review."` + "\n")
+		configContent.WriteString("#   on_finish: |\n")
+		configContent.WriteString(`#     echo "Plan {{.PlanName}} is finished."` + "\n")
 	}
 
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
