@@ -140,7 +140,15 @@ func ListDynamicRecipes(getRecipeCmd string) ([]*Recipe, error) {
 		return nil, nil // Return empty list
 	}
 
-	for recipeName, dynamicRecipe := range recipesFromProvider {
+	// Sort keys for deterministic order
+	var recipeNames []string
+	for recipeName := range recipesFromProvider {
+		recipeNames = append(recipeNames, recipeName)
+	}
+	sort.Strings(recipeNames)
+
+	for _, recipeName := range recipeNames {
+		dynamicRecipe := recipesFromProvider[recipeName]
 		jobs := make(map[string][]byte)
 		for filename, content := range dynamicRecipe.Jobs {
 			jobs[filename] = []byte(content)

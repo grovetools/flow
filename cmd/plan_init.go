@@ -179,11 +179,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-<<<<<<< HEAD
 	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.NoteRef, cmd.Repos); err != nil {
-=======
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, effectiveContainer, cmd.Repos); err != nil {
->>>>>>> 977ced9 (fix: respect target_agent_container from grove.yml config in plan init)
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -213,20 +209,24 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			return "", fmt.Errorf("failed to reload plan for extraction: %w", err)
 		}
 
-		// 2. Read the source file
-		content, err := os.ReadFile(cmd.ExtractAllFrom)
+		// 2. Read the source file after resolving its path
+		extractFilePath, err := filepath.Abs(cmd.ExtractAllFrom)
 		if err != nil {
-			return "", fmt.Errorf("failed to read source file for extraction %s: %w", cmd.ExtractAllFrom, err)
+			return "", fmt.Errorf("failed to resolve path for extraction file %s: %w", cmd.ExtractAllFrom, err)
+		}
+		content, err := os.ReadFile(extractFilePath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read source file for extraction %s: %w", extractFilePath, err)
 		}
 
 		// 3. Extract body
 		_, body, err := orchestration.ParseFrontmatter(content)
 		if err != nil {
-			return "", fmt.Errorf("failed to parse frontmatter from source file %s: %w", cmd.ExtractAllFrom, err)
+			return "", fmt.Errorf("failed to parse frontmatter from source file %s: %w", extractFilePath, err)
 		}
 
 		// 4. Create a new job
-		jobTitle := strings.TrimSuffix(filepath.Base(cmd.ExtractAllFrom), filepath.Ext(filepath.Base(cmd.ExtractAllFrom)))
+		jobTitle := strings.TrimSuffix(filepath.Base(extractFilePath), filepath.Ext(filepath.Base(extractFilePath)))
 		job := &orchestration.Job{
 			Title:      jobTitle,
 			Type:       orchestration.JobTypeChat, // Extracts become chat jobs
@@ -265,7 +265,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 		ctx := context.Background()
 		commandToRun := []string{"flow", "plan", "status", "-t"}
-		
+
 		if worktreeToSet != "" {
 			// Launch session with worktree - need to create a minimal plan object
 			plan := &orchestration.Plan{
@@ -341,7 +341,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	// Special handling when --recipe-cmd is provided
 	recipeName := cmd.Recipe
 	if cmd.RecipeCmd != "" && (cmd.Recipe == "" || cmd.Recipe == "chat-workflow") {
-		// If recipe-cmd is provided but recipe is not (or is default), 
+		// If recipe-cmd is provided but recipe is not (or is default),
 		// try to auto-select from available recipes
 		dynamicRecipes, err := orchestration.ListDynamicRecipes(getRecipeCmd)
 		if err == nil && len(dynamicRecipes) > 0 {
@@ -382,20 +382,26 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	// Prepare extracted content if provided
 	var extractedBody []byte
 	if cmd.ExtractAllFrom != "" {
-		// Read the source file
-		content, err := os.ReadFile(cmd.ExtractAllFrom)
+		// Resolve the extraction file path to an absolute path
+		extractFilePath, err := filepath.Abs(cmd.ExtractAllFrom)
 		if err != nil {
-			return fmt.Errorf("failed to read source file for extraction %s: %w", cmd.ExtractAllFrom, err)
+			return fmt.Errorf("failed to resolve path for extraction file %s: %w", cmd.ExtractAllFrom, err)
+		}
+
+		// Read the source file
+		content, err := os.ReadFile(extractFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to read source file for extraction %s: %w", extractFilePath, err)
 		}
 
 		// Extract body (remove any existing frontmatter)
 		_, body, err := orchestration.ParseFrontmatter(content)
 		if err != nil {
-			return fmt.Errorf("failed to parse frontmatter from source file %s: %w", cmd.ExtractAllFrom, err)
+			return fmt.Errorf("failed to parse frontmatter from source file %s: %w", extractFilePath, err)
 		}
-		
+
 		extractedBody = body
-		fmt.Printf("✓ Extracted content from %s\n", cmd.ExtractAllFrom)
+		fmt.Printf("✓ Extracted content from %s\n", extractFilePath)
 	}
 
 	// Parse recipe vars into a map
@@ -600,7 +606,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 		// Write the processed job file to the new plan directory
 		destPath := filepath.Join(planPath, filename)
-		if err := os.WriteFile(destPath, finalContent, 0644); err != nil {
+		if err := os.WriteFile(destPath, finalContent, 0o644); err != nil {
 			return fmt.Errorf("writing recipe job file %s: %w", filename, err)
 		}
 	}
@@ -674,11 +680,11 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	// Handle --open-session for recipe flow
 	if cmd.OpenSession {
 		fmt.Println("\n🚀 Launching new session...")
-		
+
 		ctx := context.Background()
 		commandToRun := []string{"flow", "plan", "status", "-t"}
 		worktreeToSet := finalWorktree
-		
+
 		if worktreeToSet != "" {
 			// Launch session with worktree - need to create a minimal plan object
 			plan := &orchestration.Plan{
@@ -745,7 +751,7 @@ func createPlanDirectory(dir string, force bool) error {
 	}
 
 	// Create directory
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
@@ -875,7 +881,7 @@ func createDefaultPlanConfig(planPath, model, worktree, container, noteRef strin
 	}
 
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
-	return os.WriteFile(configPath, []byte(configContent.String()), 0644)
+	return os.WriteFile(configPath, []byte(configContent.String()), 0o644)
 }
 
 // createInitialPlanJob creates the first job file and returns the filename.
@@ -939,7 +945,7 @@ func createInitialPlanJob(dir string, model string, outputType string, templateN
 			// Write to plan.md
 			filename = "plan.md"
 			planPath := filepath.Join(dir, filename)
-			if err := os.WriteFile(planPath, []byte(contentBuilder.String()), 0644); err != nil {
+			if err := os.WriteFile(planPath, []byte(contentBuilder.String()), 0o644); err != nil {
 				return "", fmt.Errorf("write plan.md: %w", err)
 			}
 
@@ -966,7 +972,7 @@ func createInitialPlanJob(dir string, model string, outputType string, templateN
 		if specContent != "" && specContent != "# Spec\n\n" {
 			// Write spec content to spec.md file
 			specPath := filepath.Join(dir, "spec.md")
-			if err := os.WriteFile(specPath, []byte(specContent), 0644); err != nil {
+			if err := os.WriteFile(specPath, []byte(specContent), 0o644); err != nil {
 				return "", fmt.Errorf("write spec file: %w", err)
 			}
 			frontmatter["prompt_source"] = []string{"spec.md"}
@@ -1060,7 +1066,7 @@ output:
 
 	// Write job file
 	jobPath := filepath.Join(dir, filename)
-	if err := os.WriteFile(jobPath, content, 0644); err != nil {
+	if err := os.WriteFile(jobPath, content, 0o644); err != nil {
 		return "", fmt.Errorf("write job file: %w", err)
 	}
 

@@ -127,7 +127,7 @@ flow:
 				}
 
 				// Verify the job file was created correctly
-				jobPath := filepath.Join(ctx.RootDir, "plans", "test-dynamic", "01-test.md")
+				jobPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-dynamic", "01-test.md")
 
 				content, err := fs.ReadString(jobPath)
 				if err != nil {
@@ -196,17 +196,21 @@ flow:
 				}
 
 				// Verify the chat job file was created
-				jobPath1 := filepath.Join(ctx.RootDir, "test-builtin", "01-chat.md")
+				jobPath1 := filepath.Join(ctx.RootDir, ".notebook", "plans", "test-builtin", "01-chat.md")
 				jobPath2 := filepath.Join(ctx.RootDir, "plans", "test-builtin", "01-chat.md")
-				
-				if fs.Exists(jobPath2) {
-					// Created under plans/
+				jobPath3 := filepath.Join(ctx.RootDir, "test-builtin", "01-chat.md")
+
+				if fs.Exists(jobPath1) {
+					// Created under .notebook/plans/
 					return nil
-				} else if fs.Exists(jobPath1) {
+				} else if fs.Exists(jobPath2) {
+					// Created under plans/ (deprecated)
+					return nil
+				} else if fs.Exists(jobPath3) {
 					// Created at root
 					return nil
 				} else {
-					return fmt.Errorf("expected chat job file not found")
+					return fmt.Errorf("expected chat job file not found at any of: %s, %s, %s", jobPath1, jobPath2, jobPath3)
 				}
 			}),
 			harness.NewStep("Test broken recipe provider command", func(ctx *harness.Context) error {

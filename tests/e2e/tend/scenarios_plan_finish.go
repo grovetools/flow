@@ -96,11 +96,27 @@ notebooks:
 				return nil
 			}),
 			harness.NewStep("Verify plan state after finish", func(ctx *harness.Context) error {
-				// Verify .grove-plan.yml is marked as finished
-				configPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "finish-test", ".grove-plan.yml")
-				content, _ := fs.ReadString(configPath)
+				// With --yes flag, the plan gets archived to .archive subdirectory
+				configPath := filepath.Join(ctx.RootDir, ".notebook", "plans", ".archive", "finish-test", ".grove-plan.yml")
+				content, err := fs.ReadString(configPath)
+
+				// Debug: if file not found, check both locations and report
+				if err != nil {
+					origPath := filepath.Join(ctx.RootDir, ".notebook", "plans", "finish-test", ".grove-plan.yml")
+					origContent, origErr := fs.ReadString(origPath)
+
+					// List all grove-plan.yml files in the test directory
+					findCmd := command.New("find", filepath.Join(ctx.RootDir, ".notebook"), "-name", ".grove-plan.yml", "-type", "f").Run()
+
+					if origErr == nil {
+						return fmt.Errorf("plan not archived: found at %s with status: %v\nAll .grove-plan.yml files:\n%s", origPath, strings.Contains(origContent, "status: finished"), findCmd.Stdout)
+					}
+
+					return fmt.Errorf("plan file not found at %s or %s\nAll .grove-plan.yml files:\n%s", configPath, origPath, findCmd.Stdout)
+				}
+
 				if !strings.Contains(content, "status: finished") {
-					return fmt.Errorf(".grove-plan.yml was not marked as finished")
+					return fmt.Errorf(".grove-plan.yml was not marked as finished, content:\n%s", content)
 				}
 
 				// Verify worktree is gone
