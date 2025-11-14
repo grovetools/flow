@@ -35,6 +35,7 @@ func InitPlanStatusFlags() {
 
 // RunPlanStatus implements the status command.
 func RunPlanStatus(cmd *cobra.Command, args []string) error {
+
 	var dir string
 	if len(args) > 0 {
 		dir = args[0]
@@ -65,7 +66,10 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify the status of running jobs using PID liveness checks
-	VerifyRunningJobStatus(plan)
+	// Skip verification if GROVE_SKIP_PID_CHECK is set (useful for tests)
+	if os.Getenv("GROVE_SKIP_PID_CHECK") != "true" {
+		VerifyRunningJobStatus(plan)
+	}
 
 	// Launch TUI if requested
 	if statusTUI {
