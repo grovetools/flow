@@ -51,9 +51,10 @@ type PlanListItem struct {
 	Status      string
 	StatusParts map[string]int  // For detailed status breakdown
 	LastUpdated time.Time       // When the plan was last modified
-	Worktree    string          // Worktree associated with the plan
-	GitStatus   *git.StatusInfo // Git status information for the worktree
-	Notes       string          // User notes/description
+	Worktree     string          // Worktree associated with the plan
+	GitStatus    *git.StatusInfo // Git status information for the worktree
+	ReviewStatus string          // Review status like "In Progress"
+	Notes        string          // User notes/description
 }
 
 // planListTUIModel represents the TUI state
@@ -84,6 +85,7 @@ type planListKeyMap struct {
 	FinishPlan key.Binding
 	NewPlan    key.Binding
 	SetActive  key.Binding
+	ReviewPlan key.Binding
 	EditNotes  key.Binding
 }
 
@@ -106,6 +108,7 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 			k.NewPlan,
 			k.SetActive,
 			k.EditNotes,
+			k.ReviewPlan,
 			k.FinishPlan,
 			k.Help,
 			k.Quit,
@@ -142,6 +145,10 @@ var planListKeys = planListKeyMap{
 	SetActive: key.NewBinding(
 		key.WithKeys("s"),
 		key.WithHelp("s", "set active plan"),
+	),
+	ReviewPlan: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "review changes"),
 	),
 	EditNotes: key.NewBinding(
 		key.WithKeys("e"),
@@ -371,6 +378,16 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case key.Matches(msg, m.keys.ReviewPlan):
+			// R key - review plan changes
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				plan := m.plans[m.cursor]
+				if plan.Worktree != "" {
+					return m, executePlanReview(plan.Plan)
+				}
+				m.statusMessage = "No worktree to review for this plan."
+			}
+
 		case key.Matches(msg, m.keys.EditNotes):
 			// E key - edit plan notes
 			if m.cursor >= 0 && m.cursor < len(m.plans) && !m.editingNotes {
@@ -468,7 +485,7 @@ func (m planListTUIModel) renderPlanTable() string {
 	}
 
 	// Prepare headers like grove ws plans list
-	headers := []string{"TITLE", "STATUS", "WORKTREE", "GIT", "NOTES", "UPDATED"}
+	headers := []string{"TITLE", "STATUS", "WORKTREE", "GIT", "REVIEW", "NOTES", "UPDATED"}
 
 	// Prepare rows with emoji status indicators and formatting
 	rows := make([][]string, len(m.plans))
@@ -523,11 +540,25 @@ func (m planListTUIModel) renderPlanTable() string {
 			notesText = notesText[:27] + "..."
 		}
 
+		// Format review status text
+		var reviewText string
+		switch plan.ReviewStatus {
+		case "Pending":
+			reviewText = theme.DefaultTheme.Info.Render("Pending")
+		case "In Progress":
+			reviewText = theme.DefaultTheme.Warning.Render("In Progress")
+		case "Not Started":
+			reviewText = theme.DefaultTheme.Muted.Render("Not Started")
+		default:
+			reviewText = theme.DefaultTheme.Muted.Render("-")
+		}
+
 		rows[i] = []string{
 			titleText,
 			statusText,
 			worktreeText,
 			gitText,
+			reviewText,
 			notesText,
 			updatedText,
 		}
@@ -711,8 +742,23 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 
 					// Fetch git status if this plan has a worktree
 					if worktree != "" {
-						// Infer git root from plan path to handle cross-repo scenarios
-						gitRoot := findGitRootForWorktree(planPath, worktree)
+						// Find the git root by getting the project/workspace for this plan
+						project, err := workspace.GetProjectByPath(planPath)
+						var gitRoot string
+						if err == nil && project != nil {
+							// Use the project's path as the git root
+							gitRoot = project.Path
+						}
+
+						// Fallback to trying git.GetGitRoot on plan path
+						if gitRoot == "" {
+							gitRoot, _ = git.GetGitRoot(planPath)
+						}
+
+						// Final fallback to specialized grove-ecosystem logic
+						if gitRoot == "" {
+							gitRoot = findGitRootForWorktree(planPath, worktree)
+						}
 
 						if gitRoot != "" {
 							worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktree)
@@ -723,6 +769,8 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 									gitStatus.AheadCount = getCommitCount(worktreePath, "main..HEAD")
 									gitStatus.BehindCount = getCommitCount(worktreePath, "HEAD..main")
 									item.GitStatus = gitStatus
+									// Populate review status
+									item.ReviewStatus = getReviewStatus(gitStatus, worktreePath)
 								}
 							}
 						}
@@ -790,6 +838,27 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 
 type childExitedMsg struct{}
 
+// getReviewStatus determines the review status based on Git state
+func getReviewStatus(gitStatus *git.StatusInfo, worktreePath string) string {
+	if gitStatus == nil {
+		return "-" // No worktree associated
+	}
+
+	// Check if an upstream branch is configured (indicates branch has been pushed)
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "@{u}")
+	cmd.Dir = worktreePath
+	if err := cmd.Run(); err == nil {
+		return "Pending"
+	}
+
+	// Check for local commits or uncommitted changes
+	if gitStatus.AheadCount > 0 || gitStatus.IsDirty {
+		return "In Progress"
+	}
+
+	return "Not Started"
+}
+
 // getCommitCount returns the number of commits in a git rev-list range
 func getCommitCount(repoPath, revRange string) int {
 	cmd := exec.Command("git", "rev-list", "--count", revRange)
@@ -804,20 +873,49 @@ func getCommitCount(repoPath, revRange string) int {
 }
 
 // findGitRootForWorktree attempts to find the git root directory for a worktree
-// by inferring from the plan path and checking known locations
+// by using workspace discovery to locate the repository
 func findGitRootForWorktree(planPath, worktreeName string) string {
-	// Try to infer the repo name from the plan path
-	// Typical pattern: ~/Documents/nb/repos/{repo}/main/plans/{plan}
+	// Get the workspace node for the plan - this will find which notebook/project it belongs to
+	project, err := workspace.GetProjectByPath(planPath)
+	if err == nil && project != nil {
+		// Check if the worktree exists at project path
+		worktreePath := filepath.Join(project.Path, ".grove-worktrees", worktreeName)
+		if _, err := os.Stat(worktreePath); err == nil {
+			return project.Path
+		}
+
+		// If project has a ParentProjectPath (it's a worktree itself), check there
+		if project.ParentProjectPath != "" {
+			worktreePath := filepath.Join(project.ParentProjectPath, ".grove-worktrees", worktreeName)
+			if _, err := os.Stat(worktreePath); err == nil {
+				return project.ParentProjectPath
+			}
+		}
+
+		// If project is in an ecosystem, check the ecosystem root
+		if project.RootEcosystemPath != "" {
+			worktreePath := filepath.Join(project.RootEcosystemPath, ".grove-worktrees", worktreeName)
+			if _, err := os.Stat(worktreePath); err == nil {
+				return project.RootEcosystemPath
+			}
+		}
+	}
+
+	// Fallback: try to infer from plan path patterns
+	// Pattern: ~/Documents/nb/workspaces/{workspace-name}/plans/{plan}
 	parts := strings.Split(planPath, string(filepath.Separator))
-	var repoName string
+	var workspaceName string
 	for i, part := range parts {
-		if part == "repos" && i+1 < len(parts) {
-			repoName = parts[i+1]
+		if part == "workspaces" && i+1 < len(parts) {
+			workspaceName = parts[i+1]
+			break
+		} else if part == "repos" && i+1 < len(parts) {
+			workspaceName = parts[i+1]
 			break
 		}
 	}
 
-	if repoName == "" {
+	if workspaceName == "" {
 		return ""
 	}
 
@@ -827,27 +925,28 @@ func findGitRootForWorktree(planPath, worktreeName string) string {
 	// Build list of candidate git roots to check
 	var candidates []string
 
-	// Special case: if repo name is "grove-ecosystem", check the ecosystem root itself
-	if repoName == "grove-ecosystem" {
+	// Special case: if workspace is "grove-ecosystem", check the ecosystem root
+	if workspaceName == "grove-ecosystem" {
 		ecosystemPath := filepath.Join(homeDir, "Code", "grove-ecosystem")
 		candidates = append(candidates, ecosystemPath)
 	} else {
-		// Look for the repo in the grove ecosystem
+		// Look for the repo in common locations
 		candidates = append(candidates,
-			filepath.Join(homeDir, "Code", "grove-ecosystem", repoName),
-			filepath.Join(homeDir, "Code", "grove-ecosystem", ".grove-worktrees", repoName),
+			filepath.Join(homeDir, "Code", workspaceName),
+			filepath.Join(homeDir, "Code", "grove-ecosystem", workspaceName),
+			filepath.Join(homeDir, "Code", "grove-ecosystem", ".grove-worktrees", workspaceName),
 		)
 	}
 
 	// Also check current directory patterns
 	if strings.Contains(cwd, "grove-ecosystem") {
 		ecosystemRoot := cwd[:strings.Index(cwd, "grove-ecosystem")+len("grove-ecosystem")]
-		if repoName == "grove-ecosystem" {
+		if workspaceName == "grove-ecosystem" {
 			candidates = append(candidates, ecosystemRoot)
 		} else {
 			candidates = append(candidates,
-				filepath.Join(ecosystemRoot, repoName),
-				filepath.Join(ecosystemRoot, ".grove-worktrees", repoName),
+				filepath.Join(ecosystemRoot, workspaceName),
+				filepath.Join(ecosystemRoot, ".grove-worktrees", workspaceName),
 			)
 		}
 	}
@@ -915,6 +1014,24 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 		tea.ExecProcess(exec.Command("grove", "flow", "plan", "open"),
 			func(err error) tea.Msg {
 				// When plan open completes, stay in the TUI
+				return nil
+			}),
+	)
+}
+
+func executePlanReview(plan *orchestration.Plan) tea.Cmd {
+	return tea.Sequence(
+		// Set active plan for context
+		func() tea.Msg {
+			if err := state.Set("flow.active_plan", plan.Name); err != nil {
+				return err
+			}
+			return nil
+		},
+		// Execute the review command
+		tea.ExecProcess(exec.Command("grove", "flow", "plan", "review"),
+			func(err error) tea.Msg {
+				// After the command exits, the TUI will redraw.
 				return nil
 			}),
 	)
