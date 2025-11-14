@@ -157,8 +157,8 @@ var planListKeys = planListKeyMap{
 		key.WithHelp("e", "edit notes"),
 	),
 	FastForwardMain: key.NewBinding(
-		key.WithKeys("F"),
-		key.WithHelp("F", "ff-main"),
+		key.WithKeys("M"),
+		key.WithHelp("M", "merge to main"),
 	),
 }
 
@@ -435,10 +435,10 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keys.FastForwardMain):
-			// F key - fast-forward main to worktree branch
+			// M key - rebase worktree on main, then fast-forward main
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				selectedPlan := m.plans[m.cursor]
-				m.statusMessage = "Attempting to fast-forward main branch..."
+				m.statusMessage = "Rebasing and merging to main..."
 				return m, fastForwardMainCmd(selectedPlan)
 			}
 		}
@@ -1102,17 +1102,45 @@ func fastForwardMainCmd(plan PlanListItem) tea.Cmd {
 		}
 
 		worktreeBranch := plan.Worktree
+		tmpBranch := fmt.Sprintf("tmp/ff-%s", worktreeBranch)
 
-		// Perform the merge
-		cmd := exec.Command("git", "merge", "--ff-only", worktreeBranch)
-		cmd.Dir = gitRoot
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			// The output might have useful info, so include it.
+		// Create temp branch from worktree branch
+		createCmd := exec.Command("git", "branch", tmpBranch, worktreeBranch)
+		createCmd.Dir = gitRoot
+		if output, err := createCmd.CombinedOutput(); err != nil {
+			return fastForwardMsg{err: fmt.Errorf("failed to create temp branch: %s", strings.TrimSpace(string(output)))}
+		}
+
+		// Cleanup function to delete temp branch
+		cleanup := func() {
+			delCmd := exec.Command("git", "branch", "-D", tmpBranch)
+			delCmd.Dir = gitRoot
+			delCmd.Run() // Ignore errors on cleanup
+		}
+		defer cleanup()
+
+		// Rebase temp branch onto main (this will checkout tmpBranch)
+		rebaseCmd := exec.Command("git", "rebase", defaultBranch, tmpBranch)
+		rebaseCmd.Dir = gitRoot
+		if output, err := rebaseCmd.CombinedOutput(); err != nil {
+			return fastForwardMsg{err: fmt.Errorf("rebase failed: %s", strings.TrimSpace(string(output)))}
+		}
+
+		// Switch back to main branch
+		checkoutCmd := exec.Command("git", "checkout", defaultBranch)
+		checkoutCmd.Dir = gitRoot
+		if output, err := checkoutCmd.CombinedOutput(); err != nil {
+			return fastForwardMsg{err: fmt.Errorf("failed to checkout main: %s", strings.TrimSpace(string(output)))}
+		}
+
+		// Fast-forward main to temp branch
+		mergeCmd := exec.Command("git", "merge", "--ff-only", tmpBranch)
+		mergeCmd.Dir = gitRoot
+		if output, err := mergeCmd.CombinedOutput(); err != nil {
 			return fastForwardMsg{err: fmt.Errorf("fast-forward merge failed: %s", strings.TrimSpace(string(output)))}
 		}
 
-		return fastForwardMsg{message: fmt.Sprintf("Successfully fast-forwarded '%s' to '%s'", currentBranch, worktreeBranch)}
+		return fastForwardMsg{message: fmt.Sprintf("Successfully rebased and fast-forwarded '%s' to '%s'", currentBranch, worktreeBranch)}
 	}
 }
 
