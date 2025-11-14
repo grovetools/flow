@@ -191,11 +191,14 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 	result.WriteString("✓ Created .grove-plan.yml with default configuration\n")
 
-	// Set the new plan as active
-	if err := state.Set("flow.active_plan", planName); err != nil {
-		result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
-	} else {
-		result.WriteString(fmt.Sprintf("✓ Set active plan to: %s\n", planName))
+	// Set the new plan as active, but only if we are not opening a new session.
+	// If a new session is opened, the active plan will be set inside that session.
+	if !cmd.OpenSession {
+		if err := state.Set("flow.active_plan", planName); err != nil {
+			result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
+		} else {
+			result.WriteString(fmt.Sprintf("✓ Set active plan to: %s\n", planName))
+		}
 	}
 
 	// Note: note_ref enrichment is now handled by enrichJobFrontmatter() and enrichJob()
@@ -629,11 +632,14 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		fmt.Println("✓ Created .grove-plan.yml")
 	}
 
-	// Set the new plan as active
-	if err := state.Set("flow.active_plan", planName); err != nil {
-		fmt.Printf("Warning: failed to set active job: %v\n", err)
-	} else {
-		fmt.Printf("✓ Set active plan to: %s\n", planName)
+	// Set the new plan as active, but only if we are not opening a new session.
+	// If a new session is opened, the active plan will be set inside that session.
+	if !cmd.OpenSession {
+		if err := state.Set("flow.active_plan", planName); err != nil {
+			fmt.Printf("Warning: failed to set active job: %v\n", err)
+		} else {
+			fmt.Printf("✓ Set active plan to: %s\n", planName)
+		}
 	}
 
 	// Execute on_start hook if plan was initialized with --open-session and note-ref
