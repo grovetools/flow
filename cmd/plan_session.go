@@ -111,11 +111,12 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 			},
 		}
 
-		// Create new session with workspace window
+		// Create new session with plan window at index 2
 		opts := tmux.LaunchOptions{
 			SessionName:      sessionName,
 			WorkingDirectory: worktreePath,
-			WindowName:       "workspace",
+			WindowName:       "plan",
+			WindowIndex:      2,
 			Panes:            panes,
 		}
 
@@ -267,6 +268,20 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	// Create the session
 	if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-c", gitRoot); err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
+	}
+
+	// Rename the initial window to "plan"
+	if err := executor.Execute("tmux", "rename-window", "-t", sessionName, "plan"); err != nil {
+		// Clean up on failure
+		executor.Execute("tmux", "kill-session", "-t", sessionName)
+		return fmt.Errorf("failed to rename window: %w", err)
+	}
+
+	// Move the "plan" window to index 2
+	if err := executor.Execute("tmux", "move-window", "-s", fmt.Sprintf("%s:plan", sessionName), "-t", "2"); err != nil {
+		// Clean up on failure
+		executor.Execute("tmux", "kill-session", "-t", sessionName)
+		return fmt.Errorf("failed to move window: %w", err)
 	}
 
 	// Send the command to the session
