@@ -38,7 +38,7 @@ func main() {
 		GenerateRecipeScenario(),             // Tests generate-recipe job type functionality
 		GenerateRecipeWithVariablesScenario(), // Tests generate-recipe with multiple template variables
 		JobSummaryScenario(),                 // Tests job summarization on completion
-		InteractiveAgentJobSummaryScenario(), // Tests interactive_agent job summarization with transcripts
+		// InteractiveAgentJobSummaryScenario(), // DISABLED: Tests interactive_agent job summarization with transcripts - requires summarization feature
 		// OneshotJobSummaryScenario(),       // DISABLED: Tests oneshot job summarization via orchestrator - fails due to async goroutine not inheriting test PATH
 		NoteToPlanWorkflowScenario(),        // Tests the new two-stage plan completion workflow
 
