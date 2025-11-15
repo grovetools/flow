@@ -55,6 +55,7 @@ type PlanListItem struct {
 	Worktree     string          // Worktree associated with the plan
 	GitStatus    *git.StatusInfo // Git status information for the worktree
 	ReviewStatus string          // Review status like "In Progress"
+	MergeStatus  string          // Merge status: "Ready", "Needs Rebase", "Merged"
 	Notes        string          // User notes/description
 }
 
@@ -499,6 +500,22 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// M key - rebase worktree on main, then fast-forward main
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				selectedPlan := m.plans[m.cursor]
+
+				// Pre-flight check before attempting merge
+				switch selectedPlan.MergeStatus {
+				case "Conflicts":
+					m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot merge: '%s' has merge conflicts with main. Resolve conflicts manually first.", selectedPlan.Worktree))
+					return m, nil
+				case "Merged":
+					m.statusMessage = theme.DefaultTheme.Info.Render(fmt.Sprintf("Branch '%s' is already merged with main.", selectedPlan.Worktree))
+					return m, nil
+				case "Ready", "Needs Rebase":
+					// Proceed with merge - either fast-forward or rebase
+				default:
+					m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot merge '%s': %s", selectedPlan.Worktree, selectedPlan.MergeStatus))
+					return m, nil
+				}
+
 				m.statusMessage = "Rebasing and merging to main..."
 				return m, fastForwardMainCmd(selectedPlan)
 			}
@@ -655,7 +672,7 @@ func (m planListTUIModel) renderPlanTable() string {
 	}
 
 	// Prepare headers like grove ws plans list
-	headers := []string{"TITLE", "STATUS", "WORKTREE", "GIT", "REVIEW", "NOTES", "UPDATED"}
+	headers := []string{"TITLE", "STATUS", "WORKTREE", "GIT", "MERGE", "REVIEW", "NOTES", "UPDATED"}
 
 	// Prepare rows with emoji status indicators and formatting
 	rows := make([][]string, len(m.plans))
@@ -710,6 +727,21 @@ func (m planListTUIModel) renderPlanTable() string {
 			notesText = notesText[:27] + "..."
 		}
 
+		// Format merge status text
+		var mergeText string
+		switch plan.MergeStatus {
+		case "Ready":
+			mergeText = theme.DefaultTheme.Success.Render("Ready")
+		case "Needs Rebase":
+			mergeText = theme.DefaultTheme.Warning.Render("Needs Rebase")
+		case "Conflicts":
+			mergeText = theme.DefaultTheme.Error.Render("Conflicts")
+		case "Merged":
+			mergeText = theme.DefaultTheme.Muted.Render("Merged")
+		default:
+			mergeText = theme.DefaultTheme.Muted.Render(plan.MergeStatus)
+		}
+
 		// Format review status text
 		var reviewText string
 		switch plan.ReviewStatus {
@@ -728,6 +760,7 @@ func (m planListTUIModel) renderPlanTable() string {
 			statusText,
 			worktreeText,
 			gitText,
+			mergeText,
 			reviewText,
 			notesText,
 			updatedText,
@@ -912,6 +945,7 @@ func loadPlansList(plansDirectory string, showOnHold bool) ([]PlanListItem, erro
 						LastUpdated: lastUpdated,
 						Worktree:    worktree,
 						Notes:       notes,
+						MergeStatus: "-", // Default value
 					}
 
 					// Fetch git status if this plan has a worktree
@@ -943,8 +977,9 @@ func loadPlansList(plansDirectory string, showOnHold bool) ([]PlanListItem, erro
 									gitStatus.AheadCount = getCommitCount(worktreePath, "main..HEAD")
 									gitStatus.BehindCount = getCommitCount(worktreePath, "HEAD..main")
 									item.GitStatus = gitStatus
-									// Populate review status
+									// Populate review status and merge status
 									item.ReviewStatus = getReviewStatus(gitStatus, worktreePath)
+									item.MergeStatus = getMergeStatus(gitRoot, worktree)
 								}
 							}
 						}
@@ -1044,6 +1079,82 @@ func getCommitCount(repoPath, revRange string) int {
 	count := 0
 	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &count)
 	return count
+}
+
+// getMergeStatus determines if a branch can be fast-forwarded into main.
+func getMergeStatus(repoPath, branchName string) string {
+	if repoPath == "" || branchName == "" {
+		return "-"
+	}
+
+	// 1. Check if the branch exists
+	branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
+	branchCheckCmd.Dir = repoPath
+	if err := branchCheckCmd.Run(); err != nil {
+		return "no branch"
+	}
+
+	// 2. Determine default branch (main or master)
+	defaultBranch := "main"
+	mainCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/main")
+	mainCheckCmd.Dir = repoPath
+	if err := mainCheckCmd.Run(); err != nil {
+		masterCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/master")
+		masterCheckCmd.Dir = repoPath
+		if err := masterCheckCmd.Run(); err != nil {
+			return "no main"
+		}
+		defaultBranch = "master"
+	}
+
+	// 3. Check if the branch is ahead of the default branch
+	aheadCmd := exec.Command("git", "rev-list", "--count", defaultBranch+".."+branchName)
+	aheadCmd.Dir = repoPath
+	aheadOutput, err := aheadCmd.Output()
+	if err != nil {
+		return "err"
+	}
+	aheadCountStr := strings.TrimSpace(string(aheadOutput))
+	if aheadCountStr == "0" {
+		return "Merged"
+	}
+
+	// 4. Check if a fast-forward merge is possible
+	mergeBaseCmd := exec.Command("git", "merge-base", defaultBranch, branchName)
+	mergeBaseCmd.Dir = repoPath
+	mergeBaseOutput, err := mergeBaseCmd.Output()
+	if err != nil {
+		return "err"
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOutput))
+
+	mainRevCmd := exec.Command("git", "rev-parse", defaultBranch)
+	mainRevCmd.Dir = repoPath
+	mainRevOutput, err := mainRevCmd.Output()
+	if err != nil {
+		return "err"
+	}
+	mainRev := strings.TrimSpace(string(mainRevOutput))
+
+	if mergeBase == mainRev {
+		return "Ready"
+	}
+
+	// 5. Branches have diverged - check for actual merge conflicts using git merge-tree
+	mergeTreeCmd := exec.Command("git", "merge-tree", mergeBase, defaultBranch, branchName)
+	mergeTreeCmd.Dir = repoPath
+	mergeTreeOutput, err := mergeTreeCmd.Output()
+	if err != nil {
+		return "err"
+	}
+
+	// If merge-tree output contains conflict markers, there are conflicts
+	if strings.Contains(string(mergeTreeOutput), "<<<<<<<") {
+		return "Conflicts"
+	}
+
+	// Branches diverged but no conflicts - can be merged cleanly
+	return "Needs Rebase"
 }
 
 // findGitRootForWorktree attempts to find the git root directory for a worktree
