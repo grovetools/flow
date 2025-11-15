@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/sanitize"
-	"github.com/mattsolo1/grove-flow/pkg/exec"
+	flowexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
 
@@ -264,7 +265,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 		// Check if session already exists
 		sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
-		executor := &exec.RealCommandExecutor{}
+		executor := &flowexec.RealCommandExecutor{}
 
 		if !sessionExists {
 			// Create new session with a blank "workspace" window
@@ -341,15 +342,29 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			return fmt.Errorf("failed to send agent command: %w", err)
 		}
 
-		// Switch to the agent window if inside tmux
+		// Conditionally switch to the agent window
 		if os.Getenv("TMUX") != "" {
-			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
-				p.log.WithError(err).Warn("Failed to switch to session")
-			}
-			if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
-				p.log.WithError(err).Warn("Failed to switch to agent window")
+			// Check if we are in the correct session before trying to select window
+			currentSessionCmd := exec.Command("tmux", "display-message", "-p", "#S")
+			currentSessionOutput, err := currentSessionCmd.Output()
+			if err == nil {
+				currentSession := strings.TrimSpace(string(currentSessionOutput))
+				if currentSession == sessionName {
+					// We are in the correct session, just switch to the window
+					if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
+						p.log.WithError(err).Warn("Failed to switch to agent window")
+					}
+				} else {
+					// In a different session, print instructions
+					p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+				}
+			} else {
+				// Couldn't determine current session, print instructions
+				p.log.WithError(err).Warn("Could not get current tmux session")
+				p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
 			}
 		} else {
+			// Not in tmux, print instructions
 			p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
 		}
 
@@ -411,7 +426,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}).Info("Creating tmux window")
 	p.prettyLog.InfoPretty(fmt.Sprintf("Creating tmux window: session=%s, window=%s, workdir=%s", sessionName, windowName, workDir))
 
-	executor := &exec.RealCommandExecutor{}
+	executor := &flowexec.RealCommandExecutor{}
 
 	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir); err != nil {
 		if strings.Contains(err.Error(), "duplicate window") {

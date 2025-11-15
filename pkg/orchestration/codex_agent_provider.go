@@ -162,15 +162,29 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		cmd.Start()  // Fire and forget
 	}()
 
-	// Switch to the agent window if inside tmux
+	// Conditionally switch to the agent window
 	if os.Getenv("TMUX") != "" {
-		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
-			p.log.WithError(err).Warn("Failed to switch to session")
-		}
-		if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
-			p.log.WithError(err).Warn("Failed to switch to agent window")
+		// Check if we are in the correct session before trying to select window
+		currentSessionCmd := osexec.Command("tmux", "display-message", "-p", "#S")
+		currentSessionOutput, err := currentSessionCmd.Output()
+		if err == nil {
+			currentSession := strings.TrimSpace(string(currentSessionOutput))
+			if currentSession == sessionName {
+				// We are in the correct session, just switch to the window
+				if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
+					p.log.WithError(err).Warn("Failed to switch to agent window")
+				}
+			} else {
+				// In a different session, print instructions
+				p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+			}
+		} else {
+			// Couldn't determine current session, print instructions
+			p.log.WithError(err).Warn("Could not get current tmux session")
+			p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
 		}
 	} else {
+		// Not in tmux, print instructions
 		p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
 	}
 
