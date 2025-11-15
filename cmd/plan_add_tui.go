@@ -801,11 +801,16 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 	// The prompt body is simply the user's input. The executor will load the template.
 	promptBody := m.jobPrompt
 
+	jobStatus := orchestration.JobStatusPending
+	if jobType == "chat" {
+		jobStatus = orchestration.JobStatusPendingUser
+	}
+
 	return &orchestration.Job{
 		ID:         jobID,
 		Title:      m.jobTitle,
 		Type:       orchestration.JobType(jobType),
-		Status:     "pending",
+		Status:     jobStatus,
 		DependsOn:  m.jobDependencies,
 		PromptBody: promptBody,
 		Template:   m.jobTemplate,

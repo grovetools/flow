@@ -233,7 +233,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		job := &orchestration.Job{
 			Title:      jobTitle,
 			Type:       orchestration.JobTypeChat, // Extracts become chat jobs
-			Status:     orchestration.JobStatusPending,
+			Status:     orchestration.JobStatusPendingUser,
 			ID:         orchestration.GenerateUniqueJobID(plan, jobTitle),
 			PromptBody: string(body),
 		}

@@ -185,11 +185,15 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		jobID := orchestration.GenerateUniqueJobID(plan, cmd.Title)
 
 		// Build job structure
+		status := orchestration.JobStatusPending
+		if cmd.Type == "chat" {
+			status = orchestration.JobStatusPendingUser
+		}
 		job := &orchestration.Job{
 			ID:                  jobID,
 			Title:               cmd.Title,
 			Type:                orchestration.JobType(cmd.Type),
-			Status:              "pending",
+			Status:              status,
 			DependsOn:           cmd.DependsOn,
 			PromptSource:        relativeSourceFiles,
 			Model:               cmd.Model,
@@ -293,11 +297,15 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	jobID := orchestration.GenerateUniqueJobID(plan, cmd.Title)
 
 	// Build job structure
+	status := orchestration.JobStatusPending
+	if cmd.Type == "chat" {
+		status = orchestration.JobStatusPendingUser
+	}
 	job := &orchestration.Job{
 		ID:                  jobID,
 		Title:               cmd.Title,
 		Type:                orchestration.JobType(cmd.Type),
-		Status:              "pending",
+		Status:              status,
 		DependsOn:           cmd.DependsOn,
 		PromptBody:          strings.TrimSpace(prompt),
 		Model:               cmd.Model,
@@ -438,7 +446,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// Apply template defaults
 	job := &orchestration.Job{
 		Title:  cmd.Title,
-		Status: "pending",
+		Status: orchestration.JobStatusPending,
 	}
 
 	// Use reflection or a helper to merge template.Frontmatter into the job struct
@@ -490,6 +498,11 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if cmd.PrependDependencies {
 		job.PrependDependencies = true
+	}
+
+	// If the job type is chat, set the status to pending_user
+	if job.Type == "chat" {
+		job.Status = orchestration.JobStatusPendingUser
 	}
 
 	// Validate dependencies

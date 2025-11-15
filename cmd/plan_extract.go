@@ -186,7 +186,7 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 	job := &orchestration.Job{
 		Title:       title,
 		Type:        orchestration.JobTypeChat,
-		Status:      orchestration.JobStatusPending,
+		Status:      orchestration.JobStatusPendingUser,
 		ID:          sanitizeForFilename(title),
 		SourceBlock: sourceBlockRef,
 		PromptBody:  "", // Empty - content will be resolved from source_block at runtime
