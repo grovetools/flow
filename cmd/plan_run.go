@@ -84,6 +84,11 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load plan: %w", err)
 	}
 
+	// Prevent running jobs in a held plan
+	if plan.Config != nil && plan.Config.Status == "hold" {
+		return fmt.Errorf("cannot run jobs: plan is on hold. Use 'flow plan unhold' to resume")
+	}
+
 	// Check for multiple worktrees
 	worktrees := make(map[string]bool)
 	hasMainRepo := false

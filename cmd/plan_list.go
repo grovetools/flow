@@ -21,6 +21,7 @@ var (
 	planListVerbose         bool
 	planListIncludeFinished bool
 	planListAllWorkspaces   bool
+	planListShowHold        bool
 )
 
 // PlanSummary represents a plan in the JSON output
@@ -51,6 +52,7 @@ the notebooks configuration. With --all-workspaces, it discovers all projects an
 	cmd.Flags().BoolVarP(&planListVerbose, "verbose", "v", false, "Show detailed information including jobs in each plan")
 	cmd.Flags().BoolVar(&planListIncludeFinished, "include-finished", false, "Include finished plans in the output")
 	cmd.Flags().BoolVar(&planListAllWorkspaces, "all-workspaces", false, "List plans across all discovered workspaces")
+	cmd.Flags().BoolVar(&planListShowHold, "show-hold", false, "Include on-hold plans in the output")
 
 	return cmd
 }
@@ -200,6 +202,8 @@ func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummar
 			VerifyRunningJobStatus(plan)
 			if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
 				// Skip finished plan
+			} else if !planListShowHold && plan.Config != nil && plan.Config.Status == "hold" {
+				// Skip on-hold plan
 			} else {
 				summary := createPlanSummary(plan, basePath)
 				summary.WorkspaceName = workspaceName
@@ -239,6 +243,9 @@ func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummar
 				VerifyRunningJobStatus(plan)
 
 				if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
+					continue
+				}
+				if !planListShowHold && plan.Config != nil && plan.Config.Status == "hold" {
 					continue
 				}
 				summary := createPlanSummary(plan, planPath)

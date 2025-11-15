@@ -319,7 +319,7 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !inTextInput || m.unfocused {
 				// Go back to the plan list view
 				listModel := newPlanListTUIModel(m.plansDirectory)
-				return listModel, loadPlansListCmd(m.plansDirectory)
+				return listModel, loadPlansListCmd(m.plansDirectory, false)
 			}
 
 		case "tab":

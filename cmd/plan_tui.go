@@ -77,6 +77,7 @@ type planListTUIModel struct {
 	showGitLog     bool   // To toggle the view
 	gitLogContent  string // To store the git log output
 	gitLogError    error  // To store any errors
+	showOnHold     bool   // Whether to show on-hold plans
 }
 
 // TUI key mappings for plan list
@@ -93,6 +94,7 @@ type planListKeyMap struct {
 	EditNotes       key.Binding
 	FastForwardMain key.Binding
 	ToggleGitLog    key.Binding
+	ToggleHold      key.Binding
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
@@ -169,6 +171,10 @@ var planListKeys = planListKeyMap{
 	ToggleGitLog: key.NewBinding(
 		key.WithKeys("g"),
 		key.WithHelp("g", "toggle git log"),
+	),
+	ToggleHold: key.NewBinding(
+		key.WithKeys("H"),
+		key.WithHelp("H", "toggle on-hold"),
 	),
 }
 
@@ -291,7 +297,7 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 
 func (m planListTUIModel) Init() tea.Cmd {
 	return tea.Batch(
-		loadPlansListCmd(m.plansDirectory),
+		loadPlansListCmd(m.plansDirectory, m.showOnHold),
 		fetchGitLogCmd(m.plansDirectory),
 		refreshTick(),
 	)
@@ -338,7 +344,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshTickMsg:
 		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory),
+			loadPlansListCmd(m.plansDirectory, m.showOnHold),
 			fetchGitLogCmd(m.plansDirectory),
 			refreshTick(),
 		)
@@ -494,6 +500,12 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showGitLog = !m.showGitLog
 			m.statusMessage = "" // Clear status message when toggling
 			return m, nil
+
+		case key.Matches(msg, m.keys.ToggleHold):
+			m.showOnHold = !m.showOnHold
+			m.cursor = 0 // Reset cursor to top
+			m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
+			return m, loadPlansListCmd(m.plansDirectory, m.showOnHold)
 		}
 	}
 
@@ -796,9 +808,9 @@ func formatRelativeTime(t time.Time) string {
 }
 
 // Helper functions
-func loadPlansListCmd(plansDirectory string) tea.Cmd {
+func loadPlansListCmd(plansDirectory string, showOnHold bool) tea.Cmd {
 	return func() tea.Msg {
-		plans, err := loadPlansList(plansDirectory)
+		plans, err := loadPlansList(plansDirectory, showOnHold)
 		return planListLoadCompleteMsg{
 			plans: plans,
 			error: err,
@@ -806,7 +818,7 @@ func loadPlansListCmd(plansDirectory string) tea.Cmd {
 	}
 }
 
-func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
+func loadPlansList(plansDirectory string, showOnHold bool) ([]PlanListItem, error) {
 	entries, err := os.ReadDir(plansDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read plans directory %s: %w", plansDirectory, err)
@@ -825,6 +837,10 @@ func loadPlansList(plansDirectory string) ([]PlanListItem, error) {
 				if err == nil {
 					// Filter out finished plans
 					if plan.Config != nil && plan.Config.Status == "finished" {
+						continue
+					}
+					// Filter out on-hold plans unless explicitly shown
+					if !showOnHold && plan.Config != nil && plan.Config.Status == "hold" {
 						continue
 					}
 					// Get last modification time of the plan directory
