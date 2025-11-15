@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/git"
@@ -73,6 +74,9 @@ type planListTUIModel struct {
 	editingNotes   bool
 	notesInput     textinput.Model
 	editPlanIndex  int
+	showGitLog     bool   // To toggle the view
+	gitLogContent  string // To store the git log output
+	gitLogError    error  // To store any errors
 }
 
 // TUI key mappings for plan list
@@ -88,6 +92,7 @@ type planListKeyMap struct {
 	ReviewPlan      key.Binding
 	EditNotes       key.Binding
 	FastForwardMain key.Binding
+	ToggleGitLog    key.Binding
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
@@ -112,6 +117,7 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 			k.ReviewPlan,
 			k.FinishPlan,
 			k.FastForwardMain,
+			k.ToggleGitLog,
 			k.Help,
 			k.Quit,
 		},
@@ -160,19 +166,53 @@ var planListKeys = planListKeyMap{
 		key.WithKeys("M"),
 		key.WithHelp("M", "merge to main"),
 	),
+	ToggleGitLog: key.NewBinding(
+		key.WithKeys("g"),
+		key.WithHelp("g", "toggle git log"),
+	),
 }
 
 
 // Messages for the plan list TUI
-type planListLoadCompleteMsg struct{
+type planListLoadCompleteMsg struct {
 	plans []PlanListItem
 	error error
+}
+
+// gitLogMsg is sent when the git log fetch is complete
+type gitLogMsg struct {
+	content string
+	err     error
 }
 
 // fastForwardMsg is sent when the git fast-forward operation is complete
 type fastForwardMsg struct {
 	err     error
 	message string
+}
+
+func fetchGitLogCmd(plansDir string) tea.Cmd {
+	return func() tea.Msg {
+		gitRoot, err := git.GetGitRoot(plansDir)
+		if err != nil {
+			// Try CWD as a fallback
+			gitRoot, err = git.GetGitRoot(".")
+			if err != nil {
+				return gitLogMsg{err: fmt.Errorf("not in a git repository: %w", err)}
+			}
+		}
+
+		// Using --color=always ensures that the color codes are captured in the output for raw rendering
+		cmd := exec.Command("git", "log", "--oneline", "--decorate", "--color=always", "--graph", "--all", "--max-count=20")
+		cmd.Dir = gitRoot
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return gitLogMsg{err: fmt.Errorf("git log failed: %w: %s", err, string(output))}
+		}
+
+		return gitLogMsg{content: string(output)}
+	}
 }
 
 func runPlanTUI(cmd *cobra.Command, args []string) error {
@@ -245,12 +285,14 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 		help:           helpModel,
 		keys:           planListKeys,
 		activePlan:     activePlan,
+		showGitLog:     false, // Off by default
 	}
 }
 
 func (m planListTUIModel) Init() tea.Cmd {
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory),
+		fetchGitLogCmd(m.plansDirectory),
 		refreshTick(),
 	)
 }
@@ -268,6 +310,11 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("✓ %s", msg.message))
 		}
+		return m, nil
+
+	case gitLogMsg:
+		m.gitLogContent = msg.content
+		m.gitLogError = msg.err
 		return m, nil
 
 	case planListLoadCompleteMsg:
@@ -292,6 +339,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshTickMsg:
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory),
+			fetchGitLogCmd(m.plansDirectory),
 			refreshTick(),
 		)
 
@@ -441,6 +489,11 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMessage = "Rebasing and merging to main..."
 				return m, fastForwardMainCmd(selectedPlan)
 			}
+
+		case key.Matches(msg, m.keys.ToggleGitLog):
+			m.showGitLog = !m.showGitLog
+			m.statusMessage = "" // Clear status message when toggling
+			return m, nil
 		}
 	}
 
@@ -492,11 +545,28 @@ func (m planListTUIModel) View() string {
 	}
 
 	// Render table using grove-core table component
-	s.WriteString(m.renderPlanTable())
+	table := m.renderPlanTable()
 
 	// Help text
+	help := m.help.View()
+
+	// Conditionally render and combine views
+	if m.showGitLog {
+		logPane := m.renderGitLogPane()
+		// Using JoinVertical to stack the elements
+		mainContent := lipgloss.JoinVertical(lipgloss.Left,
+			table,
+			"\n",
+			theme.DefaultTheme.Bold.Render("Git Repository Log"),
+			logPane,
+		)
+		s.WriteString(mainContent)
+	} else {
+		s.WriteString(table)
+	}
+
 	s.WriteString("\n")
-	s.WriteString(m.help.View())
+	s.WriteString(help)
 
 	// Display status message at the bottom if any
 	if m.statusMessage != "" {
@@ -505,6 +575,21 @@ func (m planListTUIModel) View() string {
 	}
 
 	return s.String()
+}
+
+// renderGitLogPane renders the git log pane
+func (m planListTUIModel) renderGitLogPane() string {
+	var content string
+	if m.gitLogError != nil {
+		content = theme.DefaultTheme.Error.Render(m.gitLogError.Error())
+	} else {
+		// The git log output already contains ANSI color codes, so we just render the raw string.
+		content = m.gitLogContent
+	}
+
+	// Use a lipgloss box to frame the content
+	boxStyle := theme.DefaultTheme.Box.Copy().Padding(0, 1)
+	return boxStyle.Render(content)
 }
 
 func (m planListTUIModel) renderPlanTable() string {
