@@ -44,6 +44,17 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	// Resolve the plan path with active job support
 	planPath, err := resolvePlanPathWithActiveJob(dir)
 	if err != nil {
+		// Smart Redirect: If no active plan is set and the user wants the TUI,
+		// redirect them to the plan list TUI instead of showing an error.
+		isNoActiveJobError := strings.Contains(err.Error(), "no active job set")
+		isTTY := isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+
+		if isNoActiveJobError && statusTUI && isTTY {
+			fmt.Println("No active plan set. Launching plan browser...")
+			// The runPlanTUI function handles the `flow plan tui` command.
+			// By calling it here, we effectively redirect the user.
+			return runPlanTUI(cmd, []string{}) // Pass empty args to tui command
+		}
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
 

@@ -230,7 +230,7 @@ func resolvePlanPathWithActiveJob(planName string) (string, error) {
 			return "", fmt.Errorf("get active job: %w", err)
 		}
 		if activeJob == "" {
-			return "", fmt.Errorf("no plan directory specified and no active job set (use 'flow plan set <plan-directory>' to set one)")
+			return "", fmt.Errorf("no plan directory specified and no active job set.\nUse 'flow plan list' or 'flow plan tui' to see available plans, then 'flow plan set <plan-directory>' to set one")
 		}
 		planName = activeJob
 	}
