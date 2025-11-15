@@ -95,6 +95,7 @@ type planListKeyMap struct {
 	FastForwardMain key.Binding
 	ToggleGitLog    key.Binding
 	ToggleHold      key.Binding
+	SetHoldStatus   key.Binding
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
@@ -118,8 +119,10 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 			k.EditNotes,
 			k.ReviewPlan,
 			k.FinishPlan,
+			k.SetHoldStatus,
 			k.FastForwardMain,
 			k.ToggleGitLog,
+			k.ToggleHold,
 			k.Help,
 			k.Quit,
 		},
@@ -175,6 +178,10 @@ var planListKeys = planListKeyMap{
 	ToggleHold: key.NewBinding(
 		key.WithKeys("H"),
 		key.WithHelp("H", "toggle on-hold"),
+	),
+	SetHoldStatus: key.NewBinding(
+		key.WithKeys("ctrl+h"),
+		key.WithHelp("ctrl+h", "hold/unhold plan"),
 	),
 }
 
@@ -506,6 +513,44 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0 // Reset cursor to top
 			m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
 			return m, loadPlansListCmd(m.plansDirectory, m.showOnHold)
+
+		case key.Matches(msg, m.keys.SetHoldStatus):
+			// Toggle hold status for the selected plan
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				selectedPlan := m.plans[m.cursor]
+				planPath := filepath.Join(m.plansDirectory, selectedPlan.Name)
+
+				// Check current status
+				currentStatus := ""
+				if selectedPlan.Plan.Config != nil {
+					currentStatus = selectedPlan.Plan.Config.Status
+				}
+
+				// Toggle: if currently "hold", remove it; otherwise set to "hold"
+				var newStatus string
+				var action string
+				if currentStatus == "hold" {
+					newStatus = "" // Remove hold status
+					action = "removed from"
+				} else {
+					newStatus = "hold"
+					action = "set to"
+				}
+
+				// Update the config
+				configCmd := &PlanConfigCmd{
+					Dir: planPath,
+					Set: []string{fmt.Sprintf("status=%s", newStatus)},
+				}
+				if err := RunPlanConfig(configCmd); err != nil {
+					m.statusMessage = fmt.Sprintf("Failed to update plan: %v", err)
+				} else {
+					m.statusMessage = fmt.Sprintf("Plan '%s' %s hold", selectedPlan.Name, action)
+				}
+
+				// Reload the plans list to reflect the change
+				return m, loadPlansListCmd(m.plansDirectory, m.showOnHold)
+			}
 		}
 	}
 
