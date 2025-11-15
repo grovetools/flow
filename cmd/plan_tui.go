@@ -180,8 +180,8 @@ var planListKeys = planListKeyMap{
 		key.WithHelp("H", "toggle on-hold"),
 	),
 	SetHoldStatus: key.NewBinding(
-		key.WithKeys("ctrl+h"),
-		key.WithHelp("ctrl+h", "hold/unhold plan"),
+		key.WithKeys("h"),
+		key.WithHelp("h", "hold/unhold plan"),
 	),
 }
 
