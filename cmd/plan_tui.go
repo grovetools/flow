@@ -598,7 +598,9 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.FastForwardUpdate):
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				selectedPlan := m.plans[m.cursor]
-				if selectedPlan.MergeStatus == "Needs Rebase" || selectedPlan.MergeStatus == "Behind" {
+				// Allow updating for "Needs Rebase", "Behind", or ecosystem statuses containing these
+				if selectedPlan.MergeStatus == "Needs Rebase" || selectedPlan.MergeStatus == "Behind" ||
+					strings.Contains(selectedPlan.MergeStatus, "Rebase") || strings.Contains(selectedPlan.MergeStatus, "Behind") {
 					m.statusMessage = "Updating branch from main..."
 					return m, fastForwardUpdateCmd(selectedPlan)
 				}
@@ -611,7 +613,8 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				selectedPlan := m.plans[m.cursor]
 
 				// Pre-flight check before attempting merge
-				if selectedPlan.MergeStatus != "Ready" {
+				// Allow "Ready" or ecosystem statuses containing "Ready" (e.g., "3 Ready")
+				if selectedPlan.MergeStatus != "Ready" && !strings.Contains(selectedPlan.MergeStatus, "Ready") {
 					m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot merge: branch is not ready (status: %s). Use 'U' to update first.", selectedPlan.MergeStatus))
 					return m, nil
 				}
@@ -1498,7 +1501,7 @@ func getEcosystemMergeStatus(plan *orchestration.Plan, worktree string) string {
 		statusCounts[status]++
 	}
 
-	// Prioritize showing the most critical status
+	// Prioritize showing the most critical status (from worst to best)
 	if statusCounts["Conflicts"] > 0 {
 		if len(statusCounts) == 1 {
 			return "Conflicts"
@@ -1511,17 +1514,24 @@ func getEcosystemMergeStatus(plan *orchestration.Plan, worktree string) string {
 		}
 		return fmt.Sprintf("%d Rebase", statusCounts["Needs Rebase"])
 	}
+	if statusCounts["Behind"] > 0 {
+		if len(statusCounts) == 1 {
+			return "Behind"
+		}
+		return fmt.Sprintf("%d Behind", statusCounts["Behind"])
+	}
 	if statusCounts["Ready"] > 0 {
 		if len(statusCounts) == 1 && statusCounts["Ready"] == len(plan.Config.Repos) {
 			return "Ready"
 		}
 		return fmt.Sprintf("%d Ready", statusCounts["Ready"])
 	}
-	if statusCounts["Merged"] > 0 {
-		if len(statusCounts) == 1 && statusCounts["Merged"] == len(plan.Config.Repos) {
-			return "Merged"
+	if statusCounts["Synced"] > 0 || statusCounts["Merged"] > 0 {
+		totalSynced := statusCounts["Synced"] + statusCounts["Merged"]
+		if len(statusCounts) == 1 && totalSynced == len(plan.Config.Repos) {
+			return "Synced"
 		}
-		return fmt.Sprintf("%d Merged", statusCounts["Merged"])
+		return fmt.Sprintf("%d Synced", totalSynced)
 	}
 	if statusCounts["err"] > 0 {
 		return "err"
