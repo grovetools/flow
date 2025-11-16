@@ -106,10 +106,11 @@ type planListKeyMap struct {
 	SetActive       key.Binding
 	ReviewPlan      key.Binding
 	EditNotes       key.Binding
-	FastForwardMain key.Binding
-	ToggleGitLog    key.Binding
-	ToggleHold      key.Binding
-	SetHoldStatus   key.Binding
+	FastForwardMain   key.Binding
+	FastForwardUpdate key.Binding
+	ToggleGitLog      key.Binding
+	ToggleHold        key.Binding
+	SetHoldStatus     key.Binding
 }
 
 func (k planListKeyMap) ShortHelp() []key.Binding {
@@ -134,6 +135,7 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 			k.ReviewPlan,
 			k.FinishPlan,
 			k.SetHoldStatus,
+			k.FastForwardUpdate,
 			k.FastForwardMain,
 			k.ToggleGitLog,
 			k.ToggleHold,
@@ -184,6 +186,10 @@ var planListKeys = planListKeyMap{
 	FastForwardMain: key.NewBinding(
 		key.WithKeys("M"),
 		key.WithHelp("M", "merge to main"),
+	),
+	FastForwardUpdate: key.NewBinding(
+		key.WithKeys("U"),
+		key.WithHelp("U", "update from main"),
 	),
 	ToggleGitLog: key.NewBinding(
 		key.WithKeys("g"),
@@ -589,27 +595,28 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, executePlanFinish(plan.Plan)
 			}
 
+		case key.Matches(msg, m.keys.FastForwardUpdate):
+			if m.cursor >= 0 && m.cursor < len(m.plans) {
+				selectedPlan := m.plans[m.cursor]
+				if selectedPlan.MergeStatus == "Needs Rebase" || selectedPlan.MergeStatus == "Behind" {
+					m.statusMessage = "Updating branch from main..."
+					return m, fastForwardUpdateCmd(selectedPlan)
+				}
+				m.statusMessage = theme.DefaultTheme.Error.Render("Branch is not in a state that can be updated (status: " + selectedPlan.MergeStatus + ")")
+			}
+
 		case key.Matches(msg, m.keys.FastForwardMain):
 			// M key - rebase worktree on main, then fast-forward main
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				selectedPlan := m.plans[m.cursor]
 
 				// Pre-flight check before attempting merge
-				switch selectedPlan.MergeStatus {
-				case "Conflicts":
-					m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot merge: '%s' has merge conflicts with main. Resolve conflicts manually first.", selectedPlan.Worktree))
-					return m, nil
-				case "Merged":
-					m.statusMessage = theme.DefaultTheme.Info.Render(fmt.Sprintf("Branch '%s' is already merged with main.", selectedPlan.Worktree))
-					return m, nil
-				case "Ready", "Needs Rebase":
-					// Proceed with merge - either fast-forward or rebase
-				default:
-					m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot merge '%s': %s", selectedPlan.Worktree, selectedPlan.MergeStatus))
+				if selectedPlan.MergeStatus != "Ready" {
+					m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot merge: branch is not ready (status: %s). Use 'U' to update first.", selectedPlan.MergeStatus))
 					return m, nil
 				}
 
-				m.statusMessage = "Rebasing and merging to main..."
+				m.statusMessage = "Merging branch to main..."
 				return m, fastForwardMainCmd(selectedPlan)
 			}
 
@@ -929,10 +936,12 @@ func (m planListTUIModel) renderEcosystemStatusPane() string {
 			mergeText = theme.DefaultTheme.Success.Render("Ready")
 		case "Needs Rebase":
 			mergeText = theme.DefaultTheme.Warning.Render("Needs Rebase")
+		case "Behind":
+			mergeText = theme.DefaultTheme.Info.Render("Behind")
 		case "Conflicts":
 			mergeText = theme.DefaultTheme.Error.Render("Conflicts")
-		case "Merged":
-			mergeText = theme.DefaultTheme.Muted.Render("Merged")
+		case "Merged", "Synced":
+			mergeText = theme.DefaultTheme.Muted.Render("Synced")
 		default:
 			mergeText = theme.DefaultTheme.Muted.Render(repoStatus.MergeStatus)
 		}
@@ -1023,10 +1032,12 @@ func (m planListTUIModel) renderPlanTable() string {
 			mergeText = theme.DefaultTheme.Success.Render("Ready")
 		case "Needs Rebase":
 			mergeText = theme.DefaultTheme.Warning.Render("Needs Rebase")
+		case "Behind":
+			mergeText = theme.DefaultTheme.Info.Render("Behind")
 		case "Conflicts":
 			mergeText = theme.DefaultTheme.Error.Render("Conflicts")
-		case "Merged":
-			mergeText = theme.DefaultTheme.Muted.Render("Merged")
+		case "Merged", "Synced":
+			mergeText = theme.DefaultTheme.Muted.Render("Synced")
 		default:
 			mergeText = theme.DefaultTheme.Muted.Render(plan.MergeStatus)
 		}
@@ -1412,19 +1423,21 @@ func getMergeStatus(repoPath, branchName string) string {
 		defaultBranch = "master"
 	}
 
-	// 3. Check if the branch is ahead of the default branch
-	aheadCmd := exec.Command("git", "rev-list", "--count", defaultBranch+".."+branchName)
-	aheadCmd.Dir = repoPath
-	aheadOutput, err := aheadCmd.Output()
-	if err != nil {
-		return "err"
+	// 3. Get ahead/behind counts
+	aheadCount := getCommitCount(repoPath, defaultBranch+".."+branchName)
+	behindCount := getCommitCount(repoPath, branchName+".."+defaultBranch)
+
+	if aheadCount == 0 && behindCount == 0 {
+		return "Synced"
 	}
-	aheadCountStr := strings.TrimSpace(string(aheadOutput))
-	if aheadCountStr == "0" {
-		return "Merged"
+	if aheadCount > 0 && behindCount == 0 {
+		return "Ready"
+	}
+	if aheadCount == 0 && behindCount > 0 {
+		return "Behind"
 	}
 
-	// 4. Check if a fast-forward merge is possible
+	// 4. Branches have diverged - check for conflicts
 	mergeBaseCmd := exec.Command("git", "merge-base", defaultBranch, branchName)
 	mergeBaseCmd.Dir = repoPath
 	mergeBaseOutput, err := mergeBaseCmd.Output()
@@ -1441,29 +1454,20 @@ func getMergeStatus(repoPath, branchName string) string {
 	}
 	mainRev := strings.TrimSpace(string(mainRevOutput))
 
-	if mergeBase == mainRev {
-		return "Ready"
-	}
-
-	// 5. Branches have diverged - check for actual merge conflicts using newer git merge-tree format
-	mergeTreeCmd := exec.Command("git", "merge-tree", "--write-tree", defaultBranch, branchName)
-	mergeTreeCmd.Dir = repoPath
-	output, err := mergeTreeCmd.CombinedOutput()
-	if err != nil {
-		// If merge-tree fails, there are conflicts
-		if strings.Contains(string(output), "CONFLICT") {
+	// This part is for detecting if a rebase is needed vs a clean merge
+	if mergeBase != mainRev {
+		// Check for actual merge conflicts
+		mergeTreeCmd := exec.Command("git", "merge-tree", "--write-tree", defaultBranch, branchName)
+		mergeTreeCmd.Dir = repoPath
+		output, err := mergeTreeCmd.CombinedOutput()
+		if err != nil || strings.Contains(string(output), "CONFLICT") {
 			return "Conflicts"
 		}
-		return "err"
+		return "Needs Rebase"
 	}
 
-	// Check if output contains conflict markers
-	if strings.Contains(string(output), "CONFLICT") {
-		return "Conflicts"
-	}
-
-	// Branches diverged but no conflicts - can be merged cleanly
-	return "Needs Rebase"
+	// Should not be reached if logic is correct, but as a fallback
+	return "Diverged"
 }
 
 // getEcosystemMergeStatus checks merge status across all repos in an ecosystem plan
@@ -1691,32 +1695,19 @@ func executePlanReview(plan *orchestration.Plan) tea.Cmd {
 	)
 }
 
+// rebaseWorktreeBranch rebases a worktree's branch on the default branch.
+func rebaseWorktreeBranch(worktreePath, defaultBranch string) error {
+	cmd := exec.Command("git", "rebase", defaultBranch)
+	cmd.Dir = worktreePath // CRITICAL: Execute the command within the worktree directory.
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to rebase worktree branch: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 // rebaseAndMergeRepo performs the git operations to rebase a worktree branch onto the default branch
 // and then fast-forward the default branch. It also synchronizes the worktree's branch.
 func rebaseAndMergeRepo(repoPath, worktreeBranch, defaultBranch string) error {
-	tmpBranch := fmt.Sprintf("tmp/ff-%s", worktreeBranch)
-
-	// Create temp branch from worktree branch
-	createCmd := exec.Command("git", "branch", tmpBranch, worktreeBranch)
-	createCmd.Dir = repoPath
-	if output, err := createCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create temp branch: %s", strings.TrimSpace(string(output)))
-	}
-
-	// Cleanup function to delete temp branch
-	defer func() {
-		delCmd := exec.Command("git", "branch", "-D", tmpBranch)
-		delCmd.Dir = repoPath
-		delCmd.Run() // Ignore errors on cleanup
-	}()
-
-	// Rebase temp branch onto default branch
-	rebaseCmd := exec.Command("git", "rebase", defaultBranch, tmpBranch)
-	rebaseCmd.Dir = repoPath
-	if output, err := rebaseCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("rebase failed: %s", strings.TrimSpace(string(output)))
-	}
-
 	// Switch back to default branch in the source repo
 	checkoutCmd := exec.Command("git", "checkout", defaultBranch)
 	checkoutCmd.Dir = repoPath
@@ -1724,8 +1715,8 @@ func rebaseAndMergeRepo(repoPath, worktreeBranch, defaultBranch string) error {
 		return fmt.Errorf("failed to checkout %s: %s", defaultBranch, strings.TrimSpace(string(output)))
 	}
 
-	// Fast-forward default branch to temp branch
-	mergeCmd := exec.Command("git", "merge", "--ff-only", tmpBranch)
+	// Fast-forward default branch to the worktree branch
+	mergeCmd := exec.Command("git", "merge", "--ff-only", worktreeBranch)
 	mergeCmd.Dir = repoPath
 	if output, err := mergeCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("fast-forward merge failed: %s", strings.TrimSpace(string(output)))
@@ -1734,10 +1725,12 @@ func rebaseAndMergeRepo(repoPath, worktreeBranch, defaultBranch string) error {
 	// Now, update the worktree's branch to point to the new HEAD of default branch.
 	worktreePath := filepath.Join(repoPath, ".grove-worktrees", worktreeBranch)
 	if _, err := os.Stat(worktreePath); err == nil {
+		// This command must be run inside the worktree to correctly update its HEAD
 		resetCmd := exec.Command("git", "reset", "--hard", defaultBranch)
-		resetCmd.Dir = worktreePath // CRITICAL: Execute the command within the worktree directory.
+		resetCmd.Dir = worktreePath
 		if output, err := resetCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to reset worktree branch '%s': %s", worktreeBranch, strings.TrimSpace(string(output)))
+			// This is not a fatal error for the merge itself, but we should warn the user.
+			fmt.Printf("Warning: failed to sync worktree branch '%s': %s\n", worktreeBranch, strings.TrimSpace(string(output)))
 		}
 	}
 
@@ -1789,6 +1782,74 @@ func getEcosystemRepoDetails(plan *orchestration.Plan, worktree string, provider
 	}
 
 	return details, summaryStatus
+}
+
+func fastForwardUpdateCmd(plan PlanListItem) tea.Cmd {
+	return func() tea.Msg {
+		if plan.Worktree == "" {
+			return fastForwardMsg{err: fmt.Errorf("selected plan has no associated worktree")}
+		}
+
+		// Ecosystem Plan Logic
+		if plan.Plan.Config != nil && len(plan.Plan.Config.Repos) > 0 {
+			var results []string
+			var errors []string
+
+			logger := logrus.New()
+			logger.SetLevel(logrus.WarnLevel)
+			discoveryService := workspace.NewDiscoveryService(logger)
+			discoveryResult, err := discoveryService.DiscoverAll()
+			if err != nil {
+				return fastForwardMsg{err: fmt.Errorf("failed to discover workspaces: %w", err)}
+			}
+			provider := workspace.NewProvider(discoveryResult)
+			localWorkspaces := provider.LocalWorkspaces()
+
+			for _, repoName := range plan.Plan.Config.Repos {
+				repoPath, exists := localWorkspaces[repoName]
+				if !exists {
+					errors = append(errors, fmt.Sprintf("%s: repo not found locally", repoName))
+					continue
+				}
+
+				worktreePath := filepath.Join(repoPath, ".grove-worktrees", plan.Worktree)
+				if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+					// worktree for this specific repo doesn't exist, skip
+					continue
+				}
+
+				defaultBranch := "main" // Simplified default branch logic
+				if err := rebaseWorktreeBranch(worktreePath, defaultBranch); err != nil {
+					errors = append(errors, fmt.Sprintf("%s: %v", repoName, err))
+				} else {
+					results = append(results, repoName)
+				}
+			}
+
+			var summary strings.Builder
+			if len(results) > 0 {
+				summary.WriteString(fmt.Sprintf("Successfully updated %d repos: %s. ", len(results), strings.Join(results, ", ")))
+			}
+			if len(errors) > 0 {
+				return fastForwardMsg{err: fmt.Errorf(summary.String()+"Failed to update %d repos: %s", len(errors), strings.Join(errors, "; "))}
+			}
+			return fastForwardMsg{message: summary.String()}
+		}
+
+		// Single-Repo Plan Logic
+		gitRoot, err := git.GetGitRoot(".")
+		if err != nil {
+			return fastForwardMsg{err: fmt.Errorf("not in a git repository: %w", err)}
+		}
+		worktreePath := filepath.Join(gitRoot, ".grove-worktrees", plan.Worktree)
+
+		defaultBranch := "main" // Simplified
+		if err := rebaseWorktreeBranch(worktreePath, defaultBranch); err != nil {
+			return fastForwardMsg{err: err}
+		}
+
+		return fastForwardMsg{message: fmt.Sprintf("Successfully updated branch '%s' from '%s'.", plan.Worktree, defaultBranch)}
+	}
 }
 
 func fastForwardMainCmd(plan PlanListItem) tea.Cmd {

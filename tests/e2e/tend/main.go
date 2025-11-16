@@ -79,6 +79,11 @@ func main() {
 		WorktreeStateIsolationScenario(),
 		WorktreeStateDirectNavigationScenario(),
 
+		// Worktree Fast-Forward and Merge Scenarios
+		WorktreeFastForwardScenario(),     // Tests U (update) and M (merge) functionality
+		WorktreeMergeStatusScenario(),     // Tests all merge status states
+		WorktreeMergePreflightScenario(),  // Tests M key pre-flight checks
+
 		// Rules Prompt Scenarios
 		RulesPromptProceedScenario(),
 		RulesPromptCancelScenario(),
