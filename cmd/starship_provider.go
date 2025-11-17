@@ -123,29 +123,25 @@ func FlowStatusProvider(s state.State) (string, error) {
 
 		var statsParts []string
 		if stats.Completed > 0 {
-			// Success style for completed (solid dot)
-			statsParts = append(statsParts, theme.DefaultTheme.Success.Render(fmt.Sprintf("● %d", stats.Completed)))
+			statsParts = append(statsParts, theme.DefaultTheme.Success.Render(fmt.Sprintf("%s %d", theme.IconStatusCompleted, stats.Completed)))
 		}
 		if stats.Running > 0 {
-			// Info style for running (half-filled circle)
 			statsParts = append(statsParts, theme.DefaultTheme.Info.Render(fmt.Sprintf("%s %d", theme.IconStatusRunning, stats.Running)))
 		}
 		if stats.Pending > 0 {
-			// Muted gray for pending (hollow circle)
-			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("○ %d", stats.Pending)))
+			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("%s %d", theme.IconStatusPendingUser, stats.Pending)))
 		}
 		if stats.Failed > 0 {
-			// Error style for failed (X mark)
-			statsParts = append(statsParts, theme.DefaultTheme.Error.Render(fmt.Sprintf("✗ %d", stats.Failed)))
+			statsParts = append(statsParts, theme.DefaultTheme.Error.Render(fmt.Sprintf("%s %d", theme.IconStatusFailed, stats.Failed)))
 		}
 		if stats.Todo > 0 {
-			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("📝 %d", stats.Todo)))
+			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("%s %d", theme.IconStatusTodo, stats.Todo)))
 		}
 		if stats.Hold > 0 {
 			statsParts = append(statsParts, theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s %d", theme.IconStatusHold, stats.Hold)))
 		}
 		if stats.Abandoned > 0 {
-			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("🗑️ %d", stats.Abandoned)))
+			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("%s %d", theme.IconStatusAbandoned, stats.Abandoned)))
 		}
 
 		// Add WT indicator if in worktree
@@ -159,7 +155,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 	}
 
 	if config.Model != "" {
-		output += fmt.Sprintf(" 🤖 %s", config.Model)
+		output += fmt.Sprintf(" %s %s", theme.IconHeadlessAgent, config.Model)
 	}
 
 	return output, nil

@@ -240,9 +240,9 @@ func (m finishTUIModel) View() string {
 	// Branch merge status
 	if m.branchExists {
 		if m.branchIsMerged {
-			b.WriteString(theme.DefaultTheme.Success.Render("✓ Branch merged into main - safe to delete"))
+			b.WriteString(theme.DefaultTheme.Success.Render(theme.IconSuccess + " Branch merged into main - safe to delete"))
 		} else {
-			b.WriteString(theme.DefaultTheme.Warning.Render("✗ Branch has commits not in main - review before deleting"))
+			b.WriteString(theme.DefaultTheme.Warning.Render(theme.IconError + " Branch has commits not in main - review before deleting"))
 		}
 		b.WriteString("\n\n")
 	} else {
@@ -265,7 +265,7 @@ func (m finishTUIModel) View() string {
 
 		// Cursor indicator
 		if m.cursor == i {
-			line.WriteString(focusedStyle.Render("> "))
+			line.WriteString(focusedStyle.Render(theme.IconSelect + " "))
 		} else {
 			line.WriteString("  ")
 		}

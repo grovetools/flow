@@ -510,28 +510,28 @@ func renderMuted(text string) string {
 func colorizeStatus(status orchestration.JobStatus) string {
 	switch status {
 	case orchestration.JobStatusCompleted:
-		return theme.DefaultTheme.Success.Render("✓")
+		return theme.DefaultTheme.Success.Render(theme.IconStatusCompleted)
 	case orchestration.JobStatusRunning:
-		return theme.DefaultTheme.Warning.Render("⚡")
+		return theme.DefaultTheme.Warning.Render(theme.IconStatusRunning)
 	case orchestration.JobStatusFailed:
-		return theme.DefaultTheme.Error.Render("✗")
+		return theme.DefaultTheme.Error.Render(theme.IconStatusFailed)
 	case orchestration.JobStatusBlocked:
-		return theme.DefaultTheme.Error.Render("🚫")
+		return theme.DefaultTheme.Error.Render(theme.IconStatusBlocked)
 	case orchestration.JobStatusNeedsReview:
-		return theme.DefaultTheme.Info.Render("👁")
+		return theme.DefaultTheme.Info.Render(theme.IconStatusNeedsReview)
 	case orchestration.JobStatusPendingUser:
-		return theme.DefaultTheme.Info.Render("💬")
+		return theme.DefaultTheme.Info.Render(theme.IconStatusPendingUser)
 	case orchestration.JobStatusPendingLLM:
-		return theme.DefaultTheme.Warning.Render("🤖")
+		return theme.DefaultTheme.Warning.Render(theme.IconHeadlessAgent)
 	case "interrupted": // Jobs that were running but process is dead
-		return theme.DefaultTheme.Error.Render("💔")
+		return theme.DefaultTheme.Error.Render(theme.IconStatusInterrupted)
 	case orchestration.JobStatusTodo:
 		return theme.DefaultTheme.Info.Render(theme.IconStatusTodo)
 	case orchestration.JobStatusHold:
 		return theme.DefaultTheme.Warning.Render(theme.IconStatusHold)
 	case orchestration.JobStatusAbandoned:
-		return theme.DefaultTheme.Muted.Render("🗑️")
+		return theme.DefaultTheme.Muted.Render(theme.IconStatusAbandoned)
 	default: // Pending
-		return "⏳"
+		return theme.IconPending
 	}
 }

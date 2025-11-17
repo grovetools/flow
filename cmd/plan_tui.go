@@ -835,11 +835,11 @@ func (m planListTUIModel) View() string {
 					return padStyle.Render(s.String())
 				}
 			} else {
-				detailTitle = "Git Repository Log"
+				detailTitle = theme.IconGit + " Git Repository Log"
 				detailPane = m.renderGitLogPane()
 			}
 		} else {
-			detailTitle = "Git Repository Log"
+			detailTitle = theme.IconGit + " Git Repository Log"
 			detailPane = m.renderGitLogPane()
 		}
 
@@ -917,15 +917,15 @@ func (m planListTUIModel) renderEcosystemStatusPane() string {
 			gs := repoStatus.GitStatus
 			var parts []string
 			if gs.IsDirty {
-				parts = append(parts, theme.DefaultTheme.Warning.Render("● Dirty"))
+				parts = append(parts, theme.DefaultTheme.Warning.Render(theme.IconWarning + " Dirty"))
 			} else {
-				parts = append(parts, theme.DefaultTheme.Success.Render("✓ Clean"))
+				parts = append(parts, theme.DefaultTheme.Success.Render(theme.IconSuccess + " Clean"))
 			}
 			if gs.AheadCount > 0 {
-				parts = append(parts, theme.DefaultTheme.Success.Render(fmt.Sprintf("↑%d", gs.AheadCount)))
+				parts = append(parts, theme.DefaultTheme.Success.Render(fmt.Sprintf("%s%d", theme.IconArrowUp, gs.AheadCount)))
 			}
 			if gs.BehindCount > 0 {
-				parts = append(parts, theme.DefaultTheme.Error.Render(fmt.Sprintf("↓%d", gs.BehindCount)))
+				parts = append(parts, theme.DefaultTheme.Error.Render(fmt.Sprintf("%s%d", theme.IconArrowDown, gs.BehindCount)))
 			}
 			gitText = strings.Join(parts, " ")
 		} else {
@@ -936,15 +936,15 @@ func (m planListTUIModel) renderEcosystemStatusPane() string {
 		var mergeText string
 		switch repoStatus.MergeStatus {
 		case "Ready":
-			mergeText = theme.DefaultTheme.Success.Render("Ready")
+			mergeText = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Ready")
 		case "Needs Rebase":
-			mergeText = theme.DefaultTheme.Warning.Render("Needs Rebase")
+			mergeText = theme.DefaultTheme.Warning.Render(theme.IconWarning + " Needs Rebase")
 		case "Behind":
-			mergeText = theme.DefaultTheme.Info.Render("Behind")
+			mergeText = theme.DefaultTheme.Info.Render(theme.IconInfo + " Behind")
 		case "Conflicts":
-			mergeText = theme.DefaultTheme.Error.Render("Conflicts")
+			mergeText = theme.DefaultTheme.Error.Render(theme.IconError + " Conflicts")
 		case "Merged", "Synced":
-			mergeText = theme.DefaultTheme.Muted.Render("Synced")
+			mergeText = theme.DefaultTheme.Muted.Render(theme.IconMerge + " Synced")
 		default:
 			mergeText = theme.DefaultTheme.Muted.Render(repoStatus.MergeStatus)
 		}
@@ -987,13 +987,17 @@ func (m planListTUIModel) renderPlanTable() string {
 		// Add active plan indicator - use bold for emphasis without explicit color
 		titleText := plan.Name
 		if plan.Name == m.activePlan {
-			titleText = theme.DefaultTheme.Bold.Render(fmt.Sprintf("▶ %s", titleText))
+			// Use IconSelect for active plan indicator, but only if not also selected by cursor.
+			// The SelectableTable will handle the cursor indicator.
+			titleText = theme.DefaultTheme.Bold.Render(fmt.Sprintf("%s %s", theme.IconSelect, titleText))
 		}
 
 		// Format worktree text
 		worktreeText := plan.Worktree
 		if worktreeText == "" {
 			worktreeText = theme.DefaultTheme.Muted.Render("-")
+		} else {
+			worktreeText = theme.IconGitBranch + " " + worktreeText
 		}
 
 		// Format git status text
@@ -1003,16 +1007,16 @@ func (m planListTUIModel) renderPlanTable() string {
 			var parts []string
 
 			if gs.IsDirty {
-				parts = append(parts, theme.DefaultTheme.Warning.Render("● Dirty"))
+				parts = append(parts, theme.DefaultTheme.Warning.Render(theme.IconWarning + " Dirty"))
 			} else {
-				parts = append(parts, theme.DefaultTheme.Success.Render("✓ Clean"))
+				parts = append(parts, theme.DefaultTheme.Success.Render(theme.IconSuccess + " Clean"))
 			}
 
 			if gs.AheadCount > 0 {
-				parts = append(parts, theme.DefaultTheme.Success.Render(fmt.Sprintf("↑%d", gs.AheadCount)))
+				parts = append(parts, theme.DefaultTheme.Success.Render(fmt.Sprintf("%s%d", theme.IconArrowUp, gs.AheadCount)))
 			}
 			if gs.BehindCount > 0 {
-				parts = append(parts, theme.DefaultTheme.Error.Render(fmt.Sprintf("↓%d", gs.BehindCount)))
+				parts = append(parts, theme.DefaultTheme.Error.Render(fmt.Sprintf("%s%d", theme.IconArrowDown, gs.BehindCount)))
 			}
 
 			gitText = strings.Join(parts, " ")
@@ -1032,15 +1036,15 @@ func (m planListTUIModel) renderPlanTable() string {
 		var mergeText string
 		switch plan.MergeStatus {
 		case "Ready":
-			mergeText = theme.DefaultTheme.Success.Render("Ready")
+			mergeText = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Ready")
 		case "Needs Rebase":
-			mergeText = theme.DefaultTheme.Warning.Render("Needs Rebase")
+			mergeText = theme.DefaultTheme.Warning.Render(theme.IconWarning + " Needs Rebase")
 		case "Behind":
-			mergeText = theme.DefaultTheme.Info.Render("Behind")
+			mergeText = theme.DefaultTheme.Info.Render(theme.IconInfo + " Behind")
 		case "Conflicts":
-			mergeText = theme.DefaultTheme.Error.Render("Conflicts")
+			mergeText = theme.DefaultTheme.Error.Render(theme.IconError + " Conflicts")
 		case "Merged", "Synced":
-			mergeText = theme.DefaultTheme.Muted.Render("Synced")
+			mergeText = theme.DefaultTheme.Muted.Render(theme.IconMerge + " Synced")
 		default:
 			mergeText = theme.DefaultTheme.Muted.Render(plan.MergeStatus)
 		}
@@ -1096,21 +1100,17 @@ func (m planListTUIModel) formatStatusWithEmoji(plan PlanListItem) string {
 
 	// Determine primary emoji based on dominant status
 	if failed > 0 || blocked > 0 || abandoned > 0 {
-		emoji = "❌"
+		emoji = theme.IconError
 	} else if running > 0 {
-		if completed > 0 || pending > 0 {
-			emoji = "🚧" // mixed with running
-		} else {
-			emoji = "⚡" // only running
-		}
-	} else if completed > 0 && pending > 0 {
-		emoji = "🚧" // mixed completed and pending
+		emoji = theme.IconRunning
 	} else if hold > 0 {
-		emoji = theme.IconStatusHold // on hold
+		emoji = theme.IconStatusHold
+	} else if completed > 0 && (pending > 0 || running > 0) {
+		emoji = theme.IconRunning // Represents work in progress
 	} else if completed > 0 {
-		emoji = "✓" // all completed
+		emoji = theme.IconSuccess
 	} else {
-		emoji = "⏳" // only pending
+		emoji = theme.IconPending
 	}
 
 	// Add count details

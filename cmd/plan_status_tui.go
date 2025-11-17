@@ -1060,7 +1060,7 @@ func (m statusTUIModel) View() string {
 	// 1. Create Header with subtle coloring
 	// Header uses terminal default colors with bold for emphasis.
 	// See: plans/tui-updates/14-terminal-ui-styling-philosophy.md
-	headerLabel := theme.DefaultTheme.Bold.Render("📈 Plan Status: ")
+	headerLabel := theme.DefaultTheme.Bold.Render(theme.IconPlan + " Plan Status: ")
 	planName := theme.DefaultTheme.Bold.Render(m.plan.Name)
 	headerText := headerLabel + planName
 
@@ -1168,9 +1168,9 @@ func (m statusTUIModel) renderTableView() string {
 		// Selection checkbox
 		var selCheckbox string
 		if m.selected[job.ID] {
-			selCheckbox = t.Success.Render("[x]")
+			selCheckbox = t.Success.Render(theme.IconSelect)
 		} else {
-			selCheckbox = "[ ]"
+			selCheckbox = theme.IconUnselect
 		}
 		// JOB column (with tree indentation and connectors)
 		indent := m.jobIndents[job.ID]
@@ -1308,9 +1308,17 @@ func (m statusTUIModel) renderJobTree() string {
 		// Add arrow indicator at the very left for selected row
 		var arrowIndicator string
 		if i == m.cursor {
-			arrowIndicator = theme.DefaultTheme.Highlight.Render("▶ ")
+			arrowIndicator = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold + " ")
 		} else {
 			arrowIndicator = "  "
+		}
+
+		// Build selection indicator after arrow
+		var selectionCheckbox string
+		if m.selected[job.ID] {
+			selectionCheckbox = theme.DefaultTheme.Success.Render(theme.IconSelect) + " "
+		} else {
+			selectionCheckbox = theme.IconUnselect + " "
 		}
 
 		// Build tree structure part
@@ -1372,16 +1380,8 @@ func (m statusTUIModel) renderJobTree() string {
 		// Combine emoji (no background) with styled text content
 		styledJobContent := statusIcon + " " + textContent
 
-		// Build selection indicator on the right if needed
-		selectionIndicator := ""
-		if m.selected[job.ID] {
-			selectionIndicator = " " + theme.DefaultTheme.Success.Render("[x]")
-		} else {
-			selectionIndicator = " [ ]"
-		}
-
-		// Combine all parts: arrow + tree + content + selection
-		fullLine := arrowIndicator + treePart + styledJobContent + selectionIndicator
+		// Combine all parts: arrow + selection checkbox + tree + content
+		fullLine := arrowIndicator + selectionCheckbox + treePart + styledJobContent
 
 		// Add summary on a new line if toggled on and available
 		if m.showSummaries && job.Summary != "" {
@@ -1412,16 +1412,20 @@ func (m statusTUIModel) getStatusIcon(status orchestration.JobStatus) string {
 		icon = theme.IconStatusCompleted
 	case orchestration.JobStatusRunning:
 		icon = theme.IconStatusRunning
-	case orchestration.JobStatusFailed, orchestration.JobStatusBlocked:
+	case orchestration.JobStatusFailed:
 		icon = theme.IconStatusFailed
+	case orchestration.JobStatusBlocked:
+		icon = theme.IconStatusBlocked
 	case orchestration.JobStatusTodo:
 		icon = theme.IconStatusTodo
 	case orchestration.JobStatusHold:
 		icon = theme.IconStatusHold
 	case orchestration.JobStatusAbandoned:
 		icon = theme.IconStatusAbandoned
+	case orchestration.JobStatusNeedsReview:
+		icon = theme.IconStatusNeedsReview
 	default:
-		// Pending, PendingUser, PendingLLM, NeedsReview
+		// Pending, PendingUser, PendingLLM
 		icon = theme.IconStatusPendingUser
 	}
 
@@ -1589,11 +1593,11 @@ func (m statusTUIModel) renderStatusPicker() string {
 		{orchestration.JobStatusTodo, "Todo", theme.IconStatusTodo},
 		{orchestration.JobStatusHold, "On Hold", theme.IconStatusHold},
 		{orchestration.JobStatusRunning, "Running", theme.IconStatusRunning},
-		{orchestration.JobStatusCompleted, "Completed", "✓"},
-		{orchestration.JobStatusFailed, "Failed", "✗"},
-		{orchestration.JobStatusBlocked, "Blocked", "🚫"},
-		{orchestration.JobStatusNeedsReview, "Needs Review", "👁"},
-		{orchestration.JobStatusAbandoned, "Abandoned", "🗑️"},
+		{orchestration.JobStatusCompleted, "Completed", theme.IconSuccess},
+		{orchestration.JobStatusFailed, "Failed", theme.IconStatusFailed},
+		{orchestration.JobStatusBlocked, "Blocked", theme.IconStatusBlocked},
+		{orchestration.JobStatusNeedsReview, "Needs Review", theme.IconStatusNeedsReview},
+		{orchestration.JobStatusAbandoned, "Abandoned", theme.IconStatusAbandoned},
 	}
 
 	var lines []string
@@ -1614,7 +1618,7 @@ func (m statusTUIModel) renderStatusPicker() string {
 		var style lipgloss.Style
 
 		if i == m.statusPickerCursor {
-			prefix = "▸ "
+			prefix = theme.IconSelect + " "
 			// Use background color for selection highlight, text uses terminal default
 			style = lipgloss.NewStyle().
 				Bold(true).
