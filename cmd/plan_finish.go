@@ -32,6 +32,7 @@ var (
 	planFinishCloseSession    bool
 	planFinishArchive         bool
 	planFinishCleanDevLinks   bool
+	planFinishRebuildBinaries bool
 	planFinishForce           bool
 )
 
@@ -181,6 +182,7 @@ This can include removing the git worktree, deleting the branch, closing tmux se
 	cmd.Flags().BoolVar(&planFinishPruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
 	cmd.Flags().BoolVar(&planFinishCloseSession, "close-session", false, "Close the associated tmux session")
 	cmd.Flags().BoolVar(&planFinishCleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
+	cmd.Flags().BoolVar(&planFinishRebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
 	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
 	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
 
@@ -647,6 +649,26 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			},
 		},
 		{
+			Name: "Clean up dev binaries from worktree",
+			Check: func() (string, error) {
+				// Check if grove dev is available
+				if _, err := exec.LookPath("grove"); err != nil {
+					return "N/A (grove not found)", nil
+				}
+				return color.YellowString("Available"), nil
+			},
+			Action: func() error {
+				// Run 'grove dev prune' to clean up broken links after worktree removal
+				// This will trigger the improved fallback logic in dev_prune.go
+				fmt.Printf("    Pruning broken dev links...\n")
+				if err := executor.Execute("grove", "dev", "prune"); err != nil {
+					// Not critical - just log
+					fmt.Printf("    Note: grove dev prune failed: %v\n", err)
+				}
+				return nil
+			},
+		},
+		{
 			Name: "Delete submodule branches",
 			Check: func() (string, error) {
 				if branchName == "" || gitRoot == "" {
@@ -837,114 +859,31 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			},
 		},
 		{
-			Name: "Clean up dev binaries from worktree",
+			Name: "Rebuild main repo binaries",
 			Check: func() (string, error) {
-				if worktreeName == "" || gitRoot == "" {
+				if gitRoot == "" {
 					return "N/A", nil
 				}
-				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-				// Check if grove dev is available
-				if _, err := exec.LookPath("grove"); err != nil {
-					return "N/A (grove not found)", nil
+				// Check if Makefile exists
+				makefilePath := filepath.Join(gitRoot, "Makefile")
+				if _, err := os.Stat(makefilePath); os.IsNotExist(err) {
+					return "N/A (no Makefile)", nil
 				}
-				// Check if there are any dev links from this worktree
-				output, err := exec.Command("grove", "dev", "list").Output()
-				if err != nil {
-					return "Error checking", nil
-				}
-				if strings.Contains(string(output), worktreePath) {
-					return color.YellowString("Has links"), nil
-				}
-				return "No links", nil
+				return color.YellowString("Available"), nil
 			},
 			Action: func() error {
-				if worktreeName == "" || gitRoot == "" {
+				if gitRoot == "" {
 					return nil
 				}
-				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-				// Get list of all binaries and their links
-				output, err := exec.Command("grove", "dev", "list").Output()
-				if err != nil {
-					return fmt.Errorf("failed to list dev binaries: %w", err)
-				}
-				
-				// Parse output to find links from this worktree
-				lines := strings.Split(string(output), "\n")
-				var currentBinary string
-				linksToRemove := make(map[string][]string) // binary -> aliases
-				
-				for _, line := range lines {
-					line = strings.TrimSpace(line)
-					if strings.HasPrefix(line, "Binary: ") {
-						currentBinary = strings.TrimPrefix(line, "Binary: ")
-					} else if currentBinary != "" && strings.Contains(line, worktreePath) {
-						// Extract alias from line like "  alias (/path/to/worktree)"
-						parts := strings.Fields(line)
-						if len(parts) >= 1 {
-							alias := strings.TrimPrefix(parts[0], "* ")
-							if linksToRemove[currentBinary] == nil {
-								linksToRemove[currentBinary] = []string{}
-							}
-							linksToRemove[currentBinary] = append(linksToRemove[currentBinary], alias)
-						}
-					}
-				}
-				
-				// Remove each link and potentially switch back to main
-				for binary, aliases := range linksToRemove {
-					for _, alias := range aliases {
-						// Check if this is the current link (marked with *)
-						isCurrent := false
-						for _, line := range lines {
-							if strings.HasPrefix(line, "* "+alias+" ") && strings.Contains(line, worktreePath) {
-								isCurrent = true
-								break
-							}
-						}
-						
-						// Remove the link
-						if err := executor.Execute("grove", "dev", "unlink", binary, alias); err != nil {
-							// Log but don't fail - link might already be gone
-							fmt.Printf("    Warning: failed to unlink %s:%s: %v\n", binary, alias, err)
-							continue
-						}
-						
-						// If this was the current link, try to switch back to the main repo version
-						if isCurrent {
-							// Look for a link from the main repo (not in .grove-worktrees)
-							var mainAlias string
-							inBinarySection := false
-							for _, line := range lines {
-								if strings.HasPrefix(line, "Binary: " + binary) {
-									inBinarySection = true
-								} else if strings.HasPrefix(line, "Binary: ") {
-									inBinarySection = false
-								} else if inBinarySection && strings.Contains(line, "(") && strings.Contains(line, ")") {
-									// Extract path from line like "  alias (/path/to/repo)"
-									start := strings.Index(line, "(")
-									end := strings.Index(line, ")")
-									if start != -1 && end != -1 {
-										path := line[start+1:end]
-										// Check if this is a main repo (not a worktree)
-										if !strings.Contains(path, ".grove-worktrees") {
-											parts := strings.Fields(line[:start])
-											if len(parts) >= 1 {
-												mainAlias = strings.TrimPrefix(parts[0], "* ")
-												break
-											}
-										}
-									}
-								}
-							}
-							
-							// Switch to main alias if found
-							if mainAlias != "" {
-								if err := executor.Execute("grove", "dev", "use", binary, mainAlias); err != nil {
-									fmt.Printf("    Warning: failed to switch %s back to %s: %v\n", binary, mainAlias, err)
-								}
-							}
-						}
-					}
+				fmt.Printf("    Building binaries in main repository...\n")
+				buildCmd := exec.Command("make", "build")
+				buildCmd.Dir = gitRoot
+				buildCmd.Stdout = os.Stdout
+				buildCmd.Stderr = os.Stderr
+				if err := buildCmd.Run(); err != nil {
+					fmt.Printf("    Warning: build failed: %v\n", err)
+					// Don't fail the whole cleanup if build fails
+					return nil
 				}
 				return nil
 			},
@@ -1046,7 +985,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine which items to enable
-	anyExplicitFlags := planFinishDeleteBranch || planFinishDeleteRemote || planFinishPruneWorktree || planFinishCloseSession || planFinishCleanDevLinks || planFinishArchive || planFinishForce
+	anyExplicitFlags := planFinishDeleteBranch || planFinishDeleteRemote || planFinishPruneWorktree || planFinishCloseSession || planFinishCleanDevLinks || planFinishRebuildBinaries || planFinishArchive || planFinishForce
 	if planFinishYes {
 		for _, item := range items {
 			item.IsEnabled = item.IsAvailable
@@ -1056,12 +995,13 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		items[0].IsEnabled = items[0].IsAvailable                                          // Merge/fast-forward submodules to main
 		items[1].IsEnabled = items[1].IsAvailable                                          // Mark plan as finished
 		items[2].IsEnabled = planFinishPruneWorktree && items[2].IsAvailable              // Prune git worktree
-		items[3].IsEnabled = planFinishDeleteBranch && items[3].IsAvailable               // Delete submodule branches
-		items[4].IsEnabled = planFinishDeleteBranch && items[4].IsAvailable               // Delete local git branch
-		items[5].IsEnabled = planFinishDeleteRemote && items[5].IsAvailable               // Delete remote git branch
-		items[6].IsEnabled = planFinishCloseSession && items[6].IsAvailable               // Close tmux session
-		items[7].IsEnabled = planFinishCleanDevLinks && items[7].IsAvailable              // Clean up dev binaries
-		items[8].IsEnabled = planFinishArchive && items[8].IsAvailable                    // Archive plan directory
+		items[3].IsEnabled = planFinishCleanDevLinks && items[3].IsAvailable              // Clean up dev binaries
+		items[4].IsEnabled = planFinishDeleteBranch && items[4].IsAvailable               // Delete submodule branches
+		items[5].IsEnabled = planFinishDeleteBranch && items[5].IsAvailable               // Delete local git branch
+		items[6].IsEnabled = planFinishDeleteRemote && items[6].IsAvailable               // Delete remote git branch
+		items[7].IsEnabled = planFinishCloseSession && items[7].IsAvailable               // Close tmux session
+		items[8].IsEnabled = planFinishRebuildBinaries && items[8].IsAvailable            // Rebuild main repo binaries
+		items[9].IsEnabled = planFinishArchive && items[9].IsAvailable                    // Archive plan directory
 	} else {
 		// Interactive TUI mode
 		err := runFinishTUI(planName, items, branchIsMerged, branchExists)

@@ -252,16 +252,19 @@ func (m finishTUIModel) View() string {
 
 	// Styles
 	focusedStyle := theme.DefaultTheme.Selected
-	dimStyle := theme.DefaultTheme.Muted
 	enabledCheckboxStyle := theme.DefaultTheme.Success.Bold(true)
-	disabledCheckboxStyle := theme.DefaultTheme.Muted
-	
-	// List items
+
+	// List items (only show available items)
 	for i, item := range m.items {
+		// Skip items that aren't available
+		if !item.IsAvailable {
+			continue
+		}
+
 		var line strings.Builder
 
 		// Cursor indicator
-		if m.cursor == i && item.IsAvailable {
+		if m.cursor == i {
 			line.WriteString(focusedStyle.Render("> "))
 		} else {
 			line.WriteString("  ")
@@ -270,10 +273,8 @@ func (m finishTUIModel) View() string {
 		// Checkbox
 		if item.IsEnabled {
 			line.WriteString(enabledCheckboxStyle.Render("[x] "))
-		} else if item.IsAvailable {
-			line.WriteString("[ ] ")
 		} else {
-			line.WriteString(disabledCheckboxStyle.Render("[ ] "))
+			line.WriteString("[ ] ")
 		}
 
 		// Item name with proper width
@@ -282,19 +283,17 @@ func (m finishTUIModel) View() string {
 		if len(itemName) > nameWidth {
 			itemName = itemName[:nameWidth-3] + "..."
 		}
-		
+
 		// Format name with proper alignment
 		nameFormatted := fmt.Sprintf("%-*s", nameWidth, itemName)
-		
+
 		// Status with appropriate color
 		statusStyle := getStatusStyle(item.Status)
 		statusFormatted := statusStyle.Render(fmt.Sprintf("(%s)", item.Status))
 
-		// Apply styling based on focus and availability
-		if m.cursor == i && item.IsAvailable {
+		// Apply styling based on focus
+		if m.cursor == i {
 			nameFormatted = focusedStyle.Render(nameFormatted)
-		} else if !item.IsAvailable {
-			nameFormatted = dimStyle.Render(nameFormatted)
 		}
 
 		line.WriteString(nameFormatted)
