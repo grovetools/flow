@@ -207,7 +207,7 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 	}
 }
 
-func initialModel(plan *orchestration.Plan) tuiModel {
+func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	m := tuiModel{
 		plan: plan,
 		keys: addKeys,
@@ -246,9 +246,20 @@ func initialModel(plan *orchestration.Plan) tuiModel {
 
 	// 3. Dependencies Input (List with checkboxes)
 	m.selectedDeps = make(map[string]bool)
+
+	// Create a set for efficient lookup of initial dependencies.
+	initialDepsSet := make(map[string]bool)
+	for _, dep := range initialDeps {
+		initialDepsSet[dep] = true
+	}
+
 	depItems := make([]list.Item, 0, len(plan.Jobs))
 	for _, job := range plan.Jobs {
 		depItems = append(depItems, dependencyItem{job: job})
+		// Pre-select the job if its filename is in the initial dependencies set.
+		if initialDepsSet[job.Filename] {
+			m.selectedDeps[job.ID] = true
+		}
 	}
 	m.depList = list.New(depItems, dependencyDelegate{selectedDeps: &m.selectedDeps}, 45, 7)
 	m.depList.Title = ""

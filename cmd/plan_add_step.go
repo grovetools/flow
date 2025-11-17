@@ -123,7 +123,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
 			return nil, fmt.Errorf("interactive mode requires a terminal (TTY)")
 		}
-		return interactiveJobCreation(plan, cmd.Worktree)
+		return interactiveJobCreation(plan, cmd)
 	}
 
 	// Validate non-interactive inputs
@@ -336,12 +336,12 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	return job, nil
 }
 
-func interactiveJobCreation(plan *orchestration.Plan, explicitWorktree string) (*orchestration.Job, error) {
+func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orchestration.Job, error) {
 	// Create the initial TUI model
-	model := initialModel(plan)
+	model := initialModel(plan, cmd.DependsOn)
 
 	// Note: worktree is no longer configurable in the TUI
-	// explicitWorktree parameter is ignored
+	// The explicitWorktree parameter is now part of the cmd struct and is ignored.
 
 	// Run the TUI
 	p := tea.NewProgram(model)
