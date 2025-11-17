@@ -35,6 +35,8 @@ type jobTypeInfo struct {
 func NewPlanJobsCmd() *cobra.Command {
 	// Add subcommands
 	planJobsCmd.AddCommand(planJobsListCmd)
+	planJobsCmd.AddCommand(planJobsRenameCmd)
+	planJobsCmd.AddCommand(planJobsUpdateDepsCmd)
 	return planJobsCmd
 }
 

@@ -146,32 +146,97 @@ func updateNodeValue(node *yaml.Node, key string, value interface{}) {
 	if node.Kind != yaml.MappingNode {
 		return
 	}
-	
+
 	// Iterate through key-value pairs
 	for i := 0; i < len(node.Content)-1; i += 2 {
 		keyNode := node.Content[i]
 		if keyNode.Value == key {
 			// Update the value node
 			valueNode := node.Content[i+1]
-			valueNode.Value = fmt.Sprint(value)
-			valueNode.Tag = resolveYAMLTag(value)
+
+			// Handle different types of values
+			switch v := value.(type) {
+			case []string:
+				// Handle string arrays
+				valueNode.Kind = yaml.SequenceNode
+				valueNode.Tag = "!!seq"
+				valueNode.Value = ""
+				valueNode.Content = make([]*yaml.Node, len(v))
+				for j, item := range v {
+					valueNode.Content[j] = &yaml.Node{
+						Kind:  yaml.ScalarNode,
+						Value: item,
+						Tag:   "!!str",
+					}
+				}
+			case []interface{}:
+				// Handle generic arrays
+				valueNode.Kind = yaml.SequenceNode
+				valueNode.Tag = "!!seq"
+				valueNode.Value = ""
+				valueNode.Content = make([]*yaml.Node, len(v))
+				for j, item := range v {
+					valueNode.Content[j] = &yaml.Node{
+						Kind:  yaml.ScalarNode,
+						Value: fmt.Sprint(item),
+						Tag:   resolveYAMLTag(item),
+					}
+				}
+			default:
+				// Handle scalar values
+				valueNode.Kind = yaml.ScalarNode
+				valueNode.Value = fmt.Sprint(value)
+				valueNode.Tag = resolveYAMLTag(value)
+			}
 			return
 		}
 	}
-	
+
 	// Key not found, add it
 	keyNode := &yaml.Node{
 		Kind:  yaml.ScalarNode,
 		Value: key,
 		Tag:   "!!str",
 	}
-	
-	valueNode := &yaml.Node{
-		Kind:  yaml.ScalarNode,
-		Value: fmt.Sprint(value),
-		Tag:   resolveYAMLTag(value),
+
+	var valueNode *yaml.Node
+
+	// Handle different types of values for new keys
+	switch v := value.(type) {
+	case []string:
+		valueNode = &yaml.Node{
+			Kind:    yaml.SequenceNode,
+			Tag:     "!!seq",
+			Content: make([]*yaml.Node, len(v)),
+		}
+		for j, item := range v {
+			valueNode.Content[j] = &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Value: item,
+				Tag:   "!!str",
+			}
+		}
+	case []interface{}:
+		valueNode = &yaml.Node{
+			Kind:    yaml.SequenceNode,
+			Tag:     "!!seq",
+			Content: make([]*yaml.Node, len(v)),
+		}
+		for j, item := range v {
+			valueNode.Content[j] = &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Value: fmt.Sprint(item),
+				Tag:   resolveYAMLTag(item),
+			}
+		}
+	default:
+		valueNode = &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Value: fmt.Sprint(value),
+			Tag:   resolveYAMLTag(value),
+		}
 	}
-	
+
 	node.Content = append(node.Content, keyNode, valueNode)
 }
 

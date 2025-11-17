@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
@@ -34,6 +35,8 @@ type statusTUIKeyMap struct {
 	SetStatus     key.Binding
 	AddJob        key.Binding
 	Implement     key.Binding
+	Rename        key.Binding
+	EditDeps      key.Binding
 	ToggleSummaries key.Binding
 	ToggleView    key.Binding
 	GoToTop       key.Binding
@@ -88,6 +91,14 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 		Implement: key.NewBinding(
 			key.WithKeys("i"),
 			key.WithHelp("i", "implement selected"),
+		),
+		Rename: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", "rename job"),
+		),
+		EditDeps: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", "edit dependencies"),
 		),
 		ToggleSummaries: key.NewBinding(
 			key.WithKeys("s"),
@@ -152,6 +163,8 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.AddJob,
 			k.AddXmlPlan,
 			k.Implement,
+			k.Rename,
+			k.EditDeps,
 			k.Archive,
 			k.Help,
 			k.Quit,
@@ -194,6 +207,17 @@ type statusTUIModel struct {
 	waitingForG   bool      // Track if we're waiting for second 'g' in 'gg' sequence
 	cursorVisible bool      // Track cursor visibility for blinking animation
 	viewMode      viewMode  // Current view mode (table or tree)
+	renaming       bool
+	renameInput    textinput.Model
+	renameJobIndex int
+	editingDeps      bool
+	editDepsJobIndex int
+	editDepsSelected map[string]bool // Track which jobs are selected as dependencies
+	creatingJob      bool
+	createJobInput   textinput.Model
+	createJobType    string // "xml" or "impl"
+	createJobBaseJob *orchestration.Job
+	createJobDeps    []*orchestration.Job // For multi-select case
 }
 
 
@@ -371,8 +395,25 @@ type editFileAndQuitMsg struct{ filePath string }
 type editFileInTmuxMsg struct{ err error }
 type tickMsg time.Time
 type refreshTickMsg time.Time
+type renameCompleteMsg struct{ err error }
+type updateDepsCompleteMsg struct{ err error }
+type createJobCompleteMsg struct{ err error }
 
 const refreshInterval = 2 * time.Second
+
+func renameJobCmd(plan *orchestration.Plan, job *orchestration.Job, newTitle string) tea.Cmd {
+	return func() tea.Msg {
+		err := orchestration.RenameJob(plan, job, newTitle)
+		return renameCompleteMsg{err: err}
+	}
+}
+
+func updateDepsCmd(job *orchestration.Job, newDeps []string) tea.Cmd {
+	return func() tea.Msg {
+		err := orchestration.UpdateJobDependencies(job, newDeps)
+		return updateDepsCompleteMsg{err: err}
+	}
+}
 
 // blink returns a command that sends a tick message every 500ms for cursor blinking
 func blink() tea.Cmd {
@@ -405,7 +446,33 @@ func refreshPlan(planDir string) tea.Cmd {
 
 // Update handles messages
 func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
+	case renameCompleteMsg:
+		if msg.err != nil {
+			m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error renaming job: %v", msg.err))
+		} else {
+			m.statusSummary = theme.DefaultTheme.Success.Render("✓ Job renamed successfully.")
+		}
+		return m, refreshPlan(m.planDir)
+
+	case updateDepsCompleteMsg:
+		if msg.err != nil {
+			m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error updating dependencies: %v", msg.err))
+		} else {
+			m.statusSummary = theme.DefaultTheme.Success.Render("✓ Dependencies updated successfully.")
+		}
+		return m, refreshPlan(m.planDir)
+
+	case createJobCompleteMsg:
+		if msg.err != nil {
+			m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error creating job: %v", msg.err))
+		} else {
+			m.statusSummary = theme.DefaultTheme.Success.Render("✓ Job created successfully.")
+		}
+		return m, refreshPlan(m.planDir)
+
 	case editFileInTmuxMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -490,6 +557,114 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle renaming mode
+		if m.renaming {
+			switch msg.String() {
+			case "enter":
+				if m.renameJobIndex >= 0 && m.renameJobIndex < len(m.jobs) {
+					jobToRename := m.jobs[m.renameJobIndex]
+					newTitle := m.renameInput.Value()
+					m.renaming = false
+					m.statusSummary = "Renaming job..."
+					return m, renameJobCmd(m.plan, jobToRename, newTitle)
+				}
+			case "esc":
+				m.renaming = false
+				m.statusSummary = ""
+				return m, nil
+			}
+			m.renameInput, cmd = m.renameInput.Update(msg)
+			return m, cmd
+		}
+
+		// Handle job creation mode
+		if m.creatingJob {
+			switch msg.String() {
+			case "enter":
+				customTitle := m.createJobInput.Value()
+				// If empty, use the placeholder as the title
+				if customTitle == "" {
+					customTitle = m.createJobInput.Placeholder
+				}
+				m.creatingJob = false
+				m.statusSummary = "Creating job..."
+
+				// Create the appropriate job type
+				if m.createJobType == "xml" {
+					if len(m.createJobDeps) > 0 {
+						return m, createXmlPlanJobWithTitle(m.plan, m.createJobDeps, customTitle)
+					}
+					return m, createXmlPlanJobWithTitle(m.plan, []*orchestration.Job{m.createJobBaseJob}, customTitle)
+				} else if m.createJobType == "impl" {
+					if len(m.createJobDeps) > 0 {
+						return m, createImplementationJobWithTitle(m.plan, m.createJobDeps, customTitle)
+					}
+					return m, createImplementationJobWithTitle(m.plan, []*orchestration.Job{m.createJobBaseJob}, customTitle)
+				}
+			case "esc":
+				m.creatingJob = false
+				m.createJobBaseJob = nil
+				m.createJobDeps = nil
+				m.statusSummary = ""
+				return m, nil
+			}
+			m.createJobInput, cmd = m.createJobInput.Update(msg)
+			return m, cmd
+		}
+
+		// Handle dependency editing mode
+		if m.editingDeps {
+			switch msg.String() {
+			case "enter":
+				if m.editDepsJobIndex >= 0 && m.editDepsJobIndex < len(m.jobs) {
+					jobToEdit := m.jobs[m.editDepsJobIndex]
+					// Build list of selected dependencies (filenames)
+					var newDeps []string
+					for _, job := range m.jobs {
+						if m.editDepsSelected[job.ID] {
+							newDeps = append(newDeps, job.Filename)
+						}
+					}
+					m.editingDeps = false
+					m.editDepsSelected = nil
+					m.statusSummary = "Updating dependencies..."
+					return m, updateDepsCmd(jobToEdit, newDeps)
+				}
+			case "esc":
+				m.editingDeps = false
+				m.editDepsSelected = nil
+				m.statusSummary = ""
+				return m, nil
+			case " ":
+				// Toggle selection
+				if m.cursor >= 0 && m.cursor < len(m.jobs) {
+					job := m.jobs[m.cursor]
+					// Don't allow selecting the job being edited
+					if m.cursor != m.editDepsJobIndex {
+						if m.editDepsSelected[job.ID] {
+							delete(m.editDepsSelected, job.ID)
+						} else {
+							m.editDepsSelected[job.ID] = true
+						}
+					}
+				}
+				return m, nil
+			case "up", "k":
+				if m.cursor > 0 {
+					m.cursor--
+					m.adjustScrollOffset()
+				}
+				return m, nil
+			case "down", "j":
+				if m.cursor < len(m.jobs)-1 {
+					m.cursor++
+					m.adjustScrollOffset()
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Handle status picker first
 		if m.showStatusPicker {
 			switch msg.String() {
@@ -702,10 +877,36 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-				return m, createXmlPlanJobWithDeps(m.plan, selectedJobs)
+				// Show dialog to edit job title
+				m.creatingJob = true
+				m.createJobType = "xml"
+				m.createJobDeps = selectedJobs
+				defaultTitle := fmt.Sprintf("xml-plan-%s", selectedJobs[0].Title)
+
+				ti := textinput.New()
+				ti.Placeholder = defaultTitle
+				ti.PlaceholderStyle = theme.DefaultTheme.Muted
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.createJobInput = ti
+				return m, textinput.Blink
 			} else if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
-				return m, createXmlPlanJob(m.plan, job)
+				// Show dialog to edit job title
+				m.creatingJob = true
+				m.createJobType = "xml"
+				m.createJobBaseJob = job
+				defaultTitle := fmt.Sprintf("xml-plan-%s", job.Title)
+
+				ti := textinput.New()
+				ti.Placeholder = defaultTitle
+				ti.PlaceholderStyle = theme.DefaultTheme.Muted
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.createJobInput = ti
+				return m, textinput.Blink
 			}
 
 		case key.Matches(msg, m.keyMap.AddJob):
@@ -737,10 +938,71 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-				return m, createImplementationJobWithDeps(m.plan, selectedJobs)
+				// Show dialog to edit job title
+				m.creatingJob = true
+				m.createJobType = "impl"
+				m.createJobDeps = selectedJobs
+				defaultTitle := fmt.Sprintf("impl-%s", selectedJobs[0].Title)
+
+				ti := textinput.New()
+				ti.Placeholder = defaultTitle
+				ti.PlaceholderStyle = theme.DefaultTheme.Muted
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.createJobInput = ti
+				return m, textinput.Blink
 			} else if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
-				return m, createImplementationJob(m.plan, job)
+				// Show dialog to edit job title
+				m.creatingJob = true
+				m.createJobType = "impl"
+				m.createJobBaseJob = job
+				defaultTitle := fmt.Sprintf("impl-%s", job.Title)
+
+				ti := textinput.New()
+				ti.Placeholder = defaultTitle
+				ti.PlaceholderStyle = theme.DefaultTheme.Muted
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.createJobInput = ti
+				return m, textinput.Blink
+			}
+
+		case key.Matches(msg, m.keyMap.Rename):
+			if m.cursor >= 0 && m.cursor < len(m.jobs) {
+				m.renaming = true
+				m.renameJobIndex = m.cursor
+				jobToRename := m.jobs[m.cursor]
+
+				ti := textinput.New()
+				ti.SetValue(jobToRename.Title)
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.renameInput = ti
+				return m, textinput.Blink
+			}
+
+		case key.Matches(msg, m.keyMap.EditDeps):
+			if m.cursor >= 0 && m.cursor < len(m.jobs) {
+				m.editingDeps = true
+				m.editDepsJobIndex = m.cursor
+				jobToEdit := m.jobs[m.cursor]
+
+				// Initialize selection with current dependencies
+				m.editDepsSelected = make(map[string]bool)
+				for _, depFilename := range jobToEdit.DependsOn {
+					// Find job by filename and mark as selected
+					for _, job := range m.jobs {
+						if job.Filename == depFilename {
+							m.editDepsSelected[job.ID] = true
+							break
+						}
+					}
+				}
+				return m, nil
 			}
 
 		case key.Matches(msg, m.keyMap.ToggleSummaries):
@@ -762,6 +1024,21 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m statusTUIModel) View() string {
 	if m.err != nil {
 		return fmt.Sprintf("Error: %v\n", m.err)
+	}
+
+	// If renaming, show the rename dialog and return
+	if m.renaming {
+		return m.renderRenameDialog()
+	}
+
+	// If creating a job, show the creation dialog
+	if m.creatingJob {
+		return m.renderJobCreationDialog()
+	}
+
+	// If editing dependencies, show the edit deps view
+	if m.editingDeps {
+		return m.renderEditDepsView()
 	}
 
 	// Show status picker if active
@@ -1371,6 +1648,136 @@ func (m statusTUIModel) renderStatusPicker() string {
 		Render(box)
 }
 
+func (m statusTUIModel) renderRenameDialog() string {
+	if m.renameJobIndex < 0 || m.renameJobIndex >= len(m.jobs) {
+		return "Error: Invalid job selected for renaming."
+	}
+	job := m.jobs[m.renameJobIndex]
+
+	var b strings.Builder
+	b.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Rename Job: %s", job.Filename)))
+	b.WriteString("\n\nEnter new title:\n")
+	b.WriteString(m.renameInput.View())
+	b.WriteString("\n\n")
+	b.WriteString(theme.DefaultTheme.Muted.Render("Press Enter to save, Esc to cancel"))
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Orange).
+		Padding(1, 2).
+		Render(b.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m statusTUIModel) renderJobCreationDialog() string {
+	var jobTypeName string
+	if m.createJobType == "xml" {
+		jobTypeName = "XML Plan Job"
+	} else {
+		jobTypeName = "Implementation Job"
+	}
+
+	var b strings.Builder
+	b.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Create %s", jobTypeName)))
+	b.WriteString("\n\nEnter job title:\n")
+	b.WriteString(m.createJobInput.View())
+	b.WriteString("\n\n")
+	b.WriteString(theme.DefaultTheme.Muted.Render("Press Enter to create, Esc to cancel"))
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Orange).
+		Padding(1, 2).
+		Render(b.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m statusTUIModel) renderEditDepsView() string {
+	if m.editDepsJobIndex < 0 || m.editDepsJobIndex >= len(m.jobs) {
+		return "Error: Invalid job selected for editing dependencies."
+	}
+	editJob := m.jobs[m.editDepsJobIndex]
+
+	var b strings.Builder
+
+	// Header
+	headerText := theme.DefaultTheme.Header.Render(fmt.Sprintf("Edit Dependencies: %s", editJob.Title))
+	b.WriteString(headerText)
+	b.WriteString("\n\n")
+
+	// Instructions
+	instructions := theme.DefaultTheme.Muted.Render("Use ↑/↓ or j/k to navigate • Space to select/deselect • Enter to save • Esc to cancel")
+	b.WriteString(instructions)
+	b.WriteString("\n\n")
+
+	// Calculate visible jobs
+	visibleJobs := m.getVisibleJobs()
+
+	// Render job list with selection indicators
+	for i, job := range visibleJobs {
+		globalIndex := m.scrollOffset + i
+
+		// Build line
+		var line strings.Builder
+
+		// Cursor indicator
+		if globalIndex == m.cursor {
+			line.WriteString(theme.DefaultTheme.Highlight.Render("▶ "))
+		} else {
+			line.WriteString("  ")
+		}
+
+		// Selection checkbox
+		var checkbox string
+		if m.editDepsSelected[job.ID] {
+			checkbox = theme.DefaultTheme.Success.Render("[x]")
+		} else {
+			checkbox = "[ ]"
+		}
+		line.WriteString(checkbox)
+		line.WriteString(" ")
+
+		// Job info - don't allow selecting self as dependency
+		if globalIndex == m.editDepsJobIndex {
+			line.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("%s (self)", job.Filename)))
+		} else {
+			line.WriteString(job.Filename)
+		}
+
+		// Status icon
+		statusIcon := m.getStatusIcon(job.Status)
+		line.WriteString(" ")
+		line.WriteString(statusIcon)
+
+		b.WriteString(line.String())
+		b.WriteString("\n")
+	}
+
+	// Scroll indicators
+	if len(m.jobs) > 0 {
+		visibleLines := m.getVisibleJobCount()
+		hasMore := m.scrollOffset+visibleLines < len(m.jobs)
+		hasLess := m.scrollOffset > 0
+
+		if hasLess || hasMore {
+			b.WriteString("\n")
+			indicator := ""
+			if hasLess {
+				indicator += "↑ "
+			}
+			indicator += fmt.Sprintf("[%d/%d]", m.cursor+1, len(m.jobs))
+			if hasMore {
+				indicator += " ↓"
+			}
+			b.WriteString(theme.DefaultTheme.Muted.Render(indicator))
+		}
+	}
+
+	return lipgloss.NewStyle().Margin(1, 2).Render(b.String())
+}
+
 func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 	// Build the command
 	args := []string{"plan", "add", planDir, "-i"}
@@ -1554,6 +1961,93 @@ func createImplementationJobWithDeps(plan *orchestration.Plan, selectedJobs []*o
 
 		// Return refresh message to update the TUI
 		return refreshMsg{}
+	}
+}
+
+// createXmlPlanJobWithTitle creates an XML plan job with a custom title
+func createXmlPlanJobWithTitle(plan *orchestration.Plan, selectedJobs []*orchestration.Job, customTitle string) tea.Cmd {
+	return func() tea.Msg {
+		if len(selectedJobs) == 0 {
+			return fmt.Errorf("no jobs selected")
+		}
+
+		// Generate a unique ID for the new job
+		xmlID := orchestration.GenerateUniqueJobID(plan, customTitle)
+
+		// Collect all dependency IDs
+		var depIDs []string
+		for _, job := range selectedJobs {
+			depIDs = append(depIDs, job.ID)
+		}
+
+		// Use the worktree from the first selected job
+		worktree := selectedJobs[0].Worktree
+
+		// Create the new job
+		newJob := &orchestration.Job{
+			ID:                  xmlID,
+			Title:               customTitle,
+			Type:                orchestration.JobTypeOneshot,
+			Status:              orchestration.JobStatusPending,
+			DependsOn:           depIDs,
+			Worktree:            worktree,
+			Template:            "agent-xml",
+			PromptBody:          "generate a detailed plan",
+			PrependDependencies: true,
+			Output: orchestration.OutputConfig{
+				Type: "file",
+			},
+		}
+
+		// Add the job to the plan
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return createJobCompleteMsg{err: err}
+		}
+
+		return createJobCompleteMsg{err: nil}
+	}
+}
+
+// createImplementationJobWithTitle creates an implementation job with a custom title
+func createImplementationJobWithTitle(plan *orchestration.Plan, selectedJobs []*orchestration.Job, customTitle string) tea.Cmd {
+	return func() tea.Msg {
+		if len(selectedJobs) == 0 {
+			return fmt.Errorf("no jobs selected")
+		}
+
+		// Generate a unique ID for the new job
+		implID := orchestration.GenerateUniqueJobID(plan, customTitle)
+
+		// Collect all dependency IDs
+		var depIDs []string
+		for _, job := range selectedJobs {
+			depIDs = append(depIDs, job.ID)
+		}
+
+		// Use the worktree from the first selected job
+		worktree := selectedJobs[0].Worktree
+
+		// Create the new job
+		newJob := &orchestration.Job{
+			ID:        implID,
+			Title:     customTitle,
+			Type:      orchestration.JobTypeInteractiveAgent,
+			Status:    orchestration.JobStatusPending,
+			DependsOn: depIDs,
+			Worktree:  worktree,
+			Output: orchestration.OutputConfig{
+				Type: "file",
+			},
+		}
+
+		// Add the job to the plan
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return createJobCompleteMsg{err: err}
+		}
+
+		return createJobCompleteMsg{err: nil}
 	}
 }
 
