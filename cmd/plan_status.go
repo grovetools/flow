@@ -315,7 +315,7 @@ func formatStatusTree(plan *orchestration.Plan, graph *orchestration.DependencyG
 	printed := make(map[string]bool)
 
 	// Print directory header
-	fmt.Fprintf(writer, "%s %s\n", "📁", renderInfo(plan.Name))
+	fmt.Fprintf(writer, "%s %s\n", theme.IconProject, renderInfo(plan.Name))
 
 	// Print each root and its dependents
 	for i, root := range roots {
@@ -389,7 +389,7 @@ func printJobTree(w io.Writer, job *orchestration.Job, prefix string, isLast boo
 			}
 		}
 		if len(otherDeps) > 0 {
-			jobInfo += fmt.Sprintf(" ⚠️  Also: %s", strings.Join(otherDeps, ", "))
+			jobInfo += fmt.Sprintf(" %s Also: %s", theme.IconWarning, strings.Join(otherDeps, ", "))
 		}
 	}
 

@@ -366,7 +366,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %s", msg.err.Error()))
 		} else {
-			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("✓ %s", msg.message))
+			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s %s", theme.IconSuccess, msg.message))
 		}
 		return m, nil
 
@@ -1082,7 +1082,7 @@ func (m planListTUIModel) renderPlanTable() string {
 // formatStatusWithEmoji formats the status text with emoji indicators like grove ws plans list
 func (m planListTUIModel) formatStatusWithEmoji(plan PlanListItem) string {
 	if plan.StatusParts == nil || len(plan.StatusParts) == 0 {
-		return "⏳ no jobs"
+		return theme.IconPending + " no jobs"
 	}
 
 	// Count different status types

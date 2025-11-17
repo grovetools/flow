@@ -453,7 +453,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error renaming job: %v", msg.err))
 		} else {
-			m.statusSummary = theme.DefaultTheme.Success.Render("✓ Job renamed successfully.")
+			m.statusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job renamed successfully.")
 		}
 		return m, refreshPlan(m.planDir)
 
@@ -461,7 +461,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error updating dependencies: %v", msg.err))
 		} else {
-			m.statusSummary = theme.DefaultTheme.Success.Render("✓ Dependencies updated successfully.")
+			m.statusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Dependencies updated successfully.")
 		}
 		return m, refreshPlan(m.planDir)
 
@@ -469,7 +469,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error creating job: %v", msg.err))
 		} else {
-			m.statusSummary = theme.DefaultTheme.Success.Render("✓ Job created successfully.")
+			m.statusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job created successfully.")
 		}
 		return m, refreshPlan(m.planDir)
 
@@ -1728,7 +1728,7 @@ func (m statusTUIModel) renderEditDepsView() string {
 
 		// Cursor indicator
 		if globalIndex == m.cursor {
-			line.WriteString(theme.DefaultTheme.Highlight.Render("▶ "))
+			line.WriteString(theme.DefaultTheme.Highlight.Render(theme.IconSelect + " "))
 		} else {
 			line.WriteString("  ")
 		}
