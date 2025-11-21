@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mattsolo1/grove-flow/pkg/orchestration/job",
+  "$defs": {
+    "CommitConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled",
+        "message"
+      ]
+    },
+    "JobMetadata": {
+      "properties": {
+        "execution_time": {
+          "type": "integer"
+        },
+        "retry_count": {
+          "type": "integer"
+        },
+        "last_error": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "execution_time",
+        "retry_count",
+        "last_error"
+      ]
+    },
+    "OutputConfig": {
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "commit": {
+          "$ref": "#/$defs/CommitConfig"
+        }
+      },
+      "type": "object",
+      "required": [
+        "type",
+        "message",
+        "path",
+        "commit"
+      ]
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "depends_on": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "prompt_source": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "source_block": {
+      "type": "string"
+    },
+    "template": {
+      "type": "string"
+    },
+    "repository": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "worktree": {
+      "type": "string"
+    },
+    "target_agent_container": {
+      "type": "string"
+    },
+    "agent_continue": {
+      "type": "boolean"
+    },
+    "prepend_dependencies": {
+      "type": "boolean"
+    },
+    "output": {
+      "$ref": "#/$defs/OutputConfig"
+    },
+    "on_complete_status": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "source_plan": {
+      "type": "string"
+    },
+    "recipe_name": {
+      "type": "string"
+    },
+    "rules_file": {
+      "type": "string"
+    },
+    "note_ref": {
+      "type": "string"
+    },
+    "Filename": {
+      "type": "string"
+    },
+    "FilePath": {
+      "type": "string"
+    },
+    "PromptBody": {
+      "type": "string"
+    },
+    "Dependencies": {
+      "items": {
+        "$ref": "#/$defs/Job"
+      },
+      "type": "array"
+    },
+    "StartTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "EndTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "Metadata": {
+      "$ref": "#/$defs/JobMetadata"
+    }
+  },
+  "type": "object",
+  "title": "Grove Flow Job",
+  "description": "Schema for Grove Flow job frontmatter in markdown files."
+}

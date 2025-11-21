@@ -7,6 +7,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/mattsolo1/grove-flow/cmd"
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
 func main() {
@@ -34,4 +35,24 @@ func main() {
 	}
 
 	log.Printf("Successfully generated flow schema at flow.schema.json")
+
+	// Generate schema for Job frontmatter
+	jobSchema := r.Reflect(&orchestration.Job{})
+	jobSchema.Title = "Grove Flow Job"
+	jobSchema.Description = "Schema for Grove Flow job frontmatter in markdown files."
+
+	// Make all fields optional - Job frontmatter should not require all fields
+	jobSchema.Required = nil
+
+	jobData, err := json.MarshalIndent(jobSchema, "", "  ")
+	if err != nil {
+		log.Fatalf("Error marshaling job schema: %v", err)
+	}
+
+	// Write to the package root
+	if err := os.WriteFile("flow-job.schema.json", jobData, 0644); err != nil {
+		log.Fatalf("Error writing job schema file: %v", err)
+	}
+
+	log.Printf("Successfully generated job schema at flow-job.schema.json")
 }
