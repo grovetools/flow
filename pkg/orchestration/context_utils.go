@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 )
 
 // ScopeToSubProject adjusts a working directory to point to a sub-project
@@ -25,6 +26,28 @@ func ScopeToSubProject(workDir string, job *Job) string {
 
 	// Sub-project directory doesn't exist, return original workDir
 	return workDir
+}
+
+// GetProjectRootSafe returns the project root using the workspace model.
+// It supports both Grove projects (with grove.yml) and non-Grove repos.
+// Falls back to git root or current directory if workspace discovery fails.
+func GetProjectRootSafe(startPath string) string {
+	// Try workspace discovery first - handles all workspace types including non-Grove repos
+	if node, err := workspace.GetProjectByPath(startPath); err == nil {
+		return node.Path
+	}
+
+	// Fallback to git root
+	if root, err := git.GetGitRoot(startPath); err == nil {
+		return root
+	}
+
+	// Last resort: use current directory
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+
+	return startPath
 }
 
 // GetProjectRoot attempts to find the project root directory by searching upwards for a grove.yml file.

@@ -354,16 +354,8 @@ func buildPromptFromSources(job *Job, plan *Plan) (string, error) {
 		systemMessage.WriteString("\n\n")
 		systemMessage.WriteString("The following files are relevant to your task. Please read their contents before proceeding:\n\n")
 
-		// Get project root for resolving paths - with fallbacks for projects without grove.yml
-		var projectRoot string
-		if root, err := GetProjectRoot(); err == nil {
-			projectRoot = root
-		} else if root, err := GetGitRootSafe("."); err == nil {
-			projectRoot = root
-		} else {
-			// Last resort: use current directory
-			projectRoot, _ = os.Getwd()
-		}
+		// Get project root for resolving paths - uses workspace discovery with fallbacks
+		projectRoot := GetProjectRootSafe(".")
 
 		// Collect paths from prompt sources
 		for _, source := range job.PromptSource {
