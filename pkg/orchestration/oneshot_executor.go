@@ -437,10 +437,17 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			parts = append(parts, fmt.Sprintf("\n<working_directory>%s</working_directory>", worktreePath))
 		}
 
-		// Get project root for resolving paths
-		projectRoot, err := GetProjectRoot()
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("failed to get project root: %w", err)
+		// Get project root for resolving paths - use worktreePath if available, fallback to GetProjectRoot
+		var projectRoot string
+		if worktreePath != "" {
+			projectRoot = worktreePath
+		} else if root, err := GetProjectRoot(); err == nil {
+			projectRoot = root
+		} else if root, err := GetGitRootSafe("."); err == nil {
+			projectRoot = root
+		} else {
+			// Last resort: use current directory
+			projectRoot, _ = os.Getwd()
 		}
 
 		// Resolve prompt source file paths (without reading content)
