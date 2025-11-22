@@ -69,6 +69,9 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		workDir = ResolveWorkingDirectory(plan)
 	}
 
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	workDir = ScopeToSubProject(workDir, job)
+
 	e.log.WithField("workdir", workDir).Debug("Working directory resolved")
 
 	// Generate context if a rules file is specified

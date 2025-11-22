@@ -174,6 +174,9 @@ func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Jo
 		workDir = gitRoot
 	}
 
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	workDir = ScopeToSubProject(workDir, job)
+
 	return workDir, nil
 }
 

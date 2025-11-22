@@ -89,6 +89,9 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 	}
 
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	workDir = ScopeToSubProject(workDir, job)
+
 	// Build agent prompt from sources
 	prompt, err := buildPromptFromSources(job, plan)
 	if err != nil {

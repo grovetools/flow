@@ -5,9 +5,27 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	
+
 	"github.com/mattsolo1/grove-core/git"
 )
+
+// ScopeToSubProject adjusts a working directory to point to a sub-project
+// within an ecosystem worktree when job.Repository is specified.
+// This ensures that context generation, command execution, and agent sessions
+// all operate in the correct sub-project directory rather than the ecosystem root.
+func ScopeToSubProject(workDir string, job *Job) string {
+	if job == nil || job.Repository == "" {
+		return workDir
+	}
+
+	subProjectPath := filepath.Join(workDir, job.Repository)
+	if info, err := os.Stat(subProjectPath); err == nil && info.IsDir() {
+		return subProjectPath
+	}
+
+	// Sub-project directory doesn't exist, return original workDir
+	return workDir
+}
 
 // GetProjectRoot attempts to find the project root directory by searching upwards for a grove.yml file.
 func GetProjectRoot() (string, error) {
