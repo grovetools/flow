@@ -40,20 +40,7 @@ test:
 	@go test -v ./...
 
 # --- Grove-tend E2E Testing ---
-E2E_BINARY_NAME=tend
-MOCK_BIN_DIR=tests/e2e/tend/mocks/bin
-
-# Build mock binaries for E2E tests
-build-mocks:
-	@echo "Building mock binaries..."
-	@mkdir -p $(MOCK_BIN_DIR)
-	@for mock in llm docker grove-hooks grove tmux nb cx; do \
-		echo "  Building mock-$$mock..."; \
-		go build -o $(MOCK_BIN_DIR)/mock-$$mock ./tests/e2e/tend/mocks/src/$$mock; \
-	done
-
-# Build the custom tend binary for grove-flow E2E tests.
-# Run grove-tend E2E tests.
+# Mocks are built automatically by tend from tests/e2e/tend/mocks/src/
 test-e2e: build
 	@echo "Running grove-tend E2E tests..."
 	@tend run $(ARGS)
