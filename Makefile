@@ -53,14 +53,10 @@ build-mocks:
 	done
 
 # Build the custom tend binary for grove-flow E2E tests.
-test-tend-build: build-mocks
-	@echo "Building E2E test binary $(E2E_BINARY_NAME)..."
-	@go build -o $(BIN_DIR)/$(E2E_BINARY_NAME) ./tests/e2e/tend
-
 # Run grove-tend E2E tests.
-test-e2e: build test-tend-build
+test-e2e: build
 	@echo "Running grove-tend E2E tests..."
-	@$(BIN_DIR)/$(E2E_BINARY_NAME) run $(ARGS)
+	@tend run $(ARGS)
 
 
 clean:
