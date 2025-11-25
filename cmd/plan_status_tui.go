@@ -284,9 +284,18 @@ func (m *statusTUIModel) getVisibleJobCount() int {
 	}
 
 	// Calculate available height for job list
-	// Account for: header (2 lines), scroll indicator (1 line), footer (1 line), margins (4 lines)
-	// Total UI chrome: ~8 lines
-	availableHeight := m.height - 8
+	// Account for UI chrome:
+	// - header (3 lines: label + margin)
+	// - table headers/borders (4 lines in table view, 1 in tree view)
+	// - scroll indicator (1 line)
+	// - footer spacing (2 lines)
+	// - margins (4 lines: 2 top + 2 bottom)
+	chromeLines := 14
+	if m.viewMode == treeView {
+		chromeLines = 11 // tree view has less overhead (no table borders/headers)
+	}
+
+	availableHeight := m.height - chromeLines
 	if availableHeight < 1 {
 		availableHeight = 1
 	}
