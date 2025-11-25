@@ -203,6 +203,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		prettyLog.WarnPretty(fmt.Sprintf("Failed to regenerate context: %v", err))
 	}
 
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	// This ensures buildPrompt uses the correct context files
+	workDir = ScopeToSubProject(workDir, job)
+
 	// Set environment for mock testing
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 
@@ -1469,6 +1473,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			log.WithError(err).Warn("Failed to regenerate context")
 		}
 	}
+
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	// This ensures chat uses the correct context files
+	worktreePath = ScopeToSubProject(worktreePath, job)
 
 	// Build the prompt
 	// Extract only the body content (without frontmatter) as conversation history
