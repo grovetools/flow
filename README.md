@@ -1,7 +1,5 @@
 <!-- DOCGEN:OVERVIEW:START -->
 
-<img src="docs/images/grove-flow-readme.svg" width="60%" />
-
 Grove Flow is a command-line tool that executes multi-step workflows defined in Markdown files. It uses Git worktrees to facilitate parallel development and is intended for formalizing development workflows that involve code generation or analysis by LLMs.
 
 <!-- placeholder for animated gif -->
