@@ -6,11 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
 
@@ -22,39 +20,14 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 	[]harness.Step{
 		// Step 1: Set up the sandboxed environment with a git repo and a plan.
 		harness.NewStep("Setup plan with a failing job", func(ctx *harness.Context) error {
-			// Standard setup for home dir and project dir
-			homeDir := ctx.NewDir("home")
-			ctx.Set("home_dir", homeDir)
-			if err := fs.CreateDir(homeDir); err != nil {
-				return err
-			}
-
-			projectDir := ctx.NewDir("failure-project")
-			ctx.Set("project_dir", projectDir)
-			if err := fs.CreateDir(projectDir); err != nil {
-				return err
-			}
-			if _, err := git.SetupTestRepo(projectDir); err != nil {
-				return err
-			}
-
-			// Configure a centralized notebook location in the sandboxed global config
-			notebooksRoot := filepath.Join(homeDir, "notebooks")
-			configDir := filepath.Join(homeDir, ".config", "grove")
-			notebookConfig := &config.NotebooksConfig{
-				Definitions: map[string]*config.Notebook{
-					"default": {RootDir: notebooksRoot},
-				},
-				Rules: &config.NotebookRules{Default: "default"},
-			}
-			globalCfg := &config.Config{Version: "1.0", Notebooks: notebookConfig}
-			if err := fs.WriteGroveConfig(configDir, globalCfg); err != nil {
+			projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "failure-project")
+			if err != nil {
 				return err
 			}
 
 			// Initialize the plan
-			initCmd := ctx.Command("flow", "plan", "init", "failure-plan")
-			initCmd.Dir(projectDir).Env("HOME=" + homeDir)
+			initCmd := ctx.Bin("plan", "init", "failure-plan")
+			initCmd.Dir(projectDir)
 			if result := initCmd.Run(); result.Error != nil {
 				return fmt.Errorf("plan init failed: %w", result.Error)
 			}
@@ -64,29 +37,29 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 			ctx.Set("plan_path", planPath)
 
 			// Job A: Succeeds
-			jobA := ctx.Command("flow", "plan", "add", "failure-plan", "--type", "shell", "--title", "setup", "-p", "echo 'setup complete' > setup.txt")
-			jobA.Dir(projectDir).Env("HOME=" + homeDir)
+			jobA := ctx.Bin("plan", "add", "failure-plan", "--type", "shell", "--title", "setup", "-p", "echo 'setup complete' > setup.txt")
+			jobA.Dir(projectDir)
 			if result := jobA.Run(); result.Error != nil {
 				return fmt.Errorf("failed to add job A: %w", result.Error)
 			}
 
 			// Job B: Fails (depends on A)
-			jobB := ctx.Command("flow", "plan", "add", "failure-plan", "--type", "shell", "--title", "main-task", "-p", "echo 'task failed' && exit 1", "-d", "01-setup.md")
-			jobB.Dir(projectDir).Env("HOME=" + homeDir)
+			jobB := ctx.Bin("plan", "add", "failure-plan", "--type", "shell", "--title", "main-task", "-p", "echo 'task failed' && exit 1", "-d", "01-setup.md")
+			jobB.Dir(projectDir)
 			if result := jobB.Run(); result.Error != nil {
 				return fmt.Errorf("failed to add job B: %w", result.Error)
 			}
 
 			// Job C: Depends on B
-			jobC := ctx.Command("flow", "plan", "add", "failure-plan", "--type", "shell", "--title", "cleanup", "-p", "echo 'cleanup complete'", "-d", "02-main-task.md")
-			jobC.Dir(projectDir).Env("HOME=" + homeDir)
+			jobC := ctx.Bin("plan", "add", "failure-plan", "--type", "shell", "--title", "cleanup", "-p", "echo 'cleanup complete'", "-d", "02-main-task.md")
+			jobC.Dir(projectDir)
 			if result := jobC.Run(); result.Error != nil {
 				return fmt.Errorf("failed to add job C: %w", result.Error)
 			}
 
 			// Job D: Independent job that should succeed
-			jobD := ctx.Command("flow", "plan", "add", "failure-plan", "--type", "shell", "--title", "independent-task", "-p", "echo 'independent task complete'")
-			jobD.Dir(projectDir).Env("HOME=" + homeDir)
+			jobD := ctx.Bin("plan", "add", "failure-plan", "--type", "shell", "--title", "independent-task", "-p", "echo 'independent task complete'")
+			jobD.Dir(projectDir)
 			if result := jobD.Run(); result.Error != nil {
 				return fmt.Errorf("failed to add job D: %w", result.Error)
 			}
@@ -99,8 +72,8 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 
-			cmd := ctx.Command("flow", "plan", "run", "--all", "--yes")
-			cmd.Dir(projectDir).Env("HOME=" + ctx.GetString("home_dir"))
+			cmd := ctx.Bin("plan", "run", "--all", "--yes")
+			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -110,8 +83,8 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 			}
 
 			// Use `flow plan status --format json` to get detailed job statuses.
-			statusCmd := ctx.Command("flow", "plan", "status", planPath, "--format", "json")
-			statusCmd.Dir(projectDir).Env("HOME=" + ctx.GetString("home_dir"))
+			statusCmd := ctx.Bin("plan", "status", planPath, "--format", "json")
+			statusCmd.Dir(projectDir)
 			statusResult := statusCmd.Run()
 			if statusResult.Error != nil {
 				return fmt.Errorf("failed to get plan status: %w", statusResult.Error)
@@ -170,8 +143,8 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 
-			cmd := ctx.Command("flow", "plan", "run", "--all", "--yes")
-			cmd.Dir(projectDir).Env("HOME=" + ctx.GetString("home_dir"))
+			cmd := ctx.Bin("plan", "run", "--all", "--yes")
+			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -179,8 +152,8 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 			}
 
 			// Use `flow plan status --format json` again to verify final statuses.
-			statusCmd := ctx.Command("flow", "plan", "status", planPath, "--format", "json")
-			statusCmd.Dir(projectDir).Env("HOME=" + ctx.GetString("home_dir"))
+			statusCmd := ctx.Bin("plan", "status", planPath, "--format", "json")
+			statusCmd.Dir(projectDir)
 			statusResult := statusCmd.Run()
 			if statusResult.Error != nil {
 				return fmt.Errorf("failed to get final plan status: %w", statusResult.Error)

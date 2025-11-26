@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
@@ -19,25 +18,16 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 	[]string{"core", "cli", "agent", "worktree"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment", func(ctx *harness.Context) error {
-			// Create a sandboxed home directory for global config
-			homeDir := ctx.NewDir("home")
-			ctx.Set("home_dir", homeDir)
-			if err := fs.CreateDir(homeDir); err != nil {
-				return err
-			}
-
-			// Create a project directory and initialize it as a git repo
-			projectDir := ctx.NewDir("worktree-project")
-			ctx.Set("project_dir", projectDir)
-			if err := fs.CreateDir(projectDir); err != nil {
-				return err
-			}
-			repo, err := git.SetupTestRepo(projectDir)
+			projectDir, _, err := setupDefaultEnvironment(ctx, "worktree-project")
 			if err != nil {
 				return err
 			}
 
 			// Create a dummy file for initial commit
+			repo, err := git.SetupTestRepo(projectDir)
+			if err != nil {
+				return err
+			}
 			if err := fs.WriteString(filepath.Join(projectDir, "README.md"), "# Test Project\n"); err != nil {
 				return err
 			}
@@ -45,36 +35,7 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return err
 			}
 
-			// Configure a centralized notebook in the sandboxed global config
-			notebooksRoot := filepath.Join(homeDir, "notebooks")
-			if err := fs.CreateDir(notebooksRoot); err != nil {
-				return err
-			}
-			ctx.Set("notebooks_root", notebooksRoot)
-
-			// Create the global config directory
-			configDir := filepath.Join(homeDir, ".config", "grove")
-			if err := fs.CreateDir(configDir); err != nil {
-				return err
-			}
-
-			notebookConfig := &config.NotebooksConfig{
-				Definitions: map[string]*config.Notebook{
-					"default": {
-						RootDir: notebooksRoot,
-					},
-				},
-				Rules: &config.NotebookRules{
-					Default: "default",
-				},
-			}
-
-			globalCfg := &config.Config{
-				Version:   "1.0",
-				Notebooks: notebookConfig,
-			}
-
-			return fs.WriteGroveConfig(configDir, globalCfg)
+			return nil
 		}),
 
 		harness.SetupMocks(
@@ -83,9 +44,8 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 
 		harness.NewStep("Initialize plan with a worktree", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
-			cmd := ctx.Command("flow", "plan", "init", "agent-plan", "--worktree")
+			cmd := ctx.Bin("plan", "init", "agent-plan", "--worktree")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			return result.AssertSuccess()
@@ -118,12 +78,11 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			planPath := filepath.Join(notebooksRoot, "workspaces", projectName, "plans", "agent-plan")
 			ctx.Set("plan_path", planPath)
 
-			cmd := ctx.Command("flow", "plan", "add", "agent-plan",
+			cmd := ctx.Bin("plan", "add", "agent-plan",
 				"--type", "interactive_agent",
 				"--title", "Implement Task",
 				"-p", "Implement a test feature")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			return result.AssertSuccess()
@@ -178,9 +137,8 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			}
 
 			// Use the full path to the job file
-			cmd := ctx.Command("flow", "plan", "complete", jobPath)
+			cmd := ctx.Bin("plan", "complete", jobPath)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			return result.AssertSuccess()

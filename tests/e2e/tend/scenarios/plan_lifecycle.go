@@ -2,14 +2,16 @@ package scenarios
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/mattsolo1/grove-tend/pkg/tui"
 )
 
 var PlanLifecycleScenario = harness.NewScenario(
@@ -21,20 +23,12 @@ var PlanLifecycleScenario = harness.NewScenario(
 		harness.SetupMocks(harness.Mock{CommandName: "git"}),
 
 		harness.NewStep("Setup sandboxed environment with project", func(ctx *harness.Context) error {
-			// Create sandboxed home directory
-			homeDir := ctx.NewDir("home")
-			ctx.Set("home_dir", homeDir)
-			if err := fs.CreateDir(homeDir); err != nil {
+			projectDir, _, err := setupDefaultEnvironment(ctx, "lifecycle-project")
+			if err != nil {
 				return err
 			}
 
-			// Create project directory and initialize git repo
-			projectDir := ctx.NewDir("lifecycle-project")
-			ctx.Set("project_dir", projectDir)
-			if err := fs.CreateDir(projectDir); err != nil {
-				return err
-			}
-
+			// Get the repo that was created by setupDefaultEnvironment
 			repo, err := git.SetupTestRepo(projectDir)
 			if err != nil {
 				return err
@@ -48,27 +42,6 @@ var PlanLifecycleScenario = harness.NewScenario(
 				return err
 			}
 
-			// Configure centralized notebook
-			notebooksRoot := filepath.Join(homeDir, "notebooks")
-			ctx.Set("notebooks_root", notebooksRoot)
-			configDir := filepath.Join(homeDir, ".config", "grove")
-
-			notebookConfig := &config.NotebooksConfig{
-				Definitions: map[string]*config.Notebook{
-					"default": {RootDir: notebooksRoot},
-				},
-				Rules: &config.NotebookRules{Default: "default"},
-			}
-
-			globalCfg := &config.Config{
-				Version:   "1.0",
-				Notebooks: notebookConfig,
-			}
-
-			if err := fs.WriteGroveConfig(configDir, globalCfg); err != nil {
-				return err
-			}
-
 			return nil
 		}),
 
@@ -76,9 +49,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Command("flow", "plan", "init", "my-lifecycle-plan", "--worktree")
+			cmd := ctx.Bin("plan", "init", "my-lifecycle-plan", "--worktree")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -107,9 +79,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			planConfigPath := ctx.GetString("plan_config_path")
 			planName := ctx.GetString("plan_name")
 
-			cmd := ctx.Command("flow", "plan", "hold", planName)
+			cmd := ctx.Bin("plan", "hold", planName)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -124,9 +95,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			planName := ctx.GetString("plan_name")
 
-			cmd := ctx.Command("flow", "plan", "list")
+			cmd := ctx.Bin("plan", "list")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -144,9 +114,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			planName := ctx.GetString("plan_name")
 
-			cmd := ctx.Command("flow", "plan", "list", "--show-hold")
+			cmd := ctx.Bin("plan", "list", "--show-hold")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -162,9 +131,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			planName := ctx.GetString("plan_name")
 
 			// Trying to hold an already-held plan should either succeed or fail gracefully
-			cmd := ctx.Command("flow", "plan", "hold", planName)
+			cmd := ctx.Bin("plan", "hold", planName)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -178,9 +146,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			planConfigPath := ctx.GetString("plan_config_path")
 			planName := ctx.GetString("plan_name")
 
-			cmd := ctx.Command("flow", "plan", "unhold", planName)
+			cmd := ctx.Bin("plan", "unhold", planName)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -204,9 +171,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			planName := ctx.GetString("plan_name")
 
-			cmd := ctx.Command("flow", "plan", "list")
+			cmd := ctx.Bin("plan", "list")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -221,12 +187,11 @@ var PlanLifecycleScenario = harness.NewScenario(
 			planName := ctx.GetString("plan_name")
 
 			// Add a shell job
-			cmd := ctx.Command("flow", "plan", "add", planName,
+			cmd := ctx.Bin("plan", "add", planName,
 				"--type", "shell",
 				"--title", "Setup Task",
 				"-p", "echo 'Setting up'")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -234,12 +199,11 @@ var PlanLifecycleScenario = harness.NewScenario(
 			}
 
 			// Add another shell job
-			cmd = ctx.Command("flow", "plan", "add", planName,
+			cmd = ctx.Bin("plan", "add", planName,
 				"--type", "shell",
 				"--title", "Main Task",
 				"-p", "echo 'Main work'")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result = cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			return result.AssertSuccess()
@@ -273,9 +237,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			planConfigPath := ctx.GetString("plan_config_path")
 			planName := ctx.GetString("plan_name")
 
-			cmd := ctx.Command("flow", "plan", "review", planName)
+			cmd := ctx.Bin("plan", "review", planName)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -291,9 +254,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			planName := ctx.GetString("plan_name")
 
 			// Without --yes, the command should fail or prompt (in non-interactive mode, it fails)
-			cmd := ctx.Command("flow", "plan", "finish", planName)
+			cmd := ctx.Bin("plan", "finish", planName)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -301,15 +263,116 @@ var PlanLifecycleScenario = harness.NewScenario(
 			return result.AssertFailure()
 		}),
 
+		harness.NewStep("Create and prepare a plan for TUI finish test", func(ctx *harness.Context) error {
+		projectDir := ctx.GetString("project_dir")
+		notebooksRoot := ctx.GetString("notebooks_root")
+
+		cmd := ctx.Bin("plan", "init", "finish-tui-plan", "--worktree")
+		cmd.Dir(projectDir)
+		result := cmd.Run()
+		if err := result.AssertSuccess(); err != nil {
+			return err
+		}
+
+		planPath := filepath.Join(notebooksRoot, "workspaces", "lifecycle-project", "plans", "finish-tui-plan")
+		ctx.Set("finish_tui_plan_path", planPath)
+		ctx.Set("finish_tui_plan_name", "finish-tui-plan")
+
+		// Set the plan to 'review' status so 'finish' can run
+		reviewCmd := ctx.Bin("plan", "review", "finish-tui-plan")
+		reviewCmd.Dir(projectDir)
+		reviewResult := reviewCmd.Run()
+		return reviewResult.AssertSuccess()
+		}),
+
+		harness.NewStep("Launch 'finish' TUI and verify checklist", func(ctx *harness.Context) error {
+		projectDir := ctx.GetString("project_dir")
+		planName := ctx.GetString("finish_tui_plan_name")
+		flowBinary, err := findFlowBinary()
+		if err != nil {
+			return err
+		}
+
+		// The TUI must run from within the project directory to find the plan.
+		// A wrapper script ensures the command runs in the correct directory within the TUI session.
+		wrapperScript := filepath.Join(ctx.RootDir, "run-finish-tui")
+		scriptContent := fmt.Sprintf("#!/bin/bash\ncd %s\nexec %s plan finish %s\n", projectDir, flowBinary, planName)
+		if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
+			return err
+		}
+		if err := os.Chmod(wrapperScript, 0755); err != nil {
+			return err
+		}
+
+		session, err := ctx.StartTUI(wrapperScript, []string{})
+		if err != nil {
+			return fmt.Errorf("failed to start `flow plan finish` TUI: %w", err)
+		}
+		ctx.Set("finish_tui_session", session)
+
+		if err := session.WaitForText("Finishing plan", 5*time.Second); err != nil {
+			content, _ := session.Capture()
+			return fmt.Errorf("finish TUI did not load: %w\nContent:\n%s", err, content)
+		}
+
+		// Verify key cleanup options are visible
+		if err := session.AssertContains("Prune git worktree"); err != nil {
+			return err
+		}
+		return session.AssertContains("Delete local git branch")
+		}),
+
+		harness.NewStep("Interact with finish TUI and confirm", func(ctx *harness.Context) error {
+		session := ctx.Get("finish_tui_session").(*tui.Session)
+
+		// Toggle "Prune git worktree" and "Delete local git branch"
+		// The order of items is: Merge, Mark finished, Prune, Clean dev, Delete submodule, Delete local
+		if err := session.SendKeys("Down"); err != nil {
+			return err
+		} // to "Mark plan as finished"
+		if err := session.SendKeys("Down"); err != nil {
+			return err
+		} // to "Prune git worktree"
+		if err := session.SendKeys(" "); err != nil { // Toggle "Prune git worktree"
+			return err
+		}
+		if err := session.SendKeys("Down"); err != nil {
+			return err
+		} // to "Clean up dev binaries"
+		if err := session.SendKeys("Down"); err != nil {
+			return err
+		} // to "Delete submodule branches"
+		if err := session.SendKeys("Down"); err != nil {
+			return err
+		} // to "Delete local git branch"
+		if err := session.SendKeys(" "); err != nil { // Toggle "Delete local git branch"
+			return err
+		}
+		time.Sleep(200 * time.Millisecond) // Wait for UI to update
+
+		// Confirm execution
+		return session.SendKeys("Enter")
+		}),
+
+		harness.NewStep("Verify TUI cleanup actions", func(ctx *harness.Context) error {
+		// The TUI process will have exited. The harness waits for it.
+		// Now we verify the side effects on the filesystem.
+		projectDir := ctx.GetString("project_dir")
+		worktreePath := filepath.Join(projectDir, ".grove-worktrees", "finish-tui-plan")
+
+		// Verify worktree directory was removed.
+		// `flow plan finish` should perform os.RemoveAll itself.
+		return fs.AssertNotExists(worktreePath)
+	}),
+
 		harness.NewStep("Test 'finish' with --yes enables all cleanup", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 			planName := ctx.GetString("plan_name")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Command("flow", "plan", "finish", planName, "--yes")
+			cmd := ctx.Bin("plan", "finish", planName, "--yes")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -331,9 +394,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Command("flow", "plan", "init", "cleanup-test-plan", "--worktree")
+			cmd := ctx.Bin("plan", "init", "cleanup-test-plan", "--worktree")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -354,9 +416,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			cleanupPlanName := ctx.GetString("cleanup_plan_name")
 
-			cmd := ctx.Command("flow", "plan", "review", cleanupPlanName)
+			cmd := ctx.Bin("plan", "review", cleanupPlanName)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			return result.AssertSuccess()
@@ -366,10 +427,9 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			cleanupPlanName := ctx.GetString("cleanup_plan_name")
 
-			cmd := ctx.Command("flow", "plan", "finish", cleanupPlanName,
+			cmd := ctx.Bin("plan", "finish", cleanupPlanName,
 				"--yes", "--prune-worktree", "--delete-branch", "--archive")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -404,9 +464,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 		harness.NewStep("Test error case: finish non-existent plan", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
-			cmd := ctx.Command("flow", "plan", "finish", "non-existent-plan", "--yes")
+			cmd := ctx.Bin("plan", "finish", "non-existent-plan", "--yes")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -417,9 +476,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 		harness.NewStep("Test error case: hold non-existent plan", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
-			cmd := ctx.Command("flow", "plan", "hold", "non-existent-plan")
+			cmd := ctx.Bin("plan", "hold", "non-existent-plan")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -430,9 +488,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 		harness.NewStep("Test error case: unhold non-existent plan", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
-			cmd := ctx.Command("flow", "plan", "unhold", "non-existent-plan")
+			cmd := ctx.Bin("plan", "unhold", "non-existent-plan")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -443,9 +500,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 		harness.NewStep("Test error case: review non-existent plan", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
-			cmd := ctx.Command("flow", "plan", "review", "non-existent-plan")
+			cmd := ctx.Bin("plan", "review", "non-existent-plan")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -456,9 +512,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 		harness.NewStep("Create plan without worktree for finish edge case", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
-			cmd := ctx.Command("flow", "plan", "init", "no-worktree-plan")
+			cmd := ctx.Bin("plan", "init", "no-worktree-plan")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -475,10 +530,9 @@ var PlanLifecycleScenario = harness.NewScenario(
 
 			// Try to finish with --prune-worktree flag even though there's no worktree
 			// Should handle gracefully
-			cmd := ctx.Command("flow", "plan", "finish", noWorktreePlanName,
+			cmd := ctx.Bin("plan", "finish", noWorktreePlanName,
 				"--yes", "--prune-worktree", "--archive")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -492,9 +546,8 @@ var PlanLifecycleScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			cleanupPlanName := ctx.GetString("cleanup_plan_name")
 
-			cmd := ctx.Command("flow", "plan", "list")
+			cmd := ctx.Bin("plan", "list")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {

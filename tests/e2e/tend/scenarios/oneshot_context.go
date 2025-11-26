@@ -5,11 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
 
@@ -19,20 +17,8 @@ var OneshotWithContextScenario = harness.NewScenario(
 	[]string{"core", "cli", "oneshot", "context"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment", func(ctx *harness.Context) error {
-			// Create a sandboxed home directory for global config
-			homeDir := ctx.NewDir("home")
-			ctx.Set("home_dir", homeDir)
-			if err := fs.CreateDir(homeDir); err != nil {
-				return err
-			}
-
-			// Create a project directory and initialize it as a git repo
-			projectDir := ctx.NewDir("context-project")
-			ctx.Set("project_dir", projectDir)
-			if err := fs.CreateDir(projectDir); err != nil {
-				return err
-			}
-			if _, err := git.SetupTestRepo(projectDir); err != nil {
+			projectDir, _, err := setupDefaultEnvironment(ctx, "context-project")
+			if err != nil {
 				return err
 			}
 
@@ -41,9 +27,6 @@ var OneshotWithContextScenario = harness.NewScenario(
 				return err
 			}
 			if err := fs.WriteString(filepath.Join(projectDir, "main.go"), "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}\n"); err != nil {
-				return err
-			}
-			if err := fs.WriteBasicGroveConfig(projectDir); err != nil {
 				return err
 			}
 
@@ -56,36 +39,7 @@ var OneshotWithContextScenario = harness.NewScenario(
 				return err
 			}
 
-			// Configure a centralized notebook in the sandboxed global config
-			notebooksRoot := filepath.Join(homeDir, "notebooks")
-			if err := fs.CreateDir(notebooksRoot); err != nil {
-				return err
-			}
-			ctx.Set("notebooks_root", notebooksRoot)
-
-			// Create the global config directory
-			configDir := filepath.Join(homeDir, ".config", "grove")
-			if err := fs.CreateDir(configDir); err != nil {
-				return err
-			}
-
-			notebookConfig := &config.NotebooksConfig{
-				Definitions: map[string]*config.Notebook{
-					"default": {
-						RootDir: notebooksRoot,
-					},
-				},
-				Rules: &config.NotebookRules{
-					Default: "default",
-				},
-			}
-
-			globalCfg := &config.Config{
-				Version:   "1.0",
-				Notebooks: notebookConfig,
-			}
-
-			return fs.WriteGroveConfig(configDir, globalCfg)
+			return nil
 		}),
 
 		harness.SetupMocks(
@@ -111,21 +65,19 @@ var OneshotWithContextScenario = harness.NewScenario(
 			ctx.Set("plan_path", planPath)
 
 			// Init plan inside the project
-			initCmd := ctx.Command("flow", "plan", "init", "context-test-plan")
+			initCmd := ctx.Bin("plan", "init", "context-test-plan")
 			initCmd.Dir(projectDir)
-			initCmd.Env("HOME=" + ctx.GetString("home_dir"))
 			if result := initCmd.Run(); result.Error != nil {
 				return fmt.Errorf("plan init failed: %w\nStderr: %s", result.Error, result.Stderr)
 			}
 
 			// Add job that references a source file
-			addCmd := ctx.Command("flow", "plan", "add", "context-test-plan",
+			addCmd := ctx.Bin("plan", "add", "context-test-plan",
 				"--type", "oneshot",
 				"--title", "review-code",
 				"--source-files", "main.go",
 				"-p", "Review the code in main.go")
 			addCmd.Dir(projectDir)
-			addCmd.Env("HOME=" + ctx.GetString("home_dir"))
 
 			result := addCmd.Run()
 			return result.AssertSuccess()
@@ -135,9 +87,8 @@ var OneshotWithContextScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Command("flow", "plan", "run", "--all", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--all", "--yes")
 			runCmd.Dir(projectDir)
-			runCmd.Env("HOME=" + ctx.GetString("home_dir"))
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 
 			result := runCmd.Run()

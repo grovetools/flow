@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
 
@@ -27,43 +25,8 @@ var ChatAndExtractWorkflowScenario = harness.NewScenario(
 	[]string{"core", "cli", "chat"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment and mocks", func(ctx *harness.Context) error {
-			// Create a sandboxed home directory for global config
-			homeDir := ctx.NewDir("home")
-			ctx.Set("home_dir", homeDir)
-			if err := fs.CreateDir(homeDir); err != nil {
-				return err
-			}
-
-			// Create a project directory and initialize it as a git repo
-			projectDir := ctx.NewDir("chat-project")
-			ctx.Set("project_dir", projectDir)
-			if err := fs.CreateDir(projectDir); err != nil {
-				return err
-			}
-			if _, err := git.SetupTestRepo(projectDir); err != nil {
-				return err
-			}
-
-			// Configure a centralized notebook in the sandboxed global config
-			notebooksRoot := filepath.Join(homeDir, "notebooks")
-			ctx.Set("notebooks_root", notebooksRoot)
-			configDir := filepath.Join(homeDir, ".config", "grove")
-
-			notebookConfig := &config.NotebooksConfig{
-				Definitions: map[string]*config.Notebook{
-					"default": {
-						RootDir: notebooksRoot,
-					},
-				},
-				Rules: &config.NotebookRules{
-					Default: "default",
-				},
-			}
-			globalCfg := &config.Config{
-				Version:   "1.0",
-				Notebooks: notebookConfig,
-			}
-			if err := fs.WriteGroveConfig(configDir, globalCfg); err != nil {
+			_, _, err := setupDefaultEnvironment(ctx, "chat-project")
+			if err != nil {
 				return err
 			}
 
@@ -108,9 +71,8 @@ Let's discuss a feature.`
 			}
 
 			// Use a non-gemini model so it uses the llm mock command
-			cmd := ctx.Command("flow", "chat", "-s", chatFilePath, "--model", "claude-3-5-sonnet-20241022")
+			cmd := ctx.Bin("chat", "-s", chatFilePath, "--model", "claude-3-5-sonnet-20241022")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -126,9 +88,8 @@ Let's discuss a feature.`
 			chatFilePath := ctx.GetString("chat_file_path")
 
 			// Run the chat by passing the file path explicitly
-			cmd := ctx.Command("flow", "chat", "run", chatFilePath)
+			cmd := ctx.Bin("chat", "run", chatFilePath)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			cmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -168,9 +129,8 @@ Let's discuss a feature.`
 			projectDir := ctx.GetString("project_dir")
 			chatFilePath := ctx.GetString("chat_file_path")
 
-			cmd := ctx.Command("flow", "plan", "extract", "list", "--file", chatFilePath)
+			cmd := ctx.Bin("plan", "extract", "list", "--file", chatFilePath)
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -185,9 +145,8 @@ Let's discuss a feature.`
 			projectDir := ctx.GetString("project_dir")
 			chatFilePath := ctx.GetString("chat_file_path")
 
-			cmd := ctx.Command("flow", "plan", "extract", "list", "--file", chatFilePath, "--json")
+			cmd := ctx.Bin("plan", "extract", "list", "--file", chatFilePath, "--json")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -219,9 +178,8 @@ Let's discuss a feature.`
 
 		harness.NewStep("Initialize a new plan for extracted jobs", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
-			cmd := ctx.Command("flow", "plan", "init", "extracted-plan")
+			cmd := ctx.Bin("plan", "init", "extracted-plan")
 			cmd.Dir(projectDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			return result.AssertSuccess()
@@ -234,9 +192,8 @@ Let's discuss a feature.`
 			planDir := filepath.Join(notebooksRoot, "workspaces/chat-project/plans/extracted-plan")
 
 			// Extract into the plan we just created
-			cmd := ctx.Command("flow", "plan", "extract", "block-123", "--file", chatFilePath, "--title", "Extracted Single Block")
+			cmd := ctx.Bin("plan", "extract", "block-123", "--file", chatFilePath, "--title", "Extracted Single Block")
 			cmd.Dir(planDir) // Run from within the new plan dir
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -260,9 +217,8 @@ Let's discuss a feature.`
 			chatFileName := ctx.GetString("chat_file_name")
 			planDir := filepath.Join(notebooksRoot, "workspaces/chat-project/plans/extracted-plan")
 
-			cmd := ctx.Command("flow", "plan", "extract", "all", "--file", chatFilePath, "--title", "Extracted Full Chat")
+			cmd := ctx.Bin("plan", "extract", "all", "--file", chatFilePath, "--title", "Extracted Full Chat")
 			cmd.Dir(planDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
@@ -283,9 +239,8 @@ Let's discuss a feature.`
 			chatFilePath := ctx.GetString("chat_file_path")
 			planDir := filepath.Join(notebooksRoot, "workspaces/chat-project/plans/extracted-plan")
 
-			cmd := ctx.Command("flow", "plan", "extract", "invalid-id", "--file", chatFilePath, "--title", "Invalid Extraction")
+			cmd := ctx.Bin("plan", "extract", "invalid-id", "--file", chatFilePath, "--title", "Invalid Extraction")
 			cmd.Dir(planDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
@@ -303,9 +258,8 @@ Let's discuss a feature.`
 			notebooksRoot := ctx.GetString("notebooks_root")
 			planDir := filepath.Join(notebooksRoot, "workspaces/chat-project/plans/extracted-plan")
 
-			cmd := ctx.Command("flow", "plan", "extract", "list", "--file", "non-existent-file.md")
+			cmd := ctx.Bin("plan", "extract", "list", "--file", "non-existent-file.md")
 			cmd.Dir(planDir)
-			cmd.Env("HOME=" + ctx.GetString("home_dir"))
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 

@@ -18,6 +18,8 @@ func main() {
 		scenarios.JobFailureAndRecoveryScenario,
 		scenarios.PlanLifecycleScenario,
 		scenarios.JobManagementScenario,
+		scenarios.PlanListTUIScenario,
+		scenarios.PlanStatusTUIScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
