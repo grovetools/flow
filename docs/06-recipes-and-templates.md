@@ -1,25 +1,29 @@
 # Recipes and Templates
 
-Grove Flow uses recipes for creating multi-job plans from a scaffold, and job templates for creating individual jobs from a blueprint.
+Grove Flow includes features for creating reusable jobs and plans. Job templates define individual jobs, while plan recipes define multi-job workflows.
 
 ## Job Templates
 
-A job template is a Markdown file containing frontmatter and a prompt body. It serves as a blueprint for creating new, individual jobs.
+A job template is a Markdown file containing frontmatter and a prompt body. It functions as a definition for creating new, individual jobs within a plan.
 
 ### Using a Job Template
 
-The `flow plan add --template` command creates a new job file using the frontmatter and body from a specified template file.
+The `flow plan add` command creates a new job from a template using the `--template` flag.
 
 ```bash
 # Add a new job using the 'code-review' template
 flow plan add --title "Review API Endpoints" --template code-review
 ```
 
-Flags like `--prompt` or `--source-files` provide additional content to the job being created from the template.
+Command-line flags such as `--prompt` or `--source-files` append additional content or context to the job being created from the template.
 
 ### Listing Available Templates
 
-The `flow plan templates list` command displays all available job templates from built-in, user-global (`~/.config/grove/job-templates/`), and project-specific (`.grove/job-templates/`) locations.
+The `flow plan templates list` command displays all available job templates. It searches for templates in the following order of precedence:
+
+1.  Project-specific (`.grove/job-templates/`)
+2.  User-global (`~/.config/grove/job-templates/`)
+3.  Built-in
 
 ```bash
 flow plan templates list
@@ -35,12 +39,12 @@ my-custom-template     [User]     A custom template for team-specific tasks
 
 ### Creating Custom Job Templates
 
-Job templates are located in two directories, with project-specific templates overriding user-global ones:
+Job templates are Markdown files located in specific directories. Templates in a project's `.grove/job-templates/` directory override user-global templates with the same name.
 
-1.  **Project-specific**: `.grove/job-templates/` within a project root.
-2.  **User-global**: `~/.config/grove/job-templates/`.
+1.  **Project-specific**: `.grove/job-templates/`
+2.  **User-global**: `~/.config/grove/job-templates/`
 
-Each template is a Markdown file. The frontmatter defines default settings for the job, and the body serves as the base prompt.
+The frontmatter of the template file defines default settings for the job, and the body serves as the base prompt.
 
 **Example: `.grove/job-templates/test-strategy.md`**
 
@@ -56,12 +60,12 @@ Develop a testing strategy for this feature. Analyze existing test patterns and 
 
 ### Built-in Job Templates
 
-Grove Flow includes several built-in templates.
+Grove Flow includes the following built-in templates.
 
 | Template Name            | Description                                        |
 | ------------------------ | -------------------------------------------------- |
-| `agent-run`              | Generates a plan an LLM agent carries out.         |
-| `agent-xml`              | Generates a detailed XML plan an LLM agent carries out. |
+| `agent-run`              | Generates a plan for an LLM agent to execute.      |
+| `agent-xml`              | Generates a detailed XML plan for an LLM agent.    |
 | `api-design`             | Designs a RESTful or GraphQL API.                  |
 | `architecture-overview`  | Generates an architecture overview of a codebase.  |
 | `chat`                   | A template for conversational chat jobs.           |
@@ -82,18 +86,18 @@ Grove Flow includes several built-in templates.
 
 ## Plan Recipes
 
-Plan recipes are directories containing a set of job files that define a multi-job workflow. They are used to scaffold new plans.
+A plan recipe is a directory containing a set of job files that define a multi-job workflow. Recipes are used to create new plans with a predefined structure.
 
 ### Using a Plan Recipe
 
-The `flow plan init --recipe` command creates a new directory and populates it with the job files defined in the specified recipe.
+The `flow plan init --recipe` command creates a new plan directory and populates it with copies of the job files from the specified recipe.
 
 ```bash
 # Initialize a plan using the standard-feature recipe
 flow plan init new-auth-feature --recipe standard-feature
 ```
 
-This command creates the `plans/new-auth-feature` directory and populates it with jobs like `01-spec.md` and `02-implement.md` from the recipe.
+This command creates the `plans/new-auth-feature` directory and adds the jobs defined in the `standard-feature` recipe, such as `01-spec.md` and `02-implement.md`.
 
 ### Built-in Recipes
 
@@ -106,9 +110,9 @@ Grove Flow provides several built-in recipes:
 
 ### Creating Custom Recipes
 
-User-defined recipes can be created by adding directories to `~/.config/grove/recipes/`. Each subdirectory is a recipe containing the `.md` job files that compose the plan.
+User-defined recipes are directories located in `~/.config/grove/recipes/`. Each subdirectory within this location is treated as a recipe, and its `.md` job files are used to compose the new plan.
 
-**Example Structure:**
+**Example Directory Structure:**
 
 ```
 ~/.config/grove/recipes/
@@ -118,15 +122,15 @@ User-defined recipes can be created by adding directories to `~/.config/grove/re
     └── 03-tag-release.md
 ```
 
-This structure enables running `flow plan init my-project-release --recipe my-release-workflow`.
+This structure enables the command `flow plan init my-project-release --recipe my-release-workflow`.
 
 ## Templating in Recipes
 
-Recipe files can contain template variables using Go's template syntax.
+Recipe files can contain template variables using Go's `text/template` syntax.
 
 ### Standard Variables
 
--   `{{ .PlanName }}`: This variable is replaced with the name of the plan being initialized.
+-   `{{ .PlanName }}`: This variable is replaced with the name of the plan provided in the `flow plan init` command.
 
 **Example: `01-spec.md` from the `standard-feature` recipe**
 
@@ -141,17 +145,17 @@ type: oneshot
 Define the specification for the "{{ .PlanName }}" feature.
 ```
 
-When running `flow plan init new-login-flow --recipe standard-feature`, `{{ .PlanName }}` is replaced with `new-login-flow`.
+When running `flow plan init new-login-flow --recipe standard-feature`, the `{{ .PlanName }}` variable is replaced with `new-login-flow`.
 
 ### Custom Variables
 
-The `--recipe-vars` flag passes key-value pairs to a recipe. These are accessible via the `{{ .Vars.<key> }}` syntax.
+The `--recipe-vars` flag is used to pass key-value pairs to a recipe. These variables are accessible in templates via the `{{ .Vars.<key> }}` syntax.
 
 -   **Passing Variables**:
     -   Multiple flags: `--recipe-vars key1=val1 --recipe-vars key2=val2`
     -   Comma-delimited: `--recipe-vars "key1=val1,key2=val2"`
 
-**Example: A recipe job `01-chat.md` using a custom `model` variable:**
+**Example: A recipe job `01-chat.md` that uses a custom `model` variable:**
 
 ```yaml
 ---
@@ -169,10 +173,11 @@ Let's discuss the plan.
 flow plan init my-plan --recipe my-chat-recipe --recipe-vars model=gemini-2.5-pro
 ```
 
-Default variables can be set for a recipe in `grove.yml`. CLI flags override `grove.yml` settings.
+Default variables for a recipe can be defined in `grove.yml`. Variables passed via the CLI override those set in `grove.yml`.
+
+**Example: `grove.yml` with default recipe variables**
 
 ```yaml
-# grove.yml
 flow:
   recipes:
     docgen-customize:
@@ -183,7 +188,7 @@ flow:
 
 ## Dynamic Recipe Loading
 
-Recipes can be loaded by executing an external command defined by `get_recipe_cmd` in `grove.yml`.
+Recipes can be loaded by executing an external command. The command is configured via the `get_recipe_cmd` key under the `recipes` section in `grove.yml`.
 
 ```yaml
 # grove.yml
@@ -192,7 +197,7 @@ flow:
     get_recipe_cmd: "my-cli-tool recipes --json"
 ```
 
-The command must output a JSON object where each key is a recipe name and the value is an object containing `description` and a `jobs` map.
+The specified command must output a JSON object to standard output. Each key in the object is a recipe name. The value is an object containing a `description` string and a `jobs` map, where keys are filenames and values are the file contents.
 
 **Example JSON Output:**
 

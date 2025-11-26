@@ -1,6 +1,6 @@
-# Working with Jobs 
+# Working with Jobs
 
-Jobs are the fundamental units of work in a Grove Flow plan. Each job is a single, executable step defined in a Markdown file. This document covers how to create, configure, and manage these jobs to build effective workflows.
+Jobs are the fundamental units of work in a Grove Flow plan. Each job is a single, executable step defined in a Markdown file with YAML frontmatter. This document covers how to create, configure, and manage these jobs.
 
 ## Creating Jobs
 
@@ -8,28 +8,26 @@ The primary command for adding a new job to a plan is `flow plan add`. It can be
 
 ### Interactive Mode (TUI)
 
-Running `flow plan add` or `flow plan add -i` launches an interactive form to guide you through creating a new job. This interface provides prompts and lists available options like job types, dependencies, and models.
+Running `flow plan add` or `flow plan add -i` launches a terminal interface to guide the creation of a new job. This interface provides prompts and lists available options like job types and dependencies from the current plan.
 
 ```bash
-# If an active plan is set
+# Add a job to the active plan
 flow plan add
 
-# Or specify the plan directory
+# Specify the plan directory and launch the TUI
 flow plan add ./plans/my-feature -i
 ```
 
-The TUI allows you to set the job's title, type, prompt, dependencies, and other configurations in a structured way.
-
 ### Flag-Based Mode
 
-For scripting or quick additions, you can provide all job details using flags.
+For scripting or direct creation, job details can be provided using flags.
 
 **Example:**
 ```bash
 # Set 'my-feature' as the active plan
 flow plan set my-feature
 
-# Add an agent job that depends on the initial spec
+# Add an agent job that depends on a preceding job file
 flow plan add \
   --title "Implement API Endpoints" \
   --type "agent" \
@@ -37,53 +35,51 @@ flow plan add \
   --prompt "Implement the user API endpoints as defined in the spec."
 ```
 
-This creates a new Markdown file (e.g., `02-implement-api-endpoints.md`) in the active plan directory with the specified frontmatter and prompt.
+This creates a new Markdown file (e.g., `02-implement-api-endpoints.md`) in the active plan directory with the specified frontmatter and prompt body.
 
 **Key `plan add` Flags:**
 
-| Flag             | Alias | Description                                                                |
-| ---------------- | ----- | -------------------------------------------------------------------------- |
-| `--title`        |       | The title of the job.                                                      |
-| `--type`         | `-t`  | The job type (e.g., `agent`, `oneshot`, `shell`).                           |
-| `--depends-on`   | `-d`  | A job filename this new job depends on. Can be used multiple times.        |
-| `--prompt`       | `-p`  | The main prompt or command for the job, provided inline.                   |
-| `--prompt-file`  | `-f`  | Path to a file containing the prompt content.                              |
-| `--source-files` |       | Comma-separated list of files to include as context.                       |
-| `--template`     |       | The name of a job template to use.                                         |
-| `--worktree`     |       | The git worktree for the job to run in.                                    |
-| `--agent-continue` |     | For `agent` jobs, continue the previous agent session in the same worktree.|
-| `--interactive`  | `-i`  | Force the interactive TUI mode.                                            |
+| Flag | Alias | Description |
+| --- | --- | --- |
+| `--title` | | The title of the job. |
+| `--type` | `-t` | The job type (e.g., `agent`, `oneshot`, `shell`). |
+| `--depends-on` | `-d` | A job filename this new job depends on. Can be used multiple times. |
+| `--prompt` | `-p` | The main prompt or command for the job, provided inline. |
+| `--prompt-file` | `-f` | Path to a file containing the prompt content. |
+| `--source-files` | | Comma-separated list of files to include as context. |
+| `--template` | | The name of a job template to use. |
+| `--worktree` | | The git worktree for the job to run in. |
+| `--agent-continue` | | For `agent` jobs, continue the previous agent session in the same worktree. |
+| `--interactive` | `-i` | Force the interactive TUI mode. |
 
 ### Writing Effective Prompts
 
--   **Be Specific**: State the goal and constraints. Provide file paths, function names, and expected outcomes.
--   **Provide Context**: Use `--source-files` or reference outputs from previous jobs to give the LLM the context it needs.
--   **Structure for the Job Type**: An `agent` prompt should be a high-level task, while a `oneshot` prompt can be a more specific question. A `shell` prompt is simply the command to be executed.
+-   **State the Goal and Constraints**: Provide specific file paths, function names, and expected outcomes.
+-   **Provide Context**: Use `--source-files` or define dependencies on previous jobs to supply the LLM with necessary information.
+-   **Structure for the Job Type**: An `agent` prompt should be a high-level task description. A `oneshot` prompt can be a more specific question or instruction. A `shell` prompt is the command to be executed.
 
 ## Job Types Explained
 
-Grove Flow supports several job types, each with a specific purpose and executor.
+Grove Flow supports several job types, each executed by a specific mechanism.
 
-| Type                | Description                                                          | Use Case                                                              |
-| ------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `agent`             | An `interactive_agent` session for complex, multi-step coding tasks. | Implementing features, large-scale refactoring, debugging.            |
-| `interactive_agent` | The primary agent type; a human-in-the-loop session in `tmux`.       | Same as `agent`. `agent` is an alias for this type.                   |
-| `headless_agent`    | A non-interactive agent that runs in the background.                 | Fully automated code generation tasks in a CI/CD pipeline.            |
-| `oneshot`           | A single-shot LLM prompt for analysis, review, or generation.        | Code reviews, generating documentation, creating test plans.          |
-| `shell`             | Executes a shell command in the job's worktree or main repo.         | Running tests, linting, building code, or managing files.             |
-| `chat`              | A multi-turn conversational job for ideation and refinement.         | Brainstorming a feature before creating a formal plan.                |
-| `generate-recipe`   | Generates a reusable plan recipe from an existing plan.              | Automating the creation of standardized development workflows.        |
+| Type | Description | Use Case |
+| --- | --- | --- |
+| `agent` | An alias for `interactive_agent`. | Implementing features, large-scale refactoring, debugging. |
+| `interactive_agent` | An agent session in `tmux` that allows for human interaction. | The primary type for complex, multi-step coding tasks. |
+| `headless_agent` | A non-interactive agent that runs in the background. | Fully automated code generation tasks, often in CI environments. |
+| `oneshot` | A single-shot LLM prompt for analysis, review, or generation. | Code reviews, generating documentation, or creating test plans. |
+| `shell` | Executes a shell command in the job's worktree or main repo. | Running tests, linting, building code, or file management. |
+| `chat` | A multi-turn conversational job for ideation and refinement. | Brainstorming a feature or breaking down a task before creating a formal plan. |
+| `generate-recipe` | Generates a reusable plan recipe from an existing plan. | Automating the creation of standardized development workflows. |
 
 ## Dependencies Between Jobs
 
-You can create workflows by defining dependencies between jobs. A job will not run until all of its dependencies have the status `completed`.
-
-Dependencies are defined using the `depends_on` key in the job's frontmatter, which contains a list of the filenames of the jobs it depends on.
+Workflows are created by defining dependencies between jobs. A job will not run until all of its dependencies have a status of `completed`. Dependencies are defined using the `depends_on` key in a job's frontmatter, which contains a list of the filenames of the jobs it depends on.
 
 **Example Frontmatter:**
 ```yaml
 ---
-id: review-code
+id: job-c5b1a2d3
 title: "Review Code"
 status: pending
 type: oneshot
@@ -93,54 +89,64 @@ depends_on:
 ---
 ```
 
-When using the CLI, you can specify dependencies with the `-d` or `--depends-on` flag:
+When using the CLI, dependencies are specified with the `-d` or `--depends-on` flag:
 ```bash
 flow plan add --title "Review Code" -d 01-implement-feature.md -d 02-run-tests.md
 ```
 
 ## Models and LLM Configuration
 
-You can control which LLM is used for a job at multiple levels, following a clear inheritance hierarchy:
+The LLM used for a job is determined by a three-level hierarchy:
 
 1.  **Job Level**: The `model` key in a job's frontmatter (`.md` file). This has the highest precedence.
-2.  **Plan Level**: The `model` key in the plan's `.grove-plan.yml` file. This sets the default for all jobs in that plan. You can manage this with `flow plan config set model <model-id>`.
+2.  **Plan Level**: The `model` key in the plan's `.grove-plan.yml` file. This sets the default for all jobs in that plan and can be managed with `flow plan config set model <model-id>`.
 3.  **Project Level**: The `oneshot_model` key in your project's `grove.yml` file. This serves as the global default.
 
 Use the `flow models` command to see a list of recommended models.
 
 ## Job Templates
 
-Templates allow you to reuse common job structures and prompts.
+Templates allow for the reuse of common job structures and prompts.
 
 -   **List Templates**: To see all available templates (project-local, user-global, and built-in), run:
     ```bash
     flow plan templates list
     ```
 
--   **Use a Template**: Apply a template when adding a new job using the `--template` flag.
+-   **Use a Template**: Apply a template when adding a job using the `--template` flag.
     ```bash
     flow plan add --title "Review API" --template code-review
     ```
+    This creates a new job using the pre-defined prompt and configuration from the `code-review` template. Additional instructions can be provided via the `--prompt` or `--prompt-file` flags, which will be appended to the template's prompt.
 
-This will create a new job with the pre-defined prompt and configuration from the `code-review` template. You can add your own instructions, which will be appended to the template's prompt.
+-   **Creating Custom Templates**: Custom templates can be created by adding `.md` files to a `.grove/job-templates` directory in your project root or user config directory (`~/.config/grove/job-templates`).
 
--   **Creating Custom Templates**: You can create your own templates by adding `.md` files to a `.grove/job-templates` directory in your project root.
+## Job Management
 
-## Job Completion and Management
-
--   **Manual Completion**: For jobs that require manual intervention or verification (like `interactive_agent` or `chat`), you can mark them as complete with:
+-   **Manual Completion**: For jobs that require manual intervention or verification (like `interactive_agent` or `chat`), mark them as complete with:
     ```bash
     flow plan complete <job-file>
     ```
-    When an `interactive_agent` job is completed, Grove Flow will automatically find the `clogs` transcript from the session and append it to the job file for a complete record.
+    When an `interactive_agent` job is completed, its session transcript is found via `grove aglogs` and appended to the job file.
 
--   **Automatic Summarization**: If `summarize_on_complete: true` is set in your `grove.yml`, Grove Flow will automatically generate a one-sentence summary of what the job accomplished and add it to the `summary` field in the job's frontmatter upon completion.
+-   **Renaming Jobs**: To rename a job and automatically update all references to it in other jobs within the plan, use:
+    ```bash
+    flow plan jobs rename <old-job-file> "New Job Title"
+    ```
 
--   **Job Output**: The output from `oneshot` and `shell` jobs is appended to the job's Markdown file under an `## Output` heading, providing a persistent log of its execution.
+-   **Updating Dependencies**: To replace a job's entire dependency list, use:
+    ```bash
+    flow plan jobs update-deps <job-file> [new-dep-1.md] [new-dep-2.md]
+    ```
+    Running the command without any dependency files will clear all dependencies for the specified job.
 
--   **Debugging**: If a job fails, its status will be set to `failed`. The output and logs within the job file provide the necessary information to debug the issue. Once fixed, you can re-run the job with `flow plan run <job-file>`.
+-   **Automatic Summarization**: If `summarize_on_complete: true` is set in `grove.yml`, a one-sentence summary of the job's accomplishment will be generated and added to the `summary` field in the job's frontmatter upon completion.
+
+-   **Job Output**: The output from `oneshot` and `shell` jobs is appended to the job's Markdown file under an `## Output` heading.
+
+-   **Debugging**: If a job fails, its status is set to `failed`. The output and logs within the job file can be used to debug the issue. Once fixed, the job can be re-run with `flow plan run <job-file>`.
 
 ## Advanced Topics
 
--   **Job Frontmatter**: The YAML frontmatter in each job file is the source of truth for its configuration. You can directly edit these files to modify any aspect of a job, such as its type, dependencies, or prompt.
--   **Worktree Integration**: For `agent` and `shell` jobs, you can specify a `worktree` in the frontmatter. The job will execute within that git worktree, providing isolation from your main branch. If a dependent job is added, it will automatically inherit the worktree from its dependency unless specified otherwise.
+-   **Job Frontmatter**: The YAML frontmatter in each job file is the source of truth for its configuration. These files can be edited directly to modify any aspect of a job.
+-   **Worktree Integration**: For `agent` and `shell` jobs, a `worktree` can be specified in the frontmatter. The job will then execute within that git worktree, providing isolation from the main branch.

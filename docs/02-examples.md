@@ -4,7 +4,7 @@ This document provides examples for using `grove-flow` for single- and multi-ste
 
 ## Example 1: Basic Plan Execution
 
-This example covers the process of creating a plan, adding a single job, and running it.
+This example covers creating a plan, adding a single job, and running it.
 
 1.  **Initialize the Plan**
 
@@ -14,7 +14,7 @@ This example covers the process of creating a plan, adding a single job, and run
     flow plan init new-feature-endpoint --worktree
     ```
 
-    This command creates the `plans/new-feature-endpoint` directory, adds a `.grove-plan.yml` configuration file, and sets `new-feature-endpoint` as the active plan.
+    This command creates the `new-feature-endpoint` directory, adds a `.grove-plan.yml` configuration file, and sets `new-feature-endpoint` as the active plan.
 
 2.  **Add an Agent Job**
 
@@ -25,7 +25,7 @@ This example covers the process of creating a plan, adding a single job, and run
       -p "Create a new Go API endpoint at /api/v1/users for basic CRUD operations."
     ```
 
-    This creates the file `plans/new-feature-endpoint/01-implement-user-endpoint.md` containing the job's configuration and prompt.
+    This creates the file `new-feature-endpoint/01-implement-user-endpoint.md` containing the job's configuration and prompt.
 
 3.  **Check the Status**
 
@@ -68,7 +68,7 @@ This example covers the process of creating a plan, adding a single job, and run
       -p "Write a technical specification for a JWT-based authentication system, including data models and API endpoints."
     ```
 
-    This creates `01-define-authentication-spec.md`.
+    This creates `user-auth-feature/01-define-authentication-spec.md`.
 
 3.  **Add an Implementation Job**
 
@@ -80,7 +80,7 @@ This example covers the process of creating a plan, adding a single job, and run
       -p "Implement the authentication logic based on the specification from the previous step."
     ```
 
-    This creates `02-implement-auth-logic.md`. `grove-flow` will not run this job until `01-define-authentication-spec.md` is complete.
+    This creates `user-auth-feature/02-implement-auth-logic.md`. `grove-flow` will not run this job until `01-define-authentication-spec.md` is complete.
 
 4.  **Add a Testing Job**
 
@@ -92,7 +92,7 @@ This example covers the process of creating a plan, adding a single job, and run
       -p "Write unit and integration tests for the authentication system."
     ```
 
-    This creates `03-write-unit-tests.md`.
+    This creates `user-auth-feature/03-write-unit-tests.md`.
 
 5.  **Run the Workflow**
 
@@ -104,7 +104,7 @@ This example covers the process of creating a plan, adding a single job, and run
 
     `grove-flow` runs the specification job first. Once it completes, it runs the implementation job, followed by the testing job.
 
-## Example 3: Chat-to-Plan Workflow
+## Example 3: Interactive Chat-to-Plan Workflow
 
 The `chat` and `extract` commands are used to convert an unstructured conversation into an executable plan.
 
@@ -113,7 +113,7 @@ The `chat` and `extract` commands are used to convert an unstructured conversati
     Create a Markdown file for an idea and initialize it as a chat job. This adds the required frontmatter to the file.
 
     ```bash
-    # Create the directory for chat files
+    # Create a directory for chat files
     mkdir -p chats
 
     # Create the file
@@ -129,7 +129,7 @@ The `chat` and `extract` commands are used to convert an unstructured conversati
 
     ```bash
     # Get the first response from the LLM
-    flow chat run "Idea: Refactor the logging system"
+    flow chat run logging-refactor
     ```
 
     After several turns, `chats/logging-refactor.md` might contain:
@@ -165,7 +165,7 @@ The `chat` and `extract` commands are used to convert an unstructured conversati
 
     ```bash
     # First, create a new plan to hold the extracted job
-    flow plan init logging-refactor-plan --with-worktree
+    flow plan init logging-refactor-plan --worktree
 
     # Now, extract the block from the chat into the active plan
     flow plan extract d4e5f6 --title "Implement Structured Logger" \
