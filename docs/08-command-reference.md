@@ -2,6 +2,14 @@
 
 This document provides a reference for the `flow` command-line interface, covering all subcommands and their options.
 
+**Note**: While all operations can be performed via CLI commands, the recommended workflow uses the interactive TUIs:
+- `nb tui` - Manage notes and promote to plans
+- `flow plan tui` - Browse all plans with git and lifecycle status
+- `flow plan status -t` - Manage jobs within a plan with keyboard shortcuts
+- `hooks b` - Monitor running agent sessions
+
+The TUI interfaces provide better visual feedback and keyboard-driven workflows. The CLI commands documented below are useful for scripting, automation, and quick operations.
+
 ## `flow plan`
 
 Manages multi-step orchestration plans.
@@ -115,13 +123,28 @@ flow plan list [flags]
 
 ### `flow plan tui`
 
-Launches an interactive terminal interface for browsing and managing plans.
+Launches an interactive terminal interface for browsing and managing plans across your entire workspace.
 
 **Syntax**
 
 ```bash
 flow plan tui
 ```
+
+**Description**
+
+The plan TUI provides a high-level overview of all plans with:
+- Job status summary (completed, running, pending, failed)
+- Git status (clean, modified, ahead/behind main)
+- Merge state (synced, conflicts, needs rebase)
+- Review status (not started, ready, finished)
+- Links to source notes in grove-notebook
+
+**Actions available in TUI:**
+- Navigate between plans with arrow keys
+- Press Enter to open a plan's detailed status view
+- Review diffs and manage git operations
+- Access plan lifecycle commands (review, finish, hold)
 
 ### `flow plan set`, `current`, `unset`
 
@@ -137,7 +160,7 @@ flow plan unset
 
 ### `flow plan status`
 
-Shows the status of all jobs in a plan.
+Shows the status of all jobs in a plan. Use the `-t` flag for the interactive TUI (recommended).
 
 **Syntax**
 
@@ -145,14 +168,43 @@ Shows the status of all jobs in a plan.
 flow plan status [directory] [flags]
 ```
 
+**Description**
+
+The status command displays the current state of all jobs in a plan. The interactive TUI mode (`-t`) is the primary interface for working with plans.
+
+**TUI Actions** (available with `-t` flag):
+- `r` - Run selected job(s)
+- `A` - Add a new job to the plan
+- `x` - Extract XML plan from selected chat job
+- `i` - Create interactive agent implementation job
+- `e` - Edit the selected job file
+- `d` - Delete the selected job
+- `c` - Mark the selected job as completed
+- `↑/↓` - Navigate between jobs
+- `space` - Toggle job selection
+- `?` - Show help
+
 **Flags**
 
 | Flag | Shorthand | Description | Default |
 | :--- | :--- | :--- | :--- |
 | `--format`| `-f` | Output format: `tree`, `list`, `json`. | `tree` |
 | `--graph` | `-g` | Show a dependency graph in Mermaid syntax. | `false` |
-| `--tui` | `-t` | Launch an interactive terminal interface status view. | `false` |
+| `--tui` | `-t` | Launch interactive terminal interface (recommended). | `false` |
 | `--verbose`| `-v` | Show detailed job information. | `false` |
+
+**Examples**
+
+```bash
+# Interactive TUI (recommended)
+flow plan status -t
+
+# Tree view for quick status check
+flow plan status
+
+# JSON for scripting
+flow plan status --format json
+```
 
 ### `flow plan graph`
 
@@ -215,7 +267,7 @@ Manually marks a job's status as `completed`. This is useful for interactive job
 
 ### `flow plan open`
 
-Opens a plan's worktree in a dedicated tmux session.
+Opens a plan's worktree in a dedicated tmux session with the plan status TUI.
 
 **Syntax**
 
@@ -225,7 +277,23 @@ flow plan open [directory]
 
 **Description**
 
-Switches to or creates a tmux session for the plan's associated worktree and opens the interactive status TUI. A default worktree must be set in the plan's configuration.
+This is the primary command for entering a plan's development environment. It:
+1. Finds the plan's configured worktree
+2. Creates or attaches to a tmux session named after the plan
+3. Changes the working directory to the worktree
+4. Launches the plan's interactive status TUI (`flow plan status -t`)
+
+This provides a complete, isolated workspace for the plan. When `interactive_agent` jobs are run, they launch in separate tmux windows within this session.
+
+**Requirements**
+- The plan must have a configured worktree (set via `--worktree` during init or in `.grove-plan.yml`)
+
+**Example**
+
+```bash
+# Open the ghost-jobs plan in its dedicated environment
+flow plan open ghost-jobs
+```
 
 ### `flow plan finish`
 
@@ -355,6 +423,23 @@ Marks a plan as ready for review and executes `on_review` hooks.
 **Syntax**
 ```bash
 flow plan review [directory]
+```
+
+**Description**
+
+When all jobs in a plan are complete, use this command to transition the plan to review status. This:
+- Updates the plan's review status in `.grove-plan.yml`
+- Triggers configured `on_review` hooks (e.g., creating pull requests)
+- Updates the linked note in `grove-notebook`
+- Makes the plan visible in the "review" section of the plan TUI
+
+The plan TUI shows review status, merge state with main, and git cleanliness to help with the review process.
+
+**Example**
+
+```bash
+# Mark the plan as ready for review
+flow plan review ghost-jobs
 ```
 
 ### `flow plan step`

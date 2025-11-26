@@ -1,34 +1,56 @@
 # Grove Flow
 
-Grove Flow is a command-line tool that executes multi-step workflows defined in Markdown files. It is intended for formalizing development workflows that involve code generation or analysis by LLMs, using Git worktrees for filesystem isolation.
+Grove Flow is a command-line tool for executing multi-step development workflows, deeply integrated with `grove-notebook` for idea management and featuring interactive terminal interfaces (TUIs) for plan management and execution.
 
 <!-- placeholder for animated gif -->
 
 ## Key Features
 
-*   **Job Orchestration**: Executes a sequence of jobs defined in Markdown files. The execution order is determined by dependencies specified in each file's YAML frontmatter. It supports `shell`, `oneshot`, and `agent` job types.
+*   **Notebook-Integrated Workflow**: Plans are created by promoting notes from `grove-notebook`, maintaining bidirectional links between ideas and implementations. Press `P` in the notebook TUI to transform any note into an executable plan with a dedicated worktree.
 
-*   **Plan Management**: A "Plan" is a directory of Markdown job files representing a task. The `flow plan` command provides subcommands to `init`, `add`, `run`, `status`, `graph`, and `finish` these plans. A terminal interface (`flow plan status -t`) is available for monitoring plan progress.
+*   **TUI-First Interface**: Interactive terminal interfaces for every stage of development:
+    - `nb tui` - Browse and promote notes to plans
+    - `flow plan tui` - Overview of all plans with git status and lifecycle management
+    - `flow plan status -t` - Detailed job management with keyboard-driven workflow
+    - `hooks b` - Monitor all running agent sessions across your ecosystem
 
-*   **Chat Integration**: The `flow chat` command manages conversational logs with an LLM, stored as a single Markdown file. The `flow plan extract` command can then be used to convert sections of the conversation into executable jobs within a plan.
+*   **Job Orchestration**: Execute workflows as dependency graphs of jobs defined in Markdown files. Jobs can be chat conversations, oneshot LLM calls, interactive coding agents, or shell commands. Dependencies are managed automatically through the TUI.
 
-*   **Recipes and Templates**: The `flow plan init --recipe` command creates a new plan from a predefined directory structure of job files. The `flow plan add --template` command creates a new job from a single template file.
+*   **Git Worktree Integration**: Plans can create isolated git worktrees in `.grove-worktrees/`, providing complete filesystem isolation for development work. The `flow plan open` command creates a dedicated `tmux` session for each plan's worktree.
+
+*   **Plan Lifecycle Management**: Track plans from creation through review to completion, with automatic git status tracking, merge state visualization, and guided cleanup workflows.
+
+*   **Chat-Driven Development**: Start with conversational exploration using chat jobs, then extract structured implementation plans using simple keyboard shortcuts (`x` for XML plan, `i` for interactive agent).
 
 ## How It Works
 
-A "Plan" is a directory containing numbered Markdown files, where each file represents a "Job". Each job file contains YAML frontmatter that defines its `type` (`agent`, `oneshot`, `shell`), `status` (`pending`, `completed`), and dependencies via a `depends_on` key.
+### The Complete Workflow
 
-The orchestrator reads all job files in a plan directory, builds a dependency graph, and executes jobs whose dependencies have a `completed` status. Jobs of type `agent` or `interactive_agent` are executed within a Git worktree specified in the job's frontmatter, providing filesystem isolation.
+1. **Start in grove-notebook** (`nb tui`): Capture ideas, issues, and tasks
+2. **Promote to Plan**: Press `P` to create a plan directory with an initial chat job and optional worktree
+3. **Explore with Chat**: Discuss the problem with an LLM to get a detailed implementation plan
+4. **Structure Work**: Use the plan status TUI to extract chat content into structured jobs with dependencies
+5. **Execute**: Run jobs in dependency order, with interactive agents launching in dedicated tmux windows
+6. **Monitor**: Track all running work across plans using the hooks session browser
+7. **Review and Finish**: Use lifecycle commands to review work, merge changes, and clean up resources
+
+### Technical Architecture
+
+A "Plan" is a directory containing Markdown files, where each file is a "Job" with YAML frontmatter defining its type, status, and dependencies. The orchestrator builds a dependency graph and executes jobs when their dependencies are complete. Jobs of type `interactive_agent` launch in isolated git worktrees within tmux sessions managed by `grove-hooks`.
 
 ## Ecosystem Integration
 
-Grove Flow functions as a component of the Grove tool suite and executes other tools in the ecosystem as subprocesses.
+Grove Flow integrates deeply with the Grove ecosystem:
 
-*   **Grove Context (`cx`)**: Before executing a job, `grove-flow` can call `grove-context` to read `.grove/rules` files and generate a file-based context. This context is then provided to the LLM.
+*   **Grove Notebook (`nb`)**: The primary starting point for all work. Notes are promoted to plans with automatic linking, maintaining traceability from idea to implementation. The notebook TUI provides the `P` (promote) action that creates plans.
 
-*   **Agent Tools (`claude`, `codex`)**: For `agent` or `interactive_agent` jobs, `flow` launches interactive agent tools as subprocesses within a dedicated tmux session, inheriting the specified worktree and context.
+*   **Grove Context (`cx`)**: Automatically generates file context based on `.grove/rules` files in worktrees. This context is provided to LLMs for all job types, ensuring the AI has relevant codebase information.
 
-*   **Grove Hooks (`grove-hooks`)**: The tool is designed to emit events for job lifecycle stages (e.g., job start, completion). These events can be tracked by `grove-hooks` for monitoring and logging purposes.
+*   **Grove Hooks (`hooks`)**: Manages all interactive agent sessions across the ecosystem. The `hooks b` command shows a unified view of all running jobs. Hooks also provide lifecycle management, triggering actions on plan events (e.g., creating PRs on review).
+
+*   **Agent Tools** (`claude`, `gemini`, etc.): For `interactive_agent` jobs, `flow` launches agent CLIs in isolated tmux windows with worktree context. These agents have full access to the codebase and can make changes interactively.
+
+*   **Grove Meta** (`grove`): The meta-tool manages binary installation and provides ecosystem-wide commands. Use `grove list` to see all active binaries.
 
 ## Installation
 

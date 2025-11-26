@@ -1,33 +1,55 @@
 # Examples Documentation for Grove Flow
 
-You are documenting Grove Flow, an LLM job orchestration tool in Markdown for complex development workflows.
+Generate comprehensive examples showing the modern TUI-first, notebook-integrated workflow.
 
-## Task
-Create three compelling, real-world examples that demonstrate Grove Flow's capabilities with increasing complexity.
+## Primary Example: Real-World Workflow from Note to Finished Plan
 
-## Required Examples
+Create one comprehensive example covering the complete lifecycle:
 
-### Example 1: Basic Plan Execution
-- Show a simple workflow with `flow plan init`
-- Add a single agent job using `flow plan add`
-- Execute the plan with `flow plan run`
-- Include expected output and explanations
+### 1. Start with an Idea in grove-notebook
+- Show `nb tui` interface
+- Display note organization by workspace and status
 
-### Example 2: Multi-Job Feature Workflow  
-- Demonstrate a more complex example with dependent jobs
-- Show a typical development workflow: Spec → Implement → Test
-- Highlight the orchestration capabilities and job dependencies
-- Show how jobs pass information between each other
+### 2. Promote the Note to a Plan
+- Show pressing `P` to promote
+- Worktree creation dialog
+- Bidirectional linking between note and plan
 
-### Example 3: Interactive Chat-to-Plan Workflow
-- Start with an exploratory `flow chat` session
-- Show how to use `flow plan extract` to convert the conversation into a structured, executable plan
-- Highlight the synergy between conversational and structured workflows
-- Demonstrate the transition from exploration to execution
+### 3. Set Up the Development Environment
+- Using `flow plan open` to enter plan workspace
+- Creating tmux session
+- Defining context in `.grove/rules`
 
-## Output Format
-- Each example should have clear headings (e.g., "Example 1: Basic Plan Execution")
-- Include both the commands and the context for why you'd use them
-- Show expected outcomes and results
-- Provide commentary on when to use each pattern
-- Include practical, real-world scenarios that developers would actually encounter
+### 4. Iterate with Chat Job
+- Initial chat job structure
+- Running with `flow chat run` or `r` in TUI
+- LLM response with unique block IDs
+
+### 5. Structure Work by Extracting Jobs
+- Using `x` to create XML plan job
+- Using `i` to create interactive agent job
+- Dependency tree visualization
+
+### 6. Execute and Monitor
+- Running jobs with `r`
+- Monitoring in flow plan status TUI
+- Viewing in hooks session browser
+- Plan TUI showing git and lifecycle status
+
+### 7. Review and Finalize
+- Using `flow plan review`
+- Plan TUI showing review state
+- Available actions (diffs, merge, PR creation)
+
+### 8. Clean Up
+- Using `flow plan finish`
+- Cleanup wizard steps
+- Note updates in grove-notebook
+
+## CLI-Based Workflow Section
+
+Include a condensed section showing CLI equivalents:
+- Direct plan initialization
+- Adding jobs with dependencies via flags
+- Running and monitoring via command line
+- Note: Useful for scripting and automation, but TUI recommended for day-to-day work

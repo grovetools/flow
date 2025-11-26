@@ -1,72 +1,90 @@
-# CLI Reference Documentation
+# Command Reference Documentation
 
-Generate a comprehensive command-line interface reference for Grove Flow.
+Generate comprehensive CLI reference for Grove Flow, with note about TUI being recommended.
 
-## Requirements:
+## Introduction Section
 
-Create a complete reference guide covering all `flow` subcommands and their options. This should serve as a quick lookup guide for users.
+Add note at beginning:
+- All operations can be done via CLI
+- **Recommended workflow uses TUIs**: `nb tui`, `flow plan tui`, `flow plan status -t`, `hooks b`
+- TUIs provide better visual feedback and keyboard-driven workflows
+- CLI documented below is useful for scripting, automation, and quick operations
 
-## Structure:
+## Structure
 
-### Main Commands
-Document each primary command with:
-- Command syntax
-- Description
-- All available flags and options
-- Default values
-- Examples
+### `flow plan` Commands
 
-### Commands to Document:
+Document each with syntax, description, flags, and examples:
 
-#### `flow plan`
-- `init`: Initialize a new plan
-- `add`: Add jobs to a plan
-- `list`: List all plans
-- `tui`: Interactive plan browser
-- `set`: Set active plan
-- `current`: Show active plan
-- `unset`: Clear active plan
-- `status`: Show plan status
-- `graph`: Visualize dependencies
-- `run`: Execute jobs
-- `complete`: Mark job as complete
-- `open`: Open plan directory
-- `launch`: Launch in Tmux
-- `finish`: Complete and clean up plan
-- `config`: Manage plan configuration
-- `extract`: Extract plan from chat
-- `templates list`: List job templates
+#### Core Plan Management
+- `init` - Initialize new plan (note: usually done via `nb tui` promotion)
+- `list` - List all plans
+- `tui` - Interactive plan browser (RECOMMENDED - include description of features)
+- `set`, `current`, `unset` - Active plan management
 
-#### `flow chat`
-- Starting new chats
-- Chat management commands
-- `launch`: Interactive chat session
-- Chat history and navigation
+#### Plan Status and Visualization
+- `status` - Show plan status
+  - Emphasize `-t` flag for TUI mode (RECOMMENDED)
+  - Document all TUI keyboard shortcuts (r, A, x, i, e, d, c, space, arrows)
+  - CLI modes: tree, list, JSON
+- `graph` - Visualize dependency graph
 
-#### `flow models`
-- `list`: List available models
-- Model configuration
+#### Job Management
+- `add` - Add jobs (note TUI is easier with automatic dependencies)
+- `run` - Execute jobs
+- `complete` - Mark job complete
+- `jobs rename` - Rename job
+- `jobs update-deps` - Update dependencies
 
-#### `flow version`
-- Version information
-- Build details
+#### Development Environment
+- `open` - Open plan environment (RECOMMENDED - describe full workflow)
+  - What it does: tmux session, worktree navigation, TUI launch
+- `tmux status` - Launch in tmux window
+
+#### Lifecycle Management
+- `review` - Mark ready for review (with hook triggers)
+- `finish` - Complete and cleanup (guided workflow)
+- `hold` / `unhold` - Pause/resume plans
+
+#### Configuration and Extraction
+- `config` - Manage plan config
+- `context` - Manage job context
+- `extract` - Extract from chat
+- `templates list` - List templates
+- `recipes list` - List recipes
+
+### `flow chat` Commands
+
+- Initialize chats (`-s` flag)
+- `list` - List chats with filtering
+- `run` - Run chat jobs
+
+**Important**: Document that there is NO `flow chat launch` - extraction to plan required for execution
+
+### `flow models` Command
+
+List available LLM models
+
+### `flow tmux` Commands
+
+Tmux integration commands
+
+### `flow version` Command
+
+Version information with `--json` option
 
 ### Global Options
-- `--config`: Specify config file
-- `--verbose`: Verbose output
-- `--quiet`: Suppress output
-- `--format`: Output format options
-- Help and documentation flags
 
-### Exit Codes
-- Document standard exit codes and their meanings
+Standard flags available across commands
 
 ### Environment Variables
-- List all recognized environment variables
-- Their effects on command behavior
+
+- `GROVE_ECOSYSTEM_ROOT`
+- `GROVE_FLOW_SKIP_DOCKER_CHECK`
+- `GROVE_CONFIG`
 
 ### Configuration Files
-- Quick reference to config file locations
-- Priority and override behavior
 
-Include practical examples for common workflows and command combinations.
+- `grove.yml` - Project-level
+- `.grove-plan.yml` - Plan-level
+- `.grove/state.yml` - Local state (not committed)

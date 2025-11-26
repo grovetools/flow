@@ -1,175 +1,387 @@
 # Examples
 
-This document provides examples for using `grove-flow` for single- and multi-step development workflows.
+This document demonstrates a real-world `grove-flow` workflow, showing how ideas evolve from notes in `grove-notebook` into structured, executable plans using the terminal user interface (TUI).
 
-## Example 1: Basic Plan Execution
+## A Real-World Workflow: From Note to Finished Plan
 
-This example covers creating a plan, adding a single job, and running it.
+This example covers the complete lifecycle of a plan, from capturing an idea to cleaning up after completion. It illustrates the modern, TUI-centric workflow that integrates `grove-notebook`, `grove-flow`, and `grove-hooks`.
 
-1.  **Initialize the Plan**
+### 1. Start with an Idea in `grove-notebook`
 
-    Create a new plan directory and an associated Git worktree. The `--worktree` flag creates a Git worktree and branch named after the plan (`new-feature-endpoint`), which isolates file changes.
+The workflow begins in the `grove-notebook` TUI, where you manage ideas, issues, and tasks.
 
-    ```bash
-    flow plan init new-feature-endpoint --worktree
-    ```
+```bash
+# Open the notebook TUI
+nb tui
+```
 
-    This command creates the `new-feature-endpoint` directory, adds a `.grove-plan.yml` configuration file, and sets `new-feature-endpoint` as the active plan.
+The notebook interface organizes notes by workspace and status:
 
-2.  **Add an Agent Job**
+```
+nb > grove-flow
 
-    Add a job to the active plan. The `agent` job type is for code generation tasks.
+  ▶ global
+  ▼ grove-flow
+    ├─ ▼ inbox (6)
+    │  ├─ failing-tests
+    │  ├─ review-workflow
+    │  ├─ ecosystem-refactoring
+    │  ├─ flow-plan-status-features
+    │  ├─ consolidate-tui
+    │  └─ notes-for-docs
+    ├─ ▼ issues (6)
+    │  ├─ interactive-agent-promptfile
+    │  ├─ worktree-siblings-v2
+    │  ├─ launching-multi-jobs
+    │  ├─ improve-jobs-cli
+    │  ├─ no-plan-dir-exists
+    │  └─ flow-test-config-migrations
+    └─ ▼ in_progress (1)
+```
 
-    ```bash
-    flow plan add --title "Implement User Endpoint" --type agent \
-      -p "Create a new Go API endpoint at /api/v1/users for basic CRUD operations."
-    ```
+### 2. Promote the Note to a Plan
 
-    This creates the file `new-feature-endpoint/01-implement-user-endpoint.md` containing the job's configuration and prompt.
+When you're ready to work on an issue, navigate to it in the TUI and press `P` to promote it to a plan.
 
-3.  **Check the Status**
+```
+╭────────────────────────────────────────╮
+│                                        │
+│  Create a git worktree for this plan?  │
+│                                        │
+╰────────────────────────────────────────╯
 
-    View the plan's status using the interactive terminal UI (`-t`).
+                (y/n)
+```
 
-    ```bash
-    flow plan status -t
-    ```
+Choose whether to create a dedicated git worktree for filesystem isolation. A worktree creates a separate working directory and branch, allowing you to work on the plan without affecting your main branch.
 
-    The TUI displays the "Implement User Endpoint" job with a `pending` status.
+After promotion, the notebook TUI shows the bidirectional link between the note and the plan:
 
-4.  **Run the Plan**
+```
+nb > grove-flow
 
-    Execute the next available job in the plan.
+  ▼ grove-flow
+    ├─ ▼ in_progress (1)
+    │  └─ ghost-jobs [plan: → ghost-jobs]
+    ├─ ▼ plans (1)
+    │  └─ ▶ ghost-jobs [note: ← ghost-jobs] (1)
+    └─ ▼ completed (1)
+```
 
-    ```bash
-    flow plan run
-    ```
+The promotion automatically:
+- Creates a plan directory in the configured `plans_directory`
+- Adds a `.grove-plan.yml` configuration file
+- Creates an initial `01-chat.md` job file
+- Adds a `note_ref` field to link back to the source note
+- Optionally creates a git worktree in `.grove-worktrees/`
 
-    `grove-flow` finds the pending job and executes it in the `new-feature-endpoint` worktree.
+### 3. Set Up the Development Environment
 
-## Example 2: Multi-Job Feature Workflow
+Open the plan in a dedicated development environment:
 
-`grove-flow` orchestrates multi-step workflows with dependencies. This example shows a development pattern of specification, implementation, and testing.
+```bash
+flow plan open ghost-jobs
+```
 
-1.  **Initialize the Plan**
+This command:
+- Creates or attaches to a `tmux` session named after the plan
+- Changes to the worktree directory (if one exists)
+- Launches the plan's interactive status TUI
 
-    Create a plan for a new user authentication feature.
+The plan status TUI displays:
 
-    ```bash
-    flow plan init user-auth-feature --worktree
-    ```
+```
+Plan Status: ghost-jobs
 
-2.  **Add a Specification Job**
+  ╭─────┬────────────┬──────┬──────────────╮
+  │ SEL │ JOB        │ TYPE │ STATUS       │
+  ├─────┼────────────┼──────┼──────────────┤
+  │ [ ] │ 01-chat.md │ chat │ pending_user │
+  ╰─────┴────────────┴──────┴──────────────╯
 
-    The first step is a `oneshot` job for an LLM to write a technical specification. This job has no dependencies.
+  Press ? for help • q/ctrl+c • quit [table]
+```
 
-    ```bash
-    flow plan add --title "Define Authentication Spec" --type oneshot \
-      -p "Write a technical specification for a JWT-based authentication system, including data models and API endpoints."
-    ```
+Before running the job, define what context should be included. Open `.grove/rules` in the worktree:
 
-    This creates `user-auth-feature/01-define-authentication-spec.md`.
+```
+**/*.go
+Makefile
+go.mod
+grove.yml
 
-3.  **Add an Implementation Job**
+!tests/**
+```
 
-    Next, add an `agent` job to implement the feature. The `-d` flag specifies that this job depends on the completion of the specification job.
+This file tells `grove-context` which files to include when providing codebase context to the LLM.
 
-    ```bash
-    flow plan add --title "Implement Auth Logic" --type agent \
-      -d "01-define-authentication-spec.md" \
-      -p "Implement the authentication logic based on the specification from the previous step."
-    ```
+### 4. Iterate with the LLM using a Chat Job
 
-    This creates `user-auth-feature/02-implement-auth-logic.md`. `grove-flow` will not run this job until `01-define-authentication-spec.md` is complete.
+The initial chat job file looks like this:
 
-4.  **Add a Testing Job**
+```markdown
+---
+id: chat-about-ghost-jobs-0151a038
+note_ref: /Users/solom4/notebooks/nb/workspaces/grove-hooks/in_progress/20251115-ghost-jobs.md
+repository: grove-hooks
+status: pending_user
+template: chat
+title: Chat about ghost-jobs
+type: chat
+worktree: ghost-jobs
+---
 
-    Add another `agent` job to write tests, which depends on the implementation.
+# ghost-jobs
 
-    ```bash
-    flow plan add --title "Write Unit Tests" --type agent \
-      -d "02-implement-auth-logic.md" \
-      -p "Write unit and integration tests for the authentication system."
-    ```
+[Describe the problem or feature here...]
+```
 
-    This creates `user-auth-feature/03-write-unit-tests.md`.
+Edit the file to describe your task, then submit it to the LLM by pressing `r` (run) in the status TUI or using the CLI:
 
-5.  **Run the Workflow**
+```bash
+flow chat run ghost-jobs
+```
 
-    Execute all jobs in the plan according to their dependency order.
+The job is executed:
 
-    ```bash
-    flow plan run --all
-    ```
+```
+Found 1 runnable chat(s). Executing sequentially...
 
-    `grove-flow` runs the specification job first. Once it completes, it runs the implementation job, followed by the testing job.
+--- Running Chat: Chat about ghost-jobs ---
+Executing job [id=chat-about-ghost-jobs-0151a038 type=chat]
+Job status updated [job=chat-about-ghost-jobs-0151a038 from=pending_user to=running]
+Checking context in worktree for chat job...
+Generated .grove/context with 25 files
 
-## Example 3: Interactive Chat-to-Plan Workflow
+────────────────────────────────────────────────────────────
+Context Summary
+Total Files: 25
+Total Tokens: 57.1k
+Total Size: 223.0 KB
 
-The `chat` and `extract` commands are used to convert an unstructured conversation into an executable plan.
+Language Distribution:
+.go:      96.9% (55.3k tokens, 22 files)
+Makefile:  1.7% (945 tokens, 1 files)
+.mod:      1.4% (790 tokens, 1 files)
+.yml:      0.1% (46 tokens, 1 files)
 
-1.  **Start a Chat**
+Context available for chat job.
+────────────────────────────────────────────────────────────
 
-    Create a Markdown file for an idea and initialize it as a chat job. This adds the required frontmatter to the file.
+Calling Gemini API with model: gemini-2.5-pro
+```
 
-    ```bash
-    # Create a directory for chat files
-    mkdir -p chats
+The LLM's response is appended to the chat file with a unique block ID:
 
-    # Create the file
-    echo "# Idea: Refactor the logging system" > chats/logging-refactor.md
+```markdown
+---
+<!-- grove: {"id": "f2eb25"} -->
+## LLM Response (2025-11-26 12:23:48)
 
-    # Initialize it as a runnable chat job
-    flow chat -s chats/logging-refactor.md
-    ```
+Excellent, I understand the problem of "ghost jobs" appearing in the session browser...
 
-2.  **Iterate with the LLM**
+Here is the implementation plan:
 
-    Run the chat to get a response from the LLM. Each LLM response is automatically assigned a unique block ID.
+### Project-Level Context
+...
 
-    ```bash
-    # Get the first response from the LLM
-    flow chat run logging-refactor
-    ```
+### Phase 1: Implement Orphaned Session Reaper
+...
+```
 
-    After several turns, `chats/logging-refactor.md` might contain:
+You can continue the conversation by adding more content to the file and running `flow chat run` again. Each LLM response receives a unique ID for later extraction.
 
-    ```markdown
-    ---
-    title: Idea: Refactor the logging system
-    type: chat
-    ---
-    # Idea: Refactor the logging system
+### 5. Structure the Work by Extracting Jobs
 
-    <!-- grove: {"id": "a1b2c3"} -->
-    ## LLM Response
-    A high-level plan for the logging refactor:
-    1.  Introduce a structured logging library.
-    2.  Define standardized log levels.
-    3.  Create a centralized logging configuration.
+Once the LLM provides a detailed plan, convert it into structured jobs using the TUI:
 
-    <!-- grove: {"template": "chat"} -->
-    That sounds good. Can you create a more detailed technical plan for step 1?
+**Create an XML Plan Job:**
 
-    <!-- grove: {"id": "d4e5f6"} -->
-    ## LLM Response
-    For step 1, we will:
-    - Add a logging library to `go.mod`.
-    - Create a new package `internal/logging`.
-    - Implement a `NewLogger()` function.
-    ```
+In the status TUI, select the chat job and press `x` to create an XML plan extraction job. This uses the LLM's response to generate a detailed, structured plan.
 
-3.  **Extract a Job from the Chat**
+```
+╭─────────────────────────────────────────────────────────╮
+│                                                         │
+│  Create XML Plan Job                                    │
+│                                                         │
+│  Enter job title:                                       │
+│  > xml-plan-Chat about ghost-jobs                       │
+│                                                         │
+│  Press Enter to create, Esc to cancel                   │
+╰─────────────────────────────────────────────────────────╯
+```
 
-    The LLM's second response (ID `d4e5f6`) can be extracted into a formal plan.
+**Create an Implementation Job:**
 
-    ```bash
-    # First, create a new plan to hold the extracted job
-    flow plan init logging-refactor-plan --worktree
+Next, press `i` to create an interactive agent job that will execute the plan. The status TUI now shows:
 
-    # Now, extract the block from the chat into the active plan
-    flow plan extract d4e5f6 --title "Implement Structured Logger" \
-      --file chats/logging-refactor.md
-    ```
+```
+Plan Status: ghost-jobs
 
-    This command finds the content of block `d4e5f6` and creates a new job file (`01-implement-structured-logger.md`) in the `logging-refactor-plan`. This job is now part of a formal workflow and can be executed with `flow plan run`.
+  ╭─────┬───────────────────────────────────────────┬──────────────────┬───────────╮
+  │ SEL │ JOB                                       │ TYPE             │ STATUS    │
+  ├─────┼───────────────────────────────────────────┼──────────────────┼───────────┤
+  │ [x] │ 01-chat.md                                │ chat             │ completed │
+  │ [ ] │ └─ 02-xml-plan-chat-about-ghost-jobs.md   │ oneshot          │ pending   │
+  │ [ ] │    └─ 03-impl-chat-about-ghost-jobs.md    │ interactive_agent│ pending   │
+  ╰─────┴───────────────────────────────────────────┴──────────────────┴───────────╯
+```
+
+The dependency tree shows that job 03 depends on job 02, which depends on job 01.
+
+### 6. Execute and Monitor the Plan
+
+Select the jobs and press `r` to run them. The XML plan job runs first (as a `oneshot`), followed by the implementation job.
+
+Monitor execution across different interfaces:
+
+**In the flow plan status TUI:**
+
+```
+Plan Status: ghost-jobs
+
+  ╭─────┬─────────────────────────────────────────┬──────────────────┬───────────╮
+  │ SEL │ JOB                                     │ TYPE             │ STATUS    │
+  ├─────┼─────────────────────────────────────────┼──────────────────┼───────────┤
+  │ [x] │ 01-chat.md                              │ chat             │ completed │
+  │ [x] │ └─ 02-xml-plan-chat-about-ghost-jobs.md │ oneshot          │ completed │
+  │ [ ] │    └─ 03-impl-chat-about-ghost-jobs.md  │ interactive_agent│ running   │
+  ╰─────┴─────────────────────────────────────────┴──────────────────┴───────────╯
+```
+
+**In the grove-hooks session browser (`hooks b`):**
+
+```
+╭──────────────────────────────────────────────────────┬──────────────────┬──────────────────────┬─────╮
+│ WORKSPACE / JOB                                      │ TYPE             │ STATUS               │ AGE │
+├──────────────────────────────────────────────────────┼──────────────────┼──────────────────────┼─────┤
+│ grove-ecosystem                                      │                  │                      │     │
+│ ├─(1) grove-flow                                     │                  │                      │     │
+│ │   └─(2) test-modernization                         │                  │                      │     │
+│ │        └─ Plan: test-modernization (1 jobs)        │                  │                      │     │
+│ │             └─ 01-chat.md                          │ [chat]           │ pending_user         │     │
+│ ├─(3) grove-hooks                                    │                  │                      │     │
+│ │   └─(4) ghost-jobs                                 │                  │                      │     │
+│ │        └─ Plan: ghost-jobs (1 jobs)                │                  │                      │     │
+│ │             └─ 03-impl-chat-about-ghost-jobs.md    │ [interactive_agent] │ running (claude_code) │ 9s  │
+╰──────────────────────────────────────────────────────┴──────────────────┴──────────────────────┴─────╯
+```
+
+The `interactive_agent` job runs in a dedicated `tmux` window where you can interact with the coding agent.
+
+**In the flow plan TUI (`flow plan tui`):**
+
+```
+╭────────────┬───────────────────────────┬────────────┬───────┬────────┬─────────────┬───────┬───────────────╮
+│ PLAN       │ STATUS                    │ WORKTREE   │ GIT   │ MERGE  │ REVIEW      │ NOTES │ UPDATED       │
+├────────────┼───────────────────────────┼────────────┼───────┼────────┼─────────────┼───────┼───────────────┤
+│ ghost-jobs │ 2 completed, 1 running    │ ghost-jobs │ Clean │ Synced │ Not Started │ -     │ 1 minute ago  │
+╰────────────┴───────────────────────────┴────────────┴───────┴────────┴─────────────┴───────┴───────────────╯
+
+Git Repository Log
+
+╭────────────────────────────────────────────────────────────╮
+│ * 01a103b (HEAD -> ghost-jobs, origin/main, main) chore:  │
+│   simplify test-e2e to use tend auto-build                │
+│ * 544522c feat: integrate centralized icon system          │
+│ * ec44643 feat: add recent job highlighting                │
+╰────────────────────────────────────────────────────────────╯
+```
+
+This view shows the plan's git status, merge status with main, and overall progress.
+
+### 7. Review and Finalize
+
+When all jobs are complete, review the work:
+
+```bash
+flow plan review ghost-jobs
+```
+
+This marks the plan as ready for review and can trigger configured hooks (e.g., creating a pull request, running tests).
+
+The plan TUI now shows:
+
+```
+╭────────────┬──────────────┬────────────┬───────┬────────┬────────┬───────┬──────────────╮
+│ PLAN       │ STATUS       │ WORKTREE   │ GIT   │ MERGE  │ REVIEW │ NOTES │ UPDATED      │
+├────────────┼──────────────┼────────────┼───────┼────────┼────────┼───────┼──────────────┤
+│ ghost-jobs │ 3 completed  │ ghost-jobs │ Clean │ Synced │ Ready  │ -     │ 1 minute ago │
+╰────────────┴──────────────┴────────────┴───────┴────────┴────────┴───────┴──────────────╯
+```
+
+You can use the TUI to:
+- Review diffs between the worktree and main branch
+- Rebase or merge changes
+- Create pull requests
+- Mark the plan as finished
+
+### 8. Clean Up
+
+Once the work is merged, finish the plan:
+
+```bash
+flow plan finish ghost-jobs
+```
+
+This launches a cleanup wizard that guides you through:
+- Marking the plan as `finished` in `.grove-plan.yml`
+- Pruning the git worktree from `.grove-worktrees/`
+- Deleting the local and remote branches
+- Closing the `tmux` session
+- Archiving the plan directory to `.archive/`
+
+The note in `grove-notebook` is automatically updated to reflect completion.
+
+## CLI-Based Workflow
+
+While the TUI-first workflow is recommended for interactive work, all operations can be performed via the CLI:
+
+### Initialize a Plan
+
+```bash
+flow plan init new-feature --worktree
+```
+
+### Add Jobs with Dependencies
+
+```bash
+flow plan add --title "Write Specification" --type oneshot \
+  -p "Create a technical spec for the new feature"
+
+flow plan add --title "Implement Feature" --type agent \
+  -d "01-write-specification.md" \
+  -p "Implement the feature based on the specification"
+
+flow plan add --title "Write Tests" --type agent \
+  -d "02-implement-feature.md" \
+  -p "Write comprehensive tests for the feature"
+```
+
+### Run Jobs
+
+```bash
+# Run the next available job
+flow plan run
+
+# Run all jobs in dependency order
+flow plan run --all
+
+# Run a specific job
+flow plan run new-feature/02-implement-feature.md
+```
+
+### Monitor Status
+
+```bash
+# View dependency tree
+flow plan status
+
+# View in interactive TUI
+flow plan status -t
+
+# View as JSON
+flow plan status --format json
+```
+
+This CLI workflow is useful for automation, scripting, and CI/CD pipelines, but the TUI provides a more intuitive interface for day-to-day development.

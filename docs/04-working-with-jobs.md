@@ -1,28 +1,31 @@
 # Working with Jobs
 
-Jobs are the fundamental units of work in a Grove Flow plan. Each job is a single, executable step defined in a Markdown file with YAML frontmatter. This document covers how to create, configure, and manage these jobs.
+Jobs are the fundamental units of work in a Grove Flow plan. Each job is a single, executable step defined in a Markdown file with YAML frontmatter. Most job creation and management happens through the plan status TUI, though jobs can also be managed via CLI commands.
 
 ## Creating Jobs
 
-The primary command for adding a new job to a plan is `flow plan add`. It can be used interactively through a Terminal User Interface (TUI) or non-interactively with flags.
+Jobs are typically created through the plan status TUI's keyboard shortcuts, though they can also be created via the CLI.
 
-### Interactive Mode (TUI)
+### From the Plan Status TUI (Recommended)
 
-Running `flow plan add` or `flow plan add -i` launches a terminal interface to guide the creation of a new job. This interface provides prompts and lists available options like job types and dependencies from the current plan.
+The plan status TUI (`flow plan status -t`) provides keyboard shortcuts for creating jobs with proper dependencies:
 
-```bash
-# Add a job to the active plan
-flow plan add
+- **`A`** - Add a new job to the plan
+- **`x`** - Extract XML plan from selected chat job (creates a oneshot job)
+- **`i`** - Create interactive agent implementation job (depends on selected job)
 
-# Specify the plan directory and launch the TUI
-flow plan add ./plans/my-feature -i
-```
+These actions automatically set up dependencies based on the currently selected job, ensuring proper workflow structure.
 
-### Flag-Based Mode
+**Example workflow in TUI:**
+1. Complete a chat job to explore the problem
+2. Select the chat job and press `x` to create an XML plan extraction
+3. Select the XML plan job and press `i` to create an implementation job
+4. The dependency tree is automatically created: chat → xml-plan → implementation
 
-For scripting or direct creation, job details can be provided using flags.
+### Using the CLI
 
-**Example:**
+For scripting or direct creation, jobs can be added via command-line flags:
+
 ```bash
 # Set 'my-feature' as the active plan
 flow plan set my-feature
@@ -36,6 +39,12 @@ flow plan add \
 ```
 
 This creates a new Markdown file (e.g., `02-implement-api-endpoints.md`) in the active plan directory with the specified frontmatter and prompt body.
+
+For an interactive CLI experience, use the `-i` flag to launch a guided TUI for job creation:
+
+```bash
+flow plan add -i
+```
 
 **Key `plan add` Flags:**
 
@@ -123,28 +132,53 @@ Templates allow for the reuse of common job structures and prompts.
 
 ## Job Management
 
--   **Manual Completion**: For jobs that require manual intervention or verification (like `interactive_agent` or `chat`), mark them as complete with:
-    ```bash
-    flow plan complete <job-file>
-    ```
-    When an `interactive_agent` job is completed, its session transcript is found via `grove aglogs` and appended to the job file.
+### Managing Jobs from the TUI
 
--   **Renaming Jobs**: To rename a job and automatically update all references to it in other jobs within the plan, use:
-    ```bash
-    flow plan jobs rename <old-job-file> "New Job Title"
-    ```
+The plan status TUI provides keyboard shortcuts for common job management tasks:
 
--   **Updating Dependencies**: To replace a job's entire dependency list, use:
-    ```bash
-    flow plan jobs update-deps <job-file> [new-dep-1.md] [new-dep-2.md]
-    ```
-    Running the command without any dependency files will clear all dependencies for the specified job.
+- **`r`** - Run selected job(s)
+- **`c`** - Mark selected job as completed
+- **`e`** - Edit the job file
+- **`d`** - Delete the job
+- **`space`** - Toggle job selection (for batch operations)
 
--   **Automatic Summarization**: If `summarize_on_complete: true` is set in `grove.yml`, a one-sentence summary of the job's accomplishment will be generated and added to the `summary` field in the job's frontmatter upon completion.
+### Managing Jobs from the CLI
 
--   **Job Output**: The output from `oneshot` and `shell` jobs is appended to the job's Markdown file under an `## Output` heading.
+**Manual Completion:**
 
--   **Debugging**: If a job fails, its status is set to `failed`. The output and logs within the job file can be used to debug the issue. Once fixed, the job can be re-run with `flow plan run <job-file>`.
+For jobs that require manual intervention or verification (like `interactive_agent` or `chat`), mark them as complete:
+
+```bash
+flow plan complete <job-file>
+```
+
+When an `interactive_agent` job is completed, its session transcript is found via `grove aglogs` and appended to the job file.
+
+**Renaming Jobs:**
+
+To rename a job and automatically update all references to it in other jobs within the plan:
+
+```bash
+flow plan jobs rename <old-job-file> "New Job Title"
+```
+
+**Updating Dependencies:**
+
+To replace a job's entire dependency list:
+
+```bash
+flow plan jobs update-deps <job-file> [new-dep-1.md] [new-dep-2.md]
+```
+
+Running the command without any dependency files will clear all dependencies for the specified job.
+
+### Automatic Features
+
+- **Automatic Summarization**: If `summarize_on_complete: true` is set in `grove.yml`, a one-sentence summary of the job's accomplishment will be generated and added to the `summary` field in the job's frontmatter upon completion.
+
+- **Job Output**: The output from `oneshot` and `shell` jobs is appended to the job's Markdown file under an `## Output` heading.
+
+- **Note Reference**: When a plan is created from a note in `grove-notebook`, the initial job includes a `note_ref` field that links back to the source note. This maintains traceability from idea to implementation.
 
 ## Advanced Topics
 

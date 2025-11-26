@@ -1,55 +1,74 @@
 # Working with Jobs Documentation
 
-Generate detailed documentation for creating and managing individual jobs within Grove Flow plans.
+Generate documentation for job creation and management, emphasizing TUI workflows.
 
-## Content to Cover:
+## Outline
 
 ### Creating Jobs
-- Focus on `flow plan add` command:
-  - Interactive TUI mode (default behavior)
-  - Flag-based usage for scripting
-  - How to specify job properties (title, type, prompt, dependencies)
-- Best practices for writing effective job prompts
+
+#### From the Plan Status TUI (Recommended)
+- Keyboard shortcuts for job creation
+  - `A` - Add new job
+  - `x` - Extract XML plan from chat job
+  - `i` - Create interactive agent implementation job
+- Automatic dependency setup based on selection
+- Example workflow: chat → xml-plan → implementation
+
+#### Using the CLI
+- Flag-based job creation for scripting
+- Key flags: title, type, depends-on, prompt, prompt-file, source-files, template
+- Interactive TUI mode with `-i` flag
+
+#### Writing Effective Prompts
+- State goals and constraints clearly
+- Provide context (source files, dependencies)
+- Structure appropriately for job type
 
 ### Job Types Explained
-Provide detailed explanations and use cases for each job type:
-- **agent**: Autonomous AI agents for complex tasks
-- **interactive_agent**: Agents requiring human interaction
-- **headless_agent**: Background agents without UI
-- **oneshot**: Simple, single-response LLM tasks
-- **shell**: Shell command execution jobs
-- **chat**: Multi-turn conversational jobs
 
-Include when to use each type and typical examples.
+Table format comparing:
+- `chat` - Exploration and planning
+- `oneshot` - Single-shot generation
+- `interactive_agent` - Multi-step coding sessions
+- `headless_agent` - Background automation
+- `shell` - Shell commands
+
+Include purpose, interaction model, output, and use cases for each.
 
 ### Dependencies Between Jobs
-- How to define dependencies using `depends_on`
-- Understanding dependency resolution
-- Best practices for structuring dependent jobs
-- Handling failed dependencies
+- Defining with `depends_on` frontmatter
+- CLI specification with `-d` flag
+- Automatic dependency creation in TUI
+- How orchestrator resolves dependencies
 
 ### Models and LLM Configuration
-- How to specify LLM models at the job level
-- Available models and their trade-offs
-- Model inheritance from plan and project configs
-- Best practices for model selection
+- Three-level hierarchy: job, plan, project
+- Using `flow models` to see options
+- Model selection best practices
 
 ### Job Templates
-- Using `--template` with `flow plan add`
-- Listing available templates with `flow plan templates list`
-- Understanding what templates provide
-- Creating custom job templates
+- Listing with `flow plan templates list`
+- Using with `--template` flag
+- Template locations (built-in, user, project)
+- Creating custom templates
 
-### Job Completion and Management
-- Using `flow plan complete` for manual job completion
-- Understanding automatic job summarization
-- How job outputs are stored and accessed
-- Debugging failed jobs
+### Job Management
+
+#### Managing from TUI
+- Keyboard shortcuts: r, c, e, d, space
+- Batch operations with selection
+
+#### Managing from CLI
+- Manual completion with `flow plan complete`
+- Renaming with `flow plan jobs rename`
+- Updating dependencies with `flow plan jobs update-deps`
+
+#### Automatic Features
+- Automatic summarization (if configured)
+- Job output appending
+- Note reference (`note_ref`) for traceability
 
 ### Advanced Topics
-- Job metadata and frontmatter
-- Custom job configurations
-- Integration with worktrees
-- Performance considerations
-
-Include code examples and practical scenarios throughout.
+- Job frontmatter structure
+- Worktree integration
+- Context management

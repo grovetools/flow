@@ -1,33 +1,46 @@
 # Overview Documentation for Grove Flow
 
-You are documenting Grove Flow, an LLM job orchestration tool in Markdown for complex development workflows.
+Generate overview documentation for Grove Flow, emphasizing its integration with grove-notebook and TUI-first workflow.
 
-## Task
-Write a comprehensive single-page overview that includes the following sections in order:
+## Outline
 
-1. **High-level description**: Explains what Grove Flow is and its purpose as an LLM job orchestration CLI tool
-2. **Animated GIF placeholder**: Include `<!-- placeholder for animated gif -->`
-3. **Key features**: Highlight job orchestration, plan management, chat integration, recipes and templates
-4. **Ecosystem Integration**: A dedicated H2 section explaining how Grove Flow fits into the Grove ecosystem and works with other tools 
-5. **How it works**: Provide a more technical description and exactly what happens under the hood
-6. **Installation**: A dedicated H2 section at the bottom with standardized installation instructions
+### High-level Description
+- Define Grove Flow as a multi-step development workflow tool
+- Emphasize deep integration with grove-notebook for idea management
+- Highlight interactive terminal interfaces (TUIs) as primary interaction mode
 
-## Installation Section Requirements
-Include this condensed installation section at the bottom:
+### Key Features
+Cover these core capabilities:
+- **Notebook-Integrated Workflow**: Plans created from grove-notebook notes with bidirectional linking
+- **TUI-First Interface**: Interactive interfaces at every stage (nb tui, flow plan tui, flow plan status -t, hooks b)
+- **Job Orchestration**: Dependency graphs of jobs (chat, oneshot, interactive agents, shell commands)
+- **Git Worktree Integration**: Isolated development environments in .grove-worktrees/
+- **Plan Lifecycle Management**: Track from creation through review to completion
+- **Chat-Driven Development**: Conversational exploration followed by structured implementation
+
+### How It Works
+Explain the complete workflow:
+1. Start in grove-notebook (nb tui)
+2. Promote notes to plans (Press P)
+3. Explore with chat jobs
+4. Structure work using TUI keyboard shortcuts
+5. Execute in dependency order
+6. Monitor across all plans
+7. Review and finish with lifecycle commands
+
+Also cover technical architecture:
+- Plans as directories of Markdown job files
+- YAML frontmatter for configuration
+- Dependency graph execution
+- Worktree and tmux integration
+
+### Ecosystem Integration
+Describe integration with:
+- Grove Notebook (nb): Primary entry point, note promotion
+- Grove Context (cx): File context generation for LLMs
+- Grove Hooks (hooks): Session management and lifecycle hooks
+- Agent Tools (claude, gemini): Interactive coding sessions
+- Grove Meta (grove): Binary management
 
 ### Installation
-
-Install via the Grove meta-CLI:
-```bash
-grove install flow
-```
-
-Verify installation:
-```bash
-flow version
-```
-
-Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github.com/mattsolo1/grove-meta/blob/main/docs/02-installation.md) if you don't have it installed.
-
-## Output Format
-Create a well-structured Markdown document that serves as a complete introduction to Grove Flow, combining description, ecosystem context, and installation in a single page.
+Standard installation via grove meta-CLI with verification steps.

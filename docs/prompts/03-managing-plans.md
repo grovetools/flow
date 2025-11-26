@@ -1,51 +1,91 @@
 # Managing Plans Documentation
 
-Generate comprehensive documentation for all aspects of managing plans in Grove Flow.
+Generate documentation for plan management, emphasizing grove-notebook integration and TUI workflows.
 
-## Content to Cover:
+## Outline
 
 ### Plan Initialization
-- Explain `flow plan init` with all its variations:
-  - Basic initialization
-  - Using `--worktree` (with and without custom branch names)
-    - Show that it's created in `.grove-worktrees/branch-name`
-  - Using `--recipe` with built-in recipes
-  - Using `--extract-all-from` to convert chats to plans
-  - Combining options for complex workflows
-  - Show an example with the TUI (animated GIF)
+
+#### From grove-notebook (Recommended)
+- Primary workflow starting in `nb tui`
+- Pressing `P` to promote notes
+- Automatic plan creation with initial chat job
+- Bidirectional linking via `note_ref`
+- Worktree creation during promotion
+
+#### Direct Initialization via CLI
+- Basic `flow plan init` usage
+- Worktree flags (auto-named and custom)
+- Recipe usage
+- File extraction
+- Combined options
+- Interactive TUI mode
 
 ### Listing and Browsing Plans
-- Detail `flow plan list` command and its output
-- Explain the interactive `flow plan tui` for visual browsing
-- How to navigate and interact with the TUI
+
+#### Plan TUI (Primary Interface)
+- High-level overview with `flow plan tui`
+- Columns: status, git state, merge state, review status, notes
+- Available actions and navigation
+- Accessing detailed views
+
+#### List Command
+- Simple table output for scripting
+- Filtering options
 
 ### Active Plan Management
-- Explain the concept of an "active plan" and its benefits
-- Cover `flow plan set` to set the active plan
-- Cover `flow plan current` to see the current active plan
-- Cover `flow plan unset` to clear the active plan
-- How active plans affect other commands
+- Concept of active plan
+- `flow plan set`, `current`, `unset` commands
+- How active plan affects other commands
 
 ### Status and Visualization
-- Detailed coverage of `flow plan status` command:
-  - Regular output vs TUI mode with `-t`
-  - Understanding job states and progress
-  - Interpreting the status display
-- Explain `flow plan graph` for visualizing dependencies
-- How to read and interpret dependency graphs
+
+#### Plan Status TUI (Primary Interface)
+- Interactive mode with `flow plan status -t`
+- Keyboard shortcuts (r, A, x, i, e, d, c, space, arrow keys)
+- Dependency tree visualization
+- Recommended as primary workflow tool
+
+#### Command-Line Status
+- Tree view, verbose, JSON formats
+- Status indicators
+- Use cases for scripting
+
+#### Dependency Graphs
+- `flow plan graph` command
+- Output formats (mermaid, dot, ascii)
 
 ### Interaction with Development Environment
-- Cover `flow plan open` for opening plan directories
-- Explain `flow plan launch` for Tmux integration:
-  - How it creates Tmux sessions
-  - Working with worktrees in Tmux
-  - Benefits for development workflow
 
-### Plan Cleanup and Completion
-- Detail the `flow plan finish` workflow:
-  - What happens during cleanup
-  - Worktree removal
-  - Archiving completed plans
-  - Best practices for plan lifecycle
+#### Opening Plans
+- `flow plan open` as primary entrypoint
+- Tmux session creation
+- Worktree navigation
+- Status TUI launch
 
-Include practical examples for each command and explain common use cases and workflows.
+#### Running Interactive Agents
+- Agents in dedicated tmux windows
+- Monitoring with `hooks b`
+- Cross-plan visibility
+
+### Plan Lifecycle
+
+#### Plan States
+- Active, Review, Finished, Hold
+
+#### Reviewing Plans
+- `flow plan review` command
+- Trigger hooks (PR creation, etc.)
+- Update notebook links
+- TUI review features
+
+#### Finishing and Cleanup
+- `flow plan finish` guided workflow
+- Cleanup checklist
+- Worktree and branch deletion
+- Archiving
+- Notebook updates
+
+#### Holding Plans
+- `flow plan hold` and `unhold`
+- Visibility in list views

@@ -1,18 +1,37 @@
 # Conversational Workflows (Chats)
 
-Grove Flow includes `flow chat` commands for managing conversational workflows with LLMs. This provides an environment for exploration and problem-solving before creating a structured, multi-step plan.
+Chat jobs provide a conversational interface for exploring problems, brainstorming solutions, and iterating on ideas with an LLM. They serve as the starting point for structured work in Grove Flow.
 
-## The Chat Workflow
+## Understanding Chat Jobs
 
-Chats are distinct from plans. Plans consist of interdependent jobs designed for structured execution, while chats are single Markdown files designed for interactive, back-and-forth conversation.
+Chat jobs are typically the first job created when promoting a note from `grove-notebook` to a plan. They serve as an exploration phase where you can:
 
-| Feature       | `flow plan`                                    | `flow chat`                                        |
-|---------------|------------------------------------------------|----------------------------------------------------|
-| **Purpose**   | Structured execution, automation               | Exploration, ideation, refinement, problem-solving |
-| **Structure** | A directory of interdependent job files (a DAG) | A single Markdown file capturing a linear conversation |
-| **Execution** | Orchestrator runs jobs based on dependencies   | User and LLM respond sequentially in the same file   |
+- Discuss the problem with an LLM
+- Explore different approaches
+- Get a detailed implementation plan
+- Refine requirements through conversation
 
-A common workflow is to start with a `chat` to explore a concept, then use `flow plan extract` to convert parts of the conversation into an executable `plan`.
+Each LLM response is tagged with a unique ID, making it easy to extract specific parts of the conversation into structured implementation jobs.
+
+## The Modern Chat Workflow
+
+The typical workflow with chat jobs:
+
+1. **Promote a note from grove-notebook** - Creates a plan with an initial `01-chat.md` job
+2. **Describe the problem** - Edit the chat file and run it with `flow chat run`
+3. **Iterate with the LLM** - Continue the conversation until you have a clear plan
+4. **Extract to structured jobs** - Use the TUI's `x` and `i` keys to create implementation jobs
+
+### Chat vs. Other Job Types
+
+| Feature       | `chat`                                         | `oneshot`                    | `interactive_agent`              |
+|---------------|------------------------------------------------|------------------------------|----------------------------------|
+| **Purpose**   | Exploration, ideation, planning                | Single-shot code/doc generation | Implementation, multi-step coding |
+| **Interaction**| Multi-turn conversation                       | Single request/response      | Interactive coding session       |
+| **Output**    | Conversation appended to file                  | Output appended to file      | Code changes in worktree         |
+| **Use Case**  | Problem exploration, getting detailed plans    | Code review, documentation   | Feature implementation           |
+
+Chats are not for execution - they're for thinking. To execute code or make changes, extract the chat content into `oneshot` or `interactive_agent` jobs.
 
 ## Starting and Managing Chats
 
@@ -94,9 +113,17 @@ When `flow chat run` is executed, it uses `grove-context` to gather file context
 
 ## From Conversation to Execution
 
-`chat` jobs are for conversation; their output is text. To execute code or run commands, content from a chat must be extracted into a `plan` containing an `agent` or `shell` job. An `interactive_agent` job created from a chat can then be run, which will launch a `tmux` session for development.
+**Important**: Chat jobs produce text, not code changes. To execute code or make changes to your codebase, you must extract the chat content into implementation jobs.
 
-There is no `flow chat launch` command. The workflow involves extracting content into a plan first.
+There is **no `flow chat launch`** command. The path from chat to execution is:
+
+1. Complete your chat conversation
+2. Use the plan status TUI to extract implementation jobs:
+   - Press `x` to create an XML plan job (oneshot)
+   - Press `i` to create an interactive agent job
+3. Run the extracted jobs with `r`
+
+This workflow ensures that you first think through the problem in a chat, then structure the work into proper execution jobs with dependencies.
 
 ## Extracting Plans from Chats
 
@@ -175,40 +202,41 @@ Chats are suitable for exploratory and iterative scenarios.
 *   **Prototyping**: Ask an LLM to generate boilerplate code or a proof-of-concept.
 *   **Documentation**: Draft an outline for new documentation.
 
-### Example Workflow: From Idea to Plan
+### Example Workflow: From Idea to Implementation
 
-1.  **Start a chat:**
-    ```bash
-    echo "# Idea: Refactor auth service" > chats/auth-refactor.md
-    flow chat -s chats/auth-refactor.md
-    ```
+The modern workflow using `grove-notebook` and the TUI:
 
-2.  **Add an initial prompt to the file, then run the chat to get an LLM response:**
-    ```bash
-    # (Edit chats/auth-refactor.md to add details)
-    flow chat run auth-refactor
-    ```
+1. **Start in grove-notebook:**
+   ```bash
+   nb tui
+   # Navigate to an issue
+   # Press 'P' to promote to plan (creates plan with initial chat job)
+   ```
 
-3.  **After a few turns, you have a solid plan from the LLM. List the extractable blocks:**
-    ```bash
-    flow plan extract list --file chats/auth-refactor.md
-    # Output shows block ID: a1b2c3
-    ```
+2. **Open the plan and edit the chat:**
+   ```bash
+   flow plan open auth-refactor
+   # The TUI opens showing 01-chat.md
+   # Exit TUI, edit the chat file to describe the problem
+   ```
 
-4.  **Create a new plan and extract the final LLM response into an `interactive_agent` job:**
-    ```bash
-    flow plan init refactor-auth-service --worktree
-    flow plan add refactor-auth-service -t interactive_agent --title "Refactor Auth Service"
-    # This creates a new job, e.g., 01-refactor-auth-service.md
+3. **Run the chat to get LLM's plan:**
+   ```bash
+   flow chat run
+   # Or press 'r' in the status TUI
+   ```
 
-    # Now, extract the chat content into that job.
-    # We can do this by setting the source_block property. For now, this is a manual edit.
-    # An alternative is to use `plan extract` and then change the job type.
-    flow plan extract a1b2c3 --file ./chats/auth-refactor.md --title "Implement Auth Refactor"
-    # This creates a new chat job in the plan. Manually change `type: chat` to `type: interactive_agent`.
-    ```
+4. **Extract implementation jobs in the TUI:**
+   - Open `flow plan status -t`
+   - Select the completed chat job
+   - Press `x` to create XML plan extraction job
+   - Select the XML plan job
+   - Press `i` to create interactive agent job
+   - Press `r` to run the jobs
 
-5.  **Run the new agent job to start a coding session:**
-    ```bash
-    flow plan run refactor-auth-service/01-implement-auth-refactor.md
-    ```
+5. **Monitor execution:**
+   ```bash
+   hooks b  # View running agent session
+   ```
+
+This workflow keeps you in the TUI and automatically manages dependencies, making it much faster than the CLI-based approach.
