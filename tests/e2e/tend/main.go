@@ -11,6 +11,13 @@ import (
 func main() {
 	allScenarios := []*harness.Scenario{
 		scenarios.CoreOrchestrationScenario,
+		scenarios.DependencyWorkflowScenario,
+		scenarios.OneshotWithContextScenario,
+		scenarios.AgentWorktreeLifecycleScenario,
+		scenarios.ChatAndExtractWorkflowScenario,
+		scenarios.JobFailureAndRecoveryScenario,
+		scenarios.PlanLifecycleScenario,
+		scenarios.JobManagementScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
