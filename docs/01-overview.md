@@ -1,20 +1,17 @@
 # Grove Flow
 
-Grove Flow is a command-line tool for executing multi-step development workflows, deeply integrated with `grove-notebook` for idea management and featuring interactive terminal interfaces (TUIs) for plan management and execution.
+Grove Flow is a command-line tool for executing multi-step development workflows defined in Markdown files. It features interactive terminal interfaces (TUIs) for plan management and execution, and integrates with the Grove ecosystem for a complete development workflow.
 
 <!-- placeholder for animated gif -->
 
 ## Key Features
 
-*   **Notebook-Integrated Workflow**: Plans are created by promoting notes from `grove-notebook`, maintaining bidirectional links between ideas and implementations. Press `P` in the notebook TUI to transform any note into an executable plan with a dedicated worktree.
+*   **Job Orchestration**: Execute workflows as dependency graphs of jobs defined in Markdown files. Jobs can be chat conversations, oneshot LLM calls, interactive coding agents, or shell commands. Dependencies are managed automatically through the TUI.
 
 *   **TUI-First Interface**: Interactive terminal interfaces for every stage of development:
-    - `nb tui` - Browse and promote notes to plans
     - `flow plan tui` - Overview of all plans with git status and lifecycle management
     - `flow plan status -t` - Detailed job management with keyboard-driven workflow
     - `hooks b` - Monitor all running agent sessions across your ecosystem
-
-*   **Job Orchestration**: Execute workflows as dependency graphs of jobs defined in Markdown files. Jobs can be chat conversations, oneshot LLM calls, interactive coding agents, or shell commands. Dependencies are managed automatically through the TUI.
 
 *   **Git Worktree Integration**: Plans can create isolated git worktrees in `.grove-worktrees/`, providing complete filesystem isolation for development work. The `flow plan open` command creates a dedicated `tmux` session for each plan's worktree.
 
@@ -22,17 +19,18 @@ Grove Flow is a command-line tool for executing multi-step development workflows
 
 *   **Chat-Driven Development**: Start with conversational exploration using chat jobs, then extract structured implementation plans using simple keyboard shortcuts (`x` for XML plan, `i` for interactive agent).
 
+*   **Notebook Integration**: Optionally integrates with `grove-notebook` for idea management. Plans can be created by promoting notes, maintaining bidirectional links between ideas and implementations.
+
 ## How It Works
 
 ### The Complete Workflow
 
-1. **Start in grove-notebook** (`nb tui`): Capture ideas, issues, and tasks
-2. **Promote to Plan**: Press `P` to create a plan directory with an initial chat job and optional worktree
-3. **Explore with Chat**: Discuss the problem with an LLM to get a detailed implementation plan
-4. **Structure Work**: Use the plan status TUI to extract chat content into structured jobs with dependencies
-5. **Execute**: Run jobs in dependency order, with interactive agents launching in dedicated tmux windows
-6. **Monitor**: Track all running work across plans using the hooks session browser
-7. **Review and Finish**: Use lifecycle commands to review work, merge changes, and clean up resources
+1. **Initialize a Plan**: Create a plan directory with `flow plan init` or promote from grove-notebook
+2. **Explore with Chat**: Discuss the problem with an LLM using chat jobs to get a detailed implementation plan
+3. **Structure Work**: Use the plan status TUI to extract chat content into structured jobs with dependencies
+4. **Execute**: Run jobs in dependency order, with interactive agents launching in dedicated tmux windows
+5. **Monitor**: Track all running work across plans using the hooks session browser and plan TUIs
+6. **Review and Finish**: Use lifecycle commands to review work, merge changes, and clean up resources
 
 ### Technical Architecture
 
@@ -42,7 +40,7 @@ A "Plan" is a directory containing Markdown files, where each file is a "Job" wi
 
 Grove Flow integrates deeply with the Grove ecosystem:
 
-*   **Grove Notebook (`nb`)**: The primary starting point for all work. Notes are promoted to plans with automatic linking, maintaining traceability from idea to implementation. The notebook TUI provides the `P` (promote) action that creates plans.
+*   **Grove Notebook (`nb`)**: Optional integration for idea management. Notes can be promoted to plans with automatic linking, maintaining traceability from idea to implementation. The notebook TUI provides the `P` (promote) action that creates plans.
 
 *   **Grove Context (`cx`)**: Automatically generates file context based on `.grove/rules` files in worktrees. This context is provided to LLMs for all job types, ensuring the AI has relevant codebase information.
 
