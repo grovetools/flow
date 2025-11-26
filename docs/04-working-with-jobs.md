@@ -79,7 +79,6 @@ Grove Flow supports several job types, each executed by a specific mechanism.
 | `oneshot` | A single-shot LLM prompt for analysis, review, or generation. | Code reviews, generating documentation, or creating test plans. |
 | `shell` | Executes a shell command in the job's worktree or main repo. | Running tests, linting, building code, or file management. |
 | `chat` | A multi-turn conversational job for ideation and refinement. | Brainstorming a feature or breaking down a task before creating a formal plan. |
-| `generate-recipe` | Generates a reusable plan recipe from an existing plan. | Automating the creation of standardized development workflows. |
 
 ## Dependencies Between Jobs
 

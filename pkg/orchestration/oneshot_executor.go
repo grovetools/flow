@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,7 +21,6 @@ import (
 	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -279,13 +277,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			ContextFiles:      contextFiles,
 			PromptSourceFiles: promptSourceFiles,
 		}
-
-		if job.Output.Type == "generate_jobs" {
-			// Use schema for structured output
-			response, err = e.completeWithSchema(ctx, job, plan, prompt, llmOpts)
-		} else {
-			response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts)
-		}
+		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts)
 	}
 	if err != nil {
 		job.Status = JobStatusFailed
@@ -316,29 +308,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	return nil
 }
 
-// completeWithSchema calls the LLM with a JSON schema for structured output.
-func (e *OneShotExecutor) completeWithSchema(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error) {
-	schema, err := GenerateJobCreationSchema()
-	if err != nil {
-		return "", fmt.Errorf("could not generate job schema: %w", err)
-	}
-
-	// Write schema to a temporary file
-	schemaFile, err := os.CreateTemp("", "grove-job-schema-*.json")
-	if err != nil {
-		return "", fmt.Errorf("could not create temp schema file: %w", err)
-	}
-	defer os.Remove(schemaFile.Name())
-
-	if _, err := schemaFile.WriteString(schema); err != nil {
-		return "", fmt.Errorf("could not write to temp schema file: %w", err)
-	}
-	schemaFile.Close()
-
-	// Modify llm options to include schema
-	opts.SchemaPath = schemaFile.Name()
-	return e.llmClient.Complete(ctx, job, plan, prompt, opts)
-}
 
 // buildPrompt constructs the prompt from job sources and returns context file paths separately.
 func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, []string, []string, error) {
@@ -598,8 +567,6 @@ func (e *OneShotExecutor) processOutput(output string, job *Job, plan *Plan) err
 		return e.processFileOutput(output, job, plan)
 	case "commit":
 		return e.processCommitOutput(output, job, plan)
-	case "generate_jobs":
-		return e.processGeneratedJobs(output, job, plan)
 	case "none":
 		// No output processing needed
 		return nil
@@ -643,149 +610,6 @@ func (e *OneShotExecutor) processCommitOutput(output string, job *Job, plan *Pla
 	return e.processFileOutput(output, job, plan)
 }
 
-// processGeneratedJobs parses JSON output and creates new job files.
-func (e *OneShotExecutor) processGeneratedJobs(output string, job *Job, plan *Plan) error {
-	// Parse the JSON output
-	var result JobGenerationSchema
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		return fmt.Errorf("failed to parse LLM JSON output: %w\nRaw output:\n%s", err, output)
-	}
-
-	// Track created jobs for context update insertion and dependency resolution
-	var createdJobs []struct {
-		id       string
-		title    string
-		jobType  JobType
-		filename string
-	}
-
-	// First pass: generate unique IDs and map titles to them
-	titleToID := make(map[string]string)
-	titleToFilename := make(map[string]string)
-	for _, jobDef := range result.Jobs {
-		// Generate a globally unique ID for the job
-		jobID := GenerateUniqueJobID(plan, jobDef.Title)
-		titleToID[jobDef.Title] = jobID
-	}
-
-	// Second pass: create job files with resolved dependencies
-	for _, jobDef := range result.Jobs {
-		// Get the unique ID we generated in the first pass
-		jobID := titleToID[jobDef.Title]
-		if jobID == "" {
-			// This should not happen if the title is present, but as a fallback:
-			jobID = GenerateUniqueJobID(plan, "generated-job")
-		}
-
-		// Get next job number for filename
-		nextNum, err := GetNextJobNumber(plan.Directory)
-		if err != nil {
-			return fmt.Errorf("getting next job number: %w", err)
-		}
-
-		filename := GenerateJobFilename(nextNum, jobDef.Title)
-		titleToFilename[jobDef.Title] = filename
-
-		// Resolve dependencies: map the titles from the LLM to the new unique IDs
-		var resolvedDeps []string
-		for _, depTitle := range jobDef.DependsOn {
-			if depID, ok := titleToID[depTitle]; ok {
-				resolvedDeps = append(resolvedDeps, depID)
-			} else {
-				// If a dependency title doesn't match a generated job title,
-				// it might refer to an existing job in the plan.
-				// We can try to find it by title.
-				found := false
-				for _, existingJob := range plan.Jobs {
-					if existingJob.Title == depTitle {
-						resolvedDeps = append(resolvedDeps, existingJob.ID)
-						found = true
-						break
-					}
-				}
-				if !found {
-					// Log a warning if a dependency can't be resolved.
-					log.Warnf("Could not resolve dependency title '%s' for generated job '%s'", depTitle, jobDef.Title)
-				}
-			}
-		}
-
-		// Update jobDef with resolved dependencies
-		jobDefWithResolvedDeps := jobDef
-		jobDefWithResolvedDeps.DependsOn = resolvedDeps
-
-		// Ensure all job types have the correct worktree
-		if jobDefWithResolvedDeps.Worktree == "" || jobDefWithResolvedDeps.Worktree == "todo-app" {
-			if plan.Config != nil && plan.Config.Worktree != "" {
-				jobDefWithResolvedDeps.Worktree = plan.Config.Worktree
-			} else {
-				jobDefWithResolvedDeps.Worktree = plan.Name
-			}
-		}
-
-		// Create job content with the new unique ID and resolved dependencies
-		jobContent := e.createJobContent(jobID, jobDefWithResolvedDeps)
-
-		// Write job file
-		jobPath := filepath.Join(plan.Directory, filename)
-		if err := os.WriteFile(jobPath, []byte(jobContent), 0o644); err != nil {
-			return fmt.Errorf("failed to write generated job file %s: %w", filename, err)
-		}
-		log.WithField("file", filename).Info("Generated new job")
-		prettyLog.Success(fmt.Sprintf("Generated new job: %s", filename))
-
-		createdJobs = append(createdJobs, struct {
-			id       string
-			title    string
-			jobType  JobType
-			filename string
-		}{
-			id:       jobID,
-			title:    jobDef.Title,
-			jobType:  JobType(jobDef.Type),
-			filename: filename,
-		})
-	}
-
-	if len(createdJobs) == 0 {
-		// Also append the output to the job file for debugging
-		return e.appendToJobFile(output, job)
-	}
-
-	return nil
-}
-
-// createJobContent creates the markdown content for a job from a JobDefinition.
-func (e *OneShotExecutor) createJobContent(jobID string, jobDef JobDefinition) string {
-	// Build frontmatter
-	fm := map[string]interface{}{
-		"id":     jobID,
-		"title":  jobDef.Title,
-		"status": "pending",
-		"type":   jobDef.Type,
-	}
-
-	// Dependencies are already resolved
-	if len(jobDef.DependsOn) > 0 {
-		fm["depends_on"] = jobDef.DependsOn
-	}
-
-	if jobDef.Worktree != "" {
-		fm["worktree"] = jobDef.Worktree
-	}
-
-	if jobDef.OutputType != "" {
-		fm["output"] = map[string]interface{}{
-			"type": jobDef.OutputType,
-		}
-	}
-
-	// Marshal frontmatter
-	yamlBytes, _ := yaml.Marshal(fm)
-
-	// Build complete markdown
-	return fmt.Sprintf("---\n%s---\n%s\n", string(yamlBytes), jobDef.Prompt)
-}
 
 // appendToJobFile appends output to the job file.
 func (e *OneShotExecutor) appendToJobFile(output string, job *Job) error {

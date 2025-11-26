@@ -171,7 +171,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
 	planAddCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
-	planAddCmd.Flags().StringVar(&planAddOutputType, "output-type", "file", "Output type: file, commit, none, or generate_jobs")
+	planAddCmd.Flags().StringVar(&planAddOutputType, "output-type", "file", "Output type: file, commit, or none")
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
 	planAddCmd.Flags().StringSliceVar(&planAddSourceFiles, "source-files", nil, "Comma-separated list of source files for reference-based prompts")
 	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")

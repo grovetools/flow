@@ -1019,39 +1019,6 @@ func createInitialPlanJob(dir string, model string, outputType string, templateN
 		} else {
 			filename = "01-initial-job.md"
 		}
-	} else if outputType == "generate_jobs" {
-		// Backward compatibility: use generate-plan template for generate_jobs
-		templateManager := orchestration.NewTemplateManager()
-		template, err := templateManager.FindTemplate("generate-plan")
-		if err != nil {
-			return "", fmt.Errorf("could not load 'generate-plan' template: %w", err)
-		}
-
-		// The body of the template is now our prompt content
-		// Append the spec content to the template prompt
-		promptBody := template.Prompt + "\n\n" + specContent
-
-		// Reconstruct the job file content from the template's frontmatter and body
-		var frontmatter map[string]interface{}
-		if template.Frontmatter != nil {
-			frontmatter = template.Frontmatter
-		} else {
-			frontmatter = make(map[string]interface{})
-		}
-
-		// Set/override dynamic values
-		frontmatter["id"] = jobID
-		frontmatter["title"] = "Create High-Level Implementation Plan"
-		frontmatter["status"] = "pending"
-		frontmatter["model"] = model
-		// Removed default worktree assignment
-
-		content, err = orchestration.RebuildMarkdownWithFrontmatter(frontmatter, []byte(promptBody))
-		if err != nil {
-			return "", fmt.Errorf("failed to rebuild job content from template: %w", err)
-		}
-
-		filename = "01-high-level-plan.md"
 	} else {
 		// Create a simpler job for other output types
 		modelField := fmt.Sprintf("\nmodel: %s", model)

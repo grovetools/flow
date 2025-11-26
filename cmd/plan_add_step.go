@@ -24,7 +24,7 @@ type PlanAddStepCmd struct {
 	PromptFile          string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
 	SourceFiles         []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
 	Prompt              string   `flag:"p" help:"Inline prompt text"`
-	OutputType          string   `flag:"" default:"file" help:"Output type: file, commit, none, or generate_jobs"`
+	OutputType          string   `flag:"" default:"file" help:"Output type: file, commit, or none"`
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`

@@ -67,7 +67,7 @@ Examples:
 	cmd.Flags().StringSliceVarP(&dependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model to use for this job")
-	cmd.Flags().StringVar(&outputType, "output", "file", "Output type: file, commit, none, or generate_jobs")
+	cmd.Flags().StringVar(&outputType, "output", "file", "Output type: file, commit, or none")
 	cmd.Flags().Bool("json", false, "Output in JSON format (for list command)")
 
 	return cmd

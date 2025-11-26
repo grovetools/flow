@@ -79,7 +79,7 @@ Adds a new job file to a plan directory. If no directory is specified, it uses t
 | `--agent-continue` | | Continue the last agent session (adds `--continue` flag). | `false` |
 | `--depends-on` | `-d` | List of job filenames this job depends on. | (none) |
 | `--interactive` | `-i` | Launch an interactive TUI to create the new job. | `false` |
-| `--output-type` | | Output type: `file`, `commit`, `none`, or `generate_jobs`. | `file` |
+| `--output-type` | | Output type: `file`, `commit`, or `none`. | `file` |
 | `--prepend-dependencies` | | Inline dependency content into the prompt body. | `false` |
 | `--prompt` | `-p` | Inline prompt text for the job. | (from stdin) |
 | `--prompt-file` | `-f` | Path to a file containing additional prompt text. | (none) |
