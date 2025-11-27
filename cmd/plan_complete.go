@@ -123,11 +123,27 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 		}
 
 		// Also kill the tmux window for any interactive_agent job
-		// Try to read the session metadata to get the working directory
+		// First try to read the session metadata to get the working directory
 		worktreePath, err := getWorktreePathFromSession(job.ID)
+
+		// If we can't find the session (e.g., resumed job), fall back to using the job's worktree
+		if err != nil && job.Worktree != "" {
+			// Determine worktree path from the plan's git root
+			gitRoot, gitErr := orchestration.GetGitRootSafe(plan.Directory)
+			if gitErr == nil {
+				// If gitRoot is itself a worktree, find the actual main repository root
+				gitRootInfo, gitRootErr := workspace.GetProjectByPath(gitRoot)
+				if gitRootErr == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
+					gitRoot = gitRootInfo.ParentProjectPath
+				}
+				worktreePath = filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
+				err = nil // Clear the error since we found it via worktree
+			}
+		}
+
 		if err != nil {
 			if !silent {
-				fmt.Printf("  Note: could not determine working directory from session: %v\n", err)
+				fmt.Printf("  Note: could not determine working directory: %v\n", err)
 			}
 		} else {
 			projInfo, err := workspace.GetProjectByPath(worktreePath)
@@ -139,13 +155,42 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 				sessionName := projInfo.Identifier()
 				// Replicate window name logic from interactive_agent_executor
 				windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
-				targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
 
+				// First, try exact match
+				targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
 				if !silent {
 					fmt.Printf("  Closing tmux window: %s\n", targetWindow)
 				}
 				cmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
-				if err := cmd.Run(); err != nil {
+				err := cmd.Run()
+
+				// If exact match fails, try to find windows with this prefix
+				// (tmux may add numeric suffixes like "job-hi5-" for duplicate names)
+				if err != nil {
+					listCmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}")
+					output, listErr := listCmd.Output()
+					if listErr == nil {
+						windows := strings.Split(strings.TrimSpace(string(output)), "\n")
+						for _, win := range windows {
+							if strings.HasPrefix(win, windowName) {
+								targetWindow = fmt.Sprintf("%s:%s", sessionName, win)
+								if !silent {
+									fmt.Printf("  Found window with prefix: %s\n", targetWindow)
+								}
+								killCmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
+								if killErr := killCmd.Run(); killErr == nil {
+									if !silent {
+										fmt.Println("  ✓ Tmux window closed.")
+									}
+									err = nil // Clear the error
+									break
+								}
+							}
+						}
+					}
+				}
+
+				if err != nil {
 					// This is not a fatal error; the window might already be closed.
 					if !silent {
 						fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)

@@ -36,6 +36,7 @@ type statusTUIKeyMap struct {
 	AddJob        key.Binding
 	Implement     key.Binding
 	Rename        key.Binding
+	Resume        key.Binding
 	EditDeps      key.Binding
 	ToggleSummaries key.Binding
 	ToggleView    key.Binding
@@ -93,8 +94,12 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithHelp("i", "implement selected"),
 		),
 		Rename: key.NewBinding(
+			key.WithKeys("ctrl+r"),
+			key.WithHelp("ctrl+r", "rename job"),
+		),
+		Resume: key.NewBinding(
 			key.WithKeys("R"),
-			key.WithHelp("R", "rename job"),
+			key.WithHelp("R", "resume job"),
 		),
 		EditDeps: key.NewBinding(
 			key.WithKeys("D"),
@@ -164,6 +169,7 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.AddXmlPlan,
 			k.Implement,
 			k.Rename,
+			k.Resume,
 			k.EditDeps,
 			k.Archive,
 			k.Help,
@@ -994,6 +1000,15 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 
+		case key.Matches(msg, m.keyMap.Resume):
+			if m.cursor >= 0 && m.cursor < len(m.jobs) {
+				job := m.jobs[m.cursor]
+				if (job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent) && job.Status == orchestration.JobStatusCompleted {
+					return m, executePlanResume(job)
+				}
+				m.statusSummary = theme.DefaultTheme.Error.Render("Only completed interactive agent jobs can be resumed.")
+			}
+
 		case key.Matches(msg, m.keyMap.EditDeps):
 			if m.cursor >= 0 && m.cursor < len(m.jobs) {
 				m.editingDeps = true
@@ -1551,6 +1566,16 @@ func runJob(planDir string, job *orchestration.Job) tea.Cmd {
 		}
 		return refreshMsg{} // Refresh to show status changes
 	})
+}
+
+func executePlanResume(job *orchestration.Job) tea.Cmd {
+	return tea.ExecProcess(exec.Command("flow", "plan", "resume", job.FilePath),
+		func(err error) tea.Msg {
+			if err != nil {
+				return err // Propagate error to be displayed in the TUI
+			}
+			return refreshMsg{} // Refresh TUI on success
+		})
 }
 
 func runJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {

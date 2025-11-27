@@ -25,7 +25,7 @@ Document each with syntax, description, flags, and examples:
 #### Plan Status and Visualization
 - `status` - Show plan status
   - Emphasize `-t` flag for TUI mode (RECOMMENDED)
-  - Document all TUI keyboard shortcuts (r, A, x, i, e, d, c, space, arrows)
+  - Document all TUI keyboard shortcuts (r, A, x, i, e, d, c, R (resume), space, arrows)
   - CLI modes: tree, list, JSON
 - `graph` - Visualize dependency graph
 
@@ -33,6 +33,7 @@ Document each with syntax, description, flags, and examples:
 - `add` - Add jobs (note TUI is easier with automatic dependencies)
 - `run` - Execute jobs
 - `complete` - Mark job complete
+- `resume` - Resume completed interactive agent session
 - `jobs rename` - Rename job
 - `jobs update-deps` - Update dependencies
 

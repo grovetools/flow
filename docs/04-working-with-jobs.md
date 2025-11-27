@@ -138,6 +138,7 @@ The plan status TUI provides keyboard shortcuts for common job management tasks:
 
 - **`r`** - Run selected job(s)
 - **`c`** - Mark selected job as completed
+- **`R`** - Resume a completed interactive agent job
 - **`e`** - Edit the job file
 - **`d`** - Delete the job
 - **`space`** - Toggle job selection (for batch operations)
@@ -153,6 +154,16 @@ flow plan complete <job-file>
 ```
 
 When an `interactive_agent` job is completed, its session transcript is found via `grove aglogs` and appended to the job file.
+
+**Resuming Interactive Sessions:**
+
+Completed `interactive_agent` jobs can be resumed to continue the conversation:
+
+```bash
+flow plan resume <job-file>
+```
+
+This re-launches the agent in a new tmux window with the full conversation history. When completed again, the transcript is updated with the resumed conversation. The TUI provides a keyboard shortcut (`R`) for resuming completed interactive jobs.
 
 **Renaming Jobs:**
 

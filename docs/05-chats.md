@@ -239,4 +239,9 @@ The modern workflow using `grove-notebook` and the TUI:
    hooks b  # View running agent session
    ```
 
+6. **Resume if needed:**
+   - After completing an interactive job, press `R` to resume it
+   - Continue the conversation in the new tmux window
+   - Complete again with `c` to append the resumed transcript
+
 This workflow keeps you in the TUI and automatically manages dependencies, making it much faster than the CLI-based approach.

@@ -180,6 +180,7 @@ The status command displays the current state of all jobs in a plan. The interac
 - `e` - Edit the selected job file
 - `d` - Delete the selected job
 - `c` - Mark the selected job as completed
+- `R` - Resume a completed interactive agent job
 - `↑/↓` - Navigate between jobs
 - `space` - Toggle job selection
 - `?` - Show help
@@ -264,6 +265,20 @@ flow plan complete <job-file>
 **Description**
 
 Manually marks a job's status as `completed`. This is useful for interactive jobs or when an external process has finished a task. It also cleans up associated resources like tmux windows.
+
+### `flow plan resume`
+
+Resumes a completed interactive agent session.
+
+**Syntax**
+
+```bash
+flow plan resume <job-file>
+```
+
+**Description**
+
+Re-launches a completed `interactive_agent` job in a new tmux window with the full conversation history. The agent can continue working where it left off. When completed again, the transcript is updated with the resumed conversation.
 
 ### `flow plan open`
 

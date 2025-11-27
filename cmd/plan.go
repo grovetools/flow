@@ -214,6 +214,7 @@ func NewPlanCmd() *cobra.Command {
 	planCmd.AddCommand(NewPlanContextCmd())
 	planCmd.AddCommand(NewPlanHoldCmd())
 	planCmd.AddCommand(NewPlanUnholdCmd())
+	planCmd.AddCommand(NewPlanResumeCmd())
 
 	// Return the configured jobs command
 	return planCmd

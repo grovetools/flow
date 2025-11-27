@@ -10,6 +10,45 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 )
 
+// DetermineWorkingDirectory determines the working directory for a job based on
+// its worktree and repository configuration. This is the canonical logic used by
+// both interactive agent execution and resume operations.
+func DetermineWorkingDirectory(plan *Plan, job *Job) (string, error) {
+	gitRoot, err := GetGitRootSafe(plan.Directory)
+	if err != nil {
+		return "", fmt.Errorf("could not find git root: %w", err)
+	}
+
+	var workDir string
+	if job.Worktree != "" {
+		// Check if we're already in the requested worktree
+		currentPath := gitRoot
+		if strings.HasSuffix(currentPath, filepath.Join(".grove-worktrees", job.Worktree)) {
+			workDir = currentPath
+		} else {
+			// Extract main repository path if we're in a worktree
+			actualGitRoot := gitRoot
+			if strings.Contains(gitRoot, ".grove-worktrees") {
+				parts := strings.Split(gitRoot, ".grove-worktrees")
+				if len(parts) > 0 {
+					actualGitRoot = strings.TrimSuffix(parts[0], string(filepath.Separator))
+				}
+			}
+
+			// Construct worktree path
+			workDir = filepath.Join(actualGitRoot, ".grove-worktrees", job.Worktree)
+		}
+	} else {
+		// No worktree, use the main git repository root
+		workDir = gitRoot
+	}
+
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	workDir = ScopeToSubProject(workDir, job)
+
+	return workDir, nil
+}
+
 // ScopeToSubProject adjusts a working directory to point to a sub-project
 // within an ecosystem worktree when job.Repository is specified.
 // This ensures that context generation, command execution, and agent sessions

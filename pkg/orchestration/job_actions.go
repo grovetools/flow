@@ -41,15 +41,45 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 		return fmt.Errorf("reading job file %s: %w", job.FilePath, err)
 	}
 
-	// Check if transcript already exists to avoid duplication
-	if strings.Contains(string(content), "## Transcript") {
-		fmt.Printf("Info: Transcript already exists in %s. Skipping.\n", job.Filename)
-		return nil
-	}
+	// Check if transcript section already exists
+	var newContent string
+	transcriptOutput := string(output)
 
-	// Append transcript
-	transcriptHeader := "\n\n---\n\n## Transcript\n\n"
-	newContent := string(content) + transcriptHeader + string(output)
+	if strings.Contains(string(content), "## Transcript") {
+		// Transcript section exists - check if content has changed
+		existingContent := string(content)
+
+		// Find the existing transcript section
+		transcriptIdx := strings.Index(existingContent, "## Transcript")
+		if transcriptIdx == -1 {
+			// Shouldn't happen but handle gracefully
+			transcriptHeader := "\n\n---\n\n## Transcript\n\n"
+			newContent = existingContent + transcriptHeader + transcriptOutput
+		} else {
+			existingTranscript := existingContent[transcriptIdx:]
+
+			// Check if the new transcript is identical to what's already there
+			// (after the "## Transcript\n\n" header)
+			existingTranscriptContent := strings.TrimPrefix(existingTranscript, "## Transcript\n\n")
+			existingTranscriptContent = strings.TrimSpace(existingTranscriptContent)
+			newTranscriptContent := strings.TrimSpace(transcriptOutput)
+
+			if existingTranscriptContent == newTranscriptContent {
+				fmt.Printf("Info: Transcript unchanged in %s. Skipping.\n", job.Filename)
+				return nil
+			}
+
+			// Transcript has new content - replace the entire transcript section
+			fmt.Printf("Info: Updating transcript in %s (resumed session detected).\n", job.Filename)
+			beforeTranscript := existingContent[:transcriptIdx]
+			transcriptHeader := "## Transcript\n\n"
+			newContent = beforeTranscript + transcriptHeader + transcriptOutput
+		}
+	} else {
+		// No transcript section exists - create a new one
+		transcriptHeader := "\n\n---\n\n## Transcript\n\n"
+		newContent = string(content) + transcriptHeader + transcriptOutput
+	}
 
 	// Write back to file
 	if err := os.WriteFile(job.FilePath, []byte(newContent), 0644); err != nil {

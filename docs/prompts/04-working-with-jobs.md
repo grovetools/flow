@@ -55,11 +55,12 @@ Include purpose, interaction model, output, and use cases for each.
 ### Job Management
 
 #### Managing from TUI
-- Keyboard shortcuts: r, c, e, d, space
+- Keyboard shortcuts: r, c, R (resume), e, d, space
 - Batch operations with selection
 
 #### Managing from CLI
 - Manual completion with `flow plan complete`
+- Resuming interactive sessions with `flow plan resume`
 - Renaming with `flow plan jobs rename`
 - Updating dependencies with `flow plan jobs update-deps`
 

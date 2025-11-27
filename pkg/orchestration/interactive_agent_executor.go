@@ -129,19 +129,16 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 
 // determineWorkDir determines the working directory for a job based on its worktree configuration.
 func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Job, plan *Plan) (string, error) {
-	var workDir string
-	gitRoot, err := GetGitRootSafe(plan.Directory)
-	if err != nil {
-		return "", fmt.Errorf("could not find git root: %w", err)
-	}
-
+	// For jobs with worktrees, we need to prepare the worktree if it doesn't exist yet
 	if job.Worktree != "" {
+		gitRoot, err := GetGitRootSafe(plan.Directory)
+		if err != nil {
+			return "", fmt.Errorf("could not find git root: %w", err)
+		}
+
 		// Check if we're already in the requested worktree to avoid duplicate paths
 		currentPath := gitRoot
-		if strings.HasSuffix(currentPath, filepath.Join(".grove-worktrees", job.Worktree)) {
-			// We're already in the requested worktree, use the current directory
-			workDir = currentPath
-		} else {
+		if !strings.HasSuffix(currentPath, filepath.Join(".grove-worktrees", job.Worktree)) {
 			// Extract the main repository path if we're in a worktree
 			actualGitRoot := gitRoot
 			if strings.Contains(gitRoot, ".grove-worktrees") {
@@ -163,21 +160,15 @@ func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Jo
 				opts.Repos = plan.Config.Repos
 			}
 
-			worktreePath, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
+			_, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
 			if err != nil {
 				return "", fmt.Errorf("failed to prepare host worktree: %w", err)
 			}
-			workDir = worktreePath
 		}
-	} else {
-		// No worktree, use the main git repository root
-		workDir = gitRoot
 	}
 
-	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
-	workDir = ScopeToSubProject(workDir, job)
-
-	return workDir, nil
+	// Use the shared logic to determine the final working directory
+	return DetermineWorkingDirectory(plan, job)
 }
 
 // waitForWindowClose waits for a specific tmux window to close
