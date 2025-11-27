@@ -240,14 +240,15 @@ func GenerateJobFilename(number int, title string) string {
 // CreateJobFromTemplate creates a new job with default values.
 func CreateJobFromTemplate(jobType JobType, title string, opts JobOptions) *Job {
 	job := &Job{
-		ID:           generateJobID(title),
-		Title:        title,
-		Status:       JobStatusPending,
-		Type:         jobType,
-		DependsOn:    opts.DependsOn,
-		PromptSource: opts.PromptSource,
-		Worktree:     opts.Worktree,
-		PromptBody:   opts.Prompt,
+		ID:                  generateJobID(title),
+		Title:               title,
+		Status:              JobStatusPending,
+		Type:                jobType,
+		DependsOn:           opts.DependsOn,
+		PromptSource:        opts.PromptSource,
+		Worktree:            opts.Worktree,
+		PromptBody:          opts.Prompt,
+		PrependDependencies: opts.PrependDependencies,
 	}
 
 	// Set default output type
@@ -362,31 +363,33 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 	}
 
 	data := struct {
-		ID            string
-		Title         string
-		Type          string
-		PlanType      string
-		DependsOn     []string
-		PromptSource  []string
-		Repository    string
-		Branch        string
-		Worktree      string
-		OutputType    string
-		Prompt        string
-		AgentContinue bool
+		ID                  string
+		Title               string
+		Type                string
+		PlanType            string
+		DependsOn           []string
+		PromptSource        []string
+		Repository          string
+		Branch              string
+		Worktree            string
+		OutputType          string
+		Prompt              string
+		AgentContinue       bool
+		PrependDependencies bool
 	}{
-		ID:            job.ID,
-		Title:         job.Title,
-		Type:          string(job.Type),
-		PlanType:      string(job.Type),
-		DependsOn:     job.DependsOn,
-		PromptSource:  job.PromptSource,
-		Repository:    job.Repository,
-		Branch:        job.Branch,
-		Worktree:      job.Worktree,
-		OutputType:    job.Output.Type,
-		Prompt:        job.PromptBody,
-		AgentContinue: job.AgentContinue,
+		ID:                  job.ID,
+		Title:               job.Title,
+		Type:                string(job.Type),
+		PlanType:            string(job.Type),
+		DependsOn:           job.DependsOn,
+		PromptSource:        job.PromptSource,
+		Repository:          job.Repository,
+		Branch:              job.Branch,
+		Worktree:            job.Worktree,
+		OutputType:          job.Output.Type,
+		Prompt:              job.PromptBody,
+		AgentContinue:       job.AgentContinue,
+		PrependDependencies: job.PrependDependencies,
 	}
 
 	if data.OutputType == "" {

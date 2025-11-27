@@ -41,7 +41,8 @@ prompt_source:{{ range .PromptSource }}
 repository: {{ .Repository }}{{ end }}{{ if .Branch }}
 branch: {{ .Branch }}{{ end }}{{ if .Worktree }}
 worktree: {{ .Worktree }}{{ end }}{{ if .AgentContinue }}
-agent_continue: true{{ end }}
+agent_continue: true{{ end }}{{ if .PrependDependencies }}
+prepend_dependencies: true{{ end }}
 output:
   type: {{ .OutputType }}
 ---
@@ -75,4 +76,3 @@ Your task is to analyze the feature request in spec.md and generate a comprehens
 - Focus on the single-responsibility principle for each job.
 - Always include a final step for reviewing the implementation.
 `
-

@@ -31,7 +31,7 @@ func NewCodexAgentProvider() *CodexAgentProvider {
 	}
 }
 
-func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string) error {
+func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -100,7 +100,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	}
 
 	// Build agent command (reuse Claude provider's logic but replace "claude" with "codex")
-	agentCommand, err := p.buildAgentCommand(job, plan, workDir, agentArgs)
+	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -201,55 +201,9 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 }
 
 // buildAgentCommand constructs the codex command for the interactive session.
-func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, worktreePath string, agentArgs []string) (string, error) {
-	// Build instruction for the agent
-	var instructionBuilder strings.Builder
-
-	// Add dependency files if the job has dependencies
-	if len(job.Dependencies) > 0 {
-		var depFiles []string
-		for _, dep := range job.Dependencies {
-			if dep != nil && dep.FilePath != "" {
-				depFiles = append(depFiles, dep.FilePath)
-			}
-		}
-
-		if job.PrependDependencies {
-			// New logic: Emphasize dependencies
-			instructionBuilder.WriteString(fmt.Sprintf("CRITICAL CONTEXT: Before you do anything else, you MUST read and fully understand the content of the following files in order. They provide the primary context and requirements for your task: %s. ", strings.Join(depFiles, ", ")))
-			instructionBuilder.WriteString(fmt.Sprintf("After you have processed that context, execute the agent job defined in %s. ", job.FilePath))
-		} else {
-			// Original logic
-			instructionBuilder.WriteString(fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath))
-			instructionBuilder.WriteString("For additional context from previous jobs, also read: ")
-			instructionBuilder.WriteString(strings.Join(depFiles, ", "))
-			instructionBuilder.WriteString(". ")
-		}
-	} else {
-		// No dependencies, original logic
-		instructionBuilder.WriteString(fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath))
-	}
-
-	// Add context files if specified
-	if len(job.PromptSource) > 0 {
-		instructionBuilder.WriteString("Also read these context files: ")
-		var contextFiles []string
-		for _, source := range job.PromptSource {
-			resolved, err := ResolvePromptSource(source, plan)
-			relPath := source // fallback
-			if err == nil {
-				if p, err := filepath.Rel(worktreePath, resolved); err == nil {
-					relPath = p
-				} else {
-					relPath = resolved
-				}
-			}
-			contextFiles = append(contextFiles, relPath)
-		}
-		instructionBuilder.WriteString(strings.Join(contextFiles, ", "))
-	}
-
-	instruction := instructionBuilder.String()
+func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePath string, agentArgs []string) (string, error) {
+	// The instruction is now simple: read the briefing file.
+	instruction := fmt.Sprintf("Read the task briefing in the file %s and execute the instructions contained within.", briefingFilePath)
 
 	// Shell escape the instruction
 	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"

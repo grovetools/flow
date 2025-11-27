@@ -20,7 +20,7 @@ import (
 
 // InteractiveAgentProvider defines the interface for launching an interactive agent.
 type InteractiveAgentProvider interface {
-	Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string) error
+	Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error
 }
 
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
@@ -46,6 +46,24 @@ func (e *InteractiveAgentExecutor) Name() string {
 
 // Execute runs an interactive agent job in a tmux session and blocks until completion.
 func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Determine workDir first, as it's needed for briefing file generation
+	workDir, err := e.determineWorkDir(ctx, job, plan)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("failed to determine working directory: %w", err)
+	}
+
+	// Generate the briefing file before checking skipInteractive
+	// This ensures the file is created even in test/skip mode
+	briefingFilePath, err := buildBriefingFile(job, plan, workDir)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("failed to build agent briefing file: %w", err)
+	}
+	e.prettyLog.InfoPretty(fmt.Sprintf("Agent briefing file created at: %s", briefingFilePath))
+
 	// Check if interactive jobs should be skipped
 	if e.skipInteractive {
 		job.Status = JobStatusFailed
@@ -83,14 +101,6 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		return fmt.Errorf("unknown interactive_agent provider: '%s'", providerName)
 	}
 
-	// Determine workDir once
-	workDir, err := e.determineWorkDir(ctx, job, plan)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to determine working directory: %w", err)
-	}
-
 	// Get agent args
 	var agentArgs []string
 	if coreCfg != nil {
@@ -123,8 +133,100 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}
 	}
 
-	// Delegate to the selected provider
-	return provider.Launch(ctx, job, plan, workDir, agentArgs)
+	// Delegate to the selected provider with the briefing file path
+	return provider.Launch(ctx, job, plan, workDir, agentArgs, briefingFilePath)
+}
+
+// buildBriefingFile consolidates all job context into a single markdown file.
+// It returns the path to the generated file.
+func buildBriefingFile(job *Job, plan *Plan, workDir string) (string, error) {
+	artifactsDir := filepath.Join(plan.Directory, ".artifacts")
+	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+		return "", fmt.Errorf("creating .artifacts directory: %w", err)
+	}
+
+	// Generate a unique filename for the briefing
+	briefingFilename := fmt.Sprintf("briefing-%s-%d.md", job.ID, time.Now().Unix())
+	briefingFilePath := filepath.Join(artifactsDir, briefingFilename)
+
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("# Agent Briefing: %s\n\n", job.Title))
+	b.WriteString(fmt.Sprintf("**Job ID:** %s  \n", job.ID))
+	b.WriteString(fmt.Sprintf("**Work Directory:** `%s`\n\n", workDir))
+	b.WriteString("---\n\n")
+
+	// 1. Handle dependencies based on PrependDependencies flag
+	if len(job.Dependencies) > 0 {
+		if job.PrependDependencies {
+			// Inline dependency content into the briefing
+			b.WriteString("## Context from Dependencies\n\n")
+			for _, dep := range job.Dependencies {
+				if dep == nil {
+					continue
+				}
+				depContent, err := os.ReadFile(dep.FilePath)
+				if err != nil {
+					return "", fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
+				}
+				_, depBody, _ := ParseFrontmatter(depContent)
+				b.WriteString(fmt.Sprintf("### From: `%s`\n\n", dep.Filename))
+				b.Write(depBody)
+				b.WriteString("\n\n")
+			}
+		} else {
+			// Just provide file paths for the agent to read
+			b.WriteString("## Dependency Files\n\n")
+			b.WriteString("Read the following dependency files for context:\n\n")
+			for _, dep := range job.Dependencies {
+				if dep == nil {
+					continue
+				}
+				b.WriteString(fmt.Sprintf("- `%s`\n", dep.FilePath))
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	// 2. Append source_block content
+	if job.SourceBlock != "" {
+		extractedContent, err := resolveSourceBlockForAgent(job.SourceBlock, plan)
+		if err != nil {
+			return "", fmt.Errorf("resolving source_block: %w", err)
+		}
+		b.WriteString("## Context from Source Blocks\n\n")
+		b.WriteString(extractedContent)
+		b.WriteString("\n\n")
+	}
+
+	// 3. Append source file content
+	if len(job.PromptSource) > 0 {
+		b.WriteString("## Context from Source Files\n\n")
+		for _, source := range job.PromptSource {
+			sourcePath, err := ResolvePromptSource(source, plan)
+			if err != nil {
+				return "", fmt.Errorf("resolving prompt source %s: %w", source, err)
+			}
+			sourceContent, err := os.ReadFile(sourcePath)
+			if err != nil {
+				return "", fmt.Errorf("reading prompt source file %s: %w", sourcePath, err)
+			}
+			b.WriteString(fmt.Sprintf("### From: `%s`\n\n", source))
+			b.Write(sourceContent)
+			b.WriteString("\n\n")
+		}
+	}
+
+	// 4. Append the primary task
+	b.WriteString("---\n\n## Primary Task\n\n")
+	b.WriteString(job.PromptBody)
+
+	// Write the file
+	if err := os.WriteFile(briefingFilePath, []byte(b.String()), 0644); err != nil {
+		return "", fmt.Errorf("writing briefing file: %w", err)
+	}
+
+	return briefingFilePath, nil
 }
 
 // determineWorkDir determines the working directory for a job based on its worktree configuration.
@@ -224,7 +326,7 @@ func NewClaudeAgentProvider() *ClaudeAgentProvider {
 
 // Launch implements the InteractiveAgentProvider interface for Claude.
 // This contains the logic previously in executeHostMode.
-func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string) error {
+func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -293,7 +395,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		}
 
 		// Build agent command
-		agentCommand, err := p.buildAgentCommand(job, plan, workDir, agentArgs)
+		agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -442,7 +544,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	// Build and send command
-	agentCommand, err := p.buildAgentCommand(job, plan, workDir, agentArgs)
+	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -492,52 +594,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 }
 
 // buildAgentCommand constructs the agent command for the interactive session.
-func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, worktreePath string, agentArgs []string) (string, error) {
-	// Build instruction for the agent
-	var instructionBuilder strings.Builder
-
-	// Add dependency files if the job has dependencies
-	if len(job.Dependencies) > 0 {
-		var depFiles []string
-		for _, dep := range job.Dependencies {
-			if dep != nil && dep.FilePath != "" {
-				depFiles = append(depFiles, dep.FilePath)
-			}
-		}
-
-		if job.PrependDependencies {
-			instructionBuilder.WriteString(fmt.Sprintf("CRITICAL CONTEXT: Before you do anything else, you MUST read and fully understand the content of the following files in order. They provide the primary context and requirements for your task: %s. ", strings.Join(depFiles, ", ")))
-			instructionBuilder.WriteString(fmt.Sprintf("After you have processed that context, execute the agent job defined in %s. ", job.FilePath))
-		} else {
-			instructionBuilder.WriteString(fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath))
-			instructionBuilder.WriteString("For additional context from previous jobs, also read: ")
-			instructionBuilder.WriteString(strings.Join(depFiles, ", "))
-			instructionBuilder.WriteString(". ")
-		}
-	} else {
-		instructionBuilder.WriteString(fmt.Sprintf("Read the file %s and execute the agent job defined there. ", job.FilePath))
-	}
-
-	// Add context files if specified
-	if len(job.PromptSource) > 0 {
-		instructionBuilder.WriteString("Also read these context files: ")
-		var contextFiles []string
-		for _, source := range job.PromptSource {
-			resolved, err := ResolvePromptSource(source, plan)
-			relPath := source // fallback
-			if err == nil {
-				if p, err := filepath.Rel(worktreePath, resolved); err == nil {
-					relPath = p
-				} else {
-					relPath = resolved
-				}
-			}
-			contextFiles = append(contextFiles, relPath)
-		}
-		instructionBuilder.WriteString(strings.Join(contextFiles, ", "))
-	}
-
-	instruction := instructionBuilder.String()
+func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePath string, agentArgs []string) (string, error) {
+	// The instruction is now simple: read the briefing file.
+	instruction := fmt.Sprintf("Read the task briefing in the file %s and execute the instructions contained within.", briefingFilePath)
 
 	// Shell escape the instruction
 	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"

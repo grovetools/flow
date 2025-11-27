@@ -93,11 +93,12 @@ type JobMetadata struct {
 
 // JobOptions contains options for creating a new job.
 type JobOptions struct {
-	DependsOn    []string
-	PromptSource []string
-	Worktree     string
-	OutputType   string
-	Prompt       string
+	DependsOn           []string
+	PromptSource        []string
+	Worktree            string
+	OutputType          string
+	Prompt              string
+	PrependDependencies bool
 }
 
 // IsRunnable checks if a job can be executed.
