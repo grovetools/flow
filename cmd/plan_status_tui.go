@@ -44,6 +44,7 @@ type statusTUIKeyMap struct {
 	GoToBottom    key.Binding
 	PageUp        key.Binding
 	PageDown      key.Binding
+	ViewLogs      key.Binding
 }
 
 func newStatusTUIKeyMap() statusTUIKeyMap {
@@ -129,6 +130,10 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "page down"),
 		),
+		ViewLogs: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", "view logs"),
+		),
 	}
 }
 
@@ -171,6 +176,7 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.Rename,
 			k.Resume,
 			k.EditDeps,
+			k.ViewLogs,
 			k.Archive,
 			k.Help,
 			k.Quit,
@@ -409,6 +415,7 @@ type archiveConfirmedMsg struct{ job *orchestration.Job }
 type editFileAndQuitMsg struct{ filePath string }
 type editFileInTmuxMsg struct{ err error }
 type tickMsg time.Time
+type statusUpdateMsg string
 type refreshTickMsg time.Time
 type renameCompleteMsg struct{ err error }
 type updateDepsCompleteMsg struct{ err error }
@@ -499,6 +506,10 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Toggle cursor visibility for blinking effect
 		m.cursorVisible = !m.cursorVisible
 		return m, blink() // Schedule next tick
+
+	case statusUpdateMsg:
+		m.statusSummary = string(msg)
+		return m, refreshPlan(m.planDir)
 
 	case refreshTickMsg:
 		return m, tea.Batch(
@@ -846,6 +857,12 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
 				return m, editJob(job)
+			}
+
+		case key.Matches(msg, m.keyMap.ViewLogs):
+			if m.cursor < len(m.jobs) {
+				job := m.jobs[m.cursor]
+				return m, viewLogsCmd(m.plan, job)
 			}
 
 		case key.Matches(msg, m.keyMap.Run):
@@ -1593,6 +1610,58 @@ func runJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {
 		}
 		return refreshMsg{}
 	})
+}
+
+func viewLogsCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		// Check if we're in tmux
+		if os.Getenv("TMUX") == "" {
+			// Not in tmux, fall back to less
+			jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+			pagerCmd := exec.Command("sh", "-c", fmt.Sprintf("grove aglogs read %s | less -R", jobSpec))
+
+			if err := pagerCmd.Run(); err != nil {
+				return statusUpdateMsg(fmt.Sprintf("Error viewing logs: %v", err))
+			}
+			return statusUpdateMsg("Returned from log viewer.")
+		}
+
+		// In tmux, open logs in a new window
+		ctx := context.Background()
+		client, err := tmux.NewClient()
+		if err != nil {
+			return statusUpdateMsg(fmt.Sprintf("Error creating tmux client: %v", err))
+		}
+
+		session, err := client.GetCurrentSession(ctx)
+		if err != nil {
+			return statusUpdateMsg(fmt.Sprintf("Error getting current session: %v", err))
+		}
+
+		// Create window name based on job
+		windowName := fmt.Sprintf("logs-%s", job.Filename)
+		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+
+		// Create the command to run in the new window
+		// Force color output by setting CLICOLOR_FORCE, then pipe to less -R
+		// CLICOLOR_FORCE=1 tells programs to always output color, even when piped
+		command := fmt.Sprintf("CLICOLOR_FORCE=1 grove aglogs read %s | less -R", jobSpec)
+
+		// Create new window
+		err = client.NewWindow(ctx, session, windowName, command)
+		if err != nil {
+			return statusUpdateMsg(fmt.Sprintf("Error creating logs window: %v", err))
+		}
+
+		// Switch to the new window
+		windowTarget := session + ":" + windowName
+		if err := client.SwitchClient(ctx, windowTarget); err != nil {
+			// Not critical if switch fails, window was still created
+			return statusUpdateMsg("Logs window created.")
+		}
+
+		return statusUpdateMsg("Opened logs in new window.")
+	}
 }
 
 func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan) tea.Cmd {
