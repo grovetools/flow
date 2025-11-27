@@ -205,6 +205,16 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// This ensures buildPrompt uses the correct context files
 	workDir = ScopeToSubProject(workDir, job)
 
+	// Generate the briefing file before the LLM call
+	briefingFilePath, err := BuildBriefingFile(job, plan, workDir)
+	if err != nil {
+		// Log a warning but don't fail the job
+		log.WithError(err).Warn("Failed to build agent briefing file")
+		prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to build agent briefing file: %v", err))
+	} else if briefingFilePath != "" {
+		prettyLog.InfoPretty(fmt.Sprintf("Agent briefing file created at: %s", briefingFilePath))
+	}
+
 	// Set environment for mock testing
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 
@@ -379,7 +389,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 	// Handle source_block reference if present
 	if job.SourceBlock != "" {
-		extractedContent, err := e.resolveSourceBlock(job.SourceBlock, plan)
+		extractedContent, err := resolveSourceBlock(job.SourceBlock, plan)
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("resolving source_block: %w", err)
 		}
@@ -1423,6 +1433,20 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 </prompt>`,
 		string(templateContent), conversationHistory)
 
+	// Write the full prompt to a briefing file for observability
+	artifactsDir := filepath.Join(plan.Directory, ".artifacts")
+	if err := os.MkdirAll(artifactsDir, 0755); err == nil {
+		briefingFilename := fmt.Sprintf("briefing-%s-%d.md", job.ID, time.Now().Unix())
+		briefingFilePath := filepath.Join(artifactsDir, briefingFilename)
+		if err := os.WriteFile(briefingFilePath, []byte(fullPrompt), 0644); err == nil {
+			prettyLog.InfoPretty(fmt.Sprintf("Chat briefing file created at: %s", briefingFilePath))
+		} else {
+			log.WithError(err).Warn("Failed to write chat briefing file")
+		}
+	} else {
+		log.WithError(err).Warn("Failed to create .artifacts directory for chat briefing")
+	}
+
 	if len(validContextPaths) > 0 {
 		fmt.Printf("✓ Including %d context file(s) as attachments\n", len(validContextPaths))
 	} else {
@@ -1585,70 +1609,4 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	updateJobFile(job)
 
 	return nil
-}
-
-// resolveSourceBlock reads and extracts content from a source_block reference
-// Format: path/to/file.md#block-id1,block-id2 or path/to/file.md (for entire file)
-func (e *OneShotExecutor) resolveSourceBlock(sourceBlock string, plan *Plan) (string, error) {
-	// Parse the source block reference
-	parts := strings.SplitN(sourceBlock, "#", 2)
-	filePath := parts[0]
-
-	// Resolve file path relative to plan directory
-	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(plan.Directory, filePath)
-	}
-
-	// Read the source file
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("reading source file %s: %w", filePath, err)
-	}
-
-	// If no block IDs specified, return entire file content (without frontmatter)
-	if len(parts) == 1 {
-		_, bodyContent, err := ParseFrontmatter(content)
-		if err != nil {
-			return "", fmt.Errorf("parsing frontmatter: %w", err)
-		}
-		return string(bodyContent), nil
-	}
-
-	// Extract specific blocks
-	blockIDs := strings.Split(parts[1], ",")
-
-	// Parse the chat file to find blocks
-	turns, err := ParseChatFile(content)
-	if err != nil {
-		return "", fmt.Errorf("parsing chat file: %w", err)
-	}
-
-	// Create a map of block IDs to content
-	blockMap := make(map[string]*ChatTurn)
-	for _, turn := range turns {
-		if turn.Directive != nil && turn.Directive.ID != "" {
-			blockMap[turn.Directive.ID] = turn
-		}
-	}
-
-	// Extract requested blocks
-	var extractedContent strings.Builder
-	foundCount := 0
-	for _, blockID := range blockIDs {
-		if turn, ok := blockMap[blockID]; ok {
-			if foundCount > 0 {
-				extractedContent.WriteString("\n\n---\n\n")
-			}
-			extractedContent.WriteString(turn.Content)
-			foundCount++
-		} else {
-			return "", fmt.Errorf("block ID '%s' not found in source file", blockID)
-		}
-	}
-
-	if foundCount == 0 {
-		return "", fmt.Errorf("no valid blocks found")
-	}
-
-	return extractedContent.String(), nil
 }

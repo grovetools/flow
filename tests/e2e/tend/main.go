@@ -10,6 +10,7 @@ import (
 
 func main() {
 	allScenarios := []*harness.Scenario{
+		scenarios.BriefingFilesScenario,
 		scenarios.CoreOrchestrationScenario,
 		scenarios.DependencyWorkflowScenario,
 		scenarios.OneshotWithContextScenario,
