@@ -239,8 +239,8 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return fmt.Errorf("expected .artifacts directory to exist: %w", err)
 			}
 
-			// Check that at least one briefing file exists
-			files, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.md"))
+			// Check that at least one briefing file exists (now XML format)
+			files, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
 			if err != nil {
 				return fmt.Errorf("error checking for briefing files: %w", err)
 			}
@@ -274,17 +274,16 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return fmt.Errorf("reading briefing file: %w", err)
 			}
 
-			// Check that briefing file contains expected sections
+			// Check that briefing file contains expected XML sections
 			expectedSections := []string{
-				"# Agent Briefing:",
-				"**Job ID:**",
-				"**Work Directory:**",
-				"## Context from Dependencies",
-				"## Primary Task",
+				"<prompt>",
+				"<context>",
+				"<inlined_dependency",
+				"<user_request>",
 			}
 			for _, section := range expectedSections {
 				if !strings.Contains(briefingContent, section) {
-					return fmt.Errorf("briefing file missing expected section: %s", section)
+					return fmt.Errorf("briefing file missing expected XML section: %s", section)
 				}
 			}
 
@@ -365,8 +364,8 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			planPath := ctx.GetString("plan_path")
 			artifactsDir := filepath.Join(planPath, ".artifacts")
 
-			// Check that we now have TWO briefing files
-			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.md"))
+			// Check that we now have TWO briefing files (now XML format)
+			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
 			if err != nil {
 				return fmt.Errorf("error finding briefing files: %w", err)
 			}
@@ -382,7 +381,7 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			// Find which briefing belongs to which job by checking the Job ID or title in the filename
 			var job03Briefing, job04Briefing string
 			for _, briefingPath := range briefingFiles {
-				// The filename format is: briefing-{job-id}-{timestamp}.md
+				// The filename format is: briefing-{job-id}-{timestamp}.xml
 				// Job IDs follow the pattern: {sanitized-title}-{hash}
 				filename := filepath.Base(briefingPath)
 
@@ -392,10 +391,10 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 					return fmt.Errorf("reading briefing file %s: %w", briefingPath, err)
 				}
 
-				// Check by title in the briefing header
-				if strings.Contains(content, "# Agent Briefing: Implement Task") {
+				// Check by content in the user_request section
+				if strings.Contains(content, "Implement a test feature based on the design and architecture") {
 					job03Briefing = briefingPath
-				} else if strings.Contains(content, "# Agent Briefing: Review Task") {
+				} else if strings.Contains(content, "Review the implementation and ensure quality") {
 					job04Briefing = briefingPath
 				} else if strings.Contains(filename, "implement-task") {
 					job03Briefing = briefingPath
@@ -411,14 +410,14 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return fmt.Errorf("could not find briefing file for job 04 (Review Task)")
 			}
 
-			// Verify job 03's briefing (WITH prepend_dependencies: true) has INLINED content
+			// Verify job 03's briefing (WITH prepend_dependencies: true) has INLINED content in XML format
 			job03Content, err := fs.ReadString(job03Briefing)
 			if err != nil {
 				return fmt.Errorf("reading job 03 briefing: %w", err)
 			}
 
-			if !strings.Contains(job03Content, "## Context from Dependencies") {
-				return fmt.Errorf("job 03 briefing missing 'Context from Dependencies' section")
+			if !strings.Contains(job03Content, "<inlined_dependency") {
+				return fmt.Errorf("job 03 briefing missing '<inlined_dependency' tag")
 			}
 
 			// Should contain the actual dependency content since prepend_dependencies is true
@@ -429,24 +428,19 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return fmt.Errorf("job 03 briefing missing inlined dependency content from architecture")
 			}
 
-			// Verify job 04's briefing (WITHOUT prepend_dependencies) has FILE PATHS only
+			// Verify job 04's briefing (WITHOUT prepend_dependencies) has uploaded dependency tags in XML format
 			job04Content, err := fs.ReadString(job04Briefing)
 			if err != nil {
 				return fmt.Errorf("reading job 04 briefing: %w", err)
 			}
 
-			if !strings.Contains(job04Content, "## Dependency Files") {
-				return fmt.Errorf("job 04 briefing missing 'Dependency Files' section")
+			if !strings.Contains(job04Content, "<uploaded_dependency") {
+				return fmt.Errorf("job 04 briefing missing '<uploaded_dependency' tag")
 			}
 
-			// Should list file paths, not inline content
-			if !strings.Contains(job04Content, "Read the following dependency files for context:") {
-				return fmt.Errorf("job 04 briefing missing instruction to read dependency files")
-			}
-
-			// Should contain path to job 03
+			// Should reference uploaded files, not inline content
 			if !strings.Contains(job04Content, "03-implement-task.md") {
-				return fmt.Errorf("job 04 briefing missing path to dependency file")
+				return fmt.Errorf("job 04 briefing missing reference to dependency file")
 			}
 
 			// Should NOT contain the actual content from job 03 (no inlining)

@@ -20,7 +20,7 @@ import (
 
 // InteractiveAgentProvider defines the interface for launching an interactive agent.
 type InteractiveAgentProvider interface {
-	Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error
+	Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, promptXML string) error
 }
 
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
@@ -54,15 +54,22 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
-	// Generate the briefing file before checking skipInteractive
-	// This ensures the file is created even in test/skip mode
-	briefingFilePath, err := BuildBriefingFile(job, plan, workDir)
+	// Build the XML prompt and get the list of files to upload.
+	// NOTE: interactive agents currently don't support separate file uploads, so filesToUpload is ignored.
+	promptXML, _, err := BuildXMLPrompt(job, plan, workDir)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		return fmt.Errorf("failed to build agent briefing file: %w", err)
+		return fmt.Errorf("failed to build agent XML prompt: %w", err)
 	}
-	e.prettyLog.InfoPretty(fmt.Sprintf("Agent briefing file created at: %s", briefingFilePath))
+
+	// Write the briefing file for auditing (no turnID for interactive_agent jobs).
+	if briefingFilePath, err := WriteBriefingFile(plan, job, promptXML, ""); err != nil {
+		e.log.WithError(err).Warn("Failed to write briefing file")
+		e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
+	} else {
+		e.prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
+	}
 
 	// Check if interactive jobs should be skipped
 	if e.skipInteractive {
@@ -133,8 +140,8 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}
 	}
 
-	// Delegate to the selected provider with the briefing file path
-	return provider.Launch(ctx, job, plan, workDir, agentArgs, briefingFilePath)
+	// Delegate to the selected provider with the prompt XML string
+	return provider.Launch(ctx, job, plan, workDir, agentArgs, promptXML)
 }
 
 // determineWorkDir determines the working directory for a job based on its worktree configuration.
@@ -234,7 +241,7 @@ func NewClaudeAgentProvider() *ClaudeAgentProvider {
 
 // Launch implements the InteractiveAgentProvider interface for Claude.
 // This contains the logic previously in executeHostMode.
-func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
+func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, promptXML string) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -303,7 +310,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		}
 
 		// Build agent command
-		agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
+		agentCommand, err := p.buildAgentCommand(job, plan, promptXML, agentArgs)
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -452,7 +459,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	// Build and send command
-	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
+	agentCommand, err := p.buildAgentCommand(job, plan, promptXML, agentArgs)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -502,25 +509,19 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 }
 
 // buildAgentCommand constructs the agent command for the interactive session.
-func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePath string, agentArgs []string) (string, error) {
-	// The instruction is now simple: read the briefing file.
-	instruction := fmt.Sprintf("Read the task briefing in the file %s and execute the instructions contained within.", briefingFilePath)
-
-	// Shell escape the instruction
-	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"
+func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, promptXML string, agentArgs []string) (string, error) {
+	// The prompt is now passed directly to the agent via stdin.
+	// Shell escape the entire promptXML string.
+	escapedPrompt := "'" + strings.ReplaceAll(promptXML, "'", "'\\''") + "'"
 
 	// Build command with agent args
 	cmdParts := []string{"claude"}
 	if job.AgentContinue {
 		cmdParts = append(cmdParts, "--continue")
-		cmdParts = append(cmdParts, agentArgs...)
-		return fmt.Sprintf("echo %s | %s", escapedInstruction, strings.Join(cmdParts, " ")), nil
 	}
-
 	cmdParts = append(cmdParts, agentArgs...)
-	cmdParts = append(cmdParts, escapedInstruction)
 
-	return strings.Join(cmdParts, " "), nil
+	return fmt.Sprintf("echo %s | %s", escapedPrompt, strings.Join(cmdParts, " ")), nil
 }
 
 // generateSessionName creates a unique session name for the interactive job.

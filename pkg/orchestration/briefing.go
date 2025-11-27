@@ -8,117 +8,136 @@ import (
 	"time"
 )
 
-// BuildBriefingFile consolidates all job context into a single markdown file.
-// It returns the path to the generated file.
-func BuildBriefingFile(job *Job, plan *Plan, workDir string) (string, error) {
+// WriteBriefingFile saves the provided content to a uniquely named .xml file
+// in the plan's .artifacts directory for auditing.
+// For chat jobs, turnID should be the unique turn identifier. For other jobs, pass empty string.
+func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (string, error) {
 	artifactsDir := filepath.Join(plan.Directory, ".artifacts")
 	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
 		return "", fmt.Errorf("creating .artifacts directory: %w", err)
 	}
 
-	// Generate a unique filename for the briefing
-	briefingFilename := fmt.Sprintf("briefing-%s-%d.md", job.ID, time.Now().Unix())
+	// Generate a unique filename for the briefing with an .xml extension
+	var briefingFilename string
+	if turnID != "" {
+		// For chat jobs, use the turn UUID for deterministic naming
+		briefingFilename = fmt.Sprintf("briefing-%s-%s.xml", job.ID, turnID)
+	} else {
+		// For oneshot/interactive jobs, use timestamp
+		briefingFilename = fmt.Sprintf("briefing-%s-%d.xml", job.ID, time.Now().Unix())
+	}
 	briefingFilePath := filepath.Join(artifactsDir, briefingFilename)
 
-	var b strings.Builder
-
-	b.WriteString(fmt.Sprintf("# Agent Briefing: %s\n\n", job.Title))
-	b.WriteString(fmt.Sprintf("**Job ID:** %s  \n", job.ID))
-	b.WriteString(fmt.Sprintf("**Work Directory:** `%s`\n\n", workDir))
-	b.WriteString("---\n\n")
-
-	// 1. Handle dependencies based on PrependDependencies flag
-	if len(job.Dependencies) > 0 {
-		if job.PrependDependencies {
-			// Inline dependency content into the briefing
-			b.WriteString("## Context from Dependencies\n\n")
-			for _, dep := range job.Dependencies {
-				if dep == nil {
-					continue
-				}
-				depContent, err := os.ReadFile(dep.FilePath)
-				if err != nil {
-					return "", fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
-				}
-				_, depBody, _ := ParseFrontmatter(depContent)
-				b.WriteString(fmt.Sprintf("### From: `%s`\n\n", dep.Filename))
-				b.Write(depBody)
-				b.WriteString("\n\n")
-			}
-		} else {
-			// Just provide file paths for the agent to read
-			b.WriteString("## Dependency Files\n\n")
-			b.WriteString("Read the following dependency files for context:\n\n")
-			for _, dep := range job.Dependencies {
-				if dep == nil {
-					continue
-				}
-				b.WriteString(fmt.Sprintf("- `%s`\n", dep.FilePath))
-			}
-			b.WriteString("\n")
-		}
-	}
-
-	// 2. Append source_block content
-	if job.SourceBlock != "" {
-		extractedContent, err := resolveSourceBlock(job.SourceBlock, plan)
-		if err != nil {
-			return "", fmt.Errorf("resolving source_block: %w", err)
-		}
-		b.WriteString("## Context from Source Blocks\n\n")
-		b.WriteString(extractedContent)
-		b.WriteString("\n\n")
-	}
-
-	// 3. Append source file content
-	if len(job.PromptSource) > 0 {
-		b.WriteString("## Context from Source Files\n\n")
-		for _, source := range job.PromptSource {
-			sourcePath, err := ResolvePromptSource(source, plan)
-			if err != nil {
-				return "", fmt.Errorf("resolving prompt source %s: %w", source, err)
-			}
-			sourceContent, err := os.ReadFile(sourcePath)
-			if err != nil {
-				return "", fmt.Errorf("reading prompt source file %s: %w", sourcePath, err)
-			}
-			b.WriteString(fmt.Sprintf("### From: `%s`\n\n", source))
-			b.Write(sourceContent)
-			b.WriteString("\n\n")
-		}
-	}
-
-	// 4. Append the primary task
-	b.WriteString("---\n\n## Primary Task\n\n")
-	b.WriteString(job.PromptBody)
-
 	// Write the file
-	if err := os.WriteFile(briefingFilePath, []byte(b.String()), 0644); err != nil {
+	if err := os.WriteFile(briefingFilePath, []byte(content), 0644); err != nil {
 		return "", fmt.Errorf("writing briefing file: %w", err)
 	}
 
 	return briefingFilePath, nil
 }
 
+// BuildXMLPrompt assembles a structured XML prompt for oneshot and interactive_agent jobs.
+// It returns the final XML string and a list of file paths that should be uploaded separately.
+func BuildXMLPrompt(job *Job, plan *Plan, workDir string) (promptXML string, filesToUpload []string, err error) {
+	var b strings.Builder
+	filesToUpload = []string{}
+
+	b.WriteString("<prompt>\n")
+
+	// 1. Add system instructions from the job's template, if available.
+	if job.Template != "" {
+		templateManager := NewTemplateManager()
+		template, err := templateManager.FindTemplate(job.Template)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolving template %s: %w", job.Template, err)
+		}
+		b.WriteString(fmt.Sprintf("    <system_instructions template=\"%s\">\n", job.Template))
+		b.WriteString(template.Prompt)
+		b.WriteString("\n    </system_instructions>\n")
+	}
+
+	b.WriteString("\n    <context>\n")
+
+	// 2. Handle dependencies: inline or reference as uploaded.
+	if len(job.Dependencies) > 0 {
+		for _, dep := range job.Dependencies {
+			if dep == nil {
+				continue
+			}
+			if job.PrependDependencies {
+				// Inline dependency content
+				depContent, err := os.ReadFile(dep.FilePath)
+				if err != nil {
+					return "", nil, fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
+				}
+				_, depBody, _ := ParseFrontmatter(depContent)
+				b.WriteString(fmt.Sprintf("        <inlined_dependency file=\"%s\">\n", dep.Filename))
+				b.WriteString(string(depBody))
+				b.WriteString("\n        </inlined_dependency>\n")
+			} else {
+				// Reference as an uploaded file
+				b.WriteString(fmt.Sprintf("        <uploaded_dependency file=\"%s\" description=\"This file was uploaded as context for your task.\"/>\n", dep.Filename))
+				filesToUpload = append(filesToUpload, dep.FilePath)
+			}
+		}
+	}
+
+	// 3. Handle prompt_source files: always reference as uploaded.
+	for _, source := range job.PromptSource {
+		sourcePath, err := ResolvePromptSource(source, plan)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolving prompt source %s: %w", source, err)
+		}
+		b.WriteString(fmt.Sprintf("        <uploaded_source_file file=\"%s\" description=\"This file was provided as a source for your task.\"/>\n", source))
+		filesToUpload = append(filesToUpload, sourcePath)
+	}
+
+	// 4. Handle source_block content: always inline.
+	if job.SourceBlock != "" {
+		extractedContent, err := resolveSourceBlock(job.SourceBlock, plan)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolving source_block: %w", err)
+		}
+		// Extract file and block IDs for the XML attributes
+		parts := strings.SplitN(job.SourceBlock, "#", 2)
+		fromFile := parts[0]
+		blocks := ""
+		if len(parts) > 1 {
+			blocks = parts[1]
+		}
+		b.WriteString(fmt.Sprintf("        <inlined_source_block from_file=\"%s\" blocks=\"%s\">\n", fromFile, blocks))
+		b.WriteString(extractedContent)
+		b.WriteString("\n        </inlined_source_block>\n")
+	}
+
+	b.WriteString("    </context>\n")
+
+	// 5. Add the main task from the job's prompt body.
+	if strings.TrimSpace(job.PromptBody) != "" {
+		b.WriteString("\n    <user_request priority=\"high\">\n")
+		b.WriteString(job.PromptBody)
+		b.WriteString("\n    </user_request>\n")
+	}
+
+	b.WriteString("</prompt>\n")
+
+	return b.String(), filesToUpload, nil
+}
+
 // resolveSourceBlock reads and extracts content from a source_block reference
-// Format: path/to/file.md#block-id1,block-id2 or path/to/file.md (for entire file)
 func resolveSourceBlock(sourceBlock string, plan *Plan) (string, error) {
-	// Parse the source block reference
 	parts := strings.SplitN(sourceBlock, "#", 2)
 	filePath := parts[0]
 
-	// Resolve file path relative to plan directory
 	if !filepath.IsAbs(filePath) {
 		filePath = filepath.Join(plan.Directory, filePath)
 	}
 
-	// Read the source file
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("reading source file %s: %w", filePath, err)
 	}
 
-	// If no block IDs specified, return entire file content (without frontmatter)
 	if len(parts) == 1 {
 		_, bodyContent, err := ParseFrontmatter(content)
 		if err != nil {
@@ -127,16 +146,12 @@ func resolveSourceBlock(sourceBlock string, plan *Plan) (string, error) {
 		return string(bodyContent), nil
 	}
 
-	// Extract specific blocks
 	blockIDs := strings.Split(parts[1], ",")
-
-	// Parse the chat file to find blocks
 	turns, err := ParseChatFile(content)
 	if err != nil {
 		return "", fmt.Errorf("parsing chat file: %w", err)
 	}
 
-	// Create a map of block IDs to content
 	blockMap := make(map[string]*ChatTurn)
 	for _, turn := range turns {
 		if turn.Directive != nil && turn.Directive.ID != "" {
@@ -144,7 +159,6 @@ func resolveSourceBlock(sourceBlock string, plan *Plan) (string, error) {
 		}
 	}
 
-	// Extract requested blocks
 	var extractedContent strings.Builder
 	foundCount := 0
 	for _, blockID := range blockIDs {

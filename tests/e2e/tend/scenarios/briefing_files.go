@@ -67,10 +67,10 @@ var BriefingFilesScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify briefing file
+			// Verify briefing file (now XML format)
 			planPath := ctx.GetString("plan_path")
 			artifactsDir := filepath.Join(planPath, ".artifacts")
-			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.md"))
+			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
 			if len(briefings) == 0 {
 				return fmt.Errorf("no briefing file found for oneshot job")
 			}
@@ -79,15 +79,18 @@ var BriefingFilesScenario = harness.NewScenario(
 			if err != nil {
 				return err
 			}
-			// When prepend_dependencies=true, dependencies are inlined in "Context from Dependencies" section
-			if !strings.Contains(content, "## Context from Dependencies") {
-				return fmt.Errorf("briefing missing 'Context from Dependencies' section (prepend_dependencies=true)")
+			// When prepend_dependencies=true, dependencies are inlined in <inlined_dependency> tags
+			if !strings.Contains(content, "<prompt>") {
+				return fmt.Errorf("briefing missing root <prompt> tag")
+			}
+			if !strings.Contains(content, "<inlined_dependency") {
+				return fmt.Errorf("briefing missing <inlined_dependency> tag (prepend_dependencies=true)")
 			}
 			if !strings.Contains(content, "Dependency Content") {
 				return fmt.Errorf("briefing missing dependency content")
 			}
-			if !strings.Contains(content, "Source File Content") {
-				return fmt.Errorf("briefing missing source file content")
+			if !strings.Contains(content, "<uploaded_source_file") {
+				return fmt.Errorf("briefing missing <uploaded_source_file> tag for source file")
 			}
 			if !strings.Contains(content, "Main task prompt") {
 				return fmt.Errorf("briefing missing main prompt")
@@ -123,16 +126,16 @@ var BriefingFilesScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify briefing file - should have file paths listed, not inlined content
+			// Verify briefing file (now XML format) - should have uploaded tags, not inlined content
 			planPath := ctx.GetString("plan_path")
 			artifactsDir := filepath.Join(planPath, ".artifacts")
-			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.md"))
+			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
 
 			// Find the briefing file for the second job
 			var briefingContent string
 			for _, briefing := range briefings {
 				content, _ := fs.ReadString(briefing)
-				if strings.Contains(content, "test-oneshot-no-prepend") {
+				if strings.Contains(content, "Task without prepend") {
 					briefingContent = content
 					break
 				}
@@ -142,12 +145,12 @@ var BriefingFilesScenario = harness.NewScenario(
 				return fmt.Errorf("no briefing file found for second oneshot job")
 			}
 
-			// When prepend_dependencies=false, dependencies are listed as file paths
-			if !strings.Contains(briefingContent, "## Dependency Files") {
-				return fmt.Errorf("briefing missing 'Dependency Files' section (prepend_dependencies=false)")
+			// When prepend_dependencies=false, dependencies are referenced as uploaded files
+			if !strings.Contains(briefingContent, "<uploaded_dependency") {
+				return fmt.Errorf("briefing missing <uploaded_dependency> tag (prepend_dependencies=false)")
 			}
 			if !strings.Contains(briefingContent, "03-dep2.md") {
-				return fmt.Errorf("briefing missing dependency file path")
+				return fmt.Errorf("briefing missing dependency file reference")
 			}
 			// Content should NOT be inlined when prepend_dependencies=false
 			if strings.Contains(briefingContent, "Second Dependency Content") {
@@ -180,7 +183,7 @@ var BriefingFilesScenario = harness.NewScenario(
 			chatsDir := filepath.Join(ctx.GetString("notebooks_root"), "workspaces", "briefing-project", "chats")
 			artifactsDir := filepath.Join(chatsDir, ".artifacts")
 
-			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.md"))
+			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
 			if len(briefings) == 0 {
 				return fmt.Errorf("no briefing file found for chat job")
 			}

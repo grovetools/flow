@@ -205,27 +205,34 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// This ensures buildPrompt uses the correct context files
 	workDir = ScopeToSubProject(workDir, job)
 
-	// Generate the briefing file before the LLM call
-	briefingFilePath, err := BuildBriefingFile(job, plan, workDir)
+	// Build the XML prompt and get the list of files to upload
+	prompt, promptSourceFiles, err := BuildXMLPrompt(job, plan, workDir)
 	if err != nil {
-		// Log a warning but don't fail the job
-		log.WithError(err).Warn("Failed to build agent briefing file")
-		prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to build agent briefing file: %v", err))
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		updateJobFile(job)
+		execErr = fmt.Errorf("building XML prompt: %w", err)
+		return execErr
+	}
+
+	// Write the briefing file for auditing (no turnID for oneshot jobs)
+	briefingFilePath, err := WriteBriefingFile(plan, job, prompt, "")
+	if err != nil {
+		log.WithError(err).Warn("Failed to write briefing file")
+		prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
 	} else if briefingFilePath != "" {
-		prettyLog.InfoPretty(fmt.Sprintf("Agent briefing file created at: %s", briefingFilePath))
+		prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
 	}
 
 	// Set environment for mock testing
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 
-	// Build prompt
-	prompt, promptSourceFiles, contextFiles, err := e.buildPrompt(job, plan, workDir)
+	// We still need to gather context files for the old buildPrompt logic
+	// This is a temporary workaround until we fully migrate to BuildXMLPrompt
+	_, _, contextFiles, err := e.buildPrompt(job, plan, workDir)
 	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		updateJobFile(job)
-		execErr = fmt.Errorf("building prompt: %w", err)
-		return execErr
+		// Log warning but don't fail - context files are optional
+		log.WithError(err).Warn("Could not determine context files for llm CLI fallback")
 	}
 
 	// Set environment for mock LLM if needed
@@ -1419,6 +1426,14 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// Build prompt with XML structure for better LLM parsing
 	// XML provides clearer boundaries and structure for the model
+	// Generate a unique ID for this chat turn (used for both briefing filename and response directive)
+	bytes := make([]byte, 3)
+	if _, err := rand.Read(bytes); err != nil {
+		execErr = fmt.Errorf("generate turn ID: %w", err)
+		return execErr
+	}
+	turnID := hex.EncodeToString(bytes)
+
 	fullPrompt := fmt.Sprintf(`<prompt>
 <system_instructions>
 %s
@@ -1433,18 +1448,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 </prompt>`,
 		string(templateContent), conversationHistory)
 
-	// Write the full prompt to a briefing file for observability
-	artifactsDir := filepath.Join(plan.Directory, ".artifacts")
-	if err := os.MkdirAll(artifactsDir, 0755); err == nil {
-		briefingFilename := fmt.Sprintf("briefing-%s-%d.md", job.ID, time.Now().Unix())
-		briefingFilePath := filepath.Join(artifactsDir, briefingFilename)
-		if err := os.WriteFile(briefingFilePath, []byte(fullPrompt), 0644); err == nil {
-			prettyLog.InfoPretty(fmt.Sprintf("Chat briefing file created at: %s", briefingFilePath))
-		} else {
-			log.WithError(err).Warn("Failed to write chat briefing file")
-		}
+	// Write the full prompt to a briefing file for observability using the turn UUID
+	if briefingFilePath, err := WriteBriefingFile(plan, job, fullPrompt, turnID); err != nil {
+		log.WithError(err).Warn("Failed to write chat briefing file")
 	} else {
-		log.WithError(err).Warn("Failed to create .artifacts directory for chat briefing")
+		prettyLog.InfoPretty(fmt.Sprintf("Chat briefing file created at: %s", briefingFilePath))
 	}
 
 	if len(validContextPaths) > 0 {
@@ -1582,17 +1590,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 	log.WithField("response_length_bytes", len(response)).Debug("LLM call succeeded")
 
-	// Generate a unique ID for this response
-	bytes := make([]byte, 3)
-	if _, err := rand.Read(bytes); err != nil {
-		execErr = fmt.Errorf("generate block ID: %w", err)
-		return execErr
-	}
-	blockID := hex.EncodeToString(bytes)
+	// Use the same turnID that was generated earlier for the briefing file
+	// This creates a 1:1 correspondence between briefing files and chat turns
+	// (turnID was already generated before the LLM call)
 
 	// Append the response to the chat file
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	newCell := fmt.Sprintf("\n---\n\n<!-- grove: {\"id\": \"%s\"} -->\n## LLM Response (%s)\n\n%s\n\n<!-- grove: {\"template\": \"chat\"} -->\n", blockID, timestamp, response)
+	newCell := fmt.Sprintf("\n---\n\n<!-- grove: {\"id\": \"%s\"} -->\n## LLM Response (%s)\n\n%s\n\n<!-- grove: {\"template\": \"chat\"} -->\n", turnID, timestamp, response)
 
 	// Append atomically
 	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0o644); err != nil {

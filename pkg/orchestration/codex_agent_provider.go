@@ -31,7 +31,7 @@ func NewCodexAgentProvider() *CodexAgentProvider {
 	}
 }
 
-func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
+func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, promptXML string) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -100,7 +100,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	}
 
 	// Build agent command (reuse Claude provider's logic but replace "claude" with "codex")
-	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
+	agentCommand, err := p.buildAgentCommand(job, plan, promptXML, agentArgs)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -201,25 +201,19 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 }
 
 // buildAgentCommand constructs the codex command for the interactive session.
-func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePath string, agentArgs []string) (string, error) {
-	// The instruction is now simple: read the briefing file.
-	instruction := fmt.Sprintf("Read the task briefing in the file %s and execute the instructions contained within.", briefingFilePath)
+func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, promptXML string, agentArgs []string) (string, error) {
+	// The prompt is now passed directly to the agent via stdin.
+	// Shell escape the entire promptXML string.
+	escapedPrompt := "'" + strings.ReplaceAll(promptXML, "'", "'\\''") + "'"
 
-	// Shell escape the instruction
-	escapedInstruction := "'" + strings.ReplaceAll(instruction, "'", "'\\''") + "'"
-
-	// Build command with agent args - use "codex" instead of "claude"
+	// Build command with agent args
 	cmdParts := []string{"codex"}
 	if job.AgentContinue {
 		cmdParts = append(cmdParts, "--continue")
-		cmdParts = append(cmdParts, agentArgs...)
-		return fmt.Sprintf("echo %s | %s", escapedInstruction, strings.Join(cmdParts, " ")), nil
 	}
-
 	cmdParts = append(cmdParts, agentArgs...)
-	cmdParts = append(cmdParts, escapedInstruction)
 
-	return strings.Join(cmdParts, " "), nil
+	return fmt.Sprintf("echo %s | %s", escapedPrompt, strings.Join(cmdParts, " ")), nil
 }
 
 // generateSessionName creates a unique session name for the interactive job.
