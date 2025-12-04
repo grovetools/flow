@@ -198,8 +198,15 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// This ensures buildPrompt uses the correct context files
 	workDir = ScopeToSubProject(workDir, job)
 
+	// We need to gather context files first for BuildXMLPrompt
+	_, _, contextFiles, err := e.buildPrompt(job, plan, workDir)
+	if err != nil {
+		// Log warning but don't fail - context files are optional
+		log.WithError(err).Warn("Could not determine context files")
+	}
+
 	// Build the XML prompt and get the list of files to upload
-	prompt, promptSourceFiles, err := BuildXMLPrompt(job, plan, workDir)
+	prompt, promptSourceFiles, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -219,14 +226,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// Set environment for mock testing
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
-
-	// We still need to gather context files for the old buildPrompt logic
-	// This is a temporary workaround until we fully migrate to BuildXMLPrompt
-	_, _, contextFiles, err := e.buildPrompt(job, plan, workDir)
-	if err != nil {
-		// Log warning but don't fail - context files are optional
-		log.WithError(err).Warn("Could not determine context files for llm CLI fallback")
-	}
 
 	// Set environment for mock LLM if needed
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
@@ -1321,7 +1320,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 	conversationHistory := string(bodyContent)
 
-	// Prepend dependency content if prepend_dependencies is true
+	// Handle dependencies - either prepend to conversation or collect for upload
+	var dependencyFilePaths []string
 	if job.PrependDependencies {
 		fmt.Println("🔗 prepend_dependencies enabled - inlining dependency content into chat history")
 		var dependencyContentBuilder strings.Builder
@@ -1358,6 +1358,20 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			dependencyContentBuilder.WriteString("\n\n---\n\n")
 		}
 		conversationHistory = dependencyContentBuilder.String() + conversationHistory
+	} else if len(job.Dependencies) > 0 {
+		// Collect dependency file paths for upload/attachment to LLM
+		fmt.Printf("📎 Collecting %d dependenc%s for upload:\n", len(job.Dependencies), func() string {
+			if len(job.Dependencies) == 1 {
+				return "y"
+			}
+			return "ies"
+		}())
+		for _, dep := range job.Dependencies {
+			if dep != nil && dep.FilePath != "" {
+				dependencyFilePaths = append(dependencyFilePaths, dep.FilePath)
+				fmt.Printf("     • %s (will be uploaded as file attachment)\n", dep.Filename)
+			}
+		}
 	}
 
 	// Load the template using TemplateManager
@@ -1427,19 +1441,38 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 	turnID := hex.EncodeToString(bytes)
 
-	fullPrompt := fmt.Sprintf(`<prompt>
-<system_instructions>
-%s
-</system_instructions>
+	// Build the briefing XML with context section if there are dependencies or context files
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString("<prompt>\n<system_instructions>\n")
+	promptBuilder.WriteString(string(templateContent))
+	promptBuilder.WriteString("\n</system_instructions>\n")
 
-<user_request priority="high">
-<instruction>Please focus on addressing the following user request:</instruction>
-<content>
-%s
-</content>
-</user_request>
-</prompt>`,
-		string(templateContent), conversationHistory)
+	// Add context section if we have dependencies or context files
+	if len(dependencyFilePaths) > 0 || len(validContextPaths) > 0 {
+		promptBuilder.WriteString("\n    <context>\n")
+
+		// Add dependencies
+		for _, depPath := range dependencyFilePaths {
+			promptBuilder.WriteString(fmt.Sprintf("        <inlined_dependency file=\"%s\" description=\"This file's content is provided elsewhere in the prompt context.\"/>\n", filepath.Base(depPath)))
+		}
+
+		// Add context files
+		for _, ctxPath := range validContextPaths {
+			promptBuilder.WriteString(fmt.Sprintf("        <inlined_context_file file=\"%s\" description=\"Project context file provided elsewhere in the prompt.\"/>\n", filepath.Base(ctxPath)))
+		}
+
+		promptBuilder.WriteString("    </context>\n")
+	}
+
+	promptBuilder.WriteString("\n<user_request priority=\"high\">\n")
+	promptBuilder.WriteString("<instruction>Please focus on addressing the following user request:</instruction>\n")
+	promptBuilder.WriteString("<content>\n")
+	promptBuilder.WriteString(conversationHistory)
+	promptBuilder.WriteString("\n</content>\n")
+	promptBuilder.WriteString("</user_request>\n")
+	promptBuilder.WriteString("</prompt>\n")
+
+	fullPrompt := promptBuilder.String()
 
 	// Write the full prompt to a briefing file for observability using the turn UUID
 	if briefingFilePath, err := WriteBriefingFile(plan, job, fullPrompt, turnID); err != nil {
@@ -1479,9 +1512,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// Create LLM options with determined model
 	llmOpts := LLMOptions{
-		Model:        effectiveModel,
-		WorkingDir:   contextDir,
-		ContextFiles: validContextPaths, // Pass context file paths
+		Model:             effectiveModel,
+		WorkingDir:        contextDir,
+		ContextFiles:      validContextPaths,      // Pass context file paths
+		PromptSourceFiles: dependencyFilePaths,    // Pass dependency file paths
 	}
 
 	// Log memory usage before LLM call

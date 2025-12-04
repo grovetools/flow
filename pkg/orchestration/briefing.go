@@ -38,7 +38,8 @@ func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (str
 
 // BuildXMLPrompt assembles a structured XML prompt for oneshot and interactive_agent jobs.
 // It returns the final XML string and a list of file paths that should be uploaded separately.
-func BuildXMLPrompt(job *Job, plan *Plan, workDir string) (promptXML string, filesToUpload []string, err error) {
+// contextFiles should include paths to .grove/context, CLAUDE.md, and other project context files.
+func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string) (promptXML string, filesToUpload []string, err error) {
 	var b strings.Builder
 	filesToUpload = []string{}
 
@@ -127,9 +128,23 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string) (promptXML string, fil
 		b.WriteString("\n        </inlined_source_block>\n")
 	}
 
+	// 5. Handle context files (.grove/context, CLAUDE.md, etc.)
+	// For interactive_agent jobs, use local_context_file tags since files are read locally.
+	// For oneshot jobs, use inlined_context_file tags since files are provided elsewhere in the prompt.
+	for _, contextFile := range contextFiles {
+		if job.Type == JobTypeInteractiveAgent {
+			// Interactive agents read files directly from the local filesystem
+			b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" description=\"Project context file available on the local filesystem.\"/>\n", filepath.Base(contextFile), contextFile))
+		} else {
+			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
+			b.WriteString(fmt.Sprintf("        <inlined_context_file file=\"%s\" description=\"Project context file provided elsewhere in the prompt.\"/>\n", filepath.Base(contextFile)))
+		}
+		filesToUpload = append(filesToUpload, contextFile)
+	}
+
 	b.WriteString("    </context>\n")
 
-	// 5. Add the main task from the job's prompt body.
+	// 6. Add the main task from the job's prompt body.
 	if strings.TrimSpace(job.PromptBody) != "" {
 		b.WriteString("\n    <user_request priority=\"high\">\n")
 		b.WriteString(job.PromptBody)

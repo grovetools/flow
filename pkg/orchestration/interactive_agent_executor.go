@@ -90,9 +90,12 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}
 		e.prettyLog.InfoPretty(fmt.Sprintf("Generated plan briefing file created at: %s", briefingFilePath))
 	} else {
+		// Gather context files (.grove/context, CLAUDE.md, etc.)
+		contextFiles := e.gatherContextFiles(job, plan, workDir)
+
 		// Build the XML prompt and get the list of files to upload.
 		// NOTE: interactive agents currently don't support separate file uploads, so filesToUpload is ignored.
-		promptXML, _, err := BuildXMLPrompt(job, plan, workDir)
+		promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -643,4 +646,34 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
 	return projInfo.Identifier(), nil
+}
+
+// gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
+func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) []string {
+	var contextFiles []string
+
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	contextDir := ScopeToSubProject(workDir, job)
+
+	if contextDir != "" {
+		// When using a worktree/context dir, ONLY use context from that directory
+		contextPath := filepath.Join(contextDir, ".grove", "context")
+		if _, err := os.Stat(contextPath); err == nil {
+			contextFiles = append(contextFiles, contextPath)
+		}
+
+		claudePath := filepath.Join(contextDir, "CLAUDE.md")
+		if _, err := os.Stat(claudePath); err == nil {
+			contextFiles = append(contextFiles, claudePath)
+		}
+	} else {
+		// No worktree, use the default context search
+		for _, contextPath := range FindContextFiles(plan) {
+			if _, err := os.Stat(contextPath); err == nil {
+				contextFiles = append(contextFiles, contextPath)
+			}
+		}
+	}
+
+	return contextFiles
 }
