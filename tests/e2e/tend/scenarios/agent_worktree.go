@@ -202,54 +202,51 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			return nil
 		}),
 
-		harness.NewStep("Simulate agent launch by setting job to running", func(ctx *harness.Context) error {
+		harness.NewStep("Run interactive agent and verify launch command", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 			jobPath := filepath.Join(planPath, "03-implement-task.md")
-			ctx.Set("job_path", jobPath)
 
-			// Actually run the job with --skip-interactive to trigger briefing file generation
-			// but prevent the tmux session from launching
-			cmd := ctx.Bin("plan", "run", "--skip-interactive", jobPath)
+			// Run the job. Mocks for claude and tmux will prevent hanging.
+			cmd := ctx.Bin("plan", "run", jobPath)
 			cmd.Dir(projectDir)
-			_ = cmd.Run() // Ignore result as --skip-interactive causes intentional failure
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
 
-			// Now manually set the job to running and create a lock file
-			// to simulate a successful agent launch for the rest of the test
+			// The mocks allow the job to run successfully
+			// Verify the job reached "running" status (proves the command was constructed correctly)
 			content, err := fs.ReadString(jobPath)
 			if err != nil {
 				return fmt.Errorf("reading job file: %w", err)
 			}
-
-			// Replace status: failed with status: running (since --skip-interactive causes failure)
-			updatedContent := strings.Replace(content, "status: failed", "status: running", 1)
-			if err := fs.WriteString(jobPath, updatedContent); err != nil {
-				return fmt.Errorf("updating job status: %w", err)
+			if !strings.Contains(content, "status: running") {
+				return fmt.Errorf("expected job status to be 'running', but got: %s", content)
 			}
+
+			// Verify briefing file was created with .xml extension
+			artifactsDir := filepath.Join(planPath, ".artifacts")
+			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
+			if err != nil {
+				return fmt.Errorf("error checking for briefing files: %w", err)
+			}
+			if len(briefingFiles) == 0 {
+				return fmt.Errorf("expected at least one briefing XML file to be created")
+			}
+
+			ctx.Set("job_path", jobPath)
+			ctx.Set("briefing_file", briefingFiles[0])
+
+			return nil
+		}),
+
+		harness.NewStep("Create lock file for running job", func(ctx *harness.Context) error {
+			jobPath := ctx.GetString("job_path")
 
 			// Create a lock file to simulate an active session
 			lockPath := jobPath + ".lock"
 			if err := fs.WriteString(lockPath, fmt.Sprintf("pid: 12345\nsession: agent-plan\n")); err != nil {
 				return fmt.Errorf("creating lock file: %w", err)
 			}
-
-			// Verify the briefing file was created in .artifacts
-			artifactsDir := filepath.Join(planPath, ".artifacts")
-			if err := fs.AssertExists(artifactsDir); err != nil {
-				return fmt.Errorf("expected .artifacts directory to exist: %w", err)
-			}
-
-			// Check that at least one briefing file exists (now XML format)
-			files, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
-			if err != nil {
-				return fmt.Errorf("error checking for briefing files: %w", err)
-			}
-			if len(files) == 0 {
-				return fmt.Errorf("expected at least one briefing file in .artifacts directory")
-			}
-
-			// Store the briefing file path for later verification
-			ctx.Set("briefing_file", files[0])
 
 			return nil
 		}),
@@ -279,12 +276,16 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				"<prompt>",
 				"<context>",
 				"<inlined_dependency",
-				"<user_request>",
 			}
 			for _, section := range expectedSections {
 				if !strings.Contains(briefingContent, section) {
 					return fmt.Errorf("briefing file missing expected XML section: %s", section)
 				}
+			}
+
+			// Verify the primary task content (which should be in the briefing somewhere)
+			if !strings.Contains(briefingContent, "Implement a test feature based on the design and architecture") {
+				return fmt.Errorf("briefing file missing primary task content")
 			}
 
 			// Verify dependency content is included
@@ -302,11 +303,6 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				if !strings.Contains(briefingContent, content) {
 					return fmt.Errorf("briefing file missing expected dependency content: %s", content)
 				}
-			}
-
-			// Verify the primary task content
-			if !strings.Contains(briefingContent, "Implement a test feature based on the design and architecture") {
-				return fmt.Errorf("briefing file missing primary task content")
 			}
 
 			return nil

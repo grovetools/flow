@@ -22,13 +22,19 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[MOCK TMUX] Created window\n")
 			os.Exit(0)
 		case "send-keys":
-			// Simulate successful key send
-			fmt.Fprintf(os.Stderr, "[MOCK TMUX] Sent keys\n")
+			// Simulate successful key send and log the command
+			// The command being sent is in the args
+			fmt.Fprintf(os.Stderr, "[MOCK TMUX] send-keys %s\n", strings.Join(args[1:], " "))
 			os.Exit(0)
 		case "display-message":
 			// Return a mock PID for pane_pid queries
 			if len(args) > 2 && strings.Contains(strings.Join(args, " "), "pane_pid") {
 				fmt.Println("99999")
+				os.Exit(0)
+			}
+			// Return a mock session PID (for GetSessionPID)
+			if len(args) > 2 && strings.Contains(strings.Join(args, " "), "session_pid") {
+				fmt.Println("88888")
 				os.Exit(0)
 			}
 			// Return a mock session name

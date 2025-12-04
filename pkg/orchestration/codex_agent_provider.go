@@ -31,7 +31,7 @@ func NewCodexAgentProvider() *CodexAgentProvider {
 	}
 }
 
-func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, promptXML string) error {
+func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -100,7 +100,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	}
 
 	// Build agent command (reuse Claude provider's logic but replace "claude" with "codex")
-	agentCommand, err := p.buildAgentCommand(job, plan, promptXML, agentArgs)
+	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -201,10 +201,11 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 }
 
 // buildAgentCommand constructs the codex command for the interactive session.
-func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, promptXML string, agentArgs []string) (string, error) {
-	// The prompt is now passed directly to the agent via stdin.
-	// Shell escape the entire promptXML string.
-	escapedPrompt := "'" + strings.ReplaceAll(promptXML, "'", "'\\''") + "'"
+func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePath string, agentArgs []string) (string, error) {
+	// Pass a simple instruction to read the briefing file.
+	// This is cleaner than reading the entire file content into the command.
+	// Shell escape the entire briefing file path.
+	escapedPath := "'" + strings.ReplaceAll(briefingFilePath, "'", "'\\''") + "'"
 
 	// Build command with agent args
 	cmdParts := []string{"codex"}
@@ -213,7 +214,8 @@ func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, promptXML s
 	}
 	cmdParts = append(cmdParts, agentArgs...)
 
-	return fmt.Sprintf("echo %s | %s", escapedPrompt, strings.Join(cmdParts, " ")), nil
+	// Pass instruction to read the briefing file
+	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
 }
 
 // generateSessionName creates a unique session name for the interactive job.
