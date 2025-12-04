@@ -275,7 +275,7 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			expectedSections := []string{
 				"<prompt>",
 				"<context>",
-				"<inlined_dependency",
+				"<prepended_dependency",
 			}
 			for _, section := range expectedSections {
 				if !strings.Contains(briefingContent, section) {
@@ -412,8 +412,8 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return fmt.Errorf("reading job 03 briefing: %w", err)
 			}
 
-			if !strings.Contains(job03Content, "<inlined_dependency") {
-				return fmt.Errorf("job 03 briefing missing '<inlined_dependency' tag")
+			if !strings.Contains(job03Content, "<prepended_dependency") {
+				return fmt.Errorf("job 03 briefing missing '<prepended_dependency' tag")
 			}
 
 			// Should contain the actual dependency content since prepend_dependencies is true
@@ -424,17 +424,21 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return fmt.Errorf("job 03 briefing missing inlined dependency content from architecture")
 			}
 
-			// Verify job 04's briefing (WITHOUT prepend_dependencies) has uploaded dependency tags in XML format
+			// Verify job 04's briefing (WITHOUT prepend_dependencies) has local dependency tags in XML format
 			job04Content, err := fs.ReadString(job04Briefing)
 			if err != nil {
 				return fmt.Errorf("reading job 04 briefing: %w", err)
 			}
 
-			if !strings.Contains(job04Content, "<uploaded_dependency") {
-				return fmt.Errorf("job 04 briefing missing '<uploaded_dependency' tag")
+			if !strings.Contains(job04Content, "<local_dependency") {
+				return fmt.Errorf("job 04 briefing missing '<local_dependency' tag")
 			}
 
-			// Should reference uploaded files, not inline content
+			if !strings.Contains(job04Content, "path=\"") {
+				return fmt.Errorf("job 04 briefing's local_dependency tag missing 'path' attribute")
+			}
+
+			// Should reference local files, not inline content
 			if !strings.Contains(job04Content, "03-implement-task.md") {
 				return fmt.Errorf("job 04 briefing missing reference to dependency file")
 			}

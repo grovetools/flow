@@ -83,14 +83,14 @@ var BriefingFilesScenario = harness.NewScenario(
 			if !strings.Contains(content, "<prompt>") {
 				return fmt.Errorf("briefing missing root <prompt> tag")
 			}
-			if !strings.Contains(content, "<inlined_dependency") {
-				return fmt.Errorf("briefing missing <inlined_dependency> tag (prepend_dependencies=true)")
+			if !strings.Contains(content, "<prepended_dependency") {
+				return fmt.Errorf("briefing missing <prepended_dependency> tag (prepend_dependencies=true)")
 			}
 			if !strings.Contains(content, "Dependency Content") {
 				return fmt.Errorf("briefing missing dependency content")
 			}
-			if !strings.Contains(content, "<uploaded_source_file") {
-				return fmt.Errorf("briefing missing <uploaded_source_file> tag for source file")
+			if !strings.Contains(content, "<inlined_source_file") {
+				return fmt.Errorf("briefing missing <inlined_source_file> tag for source file")
 			}
 			if !strings.Contains(content, "Main task prompt") {
 				return fmt.Errorf("briefing missing main prompt")
@@ -145,9 +145,9 @@ var BriefingFilesScenario = harness.NewScenario(
 				return fmt.Errorf("no briefing file found for second oneshot job")
 			}
 
-			// When prepend_dependencies=false, dependencies are referenced as uploaded files
-			if !strings.Contains(briefingContent, "<uploaded_dependency") {
-				return fmt.Errorf("briefing missing <uploaded_dependency> tag (prepend_dependencies=false)")
+			// When prepend_dependencies=false, dependencies are inlined elsewhere in the prompt
+			if !strings.Contains(briefingContent, "<inlined_dependency") {
+				return fmt.Errorf("briefing missing <inlined_dependency> tag (prepend_dependencies=false)")
 			}
 			if !strings.Contains(briefingContent, "03-dep2.md") {
 				return fmt.Errorf("briefing missing dependency file reference")

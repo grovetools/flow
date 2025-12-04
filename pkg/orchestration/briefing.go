@@ -58,37 +58,54 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string) (promptXML string, fil
 
 	b.WriteString("\n    <context>\n")
 
-	// 2. Handle dependencies: inline or reference as uploaded.
+	// 2. Handle dependencies: inline or reference.
+	// For interactive_agent jobs, use local_dependency tags since files are always read locally.
+	// For oneshot jobs, use inlined_dependency tags since files are provided elsewhere in the prompt.
 	if len(job.Dependencies) > 0 {
 		for _, dep := range job.Dependencies {
 			if dep == nil {
 				continue
 			}
 			if job.PrependDependencies {
-				// Inline dependency content
+				// Inline dependency content directly in the XML (prepend mode)
 				depContent, err := os.ReadFile(dep.FilePath)
 				if err != nil {
 					return "", nil, fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
 				}
 				_, depBody, _ := ParseFrontmatter(depContent)
-				b.WriteString(fmt.Sprintf("        <inlined_dependency file=\"%s\">\n", dep.Filename))
+				b.WriteString(fmt.Sprintf("        <prepended_dependency file=\"%s\">\n", dep.Filename))
 				b.WriteString(string(depBody))
-				b.WriteString("\n        </inlined_dependency>\n")
+				b.WriteString("\n        </prepended_dependency>\n")
 			} else {
-				// Reference as an uploaded file
-				b.WriteString(fmt.Sprintf("        <uploaded_dependency file=\"%s\" description=\"This file was uploaded as context for your task.\"/>\n", dep.Filename))
+				// Use different tags based on job type
+				if job.Type == JobTypeInteractiveAgent {
+					// Interactive agents read files directly from the local filesystem
+					b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" description=\"This file is available on the local filesystem as context for your task.\"/>\n", dep.Filename, dep.FilePath))
+				} else {
+					// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
+					b.WriteString(fmt.Sprintf("        <inlined_dependency file=\"%s\" description=\"This file's content is provided elsewhere in the prompt context.\"/>\n", dep.Filename))
+				}
 				filesToUpload = append(filesToUpload, dep.FilePath)
 			}
 		}
 	}
 
-	// 3. Handle prompt_source files: always reference as uploaded.
+	// 3. Handle prompt_source files.
+	// For interactive_agent jobs, use local_source_file tags since files are always read locally.
+	// For oneshot jobs, use inlined_source_file tags since files are provided elsewhere in the prompt.
 	for _, source := range job.PromptSource {
 		sourcePath, err := ResolvePromptSource(source, plan)
 		if err != nil {
 			return "", nil, fmt.Errorf("resolving prompt source %s: %w", source, err)
 		}
-		b.WriteString(fmt.Sprintf("        <uploaded_source_file file=\"%s\" description=\"This file was provided as a source for your task.\"/>\n", source))
+		// Use different tags based on job type
+		if job.Type == JobTypeInteractiveAgent {
+			// Interactive agents read files directly from the local filesystem
+			b.WriteString(fmt.Sprintf("        <local_source_file file=\"%s\" path=\"%s\" description=\"This file was provided as a source for your task.\"/>\n", source, sourcePath))
+		} else {
+			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
+			b.WriteString(fmt.Sprintf("        <inlined_source_file file=\"%s\" description=\"This file's content is provided elsewhere in the prompt context.\"/>\n", source))
+		}
 		filesToUpload = append(filesToUpload, sourcePath)
 	}
 
