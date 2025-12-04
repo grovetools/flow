@@ -2,16 +2,13 @@ package scenarios
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/tui"
 )
 
 var PlanLifecycleScenario = harness.NewScenario(
@@ -248,122 +245,6 @@ var PlanLifecycleScenario = harness.NewScenario(
 			// Verify status is set to 'review'
 			return assert.YAMLField(planConfigPath, "status", "review", "Plan status should be 'review'")
 		}),
-
-		harness.NewStep("Test 'finish' without flags (should prompt)", func(ctx *harness.Context) error {
-			projectDir := ctx.GetString("project_dir")
-			planName := ctx.GetString("plan_name")
-
-			// Without --yes, the command should fail or prompt (in non-interactive mode, it fails)
-			cmd := ctx.Bin("plan", "finish", planName)
-			cmd.Dir(projectDir)
-			result := cmd.Run()
-			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
-
-			// This should fail because we didn't pass --yes
-			return result.AssertFailure()
-		}),
-
-		harness.NewStep("Create and prepare a plan for TUI finish test", func(ctx *harness.Context) error {
-		projectDir := ctx.GetString("project_dir")
-		notebooksRoot := ctx.GetString("notebooks_root")
-
-		cmd := ctx.Bin("plan", "init", "finish-tui-plan", "--worktree")
-		cmd.Dir(projectDir)
-		result := cmd.Run()
-		if err := result.AssertSuccess(); err != nil {
-			return err
-		}
-
-		planPath := filepath.Join(notebooksRoot, "workspaces", "lifecycle-project", "plans", "finish-tui-plan")
-		ctx.Set("finish_tui_plan_path", planPath)
-		ctx.Set("finish_tui_plan_name", "finish-tui-plan")
-
-		// Set the plan to 'review' status so 'finish' can run
-		reviewCmd := ctx.Bin("plan", "review", "finish-tui-plan")
-		reviewCmd.Dir(projectDir)
-		reviewResult := reviewCmd.Run()
-		return reviewResult.AssertSuccess()
-		}),
-
-		harness.NewStep("Launch 'finish' TUI and verify checklist", func(ctx *harness.Context) error {
-		projectDir := ctx.GetString("project_dir")
-		planName := ctx.GetString("finish_tui_plan_name")
-		flowBinary, err := findFlowBinary()
-		if err != nil {
-			return err
-		}
-
-		// The TUI must run from within the project directory to find the plan.
-		// A wrapper script ensures the command runs in the correct directory within the TUI session.
-		wrapperScript := filepath.Join(ctx.RootDir, "run-finish-tui")
-		scriptContent := fmt.Sprintf("#!/bin/bash\ncd %s\nexec %s plan finish %s\n", projectDir, flowBinary, planName)
-		if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
-			return err
-		}
-		if err := os.Chmod(wrapperScript, 0755); err != nil {
-			return err
-		}
-
-		session, err := ctx.StartTUI(wrapperScript, []string{})
-		if err != nil {
-			return fmt.Errorf("failed to start `flow plan finish` TUI: %w", err)
-		}
-		ctx.Set("finish_tui_session", session)
-
-		if err := session.WaitForText("Finishing plan", 5*time.Second); err != nil {
-			content, _ := session.Capture()
-			return fmt.Errorf("finish TUI did not load: %w\nContent:\n%s", err, content)
-		}
-
-		// Verify key cleanup options are visible
-		if err := session.AssertContains("Prune git worktree"); err != nil {
-			return err
-		}
-		return session.AssertContains("Delete local git branch")
-		}),
-
-		harness.NewStep("Interact with finish TUI and confirm", func(ctx *harness.Context) error {
-		session := ctx.Get("finish_tui_session").(*tui.Session)
-
-		// Toggle "Prune git worktree" and "Delete local git branch"
-		// The order of items is: Merge, Mark finished, Prune, Clean dev, Delete submodule, Delete local
-		if err := session.SendKeys("Down"); err != nil {
-			return err
-		} // to "Mark plan as finished"
-		if err := session.SendKeys("Down"); err != nil {
-			return err
-		} // to "Prune git worktree"
-		if err := session.SendKeys(" "); err != nil { // Toggle "Prune git worktree"
-			return err
-		}
-		if err := session.SendKeys("Down"); err != nil {
-			return err
-		} // to "Clean up dev binaries"
-		if err := session.SendKeys("Down"); err != nil {
-			return err
-		} // to "Delete submodule branches"
-		if err := session.SendKeys("Down"); err != nil {
-			return err
-		} // to "Delete local git branch"
-		if err := session.SendKeys(" "); err != nil { // Toggle "Delete local git branch"
-			return err
-		}
-		time.Sleep(200 * time.Millisecond) // Wait for UI to update
-
-		// Confirm execution
-		return session.SendKeys("Enter")
-		}),
-
-		harness.NewStep("Verify TUI cleanup actions", func(ctx *harness.Context) error {
-		// The TUI process will have exited. The harness waits for it.
-		// Now we verify the side effects on the filesystem.
-		projectDir := ctx.GetString("project_dir")
-		worktreePath := filepath.Join(projectDir, ".grove-worktrees", "finish-tui-plan")
-
-		// Verify worktree directory was removed.
-		// `flow plan finish` should perform os.RemoveAll itself.
-		return fs.AssertNotExists(worktreePath)
-	}),
 
 		harness.NewStep("Test 'finish' with --yes enables all cleanup", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
