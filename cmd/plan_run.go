@@ -310,7 +310,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		} else {
 			// Create a sub-plan with selected jobs and their dependencies
 			subPlan := &orchestration.Plan{
-				Name:          plan.Name + "-selection",
+				Name:          plan.Name,
 				Directory:     plan.Directory,
 				Jobs:          []*orchestration.Job{},
 				JobsByID:      make(map[string]*orchestration.Job),
