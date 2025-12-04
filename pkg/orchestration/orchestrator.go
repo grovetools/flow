@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
-	
+
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
 )
 
@@ -109,16 +111,25 @@ func (o *Orchestrator) registerExecutors() {
 		SkipInteractive: o.config.SkipInteractive,
 	}
 
+	// Create shared LLM clients for executors
+	var llmClient LLMClient
+	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
+		llmClient = NewMockLLMClient()
+	} else {
+		llmClient = NewCommandLLMClient()
+	}
+	geminiRunner := gemini.NewRequestRunner()
+
 	// Register oneshot executor (also handles chat jobs)
-	oneshotExecutor := NewOneShotExecutor(execConfig)
+	oneshotExecutor := NewOneShotExecutor(llmClient, execConfig)
 	o.executors[JobTypeOneshot] = oneshotExecutor
 	o.executors[JobTypeChat] = oneshotExecutor
 
-	// Register headless agent executor with mock LLM client
-	o.executors[JobTypeHeadlessAgent] = NewHeadlessAgentExecutor(NewMockLLMClient(), execConfig)
+	// Register headless agent executor
+	o.executors[JobTypeHeadlessAgent] = NewHeadlessAgentExecutor(llmClient, execConfig)
 
-	// Register interactive agent executor for both agent and interactive_agent types (agent is now an alias)
-	interactiveExecutor := NewInteractiveAgentExecutor(o.config.SkipInteractive)
+	// Register interactive agent executor for both agent and interactive_agent types
+	interactiveExecutor := NewInteractiveAgentExecutor(llmClient, geminiRunner, o.config.SkipInteractive)
 	o.executors[JobTypeAgent] = interactiveExecutor
 	o.executors[JobTypeInteractiveAgent] = interactiveExecutor
 

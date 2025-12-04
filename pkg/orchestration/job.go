@@ -71,6 +71,7 @@ type Job struct {
 	Summary              string       `yaml:"summary,omitempty" json:"summary,omitempty"`
 	SourcePlan           string       `yaml:"source_plan,omitempty" json:"source_plan,omitempty"`
 	RecipeName           string       `yaml:"recipe_name,omitempty" json:"recipe_name,omitempty"`
+	GeneratePlanFrom     bool         `yaml:"generate_plan_from,omitempty" json:"generate_plan_from,omitempty"`
 	RulesFile            string       `yaml:"rules_file,omitempty" json:"rules_file,omitempty"`
 	NoteRef              string       `yaml:"note_ref,omitempty" json:"note_ref,omitempty"`
 

@@ -2,6 +2,8 @@ package orchestration
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +17,8 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	flowexec "github.com/mattsolo1/grove-flow/pkg/exec"
+	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
+	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
 )
 
@@ -28,14 +32,18 @@ type InteractiveAgentExecutor struct {
 	skipInteractive bool
 	log             *logrus.Entry
 	prettyLog       *grovelogging.PrettyLogger
+	llmClient       LLMClient
+	geminiRunner    *gemini.RequestRunner
 }
 
 // NewInteractiveAgentExecutor creates a new interactive agent executor.
-func NewInteractiveAgentExecutor(skipInteractive bool) *InteractiveAgentExecutor {
+func NewInteractiveAgentExecutor(llmClient LLMClient, geminiRunner *gemini.RequestRunner, skipInteractive bool) *InteractiveAgentExecutor {
 	return &InteractiveAgentExecutor{
 		skipInteractive: skipInteractive,
 		log:             grovelogging.NewLogger("grove-flow"),
 		prettyLog:       grovelogging.NewPrettyLogger(),
+		llmClient:       llmClient,
+		geminiRunner:    geminiRunner,
 	}
 }
 
@@ -54,25 +62,54 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
-	// Build the XML prompt and get the list of files to upload.
-	// NOTE: interactive agents currently don't support separate file uploads, so filesToUpload is ignored.
-	promptXML, _, err := BuildXMLPrompt(job, plan, workDir)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to build agent XML prompt: %w", err)
-	}
+	var briefingFilePath string
 
-	// Write the briefing file for auditing (no turnID for interactive_agent jobs).
-	briefingFilePath, err := WriteBriefingFile(plan, job, promptXML, "")
-	if err != nil {
-		e.log.WithError(err).Warn("Failed to write briefing file")
-		e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to write briefing file: %w", err)
+	// If generate_plan_from is true, we first call an LLM to generate a plan from the chat.
+	if job.GeneratePlanFrom {
+		e.prettyLog.InfoPretty("Generating implementation plan from chat dependency...")
+		generatedPlanContent, err := e.generatePlanFromDependencies(ctx, job, plan)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			updateJobFile(job)
+			return fmt.Errorf("failed to generate plan from dependencies: %w", err)
+		}
+
+		// Write the generated plan to a new briefing file for the agent to execute.
+		// The turnID is a unique identifier for this specific generation step.
+		bytes := make([]byte, 3)
+		rand.Read(bytes)
+		turnID := "generated-plan-" + hex.EncodeToString(bytes)
+
+		briefingFilePath, err = WriteBriefingFile(plan, job, generatedPlanContent, turnID)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			updateJobFile(job)
+			return fmt.Errorf("failed to write generated plan briefing file: %w", err)
+		}
+		e.prettyLog.InfoPretty(fmt.Sprintf("Generated plan briefing file created at: %s", briefingFilePath))
+	} else {
+		// Build the XML prompt and get the list of files to upload.
+		// NOTE: interactive agents currently don't support separate file uploads, so filesToUpload is ignored.
+		promptXML, _, err := BuildXMLPrompt(job, plan, workDir)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to build agent XML prompt: %w", err)
+		}
+
+		// Write the briefing file for auditing (no turnID for interactive_agent jobs).
+		briefingFilePath, err = WriteBriefingFile(plan, job, promptXML, "")
+		if err != nil {
+			e.log.WithError(err).Warn("Failed to write briefing file")
+			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return fmt.Errorf("failed to write briefing file: %w", err)
+		}
+		e.prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
 	}
-	e.prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
 
 	// Check if interactive jobs should be skipped
 	if e.skipInteractive {
@@ -191,6 +228,76 @@ func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Jo
 	return DetermineWorkingDirectory(plan, job)
 }
 
+// generatePlanFromDependencies constructs a prompt from chat dependencies and calls an LLM to generate a plan.
+func (e *InteractiveAgentExecutor) generatePlanFromDependencies(ctx context.Context, job *Job, plan *Plan) (string, error) {
+	if len(job.Dependencies) == 0 {
+		return "", fmt.Errorf("job with generate_plan_from has no dependencies")
+	}
+
+	// Assume the first dependency is the chat log to be summarized.
+	chatDep := job.Dependencies[0]
+	chatContentBytes, err := os.ReadFile(chatDep.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("reading chat dependency file %s: %w", chatDep.FilePath, err)
+	}
+	_, chatBody, err := ParseFrontmatter(chatContentBytes)
+	if err != nil {
+		return "", fmt.Errorf("parsing frontmatter from chat dependency: %w", err)
+	}
+
+	// Load the agent-xml template for plan generation instructions.
+	templateManager := NewTemplateManager()
+	template, err := templateManager.FindTemplate("agent-xml")
+	if err != nil {
+		return "", fmt.Errorf("resolving agent-xml template: %w", err)
+	}
+
+	// Combine template prompt with the chat content.
+	fullPrompt := fmt.Sprintf("%s\n\n## Chat Transcript\n\n%s", template.Prompt, string(chatBody))
+
+	// Determine the model to use.
+	effectiveModel := job.Model
+	if effectiveModel == "" && plan.Config != nil {
+		effectiveModel = plan.Config.Model
+	}
+	if effectiveModel == "" {
+		effectiveModel = "gemini-2.0-flash-exp" // Fallback
+	}
+
+	// Determine working directory for context discovery
+	workDir, err := DetermineWorkingDirectory(plan, job)
+	if err != nil {
+		// Fallback to plan directory if working directory cannot be determined
+		workDir = plan.Directory
+	}
+
+	// Make the LLM call.
+	// Check if mocking is enabled - if so, always use llmClient regardless of model
+	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
+		opts := LLMOptions{Model: effectiveModel, WorkingDir: workDir}
+		return e.llmClient.Complete(ctx, job, plan, fullPrompt, opts)
+	}
+
+	if strings.HasPrefix(effectiveModel, "gemini") {
+		apiKey, _ := geminiconfig.ResolveAPIKey()
+		opts := gemini.RequestOptions{
+			Model:            effectiveModel,
+			Prompt:           fullPrompt,
+			WorkDir:          workDir, // Enable context file discovery
+			SkipConfirmation: true,
+			APIKey:           apiKey,
+			Caller:           "grove-flow-generate-plan",
+			JobID:            job.ID,
+			PlanName:         plan.Name,
+		}
+		return e.geminiRunner.Run(ctx, opts)
+	}
+
+	// Fallback for other models.
+	opts := LLMOptions{Model: effectiveModel, WorkingDir: workDir}
+	return e.llmClient.Complete(ctx, job, plan, fullPrompt, opts)
+}
+
 // waitForWindowClose waits for a specific tmux window to close
 func (e *InteractiveAgentExecutor) waitForWindowClose(ctx context.Context, client *tmux.Client, sessionName, windowName string, pollInterval time.Duration) error {
 	// For now, we'll use a simple approach: wait for the user to close the window
@@ -253,7 +360,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	// Regenerate context before launching the agent
-	oneShotExec := NewOneShotExecutor(nil)
+	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil)
 	if err := oneShotExec.regenerateContextInWorktree(workDir, "interactive-agent", job, plan); err != nil {
 		p.log.WithError(err).Warn("Failed to generate job-specific context for interactive session")
 		p.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))

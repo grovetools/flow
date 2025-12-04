@@ -135,6 +135,9 @@
     "recipe_name": {
       "type": "string"
     },
+    "generate_plan_from": {
+      "type": "boolean"
+    },
     "rules_file": {
       "type": "string"
     },

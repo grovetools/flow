@@ -479,6 +479,12 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if model, ok := template.Frontmatter["model"].(string); ok {
 		job.Model = model
 	}
+	if genPlan, ok := template.Frontmatter["generate_plan_from"].(bool); ok {
+		job.GeneratePlanFrom = genPlan
+	}
+	if prependDeps, ok := template.Frontmatter["prepend_dependencies"].(bool); ok {
+		job.PrependDependencies = prependDeps
+	}
 
 	// CLI flags override template defaults
 	if cmd.Type != "" && cmd.Type != "agent" { // "agent" is the default, so only override if explicitly set

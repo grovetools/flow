@@ -76,7 +76,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 
 	// Generate context if a rules file is specified
 	if job.RulesFile != "" {
-		oneShotExec := NewOneShotExecutor(nil) // Use for helper method
+		oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil) // Use for helper method
 		if err := oneShotExec.regenerateContextInWorktree(workDir, "shell", job, plan); err != nil {
 			// Warn but do not fail the job for a context error
 			e.log.WithError(err).Warn("Failed to generate job-specific context for shell job")

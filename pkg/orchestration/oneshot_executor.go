@@ -47,14 +47,7 @@ type OneShotExecutor struct {
 }
 
 // NewOneShotExecutor creates a new oneshot executor.
-func NewOneShotExecutor(config *ExecutorConfig) *OneShotExecutor {
-	var llmClient LLMClient
-	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
-		llmClient = NewMockLLMClient()
-	} else {
-		llmClient = NewCommandLLMClient()
-	}
-
+func NewOneShotExecutor(llmClient LLMClient, config *ExecutorConfig) *OneShotExecutor {
 	if config == nil {
 		config = &ExecutorConfig{
 			MaxPromptLength: 0, // No limit

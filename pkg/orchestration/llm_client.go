@@ -153,19 +153,21 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	// Log full command being executed
 	c.log.WithField("args", strings.Join(args, " ")).Debug("Building grove llm command")
 
-	cmd, err := c.cmdBuilder.Build(ctx, "grove", append([]string{"llm", "request"}, args...)...)
+	// Grove llm request expects prompt as stdin when no positional args are given
+	// We need to add "-" as the prompt argument to tell it to read from stdin
+	cmd, err := c.cmdBuilder.Build(ctx, "grove", append([]string{"llm", "request"}, append(args, "-")...)...)
 	if err != nil {
 		return "", fmt.Errorf("building llm request command: %w", err)
 	}
 
 	execCmd := cmd.Exec()
-	
+
 	// Log the actual command that will be executed
 	c.log.WithFields(logrus.Fields{
 		"path": execCmd.Path,
 		"args": strings.Join(execCmd.Args[1:], " "),
 	}).Debug("Actual exec command")
-	
+
 	// Set working directory if specified
 	if opts.WorkingDir != "" {
 		execCmd.Dir = opts.WorkingDir

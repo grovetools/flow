@@ -35,6 +35,7 @@ type statusTUIKeyMap struct {
 	SetStatus     key.Binding
 	AddJob        key.Binding
 	Implement     key.Binding
+	AgentFromChat key.Binding
 	Rename        key.Binding
 	Resume        key.Binding
 	EditDeps      key.Binding
@@ -93,6 +94,10 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 		Implement: key.NewBinding(
 			key.WithKeys("i"),
 			key.WithHelp("i", "implement selected"),
+		),
+		AgentFromChat: key.NewBinding(
+			key.WithKeys("I"),
+			key.WithHelp("I", "agent from chat"),
 		),
 		Rename: key.NewBinding(
 			key.WithKeys("ctrl+r"),
@@ -626,6 +631,11 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, createImplementationJobWithTitle(m.plan, m.createJobDeps, customTitle)
 					}
 					return m, createImplementationJobWithTitle(m.plan, []*orchestration.Job{m.createJobBaseJob}, customTitle)
+				} else if m.createJobType == "agent-from-chat" {
+					if len(m.createJobDeps) > 0 {
+						return m, createAgentFromChatJobWithTitle(m.plan, m.createJobDeps, customTitle)
+					}
+					return m, createAgentFromChatJobWithTitle(m.plan, []*orchestration.Job{m.createJobBaseJob}, customTitle)
 				}
 			case "esc":
 				m.creatingJob = false
@@ -989,6 +999,50 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Show dialog to edit job title
 				m.creatingJob = true
 				m.createJobType = "impl"
+				m.createJobBaseJob = job
+				defaultTitle := fmt.Sprintf("impl-%s", job.Title)
+
+				ti := textinput.New()
+				ti.Placeholder = defaultTitle
+				ti.PlaceholderStyle = theme.DefaultTheme.Muted
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.createJobInput = ti
+				return m, textinput.Blink
+			}
+
+		case key.Matches(msg, m.keyMap.AgentFromChat):
+			if len(m.selected) > 0 {
+				// Get selected jobs for dependencies
+				var selectedJobs []*orchestration.Job
+				for id := range m.selected {
+					for _, job := range m.jobs {
+						if job.ID == id {
+							selectedJobs = append(selectedJobs, job)
+							break
+						}
+					}
+				}
+				// Show dialog to edit job title
+				m.creatingJob = true
+				m.createJobType = "agent-from-chat"
+				m.createJobDeps = selectedJobs
+				defaultTitle := fmt.Sprintf("impl-%s", selectedJobs[0].Title)
+
+				ti := textinput.New()
+				ti.Placeholder = defaultTitle
+				ti.PlaceholderStyle = theme.DefaultTheme.Muted
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.createJobInput = ti
+				return m, textinput.Blink
+			} else if m.cursor < len(m.jobs) {
+				job := m.jobs[m.cursor]
+				// Show dialog to edit job title
+				m.creatingJob = true
+				m.createJobType = "agent-from-chat"
 				m.createJobBaseJob = job
 				defaultTitle := fmt.Sprintf("impl-%s", job.Title)
 
@@ -1781,8 +1835,10 @@ func (m statusTUIModel) renderJobCreationDialog() string {
 	var jobTypeName string
 	if m.createJobType == "xml" {
 		jobTypeName = "XML Plan Job"
-	} else {
+	} else if m.createJobType == "impl" {
 		jobTypeName = "Implementation Job"
+	} else if m.createJobType == "agent-from-chat" {
+		jobTypeName = "Agent from Chat Job"
 	}
 
 	var b strings.Builder
@@ -2145,6 +2201,50 @@ func createImplementationJobWithTitle(plan *orchestration.Plan, selectedJobs []*
 			Worktree:  worktree,
 			Output: orchestration.OutputConfig{
 				Type: "file",
+			},
+		}
+
+		// Add the job to the plan
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return createJobCompleteMsg{err: err}
+		}
+
+		return createJobCompleteMsg{err: nil}
+	}
+}
+
+func createAgentFromChatJobWithTitle(plan *orchestration.Plan, selectedJobs []*orchestration.Job, customTitle string) tea.Cmd {
+	return func() tea.Msg {
+		if len(selectedJobs) == 0 {
+			return fmt.Errorf("no jobs selected")
+		}
+
+		// Generate a unique ID for the new job
+		jobID := orchestration.GenerateUniqueJobID(plan, customTitle)
+
+		// Collect all dependency IDs
+		var depIDs []string
+		for _, job := range selectedJobs {
+			depIDs = append(depIDs, job.ID)
+		}
+
+		// Use the worktree from the first selected job
+		worktree := selectedJobs[0].Worktree
+
+		// Create the new job using the agent-from-chat template
+		newJob := &orchestration.Job{
+			ID:               jobID,
+			Title:            customTitle,
+			Type:             orchestration.JobTypeInteractiveAgent,
+			Status:           orchestration.JobStatusPending,
+			DependsOn:        depIDs,
+			Worktree:         worktree,
+			Template:         "agent-from-chat",
+			GeneratePlanFrom: true,
+			PromptBody:       "Implement the detailed plan that will be generated from the dependency.",
+			Output: orchestration.OutputConfig{
+				Type: "commit",
 			},
 		}
 

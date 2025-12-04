@@ -298,6 +298,9 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if job.PrependDependencies {
 		frontmatter["prepend_dependencies"] = job.PrependDependencies
 	}
+	if job.GeneratePlanFrom {
+		frontmatter["generate_plan_from"] = job.GeneratePlanFrom
+	}
 	if job.Repository != "" {
 		frontmatter["repository"] = job.Repository
 	}
