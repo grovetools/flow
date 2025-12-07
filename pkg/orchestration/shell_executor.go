@@ -33,6 +33,9 @@ func (e *ShellExecutor) Name() string {
 
 // Execute runs a shell job.
 func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Generate a unique request ID for tracing
+	requestID, _ := ctx.Value("request_id").(string)
+
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
 		return fmt.Errorf("failed to create lock file: %w", err)
@@ -49,6 +52,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 
 	// Log execution details for debugging
 	e.log.WithFields(logrus.Fields{
+		"request_id": requestID,
 		"job_id":  job.ID,
 		"command": job.PromptBody,
 	}).Debug("Executing shell job")
@@ -72,14 +76,20 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	workDir = ScopeToSubProject(workDir, job)
 
-	e.log.WithField("workdir", workDir).Debug("Working directory resolved")
+	e.log.WithFields(logrus.Fields{
+		"job_id":     job.ID,
+		"request_id": requestID,
+		"plan_name":  plan.Name,
+		"command":    job.PromptBody,
+		"work_dir":   workDir,
+	}).Info("Executing shell job")
 
 	// Generate context if a rules file is specified
 	if job.RulesFile != "" {
 		oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil) // Use for helper method
-		if err := oneShotExec.regenerateContextInWorktree(workDir, "shell", job, plan); err != nil {
+		if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan); err != nil {
 			// Warn but do not fail the job for a context error
-			e.log.WithError(err).Warn("Failed to generate job-specific context for shell job")
+			e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to generate job-specific context for shell job")
 			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
 		}
 	}
@@ -103,6 +113,26 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	}
 
 	output, execErr := cmd.CombinedOutput()
+
+	// Log execution result
+	duration := time.Since(job.StartTime)
+	exitCode := 0
+	if execErr != nil {
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		} else {
+			exitCode = -1 // Unknown exit code
+		}
+	}
+
+	e.log.WithFields(logrus.Fields{
+		"job_id":        job.ID,
+		"request_id":    requestID,
+		"exit_code":     exitCode,
+		"duration_ms":   duration.Milliseconds(),
+		"output_length": len(output),
+		"success":       execErr == nil,
+	}).Info("Shell job execution completed")
 
 	// Persist the output of the shell command to the job file for easy debugging and audit
 	if writeErr := job.AppendOutput(persister, string(output)); writeErr != nil {

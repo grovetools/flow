@@ -81,7 +81,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 				// Use different tags based on job type
 				if job.Type == JobTypeInteractiveAgent {
 					// Interactive agents read files directly from the local filesystem
-					b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" description=\"This file is available on the local filesystem as context for your task.\"/>\n", dep.Filename, dep.FilePath))
+					b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" description=\"Dependency file available on the local filesystem. If large, use grep/search tools rather than reading directly.\"/>\n", dep.Filename, dep.FilePath))
 				} else {
 					// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
 					b.WriteString(fmt.Sprintf("        <inlined_dependency file=\"%s\" description=\"This file's content is provided elsewhere in the prompt context.\"/>\n", dep.Filename))
@@ -134,7 +134,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 	for _, contextFile := range contextFiles {
 		if job.Type == JobTypeInteractiveAgent {
 			// Interactive agents read files directly from the local filesystem
-			b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" description=\"Project context file available on the local filesystem.\"/>\n", filepath.Base(contextFile), contextFile))
+			b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" description=\"Large context file with project information. DO NOT try to read this file directly - it may be very large. Use grep/search tools to find specific content if needed. This file contains information the user thinks you might need.\"/>\n", filepath.Base(contextFile), contextFile))
 		} else {
 			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
 			b.WriteString(fmt.Sprintf("        <inlined_context_file file=\"%s\" description=\"Project context file provided elsewhere in the prompt.\"/>\n", filepath.Base(contextFile)))

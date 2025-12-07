@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -365,13 +366,68 @@ func (o *Orchestrator) runJobsConcurrently(ctx context.Context, jobs []*Job) err
 	return nil
 }
 
+// logFieldsToKeyVals converts a map to alternating key-value pairs for structured logging
+func logFieldsToKeyVals(fields map[string]interface{}) []interface{} {
+	result := make([]interface{}, 0, len(fields)*2)
+	for k, v := range fields {
+		result = append(result, k, v)
+	}
+	return result
+}
+
 // executeJob runs a single job with the appropriate executor.
 func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
+	// Generate a unique request ID for tracing this execution
+	requestID := "req-" + uuid.New().String()[:8]
+	ctx = context.WithValue(ctx, "request_id", requestID)
+
+	// Log job execution with full frontmatter details
+	logFields := map[string]interface{}{
+		"request_id":   requestID,
+		"job_id":       job.ID,
+		"job_type":     job.Type,
+		"job_title":    job.Title,
+		"job_file":     job.FilePath,
+		"plan_name":    o.plan.Name,
+		"plan_dir":     o.plan.Directory,
+		"status":       job.Status,
+	}
+
+	// Add optional fields if present
+	if job.Model != "" {
+		logFields["model"] = job.Model
+	}
+	if job.Template != "" {
+		logFields["template"] = job.Template
+	}
+	if job.RulesFile != "" {
+		logFields["rules_file"] = job.RulesFile
+	}
+	if job.Repository != "" {
+		logFields["repository"] = job.Repository
+	}
+	if job.Worktree != "" {
+		logFields["worktree"] = job.Worktree
+	}
+	if len(job.Dependencies) > 0 {
+		depFiles := make([]string, len(job.Dependencies))
+		for i, dep := range job.Dependencies {
+			if dep != nil {
+				depFiles[i] = dep.Filename
+			}
+		}
+		logFields["dependencies"] = depFiles
+		logFields["dependency_count"] = len(job.Dependencies)
+	}
+	if job.PrependDependencies {
+		logFields["prepend_dependencies"] = job.PrependDependencies
+	}
+
 	// Special logging for interactive jobs
 	if job.Type == JobTypeInteractiveAgent {
-		o.logger.Info("Starting interactive job", "id", job.ID, "title", job.Title)
+		o.logger.Info("Starting interactive job", logFieldsToKeyVals(logFields)...)
 	} else {
-		o.logger.Info("Executing job", "id", job.ID, "type", job.Type)
+		o.logger.Info("Executing job", logFieldsToKeyVals(logFields)...)
 	}
 
 	// Update status to running
@@ -393,7 +449,7 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 		finalStatus := JobStatusCompleted
 		if execErr != nil {
 			finalStatus = JobStatusFailed
-			o.logger.Error("Job execution failed", "id", job.ID, "error", execErr)
+			o.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
 		}
 
 		if err := o.UpdateJobStatus(job, finalStatus); err != nil {
@@ -401,7 +457,7 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 		}
 	} else if execErr != nil {
 		// For chat jobs, only update status on error
-		o.logger.Error("Job execution failed", "id", job.ID, "error", execErr)
+		o.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
 		if err := o.UpdateJobStatus(job, JobStatusFailed); err != nil {
 			return fmt.Errorf("update final status: %w", err)
 		}
@@ -502,16 +558,24 @@ func NewDefaultLogger() Logger {
 }
 
 func (l *defaultLogger) Info(msg string, keysAndValues ...interface{}) {
-	// For now, just include key-value pairs in the message
+	// Log to structured logger
 	if len(keysAndValues) > 0 {
-		var parts []string
+		fields := make(logrus.Fields)
 		for i := 0; i < len(keysAndValues); i += 2 {
 			if i+1 < len(keysAndValues) {
-				parts = append(parts, fmt.Sprintf("%v=%v", keysAndValues[i], keysAndValues[i+1]))
+				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
 			}
+		}
+		l.structuredLog.WithFields(fields).Info(msg)
+
+		// Also log to pretty logger
+		var parts []string
+		for k, v := range fields {
+			parts = append(parts, fmt.Sprintf("%v=%v", k, v))
 		}
 		l.prettyLog.InfoPretty(fmt.Sprintf("%s [%s]", msg, strings.Join(parts, " ")))
 	} else {
+		l.structuredLog.Info(msg)
 		l.prettyLog.InfoPretty(msg)
 	}
 }

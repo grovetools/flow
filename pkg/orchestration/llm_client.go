@@ -58,10 +58,14 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	if opts.SchemaPath != "" {
 		args = append(args, "--schema", opts.SchemaPath)
 	}
-	
+
 	// Track LLM request start
 	requestStart := time.Now()
-	requestID := fmt.Sprintf("%s-%d", job.ID, requestStart.Unix())
+	// Get request ID from context or environment
+	requestID, _ := ctx.Value("request_id").(string)
+	if requestID == "" {
+		requestID = os.Getenv("GROVE_REQUEST_ID")
+	}
 	c.log.WithFields(logrus.Fields{
 		"request_id":    requestID,
 		"job_id":        job.ID,
@@ -140,7 +144,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 				
 				// Write the full prompt to the file
 				if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0644); err != nil {
-					c.log.WithError(err).Warn("Could not write prompt log file")
+					c.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Could not write prompt log file")
 				} else {
 					c.log.WithFields(logrus.Fields{
 						"job_id": job.ID,
@@ -172,6 +176,11 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	if opts.WorkingDir != "" {
 		execCmd.Dir = opts.WorkingDir
 		c.log.WithField("workdir", opts.WorkingDir).Debug("Working directory set")
+	}
+
+	// Propagate request ID to child process via environment
+	if requestID != "" {
+		execCmd.Env = append(os.Environ(), "GROVE_REQUEST_ID="+requestID)
 	}
 
 	// Pipe full prompt (with all file contents) to stdin

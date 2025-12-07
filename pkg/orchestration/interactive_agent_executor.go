@@ -88,6 +88,20 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			updateJobFile(job)
 			return fmt.Errorf("failed to write generated plan briefing file: %w", err)
 		}
+
+		// Log briefing file creation with structured logging
+		requestID, _ := ctx.Value("request_id").(string)
+		e.log.WithFields(logrus.Fields{
+			"job_id":             job.ID,
+			"request_id":         requestID,
+			"plan_name":          plan.Name,
+			"job_file":           job.FilePath,
+			"turn_id":            turnID,
+			"briefing_file_path": briefingFilePath,
+			"prompt":             generatedPlanContent,
+			"prompt_chars":       len(generatedPlanContent),
+		}).Info("Generated plan briefing file created")
+
 		e.prettyLog.InfoPretty(fmt.Sprintf("Generated plan briefing file created at: %s", briefingFilePath))
 	} else {
 		// Gather context files (.grove/context, CLAUDE.md, etc.)
@@ -111,6 +125,19 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			job.EndTime = time.Now()
 			return fmt.Errorf("failed to write briefing file: %w", err)
 		}
+
+		// Log briefing file creation with structured logging
+		requestID, _ := ctx.Value("request_id").(string)
+		e.log.WithFields(logrus.Fields{
+			"job_id":             job.ID,
+			"request_id":         requestID,
+			"plan_name":          plan.Name,
+			"job_file":           job.FilePath,
+			"briefing_file_path": briefingFilePath,
+			"prompt":             promptXML,
+			"prompt_chars":       len(promptXML),
+		}).Info("Interactive agent briefing file created")
+
 		e.prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
 	}
 
@@ -364,7 +391,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	// Regenerate context before launching the agent
 	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil)
-	if err := oneShotExec.regenerateContextInWorktree(workDir, "interactive-agent", job, plan); err != nil {
+	if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "interactive-agent", job, plan); err != nil {
 		p.log.WithError(err).Warn("Failed to generate job-specific context for interactive session")
 		p.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
 	}

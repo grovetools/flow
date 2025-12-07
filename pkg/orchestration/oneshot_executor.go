@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mattn/go-isatty"
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
@@ -72,6 +73,9 @@ func (e *OneShotExecutor) Name() string {
 
 // Execute runs a oneshot job.
 func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Get request ID from context
+	requestID, _ := ctx.Value("request_id").(string)
+
 	// Handle chat jobs differently
 	if job.Type == JobTypeChat {
 		// If a chat job is part of a multi-job plan, it's an interactive step.
@@ -188,9 +192,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	}
 
 	// Always regenerate context to ensure oneshot has latest view
-	if err := e.regenerateContextInWorktree(workDir, "oneshot", job, plan); err != nil {
+	if err := e.regenerateContextInWorktree(ctx, workDir, "oneshot", job, plan); err != nil {
 		// Log warning but don't fail the job
-		log.WithError(err).Warn("Failed to regenerate context")
+		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to regenerate context")
 		prettyLog.WarnPretty(fmt.Sprintf("Failed to regenerate context: %v", err))
 	}
 
@@ -215,12 +219,34 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return execErr
 	}
 
+	// Log the prompt content for debugging
+	log.WithFields(logrus.Fields{
+		"job_id":       job.ID,
+		"request_id":   requestID,
+		"plan_name":    plan.Name,
+		"job_file":     job.FilePath,
+		"prompt":       prompt,
+		"prompt_chars": len(prompt),
+	}).Debug("Built prompt for job")
+
 	// Write the briefing file for auditing (no turnID for oneshot jobs)
 	briefingFilePath, err := WriteBriefingFile(plan, job, prompt, "")
 	if err != nil {
-		log.WithError(err).Warn("Failed to write briefing file")
+		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to write briefing file")
 		prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("failed to write briefing file: %w", err)
 	} else if briefingFilePath != "" {
+		log.WithFields(logrus.Fields{
+			"job_id":             job.ID,
+			"request_id":         requestID,
+			"plan_name":          plan.Name,
+			"job_file":           job.FilePath,
+			"briefing_file_path": briefingFilePath,
+			"prompt":             prompt,
+			"prompt_chars":       len(prompt),
+		}).Info("Briefing file created")
 		prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
 	}
 
@@ -230,6 +256,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Set environment for mock LLM if needed
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 	defer os.Unsetenv("GROVE_CURRENT_JOB_PATH")
+
+	// Propagate request ID to child processes
+	if requestID != "" {
+		os.Setenv("GROVE_REQUEST_ID", requestID)
+		defer os.Unsetenv("GROVE_REQUEST_ID")
+	}
 
 	// Determine the effective model to use with clear precedence
 	var effectiveModel string
@@ -292,6 +324,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		updateJobFile(job)
+		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("LLM completion failed")
 		execErr = fmt.Errorf("LLM completion: %w", err)
 		return execErr
 	}
@@ -826,7 +859,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 }
 
 // regenerateContextInWorktree regenerates the context within a worktree.
-func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobType string, job *Job, plan *Plan) error {
+func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath string, jobType string, job *Job, plan *Plan) error {
 	log.WithField("job_type", jobType).Info("Checking context in worktree")
 	prettyLog.InfoPretty(fmt.Sprintf("Checking context in worktree for %s job...", jobType))
 
@@ -1062,10 +1095,13 @@ func (e *OneShotExecutor) regenerateContextInWorktree(worktreePath string, jobTy
 		log.WithError(err).Warn("Failed to get context stats")
 	} else {
 		// Display summary statistics for structured logs
+		requestID, _ := ctx.Value("request_id").(string)
 		log.WithFields(logrus.Fields{
-			"total_files": stats.TotalFiles,
+			"request_id":   requestID,
+			"job_id":       job.ID,
+			"total_files":  stats.TotalFiles,
 			"total_tokens": stats.TotalTokens,
-			"total_size": stats.TotalSize,
+			"total_size":   stats.TotalSize,
 		}).Info("Context summary generated")
 
 		// Display summary statistics for pretty console
@@ -1164,6 +1200,15 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
+	// Generate a unique request ID for tracing this turn
+	requestID := "req-" + uuid.New().String()[:8]
+	ctx = context.WithValue(ctx, "request_id", requestID)
+	log.WithFields(logrus.Fields{
+		"job_id":     job.ID,
+		"request_id": requestID,
+		"plan_name":  plan.Name,
+	}).Info("Executing chat turn")
+
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
 		return fmt.Errorf("failed to create lock file: %w", err)
@@ -1286,7 +1331,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		worktreePath = path
 
 		// Regenerate context in the worktree to ensure chat has latest view
-		if err := e.regenerateContextInWorktree(worktreePath, "chat", job, plan); err != nil {
+		if err := e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
 			log.WithError(err).Warn("Failed to regenerate context in worktree")
 		}
@@ -1301,7 +1346,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 
 		// Also regenerate context for non-worktree case if .grove/rules exists
-		if err := e.regenerateContextInWorktree(worktreePath, "chat", job, plan); err != nil {
+		if err := e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
 			log.WithError(err).Warn("Failed to regenerate context")
 		}
@@ -1474,10 +1519,31 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	fullPrompt := promptBuilder.String()
 
+	// Log the prompt content for debugging
+	log.WithFields(logrus.Fields{
+		"job_id":       job.ID,
+		"request_id":   requestID,
+		"plan_name":    plan.Name,
+		"job_file":     job.FilePath,
+		"turn_id":      turnID,
+		"prompt":       fullPrompt,
+		"prompt_chars": len(fullPrompt),
+	}).Debug("Built prompt for chat turn")
+
 	// Write the full prompt to a briefing file for observability using the turn UUID
 	if briefingFilePath, err := WriteBriefingFile(plan, job, fullPrompt, turnID); err != nil {
 		log.WithError(err).Warn("Failed to write chat briefing file")
 	} else {
+		log.WithFields(logrus.Fields{
+			"job_id":             job.ID,
+			"request_id":         requestID,
+			"plan_name":          plan.Name,
+			"job_file":           job.FilePath,
+			"turn_id":            turnID,
+			"briefing_file_path": briefingFilePath,
+			"prompt":             fullPrompt,
+			"prompt_chars":       len(fullPrompt),
+		}).Info("Chat briefing file created")
 		prettyLog.InfoPretty(fmt.Sprintf("Chat briefing file created at: %s", briefingFilePath))
 	}
 

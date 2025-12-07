@@ -42,7 +42,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// Regenerate context before launching the agent
 	// We'll use the helper from the oneshot executor
 	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil)
-	if err := oneShotExec.regenerateContextInWorktree(workDir, "interactive-agent", job, plan); err != nil {
+	if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "interactive-agent", job, plan); err != nil {
 		// A context failure shouldn't block an interactive session, but we should warn the user.
 		p.log.WithError(err).Warn("Failed to generate job-specific context for interactive session")
 		p.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))

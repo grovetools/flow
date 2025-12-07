@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/sirupsen/logrus"
 )
 
 // AgentRunner defines the interface for running agents.
@@ -56,6 +58,16 @@ func (e *HeadlessAgentExecutor) Name() string {
 
 // Execute runs an agent job in a worktree.
 func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Generate a unique request ID for tracing
+	requestID := "req-" + uuid.New().String()[:8]
+	ctx = context.WithValue(ctx, "request_id", requestID)
+	log.WithFields(logrus.Fields{
+		"job_id":     job.ID,
+		"request_id": requestID,
+		"plan_name":  plan.Name,
+		"job_type":   job.Type,
+	}).Info("Executing headless agent job")
+
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
 		return fmt.Errorf("failed to create lock file: %w", err)
@@ -92,6 +104,12 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	workDir = ScopeToSubProject(workDir, job)
 
+	log.WithFields(logrus.Fields{
+		"job_id":     job.ID,
+		"request_id": requestID,
+		"work_dir":   workDir,
+	}).Info("Resolved working directory")
+
 	// Build agent prompt from sources
 	prompt, err := buildPromptFromSources(job, plan)
 	if err != nil {
@@ -104,6 +122,10 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	if err := e.runAgentInWorktree(ctx, workDir, prompt, job, plan); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
+		log.WithError(err).WithFields(logrus.Fields{
+			"job_id":     job.ID,
+			"request_id": requestID,
+		}).Error("Agent execution failed")
 		return fmt.Errorf("run agent: %w", err)
 	}
 
