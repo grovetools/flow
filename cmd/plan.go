@@ -189,6 +189,8 @@ func NewPlanCmd() *cobra.Command {
 
 	// Register templates subcommand
 	planTemplatesCmd.AddCommand(planTemplatesListCmd)
+	planTemplatesPrintCmd.Flags().BoolVar(&planTemplatesPrintWithFrontmatter, "frontmatter", false, "Include YAML frontmatter in output")
+	planTemplatesCmd.AddCommand(planTemplatesPrintCmd)
 
 	// Add subcommands
 	planCmd.AddCommand(planInitCmd)

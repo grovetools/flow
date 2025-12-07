@@ -19,7 +19,7 @@ var builtinRecipeFS embed.FS
 type Recipe struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
-	Source      string            `json:"source,omitempty"` // [Built-in], [User], or [Dynamic]
+	Source      string            `json:"source,omitempty"` // [Built-in], [User], [Dynamic], or [Project]
 	Jobs        map[string][]byte `json:"-"` // Filename -> Content
 }
 
@@ -165,6 +165,39 @@ func ListDynamicRecipes(getRecipeCmd string) ([]*Recipe, error) {
 	return dynamicRecipes, nil
 }
 
+// ListProjectRecipes lists all project-local recipes from .grove/recipes, searching upwards.
+func ListProjectRecipes() ([]*Recipe, error) {
+	var recipes []*Recipe
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return nil, nil
+	}
+
+	// Search upwards for .grove/recipes/
+	dir := currentDir
+	for {
+		projectRecipeDir := filepath.Join(dir, ".grove", "recipes")
+		if entries, err := os.ReadDir(projectRecipeDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					if recipe, err := GetProjectRecipe(entry.Name()); err == nil {
+						recipes = append(recipes, recipe)
+					}
+				}
+			}
+			break // Stop after finding the first .grove/recipes directory
+		}
+
+		// Check if we've reached the root
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return recipes, nil
+}
+
 // ListUserRecipes lists all user-defined recipes from ~/.config/grove/recipes.
 func ListUserRecipes() ([]*Recipe, error) {
 	var recipes []*Recipe
@@ -172,7 +205,7 @@ func ListUserRecipes() ([]*Recipe, error) {
 	if err != nil {
 		return nil, nil // Not an error if home dir doesn't exist
 	}
-	
+
 	userRecipeDir := filepath.Join(homeDir, ".config", "grove", "recipes")
 	if entries, err := os.ReadDir(userRecipeDir); err == nil {
 		for _, entry := range entries {
@@ -186,13 +219,59 @@ func ListUserRecipes() ([]*Recipe, error) {
 	return recipes, nil
 }
 
+// GetProjectRecipe finds and returns a project-local recipe by searching upwards.
+func GetProjectRecipe(name string) (*Recipe, error) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("getting current directory: %w", err)
+	}
+
+	// Search upwards for .grove/recipes/
+	dir := currentDir
+	for {
+		recipeDir := filepath.Join(dir, ".grove", "recipes", name)
+		entries, err := os.ReadDir(recipeDir)
+		if err == nil {
+			recipe := &Recipe{
+				Name: name,
+				Jobs: make(map[string][]byte),
+			}
+
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+					content, err := os.ReadFile(filepath.Join(recipeDir, entry.Name()))
+					if err != nil {
+						return nil, fmt.Errorf("could not read recipe file %s: %w", entry.Name(), err)
+					}
+					recipe.Jobs[entry.Name()] = content
+				}
+			}
+
+			if len(recipe.Jobs) == 0 {
+				return nil, fmt.Errorf("recipe '%s' contains no job files", name)
+			}
+
+			return recipe, nil
+		}
+
+		// Check if we've reached the root
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return nil, fmt.Errorf("recipe '%s' not found", name)
+}
+
 // GetUserRecipe finds and returns a user-defined recipe.
 func GetUserRecipe(name string) (*Recipe, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("getting home directory: %w", err)
 	}
-	
+
 	recipeDir := filepath.Join(homeDir, ".config", "grove", "recipes", name)
 	entries, err := os.ReadDir(recipeDir)
 	if err != nil {
@@ -221,18 +300,25 @@ func GetUserRecipe(name string) (*Recipe, error) {
 	return recipe, nil
 }
 
-// GetRecipe finds and returns a recipe by name with precedence: User > Dynamic > Built-in.
+// GetRecipe finds and returns a recipe by name with precedence: Project > User > Dynamic > Built-in.
 func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
-	// Precedence: User > Dynamic > Built-in
+	// Precedence: Project > User > Dynamic > Built-in
 
-	// 1. Try user recipes
-	recipe, err := GetUserRecipe(name)
+	// 1. Try project recipes
+	recipe, err := GetProjectRecipe(name)
+	if err == nil {
+		recipe.Source = "[Project]"
+		return recipe, nil
+	}
+
+	// 2. Try user recipes
+	recipe, err = GetUserRecipe(name)
 	if err == nil {
 		recipe.Source = "[User]"
 		return recipe, nil
 	}
 
-	// 2. Try dynamic recipes
+	// 3. Try dynamic recipes
 	dynamicRecipes, _ := ListDynamicRecipes(getRecipeCmd)
 	for _, r := range dynamicRecipes {
 		if r.Name == name {
@@ -240,7 +326,7 @@ func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
 		}
 	}
 
-	// 3. Try built-in recipes
+	// 4. Try built-in recipes
 	recipe, err = GetBuiltinRecipe(name)
 	if err == nil {
 		recipe.Source = "[Built-in]"
@@ -250,7 +336,7 @@ func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
 	return nil, fmt.Errorf("recipe '%s' not found", name)
 }
 
-// ListAllRecipes lists all available recipes with precedence: User > Dynamic > Built-in.
+// ListAllRecipes lists all available recipes with precedence: Project > User > Dynamic > Built-in.
 func ListAllRecipes(getRecipeCmd string) ([]*Recipe, error) {
 	recipeMap := make(map[string]*Recipe)
 
@@ -270,10 +356,17 @@ func ListAllRecipes(getRecipeCmd string) ([]*Recipe, error) {
 		recipeMap[recipe.Name] = recipe
 	}
 
-	// 3. Load user recipes, overriding all others
+	// 3. Load user recipes, overriding dynamic and built-in
 	userRecipes, _ := ListUserRecipes()
 	for _, recipe := range userRecipes {
 		recipe.Source = "[User]"
+		recipeMap[recipe.Name] = recipe
+	}
+
+	// 4. Load project recipes, overriding all others
+	projectRecipes, _ := ListProjectRecipes()
+	for _, recipe := range projectRecipes {
+		recipe.Source = "[Project]"
 		recipeMap[recipe.Name] = recipe
 	}
 
@@ -282,7 +375,7 @@ func ListAllRecipes(getRecipeCmd string) ([]*Recipe, error) {
 	for _, recipe := range recipeMap {
 		allRecipes = append(allRecipes, recipe)
 	}
-	
+
 	// Sort for consistent output
 	sort.Slice(allRecipes, func(i, j int) bool {
 		return allRecipes[i].Name < allRecipes[j].Name

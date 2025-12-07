@@ -503,6 +503,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	recipeIDToUniqueID := make(map[string]string)
 
 	// First pass: Generate unique IDs for all jobs and build the mapping
+	filenameToUniqueID := make(map[string]string)
 	for _, filename := range jobFiles {
 		renderedContent, err := recipe.RenderJob(filename, templateData)
 		if err != nil {
@@ -530,7 +531,10 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		// Generate a unique ID (pass nil for plan since we don't have it loaded yet)
 		uniqueID := orchestration.GenerateUniqueJobID(nil, title)
 
-		// Map the original recipe ID to the new unique ID
+		// Map the filename to the unique ID (for jobs without an original ID)
+		filenameToUniqueID[filename] = uniqueID
+
+		// Map the original recipe ID to the new unique ID (for dependency remapping)
 		if originalID != "" {
 			recipeIDToUniqueID[originalID] = uniqueID
 		}
@@ -549,10 +553,14 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			return fmt.Errorf("parsing frontmatter from recipe job %s: %w", filename, err)
 		}
 
-		// Get the original ID and replace it with the unique ID
+		// Set the unique ID for this job
+		// If the recipe had an ID, use the remapped one; otherwise use the filename-based ID
 		originalID, _ := frontmatter["id"].(string)
 		if originalID != "" && recipeIDToUniqueID[originalID] != "" {
 			frontmatter["id"] = recipeIDToUniqueID[originalID]
+		} else {
+			// Job didn't have an ID in the recipe template, so add the generated one
+			frontmatter["id"] = filenameToUniqueID[filename]
 		}
 
 		// Remap dependencies from original recipe IDs to new unique IDs
