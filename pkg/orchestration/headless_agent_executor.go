@@ -9,11 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/sirupsen/logrus"
 )
 
 // AgentRunner defines the interface for running agents.
@@ -53,20 +51,12 @@ func NewHeadlessAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *Head
 
 // Name returns the executor name.
 func (e *HeadlessAgentExecutor) Name() string {
-	return "agent"
+	return "headless_agent"
 }
 
 // Execute runs an agent job in a worktree.
 func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
-	// Generate a unique request ID for tracing
-	requestID := "req-" + uuid.New().String()[:8]
-	ctx = context.WithValue(ctx, "request_id", requestID)
-	log.WithFields(logrus.Fields{
-		"job_id":     job.ID,
-		"request_id": requestID,
-		"plan_name":  plan.Name,
-		"job_type":   job.Type,
-	}).Info("Executing headless agent job")
+	persister := NewStatePersister()
 
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
@@ -76,139 +66,77 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	defer RemoveLockFile(job.FilePath)
 
 	// Update job status to running
-	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
+	if err := job.UpdateStatus(persister, JobStatusRunning); err != nil {
+		return fmt.Errorf("updating job status: %w", err)
+	}
+
+	var execErr error
+
+	// Defer final status update
+	defer func() {
+		finalStatus := JobStatusCompleted
+		if execErr != nil {
+			finalStatus = JobStatusFailed
+		}
+		job.EndTime = time.Now()
+		job.UpdateStatus(persister, finalStatus)
+	}()
 
 	// Determine the working directory for the job
 	var workDir string
 	if job.Worktree != "" {
 		var err error
-		// Existing logic to prepare a git worktree
 		workDir, err = e.prepareWorktree(ctx, job, plan)
 		if err != nil {
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("prepare worktree: %w", err)
+			execErr = fmt.Errorf("prepare worktree: %w", err)
+			return execErr
 		}
 	} else {
-		// NEW: No worktree specified, default to the git repository root.
 		var err error
 		workDir, err = GetGitRootSafe(plan.Directory)
 		if err != nil {
-			// Fallback to the plan's directory if not in a git repo
 			workDir = plan.Directory
-			fmt.Printf("Warning: not a git repository. Using plan directory as working directory: %s\n", workDir)
+			log.Warn("Not a git repository, using plan directory as working directory")
+			prettyLog.WarnPretty(fmt.Sprintf("Not a git repository. Using plan directory: %s", workDir))
 		}
 	}
 
-	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	// Scope to sub-project if job.Repository is set
 	workDir = ScopeToSubProject(workDir, job)
 
-	log.WithFields(logrus.Fields{
-		"job_id":     job.ID,
-		"request_id": requestID,
-		"work_dir":   workDir,
-	}).Info("Resolved working directory")
+	// Gather context files (.grove/context, CLAUDE.md, etc.)
+	contextFiles := e.gatherContextFiles(job, plan, workDir)
 
-	// Build agent prompt from sources
-	prompt, err := buildPromptFromSources(job, plan)
+	// Build the XML prompt
+	prompt, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
 	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("build prompt: %w", err)
+		execErr = fmt.Errorf("building XML prompt: %w", err)
+		return execErr
 	}
 
-	// Execute agent in working directory context
-	if err := e.runAgentInWorktree(ctx, workDir, prompt, job, plan); err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		log.WithError(err).WithFields(logrus.Fields{
-			"job_id":     job.ID,
-			"request_id": requestID,
-		}).Error("Agent execution failed")
-		return fmt.Errorf("run agent: %w", err)
+	// Write the briefing file for auditing
+	if _, err := WriteBriefingFile(plan, job, prompt, ""); err != nil {
+		log.WithError(err).Warn("Failed to write briefing file")
 	}
 
-	// Automatically update context within the working directory
-	if os.Getenv("GROVE_DEBUG") != "" {
-		fmt.Println("Checking for context update in working directory...")
-	}
-	ctxMgr := grovecontext.NewManager(workDir)
-	
-	// Check if job has a custom rules file specified
-	if job.RulesFile != "" {
-		// Resolve the custom rules file path relative to the plan directory
-		rulesFilePath := filepath.Join(plan.Directory, job.RulesFile)
-		
-		fmt.Printf("Using job-specific context from: %s\n", rulesFilePath)
-		
-		// Generate context using the custom rules file
-		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
-			// Log a warning, but don't fail the job for a context update failure.
-			fmt.Printf("Warning: failed to generate job-specific context: %v\n", err)
-		} else {
-			fmt.Println("✓ Context updated successfully with job-specific rules.")
-			
-			// Check token count after successful context generation
-			// Read the files list that was just generated
-			files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
-			stats, err := ctxMgr.GetStats("agent", files, 10)
-			if err != nil {
-				fmt.Printf("Warning: failed to get context stats: %v\n", err)
-			} else if stats.TotalTokens > 500000 {
-				// Fail the job if context exceeds 500k tokens
-				job.Status = JobStatusFailed
-				job.EndTime = time.Now()
-				return fmt.Errorf("context size exceeds limit: %d tokens (max 500,000 tokens)", stats.TotalTokens)
-			} else {
-				fmt.Printf("Context size: %d tokens\n", stats.TotalTokens)
-			}
-		}
-	} else {
-		// Check for default .grove/rules file
-		rulesPath := filepath.Join(workDir, ".grove", "rules")
-		
-		if _, err := os.Stat(rulesPath); err == nil {
-			absRulesPath, _ := filepath.Abs(rulesPath)
-			if os.Getenv("GROVE_DEBUG") != "" {
-				fmt.Printf("Found context rules file, updating context...\n")
-				fmt.Printf("  Rules File: %s\n", absRulesPath)
-			}
-			if err := ctxMgr.UpdateFromRules(); err != nil {
-				// Log a warning, but don't fail the job for a context update failure.
-				fmt.Printf("Warning: failed to update context file list in worktree: %v\n", err)
-			} else {
-				if err := ctxMgr.GenerateContext(true); err != nil {
-					fmt.Printf("Warning: failed to generate context file in worktree: %v\n", err)
-				} else {
-					fmt.Println("✓ Context updated successfully in worktree.")
-
-					// Check token count after successful context generation
-					// Read the files list that was just generated
-					files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
-					stats, err := ctxMgr.GetStats("agent", files, 10)
-					if err != nil {
-						fmt.Printf("Warning: failed to get context stats: %v\n", err)
-					} else if stats.TotalTokens > 500000 {
-						// Fail the job if context exceeds 500k tokens
-						job.Status = JobStatusFailed
-						job.EndTime = time.Now()
-						return fmt.Errorf("context size exceeds limit: %d tokens (max 500,000 tokens)", stats.TotalTokens)
-					} else {
-						fmt.Printf("Context size: %d tokens\n", stats.TotalTokens)
-					}
-				}
-			}
-		} else {
-			fmt.Println("No .grove/rules file found in worktree, skipping context update.")
-		}
+	// Execute agent; raw output is for debugging logs, not the job file.
+	_, err = e.runAgentInWorktree(ctx, workDir, prompt, job, plan)
+	if err != nil {
+		execErr = fmt.Errorf("run agent: %w", err)
 	}
 
-	// Update job status on completion
-	job.Status = JobStatusCompleted
-	job.EndTime = time.Now()
+	// Append the formatted transcript using aglogs.
+	if err := e.appendTranscript(job, plan); err != nil {
+		log.WithError(err).Warn("Failed to append transcript to job file")
+	}
 
-	return nil
+	// Regenerate context
+	if err := e.regenerateContextInWorktree(workDir, "headless_agent", job, plan); err != nil {
+		log.WithError(err).Warn("Failed to regenerate context")
+	}
+
+	return execErr
 }
 
 
@@ -247,185 +175,225 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 	return workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
 }
 
-// runAgentInWorktree executes the agent in the worktree context.
-func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan) error {
-	// Set up output handling
+// runAgentInWorktree executes the agent in the worktree context and returns its output.
+func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan) (string, error) {
 	logDir := ResolveLogDirectory(plan, job)
 	logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", job.ID))
 	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
-		return fmt.Errorf("create log directory: %w", err)
+		return "", fmt.Errorf("create log directory: %w", err)
 	}
 
 	log, err := os.Create(logFile)
 	if err != nil {
-		return fmt.Errorf("create log file: %w", err)
+		return "", fmt.Errorf("create log file: %w", err)
 	}
 	defer log.Close()
 
-	// Load grove config to get agent configuration
 	coreCfg, err := config.LoadFrom(".")
 	if err != nil {
 		coreCfg = &config.Config{}
-		fmt.Printf("Warning: could not load grove.yml for agent execution: %v\n", err)
 	}
 
-	// Extract agent args from config
 	type agentConfig struct {
 		Args []string `yaml:"args"`
 	}
 	var agentCfg agentConfig
 	coreCfg.UnmarshalExtension("agent", &agentCfg)
 
-	// Git root is no longer needed since we removed container operations
-
-	// Always run in host mode - no container dependencies
-	fmt.Fprintf(os.Stdout, "Running job in host mode\n")
 	return e.runOnHost(ctx, worktreePath, prompt, job, plan, log, agentCfg.Args)
 }
 
 
-// runOnHost executes the agent directly on the host machine
-func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, agentArgs []string) error {
-	// Change to the worktree directory
+// runOnHost executes the agent directly on the host machine and returns its output.
+func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, log *os.File, agentArgs []string) (string, error) {
 	originalDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
+		return "", fmt.Errorf("failed to get current directory: %w", err)
 	}
 	defer os.Chdir(originalDir)
 
 	if err := os.Chdir(worktreePath); err != nil {
-		return fmt.Errorf("failed to change to worktree directory: %w", err)
+		return "", fmt.Errorf("failed to change to worktree directory: %w", err)
 	}
 
-	// Prepare the claude command
 	args := []string{"--dangerously-skip-permissions"}
 	if agentArgs != nil {
 		args = append(args, agentArgs...)
 	}
 
-	// Create the command
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = worktreePath
 	cmd.Stdin = strings.NewReader(prompt)
 
-	// Capture output
-	output, err := cmd.CombinedOutput()
+	// Set environment variables to enable grove-hooks integration for session registration.
+	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
+	cmd.Env = append(os.Environ(),
+		"GROVE_FLOW_JOB_ID="+job.ID,
+		"GROVE_FLOW_JOB_PATH="+job.FilePath,
+		"GROVE_FLOW_PLAN_NAME="+plan.Name,
+		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
+	)
 
-	// Write output to log file regardless of success or failure
-	if len(output) > 0 {
-		if _, writeErr := log.Write(output); writeErr != nil {
-			// Log this, but don't fail the job over it
-			fmt.Printf("Warning: failed to write agent output to log: %v\n", writeErr)
-		}
+	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+
+	if _, writeErr := log.WriteString(outputStr); writeErr != nil {
+		fmt.Printf("Warning: failed to write agent output to log: %v\n", writeErr)
 	}
 
 	if err != nil {
-		return fmt.Errorf("agent execution failed: %w", err)
+		return outputStr, fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	// Handle output based on configuration (commit, etc.)
-	if job.Output.Type == "commit" && job.Output.Commit.Enabled {
-		// Create commit in worktree
-		commitCmd := exec.CommandContext(ctx, "git", "add", "-A")
-		commitCmd.Dir = worktreePath
-		if err := commitCmd.Run(); err != nil {
-			return fmt.Errorf("git add: %w", err)
-		}
-
-		commitMsg := job.Output.Commit.Message
-		if commitMsg == "" {
-			commitMsg = fmt.Sprintf("Agent execution for job %s", job.ID)
-		}
-
-		commitCmd = exec.CommandContext(ctx, "git", "commit", "-m", commitMsg)
-		commitCmd.Dir = worktreePath
-		if err := commitCmd.Run(); err != nil {
-			// No changes to commit is not an error
-			if !strings.Contains(err.Error(), "nothing to commit") {
-				return fmt.Errorf("git commit: %w", err)
-			}
-		}
-	}
-
-	return nil
+	return outputStr, nil
 }
 
 // RunAgent implements the AgentRunner interface.
 func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree string, prompt string) error {
-	// This is implemented in runAgentInWorktree above
-	// This method exists for testing/mocking purposes
 	return nil
 }
 
-// buildPromptFromSources builds a prompt that instructs the agent to read files.
-func buildPromptFromSources(job *Job, plan *Plan) (string, error) {
-	var promptFiles []string
-	var systemMessage strings.Builder
+// appendTranscript uses aglogs to get the formatted transcript and appends it to the job file.
+func (e *HeadlessAgentExecutor) appendTranscript(job *Job, plan *Plan) error {
+	// Use aglogs to read the transcript for the completed job
+	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+	cmd := exec.Command("grove", "aglogs", "read", jobSpec)
 
-	// If a template is specified, use the reference-based prompt structure
-	if job.Template != "" {
-		// Reference-based prompt - load template
-		templateManager := NewTemplateManager()
-		template, err := templateManager.FindTemplate(job.Template)
-		if err != nil {
-			return "", fmt.Errorf("resolving template %s: %w", job.Template, err)
+	transcript, err := cmd.CombinedOutput()
+	if err != nil {
+		// It's not fatal if transcript can't be found
+		log.WithError(err).Warn("Could not get transcript")
+		return nil
+	}
+
+	if len(strings.TrimSpace(string(transcript))) == 0 || strings.Contains(string(transcript), "no sessions found with job") {
+		log.Info("No transcript found for job")
+		return nil
+	}
+
+	// Read current content of the job file
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("reading job file: %w", err)
+	}
+
+	// Append transcript section
+	separator := "\n\n---\n\n## Transcript\n\n"
+	newContent := string(content) + separator + string(transcript)
+
+	// Write back
+	if err := os.WriteFile(job.FilePath, []byte(newContent), 0o644); err != nil {
+		return fmt.Errorf("writing job file with transcript: %w", err)
+	}
+
+	return nil
+}
+
+// regenerateContextInWorktree regenerates the context within a worktree.
+func (e *HeadlessAgentExecutor) regenerateContextInWorktree(worktreePath string, jobType string, job *Job, plan *Plan) error {
+	log.WithField("job_type", jobType).Info("Checking context in worktree")
+	prettyLog.InfoPretty(fmt.Sprintf("Checking context in worktree for %s job...", jobType))
+
+	contextDir := ScopeToSubProject(worktreePath, job)
+	if contextDir != worktreePath {
+		log.WithField("context_dir", contextDir).Info("Scoping context generation to sub-project")
+		prettyLog.InfoPretty(fmt.Sprintf("Scoping context to sub-project: %s", job.Repository))
+	}
+
+	ctxMgr := grovecontext.NewManager(contextDir)
+
+	if job != nil && job.RulesFile != "" {
+		rulesFilePath := filepath.Join(plan.Directory, job.RulesFile)
+		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
+		prettyLog.InfoPretty(fmt.Sprintf("Using job-specific context from: %s", rulesFilePath))
+
+		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
+			return fmt.Errorf("failed to generate job-specific context: %w", err)
+		}
+		return e.displayContextInfo(contextDir)
+	}
+
+	rulesPath := filepath.Join(contextDir, ".grove", "rules")
+	if _, err := os.Stat(rulesPath); err != nil {
+		if os.IsNotExist(err) {
+			return e.displayContextInfo(contextDir)
+		}
+		return fmt.Errorf("checking .grove/rules: %w", err)
+	}
+
+	if err := ctxMgr.UpdateFromRules(); err != nil {
+		return fmt.Errorf("update context from rules: %w", err)
+	}
+
+	if err := ctxMgr.GenerateContext(true); err != nil {
+		return fmt.Errorf("generate context: %w", err)
+	}
+
+	return e.displayContextInfo(contextDir)
+}
+
+// displayContextInfo displays information about available context files
+func (e *HeadlessAgentExecutor) displayContextInfo(worktreePath string) error {
+	var contextFiles []string
+	var totalSize int64
+
+	groveContextPath := filepath.Join(worktreePath, ".grove", "context")
+	if info, err := os.Stat(groveContextPath); err == nil && !info.IsDir() {
+		contextFiles = append(contextFiles, groveContextPath)
+		totalSize += info.Size()
+	}
+
+	claudePath := filepath.Join(worktreePath, "CLAUDE.md")
+	if info, err := os.Stat(claudePath); err == nil && !info.IsDir() {
+		contextFiles = append(contextFiles, claudePath)
+		totalSize += info.Size()
+	}
+
+	if len(contextFiles) == 0 {
+		prettyLog.InfoPretty("No context files found (.grove/context or CLAUDE.md)")
+		return nil
+	}
+
+	prettyLog.Divider()
+	prettyLog.InfoPretty("Context Files Available")
+	for _, file := range contextFiles {
+		relPath, _ := filepath.Rel(worktreePath, file)
+		prettyLog.Field("File", relPath)
+	}
+	prettyLog.Blank()
+	prettyLog.Field("Total context size", grovecontext.FormatBytes(int(totalSize)))
+	prettyLog.Divider()
+
+	return nil
+}
+
+// gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
+func (e *HeadlessAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) []string {
+	var contextFiles []string
+
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	contextDir := ScopeToSubProject(workDir, job)
+
+	if contextDir != "" {
+		// When using a worktree/context dir, ONLY use context from that directory
+		contextPath := filepath.Join(contextDir, ".grove", "context")
+		if _, err := os.Stat(contextPath); err == nil {
+			contextFiles = append(contextFiles, contextPath)
 		}
 
-		// Start with template content
-		systemMessage.WriteString(template.Prompt)
-		systemMessage.WriteString("\n\n")
-		systemMessage.WriteString("The following files are relevant to your task. Please read their contents before proceeding:\n\n")
-
-		// Get project root for resolving paths - uses workspace discovery with fallbacks
-		projectRoot := GetProjectRootSafe(".")
-
-		// Collect paths from prompt sources
-		for _, source := range job.PromptSource {
-			// Resolve the source file path
-			var sourcePath string
-
-			// If it's a relative path, make it absolute from project root
-			if !filepath.IsAbs(source) {
-				sourcePath = filepath.Join(projectRoot, source)
-			} else {
-				sourcePath = source
-			}
-
-			// Check if file exists
-			if _, err := os.Stat(sourcePath); err == nil {
-				promptFiles = append(promptFiles, sourcePath)
-			} else {
-				// Try alternative resolution strategies
-				sourcePath, err = ResolvePromptSource(source, plan)
-				if err == nil {
-					promptFiles = append(promptFiles, sourcePath)
-				}
-			}
+		claudePath := filepath.Join(contextDir, "CLAUDE.md")
+		if _, err := os.Stat(claudePath); err == nil {
+			contextFiles = append(contextFiles, claudePath)
 		}
 	} else {
-		// Traditional prompt assembly
-		systemMessage.WriteString("You are an expert software developer AI assistant.\n")
-		systemMessage.WriteString("You have access to a file system containing the project code.\n")
-		systemMessage.WriteString("The following files are relevant to your task. Please read their contents before proceeding:\n\n")
-
-		// Collect paths from prompt sources
-		for _, source := range job.PromptSource {
-			sourcePath := filepath.Join(plan.Directory, source)
-			// Check if the file exists to provide a clean list
-			if _, err := os.Stat(sourcePath); err == nil {
-				promptFiles = append(promptFiles, sourcePath)
+		// No worktree, use the default context search
+		for _, contextPath := range FindContextFiles(plan) {
+			if _, err := os.Stat(contextPath); err == nil {
+				contextFiles = append(contextFiles, contextPath)
 			}
 		}
 	}
 
-	for _, path := range promptFiles {
-		systemMessage.WriteString(fmt.Sprintf("- %s\n", path))
-	}
-
-	systemMessage.WriteString("\n---\n\n")
-	systemMessage.WriteString("## Task\n\n")
-	systemMessage.WriteString(job.PromptBody)
-
-	return systemMessage.String(), nil
+	return contextFiles
 }
 

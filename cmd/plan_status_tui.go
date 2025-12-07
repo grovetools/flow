@@ -1314,6 +1314,8 @@ func (m statusTUIModel) renderTableView() string {
 		switch job.Type {
 		case "interactive_agent":
 			jobTypeSymbol = theme.IconInteractiveAgent
+		case "headless_agent":
+			jobTypeSymbol = theme.IconHeadlessAgent
 		case "chat":
 			jobTypeSymbol = theme.IconChat
 		case "oneshot":
@@ -1448,6 +1450,8 @@ func (m statusTUIModel) renderJobTree() string {
 		switch job.Type {
 		case "interactive_agent":
 			jobTypeSymbol = theme.IconInteractiveAgent + " "
+		case "headless_agent":
+			jobTypeSymbol = theme.IconHeadlessAgent + " "
 		case "chat":
 			jobTypeSymbol = theme.IconChat + " "
 		case "oneshot":
