@@ -1320,6 +1320,8 @@ func (m statusTUIModel) renderTableView() string {
 			jobTypeSymbol = theme.IconChat
 		case "oneshot":
 			jobTypeSymbol = theme.IconOneshot
+		case "shell":
+			jobTypeSymbol = theme.IconShell
 		default:
 			jobTypeSymbol = ""
 		}
