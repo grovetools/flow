@@ -14,8 +14,10 @@ This template helps users convert notebook entries into executable flow plans. T
 2. **Create plan** with `flow plan init <note-title> --worktree --recipe <recipe-name>`
 3. **Run all jobs** with `flow plan run <plan-name> --all`
 4. **Get approval** from the user to review results
-5. **Mark for review** with `flow plan review <plan-name>`
-6. **Finish plan** with `flow plan finish -y`
+5. **Commit changes** in the worktree (only when user explicitly requests)
+6. **Merge to main** (optional) with `flow plan merge-worktree <plan-name>`
+7. **Mark for review** with `flow plan review <plan-name>`
+8. **Finish plan** with `flow plan finish -y`
 
 ## Your Task
 
@@ -132,7 +134,21 @@ Total usage: ~21.5k tokens
 Ready to review and finish this plan?
 ```
 
-### 6. Update and Merge Worktree (Optional)
+### 6. Commit Changes in Worktree (Only When User Requests)
+
+**Do not commit changes unless the user explicitly asks you to.**
+
+If the user requests to commit changes in the worktree:
+
+```bash
+git -C /path/to/worktree/<plan-name> status
+git -C /path/to/worktree/<plan-name> add <files>
+git -C /path/to/worktree/<plan-name> commit -m "message"
+```
+
+Jobs typically create output files that may need to be committed before the worktree can be merged, but only commit when instructed.
+
+### 7. Update and Merge Worktree (Optional)
 
 Before marking for review, you may need to update the worktree from main or merge it to main.
 
@@ -161,6 +177,12 @@ flow plan merge-worktree <plan-name>
 
 This performs a fast-forward merge of the worktree branch into main, then synchronizes the worktree.
 
+**Important**: The `merge-worktree` command must be run from the main branch/directory, not from within a worktree. If you're working in a worktree directory, use an explicit path:
+```bash
+cd /path/to/main/repo && flow plan merge-worktree <plan-name>
+```
+Otherwise you'll get: `Error: must be on 'main' branch to merge`
+
 These commands are equivalent to pressing 'U' (update) and 'M' (merge) in the plan TUI.
 
 **When to use these**:
@@ -186,7 +208,7 @@ flow plan merge-worktree plan-3
 
 Without updating, the TUI will show "Needs Rebase" status and merging may create merge commits instead of a clean linear history.
 
-### 7. Mark for Review
+### 8. Mark for Review
 
 Once the user approves (and optionally after merging), mark the plan for review:
 
@@ -196,7 +218,7 @@ flow plan review <plan-name>
 
 This sets the plan state to indicate it's ready for cleanup.
 
-### 8. Finish and Clean Up
+### 9. Finish and Clean Up
 
 Finally, clean up the plan and worktree:
 
@@ -218,10 +240,12 @@ When the user specifies multiple notes, process them **sequentially** (one at a 
 1. Create plan for note 1
 2. Run all jobs for note 1
 3. Get approval
-4. Optionally merge to main with `flow plan merge-worktree`
-5. Review and finish note 1
-6. Move to note 2
-7. Repeat
+4. Commit changes in worktree (only if user requests)
+5. Check merge status with `flow plan status <plan-name> --json` (if merging)
+6. Merge to main with `flow plan merge-worktree <plan-name>` (only if user requests)
+7. Review and finish note 1
+8. Move to note 2
+9. Repeat (subsequent plans will need `update-worktree` before merging)
 
 This ensures each plan is fully completed and merged to main before starting the next, maintaining a clean linear git history and avoiding the need for rebasing.
 
@@ -256,10 +280,12 @@ You can pass these to recipes that support variables using `--recipe-vars`.
 3. Run `flow plan run lobster --all`
 4. Monitor execution and report completion: "All 6 jobs completed successfully. Total usage: ~21.5k tokens. Ready to review and finish?"
 5. Wait for user approval
-6. (Optional) Run `flow plan merge-worktree lobster` to merge changes to main
-7. Run `flow plan review lobster`
-8. Run `flow plan finish -y`
-9. Report: "Plan archived to `.archive/lobster`"
+6. If user requests, commit changes in worktree with git commands
+7. If user requests merge, check merge status: `flow plan status lobster --json`
+8. If user requests merge, run `flow plan merge-worktree lobster` to merge changes to main (from main repo directory)
+9. Run `flow plan review lobster`
+10. Run `flow plan finish -y`
+11. Report: "Plan archived to `.archive/lobster`"
 
 ## Important Notes
 
