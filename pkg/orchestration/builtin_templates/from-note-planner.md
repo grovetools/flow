@@ -44,17 +44,30 @@ If no recipe is specified, ask the user which recipe to use or default to `chat`
 
 ### 3. Create Plan with Worktree
 
-For each selected note, create a flow plan:
+For each selected note, create a flow plan using the `--from-note` flag:
 
 ```bash
-flow plan init <note-title> --worktree --recipe <recipe-name>
+flow plan init <note-title> --from-note <path-to-note> --worktree --recipe <recipe-name>
 ```
+
+**Using --from-note flag** (recommended):
+- Automatically extracts the note's body content into the first job's prompt
+- Links the note to the plan via `note_ref` field in job frontmatter
+- Takes precedence over `--extract-all-from` and `--note-ref` if also specified
 
 This will:
 - Create a plan directory at `/path/to/notebooks/workspace/plans/<note-title>`
 - Create a git worktree at `/path/to/project/.grove-worktrees/<note-title>`
 - Generate job files based on the recipe
+- Inject the note's content into the first job
+- Link the note to the plan for traceability
 - Set the plan as active
+
+**Alternative without --from-note**:
+```bash
+flow plan init <note-title> --worktree --recipe <recipe-name>
+```
+This creates the plan without extracting note content automatically.
 
 **Important**: The plan name should match the note title for clarity.
 
@@ -164,8 +177,8 @@ You can pass these to recipes that support variables using `--recipe-vars`.
 **User**: "Process the lobster note using chef-cook-critic recipe"
 
 **You**:
-1. Run `nb list --json` and find the "lobster" note
-2. Run `flow plan init lobster --worktree --recipe chef-cook-critic`
+1. Run `nb list --json` and find the "lobster" note (get the path)
+2. Run `flow plan init lobster --from-note /path/to/lobster.md --worktree --recipe chef-cook-critic`
 3. Run `flow plan run lobster --all`
 4. Monitor execution and report completion: "All 6 jobs completed successfully. Total usage: ~21.5k tokens. Ready to review and finish?"
 5. Wait for user approval
