@@ -244,13 +244,12 @@ Create and run all plans first, then merge them sequentially:
    This runs all plans in the background and waits for all to complete.
 
    **Option B: Use Bash tool with run_in_background parameter**
-   ```bash
-   # Make separate Bash tool calls with run_in_background: true
-   # Then monitor each with BashOutput tool
-   flow plan run plan-1 --all  # (with run_in_background: true)
-   flow plan run plan-2 --all  # (with run_in_background: true)
-   flow plan run plan-3 --all  # (with run_in_background: true)
-   ```
+
+   Make three separate Bash tool invocations with `run_in_background: true`:
+   1. Call Bash tool for `flow plan run plan-1 --all` with run_in_background=true (returns shell_id)
+   2. Call Bash tool for `flow plan run plan-2 --all` with run_in_background=true (returns shell_id)
+   3. Call Bash tool for `flow plan run plan-3 --all` with run_in_background=true (returns shell_id)
+   4. Use BashOutput tool with each shell_id to monitor progress and check completion
 
    **Option C: Shell job control with PID tracking**
    ```bash
