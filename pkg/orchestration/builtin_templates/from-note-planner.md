@@ -227,10 +227,51 @@ This ensures each plan is fully completed and merged to main before starting the
 
 ### Parallel Processing
 Create and run all plans first, then merge them sequentially:
-1. Create all plans with worktrees
-2. Run all jobs in parallel (or sequentially)
-3. Get approval for each plan
-4. **Important**: Merge them one at a time with updates:
+
+1. Create all plans with worktrees (can be done sequentially)
+   ```bash
+   flow plan init plan-1 --from-note /path/to/note1.md --worktree --recipe <recipe>
+   flow plan init plan-2 --from-note /path/to/note2.md --worktree --recipe <recipe>
+   flow plan init plan-3 --from-note /path/to/note3.md --worktree --recipe <recipe>
+   ```
+
+2. **Run all jobs in parallel** using background processes:
+
+   **Option A: Single bash command with background jobs and wait**
+   ```bash
+   flow plan run plan-1 --all & flow plan run plan-2 --all & flow plan run plan-3 --all & wait
+   ```
+   This runs all plans in the background and waits for all to complete.
+
+   **Option B: Use Bash tool with run_in_background parameter**
+   ```bash
+   # Make separate Bash tool calls with run_in_background: true
+   # Then monitor each with BashOutput tool
+   flow plan run plan-1 --all  # (with run_in_background: true)
+   flow plan run plan-2 --all  # (with run_in_background: true)
+   flow plan run plan-3 --all  # (with run_in_background: true)
+   ```
+
+   **Option C: Shell job control with PID tracking**
+   ```bash
+   (flow plan run plan-1 --all) & PID1=$!
+   (flow plan run plan-2 --all) & PID2=$!
+   (flow plan run plan-3 --all) & PID3=$!
+   wait $PID1 $PID2 $PID3
+   ```
+
+   **Important**: Do NOT make multiple separate Bash tool calls thinking they'll run in parallel - the Bash tool executes commands sequentially even when called multiple times in one message. You must use background processes (`&`) or `run_in_background` parameter for true parallelism.
+
+3. Check completion status for each plan:
+   ```bash
+   flow plan status plan-1 --json | jq '.statistics'
+   flow plan status plan-2 --json | jq '.statistics'
+   flow plan status plan-3 --json | jq '.statistics'
+   ```
+
+4. Get approval for each plan
+
+5. **Important**: Merge them one at a time with updates:
    ```bash
    flow plan merge-worktree plan-1
    flow plan update-worktree plan-2  # Rebase on updated main
@@ -239,7 +280,8 @@ Create and run all plans first, then merge them sequentially:
    flow plan merge-worktree plan-3
    # etc.
    ```
-5. Review and finish each plan
+
+6. Review and finish each plan
 
 **Why update between merges?** When multiple worktrees are created in parallel, they all branch from the same commit. After merging the first one, main has moved forward, so subsequent plans need rebasing to maintain a linear history and avoid merge commits.
 
