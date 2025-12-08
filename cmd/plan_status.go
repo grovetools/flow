@@ -11,7 +11,9 @@ import (
 
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/cli"
+	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/process"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -457,13 +459,113 @@ func formatStatusList(plan *orchestration.Plan) string {
 	return buf.String()
 }
 
+// WorktreeStatus represents git and worktree information for JSON output
+type WorktreeStatus struct {
+	Name         string          `json:"name"`
+	Branch       string          `json:"branch,omitempty"`
+	GitStatus    *GitStatusInfo  `json:"git_status,omitempty"`
+	MergeStatus  string          `json:"merge_status"`
+	ReviewStatus string          `json:"review_status"`
+}
+
+// GitStatusInfo contains git repository status information
+type GitStatusInfo struct {
+	Clean        bool   `json:"clean"`
+	AheadCount   int    `json:"ahead_count"`
+	BehindCount  int    `json:"behind_count"`
+	HasUntracked bool   `json:"has_untracked"`
+	HasModified  bool   `json:"has_modified"`
+	HasStaged    bool   `json:"has_staged"`
+}
+
+// getWorktreeStatus retrieves worktree and git status information for a plan
+func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
+	if plan.Config == nil || plan.Config.Worktree == "" {
+		return nil, fmt.Errorf("no worktree configured")
+	}
+
+	worktreeName := plan.Config.Worktree
+	status := &WorktreeStatus{
+		Name:         worktreeName,
+		Branch:       worktreeName, // Branch name typically matches worktree name
+		MergeStatus:  "-",
+		ReviewStatus: "-",
+	}
+
+	// Try to get git root from current directory first
+	gitRoot, err := git.GetGitRoot(".")
+	if err != nil {
+		gitRoot = "" // We'll try to find it another way
+	}
+
+	// Build worktree path and check if it exists
+	var worktreePath string
+	if gitRoot != "" {
+		worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			// Worktree not found at this git root
+			gitRoot = ""
+		}
+	}
+
+	// If we couldn't find the worktree from CWD, try using the plan's directory
+	// to infer the workspace and find the git root
+	if gitRoot == "" {
+		// Try to get workspace for this plan
+		project, err := workspace.GetProjectByPath(plan.Directory)
+		if err == nil && project != nil {
+			gitRoot = project.Path
+			worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+			if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+				// Still not found
+				return status, nil
+			}
+		} else {
+			// Can't find worktree
+			return status, nil
+		}
+	}
+
+	// Get git status for the worktree
+	gitStatus, err := git.GetStatus(worktreePath)
+	if err == nil {
+		// Override ahead/behind counts to compare against local main, not upstream
+		gitStatus.AheadCount = getCommitCount(worktreePath, "main..HEAD")
+		gitStatus.BehindCount = getCommitCount(worktreePath, "HEAD..main")
+
+		status.GitStatus = &GitStatusInfo{
+			Clean:        !gitStatus.IsDirty,
+			AheadCount:   gitStatus.AheadCount,
+			BehindCount:  gitStatus.BehindCount,
+			HasUntracked: gitStatus.UntrackedCount > 0,
+			HasModified:  gitStatus.ModifiedCount > 0,
+			HasStaged:    gitStatus.StagedCount > 0,
+		}
+
+		// Determine merge status
+		status.MergeStatus = getMergeStatus(gitRoot, worktreeName)
+	}
+
+	// Determine review status based on plan config
+	if plan.Config.Status == "review" {
+		status.ReviewStatus = "In Progress"
+	} else if plan.Config.Status == "finished" {
+		status.ReviewStatus = "Finished"
+	} else {
+		status.ReviewStatus = "Not Started"
+	}
+
+	return status, nil
+}
+
 // formatStatusJSON creates JSON output.
 func formatStatusJSON(plan *orchestration.Plan) (string, error) {
-	// Create a structure for JSON output
+	// Create a structure for JSON output with git/worktree info
 	output := struct {
-		Plan  string               `json:"plan"`
-		Jobs  []*orchestration.Job `json:"jobs"`
-		Stats map[string]int       `json:"statistics"`
+		Plan         string               `json:"plan"`
+		Jobs         []*orchestration.Job `json:"jobs"`
+		Stats        map[string]int       `json:"statistics"`
+		Worktree     *WorktreeStatus      `json:"worktree,omitempty"`
 	}{
 		Plan:  plan.Name,
 		Jobs:  plan.Jobs,
@@ -475,6 +577,15 @@ func formatStatusJSON(plan *orchestration.Plan) (string, error) {
 		output.Stats[string(job.Status)]++
 	}
 	output.Stats["total"] = len(plan.Jobs)
+	output.Stats["completed"] = output.Stats["completed"]
+
+	// Add worktree status if available
+	if plan.Config != nil && plan.Config.Worktree != "" {
+		worktreeStatus, err := getWorktreeStatus(plan)
+		if err == nil {
+			output.Worktree = worktreeStatus
+		}
+	}
 
 	// Marshal with indentation
 	data, err := json.MarshalIndent(output, "", "  ")
