@@ -109,19 +109,25 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	contextFiles := e.gatherContextFiles(job, plan, workDir)
 
 	// Build the XML prompt
-	prompt, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
+	promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
 	if err != nil {
 		execErr = fmt.Errorf("building XML prompt: %w", err)
 		return execErr
 	}
 
 	// Write the briefing file for auditing
-	if _, err := WriteBriefingFile(plan, job, prompt, ""); err != nil {
+	briefingFilePath, err := WriteBriefingFile(plan, job, promptXML, "")
+	if err != nil {
 		log.WithError(err).Warn("Failed to write briefing file")
+		execErr = fmt.Errorf("writing briefing file: %w", err)
+		return execErr
 	}
 
-	// Execute agent; raw output is for debugging logs, not the job file.
-	_, err = e.runAgentInWorktree(ctx, workDir, prompt, job, plan)
+	// Create instruction to read the briefing file (like interactive_agent does)
+	instructionPrompt := fmt.Sprintf("Read the briefing file at '%s' and execute the task.", briefingFilePath)
+
+	// Execute agent with the instruction to read the briefing file
+	_, err = e.runAgentInWorktree(ctx, workDir, instructionPrompt, job, plan)
 	if err != nil {
 		execErr = fmt.Errorf("run agent: %w", err)
 	}

@@ -79,8 +79,8 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 				b.WriteString("\n        </prepended_dependency>\n")
 			} else {
 				// Use different tags based on job type
-				if job.Type == JobTypeInteractiveAgent {
-					// Interactive agents read files directly from the local filesystem
+				if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
+					// Interactive and headless agents read files directly from the local filesystem
 					b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" description=\"Dependency file available on the local filesystem. If large, use grep/search tools rather than reading directly.\"/>\n", dep.Filename, dep.FilePath))
 				} else {
 					// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
@@ -100,8 +100,8 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 			return "", nil, fmt.Errorf("resolving prompt source %s: %w", source, err)
 		}
 		// Use different tags based on job type
-		if job.Type == JobTypeInteractiveAgent {
-			// Interactive agents read files directly from the local filesystem
+		if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
+			// Interactive and headless agents read files directly from the local filesystem
 			b.WriteString(fmt.Sprintf("        <local_source_file file=\"%s\" path=\"%s\" description=\"This file was provided as a source for your task.\"/>\n", source, sourcePath))
 		} else {
 			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
@@ -129,11 +129,11 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 	}
 
 	// 5. Handle context files (.grove/context, CLAUDE.md, etc.)
-	// For interactive_agent jobs, use local_context_file tags since files are read locally.
+	// For interactive_agent and headless_agent jobs, use local_context_file tags since files are read locally.
 	// For oneshot jobs, use inlined_context_file tags since files are provided elsewhere in the prompt.
 	for _, contextFile := range contextFiles {
-		if job.Type == JobTypeInteractiveAgent {
-			// Interactive agents read files directly from the local filesystem
+		if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
+			// Interactive and headless agents read files directly from the local filesystem
 			b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" description=\"Large context file with project information. DO NOT try to read this file directly - it may be very large. Use grep/search tools to find specific content if needed. This file contains information the user thinks you might need.\"/>\n", filepath.Base(contextFile), contextFile))
 		} else {
 			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini

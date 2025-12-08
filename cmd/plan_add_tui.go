@@ -150,7 +150,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	var str string
 	cursor := "  "
 	if index == m.Index() {
-		cursor = theme.DefaultTheme.Highlight.Render(theme.IconSelect + " ")
+		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrow + " ")
 	}
 
 	switch item := listItem.(type) {
@@ -181,12 +181,12 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 	var str string
 	cursor := "  "
 	if index == m.Index() {
-		cursor = theme.DefaultTheme.Highlight.Render(theme.IconSelect + " ")
+		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrow + " ")
 	}
 
-	checkbox := "[ ]"
+	checkbox := theme.IconUnselect
 	if (*d.selectedDeps)[depItem.job.ID] {
-		checkbox = "[" + theme.IconSuccess + "]"
+		checkbox = theme.IconSelect
 	}
 
 	// Format the display text
@@ -228,6 +228,7 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	// 2. Job Type Input (list)
 	jobTypes := []list.Item{
 		item("interactive_agent"),
+		item("headless_agent"),
 		item("agent"),
 		item("oneshot"),
 		item("shell"),
@@ -700,7 +701,7 @@ func (m tuiModel) View() string {
 		var fieldContent strings.Builder
 
 		if m.focusIndex == index {
-			fieldContent.WriteString(focusedStyle.Render(theme.IconSelect + " ") + headingStyle.Render(label))
+			fieldContent.WriteString("  " + focusedStyle.Render(headingStyle.Render(label)))
 		} else {
 			fieldContent.WriteString("  " + headingStyle.Render(label))
 		}
@@ -736,7 +737,7 @@ func (m tuiModel) View() string {
 	}
 	var titleContent strings.Builder
 	if m.focusIndex == 0 {
-		titleContent.WriteString(focusedStyle.Render(theme.IconSelect + " ") + headingStyle.Render("Title:"))
+		titleContent.WriteString("  " + focusedStyle.Render(headingStyle.Render("Title:")))
 	} else {
 		titleContent.WriteString("  " + headingStyle.Render("Title:"))
 	}
