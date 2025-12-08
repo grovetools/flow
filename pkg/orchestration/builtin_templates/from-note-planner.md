@@ -90,6 +90,23 @@ Monitor the output for:
 - Any errors or failures
 - Token usage and API costs
 
+**Checking Plan Status Programmatically:**
+
+You can check the status of a plan at any time using JSON output:
+
+```bash
+flow plan status <plan-name> --json
+```
+
+This returns:
+- `statistics.completed` / `statistics.total` - Job completion counts
+- `worktree.git_status.clean` - Whether working directory is clean
+- `worktree.git_status.ahead_count` - Commits ahead of main
+- `worktree.merge_status` - "Ready", "Needs Rebase", "Synced", or "Merged"
+- `worktree.review_status` - "Not Started", "In Progress", or "Finished"
+
+Use this to verify job completion before proceeding to the next step.
+
 ### 5. Present Results and Get Approval
 
 After all jobs complete:
@@ -117,7 +134,18 @@ Ready to review and finish this plan?
 
 ### 6. Update and Merge Worktree (Optional)
 
-Before marking for review, you may need to update the worktree from main or merge it to main:
+Before marking for review, you may need to update the worktree from main or merge it to main.
+
+**Check merge readiness first:**
+```bash
+flow plan status <plan-name> --json | jq '.worktree.merge_status'
+```
+
+Possible values:
+- `"Ready"` - Can be merged to main with fast-forward
+- `"Needs Rebase"` - Main has advanced, needs `update-worktree` first
+- `"Synced"` - Worktree is up to date with main (no commits ahead)
+- `"Merged"` - Already merged to main
 
 **Update worktree from main** (rebase on latest main):
 ```bash
