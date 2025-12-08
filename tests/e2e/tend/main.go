@@ -23,6 +23,7 @@ func main() {
 		scenarios.JobManagementScenario,
 		scenarios.PlanListTUIScenario,
 		scenarios.PlanStatusTUIScenario,
+		scenarios.PlanFromNoteScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

@@ -15,7 +15,7 @@ var planCmd = &cobra.Command{
 }
 
 var planInitCmd = &cobra.Command{
-	Use:   "init <directory>",
+	Use:   "init [directory]",
 	Short: "Initialize a new plan directory, interactively or via flags",
 	Long: `Initialize a new orchestration plan in the specified directory.
 Creates a .grove-plan.yml file with default configuration options.
@@ -111,6 +111,7 @@ var (
 	planInitRecipeCmd      string
 	planInitRepos          []string
 	planInitNoteRef        string
+	planInitFromNote       string
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -153,6 +154,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringSliceVar(&planInitRepos, "repos", nil, "Specific repos to include in ecosystem worktree (e.g., --repos grove-core,grove-flow). If not specified, all submodules are included")
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 	planInitCmd.Flags().StringVar(&planInitNoteRef, "note-ref", "", "Path to the source note to link to this plan")
+	planInitCmd.Flags().StringVar(&planInitFromNote, "from-note", "", "Path to a note file whose body will be used as the prompt for the first job")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -254,6 +256,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		RecipeCmd:      planInitRecipeCmd,
 		Repos:          planInitRepos,
 		NoteRef:        planInitNoteRef,
+		FromNote:       planInitFromNote,
 	}
 	result, err := executePlanInit(directCmd)
 	if err != nil {
@@ -317,4 +320,5 @@ type PlanInitCmd struct {
 	RecipeCmd      string
 	Repos          []string // List of repos to include in ecosystem worktree
 	NoteRef        string
+	FromNote       string
 }

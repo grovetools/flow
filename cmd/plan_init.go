@@ -49,6 +49,7 @@ func RunPlanInitTUI(dir string) error {
 		RecipeVars:     planInitRecipeVars,
 		RecipeCmd:      planInitRecipeCmd,
 		Repos:          planInitRepos,
+		FromNote:       planInitFromNote,
 	}
 
 	finalCmd, err := runPlanInitTUI(plansDir, initialCmd)
@@ -74,6 +75,24 @@ func RunPlanInit(cmd *PlanInitCmd) error {
 
 // executePlanInit contains the core logic for initializing a plan and returns a result string.
 func executePlanInit(cmd *PlanInitCmd) (string, error) {
+	// Derive ExtractAllFrom and NoteRef from FromNote if provided
+	// --from-note takes precedence over --extract-all-from and --note-ref
+	if cmd.FromNote != "" {
+		// Resolve the path to an absolute path
+		fromNotePath, err := filepath.Abs(cmd.FromNote)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve path for --from-note file %s: %w", cmd.FromNote, err)
+		}
+
+		// Set ExtractAllFrom to the note path for content extraction
+		// --from-note takes precedence
+		cmd.ExtractAllFrom = fromNotePath
+
+		// Set NoteRef to the note path for linking
+		// --from-note takes precedence
+		cmd.NoteRef = fromNotePath
+	}
+
 	// Auto-detect worktree context when running inside a sub-project of an ecosystem worktree.
 	currentNode, err := workspace.GetProjectByPath(".")
 	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
@@ -302,6 +321,24 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
 func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) error {
+	// Derive ExtractAllFrom and NoteRef from FromNote if provided
+	// --from-note takes precedence over --extract-all-from and --note-ref
+	if cmd.FromNote != "" {
+		// Resolve the path to an absolute path
+		fromNotePath, err := filepath.Abs(cmd.FromNote)
+		if err != nil {
+			return fmt.Errorf("failed to resolve path for --from-note file %s: %w", cmd.FromNote, err)
+		}
+
+		// Set ExtractAllFrom to the note path for content extraction
+		// --from-note takes precedence
+		cmd.ExtractAllFrom = fromNotePath
+
+		// Set NoteRef to the note path for linking
+		// --from-note takes precedence
+		cmd.NoteRef = fromNotePath
+	}
+
 	// Auto-detect worktree context when running inside a sub-project of an ecosystem worktree.
 	currentNode, err := workspace.GetProjectByPath(".")
 	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {

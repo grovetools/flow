@@ -313,6 +313,9 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if job.Model != "" {
 		frontmatter["model"] = job.Model
 	}
+	if job.NoteRef != "" {
+		frontmatter["note_ref"] = job.NoteRef
+	}
 	if job.Output.Type != "" {
 		output := map[string]interface{}{
 			"type": job.Output.Type,
@@ -375,6 +378,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Repository          string
 		Branch              string
 		Worktree            string
+		NoteRef             string
 		OutputType          string
 		Prompt              string
 		AgentContinue       bool
@@ -389,6 +393,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Repository:          job.Repository,
 		Branch:              job.Branch,
 		Worktree:            job.Worktree,
+		NoteRef:             job.NoteRef,
 		OutputType:          job.Output.Type,
 		Prompt:              job.PromptBody,
 		AgentContinue:       job.AgentContinue,
