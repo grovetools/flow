@@ -24,6 +24,7 @@ func main() {
 		scenarios.PlanListTUIScenario,
 		scenarios.PlanStatusTUIScenario,
 		scenarios.PlanFromNoteScenario,
+		scenarios.PlanMergeUpdateWorktreeScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
