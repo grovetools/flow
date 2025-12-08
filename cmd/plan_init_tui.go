@@ -318,8 +318,9 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Only quit on 'q' if not in text input or if in normal mode
 			if !inTextInput || m.unfocused {
 				// Go back to the plan list view
-				listModel := newPlanListTUIModel(m.plansDirectory)
-				return listModel, loadPlansListCmd(m.plansDirectory, false)
+				// Note: cwdGitRoot will be determined by the list model's Init function
+				listModel := newPlanListTUIModel(m.plansDirectory, "")
+				return listModel, loadPlansListCmd(m.plansDirectory, "", false)
 			}
 
 		case "tab":

@@ -77,6 +77,7 @@ type planListTUIModel struct {
 	err                  error
 	loading              bool
 	plansDirectory       string
+	cwdGitRoot           string // Git root from where the command was run
 	statusMessage        string
 	help                 help.Model
 	keys                 planListKeyMap
@@ -302,8 +303,15 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not resolve plans directory: %w", err)
 	}
 
+	// Get git root from the CWD workspace node
+	cwdGitRoot := node.Path
+	if cwdGitRoot == "" {
+		// Fallback: try to get git root from current directory
+		cwdGitRoot, _ = git.GetGitRoot(".")
+	}
+
 	// Create and run TUI
-	model := newPlanListTUIModel(plansDirectory)
+	model := newPlanListTUIModel(plansDirectory, cwdGitRoot)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 
 	finalModel, err := program.Run() // Capture the final model
@@ -326,7 +334,7 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func newPlanListTUIModel(plansDirectory string) planListTUIModel {
+func newPlanListTUIModel(plansDirectory string, cwdGitRoot string) planListTUIModel {
 	helpModel := help.NewBuilder().
 		WithKeys(planListKeys).
 		WithTitle("Plan List - Help").
@@ -340,6 +348,7 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 		cursor:         0,
 		loading:        true,
 		plansDirectory: plansDirectory,
+		cwdGitRoot:     cwdGitRoot,
 		help:           helpModel,
 		keys:           planListKeys,
 		activePlan:     activePlan,
@@ -349,7 +358,7 @@ func newPlanListTUIModel(plansDirectory string) planListTUIModel {
 
 func (m planListTUIModel) Init() tea.Cmd {
 	return tea.Batch(
-		loadPlansListCmd(m.plansDirectory, m.showOnHold),
+		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
 		fetchGitLogCmd(m.plansDirectory),
 		refreshTick(),
 	)
@@ -401,7 +410,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshTickMsg:
 		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.showOnHold),
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
 			fetchGitLogCmd(m.plansDirectory),
 			refreshTick(),
 		)
@@ -667,7 +676,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showOnHold = !m.showOnHold
 			m.cursor = 0 // Reset cursor to top
 			m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
-			return m, loadPlansListCmd(m.plansDirectory, m.showOnHold)
+			return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold)
 
 		case key.Matches(msg, m.keys.SetHoldStatus):
 			// Toggle hold status for the selected plan
@@ -704,7 +713,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Reload the plans list to reflect the change
-				return m, loadPlansListCmd(m.plansDirectory, m.showOnHold)
+				return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold)
 			}
 		}
 	}
@@ -1189,9 +1198,9 @@ func formatRelativeTime(t time.Time) string {
 }
 
 // Helper functions
-func loadPlansListCmd(plansDirectory string, showOnHold bool) tea.Cmd {
+func loadPlansListCmd(plansDirectory string, cwdGitRoot string, showOnHold bool) tea.Cmd {
 	return func() tea.Msg {
-		plans, err := loadPlansList(plansDirectory, showOnHold)
+		plans, err := loadPlansList(plansDirectory, cwdGitRoot, showOnHold)
 		return planListLoadCompleteMsg{
 			plans: plans,
 			error: err,
@@ -1199,7 +1208,7 @@ func loadPlansListCmd(plansDirectory string, showOnHold bool) tea.Cmd {
 	}
 }
 
-func loadPlansList(plansDirectory string, showOnHold bool) ([]PlanListItem, error) {
+func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([]PlanListItem, error) {
 	entries, err := os.ReadDir(plansDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read plans directory %s: %w", plansDirectory, err)
@@ -1253,12 +1262,23 @@ func loadPlansList(plansDirectory string, showOnHold bool) ([]PlanListItem, erro
 
 					// Fetch git status if this plan has a worktree
 					if worktree != "" {
-						// Find the git root by getting the project/workspace for this plan
-						project, err := workspace.GetProjectByPath(planPath)
+						// Start with the git root from CWD (where the command was run)
 						var gitRoot string
-						if err == nil && project != nil {
-							// Use the project's path as the git root
-							gitRoot = project.Path
+						if cwdGitRoot != "" {
+							// First, check if the worktree exists in the CWD git root
+							worktreePath := filepath.Join(cwdGitRoot, ".grove-worktrees", worktree)
+							if _, err := os.Stat(worktreePath); err == nil {
+								gitRoot = cwdGitRoot
+							}
+						}
+
+						// Fallback: try to find the git root by getting the project/workspace for this plan
+						if gitRoot == "" {
+							project, err := workspace.GetProjectByPath(planPath)
+							if err == nil && project != nil {
+								// Use the project's path as the git root
+								gitRoot = project.Path
+							}
 						}
 
 						// Fallback to trying git.GetGitRoot on plan path
