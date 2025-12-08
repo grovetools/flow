@@ -115,9 +115,52 @@ Total usage: ~21.5k tokens
 Ready to review and finish this plan?
 ```
 
-### 6. Mark for Review
+### 6. Update and Merge Worktree (Optional)
 
-Once the user approves, mark the plan for review:
+Before marking for review, you may need to update the worktree from main or merge it to main:
+
+**Update worktree from main** (rebase on latest main):
+```bash
+flow plan update-worktree <plan-name>
+```
+
+This rebases the worktree branch on top of the main branch, ensuring it has the latest changes.
+
+**Merge worktree to main** (after work is complete):
+```bash
+flow plan merge-worktree <plan-name>
+```
+
+This performs a fast-forward merge of the worktree branch into main, then synchronizes the worktree.
+
+These commands are equivalent to pressing 'U' (update) and 'M' (merge) in the plan TUI.
+
+**When to use these**:
+- Use `update-worktree` if main has advanced and you need to sync changes
+- Use `merge-worktree` when the work is complete and you want to merge to main before finishing
+- Both are optional - skip if you're handling git operations manually
+
+**Important for multiple worktrees**:
+When processing multiple notes that create parallel worktrees, they all diverge from the same point on main. Once you merge the first worktree to main, subsequent worktrees will need rebasing to maintain a clean linear history:
+
+```bash
+# Merge first plan
+flow plan merge-worktree plan-1
+
+# Before merging the second plan, update it first
+flow plan update-worktree plan-2  # Rebase on updated main
+flow plan merge-worktree plan-2   # Then merge
+
+# Repeat for remaining plans
+flow plan update-worktree plan-3
+flow plan merge-worktree plan-3
+```
+
+Without updating, the TUI will show "Needs Rebase" status and merging may create merge commits instead of a clean linear history.
+
+### 7. Mark for Review
+
+Once the user approves (and optionally after merging), mark the plan for review:
 
 ```bash
 flow plan review <plan-name>
@@ -125,7 +168,7 @@ flow plan review <plan-name>
 
 This sets the plan state to indicate it's ready for cleanup.
 
-### 7. Finish and Clean Up
+### 8. Finish and Clean Up
 
 Finally, clean up the plan and worktree:
 
@@ -142,14 +185,35 @@ This will:
 
 ## Handling Multiple Notes
 
-If the user specifies multiple notes, process them sequentially:
+If the user specifies multiple notes, you can process them in two ways:
+
+### Sequential Processing (Recommended)
+Process one note at a time:
 1. Create plan for note 1
 2. Run all jobs for note 1
-3. Get approval and finish note 1
+3. Get approval, merge, review, and finish note 1
 4. Move to note 2
 5. Repeat
 
-Alternatively, if the user wants parallel processing, create all plans first, then run them concurrently (but still get individual approval for each before finishing).
+This ensures each plan is fully completed and merged to main before starting the next, avoiding the need for rebasing.
+
+### Parallel Processing
+Create and run all plans first, then merge them sequentially:
+1. Create all plans with worktrees
+2. Run all jobs in parallel (or sequentially)
+3. Get approval for each plan
+4. **Important**: Merge them one at a time with updates:
+   ```bash
+   flow plan merge-worktree plan-1
+   flow plan update-worktree plan-2  # Rebase on updated main
+   flow plan merge-worktree plan-2
+   flow plan update-worktree plan-3
+   flow plan merge-worktree plan-3
+   # etc.
+   ```
+5. Review and finish each plan
+
+**Why update between merges?** When multiple worktrees are created in parallel, they all branch from the same commit. After merging the first one, main has moved forward, so subsequent plans need rebasing to maintain a linear history and avoid merge commits.
 
 ## Error Handling
 
@@ -182,9 +246,10 @@ You can pass these to recipes that support variables using `--recipe-vars`.
 3. Run `flow plan run lobster --all`
 4. Monitor execution and report completion: "All 6 jobs completed successfully. Total usage: ~21.5k tokens. Ready to review and finish?"
 5. Wait for user approval
-6. Run `flow plan review lobster`
-7. Run `flow plan finish -y`
-8. Report: "Plan archived to `.archive/lobster`"
+6. (Optional) Run `flow plan merge-worktree lobster` to merge changes to main
+7. Run `flow plan review lobster`
+8. Run `flow plan finish -y`
+9. Report: "Plan archived to `.archive/lobster`"
 
 ## Important Notes
 
