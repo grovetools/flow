@@ -15,8 +15,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/state"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 // RunPlanInitTUI launches the interactive TUI for creating a new plan.
@@ -171,13 +173,21 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 		// After creating the worktree(s), apply default context rules.
 		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
-			fmt.Printf("⚠️  Warning: could not apply default context rules: %v\n", err)
+			fmt.Printf("%s  Warning: could not apply default context rules: %v\n", theme.IconWarning, err)
 		}
 
 		// Configure go.work file for the worktree.
 		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {
 			// This is not a fatal error, but the user should be aware of it.
-			fmt.Printf("⚠️  Warning: could not configure go.work file: %v\n", err)
+			fmt.Printf("%s  Warning: could not configure go.work file: %v\n", theme.IconWarning, err)
+		}
+
+		// Set the active plan inside the worktree.
+		if err := setWorktreeActivePlan(worktreePath, planName); err != nil {
+			// This is not a fatal error, but the user should be aware of it.
+			result.WriteString(fmt.Sprintf("%s  Warning: could not set active plan in new worktree: %v\n", theme.IconWarning, err))
+		} else {
+			result.WriteString(fmt.Sprintf("%s Set active plan in worktree: %s\n", theme.IconSuccess, worktreeToSet))
 		}
 	}
 
@@ -212,7 +222,8 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Set the new plan as active, but only if we are not opening a new session.
 	// If a new session is opened, the active plan will be set inside that session.
-	if !cmd.OpenSession {
+	// Also skip setting the active plan in the parent if a worktree was created.
+	if !cmd.OpenSession && worktreeToSet == "" {
 		if err := state.Set("flow.active_plan", planName); err != nil {
 			result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
 		} else {
@@ -523,13 +534,21 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 		// After creating the worktree(s), apply default context rules.
 		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
-			fmt.Printf("⚠️  Warning: could not apply default context rules: %v\n", err)
+			fmt.Printf("%s  Warning: could not apply default context rules: %v\n", theme.IconWarning, err)
 		}
 
 		// Configure go.work file for the worktree.
 		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {
 			// This is not a fatal error, but the user should be aware of it.
-			fmt.Printf("⚠️  Warning: could not configure go.work file: %v\n", err)
+			fmt.Printf("%s  Warning: could not configure go.work file: %v\n", theme.IconWarning, err)
+		}
+
+		// Set the active plan inside the worktree.
+		if err := setWorktreeActivePlan(worktreePath, planName); err != nil {
+			// This is not a fatal error, but the user should be aware of it.
+			fmt.Printf("%s  Warning: could not set active plan in new worktree: %v\n", theme.IconWarning, err)
+		} else {
+			fmt.Printf("%s Set active plan in worktree: %s\n", theme.IconSuccess, worktreeOverride)
 		}
 	}
 
@@ -679,7 +698,8 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 	// Set the new plan as active, but only if we are not opening a new session.
 	// If a new session is opened, the active plan will be set inside that session.
-	if !cmd.OpenSession {
+	// Also skip setting the active plan in the parent if a worktree was created.
+	if !cmd.OpenSession && finalWorktree == "" {
 		if err := state.Set("flow.active_plan", planName); err != nil {
 			fmt.Printf("Warning: failed to set active job: %v\n", err)
 		} else {
@@ -1176,4 +1196,29 @@ func createWorktreeIfRequested(worktreeName string, repos []string, workspacePat
 	}
 
 	return worktreePath, nil
+}
+
+// setWorktreeActivePlan writes a state file within a worktree to set the active plan.
+func setWorktreeActivePlan(worktreePath, planName string) error {
+	groveDir := filepath.Join(worktreePath, ".grove")
+	if err := os.MkdirAll(groveDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .grove directory in worktree: %w", err)
+	}
+
+	// Use a flat map with the key "flow.active_plan" to match how state.Set works.
+	stateData := map[string]string{
+		"flow.active_plan": planName,
+	}
+
+	yamlBytes, err := yaml.Marshal(stateData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal state data: %w", err)
+	}
+
+	statePath := filepath.Join(groveDir, "state.yml")
+	if err := os.WriteFile(statePath, yamlBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write state file in worktree: %w", err)
+	}
+
+	return nil
 }

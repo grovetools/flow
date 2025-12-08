@@ -22,6 +22,7 @@ import (
 	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -849,10 +850,16 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		prettyLog.WarnPretty(fmt.Sprintf("Failed to create .grove directory in worktree: %v", err))
 	} else {
 		planName := filepath.Base(plan.Directory)
-		stateContent := fmt.Sprintf("active_plan: %s\n", planName)
-		statePath := filepath.Join(groveDir, "state.yml")
-		// This is a best-effort attempt; failure should not stop the job.
-		_ = os.WriteFile(statePath, []byte(stateContent), 0o644)
+		// Use a flat map with the key "flow.active_plan" to match how state.Set works.
+		stateData := map[string]string{
+			"flow.active_plan": planName,
+		}
+		yamlBytes, err := yaml.Marshal(stateData)
+		if err == nil {
+			statePath := filepath.Join(groveDir, "state.yml")
+			// This is a best-effort attempt; failure should not stop the job.
+			_ = os.WriteFile(statePath, yamlBytes, 0o644)
+		}
 	}
 
 	return worktreePath, nil
