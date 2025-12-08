@@ -266,6 +266,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			Status:     orchestration.JobStatusPendingUser,
 			ID:         orchestration.GenerateUniqueJobID(plan, jobTitle),
 			PromptBody: string(body),
+			Model:      cmd.Model,
 		}
 
 		// Enrich the job with common fields (worktree, repository, note_ref)
@@ -489,6 +490,11 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		}
 	}
 
+	// Override model from CLI if provided
+	if cmd.Model != "" {
+		recipeVars["model"] = cmd.Model
+	}
+
 	// Data for templating
 	templateData := struct {
 		PlanName string
@@ -655,6 +661,11 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			IsFirstJob: isFirstJob,
 		}
 		enrichJobFrontmatter(frontmatter, enrichOpts)
+
+		// Override model from CLI if provided
+		if cmd.Model != "" {
+			frontmatter["model"] = cmd.Model
+		}
 
 		// If we have extracted content and this is the first job, merge it into the body
 		if extractedBody != nil && isFirstJob {
