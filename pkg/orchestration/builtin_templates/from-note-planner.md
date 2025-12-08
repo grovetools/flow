@@ -213,76 +213,17 @@ This will:
 
 ## Handling Multiple Notes
 
-If the user specifies multiple notes, you can process them in two ways:
+When the user specifies multiple notes, process them **sequentially** (one at a time):
 
-### Sequential Processing (Recommended)
-Process one note at a time:
 1. Create plan for note 1
 2. Run all jobs for note 1
-3. Get approval, merge, review, and finish note 1
-4. Move to note 2
-5. Repeat
+3. Get approval
+4. Optionally merge to main with `flow plan merge-worktree`
+5. Review and finish note 1
+6. Move to note 2
+7. Repeat
 
-This ensures each plan is fully completed and merged to main before starting the next, avoiding the need for rebasing.
-
-### Parallel Processing
-Create and run all plans first, then merge them sequentially:
-
-1. Create all plans with worktrees (can be done sequentially)
-   ```bash
-   flow plan init plan-1 --from-note /path/to/note1.md --worktree --recipe <recipe>
-   flow plan init plan-2 --from-note /path/to/note2.md --worktree --recipe <recipe>
-   flow plan init plan-3 --from-note /path/to/note3.md --worktree --recipe <recipe>
-   ```
-
-2. **Run all jobs in parallel** using background processes:
-
-   **Option A: Single bash command with background jobs and wait**
-   ```bash
-   flow plan run plan-1 --all & flow plan run plan-2 --all & flow plan run plan-3 --all & wait
-   ```
-   This runs all plans in the background and waits for all to complete.
-
-   **Option B: Use Bash tool with run_in_background parameter**
-
-   Make three separate Bash tool invocations with `run_in_background: true`:
-   1. Call Bash tool for `flow plan run plan-1 --all` with run_in_background=true (returns shell_id)
-   2. Call Bash tool for `flow plan run plan-2 --all` with run_in_background=true (returns shell_id)
-   3. Call Bash tool for `flow plan run plan-3 --all` with run_in_background=true (returns shell_id)
-   4. Use BashOutput tool with each shell_id to monitor progress and check completion
-
-   **Option C: Shell job control with PID tracking**
-   ```bash
-   (flow plan run plan-1 --all) & PID1=$!
-   (flow plan run plan-2 --all) & PID2=$!
-   (flow plan run plan-3 --all) & PID3=$!
-   wait $PID1 $PID2 $PID3
-   ```
-
-   **Important**: Do NOT make multiple separate Bash tool calls thinking they'll run in parallel - the Bash tool executes commands sequentially even when called multiple times in one message. You must use background processes (`&`) or `run_in_background` parameter for true parallelism.
-
-3. Check completion status for each plan:
-   ```bash
-   flow plan status plan-1 --json | jq '.statistics'
-   flow plan status plan-2 --json | jq '.statistics'
-   flow plan status plan-3 --json | jq '.statistics'
-   ```
-
-4. Get approval for each plan
-
-5. **Important**: Merge them one at a time with updates:
-   ```bash
-   flow plan merge-worktree plan-1
-   flow plan update-worktree plan-2  # Rebase on updated main
-   flow plan merge-worktree plan-2
-   flow plan update-worktree plan-3
-   flow plan merge-worktree plan-3
-   # etc.
-   ```
-
-6. Review and finish each plan
-
-**Why update between merges?** When multiple worktrees are created in parallel, they all branch from the same commit. After merging the first one, main has moved forward, so subsequent plans need rebasing to maintain a linear history and avoid merge commits.
+This ensures each plan is fully completed and merged to main before starting the next, maintaining a clean linear git history and avoiding the need for rebasing.
 
 ## Error Handling
 
