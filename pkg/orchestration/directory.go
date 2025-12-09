@@ -95,9 +95,6 @@ func InitPlan(dir string, specFile string) error {
 		Status:       JobStatusPending,
 		Type:         JobTypeOneshot,
 		PromptSource: []string{"spec.md"},
-		Output: OutputConfig{
-			Type: "generate_jobs",
-		},
 	}
 
 	// Generate job content from template
@@ -251,15 +248,6 @@ func CreateJobFromTemplate(jobType JobType, title string, opts JobOptions) *Job 
 		PrependDependencies: opts.PrependDependencies,
 	}
 
-	// Set default output type
-	if opts.OutputType != "" {
-		job.Output.Type = opts.OutputType
-	} else if jobType == JobTypeAgent {
-		job.Output.Type = "commit"
-	} else {
-		job.Output.Type = "file"
-	}
-
 	return job
 }
 
@@ -279,9 +267,6 @@ func generateJobContent(job *Job) ([]byte, error) {
 		"status": job.Status,
 		"type":   job.Type,
 	}
-
-	// Add plan_type field (same as type for consistency)
-	frontmatter["plan_type"] = string(job.Type)
 
 	if len(job.DependsOn) > 0 {
 		frontmatter["depends_on"] = job.DependsOn
@@ -316,18 +301,6 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if job.NoteRef != "" {
 		frontmatter["note_ref"] = job.NoteRef
 	}
-	if job.Output.Type != "" {
-		output := map[string]interface{}{
-			"type": job.Output.Type,
-		}
-		if job.Output.Message != "" {
-			output["message"] = job.Output.Message
-		}
-		if job.Output.Path != "" {
-			output["path"] = job.Output.Path
-		}
-		frontmatter["output"] = output
-	}
 
 	// Create YAML
 	yamlContent := "---\n"
@@ -335,22 +308,7 @@ func generateJobContent(job *Job) ([]byte, error) {
 	yamlContent += "---\n\n"
 	
 	// Add the prompt body
-	promptBody := job.PromptBody
-	
-	// If output type is generate_jobs and it's a oneshot job, append the special prompt
-	if job.Type == JobTypeOneshot && job.Output.Type == "generate_jobs" {
-		// Extract the generate_jobs prompt from InitialJobContent
-		// Starting after the YAML frontmatter
-		startMarker := "---\n\n"
-		if idx := strings.Index(InitialJobContent, startMarker); idx != -1 {
-			generateJobsPrompt := InitialJobContent[idx+len(startMarker):]
-			// Remove the %s placeholders from the template
-			generateJobsPrompt = strings.ReplaceAll(generateJobsPrompt, "%s", "")
-			promptBody += "\n\n" + generateJobsPrompt
-		}
-	}
-	
-	yamlContent += promptBody
+	yamlContent += job.PromptBody
 
 	return []byte(yamlContent), nil
 }
@@ -372,14 +330,12 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		ID                  string
 		Title               string
 		Type                string
-		PlanType            string
 		DependsOn           []string
 		PromptSource        []string
 		Repository          string
 		Branch              string
 		Worktree            string
 		NoteRef             string
-		OutputType          string
 		Prompt              string
 		AgentContinue       bool
 		PrependDependencies bool
@@ -387,21 +343,15 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		ID:                  job.ID,
 		Title:               job.Title,
 		Type:                string(job.Type),
-		PlanType:            string(job.Type),
 		DependsOn:           job.DependsOn,
 		PromptSource:        job.PromptSource,
 		Repository:          job.Repository,
 		Branch:              job.Branch,
 		Worktree:            job.Worktree,
 		NoteRef:             job.NoteRef,
-		OutputType:          job.Output.Type,
 		Prompt:              job.PromptBody,
 		AgentContinue:       job.AgentContinue,
 		PrependDependencies: job.PrependDependencies,
-	}
-
-	if data.OutputType == "" {
-		data.OutputType = "commit"
 	}
 
 	var buf bytes.Buffer

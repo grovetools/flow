@@ -237,16 +237,12 @@ func TestAddJob(t *testing.T) {
 
 	// Add second job with dependencies
 	job2 := &Job{
-		ID:        "test-job-2",
-		Title:     "Second Test Job",
-		Type:      JobTypeAgent,
-		Status:    JobStatusPending,
-		DependsOn: []string{"01-first-test-job.md"},
-		Worktree:  "feature-branch",
-		Output: OutputConfig{
-			Type:    "commit",
-			Message: "feat: implement feature",
-		},
+		ID:         "test-job-2",
+		Title:      "Second Test Job",
+		Type:       JobTypeAgent,
+		Status:     JobStatusPending,
+		DependsOn:  []string{"01-first-test-job.md"},
+		Worktree:   "feature-branch",
 		PromptBody: "Implement the feature",
 	}
 
@@ -343,9 +339,6 @@ func TestCreateJobFromTemplate(t *testing.T) {
 				if job.Type != JobTypeOneshot {
 					t.Errorf("Job type = %v, want oneshot", job.Type)
 				}
-				if job.Output.Type != "file" {
-					t.Errorf("Output type = %v, want file", job.Output.Type)
-				}
 			},
 		},
 		{
@@ -357,9 +350,6 @@ func TestCreateJobFromTemplate(t *testing.T) {
 				if job.Type != JobTypeAgent {
 					t.Errorf("Job type = %v, want agent", job.Type)
 				}
-				if job.Output.Type != "commit" {
-					t.Errorf("Output type = %v, want commit", job.Output.Type)
-				}
 			},
 		},
 		{
@@ -370,7 +360,6 @@ func TestCreateJobFromTemplate(t *testing.T) {
 				DependsOn:    []string{"01-first.md", "02-second.md"},
 				PromptSource: []string{"spec.md", "context.md"},
 				Worktree:     "feature-xyz",
-				OutputType:   "none",
 				Prompt:       "Do complex stuff",
 			},
 			validate: func(t *testing.T, job *Job) {
@@ -379,9 +368,6 @@ func TestCreateJobFromTemplate(t *testing.T) {
 				}
 				if job.Worktree != "feature-xyz" {
 					t.Errorf("Worktree = %v, want feature-xyz", job.Worktree)
-				}
-				if job.Output.Type != "none" {
-					t.Errorf("Output type = %v, want none", job.Output.Type)
 				}
 			},
 		},

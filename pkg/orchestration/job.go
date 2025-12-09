@@ -32,20 +32,6 @@ const (
 	JobTypeGenerateRecipe   JobType = "generate-recipe"
 )
 
-// OutputConfig defines how job output should be handled.
-type OutputConfig struct {
-	Type    string       `yaml:"type"`    // "file", "commit", "none"
-	Message string       `yaml:"message"` // For commit type
-	Path    string       `yaml:"path"`    // For file type
-	Commit  CommitConfig `yaml:"commit"`  // For commit type
-}
-
-// CommitConfig defines commit creation settings.
-type CommitConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Message string `yaml:"message"`
-}
-
 // Job represents a single orchestration job.
 type Job struct {
 	// From frontmatter
@@ -64,7 +50,6 @@ type Job struct {
 	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
 	AgentContinue        bool         `yaml:"agent_continue,omitempty" json:"agent_continue,omitempty"`
 	PrependDependencies  bool         `yaml:"prepend_dependencies,omitempty" json:"prepend_dependencies,omitempty"`
-	Output               OutputConfig `yaml:"output" json:"output,omitempty"`
 	OnCompleteStatus     string       `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty"`
 	CreatedAt            time.Time    `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	UpdatedAt            time.Time    `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
@@ -97,7 +82,6 @@ type JobOptions struct {
 	DependsOn           []string
 	PromptSource        []string
 	Worktree            string
-	OutputType          string
 	Prompt              string
 	PrependDependencies bool
 }

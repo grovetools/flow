@@ -191,9 +191,6 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		SourceBlock: sourceBlockRef,
 		PromptBody:  "", // Empty - content will be resolved from source_block at runtime
 		DependsOn:   dependsOn,
-		Output: orchestration.OutputConfig{
-			Type: outputType,
-		},
 	}
 
 	// Apply explicit parameters (override plan defaults)

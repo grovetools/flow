@@ -807,9 +807,6 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 		jobType = "agent"
 	}
 
-	// Default output type
-	outputType := "file"
-
 	// The prompt body is simply the user's input. The executor will load the template.
 	promptBody := m.jobPrompt
 
@@ -826,9 +823,6 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 		DependsOn:  m.jobDependencies,
 		PromptBody: promptBody,
 		Template:   m.jobTemplate,
-		Output: orchestration.OutputConfig{
-			Type: outputType,
-		},
 	}
 }
 

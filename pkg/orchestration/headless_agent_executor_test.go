@@ -40,9 +40,6 @@ func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 		Status:   JobStatusPending,
 		Worktree: "test-worktree",
 		FilePath: filepath.Join(tmpDir, "test-job.md"),
-		Output: OutputConfig{
-			Type: "file",
-		},
 	}
 
 	// Create executor with mock

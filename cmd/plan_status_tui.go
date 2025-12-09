@@ -1988,9 +1988,6 @@ func createXmlPlanJob(plan *orchestration.Plan, selectedJob *orchestration.Job) 
 			Template:            "agent-xml",
 			PromptBody:          "generate a detailed plan",
 			PrependDependencies: true,
-			Output: orchestration.OutputConfig{
-				Type: "file",
-			},
 		}
 
 		// Add the job to the plan
@@ -2038,9 +2035,6 @@ func createXmlPlanJobWithDeps(plan *orchestration.Plan, selectedJobs []*orchestr
 			Template:            "agent-xml",
 			PromptBody:          "generate a detailed plan",
 			PrependDependencies: true,
-			Output: orchestration.OutputConfig{
-				Type: "file",
-			},
 		}
 
 		// Add the job to the plan
@@ -2070,9 +2064,6 @@ func createImplementationJob(plan *orchestration.Plan, selectedJob *orchestratio
 			Status:    orchestration.JobStatusPending,
 			DependsOn: []string{selectedJob.ID},
 			Worktree:  selectedJob.Worktree,
-			Output: orchestration.OutputConfig{
-				Type: "file",
-			},
 		}
 
 		// Add the job to the plan
@@ -2117,9 +2108,6 @@ func createImplementationJobWithDeps(plan *orchestration.Plan, selectedJobs []*o
 			Status:    orchestration.JobStatusPending,
 			DependsOn: depIDs,
 			Worktree:  worktree,
-			Output: orchestration.OutputConfig{
-				Type: "file",
-			},
 		}
 
 		// Add the job to the plan
@@ -2163,9 +2151,6 @@ func createXmlPlanJobWithTitle(plan *orchestration.Plan, selectedJobs []*orchest
 			Template:            "agent-xml",
 			PromptBody:          "generate a detailed plan",
 			PrependDependencies: true,
-			Output: orchestration.OutputConfig{
-				Type: "file",
-			},
 		}
 
 		// Add the job to the plan
@@ -2205,9 +2190,6 @@ func createImplementationJobWithTitle(plan *orchestration.Plan, selectedJobs []*
 			Status:    orchestration.JobStatusPending,
 			DependsOn: depIDs,
 			Worktree:  worktree,
-			Output: orchestration.OutputConfig{
-				Type: "file",
-			},
 		}
 
 		// Add the job to the plan
@@ -2249,9 +2231,6 @@ func createAgentFromChatJobWithTitle(plan *orchestration.Plan, selectedJobs []*o
 			Template:         "agent-from-chat",
 			GeneratePlanFrom: true,
 			PromptBody:       "Implement the detailed plan that will be generated from the dependency.",
-			Output: orchestration.OutputConfig{
-				Type: "commit",
-			},
 		}
 
 		// Add the job to the plan

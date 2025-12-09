@@ -8,8 +8,6 @@ status: pending
 type: oneshot
 prompt_source:
   - spec.md
-output:
-  type: file
 ---
 
 You are a senior software architect AI responsible for creating detailed, multi-step implementation plans.
@@ -33,7 +31,7 @@ id: {{ .ID }}
 title: "{{ .Title }}"
 status: pending
 type: {{ .Type }}
-plan_type: {{ .PlanType }}{{ if .DependsOn }}
+{{- if .DependsOn }}
 depends_on:{{ range .DependsOn }}
   - {{ . }}{{ end }}{{ end }}{{ if .PromptSource }}
 prompt_source:{{ range .PromptSource }}
@@ -44,8 +42,6 @@ worktree: {{ .Worktree }}{{ end }}{{ if .NoteRef }}
 note_ref: {{ .NoteRef }}{{ end }}{{ if .AgentContinue }}
 agent_continue: true{{ end }}{{ if .PrependDependencies }}
 prepend_dependencies: true{{ end }}
-output:
-  type: {{ .OutputType }}
 ---
 
 {{ .Prompt }}
@@ -59,8 +55,6 @@ status: pending
 type: oneshot%s
 prompt_source:
   - spec.md
-output:
-  type: file
 ---
 
 You are a senior software architect AI responsible for creating detailed, multi-step implementation plans.

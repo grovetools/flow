@@ -24,7 +24,6 @@ type PlanAddStepCmd struct {
 	PromptFile          string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
 	SourceFiles         []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
 	Prompt              string   `flag:"p" help:"Inline prompt text"`
-	OutputType          string   `flag:"" default:"file" help:"Output type: file, commit, or none"`
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`
@@ -198,9 +197,6 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			PromptSource:        relativeSourceFiles,
 			Model:               cmd.Model,
 			PrependDependencies: cmd.PrependDependencies,
-			Output: orchestration.OutputConfig{
-				Type: cmd.OutputType,
-			},
 		}
 
 		// Initialize empty prompt body - no comments needed since info is in frontmatter
@@ -311,9 +307,6 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		Model:               cmd.Model,
 		AgentContinue:       cmd.AgentContinue,
 		PrependDependencies: cmd.PrependDependencies,
-		Output: orchestration.OutputConfig{
-			Type: cmd.OutputType,
-		},
 	}
 
 	// Set worktree only if explicitly provided
@@ -454,11 +447,6 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if typ, ok := template.Frontmatter["type"].(string); ok {
 		job.Type = orchestration.JobType(typ)
 	}
-	if output, ok := template.Frontmatter["output"].(map[string]interface{}); ok {
-		if outputType, ok := output["type"].(string); ok {
-			job.Output.Type = outputType
-		}
-	}
 	if deps, ok := template.Frontmatter["depends_on"].([]interface{}); ok {
 		for _, dep := range deps {
 			if depStr, ok := dep.(string); ok {
@@ -489,9 +477,6 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// CLI flags override template defaults
 	if cmd.Type != "" && cmd.Type != "agent" { // "agent" is the default, so only override if explicitly set
 		job.Type = orchestration.JobType(cmd.Type)
-	}
-	if cmd.OutputType != "" && cmd.OutputType != "file" { // "file" is the default
-		job.Output.Type = cmd.OutputType
 	}
 	if len(cmd.DependsOn) > 0 {
 		job.DependsOn = cmd.DependsOn

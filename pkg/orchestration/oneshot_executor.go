@@ -330,12 +330,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return execErr
 	}
 
-	// Process output
-	if err := e.processOutput(response, job, plan); err != nil {
+	// Append output to job file
+	if err := e.appendToJobFile(response, job); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		updateJobFile(job)
-		execErr = fmt.Errorf("processing output: %w", err)
+		execErr = fmt.Errorf("appending output to job file: %w", err)
 		return execErr
 	}
 
@@ -602,57 +602,6 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		return prompt, promptSourceFiles, contextFiles, nil
 	}
 }
-
-// processOutput handles the job output based on configuration.
-func (e *OneShotExecutor) processOutput(output string, job *Job, plan *Plan) error {
-	switch job.Output.Type {
-	case "file":
-		return e.processFileOutput(output, job, plan)
-	case "commit":
-		return e.processCommitOutput(output, job, plan)
-	case "none":
-		// No output processing needed
-		return nil
-	default:
-		// Default to appending to job file
-		return e.appendToJobFile(output, job)
-	}
-}
-
-// processFileOutput writes output to a file.
-func (e *OneShotExecutor) processFileOutput(output string, job *Job, plan *Plan) error {
-	// If no path specified, append to job file
-	if job.Output.Path == "" {
-		return e.appendToJobFile(output, job)
-	}
-
-	// Write to specified path
-	outputPath := job.Output.Path
-	if !filepath.IsAbs(outputPath) {
-		outputPath = filepath.Join(plan.Directory, outputPath)
-	}
-
-	// Create directory if needed
-	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("creating output directory: %w", err)
-	}
-
-	// Write file
-	if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
-		return fmt.Errorf("writing output file: %w", err)
-	}
-
-	return nil
-}
-
-// processCommitOutput stages changes and creates a commit.
-func (e *OneShotExecutor) processCommitOutput(output string, job *Job, plan *Plan) error {
-	// TODO: Implement git operations
-	// For now, just write to a file
-	return e.processFileOutput(output, job, plan)
-}
-
 
 // appendToJobFile appends output to the job file.
 func (e *OneShotExecutor) appendToJobFile(output string, job *Job) error {
