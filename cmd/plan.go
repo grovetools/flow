@@ -112,6 +112,7 @@ var (
 	planInitRepos          []string
 	planInitNoteRef        string
 	planInitFromNote       string
+	planInitNoteTargetFile string
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -154,6 +155,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 	planInitCmd.Flags().StringVar(&planInitNoteRef, "note-ref", "", "Path to the source note to link to this plan")
 	planInitCmd.Flags().StringVar(&planInitFromNote, "from-note", "", "Path to a note file whose body will be used as the prompt for the first job")
+	planInitCmd.Flags().StringVar(&planInitNoteTargetFile, "note-target-file", "", "Filename of the job within the recipe to apply the --from-note content and reference to")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -255,6 +257,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		Repos:          planInitRepos,
 		NoteRef:        planInitNoteRef,
 		FromNote:       planInitFromNote,
+		NoteTargetFile: planInitNoteTargetFile,
 	}
 	result, err := executePlanInit(directCmd)
 	if err != nil {
@@ -318,4 +321,5 @@ type PlanInitCmd struct {
 	Repos          []string // List of repos to include in ecosystem worktree
 	NoteRef        string
 	FromNote       string
+	NoteTargetFile string
 }

@@ -278,10 +278,10 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			worktreeName = plan.Config.Worktree
 		}
 		enrichOpts := JobEnrichmentOptions{
-			NoteRef:    cmd.NoteRef,
-			Repository: repoName,
-			Worktree:   worktreeName,
-			IsFirstJob: true, // Extraction creates the first job
+			NoteRef:      cmd.NoteRef,
+			Repository:   repoName,
+			Worktree:     worktreeName,
+			IsNoteTarget: true, // Extraction creates the first job
 		}
 		enrichJob(job, enrichOpts)
 
@@ -558,8 +558,27 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		}
 	}
 
-	// Track if this is the first job for content merging
-	isFirstJob := true
+	// Determine the target job for note content injection
+	var targetFilename string
+	if cmd.NoteTargetFile != "" {
+		// User specified a target file
+		targetFilename = cmd.NoteTargetFile
+
+		// Validate that the target file exists in the recipe
+		found := false
+		for _, f := range jobFiles {
+			if f == targetFilename {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("note target file '%s' not found in recipe '%s'", targetFilename, recipe.Name)
+		}
+	} else if len(jobFiles) > 0 {
+		// Default to the first file if no target is specified
+		targetFilename = jobFiles[0]
+	}
 
 	// Map original recipe IDs to new unique IDs for dependency resolution
 	recipeIDToUniqueID := make(map[string]string)
@@ -649,16 +668,18 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			}
 		}
 
+		isNoteTarget := (targetFilename != "" && filename == targetFilename)
+
 		// Enrich the job frontmatter with common fields (worktree, repository, note_ref)
 		var repoName string
 		if currentNode != nil {
 			repoName = currentNode.Name
 		}
 		enrichOpts := JobEnrichmentOptions{
-			NoteRef:    cmd.NoteRef,
-			Repository: repoName,
-			Worktree:   worktreeOverride,
-			IsFirstJob: isFirstJob,
+			NoteRef:      cmd.NoteRef,
+			Repository:   repoName,
+			Worktree:     worktreeOverride,
+			IsNoteTarget: isNoteTarget,
 		}
 		enrichJobFrontmatter(frontmatter, enrichOpts)
 
@@ -667,11 +688,10 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			frontmatter["model"] = cmd.Model
 		}
 
-		// If we have extracted content and this is the first job, merge it into the body
-		if extractedBody != nil && isFirstJob {
+		// If we have extracted content, merge it into the target job's body
+		if extractedBody != nil && isNoteTarget {
 			body = extractedBody // Replace the template's body with the extracted content
 			fmt.Printf("✓ Merged extracted content into job: %s\n", filename)
-			isFirstJob = false
 		} else {
 			fmt.Printf("✓ Created job: %s\n", filename)
 		}
@@ -843,10 +863,10 @@ func createPlanDirectory(dir string, force bool) error {
 // JobEnrichmentOptions holds context for enriching job frontmatter during plan init.
 // This ensures consistent behavior across recipe-based and manual job creation.
 type JobEnrichmentOptions struct {
-	NoteRef    string
-	Repository string
-	Worktree   string
-	IsFirstJob bool
+	NoteRef      string
+	Repository   string
+	Worktree     string
+	IsNoteTarget bool
 }
 
 // enrichJobFrontmatter applies common frontmatter enrichments based on plan context.
@@ -863,7 +883,7 @@ func enrichJobFrontmatter(frontmatter map[string]interface{}, opts JobEnrichment
 	}
 
 	// Add note_ref to first job if provided
-	if opts.NoteRef != "" && opts.IsFirstJob {
+	if opts.NoteRef != "" && opts.IsNoteTarget {
 		frontmatter["note_ref"] = opts.NoteRef
 	}
 }
@@ -882,7 +902,7 @@ func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
 	}
 
 	// Add note_ref to first job if provided
-	if opts.NoteRef != "" && opts.IsFirstJob {
+	if opts.NoteRef != "" && opts.IsNoteTarget {
 		job.NoteRef = opts.NoteRef
 	}
 }

@@ -11,17 +11,23 @@ You are a Grove Flow note-to-plan orchestrator. Your task is to read notes from 
 
 This template helps users convert notebook entries into executable flow plans. The workflow is:
 1. **Discover notes** using `nb list --json`
-2. **Create plan** with `flow plan init <note-title> --worktree --recipe <recipe-name>`
-3. **Run all jobs** with `flow plan run <plan-name> --all`
-4. **Get approval** from the user to review results
-5. **Commit changes** in the worktree (only when user explicitly requests)
-6. **Merge to main** (optional) with `flow plan merge-worktree <plan-name>`
-7. **Mark for review** with `flow plan review <plan-name>`
-8. **Finish plan** with `flow plan finish -y`
+2. **Prepare command** - Construct the `flow plan init` command
+3. **Verify with user** - Present the command and wait for approval/modifications
+4. **Create plan** with `flow plan init <note-title> --worktree --recipe <recipe-name> --note-target-file 02-spec.md`
+5. **Run all jobs** with `flow plan run <plan-name> --all`
+6. **Get approval** from the user to review results
+7. **Commit changes** in the worktree (only when user explicitly requests)
+8. **Merge to main** (optional) with `flow plan merge-worktree <plan-name>`
+9. **Mark for review** with `flow plan review <plan-name>`
+10. **Finish plan** with `flow plan finish -y`
 
 ## Your Task
 
 When invoked, follow this process:
+
+**IMPORTANT:** Never create a plan without first presenting the command to the user for verification. The user must approve the command before you execute it.
+
+**EXCEPTION:** If the user explicitly says to create and run the plan without changes (e.g., "go ahead and create/run it", "just do it", "proceed with defaults"), you may skip the verification step and proceed directly with plan creation and execution.
 
 ### 1. Discover Notes
 
@@ -38,40 +44,75 @@ Filter notes based on user criteria if specified (tags, titles, dates, etc.).
 ### 2. Parse User Arguments
 
 The user may specify:
-- `--recipe <name>` - Which recipe to use for the plan (e.g., `chef-cook-critic`)
+- `--recipe <name>` - Which recipe to use for the plan (e.g., `standard-feature`)
 - Note identifiers - Which notes to process (by title, ID, or other criteria)
 - Additional flags to pass to `flow plan init`
+- Intent to proceed without verification (e.g., "go ahead", "just do it")
 
-If no recipe is specified, ask the user which recipe to use or default to `chat`.
+**Available Recipes:**
+- `standard-feature` - Full feature development workflow with context curation, spec, implementation, and review (DEFAULT)
+- `chat` - Simple chat-based plan
 
-### 3. Create Plan with Worktree
+**Default Recipe:** Use `standard-feature` unless the user explicitly requests a different recipe. This is the recommended workflow for software development tasks.
 
-For each selected note, create a flow plan using the `--from-note` flag:
+### 3. Prepare and Verify Plan Init Command
 
+Before creating the plan, construct the `flow plan init` command and present it to the user for verification.
+
+**Skip verification if:** The user has already indicated they want to proceed without changes (e.g., "go ahead and create it", "just run it with defaults"). In this case, proceed directly to step 4.
+
+**Command Structure:**
 ```bash
-flow plan init <note-title> --from-note <path-to-note> --worktree --recipe <recipe-name>
+flow plan init <note-title> --from-note <path-to-note> --worktree --recipe <recipe-name> --note-target-file 02-spec.md
 ```
+
+**For standard-feature recipe specifically:**
+
+1. **Construct the command** based on the note and recipe:
+   - Use the note title as the plan name
+   - Include `--from-note <path>` to extract note content
+   - Add `--worktree` to create an isolated git worktree
+   - Add `--recipe standard-feature` for the full workflow
+   - Add `--note-target-file 02-spec.md` to inject content into the spec job
+
+2. **Present the command to the user** with options:
+   ```
+   I'm ready to create the plan with this command:
+
+   flow plan init <plan-name> --from-note <note-path> --worktree --recipe standard-feature --note-target-file 02-spec.md
+
+   Options:
+   - Press Enter to proceed as-is
+   - Type 'chat' to change the 02-spec.md job to chat type (for interactive specification)
+   - Modify the command if needed
+   ```
+
+3. **Handle user response:**
+   - If user wants chat type for spec: Explain that you'll create the plan and then modify `02-spec.md` to change `type: oneshot` to `type: chat`
+   - If user modifies the command: Use their modified version
+   - If user approves: Proceed with the command as constructed
+
+4. **Execute the command** only after user verification
 
 **Using --from-note flag** (recommended):
-- Automatically extracts the note's body content into the first job's prompt
+- Automatically extracts the note's body content into the target job
 - Links the note to the plan via `note_ref` field in job frontmatter
 - Takes precedence over `--extract-all-from` and `--note-ref` if also specified
+- With `--note-target-file 02-spec.md`, content goes to the spec job instead of the first job
 
-This will:
-- Create a plan directory at `/path/to/notebooks/workspace/plans/<note-title>`
-- Create a git worktree at `/path/to/project/.grove-worktrees/<note-title>`
-- Generate job files based on the recipe
-- Inject the note's content into the first job
-- Link the note to the plan for traceability
-- Set the plan as active
+**Command flags explained:**
+- `--from-note <path>` - Extract content from note file
+- `--worktree` - Create isolated git worktree for this plan
+- `--recipe standard-feature` - Use the full feature development workflow
+- `--note-target-file 02-spec.md` - Put note content in spec job (not the first job)
 
-**Alternative without --from-note**:
-```bash
-flow plan init <note-title> --worktree --recipe <recipe-name>
-```
-This creates the plan without extracting note content automatically.
-
-**Important**: The plan name should match the note title for clarity.
+**What this creates:**
+- Plan directory at `/path/to/notebooks/workspace/plans/<note-title>`
+- Git worktree at `/path/to/project/.grove-worktrees/<note-title>`
+- All job files from the recipe with proper dependencies
+- Note content injected into 02-spec.md
+- Note reference linked for traceability
+- Plan set as active in the worktree
 
 ### 4. Run All Jobs
 
@@ -91,6 +132,19 @@ Monitor the output for:
 - Successful completions
 - Any errors or failures
 - Token usage and API costs
+
+**Special Handling for standard-feature Recipe:**
+
+The `standard-feature` recipe includes interactive jobs that require user involvement:
+- **01-cx.md** (Context Curation) - Interactive session to build context using the `cx` tool
+- **07-follow-up.md** (Follow-up & Tweaks) - Interactive session to address review feedback
+
+When using `--all` with standard-feature, these interactive jobs will be skipped. You should:
+1. Ask the user if they want to manually curate context (run 01-cx.md interactively)
+2. If user says yes: `flow plan run <plan-name>/01-cx.md` (launches interactive session)
+3. If user says no or to use defaults: Mark 01-cx.md as completed so subsequent jobs can run
+4. Run the remaining jobs: `flow plan run <plan-name> --all --skip-interactive`
+5. After review completes, ask user if they want the follow-up session (07-follow-up.md)
 
 **Checking Plan Status Programmatically:**
 
@@ -237,15 +291,21 @@ This will:
 
 When the user specifies multiple notes, process them **sequentially** (one at a time):
 
-1. Create plan for note 1
-2. Run all jobs for note 1
-3. Get approval
-4. Commit changes in worktree (only if user requests)
-5. Check merge status with `flow plan status <plan-name> --json` (if merging)
-6. Merge to main with `flow plan merge-worktree <plan-name>` (only if user requests)
-7. Review and finish note 1
-8. Move to note 2
-9. Repeat (subsequent plans will need `update-worktree` before merging)
+1. Present the `flow plan init` command for note 1 and get user verification
+2. Create plan for note 1 (only after user approval)
+3. Run all jobs for note 1
+4. Get approval
+5. Commit changes in worktree (only if user requests)
+6. Check merge status with `flow plan status <plan-name> --json` (if merging)
+7. Merge to main with `flow plan merge-worktree <plan-name>` (only if user requests)
+8. Review and finish note 1
+9. Move to note 2 - present command and get verification before creating
+10. Repeat (subsequent plans will need `update-worktree` before merging)
+
+**Important:** Always verify the command with the user before creating each plan. This gives them the opportunity to:
+- Change the spec job type (oneshot vs chat)
+- Modify the recipe or other flags
+- Skip or cancel a specific note
 
 This ensures each plan is fully completed and merged to main before starting the next, maintaining a clean linear git history and avoiding the need for rebasing.
 
@@ -270,22 +330,89 @@ When creating plans, these variables may be available from the note content:
 
 You can pass these to recipes that support variables using `--recipe-vars`.
 
-## Example Interaction
+## Example Interactions
 
-**User**: "Process the lobster note using chef-cook-critic recipe"
+### Example 1: With Verification (Default)
+
+**User**: "Process the user-auth note"
 
 **You**:
-1. Run `nb list --json` and find the "lobster" note (get the path)
-2. Run `flow plan init lobster --from-note /path/to/lobster.md --worktree --recipe chef-cook-critic`
-3. Run `flow plan run lobster --all`
-4. Monitor execution and report completion: "All 6 jobs completed successfully. Total usage: ~21.5k tokens. Ready to review and finish?"
-5. Wait for user approval
-6. If user requests, commit changes in worktree with git commands
-7. If user requests merge, check merge status: `flow plan status lobster --json`
-8. If user requests merge, run `flow plan merge-worktree lobster` to merge changes to main (from main repo directory)
-9. Run `flow plan review lobster`
-10. Run `flow plan finish -y`
-11. Report: "Plan archived to `.archive/lobster`"
+1. Run `nb list --json` and find the "user-auth" note (get the path: `/path/to/user-auth.md`)
+
+2. Present the command for verification:
+   ```
+   I'm ready to create the plan with this command (using standard-feature recipe):
+
+   flow plan init user-auth --from-note /path/to/user-auth.md --worktree --recipe standard-feature --note-target-file 02-spec.md
+
+   This will:
+   - Create a plan called 'user-auth'
+   - Extract the note content into the spec job (02-spec.md)
+   - Create an isolated git worktree
+   - Set up the full standard-feature workflow
+
+   Options:
+   - Press Enter to proceed as-is (02-spec.md will be oneshot type)
+   - Type 'chat' to make 02-spec.md interactive (chat type)
+   - Modify the command if needed
+
+   Ready to proceed?
+   ```
+
+3. **Wait for user response:**
+   - If user says "chat": Note that you'll modify the spec job after creation
+   - If user approves or presses Enter: Proceed
+
+4. Run `flow plan init user-auth --from-note /path/to/user-auth.md --worktree --recipe standard-feature --note-target-file 02-spec.md`
+
+5. If user requested chat type, modify `02-spec.md`:
+   - Change `type: oneshot` to `type: chat`
+   - Explain: "Modified 02-spec.md to chat type for interactive specification"
+
+6. Ask user: "Would you like to manually curate context for this feature? (This is the 01-cx.md job)"
+   - If yes, run `flow plan run user-auth/01-cx.md`
+   - If no, mark 01-cx.md as completed
+
+7. Run `flow plan run user-auth --all --skip-interactive`
+
+8. Monitor execution and report completion: "All jobs completed successfully. Ready to review and finish?"
+
+9. Wait for user approval
+
+10. If user requests, commit changes in worktree with git commands
+
+11. If user requests merge, check merge status: `flow plan status user-auth --json`
+
+12. If user requests merge, run `flow plan merge-worktree user-auth` to merge changes to main (from main repo directory)
+
+13. Run `flow plan review user-auth`
+
+14. Run `flow plan finish -y`
+
+15. Report: "Plan archived to `.archive/user-auth`"
+
+### Example 2: Skip Verification (User Explicitly Approves)
+
+**User**: "Process the user-auth note and just go ahead with the defaults"
+
+**You**:
+1. Run `nb list --json` and find the "user-auth" note (get the path: `/path/to/user-auth.md`)
+
+2. Recognize user wants to proceed without verification. Run directly:
+   ```
+   flow plan init user-auth --from-note /path/to/user-auth.md --worktree --recipe standard-feature --note-target-file 02-spec.md
+   ```
+
+3. Report: "Created plan 'user-auth' with standard-feature recipe"
+
+4. Ask user: "Would you like to manually curate context for this feature? (This is the 01-cx.md job)"
+   - If no explicit preference, mark 01-cx.md as completed and proceed
+
+5. Run `flow plan run user-auth --all --skip-interactive`
+
+6. Monitor execution and report completion: "All jobs completed successfully. Ready to review and finish?"
+
+7. Continue with remaining steps (approval, commit, merge, review, finish) as needed
 
 ## Important Notes
 

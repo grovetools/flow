@@ -85,24 +85,34 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				prependDep bool
 				gitChanges bool
 			}{
-				"01-spec.md": {
-					jobType: orchestration.JobTypeOneshot,
+				"01-cx.md": {
+					jobType:  orchestration.JobTypeInteractiveAgent,
+					template: "cx-builder",
 				},
-				"02-generate-plan.md": {
+				"02-spec.md": {
+					jobType:   orchestration.JobTypeOneshot,
+					template:  "chat",
+					dependsOn: []string{"01-cx.md"},
+				},
+				"03-generate-plan.md": {
 					jobType:    orchestration.JobTypeOneshot,
 					template:   "agent-xml",
-					dependsOn:  []string{"01-spec.md"},
+					dependsOn:  []string{"02-spec.md"},
 					prependDep: true,
 				},
-				"03-implement.md": {
+				"04-implement.md": {
 					jobType:   orchestration.JobTypeHeadlessAgent,
-					dependsOn: []string{"02-generate-plan.md"},
+					dependsOn: []string{"03-generate-plan.md"},
 				},
-				"05-review.md": {
+				"06-review.md": {
 					jobType:    orchestration.JobTypeOneshot,
-					dependsOn:  []string{"03-implement.md"},
+					dependsOn:  []string{"04-implement.md"},
 					prependDep: true,
 					gitChanges: true,
+				},
+				"07-follow-up.md": {
+					jobType:   orchestration.JobTypeInteractiveAgent,
+					dependsOn: []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "06-review.md"},
 				},
 			}
 
@@ -162,9 +172,11 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				jobFile  string
 				expected []string
 			}{
-				{"02-generate-plan.md", []string{"01-spec.md"}},
-				{"03-implement.md", []string{"02-generate-plan.md"}},
-				{"05-review.md", []string{"03-implement.md"}},
+				{"02-spec.md", []string{"01-cx.md"}},
+				{"03-generate-plan.md", []string{"02-spec.md"}},
+				{"04-implement.md", []string{"03-generate-plan.md"}},
+				{"06-review.md", []string{"04-implement.md"}},
+				{"07-follow-up.md", []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "06-review.md"}},
 			}
 
 			for _, tc := range testCases {
@@ -191,7 +203,18 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 		harness.NewStep("Run spec job and verify briefing file", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
-			specJobPath := filepath.Join(planPath, "01-spec.md")
+			specJobPath := filepath.Join(planPath, "02-spec.md")
+			cxJobPath := filepath.Join(planPath, "01-cx.md")
+
+			// Mark the cx job as completed so spec can run
+			content, err := fs.ReadString(cxJobPath)
+			if err != nil {
+				return fmt.Errorf("reading cx job: %w", err)
+			}
+			content = strings.Replace(content, "status: pending", "status: completed", 1)
+			if err := fs.WriteString(cxJobPath, content); err != nil {
+				return fmt.Errorf("updating cx job: %w", err)
+			}
 
 			// Run the spec job with mock model
 			cmd := ctx.Bin("plan", "run", specJobPath, "--model", "mock", "-y")
@@ -231,8 +254,8 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 		harness.NewStep("Add spec content and run generate-plan job", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
-			specJobPath := filepath.Join(planPath, "01-spec.md")
-			planJobPath := filepath.Join(planPath, "02-generate-plan.md")
+			specJobPath := filepath.Join(planPath, "02-spec.md")
+			planJobPath := filepath.Join(planPath, "03-generate-plan.md")
 
 			// Add some spec content to the spec job
 			specContent := `
@@ -288,7 +311,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			if !strings.Contains(briefingContent, "<prepended_dependency") {
 				return fmt.Errorf("briefing file missing <prepended_dependency> tag")
 			}
-			if !strings.Contains(briefingContent, "01-spec.md") {
+			if !strings.Contains(briefingContent, "02-spec.md") {
 				return fmt.Errorf("briefing file missing reference to spec dependency")
 			}
 			if !strings.Contains(briefingContent, "User Stories") {
@@ -404,11 +427,11 @@ func CheckPasswordHash(password, hash string) bool {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "add-user-auth")
-			reviewJobPath := filepath.Join(planPath, "05-review.md")
+			reviewJobPath := filepath.Join(planPath, "06-review.md")
 
 			// Mark the generate-plan and implement jobs as completed so review can run
-			planJobPath := filepath.Join(planPath, "02-generate-plan.md")
-			implementJobPath := filepath.Join(planPath, "03-implement.md")
+			planJobPath := filepath.Join(planPath, "03-generate-plan.md")
+			implementJobPath := filepath.Join(planPath, "04-implement.md")
 
 			for _, jobPath := range []string{planJobPath, implementJobPath} {
 				content, err := fs.ReadString(jobPath)

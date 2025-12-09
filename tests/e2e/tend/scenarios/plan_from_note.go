@@ -401,6 +401,112 @@ Different reference note.
 			return nil
 		}),
 
+		harness.NewStep("Test --note-target-file with recipe", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			notebooksRoot := ctx.GetString("notebooks_root")
+			notePath := ctx.GetString("note_path")
+
+			cmd := ctx.Bin("plan", "init", "target-file-test",
+				"--from-note", notePath,
+				"--recipe", "standard-feature",
+				"--note-target-file", "02-spec.md",
+				"--worktree")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("plan init with --note-target-file failed: %w", err)
+			}
+
+			targetPlanPath := filepath.Join(notebooksRoot, "workspaces", "from-note-project", "plans", "target-file-test")
+			ctx.Set("target_plan_path", targetPlanPath)
+
+			return fs.AssertExists(targetPlanPath)
+		}),
+
+		harness.NewStep("Verify note content is in target file, not first file", func(ctx *harness.Context) error {
+			targetPlanPath := ctx.GetString("target_plan_path")
+
+			// Read 01-cx.md (first job) - should NOT have the note content
+			firstJobPath := filepath.Join(targetPlanPath, "01-cx.md")
+			firstJobContent, err := fs.ReadString(firstJobPath)
+			if err != nil {
+				return err
+			}
+
+			// First job should not contain the extracted note content
+			if strings.Contains(firstJobContent, "Feature Request: Add User Dashboard") {
+				return fmt.Errorf("first job (01-cx.md) should not contain note content when --note-target-file is 02-spec.md")
+			}
+
+			// Read 02-spec.md (target job) - should have the note content
+			specJobPath := filepath.Join(targetPlanPath, "02-spec.md")
+			specJobContent, err := fs.ReadString(specJobPath)
+			if err != nil {
+				return err
+			}
+
+			// Target job should contain the extracted note content
+			if !strings.Contains(specJobContent, "Feature Request: Add User Dashboard") {
+				return fmt.Errorf("target job (02-spec.md) should contain note content")
+			}
+
+			if !strings.Contains(specJobContent, "User profile display") {
+				return fmt.Errorf("target job should contain feature details from note")
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Verify note_ref is in target file", func(ctx *harness.Context) error {
+			targetPlanPath := ctx.GetString("target_plan_path")
+			notePath := ctx.GetString("note_path")
+
+			// Read 02-spec.md (target job)
+			specJobPath := filepath.Join(targetPlanPath, "02-spec.md")
+			specJobContent, err := fs.ReadString(specJobPath)
+			if err != nil {
+				return err
+			}
+
+			// Check for note_ref field in frontmatter
+			if !strings.Contains(specJobContent, "note_ref:") {
+				return fmt.Errorf("target job frontmatter missing note_ref field")
+			}
+
+			// Verify it references the correct note path
+			if !strings.Contains(specJobContent, notePath) {
+				return fmt.Errorf("note_ref does not reference the correct note path")
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Test error: invalid note-target-file", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			notePath := ctx.GetString("note_path")
+
+			cmd := ctx.Bin("plan", "init", "invalid-target",
+				"--from-note", notePath,
+				"--recipe", "standard-feature",
+				"--note-target-file", "99-nonexistent.md",
+				"--worktree")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+			// Should fail with error message about target file not found
+			if err := result.AssertFailure(); err != nil {
+				return err
+			}
+
+			if !strings.Contains(result.Stderr, "not found in recipe") {
+				return fmt.Errorf("expected error message about target file not found in recipe")
+			}
+
+			return nil
+		}),
+
 		harness.NewStep("Test plan init without directory uses TUI (skipped in test)", func(ctx *harness.Context) error {
 			// When no directory is provided and in TTY mode, it would launch TUI
 			// We can't easily test interactive TUI in automated tests

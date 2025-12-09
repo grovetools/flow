@@ -4,7 +4,7 @@ title: "Code Review for {{ .PlanName }}"
 status: pending
 type: oneshot
 depends_on:
-  - 03-implement.md
+  - 04-implement.md
 prepend_dependencies: true
 git_changes: true
 ---

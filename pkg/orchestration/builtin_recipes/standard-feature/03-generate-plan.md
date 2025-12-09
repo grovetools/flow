@@ -5,7 +5,7 @@ status: pending
 type: oneshot
 template: agent-xml
 depends_on:
-  - 01-spec.md
+  - 02-spec.md
 prepend_dependencies: true
 output:
   type: file

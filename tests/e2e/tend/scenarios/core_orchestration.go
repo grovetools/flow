@@ -45,7 +45,7 @@ var CoreOrchestrationScenario = harness.NewScenario(
 			if err := fs.AssertExists(filepath.Join(planPath, ".grove-plan.yml")); err != nil {
 				return err
 			}
-			return fs.AssertExists(filepath.Join(planPath, "01-spec.md"))
+			return fs.AssertExists(filepath.Join(planPath, "01-cx.md"))
 		}),
 
 		harness.NewStep("Verify plan has jobs from recipe", func(ctx *harness.Context) error {
@@ -53,11 +53,12 @@ var CoreOrchestrationScenario = harness.NewScenario(
 
 			// Verify that jobs from the recipe were created
 			expectedJobs := []string{
-				"01-spec.md",
-				"02-generate-plan.md",
-				"03-implement.md",
-				"04-git-status.md",
+				"01-cx.md",
+				"02-spec.md",
+				"03-generate-plan.md",
+				"04-implement.md",
 				"06-review.md",
+				"07-follow-up.md",
 			}
 
 			for _, jobFile := range expectedJobs {

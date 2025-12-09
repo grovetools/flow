@@ -3,6 +3,9 @@ id: spec
 title: "Specification for {{ .PlanName }}"
 status: pending
 type: oneshot
+template: chat
+depends_on:
+  - 01-cx.md
 output:
   type: file
 ---
