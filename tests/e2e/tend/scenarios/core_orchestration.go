@@ -54,10 +54,10 @@ var CoreOrchestrationScenario = harness.NewScenario(
 			// Verify that jobs from the recipe were created
 			expectedJobs := []string{
 				"01-spec.md",
-				"02-implement.md",
-				"03-git-changes.md",
+				"02-generate-plan.md",
+				"03-implement.md",
 				"04-git-status.md",
-				"05-review.md",
+				"06-review.md",
 			}
 
 			for _, jobFile := range expectedJobs {
