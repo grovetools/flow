@@ -83,6 +83,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				template   string
 				dependsOn  []string
 				prependDep bool
+				gitChanges bool
 			}{
 				"01-spec.md": {
 					jobType: orchestration.JobTypeOneshot,
@@ -97,14 +98,11 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 					jobType:   orchestration.JobTypeHeadlessAgent,
 					dependsOn: []string{"02-generate-plan.md"},
 				},
-				"04-git-status.md": {
-					jobType:   orchestration.JobTypeShell,
-					dependsOn: []string{"03-implement.md"},
-				},
-				"06-review.md": {
+				"05-review.md": {
 					jobType:    orchestration.JobTypeOneshot,
-					dependsOn:  []string{"03-implement.md", "04-git-status.md"},
+					dependsOn:  []string{"03-implement.md"},
 					prependDep: true,
+					gitChanges: true,
 				},
 			}
 
@@ -146,32 +144,10 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				if expected.prependDep && !job.PrependDependencies {
 					return fmt.Errorf("job %s: expected prepend_dependencies to be true", jobFile)
 				}
-			}
 
-			return nil
-		}),
-
-		harness.NewStep("Verify git-status job shell script content", func(ctx *harness.Context) error {
-			planPath := ctx.GetString("plan_path")
-			gitStatusJobPath := filepath.Join(planPath, "04-git-status.md")
-
-			content, err := fs.ReadString(gitStatusJobPath)
-			if err != nil {
-				return fmt.Errorf("reading git-status job: %w", err)
-			}
-
-			// Verify it contains the comprehensive git commands
-			expectedContent := []string{
-				"git diff main...HEAD",
-				"git diff",
-				"git diff --cached",
-				"for file in $(git ls-files --others --exclude-standard)",
-				"cat \"$file\"",
-			}
-
-			for _, expected := range expectedContent {
-				if !strings.Contains(content, expected) {
-					return fmt.Errorf("git-status job missing expected content: %s", expected)
+				// Verify git_changes
+				if expected.gitChanges && !job.GitChanges {
+					return fmt.Errorf("job %s: expected git_changes to be true", jobFile)
 				}
 			}
 
@@ -188,8 +164,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			}{
 				{"02-generate-plan.md", []string{"01-spec.md"}},
 				{"03-implement.md", []string{"02-generate-plan.md"}},
-				{"04-git-status.md", []string{"03-implement.md"}},
-				{"06-review.md", []string{"03-implement.md", "04-git-status.md"}},
+				{"05-review.md", []string{"03-implement.md"}},
 			}
 
 			for _, tc := range testCases {
@@ -425,44 +400,29 @@ func CheckPasswordHash(password, hash string) bool {
 			return nil
 		}),
 
-		harness.NewStep("Run git-status job and verify it captures changes", func(ctx *harness.Context) error {
+		harness.NewStep("Run review job and verify briefing contains git changes", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "add-user-auth")
-			gitStatusJobPath := filepath.Join(planPath, "04-git-status.md")
+			reviewJobPath := filepath.Join(planPath, "05-review.md")
 
-			// Mark the generate-plan and implement jobs as completed so git-status can run
+			// Mark the generate-plan and implement jobs as completed so review can run
 			planJobPath := filepath.Join(planPath, "02-generate-plan.md")
 			implementJobPath := filepath.Join(planPath, "03-implement.md")
 
-			// Update plan job to completed
-			planContent, err := fs.ReadString(planJobPath)
-			if err != nil {
-				return fmt.Errorf("reading plan job: %w", err)
-			}
-			planContent = strings.Replace(planContent, "status: completed", "status: completed", 1)
-			if err := fs.WriteString(planJobPath, planContent); err != nil {
-				return fmt.Errorf("updating plan job: %w", err)
-			}
-
-			// Mark implement job as completed
-			implementContent := `---
-id: implement-add-user-auth
-title: "Implement add-user-auth"
-status: completed
-type: headless_agent
-depends_on:
-  - 02-generate-plan.md
----
-
-Implementation completed.
-`
-			if err := fs.WriteString(implementJobPath, implementContent); err != nil {
-				return fmt.Errorf("updating implement job: %w", err)
+			for _, jobPath := range []string{planJobPath, implementJobPath} {
+				content, err := fs.ReadString(jobPath)
+				if err != nil {
+					return fmt.Errorf("reading job %s: %w", jobPath, err)
+				}
+				content = strings.Replace(content, "status: pending", "status: completed", 1)
+				if err := fs.WriteString(jobPath, content); err != nil {
+					return fmt.Errorf("updating job %s: %w", jobPath, err)
+				}
 			}
 
-			// Run the git-status job from the worktree directory
-			cmd := ctx.Bin("plan", "run", gitStatusJobPath, "-y")
+			// Run the review job from the worktree directory
+			cmd := ctx.Bin("plan", "run", reviewJobPath, "-y", "--model", "mock")
 			cmd.Dir(worktreePath)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -470,67 +430,60 @@ Implementation completed.
 				return err
 			}
 
-			// Verify the git-status job output contains our changes
-			gitStatusContent, err := fs.ReadString(gitStatusJobPath)
+			// Verify briefing file was created
+			artifactsDir := filepath.Join(planPath, ".artifacts")
+			// The title is "Code Review for {{ .PlanName }}", so the briefing file will be "briefing-code-review-for-*.xml"
+			briefingPattern := filepath.Join(artifactsDir, "briefing-code-review-for-*.xml")
+			briefingFiles, err := filepath.Glob(briefingPattern)
 			if err != nil {
-				return fmt.Errorf("reading git-status job: %w", err)
+				return fmt.Errorf("checking for briefing files: %w", err)
+			}
+			if len(briefingFiles) == 0 {
+				return fmt.Errorf("expected briefing file for review job")
+			}
+			briefingFile := briefingFiles[0]
+
+			briefingContent, err := fs.ReadString(briefingFile)
+			if err != nil {
+				return fmt.Errorf("reading briefing file: %w", err)
 			}
 
-			// Should have an output section
-			if !strings.Contains(gitStatusContent, "## Output") {
-				return fmt.Errorf("git-status job missing output section")
+			// Verify the briefing contains the git_changes block
+			if !strings.Contains(briefingContent, "<git_changes>") {
+				return fmt.Errorf("briefing file missing <git_changes> block")
 			}
 
-			// Should have section headers
-			if !strings.Contains(gitStatusContent, "=== Committed changes (diff from main) ===") {
-				return fmt.Errorf("git-status output missing committed changes section")
+			// Verify it contains content from each category of change
+			// 1. Committed changes (models.go)
+			if !strings.Contains(briefingContent, `<git_change type="committed"`) {
+				return fmt.Errorf("briefing file missing committed changes section")
 			}
-			if !strings.Contains(gitStatusContent, "=== Uncommitted changes (working directory) ===") {
-				return fmt.Errorf("git-status output missing uncommitted changes section")
-			}
-			if !strings.Contains(gitStatusContent, "=== Staged changes (index) ===") {
-				return fmt.Errorf("git-status output missing staged changes section")
-			}
-			if !strings.Contains(gitStatusContent, "=== New/untracked files (full content) ===") {
-				return fmt.Errorf("git-status output missing new files section")
+			if !strings.Contains(briefingContent, "type User struct") {
+				return fmt.Errorf("briefing file missing committed changes for models.go")
 			}
 
-			// 1. Verify committed changes (models.go)
-			if !strings.Contains(gitStatusContent, "models.go") {
-				return fmt.Errorf("git-status output missing committed file models.go")
+			// 2. Staged changes (handlers.go)
+			if !strings.Contains(briefingContent, `<git_change type="staged"`) {
+				return fmt.Errorf("briefing file missing staged changes section")
 			}
-			if !strings.Contains(gitStatusContent, "type User struct") {
-				return fmt.Errorf("git-status output missing models.go content")
-			}
-
-			// 2. Verify staged changes (handlers.go)
-			if !strings.Contains(gitStatusContent, "handlers.go") {
-				return fmt.Errorf("git-status output missing staged file handlers.go")
-			}
-			if !strings.Contains(gitStatusContent, "LoginHandler") {
-				return fmt.Errorf("git-status output missing handlers.go content")
+			if !strings.Contains(briefingContent, "LoginHandler") {
+				return fmt.Errorf("briefing file missing staged changes for handlers.go")
 			}
 
-			// 3. Verify uncommitted changes (README.md)
-			if !strings.Contains(gitStatusContent, "README.md") {
-				return fmt.Errorf("git-status output missing uncommitted README.md changes")
+			// 3. Uncommitted changes (README.md)
+			if !strings.Contains(briefingContent, `<git_change type="uncommitted"`) {
+				return fmt.Errorf("briefing file missing uncommitted changes section")
 			}
-			if !strings.Contains(gitStatusContent, "Authentication System") {
-				return fmt.Errorf("git-status output missing README.md content changes")
-			}
-			if !strings.Contains(gitStatusContent, "API Endpoints") {
-				return fmt.Errorf("git-status output missing README.md API documentation")
+			if !strings.Contains(briefingContent, "Authentication System") {
+				return fmt.Errorf("briefing file missing uncommitted changes for README.md")
 			}
 
-			// 4. Verify new untracked file (auth.go)
-			if !strings.Contains(gitStatusContent, "auth.go") {
-				return fmt.Errorf("git-status output missing new auth.go file")
+			// 4. Untracked files (auth.go)
+			if !strings.Contains(briefingContent, `<git_change type="untracked_files"`) {
+				return fmt.Errorf("briefing file missing untracked files section")
 			}
-			if !strings.Contains(gitStatusContent, "HashPassword") {
-				return fmt.Errorf("git-status output missing code content from auth.go")
-			}
-			if !strings.Contains(gitStatusContent, "CheckPasswordHash") {
-				return fmt.Errorf("git-status output missing CheckPasswordHash function from auth.go")
+			if !strings.Contains(briefingContent, "HashPassword") {
+				return fmt.Errorf("briefing file missing untracked file content for auth.go")
 			}
 
 			return nil

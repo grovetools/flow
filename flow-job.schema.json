@@ -97,6 +97,9 @@
     "generate_plan_from": {
       "type": "boolean"
     },
+    "git_changes": {
+      "type": "boolean"
+    },
     "rules_file": {
       "type": "string"
     },

@@ -59,7 +59,18 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 
 	b.WriteString("\n    <context>\n")
 
-	// 2. Handle dependencies: inline or reference.
+	// 2. Handle git_changes if enabled for the job.
+	if job.GitChanges {
+		gitChangesXML, err := GenerateGitChangesXML(workDir)
+		if err != nil {
+			// Log a warning but don't fail the job. The agent can still proceed.
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate git changes for job %s: %v\n", job.ID, err)
+		} else if gitChangesXML != "" {
+			b.WriteString(gitChangesXML)
+		}
+	}
+
+	// 3. Handle dependencies: inline or reference.
 	// For interactive_agent jobs, use local_dependency tags since files are always read locally.
 	// For oneshot jobs, use inlined_dependency tags since files are provided elsewhere in the prompt.
 	if len(job.Dependencies) > 0 {
@@ -91,7 +102,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 		}
 	}
 
-	// 3. Handle prompt_source files.
+	// 4. Handle prompt_source files.
 	// For interactive_agent jobs, use local_source_file tags since files are always read locally.
 	// For oneshot jobs, use inlined_source_file tags since files are provided elsewhere in the prompt.
 	for _, source := range job.PromptSource {
@@ -110,7 +121,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 		filesToUpload = append(filesToUpload, sourcePath)
 	}
 
-	// 4. Handle source_block content: always inline.
+	// 5. Handle source_block content: always inline.
 	if job.SourceBlock != "" {
 		extractedContent, err := resolveSourceBlock(job.SourceBlock, plan)
 		if err != nil {
@@ -128,7 +139,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 		b.WriteString("\n        </inlined_source_block>\n")
 	}
 
-	// 5. Handle context files (.grove/context, CLAUDE.md, etc.)
+	// 6. Handle context files (.grove/context, CLAUDE.md, etc.)
 	// For interactive_agent and headless_agent jobs, use local_context_file tags since files are read locally.
 	// For oneshot jobs, use inlined_context_file tags since files are provided elsewhere in the prompt.
 	for _, contextFile := range contextFiles {
