@@ -21,47 +21,47 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 	cmd := exec.Command("grove", "aglogs", "read", jobSpec)
 
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// It's not a fatal error if the transcript can't be found.
-		// This can happen if the agent session was never started.
-		// Log a warning and continue.
-		fmt.Printf("Warning: could not get transcript for %s: %v\n", jobSpec, err)
-		fmt.Printf("         'aglogs' output: %s\n", string(output))
-		return nil
+	outputStr := string(output)
+
+	// Check if a transcript was found. `aglogs read` returns an error if not found.
+	if err != nil || len(strings.TrimSpace(outputStr)) == 0 || strings.Contains(outputStr, "no sessions found with job") {
+		// This is the expected case for a job that was never run.
+		// Append a note to the job file instead of treating it as a failure.
+		content, readErr := os.ReadFile(job.FilePath)
+		if readErr != nil {
+			return fmt.Errorf("reading job file %s: %w", job.FilePath, readErr)
+		}
+
+		// Only append if transcript section doesn't already exist.
+		if !strings.Contains(string(content), "## Transcript") {
+			note := "\n\n---\n\n## Transcript\n\n*This interactive agent job was never run.*"
+			newContent := string(content) + note
+			if writeErr := os.WriteFile(job.FilePath, []byte(newContent), 0644); writeErr != nil {
+				return fmt.Errorf("writing note to job file %s: %w", job.FilePath, writeErr)
+			}
+		}
+
+		return nil // Not an error.
 	}
 
-	if len(strings.TrimSpace(string(output))) == 0 || strings.Contains(string(output), "no sessions found with job") {
-		fmt.Printf("Info: No transcript found for job %s.\n", jobSpec)
-		return nil
-	}
-
-	// Read current job file content
+	// Transcript was found, so proceed with appending it.
 	content, err := os.ReadFile(job.FilePath)
 	if err != nil {
 		return fmt.Errorf("reading job file %s: %w", job.FilePath, err)
 	}
 
-	// Check if transcript section already exists
 	var newContent string
-	transcriptOutput := string(output)
+	transcriptOutput := outputStr
 
 	if strings.Contains(string(content), "## Transcript") {
-		// Transcript section exists - check if content has changed
 		existingContent := string(content)
-
-		// Find the existing transcript section
 		transcriptIdx := strings.Index(existingContent, "## Transcript")
 		if transcriptIdx == -1 {
-			// Shouldn't happen but handle gracefully
 			transcriptHeader := "\n\n---\n\n## Transcript\n\n"
 			newContent = existingContent + transcriptHeader + transcriptOutput
 		} else {
 			existingTranscript := existingContent[transcriptIdx:]
-
-			// Check if the new transcript is identical to what's already there
-			// (after the "## Transcript\n\n" header)
-			existingTranscriptContent := strings.TrimPrefix(existingTranscript, "## Transcript\n\n")
-			existingTranscriptContent = strings.TrimSpace(existingTranscriptContent)
+			existingTranscriptContent := strings.TrimSpace(strings.TrimPrefix(existingTranscript, "## Transcript\n\n"))
 			newTranscriptContent := strings.TrimSpace(transcriptOutput)
 
 			if existingTranscriptContent == newTranscriptContent {
@@ -69,19 +69,16 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 				return nil
 			}
 
-			// Transcript has new content - replace the entire transcript section
 			fmt.Printf("Info: Updating transcript in %s (resumed session detected).\n", job.Filename)
 			beforeTranscript := existingContent[:transcriptIdx]
 			transcriptHeader := "## Transcript\n\n"
 			newContent = beforeTranscript + transcriptHeader + transcriptOutput
 		}
 	} else {
-		// No transcript section exists - create a new one
 		transcriptHeader := "\n\n---\n\n## Transcript\n\n"
 		newContent = string(content) + transcriptHeader + transcriptOutput
 	}
 
-	// Write back to file
 	if err := os.WriteFile(job.FilePath, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("writing transcript to job file %s: %w", job.FilePath, err)
 	}
