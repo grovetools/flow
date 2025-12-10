@@ -1,12 +1,34 @@
 package orchestration
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// countLines efficiently counts the number of lines in a file.
+func countLines(filePath string) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
 
 // WriteBriefingFile saves the provided content to a uniquely named .xml file
 // in the plan's .artifacts directory for auditing.
@@ -92,7 +114,17 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 				// Use different tags based on job type
 				if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
 					// Interactive and headless agents read files directly from the local filesystem
-					b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" description=\"Dependency file available on the local filesystem. If large, use grep/search tools rather than reading directly.\"/>\n", dep.Filename, dep.FilePath))
+					lineCount, err := countLines(dep.FilePath)
+					description := "Dependency file available on the local filesystem."
+					if err == nil && lineCount > 5000 {
+						description = fmt.Sprintf("Large dependency file with %d lines. Use grep/search tools rather than reading directly.", lineCount)
+					}
+
+					if err != nil {
+						b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" description=\"%s\"/>\n", dep.Filename, dep.FilePath, description))
+					} else {
+						b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" n_lines=\"%d\" description=\"%s\"/>\n", dep.Filename, dep.FilePath, lineCount, description))
+					}
 				} else {
 					// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
 					b.WriteString(fmt.Sprintf("        <inlined_dependency file=\"%s\" description=\"This file's content is provided elsewhere in the prompt context.\"/>\n", dep.Filename))
@@ -145,7 +177,17 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 	for _, contextFile := range contextFiles {
 		if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
 			// Interactive and headless agents read files directly from the local filesystem
-			b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" description=\"Large context file with project information. DO NOT try to read this file directly - it may be very large. Use grep/search tools to find specific content if needed. This file contains information the user thinks you might need.\"/>\n", filepath.Base(contextFile), contextFile))
+			lineCount, err := countLines(contextFile)
+			description := "Large context file with project information. DO NOT try to read this file directly - it may be very large. Use grep/search tools to find specific content if needed. This file contains information the user thinks you might need."
+			if err == nil {
+				description = fmt.Sprintf("Large context file with %d lines. DO NOT read this file directly - it is very large. Use grep/search tools to find specific content if needed.", lineCount)
+			}
+
+			if err != nil {
+				b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" description=\"%s\"/>\n", filepath.Base(contextFile), contextFile, description))
+			} else {
+				b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" n_lines=\"%d\" description=\"%s\"/>\n", filepath.Base(contextFile), contextFile, lineCount, description))
+			}
 		} else {
 			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
 			b.WriteString(fmt.Sprintf("        <inlined_context_file file=\"%s\" description=\"Project context file provided elsewhere in the prompt.\"/>\n", filepath.Base(contextFile)))
