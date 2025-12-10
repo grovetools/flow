@@ -20,6 +20,7 @@ var PlanStatusTUIScenario = harness.NewScenarioWithOptions(
 	[]harness.Step{
 		harness.NewStep("Setup mock filesystem with dependent jobs", setupPlanWithDependencies),
 		harness.NewStep("Launch status TUI and verify initial state", launchStatusTUIAndVerify),
+		harness.NewStep("Verify split-screen log view is visible", verifySplitScreenLogs),
 		harness.NewStep("Mark first job as completed", markFirstJobCompleted),
 		harness.NewStep("Verify status updated in TUI", verifyStatusUpdate),
 		harness.NewStep("Quit the TUI", quitStatusTUI),
@@ -33,6 +34,25 @@ func setupPlanWithDependencies(ctx *harness.Context) error {
 	projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "status-tui-project")
 	if err != nil {
 		return err
+	}
+
+	// Create grove.yml with logging enabled
+	groveYml := `name: status-tui-project
+description: Test project for status TUI
+
+logging:
+  level: info
+  file:
+    enabled: true
+    path: .grove/logs/grove.log
+    format: json
+  show_current_project: true
+  show:
+    - status-tui-project
+`
+	groveYmlPath := filepath.Join(projectDir, "grove.yml")
+	if err := fs.WriteString(groveYmlPath, groveYml); err != nil {
+		return fmt.Errorf("failed to create grove.yml: %w", err)
 	}
 
 	// Initialize the plan
@@ -57,6 +77,16 @@ func setupPlanWithDependencies(ctx *harness.Context) error {
 	if result := jobB.Run(); result.Error != nil {
 		return fmt.Errorf("failed to add Job B: %w", result.Error)
 	}
+
+	// Run Job A to generate some logs
+	runCmd := ctx.Bin("plan", "run", "dependency-plan", "01-job-a.md")
+	runCmd.Dir(projectDir)
+	if result := runCmd.Run(); result.Error != nil {
+		return fmt.Errorf("failed to run Job A: %w", result.Error)
+	}
+
+	// Wait a moment for logs to be written
+	time.Sleep(1 * time.Second)
 
 	return nil
 }
@@ -122,6 +152,47 @@ func launchStatusTUIAndVerify(ctx *harness.Context) error {
 	return nil
 }
 
+// verifySplitScreenLogs verifies that the split-screen log viewer is displayed.
+func verifySplitScreenLogs(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Wait for the TUI to stabilize
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	content, err := session.Capture(tui.WithCleanedOutput())
+	if err != nil {
+		return err
+	}
+
+	// The split-screen view should show either:
+	// 1. The log viewer with divider and "Follow:" indicator (if logs exist)
+	// 2. Just the job list (if no logs exist)
+	// We'll check for the divider which indicates split-screen mode is active
+
+	hasFollowIndicator := strings.Contains(content, "Follow:")
+	hasDivider := strings.Contains(content, "─")
+
+	// Verify log content is present
+	hasLogContent := strings.Contains(content, "INFO") ||
+	                 strings.Contains(content, "ERROR") ||
+	                 strings.Contains(content, "Executing")
+
+	// Verify split-screen log viewer is active
+	if !hasFollowIndicator || !hasDivider {
+		return fmt.Errorf("split-screen log viewer not active (Follow: %v, Divider: %v)", hasFollowIndicator, hasDivider)
+	}
+
+	// Verify actual log content is visible
+	if !hasLogContent {
+		return fmt.Errorf("split-screen active but no log content visible")
+	}
+
+	return nil
+
+}
+
 // markFirstJobCompleted sends the 'c' key to mark the first job as completed.
 func markFirstJobCompleted(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
@@ -168,6 +239,108 @@ func verifyStatusUpdate(ctx *harness.Context) error {
 	// Verify Job B is still visible
 	if !strings.Contains(content, "02-job-b.md") {
 		return fmt.Errorf("expected '02-job-b.md' to still be visible:\n%s", content)
+	}
+
+	return nil
+}
+
+// toggleLogViewer sends the 'v' key to toggle the log viewer.
+func toggleLogViewer(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Give the TUI a moment to stabilize
+	time.Sleep(500 * time.Millisecond)
+
+	// Send 'v' to toggle the log viewer
+	if err := session.SendKeys("v"); err != nil {
+		return fmt.Errorf("failed to send 'v' key: %w", err)
+	}
+
+	// Wait for the TUI to process the keypress
+	time.Sleep(500 * time.Millisecond)
+
+	return nil
+}
+
+// verifyLogViewerVisible verifies that the log viewer functionality responds.
+func verifyLogViewerVisible(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Wait for the TUI to stabilize
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	content, err := session.Capture(tui.WithCleanedOutput())
+	if err != nil {
+		return err
+	}
+
+	// The log viewer toggle should either:
+	// 1. Show the log viewer if logs exist (with "Follow:" indicator and divider)
+	// 2. Show a warning if no logs exist (with "No logs found")
+
+	hasLogViewer := strings.Contains(content, "Follow:") && strings.Contains(content, "Viewing logs")
+	hasNoLogsWarning := strings.Contains(content, "No logs found")
+
+	if !hasLogViewer && !hasNoLogsWarning {
+		return fmt.Errorf("expected either log viewer or 'No logs found' warning, got neither in:\n%s", content)
+	}
+
+	// Store whether logs were found for the next test step
+	if hasLogViewer {
+		ctx.Set("logs_found", true)
+	} else {
+		ctx.Set("logs_found", false)
+	}
+
+	return nil
+}
+
+// closeLogViewer sends the 'L' key again to close the log viewer (if it was opened).
+func closeLogViewer(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Only send the close key if logs were actually found and opened
+	logsFound := ctx.Get("logs_found")
+	if logsFound != nil && logsFound.(bool) {
+		// Send 'v' to close the log viewer
+		if err := session.SendKeys("v"); err != nil {
+			return fmt.Errorf("failed to send 'v' key to close: %w", err)
+		}
+
+		// Wait for the TUI to process the keypress
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil
+}
+
+// verifyLogViewerClosed verifies that the log viewer is no longer displayed (if it was opened).
+func verifyLogViewerClosed(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Wait for the TUI to stabilize
+	if err := session.WaitStable(); err != nil {
+		return err
+	}
+
+	content, err := session.Capture(tui.WithCleanedOutput())
+	if err != nil {
+		return err
+	}
+
+	logsFound := ctx.Get("logs_found")
+	if logsFound != nil && logsFound.(bool) {
+		// If logs were found and opened, they should now be closed
+		if strings.Contains(content, "Viewing logs") {
+			return fmt.Errorf("expected log viewer to be closed, but 'Viewing logs' still found in:\n%s", content)
+		}
+	}
+
+	// The job list should still be visible
+	if !strings.Contains(content, "01-job-a.md") {
+		return fmt.Errorf("expected job list to still be visible:\n%s", content)
 	}
 
 	return nil

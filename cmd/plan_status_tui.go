@@ -14,8 +14,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/pkg/logging/logutil"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/components/help"
+	"github.com/mattsolo1/grove-core/tui/components/logviewer"
 	gtable "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -136,8 +139,8 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithHelp("ctrl+d", "page down"),
 		),
 		ViewLogs: key.NewBinding(
-			key.WithKeys("l"),
-			key.WithHelp("l", "view logs"),
+			key.WithKeys("v"),
+			key.WithHelp("v", "toggle log view"),
 		),
 	}
 }
@@ -235,6 +238,9 @@ type statusTUIModel struct {
 	createJobType    string // "xml" or "impl"
 	createJobBaseJob *orchestration.Job
 	createJobDeps    []*orchestration.Job // For multi-select case
+	showLogs         bool
+	logViewer        logviewer.Model
+	activeLogJob     *orchestration.Job
 }
 
 
@@ -275,6 +281,8 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		WithTitle("Plan Status - Help").
 		Build()
 
+	logViewerModel := logviewer.New(80, 20) // Initial size, will be updated
+
 	return statusTUIModel{
 		plan:           plan,
 		graph:          graph,
@@ -291,6 +299,9 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		help:           helpModel,
 		cursorVisible:  true,
 		viewMode:       tableView, // Default to table view
+		logViewer:      logViewerModel,
+		showLogs:       true, // Always start with logs visible
+		activeLogJob:   nil,
 	}
 }
 
@@ -585,6 +596,43 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Width = msg.Width
 		m.help.Height = msg.Height
 		m.help, _ = m.help.Update(msg)
+
+		// Start log viewer on first window size message if we have jobs and logs are enabled
+		if m.showLogs && m.activeLogJob == nil && len(m.jobs) > 0 {
+			job := m.jobs[m.cursor]
+			m.activeLogJob = job // Mark as attempted
+			workDir, err := orchestration.DetermineWorkingDirectory(m.plan, job)
+			if err == nil {
+				node, err := workspace.GetProjectByPath(workDir)
+				if err == nil {
+					logFile, _, err := logutil.FindLogFileForWorkspace(node)
+					if err == nil {
+						logHeight := m.height / 3
+						m.logViewer = logviewer.New(msg.Width, logHeight)
+						cmd = m.logViewer.Start(map[string]string{node.Name: logFile})
+						return m, cmd
+					}
+				}
+			}
+			// If no logs found, still show the log viewer (it will show empty/waiting state)
+			logHeight := m.height / 3
+			m.logViewer = logviewer.New(msg.Width, logHeight)
+		}
+
+		// Update log viewer size if active
+		if m.showLogs {
+			logHeight := m.height/3
+			m.logViewer, cmd = m.logViewer.Update(tea.WindowSizeMsg{Width: msg.Width, Height: logHeight})
+			return m, cmd
+		}
+		return m, nil
+
+	case logviewer.LogLineMsg:
+		// Delegate log messages to the log viewer
+		if m.showLogs {
+			m.logViewer, cmd = m.logViewer.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -781,6 +829,22 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// If log viewer is showing, delegate scroll keys to it
+		if m.showLogs {
+			switch msg.String() {
+			case "up", "k", "down", "j", "pgup", "pgdown", "ctrl+u", "ctrl+d", "f":
+				// Let the log viewer handle these keys for scrolling
+				m.logViewer, cmd = m.logViewer.Update(msg)
+				return m, cmd
+			case "v", "esc":
+				// 'v' or 'esc' closes the log viewer (handled below in the normal key dispatch)
+				// Fall through to normal handling
+			default:
+				// For other keys, still delegate to log viewer but also fall through
+				m.logViewer, cmd = m.logViewer.Update(msg)
+			}
+		}
+
 		// Handle 'gg' sequence for going to top
 		if msg.String() == "g" {
 			if m.waitingForG {
@@ -870,9 +934,39 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keyMap.ViewLogs):
-			if m.cursor < len(m.jobs) {
+			if m.showLogs {
+				// Close the log viewer
+				m.logViewer.Stop()
+				m.showLogs = false
+				m.activeLogJob = nil
+				m.statusSummary = ""
+			} else if m.cursor < len(m.jobs) {
 				job := m.jobs[m.cursor]
-				return m, viewLogsCmd(m.plan, job)
+
+				// Find workspace for the job
+				workDir, err := orchestration.DetermineWorkingDirectory(m.plan, job)
+				if err != nil {
+					m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error finding workspace: %v", err))
+					return m, nil
+				}
+				node, err := workspace.GetProjectByPath(workDir)
+				if err != nil {
+					m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error getting workspace node: %v", err))
+					return m, nil
+				}
+
+				// Find log file
+				logFile, _, err := logutil.FindLogFileForWorkspace(node)
+				if err != nil {
+					m.statusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("No logs found for %s", job.Title))
+					return m, nil
+				}
+
+				m.showLogs = true
+				m.activeLogJob = job
+				m.logViewer = logviewer.New(m.width, m.height/3)
+				cmd = m.logViewer.Start(map[string]string{node.Name: logFile})
+				m.statusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Viewing logs for %s (press 'v' to close)", job.Title))
 			}
 
 		case key.Matches(msg, m.keyMap.Run):
@@ -1216,14 +1310,49 @@ func (m statusTUIModel) View() string {
 	}
 
 	// 4. Combine everything
-	finalView := lipgloss.JoinVertical(
-		lipgloss.Left,
-		styledHeader,
-		mainContent,
-		scrollIndicator,
-		"\n", // Space before footer
-		footer,
-	)
+	var finalView string
+	if m.showLogs {
+		// Split-screen layout: jobs on top, logs on bottom
+		tableHeight := (m.height * 2) / 3
+		logHeight := m.height - tableHeight - 6 // Account for headers, dividers, and margins
+
+		// Render the job list with constrained height
+		jobsView := lipgloss.JoinVertical(
+			lipgloss.Left,
+			styledHeader,
+			mainContent,
+			scrollIndicator,
+		)
+
+		// Update log viewer size
+		m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: m.width - 4, Height: logHeight})
+		logView := m.logViewer.View()
+
+		// Create a divider
+		divider := lipgloss.NewStyle().
+			Width(contentWidth).
+			Foreground(theme.DefaultTheme.Muted.GetForeground()).
+			Render(strings.Repeat("─", contentWidth))
+
+		finalView = lipgloss.JoinVertical(
+			lipgloss.Left,
+			jobsView,
+			"\n",
+			divider,
+			logView,
+			"\n",
+			footer,
+		)
+	} else {
+		finalView = lipgloss.JoinVertical(
+			lipgloss.Left,
+			styledHeader,
+			mainContent,
+			scrollIndicator,
+			"\n", // Space before footer
+			footer,
+		)
+	}
 
 	// Add overall margin
 	return lipgloss.NewStyle().Margin(1, 2).Render(finalView)
