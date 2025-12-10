@@ -27,7 +27,6 @@ type PlanAddStepCmd struct {
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`
-	AgentContinue       bool     `flag:"" help:"Continue the last agent session (adds --continue flag)"`
 	PrependDependencies bool     `flag:"" help:"Inline dependency content into prompt body instead of uploading as separate files"`
 }
 
@@ -305,7 +304,6 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		DependsOn:           cmd.DependsOn,
 		PromptBody:          strings.TrimSpace(prompt),
 		Model:               cmd.Model,
-		AgentContinue:       cmd.AgentContinue,
 		PrependDependencies: cmd.PrependDependencies,
 	}
 
@@ -483,9 +481,6 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if cmd.Model != "" {
 		job.Model = cmd.Model
-	}
-	if cmd.AgentContinue {
-		job.AgentContinue = true
 	}
 	if cmd.PrependDependencies {
 		job.PrependDependencies = true

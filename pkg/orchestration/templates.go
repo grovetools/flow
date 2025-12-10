@@ -14,8 +14,7 @@ prompt_source:{{ range .PromptSource }}
 repository: {{ .Repository }}{{ end }}{{ if .Branch }}
 branch: {{ .Branch }}{{ end }}{{ if .Worktree }}
 worktree: {{ .Worktree }}{{ end }}{{ if .NoteRef }}
-note_ref: {{ .NoteRef }}{{ end }}{{ if .AgentContinue }}
-agent_continue: true{{ end }}{{ if .PrependDependencies }}
+note_ref: {{ .NoteRef }}{{ end }}{{ if .PrependDependencies }}
 prepend_dependencies: true{{ end }}
 ---
 

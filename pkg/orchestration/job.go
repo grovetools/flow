@@ -48,7 +48,6 @@ type Job struct {
 	Branch               string       `yaml:"branch,omitempty" json:"branch,omitempty"`
 	Worktree             string       `yaml:"worktree" json:"worktree,omitempty"`
 	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
-	AgentContinue        bool         `yaml:"agent_continue,omitempty" json:"agent_continue,omitempty"`
 	PrependDependencies  bool         `yaml:"prepend_dependencies,omitempty" json:"prepend_dependencies,omitempty"`
 	OnCompleteStatus     string       `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty"`
 	CreatedAt            time.Time    `yaml:"created_at,omitempty" json:"created_at,omitempty"`

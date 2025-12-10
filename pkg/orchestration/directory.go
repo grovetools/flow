@@ -284,7 +284,6 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Worktree            string
 		NoteRef             string
 		Prompt              string
-		AgentContinue       bool
 		PrependDependencies bool
 	}{
 		ID:                  job.ID,
@@ -297,7 +296,6 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Worktree:            job.Worktree,
 		NoteRef:             job.NoteRef,
 		Prompt:              job.PromptBody,
-		AgentContinue:       job.AgentContinue,
 		PrependDependencies: job.PrependDependencies,
 	}
 

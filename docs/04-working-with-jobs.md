@@ -58,7 +58,6 @@ flow plan add -i
 | `--source-files` | | Comma-separated list of files to include as context. |
 | `--template` | | The name of a job template to use. |
 | `--worktree` | | The git worktree for the job to run in. |
-| `--agent-continue` | | For `agent` jobs, continue the previous agent session in the same worktree. |
 | `--interactive` | `-i` | Force the interactive TUI mode. |
 
 ### Writing Effective Prompts

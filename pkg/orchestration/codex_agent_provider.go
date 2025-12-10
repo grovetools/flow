@@ -209,9 +209,6 @@ func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFil
 
 	// Build command with agent args
 	cmdParts := []string{"codex"}
-	if job.AgentContinue {
-		cmdParts = append(cmdParts, "--continue")
-	}
 	cmdParts = append(cmdParts, agentArgs...)
 
 	// Pass instruction to read the briefing file

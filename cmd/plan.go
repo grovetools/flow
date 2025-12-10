@@ -128,7 +128,6 @@ var (
 	planAddInteractive       bool
 	planAddSourceFiles       []string
 	planAddWorktree          string
-	planAddAgentContinue     bool
 	planAddPrependDependencies bool
 
 	// Graph flags
@@ -177,7 +176,6 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
 	planAddCmd.Flags().StringSliceVar(&planAddSourceFiles, "source-files", nil, "Comma-separated list of source files for reference-based prompts")
 	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
-	planAddCmd.Flags().BoolVar(&planAddAgentContinue, "agent-continue", false, "Continue the last agent session (adds --continue flag)")
 	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "Inline dependency content into prompt body instead of uploading as separate files")
 
 	// Graph command flags
@@ -289,7 +287,6 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		Interactive:          planAddInteractive,
 		SourceFiles:          planAddSourceFiles,
 		Worktree:             planAddWorktree,
-		AgentContinue:        planAddAgentContinue,
 		PrependDependencies:  planAddPrependDependencies,
 	}
 	return RunPlanAddStep(addStepCmd)

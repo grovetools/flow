@@ -76,7 +76,6 @@ Adds a new job file to a plan directory. If no directory is specified, it uses t
 
 | Flag | Shorthand | Description | Default |
 | :--- | :--- | :--- | :--- |
-| `--agent-continue` | | Continue the last agent session (adds `--continue` flag). | `false` |
 | `--depends-on` | `-d` | List of job filenames this job depends on. | (none) |
 | `--interactive` | `-i` | Launch an interactive TUI to create the new job. | `false` |
 | `--output-type` | | Output type: `file`, `commit`, or `none`. | `file` |

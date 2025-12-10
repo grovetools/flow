@@ -68,9 +68,6 @@
     "target_agent_container": {
       "type": "string"
     },
-    "agent_continue": {
-      "type": "boolean"
-    },
     "prepend_dependencies": {
       "type": "boolean"
     },
