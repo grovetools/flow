@@ -967,6 +967,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logViewer = logviewer.New(m.width, m.height/3)
 				cmd = m.logViewer.Start(map[string]string{node.Name: logFile})
 				m.statusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Viewing logs for %s (press 'v' to close)", job.Title))
+				return m, cmd
 			}
 
 		case key.Matches(msg, m.keyMap.Run):
