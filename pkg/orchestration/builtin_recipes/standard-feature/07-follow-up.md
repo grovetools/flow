@@ -1,5 +1,5 @@
 ---
-id: follow-up
+id: "{{ .PlanName }}-follow-up-{{ .Vars.uuid }}"
 title: "Follow-up & Tweaks"
 status: pending
 type: interactive_agent
@@ -7,12 +7,14 @@ depends_on:
   - 02-spec.md
   - 03-generate-plan.md
   - 04-implement.md
+  - 05-impl-tests.md
   - 06-review.md
 ---
 Read all previous job files in this plan to understand the full context:
 - 02-spec.md: The feature specification
 - 03-generate-plan.md: The implementation plan
 - 04-implement.md: The implementation job
+- 05-impl-tests.md: The e2e test implementation
 - 06-review.md: The code review feedback
 
 After reviewing all the plan files, critically evaluate whether the specification goals have been met:

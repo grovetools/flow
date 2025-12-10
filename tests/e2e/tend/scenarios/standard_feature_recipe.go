@@ -104,15 +104,21 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 					jobType:   orchestration.JobTypeHeadlessAgent,
 					dependsOn: []string{"03-generate-plan.md"},
 				},
+				"05-impl-tests.md": {
+					jobType:    orchestration.JobTypeInteractiveAgent,
+					template:   "tend-tester",
+					dependsOn:  []string{"04-implement.md"},
+					gitChanges: true,
+				},
 				"06-review.md": {
 					jobType:    orchestration.JobTypeOneshot,
-					dependsOn:  []string{"04-implement.md"},
+					dependsOn:  []string{"05-impl-tests.md"},
 					prependDep: true,
 					gitChanges: true,
 				},
 				"07-follow-up.md": {
 					jobType:   orchestration.JobTypeInteractiveAgent,
-					dependsOn: []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "06-review.md"},
+					dependsOn: []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "05-impl-tests.md", "06-review.md"},
 				},
 			}
 
@@ -175,8 +181,9 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				{"02-spec.md", []string{"01-cx.md"}},
 				{"03-generate-plan.md", []string{"02-spec.md"}},
 				{"04-implement.md", []string{"03-generate-plan.md"}},
-				{"06-review.md", []string{"04-implement.md"}},
-				{"07-follow-up.md", []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "06-review.md"}},
+				{"05-impl-tests.md", []string{"04-implement.md"}},
+				{"06-review.md", []string{"05-impl-tests.md"}},
+				{"07-follow-up.md", []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "05-impl-tests.md", "06-review.md"}},
 			}
 
 			for _, tc := range testCases {
@@ -429,11 +436,12 @@ func CheckPasswordHash(password, hash string) bool {
 			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "add-user-auth")
 			reviewJobPath := filepath.Join(planPath, "06-review.md")
 
-			// Mark the generate-plan and implement jobs as completed so review can run
+			// Mark the generate-plan, implement, and impl-tests jobs as completed so review can run
 			planJobPath := filepath.Join(planPath, "03-generate-plan.md")
 			implementJobPath := filepath.Join(planPath, "04-implement.md")
+			implTestsJobPath := filepath.Join(planPath, "05-impl-tests.md")
 
-			for _, jobPath := range []string{planJobPath, implementJobPath} {
+			for _, jobPath := range []string{planJobPath, implementJobPath, implTestsJobPath} {
 				content, err := fs.ReadString(jobPath)
 				if err != nil {
 					return fmt.Errorf("reading job %s: %w", jobPath, err)

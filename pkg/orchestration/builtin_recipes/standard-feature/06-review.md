@@ -1,10 +1,10 @@
 ---
-id: review
+id: "{{ .PlanName }}-code-review-{{ .Vars.uuid }}"
 title: "Code Review for {{ .PlanName }}"
 status: pending
 type: oneshot
 depends_on:
-  - 04-implement.md
+  - 05-impl-tests.md
 prepend_dependencies: true
 git_changes: true
 ---
