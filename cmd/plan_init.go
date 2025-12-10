@@ -278,6 +278,14 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		result.WriteString(fmt.Sprintf("✓ Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename))
 	}
 
+	// Execute on_start hook if plan was initialized from a note
+	// This runs after extraction to avoid file path conflicts
+	if cmd.NoteRef != "" {
+		if err := executeOnStartHook(planPath, planName, cmd.NoteRef); err != nil {
+			result.WriteString(fmt.Sprintf("⚠️  Warning: on_start hook execution failed: %v\n", err))
+		}
+	}
+
 	// Open Session Logic
 	if cmd.OpenSession {
 		result.WriteString("\n🚀 Launching new session...\n")
@@ -712,6 +720,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		fmt.Println("✓ Created .grove-plan.yml")
 	}
 
+	// Execute on_start hook if plan was initialized from a note
+	if cmd.NoteRef != "" {
+		if err := executeOnStartHook(planPath, planName, cmd.NoteRef); err != nil {
+			fmt.Printf("Warning: on_start hook execution failed: %v\n", err)
+		}
+	}
+
 	// Set the new plan as active, but only if we are not opening a new session.
 	// If a new session is opened, the active plan will be set inside that session.
 	// Also skip setting the active plan in the parent if a worktree was created.
@@ -720,47 +735,6 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			fmt.Printf("Warning: failed to set active job: %v\n", err)
 		} else {
 			fmt.Printf("✓ Set active plan to: %s\n", planName)
-		}
-	}
-
-	// Execute on_start hook if plan was initialized with --open-session and note-ref
-	if cmd.OpenSession && cmd.NoteRef != "" {
-		// Load the plan to get the config
-		plan, err := orchestration.LoadPlan(planPath)
-		if err == nil && plan.Config != nil && plan.Config.Hooks != nil {
-			if hookCmdStr, ok := plan.Config.Hooks["on_start"]; ok && hookCmdStr != "" {
-				fmt.Println("▶️  Executing on_start hook...")
-
-				// Prepare template data
-				templateData := struct {
-					PlanName string
-					NoteRef  string
-				}{
-					PlanName: planName,
-					NoteRef:  cmd.NoteRef,
-				}
-
-				// Render the hook command
-				tmpl, err := template.New("hook").Parse(hookCmdStr)
-				if err != nil {
-					fmt.Printf("Warning: failed to parse on_start hook template: %v\n", err)
-				} else {
-					var renderedCmd bytes.Buffer
-					if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
-						fmt.Printf("Warning: failed to render on_start hook command: %v\n", err)
-					} else {
-						// Execute the command
-						hookCmd := exec.Command("sh", "-c", renderedCmd.String())
-						hookCmd.Stdout = os.Stdout
-						hookCmd.Stderr = os.Stderr
-						if err := hookCmd.Run(); err != nil {
-							fmt.Printf("Warning: on_start hook execution failed: %v\n", err)
-						} else {
-							fmt.Println("✓ on_start hook executed successfully.")
-						}
-					}
-				}
-			}
 		}
 	}
 
@@ -842,6 +816,51 @@ func createPlanDirectory(dir string, force bool) error {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
+	return nil
+}
+
+// executeOnStartHook runs the on_start hook if defined in the plan's configuration.
+func executeOnStartHook(planPath, planName, noteRef string) error {
+	// Load the plan to get the config
+	plan, err := orchestration.LoadPlan(planPath)
+	if err != nil {
+		// Don't fail the whole operation, just log a warning
+		return fmt.Errorf("could not load plan to execute on_start hook: %w", err)
+	}
+
+	if plan.Config != nil && plan.Config.Hooks != nil {
+		if hookCmdStr, ok := plan.Config.Hooks["on_start"]; ok && hookCmdStr != "" {
+			fmt.Println("▶️  Executing on_start hook...")
+
+			// Prepare template data
+			templateData := struct {
+				PlanName string
+				NoteRef  string
+			}{
+				PlanName: planName,
+				NoteRef:  noteRef,
+			}
+
+			// Render the hook command
+			tmpl, err := template.New("hook").Parse(hookCmdStr)
+			if err != nil {
+				return fmt.Errorf("failed to parse on_start hook template: %w", err)
+			}
+			var renderedCmd bytes.Buffer
+			if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
+				return fmt.Errorf("failed to render on_start hook command: %w", err)
+			}
+
+			// Execute the command
+			hookCmd := exec.Command("sh", "-c", renderedCmd.String())
+			hookCmd.Stdout = os.Stdout
+			hookCmd.Stderr = os.Stderr
+			if err := hookCmd.Run(); err != nil {
+				return fmt.Errorf("on_start hook execution failed: %w", err)
+			}
+			fmt.Println("✓ on_start hook executed successfully.")
+		}
+	}
 	return nil
 }
 
