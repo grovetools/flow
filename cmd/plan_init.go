@@ -22,7 +22,7 @@ import (
 )
 
 // RunPlanInitTUI launches the interactive TUI for creating a new plan.
-func RunPlanInitTUI(dir string) error {
+func RunPlanInitTUI(dir string, cliCmd *PlanInitCmd) error {
 	flowCfg, err := loadFlowConfig()
 	if err != nil {
 		// Don't fail if config doesn't exist.
@@ -39,22 +39,7 @@ func RunPlanInitTUI(dir string) error {
 		plansDir, _ = os.Getwd()
 	}
 
-	// Create a pre-populated command object from CLI flags
-	initialCmd := &PlanInitCmd{
-		Dir:            dir,
-		Model:          planInitModel,
-		Worktree:       planInitWorktree,
-		Container:      planInitContainer,
-		ExtractAllFrom: planInitExtractAllFrom,
-		OpenSession:    planInitOpenSession,
-		Recipe:         planInitRecipe,
-		RecipeVars:     planInitRecipeVars,
-		RecipeCmd:      planInitRecipeCmd,
-		Repos:          planInitRepos,
-		FromNote:       planInitFromNote,
-	}
-
-	finalCmd, err := runPlanInitTUI(plansDir, initialCmd)
+	finalCmd, err := runPlanInitTUI(plansDir, cliCmd)
 	if err != nil {
 		if err == ErrTUIQuit {
 			// User quit the TUI, this is not an error

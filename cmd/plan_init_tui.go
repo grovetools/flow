@@ -59,13 +59,14 @@ func runPlanInitTUI(plansDir string, initialCmd *PlanInitCmd) (*PlanInitCmd, err
 
 type planInitTUIKeyMap struct {
 	keymap.Base
-	Toggle    key.Binding
-	NextField key.Binding
-	PrevField key.Binding
-	Submit    key.Binding
-	Back      key.Binding
-	Escape    key.Binding
-	Insert    key.Binding
+	Toggle         key.Binding
+	ToggleAdvanced key.Binding
+	NextField      key.Binding
+	PrevField      key.Binding
+	Submit         key.Binding
+	Back           key.Binding
+	Escape         key.Binding
+	Insert         key.Binding
 }
 
 func newPlanInitTUIKeyMap() planInitTUIKeyMap {
@@ -74,6 +75,10 @@ func newPlanInitTUIKeyMap() planInitTUIKeyMap {
 		Toggle: key.NewBinding(
 			key.WithKeys(" "),
 			key.WithHelp("space", "toggle checkbox"),
+		),
+		ToggleAdvanced: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "toggle advanced"),
 		),
 		NextField: key.NewBinding(
 			key.WithKeys("tab", "j"),
@@ -122,16 +127,20 @@ type planInitTUIModel struct {
 	standalone bool
 	quitting   bool
 	// Form inputs
-	nameInput        textinput.Model
-	recipeList       list.Model
-	withWorktree     bool
-	worktreeInput    textinput.Model
-	modelList        list.Model
-	containerInput   textinput.Model
-	extractFromInput textinput.Model
-	openSession      bool
-	keyMap           planInitTUIKeyMap
-	help             help.Model
+	nameInput           textinput.Model
+	recipeList          list.Model
+	modelList           list.Model
+	openSession         bool
+
+	// Advanced options
+	showAdvanced        bool
+	withWorktree        bool
+	worktreeInput       textinput.Model
+	extractFromInput    textinput.Model
+	noteTargetFileInput textinput.Model
+
+	keyMap              planInitTUIKeyMap
+	help                help.Model
 }
 
 // newPlanInitTUIModel creates a new model for the plan initialization form.
@@ -155,7 +164,7 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	defaultRecipeIndex := 0
 	for i, r := range recipes {
 		recipeItems[i+1] = item(r.Name)
-		if r.Name == "chat" {
+		if r.Name == "standard-feature" {
 			defaultRecipeIndex = i + 1
 		}
 	}
@@ -163,36 +172,44 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	m.recipeList.Title = ""
 	m.recipeList.SetShowTitle(false)
 	m.recipeList.SetShowStatusBar(false)
-	m.recipeList.Select(defaultRecipeIndex) // Default to chat-workflow
+	m.recipeList.Select(defaultRecipeIndex) // Default to standard-feature
 
 	// Models List
 	models := getAvailableModels()
 	modelItems := make([]list.Item, len(models)+1)
 	modelItems[0] = modelItem{Model: Model{ID: "(default)"}}
+	defaultModelIndex := 0
 	for i, model := range models {
 		modelItems[i+1] = modelItem{model}
+		if model.ID == "gemini-2.5-pro" {
+			defaultModelIndex = i + 1
+		}
 	}
 	m.modelList = list.New(modelItems, itemDelegate{}, 20, 6)
 	m.modelList.Title = ""
 	m.modelList.SetShowTitle(false)
 	m.modelList.SetShowStatusBar(false)
+	m.modelList.Select(defaultModelIndex)
 
 	m.worktreeInput = textinput.New()
 	m.worktreeInput.Placeholder = "feature/branch-name"
 	m.worktreeInput.Width = 41
 
-	m.containerInput = textinput.New()
-	m.containerInput.Placeholder = "grove-agent-ide"
-	m.containerInput.SetValue("grove-agent-ide") // Set default value
-	m.containerInput.Width = 41
-
 	m.extractFromInput = textinput.New()
 	m.extractFromInput.Placeholder = "/path/to/spec.md"
 	m.extractFromInput.Width = 41
 
+	m.noteTargetFileInput = textinput.New()
+	m.noteTargetFileInput.Placeholder = "02-spec.md"
+	m.noteTargetFileInput.SetValue("02-spec.md")
+	m.noteTargetFileInput.Width = 41
+
 	// Set default values for checkboxes
 	m.withWorktree = true
-	m.openSession = true
+	m.openSession = false // Changed default to false since it's now in advanced
+
+	// Advanced section starts hidden by default
+	m.showAdvanced = false
 
 	// Initialize keymap and help
 	m.keyMap = newPlanInitTUIKeyMap()
@@ -231,20 +248,6 @@ func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
 		}
 	}
 
-	// Handle worktree logic. Default is true (auto-mode).
-	// Only change if the flag was explicitly provided with a value or set to false.
-	// We don't have a direct way to check for flag presence here, so we rely on the value.
-	if initialCmd.Worktree != "" && initialCmd.Worktree != "__AUTO__" {
-		m.withWorktree = false
-		m.worktreeInput.SetValue(initialCmd.Worktree)
-	} else if initialCmd.Worktree == "__AUTO__" {
-		m.withWorktree = true
-	}
-
-	// For boolean flags, if they were set on the command line, their value will be passed in.
-	// Cobra handles the default values.
-	m.openSession = initialCmd.OpenSession
-
 	if initialCmd.Model != "" {
 		for i, listItem := range m.modelList.Items() {
 			if model, ok := listItem.(modelItem); ok && model.ID == initialCmd.Model {
@@ -253,11 +256,43 @@ func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
 			}
 		}
 	}
-	if initialCmd.Container != "" {
-		m.containerInput.SetValue(initialCmd.Container)
+
+	// For boolean flags, if they were set on the command line, their value will be passed in.
+	// Cobra handles the default values.
+	m.openSession = initialCmd.OpenSession
+
+	// Advanced section fields - auto-show if any are populated
+	hasAdvancedOptions := false
+
+	// Handle worktree logic. Default is true (auto-mode).
+	// Only change if the flag was explicitly provided with a value or set to false.
+	// We don't have a direct way to check for flag presence here, so we rely on the value.
+	if initialCmd.Worktree != "" && initialCmd.Worktree != "__AUTO__" {
+		m.withWorktree = false
+		m.worktreeInput.SetValue(initialCmd.Worktree)
+		hasAdvancedOptions = true
+	} else if initialCmd.Worktree == "__AUTO__" {
+		m.withWorktree = true
+		hasAdvancedOptions = true
 	}
-	if initialCmd.ExtractAllFrom != "" {
+
+	// Populate extract from field - FromNote takes precedence over ExtractAllFrom
+	if initialCmd.FromNote != "" {
+		m.extractFromInput.SetValue(initialCmd.FromNote)
+		hasAdvancedOptions = true
+	} else if initialCmd.ExtractAllFrom != "" {
 		m.extractFromInput.SetValue(initialCmd.ExtractAllFrom)
+		hasAdvancedOptions = true
+	}
+
+	if initialCmd.NoteTargetFile != "" {
+		m.noteTargetFileInput.SetValue(initialCmd.NoteTargetFile)
+		hasAdvancedOptions = true
+	}
+
+	// Show advanced section if any advanced options were pre-populated
+	if hasAdvancedOptions {
+		m.showAdvanced = true
 	}
 }
 
@@ -284,9 +319,11 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if we're in a text input field that should capture all keys
-		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 3 || m.focusIndex == 5 || m.focusIndex == 7)
+		// Basic field: 0=name, Advanced fields: 5=worktree, 6=extractFrom, 7=noteTargetFile
+		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 5 || m.focusIndex == 6 || m.focusIndex == 7)
 		// Check if we're in a list that needs arrow keys
-		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 4)
+		// Basic lists: 1=recipe, 2=model
+		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 2)
 
 		switch msg.String() {
 		case "esc", "escape":
@@ -294,8 +331,8 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.unfocused = true
 			m.nameInput.Blur()
 			m.worktreeInput.Blur()
-			m.containerInput.Blur()
 			m.extractFromInput.Blur()
+			m.noteTargetFileInput.Blur()
 			return m, nil
 
 		case "i":
@@ -309,6 +346,13 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle help
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
+
+		case "a":
+			// Toggle advanced options (only when not in text input or in normal mode)
+			if !inTextInput || m.unfocused {
+				m.showAdvanced = !m.showAdvanced
+				return m, nil
+			}
 
 		case "ctrl+c":
 			m.quitting = true
@@ -326,7 +370,11 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			// Tab always moves to next field
 			m.focusIndex++
-			if m.focusIndex > 7 {
+			maxIndex := 4 // Basic fields: 0-4
+			if m.showAdvanced {
+				maxIndex = 7 // Include advanced fields: 5-7
+			}
+			if m.focusIndex > maxIndex {
 				m.focusIndex = 0
 			}
 			// Update highest focus index for progress tracking
@@ -339,7 +387,11 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Shift+tab always moves to previous field
 			m.focusIndex--
 			if m.focusIndex < 0 {
-				m.focusIndex = 7
+				maxIndex := 4 // Basic fields: 0-4
+				if m.showAdvanced {
+					maxIndex = 7 // Include advanced fields: 5-7
+				}
+				m.focusIndex = maxIndex
 			}
 			// Update highest focus index for progress tracking
 			if m.focusIndex > m.highestFocusIndex {
@@ -351,7 +403,11 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// j moves to next field only when not in text input or when unfocused
 			if !inTextInput || m.unfocused {
 				m.focusIndex++
-				if m.focusIndex > 7 {
+				maxIndex := 4 // Basic fields: 0-4
+				if m.showAdvanced {
+					maxIndex = 7 // Include advanced fields: 5-7
+				}
+				if m.focusIndex > maxIndex {
 					m.focusIndex = 0
 				}
 				// Update highest focus index for progress tracking
@@ -366,7 +422,11 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !inTextInput || m.unfocused {
 				m.focusIndex--
 				if m.focusIndex < 0 {
-					m.focusIndex = 7
+					maxIndex := 4 // Basic fields: 0-4
+					if m.showAdvanced {
+						maxIndex = 7 // Include advanced fields: 5-7
+					}
+					m.focusIndex = maxIndex
 				}
 				// Update highest focus index for progress tracking
 				if m.focusIndex > m.highestFocusIndex {
@@ -380,7 +440,11 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.unfocused && !inTextInput {
 				m.focusIndex--
 				if m.focusIndex < 0 {
-					m.focusIndex = 7
+					maxIndex := 4 // Basic fields: 0-4
+					if m.showAdvanced {
+						maxIndex = 7 // Include advanced fields: 5-7
+					}
+					m.focusIndex = maxIndex
 				}
 				if m.focusIndex > m.highestFocusIndex {
 					m.highestFocusIndex = m.focusIndex
@@ -392,7 +456,11 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// l moves to next field when in normal mode
 			if m.unfocused && !inTextInput {
 				m.focusIndex++
-				if m.focusIndex > 7 {
+				maxIndex := 4 // Basic fields: 0-4
+				if m.showAdvanced {
+					maxIndex = 7 // Include advanced fields: 5-7
+				}
+				if m.focusIndex > maxIndex {
 					m.focusIndex = 0
 				}
 				if m.focusIndex > m.highestFocusIndex {
@@ -404,13 +472,13 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ":
 			// Space toggles checkboxes
 			switch m.focusIndex {
-			case 2: // Auto-create Worktree
+			case 3: // Auto-create Worktree
 				m.withWorktree = !m.withWorktree
 				if m.withWorktree {
 					m.worktreeInput.SetValue("")
 				}
 				return m, nil
-			case 6: // Open Session
+			case 4: // Open Session on Create
 				m.openSession = !m.openSession
 				return m, nil
 			}
@@ -451,16 +519,16 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.nameInput, cmd = m.nameInput.Update(msg)
 		case 1:
 			m.recipeList, cmd = m.recipeList.Update(msg)
-		case 3:
+		case 2:
+			m.modelList, cmd = m.modelList.Update(msg)
+		case 5:
 			if !m.withWorktree {
 				m.worktreeInput, cmd = m.worktreeInput.Update(msg)
 			}
-		case 4:
-			m.modelList, cmd = m.modelList.Update(msg)
-		case 5:
-			m.containerInput, cmd = m.containerInput.Update(msg)
-		case 7:
+		case 6:
 			m.extractFromInput, cmd = m.extractFromInput.Update(msg)
+		case 7:
+			m.noteTargetFileInput, cmd = m.noteTargetFileInput.Update(msg)
 		}
 	}
 
@@ -472,22 +540,22 @@ func (m planInitTUIModel) updateFocus() planInitTUIModel {
 	// Blur all inputs
 	m.nameInput.Blur()
 	m.worktreeInput.Blur()
-	m.containerInput.Blur()
 	m.extractFromInput.Blur()
+	m.noteTargetFileInput.Blur()
 
 	// Only focus if not in unfocused state
 	if !m.unfocused {
 		switch m.focusIndex {
 		case 0:
 			m.nameInput.Focus()
-		case 3:
+		case 5:
 			if !m.withWorktree {
 				m.worktreeInput.Focus()
 			}
-		case 5:
-			m.containerInput.Focus()
-		case 7:
+		case 6:
 			m.extractFromInput.Focus()
+		case 7:
+			m.noteTargetFileInput.Focus()
 		}
 	}
 	return m
@@ -504,7 +572,11 @@ func (m planInitTUIModel) View() string {
 	var b strings.Builder
 
 	// Header with progress indicator
-	progressText := fmt.Sprintf("[Step %d of 8]", m.highestFocusIndex+1)
+	maxSteps := 5 // Basic fields: 0-4
+	if m.showAdvanced {
+		maxSteps = 8 // Include advanced fields: 5-7
+	}
+	progressText := fmt.Sprintf("[Step %d of %d]", m.highestFocusIndex+1, maxSteps)
 	header := fmt.Sprintf("🌲 ✨ Create New Plan                          %s", progressText)
 	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render(header))
 	b.WriteString("\n\n")
@@ -520,10 +592,12 @@ func (m planInitTUIModel) View() string {
 		Width(85) // Full width for single fields
 
 	unfocusedBorderStyle := borderStyle.Copy().
-		BorderForeground(theme.DefaultColors.Border)
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")) // Dimmed gray
 
 	unfocusedBorderStyleWide := borderStyleWide.Copy().
-		BorderForeground(theme.DefaultColors.Border)
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")) // Dimmed gray
 
 	focusedBorderStyle := borderStyle.Copy().
 		BorderStyle(lipgloss.ThickBorder()).
@@ -580,7 +654,7 @@ func (m planInitTUIModel) View() string {
 	b.WriteString(renderField(0, "Plan Name", m.nameInput.View(), true))
 	b.WriteString("\n")
 
-	// Row 2: Recipe | Auto-create Worktree
+	// Row 2: Recipe | Default Model
 	recipeDisplay := "none"
 	if selected := m.recipeList.SelectedItem(); selected != nil {
 		if recipeItem, ok := selected.(item); ok {
@@ -588,7 +662,21 @@ func (m planInitTUIModel) View() string {
 		}
 	}
 
-	// Check if we're in an inherited context
+	modelDisplay := "(default)"
+	if selected := m.modelList.SelectedItem(); selected != nil {
+		if modelItem, ok := selected.(modelItem); ok {
+			modelDisplay = fmt.Sprintf("[%s]", modelItem.ID)
+		}
+	}
+
+	recipeField := renderField(1, "Recipe", recipeDisplay, false)
+	modelField := renderField(2, "Default Model", modelDisplay, false)
+	row2 := lipgloss.JoinHorizontal(lipgloss.Top, recipeField, "  ", modelField)
+	b.WriteString(row2)
+	b.WriteString("\n")
+
+	// Row 3: Auto-create Worktree | Open Session
+	// Check if we're in an inherited context for worktree
 	isInheritedContext := false
 	currentNode, err := workspace.GetProjectByPath(".")
 	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
@@ -603,63 +691,50 @@ func (m planInitTUIModel) View() string {
 		autoWorktreeDisplay = theme.DefaultTheme.Muted.Render("[ ] (Inherited)")
 	}
 
-	recipeField := renderField(1, "Recipe", recipeDisplay, false)
-	autoWorktreeField := renderField(2, "Auto-create Worktree", autoWorktreeDisplay, false)
-	row2 := lipgloss.JoinHorizontal(lipgloss.Top, recipeField, "  ", autoWorktreeField)
-	b.WriteString(row2)
-	b.WriteString("\n")
-
-	// Worktree Settings Section
-	b.WriteString(theme.DefaultTheme.Info.Render("Worktree Settings"))
-	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", 90))
-	b.WriteString("\n")
-
-	// Row 3: Worktree Name | Default Model
-	var worktreeDisplay string
-	if m.withWorktree {
-		worktreeDisplay = theme.DefaultTheme.Muted.Render("(matches plan name)")
-	} else if isInheritedContext {
-		// Show the inherited worktree name but make it clear it's not editable here.
-		worktreeDisplay = theme.DefaultTheme.Info.Render(m.worktreeInput.Value())
-	} else {
-		worktreeDisplay = m.worktreeInput.View()
-	}
-
-	modelDisplay := "(default)"
-	if selected := m.modelList.SelectedItem(); selected != nil {
-		if modelItem, ok := selected.(modelItem); ok {
-			modelDisplay = fmt.Sprintf("[%s]", modelItem.ID)
-		}
-	}
-
-	worktreeField := renderField(3, "Worktree Name", worktreeDisplay, false)
-	modelField := renderField(4, "Default Model", modelDisplay, false)
-	row3 := lipgloss.JoinHorizontal(lipgloss.Top, worktreeField, "  ", modelField)
-	b.WriteString(row3)
-	b.WriteString("\n")
-
-	// Execution Options Section
-	b.WriteString(theme.DefaultTheme.Info.Render("Execution Options"))
-	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", 90))
-	b.WriteString("\n")
-
-	// Row 4: Target Container | Open Session
 	openSessionDisplay := "[ ]"
 	if m.openSession {
 		openSessionDisplay = "[x]"
 	}
 
-	containerField := renderField(5, "Target Container", m.containerInput.View(), false)
-	openSessionField := renderField(6, "Open Session on Create", openSessionDisplay, false)
-	row4 := lipgloss.JoinHorizontal(lipgloss.Top, containerField, "  ", openSessionField)
-	b.WriteString(row4)
+	autoWorktreeField := renderField(3, "Auto-create Worktree", autoWorktreeDisplay, false)
+	openSessionField := renderField(4, "Open Session on Create", openSessionDisplay, false)
+	row3 := lipgloss.JoinHorizontal(lipgloss.Top, autoWorktreeField, "  ", openSessionField)
+	b.WriteString(row3)
 	b.WriteString("\n")
 
-	// Row 5: Extract from File (full width)
-	b.WriteString(renderField(7, "Extract from File", m.extractFromInput.View(), true))
-	b.WriteString("\n")
+	// Advanced Options Section (conditionally shown)
+	if m.showAdvanced {
+		b.WriteString("\n")
+		b.WriteString(theme.DefaultTheme.Info.Render("Advanced Options"))
+		b.WriteString("\n")
+		b.WriteString(strings.Repeat("─", 90))
+		b.WriteString("\n")
+
+		// Worktree Name (only shown if not auto-creating)
+		var worktreeDisplay string
+		if m.withWorktree {
+			worktreeDisplay = theme.DefaultTheme.Muted.Render("(matches plan name)")
+		} else if isInheritedContext {
+			worktreeDisplay = theme.DefaultTheme.Info.Render(m.worktreeInput.Value())
+		} else {
+			worktreeDisplay = m.worktreeInput.View()
+		}
+
+		b.WriteString(renderField(5, "Worktree Name", worktreeDisplay, true))
+		b.WriteString("\n")
+
+		// Note integration options
+		extractField := renderField(6, "Extract from File (from-note)", m.extractFromInput.View(), false)
+		targetFileField := renderField(7, "Note Target File", m.noteTargetFileInput.View(), false)
+		noteRow := lipgloss.JoinHorizontal(lipgloss.Top, extractField, "  ", targetFileField)
+		b.WriteString(noteRow)
+		b.WriteString("\n")
+	} else {
+		// Show hint to toggle advanced options
+		b.WriteString("\n")
+		b.WriteString(theme.DefaultTheme.Muted.Render("Press 'a' to toggle advanced options (worktree name, note integration)"))
+		b.WriteString("\n")
+	}
 
 	// Error message
 	if m.err != nil {
@@ -690,8 +765,8 @@ func (m planInitTUIModel) View() string {
 func (m planInitTUIModel) toPlanInitCmd() *PlanInitCmd {
 	cmd := &PlanInitCmd{
 		Dir:            m.nameInput.Value(),
-		Container:      m.containerInput.Value(),
-		ExtractAllFrom: m.extractFromInput.Value(),
+		FromNote:       m.extractFromInput.Value(), // The extract field represents --from-note
+		NoteTargetFile: m.noteTargetFileInput.Value(),
 		OpenSession:    m.openSession,
 		Force:          false, // Not settable from TUI
 	}

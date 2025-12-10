@@ -230,20 +230,9 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		dir = args[0]
 	}
 
-	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
-	isTTY := isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
-	if (dir == "" && isTTY) || planInitTUI {
-		// This logic is now in cmd/plan_init.go
-		return RunPlanInitTUI(dir)
-	}
-
-	// Non-interactive path
-	if dir == "" {
-		return cmd.Help() // Show help if no directory is given and not in TUI mode
-	}
-
-	// This is the direct CLI execution path
-	directCmd := &PlanInitCmd{
+	// This is the command object built from CLI flags.
+	// It will be used for both direct CLI execution and to pre-populate the TUI.
+	cliCmd := &PlanInitCmd{
 		Dir:            dir,
 		Force:          planInitForce,
 		Model:          planInitModel,
@@ -259,7 +248,20 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		FromNote:       planInitFromNote,
 		NoteTargetFile: planInitNoteTargetFile,
 	}
-	result, err := executePlanInit(directCmd)
+
+	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
+	isTTY := isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+	if (dir == "" && isTTY) || planInitTUI {
+		// This logic is now in cmd/plan_init.go
+		return RunPlanInitTUI(dir, cliCmd)
+	}
+
+	// Non-interactive path
+	if dir == "" {
+		return cmd.Help() // Show help if no directory is given and not in TUI mode
+	}
+
+	result, err := executePlanInit(cliCmd)
 	if err != nil {
 		return err
 	}
