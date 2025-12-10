@@ -29,6 +29,8 @@ all: build
 schema:
 	@echo "Generating JSON schema..."
 	@go generate ./cmd
+	@echo "Regenerating docs JSON..."
+	@docgen regen-json
 
 build: schema
 	@mkdir -p $(BIN_DIR)
