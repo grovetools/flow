@@ -114,9 +114,6 @@ func TestAutoEnableAgentContinueIntegration(t *testing.T) {
 		Status:        orchestration.JobStatusPending,
 		AgentContinue: false,
 		PromptBody:    "First job",
-		Output: orchestration.OutputConfig{
-			Type: "file",
-		},
 	}
 
 	filename1, err := orchestration.AddJob(plan, job1)

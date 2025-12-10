@@ -61,7 +61,7 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 		errorMsg.WriteString("Please either:\n")
 		errorMsg.WriteString(fmt.Sprintf("  a) Set a default worktree in '%s/.grove-plan.yml' with 'flow plan config --set worktree=<name>'\n", plan.Directory))
 		errorMsg.WriteString("  b) Ensure all jobs in the plan use the same worktree name.")
-		return fmt.Errorf(errorMsg.String())
+		return fmt.Errorf("%s", errorMsg.String())
 	}
 
 	// Create a minimal plan object for the session helper.

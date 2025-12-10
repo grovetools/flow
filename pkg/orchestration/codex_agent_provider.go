@@ -244,7 +244,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 	defer func() {
 		if r := recover(); r != nil {
 			msg := fmt.Sprintf("❌ Panic in session registration: %v\n", r)
-			fmt.Fprintf(os.Stderr, msg)
+			fmt.Fprintf(os.Stderr, "%s", msg)
 			if debugFile != nil {
 				debugFile.WriteString(msg)
 				debugFile.Sync()
@@ -260,7 +260,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 
 	// Wait a moment for the log file to be created.
 	msg := fmt.Sprintf("⏳ Waiting 2s for Codex log file to be created...\n")
-	fmt.Fprintf(os.Stderr, msg)
+	fmt.Fprintf(os.Stderr, "%s", msg)
 	if debugFile != nil {
 		debugFile.WriteString(msg)
 		debugFile.Sync() // Flush to disk
@@ -281,7 +281,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 	latestFile, err := findMostRecentFile(codexSessionsDir, debugFile)
 	if err != nil {
 		msg := fmt.Sprintf("❌ Failed to find Codex session file: %v\n", err)
-		fmt.Fprintf(os.Stderr, msg)
+		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
 			debugFile.WriteString(msg)
 		}
@@ -289,7 +289,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 		return
 	}
 	msg = fmt.Sprintf("✓ Found Codex log: %s\n", latestFile)
-	fmt.Fprintf(os.Stderr, msg)
+	fmt.Fprintf(os.Stderr, "%s", msg)
 	if debugFile != nil {
 		debugFile.WriteString(msg)
 	}
@@ -369,7 +369,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 // findMostRecentFile finds the most recently modified file in a directory tree.
 func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 	msg := fmt.Sprintf("🔍 Searching for .jsonl files in: %s\n", dir)
-	fmt.Fprintf(os.Stderr, msg)
+	fmt.Fprintf(os.Stderr, "%s", msg)
 	if debugFile != nil {
 		debugFile.WriteString(msg)
 	}
@@ -381,7 +381,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			msg := fmt.Sprintf("  ⚠️  Walk error at %s: %v\n", path, err)
-			fmt.Fprintf(os.Stderr, msg)
+			fmt.Fprintf(os.Stderr, "%s", msg)
 			if debugFile != nil {
 				debugFile.WriteString(msg)
 			}
@@ -403,7 +403,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 
 	if err != nil {
 		msg := fmt.Sprintf("❌ Walk failed: %v\n", err)
-		fmt.Fprintf(os.Stderr, msg)
+		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
 			debugFile.WriteString(msg)
 		}
@@ -411,7 +411,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 	}
 	if latestFile == "" {
 		msg := fmt.Sprintf("❌ No .jsonl files found (searched %d files)\n", fileCount)
-		fmt.Fprintf(os.Stderr, msg)
+		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
 			debugFile.WriteString(msg)
 		}

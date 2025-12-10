@@ -64,59 +64,6 @@ func GenerateUniqueJobID(plan *Plan, title string) string {
 	return uniqueID
 }
 
-// InitPlan creates a new plan directory with initial structure.
-func InitPlan(dir string, specFile string) error {
-	// Create plan directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("creating plan directory: %w", err)
-	}
-
-	// Check if spec file exists
-	if _, err := os.Stat(specFile); err != nil {
-		return fmt.Errorf("spec file not found: %w", err)
-	}
-
-	// Copy spec file into directory
-	specContent, err := os.ReadFile(specFile)
-	if err != nil {
-		return fmt.Errorf("reading spec file: %w", err)
-	}
-
-	specDest := filepath.Join(dir, "spec.md")
-	if err := os.WriteFile(specDest, specContent, 0644); err != nil {
-		return fmt.Errorf("writing spec file: %w", err)
-	}
-
-	// Create initial planning job
-	jobID := generateJobID("initial-plan")
-	job := &Job{
-		ID:           jobID,
-		Title:        "Create High-Level Implementation Plan",
-		Status:       JobStatusPending,
-		Type:         JobTypeOneshot,
-		PromptSource: []string{"spec.md"},
-	}
-
-	// Generate job content from template
-	tmpl, err := template.New("initial").Parse(InitialPlanTemplate)
-	if err != nil {
-		return fmt.Errorf("parsing initial plan template: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, job); err != nil {
-		return fmt.Errorf("executing initial plan template: %w", err)
-	}
-
-	// Write initial job file
-	jobPath := filepath.Join(dir, "01-high-level-plan.md")
-	if err := os.WriteFile(jobPath, buf.Bytes(), 0644); err != nil {
-		return fmt.Errorf("writing initial job file: %w", err)
-	}
-
-	return nil
-}
-
 // getWorkspaceContext retrieves repository and branch information from the current directory.
 func getWorkspaceContext() (repository, branch, worktree string) {
 	// Get repository name and branch from git

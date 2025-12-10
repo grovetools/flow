@@ -58,7 +58,7 @@ Create a plan based on the spec.`
 		MaxPromptLength: 10000,
 		Timeout:         1 * time.Minute,
 	}
-	executor := NewOneShotExecutor(config)
+	executor := NewOneShotExecutor(NewMockLLMClient(), config)
 
 	// Execute the job
 	ctx := context.Background()
@@ -101,7 +101,7 @@ func TestOneShotExecutor_BuildPrompt(t *testing.T) {
 		PromptBody:   "Do something with these specs",
 	}
 
-	executor := NewOneShotExecutor(nil)
+	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 	prompt, _, _, err := executor.buildPrompt(job, plan, "")
 	if err != nil {
 		t.Fatalf("buildPrompt() error = %v", err)
@@ -140,7 +140,7 @@ func TestOneShotExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
 		PromptBody:   "<!-- This step uses template 'agent-run' with source files -->\n<!-- Template will be resolved at execution time -->\n\n## Additional Instructions\n\nRefactor these files",
 	}
 
-	executor := NewOneShotExecutor(nil)
+	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 	prompt, _, _, err := executor.buildPrompt(job, plan, "")
 	if err != nil {
 		// The test might fail if the template doesn't exist, but we can check
@@ -185,7 +185,7 @@ func TestMockLLMClientFile(t *testing.T) {
 	defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 	client := NewMockLLMClient()
-	response, err := client.Complete(context.Background(), "test prompt", LLMOptions{})
+	response, err := client.Complete(context.Background(), &Job{}, &Plan{}, "test prompt", LLMOptions{})
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
@@ -236,7 +236,7 @@ Implement the second part.`
 	}()
 
 	client := NewMockLLMClient()
-	response, err := client.Complete(context.Background(), "test prompt", LLMOptions{})
+	response, err := client.Complete(context.Background(), &Job{}, &Plan{}, "test prompt", LLMOptions{})
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
@@ -325,7 +325,7 @@ Body`
 			config := &ExecutorConfig{
 				MaxPromptLength: 100, // Small limit for testing
 			}
-			executor := NewOneShotExecutor(config)
+			executor := NewOneShotExecutor(NewMockLLMClient(), config)
 
 			err := executor.Execute(context.Background(), job, plan)
 			if err == nil {

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -652,7 +651,6 @@ func updateJobFile(job *Job) error {
 // MockLLMClient implements a mock LLM client for testing.
 type MockLLMClient struct {
 	responseFile string
-	outputMode   string
 }
 
 // NewMockLLMClient creates a new mock LLM client.
@@ -661,7 +659,6 @@ func NewMockLLMClient() LLMClient {
 	if file := os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE"); file != "" {
 		return &MockLLMClient{
 			responseFile: file,
-			outputMode:   os.Getenv("GROVE_MOCK_LLM_OUTPUT_MODE"),
 		}
 	}
 	// Return real LLM client (placeholder for now)
@@ -680,81 +677,7 @@ func (m *MockLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prom
 		return "", fmt.Errorf("read mock response: %w", err)
 	}
 
-	// For oneshot jobs that create new job files
-	if m.outputMode == "split_by_frontmatter" {
-		return m.splitIntoJobFiles(string(content))
-	}
-
 	return string(content), nil
-}
-
-// splitIntoJobFiles parses mock response and creates job files.
-func (m *MockLLMClient) splitIntoJobFiles(content string) (string, error) {
-	// Split content by frontmatter markers
-	// The format is: main content, then job definitions separated by ---
-	parts := strings.Split(content, "\n---\n")
-
-	if len(parts) < 2 {
-		// No jobs to create
-		return content, nil
-	}
-
-	// First part is the main response
-	mainResponse := parts[0]
-
-	// Process remaining parts as job definitions
-	jobNum := 2 // Start numbering from 02
-	planDir := filepath.Dir(os.Getenv("GROVE_CURRENT_JOB_PATH"))
-
-	for i := 1; i < len(parts); i++ {
-		part := parts[i]
-
-		// Skip empty parts
-		if strings.TrimSpace(part) == "" {
-			continue
-		}
-
-		// Check if this looks like a job definition (has id: and title:)
-		if strings.Contains(part, "id:") && strings.Contains(part, "title:") {
-			// Split into frontmatter and body
-			bodyIdx := strings.Index(part, "---\n")
-			var frontmatter, body string
-
-			if bodyIdx != -1 {
-				frontmatter = part[:bodyIdx]
-				body = part[bodyIdx+4:] // Skip "---\n"
-			} else {
-				// No body separator, entire part is frontmatter
-				frontmatter = part
-				body = ""
-			}
-
-			// Extract title for filename
-			titleMatch := regexp.MustCompile(`title:\s*"([^"]+)"`).FindStringSubmatch(frontmatter)
-			var filename string
-			if len(titleMatch) > 1 {
-				// Sanitize title for filename
-				safeName := strings.ToLower(titleMatch[1])
-				safeName = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(safeName, "-")
-				safeName = strings.Trim(safeName, "-")
-				filename = fmt.Sprintf("%02d-%s.md", jobNum, safeName)
-			} else {
-				filename = fmt.Sprintf("%02d-generated-job.md", jobNum)
-			}
-
-			// Create job file
-			jobContent := fmt.Sprintf("---\n%s\n---\n%s", frontmatter, body)
-			jobPath := filepath.Join(planDir, filename)
-
-			if err := os.WriteFile(jobPath, []byte(jobContent), 0o644); err != nil {
-				return "", fmt.Errorf("write job file %s: %w", filename, err)
-			}
-
-			jobNum++
-		}
-	}
-
-	return mainResponse, nil
 }
 
 // prepareWorktree ensures the worktree exists and is ready.

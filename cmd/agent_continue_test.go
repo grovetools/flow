@@ -84,9 +84,6 @@ func TestAgentJobTemplateWithContinue(t *testing.T) {
 		Status:        orchestration.JobStatusPending,
 		AgentContinue: true,
 		PromptBody:    "Test prompt",
-		Output: orchestration.OutputConfig{
-			Type: "file",
-		},
 	}
 
 	// Add the job to the plan

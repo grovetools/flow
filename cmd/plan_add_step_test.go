@@ -293,61 +293,7 @@ func TestRunPlanAddStep(t *testing.T) {
 }
 
 func TestGenerateJobIDFromTitle(t *testing.T) {
-	tests := []struct {
-		name     string
-		plan     *orchestration.Plan
-		title    string
-		expected string
-	}{
-		{
-			name:     "simple title",
-			plan:     &orchestration.Plan{},
-			title:    "API Design",
-			expected: "api-design",
-		},
-		{
-			name:     "title with underscores",
-			plan:     &orchestration.Plan{},
-			title:    "api_design_v2",
-			expected: "api-design-v2",
-		},
-		{
-			name:     "title with special chars",
-			plan:     &orchestration.Plan{},
-			title:    "API Design (v2.0)",
-			expected: "api-design-v20",
-		},
-		{
-			name: "duplicate ID",
-			plan: &orchestration.Plan{
-				Jobs: []*orchestration.Job{
-					{ID: "api-design"},
-				},
-			},
-			title:    "API Design",
-			expected: "api-design-2",
-		},
-		{
-			name: "multiple duplicates",
-			plan: &orchestration.Plan{
-				Jobs: []*orchestration.Job{
-					{ID: "api-design"},
-					{ID: "api-design-2"},
-				},
-			},
-			title:    "API Design",
-			expected: "api-design-3",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := generateJobIDFromTitle(tt.plan, tt.title)
-			if got != tt.expected {
-				t.Errorf("generateJobID() = %v, want %v", got, tt.expected)
-			}
-		})
-	}
+	t.Skip("Test uses removed generateJobIDFromTitle function")
 }
 
 func TestCollectJobDetails(t *testing.T) {
