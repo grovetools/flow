@@ -709,7 +709,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 	}
 
 	// Use the shared method to get or prepare the worktree at the git root
-	worktreePath, err := e.worktreeManager.GetOrPrepareWorktree(ctx, realGitRoot, job.Worktree, "")
+	worktreePath, _, err := e.worktreeManager.GetOrPrepareWorktree(ctx, realGitRoot, job.Worktree, "")
 	if err != nil {
 		return "", err
 	}

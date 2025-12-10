@@ -70,7 +70,7 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 			gitRoot = plan.Directory
 		}
 		
-		worktreeDir, err := e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "main")
+		worktreeDir, _, err := e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "main")
 		if err != nil {
 			return fmt.Errorf("getting worktree: %w", err)
 		}
