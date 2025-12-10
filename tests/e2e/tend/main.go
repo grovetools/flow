@@ -26,6 +26,7 @@ func main() {
 		scenarios.PlanFromNoteScenario,
 		scenarios.PlanMergeUpdateWorktreeScenario,
 		scenarios.StandardFeatureRecipeScenario,
+		scenarios.PlanAddTemplateScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
