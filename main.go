@@ -5,6 +5,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-flow/cmd"
+	"github.com/mattsolo1/grove-flow/pkg/docs"
 )
 
 func main() {
@@ -21,6 +22,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewStarshipCmd())
 	rootCmd.AddCommand(cmd.GetRegisterCodexSessionCmd())
 	rootCmd.AddCommand(cmd.NewTmuxCmd())
+	rootCmd.AddCommand(cli.NewDocsCommand(docs.DocsJSON))
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

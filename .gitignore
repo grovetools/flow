@@ -7,6 +7,9 @@ bin/
 # Go coverage
 *.out
 
+# Generated documentation
+pkg/docs/docs.json
+
 .grove
 # Ignore worktrees created by flow.
 # These contain .grove/workspace marker files for grove-meta tooling.
