@@ -49,6 +49,8 @@ type statusTUIKeyMap struct {
 	PageUp        key.Binding
 	PageDown      key.Binding
 	ViewLogs      key.Binding
+	SwitchFocus   key.Binding
+	ToggleLayout  key.Binding
 }
 
 func newStatusTUIKeyMap() statusTUIKeyMap {
@@ -142,6 +144,14 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithKeys("v"),
 			key.WithHelp("v", "toggle log view"),
 		),
+		SwitchFocus: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "switch focus"),
+		),
+		ToggleLayout: key.NewBinding(
+			key.WithKeys("V"),
+			key.WithHelp("V", "toggle layout"),
+		),
 	}
 }
 
@@ -171,6 +181,9 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Views")),
 			k.ToggleView,
 			k.ToggleSummaries,
+			k.ViewLogs,
+			k.SwitchFocus,
+			k.ToggleLayout,
 		},
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
@@ -184,7 +197,6 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.Rename,
 			k.Resume,
 			k.EditDeps,
-			k.ViewLogs,
 			k.Archive,
 			k.Help,
 			k.Quit,
@@ -197,6 +209,13 @@ type viewMode int
 const (
 	tableView viewMode = iota
 	treeView
+)
+
+type viewFocus int
+
+const (
+	jobsPane viewFocus = iota
+	logsPane
 )
 
 func (v viewMode) String() string {
@@ -241,6 +260,8 @@ type statusTUIModel struct {
 	showLogs         bool
 	logViewer        logviewer.Model
 	activeLogJob     *orchestration.Job
+	focus            viewFocus // Track which pane is active
+	logSplitVertical bool      // Track log viewer layout
 }
 
 
@@ -297,11 +318,13 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		planDir:        plan.Directory,
 		keyMap:         keyMap,
 		help:           helpModel,
-		cursorVisible:  true,
-		viewMode:       tableView, // Default to table view
-		logViewer:      logViewerModel,
-		showLogs:       true, // Always start with logs visible
-		activeLogJob:   nil,
+		cursorVisible:    true,
+		viewMode:         tableView, // Default to table view
+		logViewer:        logViewerModel,
+		showLogs:         false, // Start with logs hidden by default
+		activeLogJob:     nil,
+		focus:            jobsPane,
+		logSplitVertical: true, // Default to vertical split
 	}
 }
 
@@ -829,19 +852,23 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// If log viewer is showing, delegate scroll keys to it
-		if m.showLogs {
+		// If log viewer is showing and focused, delegate most keys to it first.
+		if m.showLogs && m.focus == logsPane {
 			switch msg.String() {
-			case "up", "k", "down", "j", "pgup", "pgdown", "ctrl+u", "ctrl+d", "f":
-				// Let the log viewer handle these keys for scrolling
+			case "v":
+				// Let 'v' be handled by the main logic to close the viewer.
+			case "V":
+				// Let 'V' be handled by the main logic to toggle layout.
+			case "tab":
+				// Let 'tab' be handled by the main logic to switch focus.
+			case "esc":
+				// 'esc' switches focus back to the jobs pane.
+				m.focus = jobsPane
+				return m, nil
+			default:
+				// Delegate other keys to the log viewer for scrolling, etc.
 				m.logViewer, cmd = m.logViewer.Update(msg)
 				return m, cmd
-			case "v", "esc":
-				// 'v' or 'esc' closes the log viewer (handled below in the normal key dispatch)
-				// Fall through to normal handling
-			default:
-				// For other keys, still delegate to log viewer but also fall through
-				m.logViewer, cmd = m.logViewer.Update(msg)
 			}
 		}
 
@@ -868,6 +895,21 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keyMap.Help):
 			m.help.Toggle()
+
+		case key.Matches(msg, m.keyMap.SwitchFocus):
+			if m.showLogs {
+				if m.focus == jobsPane {
+					m.focus = logsPane
+				} else {
+					m.focus = jobsPane
+				}
+			}
+
+		case key.Matches(msg, m.keyMap.ToggleLayout):
+			if m.showLogs {
+				m.logSplitVertical = !m.logSplitVertical
+			}
+			return m, nil
 
 		case key.Matches(msg, m.keyMap.Up):
 			if m.cursor > 0 {
@@ -938,9 +980,12 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Close the log viewer
 				m.logViewer.Stop()
 				m.showLogs = false
+				m.focus = jobsPane
 				m.activeLogJob = nil
 				m.statusSummary = ""
 			} else if m.cursor < len(m.jobs) {
+				// Open the log viewer and focus it
+				m.focus = logsPane
 				job := m.jobs[m.cursor]
 
 				// Find workspace for the job
@@ -1313,11 +1358,18 @@ func (m statusTUIModel) View() string {
 	// 4. Combine everything
 	var finalView string
 	if m.showLogs {
-		// Split-screen layout: jobs on top, logs on bottom
-		tableHeight := (m.height * 2) / 3
-		logHeight := m.height - tableHeight - 6 // Account for headers, dividers, and margins
+		// Define pane styles for focus indication
+		jobsPaneStyle := lipgloss.NewStyle()
+		logsPaneStyle := lipgloss.NewStyle()
 
-		// Render the job list with constrained height
+		if m.focus == jobsPane {
+			jobsPaneStyle = jobsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Orange)
+			logsPaneStyle = logsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Border)
+		} else {
+			jobsPaneStyle = jobsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Border)
+			logsPaneStyle = logsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Orange)
+		}
+
 		jobsView := lipgloss.JoinVertical(
 			lipgloss.Left,
 			styledHeader,
@@ -1325,25 +1377,49 @@ func (m statusTUIModel) View() string {
 			scrollIndicator,
 		)
 
-		// Update log viewer size
-		m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: m.width - 4, Height: logHeight})
-		logView := m.logViewer.View()
+		var logHeight, logWidth, jobsHeight, jobsWidth int
 
-		// Create a divider
-		divider := lipgloss.NewStyle().
-			Width(contentWidth).
-			Foreground(theme.DefaultTheme.Muted.GetForeground()).
-			Render(strings.Repeat("─", contentWidth))
+		if m.logSplitVertical {
+			// Vertical split (side-by-side)
+			jobsWidth = m.width/2 - 4
+			logWidth = m.width - jobsWidth - 6
+			jobsHeight = m.height - 10 // Account for footer and margins
+			logHeight = jobsHeight
 
-		finalView = lipgloss.JoinVertical(
-			lipgloss.Left,
-			jobsView,
-			"\n",
-			divider,
-			logView,
-			"\n",
-			footer,
-		)
+			m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: logWidth, Height: logHeight})
+			logView := logsPaneStyle.Padding(1).Width(logWidth).Height(logHeight).Render(m.logViewer.View())
+
+			jobsPane := jobsPaneStyle.Padding(1).Width(jobsWidth).Height(jobsHeight).Render(jobsView)
+
+			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, logView)
+			finalView = lipgloss.JoinVertical(lipgloss.Left, finalView, "\n", footer)
+
+		} else {
+			// Horizontal split (top/bottom)
+			jobsHeight = (m.height * 2) / 3
+			logHeight = m.height - jobsHeight - 6 // Account for headers, dividers, and margins
+
+			m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: m.width - 4, Height: logHeight})
+			logView := logsPaneStyle.Render(m.logViewer.View())
+
+			jobsPane := jobsPaneStyle.Render(jobsView)
+
+			// Create a divider
+			divider := lipgloss.NewStyle().
+				Width(contentWidth).
+				Foreground(theme.DefaultTheme.Muted.GetForeground()).
+				Render(strings.Repeat("─", contentWidth))
+
+			finalView = lipgloss.JoinVertical(
+				lipgloss.Left,
+				jobsPane,
+				"\n",
+				divider,
+				logView,
+				"\n",
+				footer,
+			)
+		}
 	} else {
 		finalView = lipgloss.JoinVertical(
 			lipgloss.Left,
