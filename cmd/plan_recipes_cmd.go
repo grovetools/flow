@@ -20,6 +20,7 @@ var planRecipesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available plan recipes",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		domain, _ := cmd.Flags().GetString("domain")
 		// Load flow config to get dynamic recipe command
 		_, getRecipeCmd, err := loadFlowConfigWithDynamicRecipes()
 		if err != nil {
@@ -28,9 +29,20 @@ var planRecipesListCmd = &cobra.Command{
 		}
 
 		// List all recipes (user, dynamic, and built-in)
-		recipes, err := orchestration.ListAllRecipes(getRecipeCmd)
+		allRecipes, err := orchestration.ListAllRecipes(getRecipeCmd)
 		if err != nil {
 			return err
+		}
+
+		var recipes []*orchestration.Recipe
+		if domain != "" {
+			for _, r := range allRecipes {
+				if r.Domain == domain {
+					recipes = append(recipes, r)
+				}
+			}
+		} else {
+			recipes = allRecipes
 		}
 
 		if len(recipes) == 0 {
@@ -46,9 +58,9 @@ var planRecipesListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSOURCE\tDESCRIPTION")
+		fmt.Fprintln(w, "NAME\tDOMAIN\tSOURCE\tDESCRIPTION")
 		for _, r := range recipes {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Name, r.Source, r.Description)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.Name, r.Domain, r.Source, r.Description)
 		}
 		w.Flush()
 		return nil
@@ -56,5 +68,6 @@ var planRecipesListCmd = &cobra.Command{
 }
 
 func init() {
+	planRecipesListCmd.Flags().String("domain", "", "Filter recipes by domain (e.g., generic, grove)")
 	planRecipesCmd.AddCommand(planRecipesListCmd)
 }

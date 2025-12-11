@@ -20,10 +20,22 @@ var planTemplatesListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available job templates",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		domain, _ := cmd.Flags().GetString("domain")
 		manager := orchestration.NewTemplateManager()
-		templates, err := manager.ListTemplates()
+		allTemplates, err := manager.ListTemplates()
 		if err != nil {
 			return err
+		}
+
+		var templates []*orchestration.JobTemplate
+		if domain != "" {
+			for _, t := range allTemplates {
+				if t.Domain == domain {
+					templates = append(templates, t)
+				}
+			}
+		} else {
+			templates = allTemplates
 		}
 
 		if len(templates) == 0 {
@@ -42,9 +54,9 @@ var planTemplatesListCmd = &cobra.Command{
 
 		// Default tabular output
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSOURCE\tDESCRIPTION")
+		fmt.Fprintln(w, "NAME\tDOMAIN\tTYPE\tSOURCE\tDESCRIPTION")
 		for _, t := range templates {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", t.Name, t.Source, t.Description)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.Name, t.Domain, t.Type, t.Source, t.Description)
 		}
 		w.Flush()
 		return nil

@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
-
-	"github.com/mattsolo1/grove-core/util/sanitize"
 )
 
 // JobTemplate represents a predefined job structure.
@@ -16,6 +14,8 @@ type JobTemplate struct {
 	Name        string                 `json:"name"`
 	Path        string                 `json:"path"`
 	Source      string                 `json:"source"` // "project", "user", "builtin"
+	Domain      string                 `json:"domain,omitempty"` // "generic" or "grove"
+	Type        string                 `json:"type,omitempty"`   // "agent" or "oneshot"
 	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`
 	Frontmatter map[string]interface{} `json:"frontmatter,omitempty"`
 	Prompt      string                 `json:"prompt,omitempty"`
@@ -69,24 +69,7 @@ func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
 	}
 
 	// 3. Check built-in templates
-	if content, ok := BuiltinTemplates[name]; ok {
-		fm, body, err := ParseFrontmatter([]byte(content))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse built-in template '%s': %w", name, err)
-		}
-
-		template := &JobTemplate{
-			Name:        name,
-			Path:        "builtin:" + name,
-			Source:      "builtin",
-			Frontmatter: fm,
-			Prompt:      sanitize.UTF8(body),
-		}
-
-		if desc, ok := fm["description"].(string); ok {
-			template.Description = desc
-		}
-
+	if template, ok := BuiltinTemplates[name]; ok {
 		return template, nil
 	}
 
@@ -153,26 +136,9 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 	}
 
 	// 3. Add built-in templates
-	for name, content := range BuiltinTemplates {
+	for name, template := range BuiltinTemplates {
 		// Only add if we haven't seen this template name yet
 		if !templateNames[name] {
-			fm, body, err := ParseFrontmatter([]byte(content))
-			if err != nil {
-				continue
-			}
-
-			template := &JobTemplate{
-				Name:        name,
-				Path:        "builtin:" + name,
-				Source:      "builtin",
-				Frontmatter: fm,
-				Prompt:      sanitize.UTF8(body),
-			}
-
-			if desc, ok := fm["description"].(string); ok {
-				template.Description = desc
-			}
-
 			templates = append(templates, template)
 			templateNames[name] = true
 		}
@@ -200,9 +166,17 @@ func (tm *TemplateManager) LoadTemplate(path, name, source string) (*JobTemplate
 		Frontmatter: fm,
 		Prompt:      string(body),
 	}
-	
+
 	if desc, ok := fm["description"].(string); ok {
 		template.Description = desc
+	}
+
+	if domain, ok := fm["domain"].(string); ok {
+		template.Domain = domain
+	}
+
+	if typ, ok := fm["type"].(string); ok {
+		template.Type = typ
 	}
 
 	return template, nil

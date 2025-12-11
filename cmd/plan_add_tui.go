@@ -119,6 +119,9 @@ type tuiModel struct {
 	templateList list.Model
 	promptInput  textarea.Model
 
+	// All available templates (for filtering)
+	allTemplates []*orchestration.JobTemplate
+
 	// Fields to store the final job data
 	jobTitle        string
 	jobType         string
@@ -276,21 +279,10 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	// 4. Template Input (list)
 	templateManager := orchestration.NewTemplateManager()
 	templates, _ := templateManager.ListTemplates() // Ignore error for now
-	templateItems := make([]list.Item, len(templates)+1)
-	templateItems[0] = item("none") // Add a 'none' option
-	for i, t := range templates {
-		templateItems[i+1] = item(t.Name)
-	}
-	m.templateList = list.New(templateItems, itemDelegate{}, 20, 7)
-	m.templateList.Title = ""
-	m.templateList.SetShowTitle(false)
-	m.templateList.SetShowStatusBar(false)
-	m.templateList.SetFilteringEnabled(true)
-	m.templateList.SetShowHelp(false)
-	m.templateList.SetShowPagination(true)
-	m.templateList.FilterInput.Prompt = "🔍 "
-	m.templateList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
-	m.templateList.FilterInput.TextStyle = theme.DefaultTheme.Selected
+	m.allTemplates = templates
+
+	// Initially show all templates (no job type selected yet)
+	m.templateList = m.buildTemplateList("")
 
 	// 5. Prompt Input (textarea)
 	m.promptInput = textarea.New()
@@ -299,6 +291,59 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	m.promptInput.SetHeight(7)
 
 	return m
+}
+
+// buildTemplateList creates a filtered template list based on the selected job type
+func (m tuiModel) buildTemplateList(jobType string) list.Model {
+	// Filter templates based on job type
+	var filteredTemplates []*orchestration.JobTemplate
+
+	for _, t := range m.allTemplates {
+		// Map job types to template types
+		// Agent types (interactive_agent, headless_agent, agent) share "Agent templates"
+		// Prompt types (oneshot, chat) share "Prompt templates"
+		// Note: Template Type comes from directory structure: "agent" or "oneshot"
+		includeTemplate := false
+
+		switch jobType {
+		case "interactive_agent", "headless_agent", "agent":
+			// Show agent templates (Type == "agent")
+			includeTemplate = t.Type == "agent"
+		case "oneshot", "chat":
+			// Show oneshot templates (Type == "oneshot", which includes chat.md)
+			includeTemplate = t.Type == "oneshot"
+		case "shell":
+			// Shell jobs typically don't use templates
+			includeTemplate = false
+		default:
+			// If no job type selected, show all templates
+			includeTemplate = true
+		}
+
+		if includeTemplate {
+			filteredTemplates = append(filteredTemplates, t)
+		}
+	}
+
+	// Build list items
+	templateItems := make([]list.Item, len(filteredTemplates)+1)
+	templateItems[0] = item("none") // Add a 'none' option
+	for i, t := range filteredTemplates {
+		templateItems[i+1] = item(t.Name)
+	}
+
+	templateList := list.New(templateItems, itemDelegate{}, 20, 7)
+	templateList.Title = ""
+	templateList.SetShowTitle(false)
+	templateList.SetShowStatusBar(false)
+	templateList.SetFilteringEnabled(true)
+	templateList.SetShowHelp(false)
+	templateList.SetShowPagination(true)
+	templateList.FilterInput.Prompt = "🔍 "
+	templateList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	templateList.FilterInput.TextStyle = theme.DefaultTheme.Selected
+
+	return templateList
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -513,6 +558,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
+				// Update template list for chat job type (filters to oneshot templates)
+				m.templateList = m.buildTemplateList("chat")
 				// Set template to chat (find it in the template list)
 				for i, listItem := range m.templateList.Items() {
 					if string(listItem.(item)) == "chat" {
@@ -533,6 +580,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
+				// Update template list for interactive_agent job type (filters to agent templates)
+				m.templateList = m.buildTemplateList("interactive_agent")
 				return m, nil
 			}
 
@@ -584,7 +633,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case 0: // Title input
 		m.titleInput, cmd = m.titleInput.Update(msg)
 	case 1: // Job type list
+		prevSelection := m.jobTypeList.SelectedItem()
 		m.jobTypeList, cmd = m.jobTypeList.Update(msg)
+		// Check if job type selection changed
+		newSelection := m.jobTypeList.SelectedItem()
+		if prevSelection != newSelection && newSelection != nil {
+			// Update template list based on new job type
+			selectedJobType := string(newSelection.(item))
+			m.templateList = m.buildTemplateList(selectedJobType)
+		}
 	case 2: // Template list
 		m.templateList, cmd = m.templateList.Update(msg)
 	case 3: // Dependency list
@@ -749,8 +806,20 @@ func (m tuiModel) View() string {
 	jobTypeView := m.jobTypeList.View()
 	jobTypeField := renderField(1, "Job Type:", jobTypeView, 0)
 
+	// Determine template label based on selected job type
+	templateLabel := "Template:"
+	if selected := m.jobTypeList.SelectedItem(); selected != nil {
+		jobType := string(selected.(item))
+		switch jobType {
+		case "interactive_agent", "headless_agent", "agent":
+			templateLabel = "Agent templates:"
+		case "oneshot", "chat":
+			templateLabel = "Prompt templates:"
+		}
+	}
+
 	templateView := m.templateList.View()
-	templateField := renderField(2, "Template:", templateView, 0)
+	templateField := renderField(2, templateLabel, templateView, 0)
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, jobTypeField, "  ", templateField)
 	row2WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row2)

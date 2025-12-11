@@ -188,6 +188,7 @@ func NewPlanCmd() *cobra.Command {
 	InitPlanStatusFlags()
 
 	// Register templates subcommand
+	planTemplatesListCmd.Flags().String("domain", "", "Filter templates by domain (e.g., generic, grove)")
 	planTemplatesCmd.AddCommand(planTemplatesListCmd)
 	planTemplatesPrintCmd.Flags().BoolVar(&planTemplatesPrintWithFrontmatter, "frontmatter", false, "Include YAML frontmatter in output")
 	planTemplatesCmd.AddCommand(planTemplatesPrintCmd)
