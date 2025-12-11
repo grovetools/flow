@@ -32,6 +32,7 @@ func main() {
 		scenarios.PlanAddTemplateScenario,
 		scenarios.RecipeInitActionsShellScenario,
 		scenarios.RecipeInitActionsDockerComposeScenario,
+		scenarios.RecipeInitActionsNotebookScenario,
 		// scenarios.RecipeInitActionsEcosystemScenario,
 		scenarios.RecipeInitActionsFailureHandlingScenario,
 		scenarios.PlanDomainFilteringScenario,

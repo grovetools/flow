@@ -488,6 +488,128 @@ actions:
 	},
 )
 
+var RecipeInitActionsNotebookScenario = harness.NewScenario(
+	"recipe-init-actions-notebook",
+	"Tests shell-type init actions from notebook recipe workspace_init.yml",
+	[]string{"recipe", "init-actions", "notebook", "shell"},
+	[]harness.Step{
+		harness.NewStep("Setup sandboxed environment with git repo", func(ctx *harness.Context) error {
+			projectDir, _, err := setupDefaultEnvironment(ctx, "notebook-init-project")
+			if err != nil {
+				return err
+			}
+
+			// Create a git repo with initial commit
+			repo, err := git.SetupTestRepo(projectDir)
+			if err != nil {
+				return err
+			}
+			if err := fs.WriteString(filepath.Join(projectDir, "README.md"), "# Notebook Init Test\n"); err != nil {
+				return err
+			}
+			if err := repo.AddCommit("Initial commit"); err != nil {
+				return err
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Create notebook recipe with shell init actions", func(ctx *harness.Context) error {
+			notebooksRoot := ctx.GetString("notebooks_root")
+			recipesDir := filepath.Join(notebooksRoot, "workspaces", "notebook-init-project", "recipes", "notebook-shell-recipe")
+
+			if err := fs.CreateDir(recipesDir); err != nil {
+				return fmt.Errorf("creating recipe directory: %w", err)
+			}
+
+			// Create main job file
+			jobContent := `---
+type: interactive-agent
+template: chat
+---
+
+# Notebook Recipe with Shell Actions
+
+This is a test recipe in the notebook directory to verify shell init actions.
+`
+			if err := fs.WriteString(filepath.Join(recipesDir, "01-test.md"), jobContent); err != nil {
+				return fmt.Errorf("creating job file: %w", err)
+			}
+
+			// Create workspace_init.yml with shell actions
+			workspaceInitContent := `description: Notebook recipe with shell init actions
+actions:
+  - type: shell
+    description: Create notebook test directory
+    command: mkdir -p notebook-test-output
+
+  - type: shell
+    description: Write test file with template from notebook
+    command: echo "NotebookPlan:{{ .PlanName }}" > notebook-test-output/notebook-plan.txt
+`
+			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
+				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Initialize plan from notebook recipe with shell actions", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			notebooksRoot := ctx.GetString("notebooks_root")
+
+			cmd := ctx.Bin("plan", "init", "notebook-shell-plan", "--recipe", "notebook-shell-recipe", "--worktree")
+			cmd.Dir(projectDir)
+
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("plan init failed: %w", err)
+			}
+
+			// Verify output mentions executing actions
+			if !strings.Contains(result.Stdout, "Executing initialization actions") {
+				return fmt.Errorf("expected output to mention executing initialization actions, got stdout: %s", result.Stdout)
+			}
+
+			planPath := filepath.Join(notebooksRoot, "workspaces", "notebook-init-project", "plans", "notebook-shell-plan")
+			ctx.Set("plan_path", planPath)
+
+			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "notebook-shell-plan")
+			ctx.Set("worktree_path", worktreePath)
+
+			return nil
+		}),
+
+		harness.NewStep("Verify shell actions from notebook recipe created expected files", func(ctx *harness.Context) error {
+			worktreePath := ctx.GetString("worktree_path")
+
+			// Verify notebook-test-output directory was created
+			testOutputDir := filepath.Join(worktreePath, "notebook-test-output")
+			if err := fs.AssertExists(testOutputDir); err != nil {
+				return fmt.Errorf("notebook-test-output directory should exist: %w", err)
+			}
+
+			// Verify notebook-plan.txt was created with rendered template
+			planInfoPath := filepath.Join(testOutputDir, "notebook-plan.txt")
+			if err := fs.AssertExists(planInfoPath); err != nil {
+				return fmt.Errorf("notebook-plan.txt should exist: %w", err)
+			}
+
+			content, err := fs.ReadString(planInfoPath)
+			if err != nil {
+				return fmt.Errorf("reading notebook-plan.txt: %w", err)
+			}
+
+			if !strings.Contains(content, "NotebookPlan:notebook-shell-plan") {
+				return fmt.Errorf("notebook-plan.txt should contain rendered plan name, got: %s", content)
+			}
+
+			return nil
+		}),
+	},
+)
+
 var RecipeInitActionsFailureHandlingScenario = harness.NewScenario(
 	"recipe-init-actions-failure",
 	"Tests that init action failures are handled gracefully without blocking plan creation",

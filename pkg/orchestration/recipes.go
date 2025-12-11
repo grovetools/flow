@@ -466,6 +466,10 @@ func GetNotebookRecipe(name string) (*Recipe, error) {
 		}
 	}
 
+	if err := loadInitActions(recipe, recipeDir, embed.FS{}); err != nil {
+		return nil, fmt.Errorf("loading init actions for notebook recipe '%s': %w", name, err)
+	}
+
 	if len(recipe.Jobs) == 0 {
 		return nil, fmt.Errorf("notebook recipe '%s' contains no job files", name)
 	}
