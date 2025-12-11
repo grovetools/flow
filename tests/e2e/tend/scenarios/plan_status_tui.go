@@ -20,6 +20,7 @@ var PlanStatusTUIScenario = harness.NewScenarioWithOptions(
 	[]harness.Step{
 		harness.NewStep("Setup mock filesystem with dependent jobs", setupPlanWithDependencies),
 		harness.NewStep("Launch status TUI and verify initial state", launchStatusTUIAndVerify),
+		harness.NewStep("Ensure log viewer is open", ensureLogViewerOpen),
 		harness.NewStep("Verify split-screen log view is visible", verifySplitScreenLogs),
 		harness.NewStep("Mark first job as completed", markFirstJobCompleted),
 		harness.NewStep("Verify status updated in TUI", verifyStatusUpdate),
@@ -166,25 +167,25 @@ func verifySplitScreenLogs(ctx *harness.Context) error {
 		return err
 	}
 
-	// The split-screen view should show either:
-	// 1. The log viewer with divider and "Follow:" indicator (if logs exist)
-	// 2. Just the job list (if no logs exist)
-	// We'll check for the divider which indicates split-screen mode is active
-
+	// Verify split-screen is active by checking for:
+	// 1. "Follow:" indicator showing log viewer is active
+	// 2. Job list is still visible (showing split-screen mode)
 	hasFollowIndicator := strings.Contains(content, "Follow:")
-	hasDivider := strings.Contains(content, "─")
+	hasJobs := strings.Contains(content, "01-job-a.md")
 
-	// Verify log content is present
+	if !hasFollowIndicator {
+		return fmt.Errorf("split-screen log viewer not active - missing 'Follow:' indicator")
+	}
+
+	if !hasJobs {
+		return fmt.Errorf("split-screen log viewer not active - job list not visible")
+	}
+
+	// Verify actual log content is present
 	hasLogContent := strings.Contains(content, "INFO") ||
 	                 strings.Contains(content, "ERROR") ||
 	                 strings.Contains(content, "Executing")
 
-	// Verify split-screen log viewer is active
-	if !hasFollowIndicator || !hasDivider {
-		return fmt.Errorf("split-screen log viewer not active (Follow: %v, Divider: %v)", hasFollowIndicator, hasDivider)
-	}
-
-	// Verify actual log content is visible
 	if !hasLogContent {
 		return fmt.Errorf("split-screen active but no log content visible")
 	}
