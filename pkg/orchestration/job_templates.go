@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 )
 
 // JobTemplate represents a predefined job structure.
@@ -59,7 +62,15 @@ func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
 		dir = parent
 	}
 
-	// 2. Check user-global: ~/.config/grove/job-templates/
+	// 2. Check notebook-scoped templates
+	if notebookTemplatesDir, err := getNotebookTemplatesDir(); err == nil {
+		templatePath := filepath.Join(notebookTemplatesDir, name+".md")
+		if _, err := os.Stat(templatePath); err == nil {
+			return tm.LoadTemplate(templatePath, name, "notebook")
+		}
+	}
+
+	// 3. Check user-global: ~/.config/grove/job-templates/
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
 		userPath := filepath.Join(homeDir, ".config", "grove", "job-templates", name+".md")
@@ -68,7 +79,7 @@ func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
 		}
 	}
 
-	// 3. Check built-in templates
+	// 4. Check built-in templates
 	if template, ok := BuiltinTemplates[name]; ok {
 		return template, nil
 	}
@@ -115,7 +126,24 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 		dir = parent
 	}
 
-	// 2. Check user-global: ~/.config/grove/job-templates/
+	// 2. Add notebook-scoped templates
+	if notebookTemplatesDir, err := getNotebookTemplatesDir(); err == nil {
+		if entries, err := os.ReadDir(notebookTemplatesDir); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+					name := strings.TrimSuffix(entry.Name(), ".md")
+					if !templateNames[name] {
+						if tmpl, err := tm.LoadTemplate(filepath.Join(notebookTemplatesDir, entry.Name()), name, "notebook"); err == nil {
+							templates = append(templates, tmpl)
+							templateNames[name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Check user-global: ~/.config/grove/job-templates/
 	homeDir, _ := os.UserHomeDir()
 	if homeDir != "" {
 		userDir := filepath.Join(homeDir, ".config", "grove", "job-templates")
@@ -135,7 +163,7 @@ func (tm *TemplateManager) ListTemplates() ([]*JobTemplate, error) {
 		}
 	}
 
-	// 3. Add built-in templates
+	// 4. Add built-in templates
 	for name, template := range BuiltinTemplates {
 		// Only add if we haven't seen this template name yet
 		if !templateNames[name] {
@@ -195,4 +223,20 @@ func (t *JobTemplate) Render(data interface{}) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+// getNotebookTemplatesDir resolves the path to the current notebook's templates directory.
+func getNotebookTemplatesDir() (string, error) {
+	node, err := workspace.GetProjectByPath(".")
+	if err != nil {
+		return "", fmt.Errorf("could not determine current workspace: %w", err)
+	}
+
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		cfg = &config.Config{} // Proceed with default locator logic
+	}
+
+	locator := workspace.NewNotebookLocator(cfg)
+	return locator.GetTemplatesDir(node)
 }

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/mattsolo1/grove-core/config"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -328,6 +330,26 @@ func ListUserRecipes() ([]*Recipe, error) {
 	return recipes, nil
 }
 
+// ListNotebookRecipes lists all recipes from the current notebook context.
+func ListNotebookRecipes() ([]*Recipe, error) {
+	var recipes []*Recipe
+	notebookRecipesDir, err := getNotebookRecipesDir()
+	if err != nil {
+		return nil, nil // Not an error if the dir doesn't resolve
+	}
+
+	if entries, err := os.ReadDir(notebookRecipesDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				if recipe, err := GetNotebookRecipe(entry.Name()); err == nil {
+					recipes = append(recipes, recipe)
+				}
+			}
+		}
+	}
+	return recipes, nil
+}
+
 // GetProjectRecipe finds and returns a project-local recipe by searching upwards.
 func GetProjectRecipe(name string) (*Recipe, error) {
 	currentDir, err := os.Getwd()
@@ -416,9 +438,44 @@ func GetUserRecipe(name string) (*Recipe, error) {
 	return recipe, nil
 }
 
-// GetRecipe finds and returns a recipe by name with precedence: Project > User > Dynamic > Built-in.
+// GetNotebookRecipe finds and returns a recipe from the current notebook context.
+func GetNotebookRecipe(name string) (*Recipe, error) {
+	notebookRecipesDir, err := getNotebookRecipesDir()
+	if err != nil {
+		return nil, err
+	}
+
+	recipeDir := filepath.Join(notebookRecipesDir, name)
+	entries, err := os.ReadDir(recipeDir)
+	if err != nil {
+		return nil, fmt.Errorf("notebook recipe '%s' not found", name)
+	}
+
+	recipe := &Recipe{
+		Name: name,
+		Jobs: make(map[string][]byte),
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			content, err := os.ReadFile(filepath.Join(recipeDir, entry.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("could not read recipe file %s: %w", entry.Name(), err)
+			}
+			recipe.Jobs[entry.Name()] = content
+		}
+	}
+
+	if len(recipe.Jobs) == 0 {
+		return nil, fmt.Errorf("notebook recipe '%s' contains no job files", name)
+	}
+
+	return recipe, nil
+}
+
+// GetRecipe finds and returns a recipe by name with precedence: Project > Notebook > User > Dynamic > Built-in.
 func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
-	// Precedence: Project > User > Dynamic > Built-in
+	// Precedence: Project > Notebook > User > Dynamic > Built-in
 
 	// 1. Try project recipes
 	recipe, err := GetProjectRecipe(name)
@@ -427,14 +484,21 @@ func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
 		return recipe, nil
 	}
 
-	// 2. Try user recipes
+	// 2. Try notebook recipes
+	recipe, err = GetNotebookRecipe(name)
+	if err == nil {
+		recipe.Source = "[Notebook]"
+		return recipe, nil
+	}
+
+	// 3. Try user recipes
 	recipe, err = GetUserRecipe(name)
 	if err == nil {
 		recipe.Source = "[User]"
 		return recipe, nil
 	}
 
-	// 3. Try dynamic recipes
+	// 4. Try dynamic recipes
 	dynamicRecipes, _ := ListDynamicRecipes(getRecipeCmd)
 	for _, r := range dynamicRecipes {
 		if r.Name == name {
@@ -442,7 +506,7 @@ func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
 		}
 	}
 
-	// 4. Try built-in recipes
+	// 5. Try built-in recipes
 	recipe, err = GetBuiltinRecipe(name)
 	if err == nil {
 		recipe.Source = "[Built-in]"
@@ -472,14 +536,21 @@ func ListAllRecipes(getRecipeCmd string) ([]*Recipe, error) {
 		recipeMap[recipe.Name] = recipe
 	}
 
-	// 3. Load user recipes, overriding dynamic and built-in
+	// 3. Load notebook recipes, overriding dynamic and built-in
+	notebookRecipes, _ := ListNotebookRecipes()
+	for _, recipe := range notebookRecipes {
+		recipe.Source = "[Notebook]"
+		recipeMap[recipe.Name] = recipe
+	}
+
+	// 4. Load user recipes, overriding notebook, dynamic and built-in
 	userRecipes, _ := ListUserRecipes()
 	for _, recipe := range userRecipes {
 		recipe.Source = "[User]"
 		recipeMap[recipe.Name] = recipe
 	}
 
-	// 4. Load project recipes, overriding all others
+	// 5. Load project recipes, overriding all others
 	projectRecipes, _ := ListProjectRecipes()
 	for _, recipe := range projectRecipes {
 		recipe.Source = "[Project]"
@@ -498,4 +569,20 @@ func ListAllRecipes(getRecipeCmd string) ([]*Recipe, error) {
 	})
 
 	return allRecipes, nil
+}
+
+// getNotebookRecipesDir resolves the path to the current notebook's recipes directory.
+func getNotebookRecipesDir() (string, error) {
+	node, err := workspace.GetProjectByPath(".")
+	if err != nil {
+		return "", fmt.Errorf("could not determine current workspace: %w", err)
+	}
+
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		cfg = &config.Config{} // Proceed with default locator logic
+	}
+
+	locator := workspace.NewNotebookLocator(cfg)
+	return locator.GetRecipesDir(node)
 }
