@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
 	"github.com/mattsolo1/grove-core/tui/components"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
@@ -202,19 +201,19 @@ func (m finishTUIModel) renderInlineDetails(item *cleanupItem) string {
 // getStatusStyle returns the appropriate lipgloss style for a status string
 func getStatusStyle(status string) lipgloss.Style {
 	// Strip ANSI colors to get the plain text
-	plainStatus := color.New().Sprint(status)
-	
+	plainStatus := stripANSI(status)
+
 	// Check for specific status patterns and return appropriate colors
-	if strings.Contains(status, "Already finished") || strings.Contains(status, "Available") {
+	if strings.Contains(plainStatus, "Already finished") || strings.Contains(plainStatus, "Available") {
 		return theme.DefaultTheme.Success // Green
-	} else if strings.Contains(status, "Exists") || strings.Contains(status, "Running") || strings.Contains(status, "Has links") {
-		return theme.DefaultTheme.Warning // Yellow  
-	} else if strings.Contains(status, "Has changes") || strings.Contains(status, "Checked out") || strings.Contains(status, "commits ahead") {
+	} else if strings.Contains(plainStatus, "Exists") || strings.Contains(plainStatus, "Running") || strings.Contains(plainStatus, "Has links") || strings.Contains(plainStatus, "Checked out") {
+		return theme.DefaultTheme.Warning // Yellow
+	} else if strings.Contains(plainStatus, "Has changes") || strings.Contains(plainStatus, "commits ahead") {
 		return theme.DefaultTheme.Error // Red
 	} else if strings.Contains(plainStatus, "N/A") || strings.Contains(plainStatus, "Not found") || strings.Contains(plainStatus, "No links") {
 		return theme.DefaultTheme.Muted // Dim
 	}
-	
+
 	return theme.DefaultTheme.Bold // Default
 }
 
@@ -272,9 +271,9 @@ func (m finishTUIModel) View() string {
 
 		// Checkbox
 		if item.IsEnabled {
-			line.WriteString(enabledCheckboxStyle.Render("[x] "))
+			line.WriteString(enabledCheckboxStyle.Render(theme.IconStatusCompleted + " "))
 		} else {
-			line.WriteString("[ ] ")
+			line.WriteString(theme.IconStatusTodo + " ")
 		}
 
 		// Item name with proper width
@@ -287,9 +286,9 @@ func (m finishTUIModel) View() string {
 		// Format name with proper alignment
 		nameFormatted := fmt.Sprintf("%-*s", nameWidth, itemName)
 
-		// Status with appropriate color
+		// Status with appropriate color (strip existing ANSI codes first)
 		statusStyle := getStatusStyle(item.Status)
-		statusFormatted := statusStyle.Render(fmt.Sprintf("(%s)", item.Status))
+		statusFormatted := statusStyle.Render(fmt.Sprintf("(%s)", stripANSI(item.Status)))
 
 		// Apply styling based on focus
 		if m.cursor == i {

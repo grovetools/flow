@@ -1079,6 +1079,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		   status == color.YellowString("Exists") ||
 		   status == color.YellowString("Exists on origin") ||
 		   status == color.YellowString("Running") ||
+		   status == color.YellowString("Running containers found") ||
 		   status == color.YellowString("Has links") ||
 		   status == color.YellowString("Checked out in worktree") ||
 		   status == color.RedString("Has changes (needs --force)") ||
@@ -1124,17 +1125,18 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
-		// Always enable merging submodules and marking as finished
+		// Always enable merging submodules, docker cleanup, and marking as finished
 		items[0].IsEnabled = items[0].IsAvailable                                          // Merge/fast-forward submodules to main
-		items[1].IsEnabled = items[1].IsAvailable                                          // Mark plan as finished
-		items[2].IsEnabled = planFinishPruneWorktree && items[2].IsAvailable              // Prune git worktree
-		items[3].IsEnabled = planFinishCleanDevLinks && items[3].IsAvailable              // Clean up dev binaries
-		items[4].IsEnabled = planFinishDeleteBranch && items[4].IsAvailable               // Delete submodule branches
-		items[5].IsEnabled = planFinishDeleteBranch && items[5].IsAvailable               // Delete local git branch
-		items[6].IsEnabled = planFinishDeleteRemote && items[6].IsAvailable               // Delete remote git branch
-		items[7].IsEnabled = planFinishCloseSession && items[7].IsAvailable               // Close tmux session
-		items[8].IsEnabled = planFinishRebuildBinaries && items[8].IsAvailable            // Rebuild main repo binaries
-		items[9].IsEnabled = planFinishArchive && items[9].IsAvailable                    // Archive plan directory
+		items[1].IsEnabled = items[1].IsAvailable                                          // Cleanup Docker Compose environment
+		items[2].IsEnabled = items[2].IsAvailable                                          // Mark plan as finished
+		items[3].IsEnabled = planFinishPruneWorktree && items[3].IsAvailable              // Prune git worktree
+		items[4].IsEnabled = planFinishCleanDevLinks && items[4].IsAvailable              // Clean up dev binaries
+		items[5].IsEnabled = planFinishDeleteBranch && items[5].IsAvailable               // Delete submodule branches
+		items[6].IsEnabled = planFinishDeleteBranch && items[6].IsAvailable               // Delete local git branch
+		items[7].IsEnabled = planFinishDeleteRemote && items[7].IsAvailable               // Delete remote git branch
+		items[8].IsEnabled = planFinishCloseSession && items[8].IsAvailable               // Close tmux session
+		items[9].IsEnabled = planFinishRebuildBinaries && items[9].IsAvailable            // Rebuild main repo binaries
+		items[10].IsEnabled = planFinishArchive && items[10].IsAvailable                  // Archive plan directory
 	} else {
 		// Interactive TUI mode
 		err := runFinishTUI(planName, items, branchIsMerged, branchExists)
