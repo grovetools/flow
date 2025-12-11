@@ -15,11 +15,23 @@ import (
 
 var planReviewCmd = &cobra.Command{
 	Use:   "review [directory]",
-	Short: "Mark a plan as ready for review and execute completion hooks",
+	Short: "Mark a plan as ready for review and execute completion hooks (use: flow review)",
 	Long: `Marks a plan as ready for review, executes on-review hooks, and prepares it for final cleanup.
 This is the intermediary step before using 'flow plan finish'.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanReview,
+}
+
+// NewReviewCmd creates the top-level `review` command.
+func NewReviewCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "review [directory]",
+		Short: "Mark a plan as ready for review and execute completion hooks",
+		Long: `Marks a plan as ready for review, executes on-review hooks, and prepares it for final cleanup.
+This is the intermediary step before using 'flow finish'.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runPlanReview,
+	}
 }
 
 // runPlanReview implements the review command.

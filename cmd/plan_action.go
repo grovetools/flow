@@ -14,7 +14,7 @@ var (
 
 var planActionCmd = &cobra.Command{
 	Use:   "action [action-name] [plan-name]",
-	Short: "Execute or list workspace actions from a recipe",
+	Short: "Execute or list workspace actions from a recipe (use: flow action)",
 	Long: `Execute a named workspace action defined in the recipe's workspace_init.yml,
 or list all available actions.
 

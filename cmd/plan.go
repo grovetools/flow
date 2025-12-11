@@ -26,7 +26,7 @@ If no directory is provided, an interactive TUI will be launched.`,
 
 var planStatusCmd = &cobra.Command{
 	Use:   "status [directory]",
-	Short: "Show plan status",
+	Short: "Show plan status (use: flow status)",
 	Long: `Show the status of all jobs in an orchestration plan.
 If no directory is specified, uses the active job if set.`,
 	Args: cobra.MaximumNArgs(1),
@@ -35,7 +35,7 @@ If no directory is specified, uses the active job if set.`,
 
 var planRunCmd = &cobra.Command{
 	Use:   "run [job-file...]",
-	Short: "Run jobs",
+	Short: "Run jobs (use: flow run)",
 	Long: `Run jobs in an orchestration plan.
 Without arguments, runs the next available jobs.
 With a single job file argument, runs that specific job.
@@ -45,7 +45,7 @@ With multiple job file arguments, runs those jobs in parallel.`,
 
 var planAddCmd = &cobra.Command{
 	Use:   "add [directory]",
-	Short: "Add a new job to an existing plan",
+	Short: "Add a new job to an existing plan (use: flow add)",
 	Long: `Add a new job to an existing orchestration plan.
 Can be used interactively or with command-line arguments.
 If no directory is specified, uses the active job if set.
@@ -69,7 +69,7 @@ Examples:
 
 var planGraphCmd = &cobra.Command{
 	Use:   "graph [directory]",
-	Short: "Visualize job dependency graph",
+	Short: "Visualize job dependency graph (use: flow graph)",
 	Long: `Generate a visualization of the job dependency graph.
 Supports multiple output formats including Mermaid, DOT, and ASCII.
 If no directory is specified, uses the active job if set.`,
@@ -79,7 +79,7 @@ If no directory is specified, uses the active job if set.`,
 
 var planStepCmd = &cobra.Command{
 	Use:   "step [directory]",
-	Short: "Step through plan execution interactively",
+	Short: "Step through plan execution interactively (use: flow step)",
 	Long: `Provides an interactive wizard for executing a plan step by step.
 Shows runnable jobs and allows you to run, launch, skip, or quit.
 If no directory is specified, uses the current directory.`,
@@ -89,7 +89,7 @@ If no directory is specified, uses the current directory.`,
 
 var planOpenCmd = &cobra.Command{
 	Use:   "open [directory]",
-	Short: "Open a plan's worktree in a dedicated tmux session",
+	Short: "Open a plan's worktree in a dedicated tmux session (use: flow open)",
 	Long: `Switches to or creates a tmux session for the plan's worktree and opens the interactive status TUI.
 This provides a one-command entry point into a plan's interactive environment.
 If no directory is specified, uses the active job if set.`,

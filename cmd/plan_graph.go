@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/spf13/cobra"
 )
 
 type PlanGraphCmd struct {
@@ -21,6 +22,22 @@ type PlanGraphCmd struct {
 
 func (c *PlanGraphCmd) Run() error {
 	return RunPlanGraph(c)
+}
+
+// NewGraphCmd creates the top-level `graph` command.
+func NewGraphCmd() *cobra.Command {
+	graphCmd := &cobra.Command{
+		Use:   "graph [directory]",
+		Short: "Visualize job dependency graph",
+		Long:  `Generate a visualization of the job dependency graph. Supports multiple output formats including Mermaid, DOT, and ASCII. If no directory is specified, uses the active job if set.`,
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runPlanGraph,
+	}
+	graphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
+	graphCmd.Flags().BoolVarP(&planGraphServe, "serve", "s", false, "Serve interactive HTML visualization")
+	graphCmd.Flags().IntVarP(&planGraphPort, "port", "p", 8080, "Port for web server")
+	graphCmd.Flags().StringVarP(&planGraphOutput, "output", "o", "", "Output file (stdout if not specified)")
+	return graphCmd
 }
 
 func RunPlanGraph(cmd *PlanGraphCmd) error {

@@ -43,7 +43,7 @@ type PlanSummary struct {
 func newPlanListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all plans in the configured plans directory or across all workspaces",
+		Short: "List all plans (use: flow list)",
 		Long: `Scans for and lists orchestration plans. By default, it scans the directory specified in
 the notebooks configuration. With --all-workspaces, it discovers all projects and scans for plans within them.`,
 		RunE: runPlanList,
@@ -55,6 +55,21 @@ the notebooks configuration. With --all-workspaces, it discovers all projects an
 	cmd.Flags().BoolVar(&planListShowHold, "show-hold", false, "Include on-hold plans in the output")
 
 	return cmd
+}
+
+// NewListCmd creates the top-level `list` command.
+func NewListCmd() *cobra.Command {
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all plans in the configured plans directory or across all workspaces",
+		Long: `Scans for and lists orchestration plans. By default, it scans the directory specified in the notebooks configuration. With --all-workspaces, it discovers all projects and scans for plans within them.`,
+		RunE:  runPlanList,
+	}
+	listCmd.Flags().BoolVarP(&planListVerbose, "verbose", "v", false, "Show detailed information including jobs in each plan")
+	listCmd.Flags().BoolVar(&planListIncludeFinished, "include-finished", false, "Include finished plans in the output")
+	listCmd.Flags().BoolVar(&planListAllWorkspaces, "all-workspaces", false, "List plans across all discovered workspaces")
+	listCmd.Flags().BoolVar(&planListShowHold, "show-hold", false, "Include on-hold plans in the output")
+	return listCmd
 }
 
 func runPlanList(cmd *cobra.Command, args []string) error {

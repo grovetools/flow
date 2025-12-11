@@ -14,8 +14,32 @@ func main() {
 		"Job orchestration and workflows",
 	)
 
-	// Add the plan (formerly jobs) and chat commands
+	// Add hoisted plan commands at the top level
+	rootCmd.AddCommand(cmd.NewStatusCmd())
+	rootCmd.AddCommand(cmd.NewListCmd())
+	rootCmd.AddCommand(cmd.NewRunCmd())
+	rootCmd.AddCommand(cmd.NewAddCmd())
+	rootCmd.AddCommand(cmd.NewCompleteCmd())
+	rootCmd.AddCommand(cmd.NewGraphCmd())
+	rootCmd.AddCommand(cmd.NewStepCmd())
+	rootCmd.AddCommand(cmd.NewOpenCmd())
+	rootCmd.AddCommand(cmd.NewReviewCmd())
+	rootCmd.AddCommand(cmd.NewFinishCmd())
+	rootCmd.AddCommand(cmd.NewActionCmd())
+
+	// Add the plan command (with all subcommands for backward compatibility)
 	rootCmd.AddCommand(cmd.NewPlanCmd())
+
+	// Add plan configuration commands at the top level
+	rootCmd.AddCommand(cmd.NewSetCmd())
+	rootCmd.AddCommand(cmd.NewCurrentCmd())
+	rootCmd.AddCommand(cmd.NewUnsetCmd())
+	rootCmd.AddCommand(cmd.NewConfigCmd())
+	rootCmd.AddCommand(cmd.NewHoldCmd())
+	rootCmd.AddCommand(cmd.NewUnholdCmd())
+	rootCmd.AddCommand(cmd.NewResumeCmd())
+
+	// Add other top-level commands
 	rootCmd.AddCommand(cmd.GetChatCommand())
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewModelsCmd())

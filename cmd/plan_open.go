@@ -8,6 +8,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewOpenCmd creates the top-level `open` command.
+func NewOpenCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "open [directory]",
+		Short: "Open a plan's worktree in a dedicated tmux session",
+		Long: `Switches to or creates a tmux session for the plan's worktree and opens the interactive status TUI.
+This provides a one-command entry point into a plan's interactive environment.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runPlanOpen,
+	}
+}
+
 // runPlanOpen implements the open command.
 func runPlanOpen(cmd *cobra.Command, args []string) error {
 	var planDir string

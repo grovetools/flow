@@ -20,18 +20,34 @@ import (
 
 var planCompleteCmd = &cobra.Command{
 	Use:   "complete <job-file>",
-	Short: "Mark a job as completed",
-	Long: `Mark a job as completed. This is especially useful for chat jobs 
+	Short: "Mark a job as completed (use: flow complete)",
+	Long: `Mark a job as completed. This is especially useful for chat jobs
 that would otherwise remain in pending_user status indefinitely.
 
 Examples:
   # Complete a chat job
   flow plan complete my-project/plan.md
-  
+
   # Complete any job by its filename
   flow plan complete my-project/01-design-api.md`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPlanComplete,
+}
+
+// NewCompleteCmd creates the top-level `complete` command.
+func NewCompleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "complete <job-file>",
+		Short: "Mark a job as completed",
+		Long: `Mark a job as completed. This is especially useful for chat jobs
+that would otherwise remain in pending_user status indefinitely.
+
+Examples:
+  # Complete a chat job
+  flow complete my-project/plan.md`,
+		Args: cobra.ExactArgs(1),
+		RunE: runPlanComplete,
+	}
 }
 
 // completeJob is the shared function that handles job completion logic

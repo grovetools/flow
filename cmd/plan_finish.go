@@ -169,7 +169,7 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 func NewPlanFinishCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "finish [directory]",
-		Short: "Finish and clean up a plan and its associated worktree",
+		Short: "Finish and clean up a plan and its associated worktree (use: flow finish)",
 		Long: `Guides through the process of cleaning up a completed plan.
 This can include removing the git worktree, deleting the branch, closing tmux sessions, and archiving the plan.`,
 		Args: cobra.MaximumNArgs(1),
@@ -186,6 +186,29 @@ This can include removing the git worktree, deleting the branch, closing tmux se
 	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
 	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
 
+	return cmd
+}
+
+// NewFinishCmd creates the top-level `finish` command.
+func NewFinishCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "finish [directory]",
+		Short: "Finish and clean up a plan and its associated worktree",
+		Long: `Guides through the process of cleaning up a completed plan.
+This can include removing the git worktree, deleting the branch, closing tmux sessions, and archiving the plan.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runPlanFinish,
+	}
+
+	cmd.Flags().BoolVarP(&planFinishYes, "yes", "y", false, "Automatically confirm all cleanup actions")
+	cmd.Flags().BoolVar(&planFinishDeleteBranch, "delete-branch", false, "Delete the local git branch")
+	cmd.Flags().BoolVar(&planFinishDeleteRemote, "delete-remote", false, "Delete the remote git branch")
+	cmd.Flags().BoolVar(&planFinishPruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
+	cmd.Flags().BoolVar(&planFinishCloseSession, "close-session", false, "Close the associated tmux session")
+	cmd.Flags().BoolVar(&planFinishCleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
+	cmd.Flags().BoolVar(&planFinishRebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
+	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
+	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
 	return cmd
 }
 
