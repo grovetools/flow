@@ -113,6 +113,7 @@ var (
 	planInitNoteRef        string
 	planInitFromNote       string
 	planInitNoteTargetFile string
+	planInitRunInit        bool
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -155,6 +156,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitNoteRef, "note-ref", "", "Path to the source note to link to this plan")
 	planInitCmd.Flags().StringVar(&planInitFromNote, "from-note", "", "Path to a note file whose body will be used as the prompt for the first job")
 	planInitCmd.Flags().StringVar(&planInitNoteTargetFile, "note-target-file", "", "Filename of the job within the recipe to apply the --from-note content and reference to")
+	planInitCmd.Flags().BoolVar(&planInitRunInit, "init", false, "Execute init actions from the recipe's workspace_init.yml")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -195,6 +197,7 @@ func NewPlanCmd() *cobra.Command {
 
 	// Add subcommands
 	planCmd.AddCommand(planInitCmd)
+	planCmd.AddCommand(planActionCmd)
 	planCmd.AddCommand(planStatusCmd)
 	planCmd.AddCommand(planTUICmd)
 	planCmd.AddCommand(newPlanListCmd())
@@ -246,6 +249,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		NoteRef:        planInitNoteRef,
 		FromNote:       planInitFromNote,
 		NoteTargetFile: planInitNoteTargetFile,
+		RunInit:        planInitRunInit,
 	}
 
 	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
@@ -322,4 +326,5 @@ type PlanInitCmd struct {
 	NoteRef        string
 	FromNote       string
 	NoteTargetFile string
+	RunInit        bool     // Run init actions from workspace_init.yml
 }

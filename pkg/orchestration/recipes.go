@@ -53,8 +53,9 @@ func loadInitActions(recipe *Recipe, recipeDir string, fs embed.FS) error {
 	}
 
 	var initConfig struct {
-		Description string       `yaml:"description"`
-		Actions     []InitAction `yaml:"actions"`
+		Description string                      `yaml:"description"`
+		Init        []InitAction                `yaml:"init"`    // Actions that run with --init flag
+		Actions     map[string][]InitAction     `yaml:"actions"` // Named, on-demand action groups
 	}
 
 	if err := yaml.Unmarshal(initData, &initConfig); err != nil {
@@ -62,17 +63,33 @@ func loadInitActions(recipe *Recipe, recipeDir string, fs embed.FS) error {
 	}
 
 	recipe.Description = initConfig.Description
-	recipe.Actions = initConfig.Actions
+	recipe.InitActions = initConfig.Init
+	recipe.NamedActions = initConfig.Actions
+
+	// For backward compatibility: if neither init nor actions is defined, check for old "actions" format
+	if len(recipe.InitActions) == 0 && len(recipe.NamedActions) == 0 {
+		// Try parsing old format where actions was a direct array
+		var oldConfig struct {
+			Description string       `yaml:"description"`
+			Actions     []InitAction `yaml:"actions"`
+		}
+		if err := yaml.Unmarshal(initData, &oldConfig); err == nil && len(oldConfig.Actions) > 0 {
+			// Migrate old format to new format by putting it in InitActions
+			recipe.InitActions = oldConfig.Actions
+		}
+	}
+
 	return nil
 }
 
 type Recipe struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Source      string            `json:"source,omitempty"`  // [Built-in], [User], [Dynamic], or [Project]
-	Domain      string            `json:"domain,omitempty"`  // "generic" or "grove"
-	Jobs        map[string][]byte `json:"-"`                 // Filename -> Content
-	Actions     []InitAction      `yaml:"actions,omitempty"` // Loaded from workspace_init.yml
+	Name         string                      `json:"name"`
+	Description  string                      `json:"description"`
+	Source       string                      `json:"source,omitempty"` // [Built-in], [User], [Dynamic], or [Project]
+	Domain       string                      `json:"domain,omitempty"` // "generic" or "grove"
+	Jobs         map[string][]byte           `json:"-"`                // Filename -> Content
+	InitActions  []InitAction                `yaml:"init,omitempty"`   // Actions that run with --init flag
+	NamedActions map[string][]InitAction     `yaml:"actions,omitempty"` // Named, on-demand action groups
 }
 
 // GetBuiltinRecipe finds and returns a built-in recipe.

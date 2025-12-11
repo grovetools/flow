@@ -510,6 +510,139 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	items := []*cleanupItem{
 		mergeItem,
 		{
+			Name: "Cleanup Docker Compose environment",
+			Check: func() (string, error) {
+				// Check if plan was created from a recipe with Docker Compose actions
+				if plan.Config == nil || plan.Config.Recipe == "" {
+					return "N/A (no recipe)", nil
+				}
+
+				// Load the recipe
+				flowCfg, _ := loadFlowConfig()
+				var getRecipeCmd string
+				if flowCfg != nil {
+					_, getRecipeCmd, _ = loadFlowConfigWithDynamicRecipes()
+				}
+
+				recipe, err := orchestration.GetRecipe(plan.Config.Recipe, getRecipeCmd)
+				if err != nil {
+					return "N/A (recipe not found)", nil
+				}
+
+				// Check for docker_compose actions in init and named actions
+				var dockerComposeProjects []string
+				allActions := recipe.InitActions
+				for _, namedActionList := range recipe.NamedActions {
+					allActions = append(allActions, namedActionList...)
+				}
+
+				for _, action := range allActions {
+					if action.Type == "docker_compose" && action.ProjectName != "" {
+						// Render the project name template
+						tmpl, err := template.New("project-name").Parse(action.ProjectName)
+						if err != nil {
+							continue
+						}
+						templateData := struct {
+							PlanName string
+						}{
+							PlanName: planName,
+						}
+						var renderedProjectName bytes.Buffer
+						if err := tmpl.Execute(&renderedProjectName, templateData); err != nil {
+							continue
+						}
+						projectName := renderedProjectName.String()
+						if projectName != "" {
+							dockerComposeProjects = append(dockerComposeProjects, projectName)
+						}
+					}
+				}
+
+				if len(dockerComposeProjects) == 0 {
+					return "N/A (no Docker services)", nil
+				}
+
+				// Check if any of the projects have running containers
+				hasRunning := false
+				for _, projectName := range dockerComposeProjects {
+					cmd := exec.Command("docker", "ps", "--filter", fmt.Sprintf("label=com.docker.compose.project=%s", projectName), "--format", "{{.Names}}")
+					output, err := cmd.Output()
+					if err == nil && strings.TrimSpace(string(output)) != "" {
+						hasRunning = true
+						break
+					}
+				}
+
+				if hasRunning {
+					return color.YellowString("Running containers found"), nil
+				}
+				// Return Available even if no containers running, so item shows in TUI
+				return color.YellowString("Available"), nil
+			},
+			Action: func() error {
+				// Load the recipe
+				flowCfg, _ := loadFlowConfig()
+				var getRecipeCmd string
+				if flowCfg != nil {
+					_, getRecipeCmd, _ = loadFlowConfigWithDynamicRecipes()
+				}
+
+				recipe, err := orchestration.GetRecipe(plan.Config.Recipe, getRecipeCmd)
+				if err != nil {
+					return fmt.Errorf("failed to load recipe: %w", err)
+				}
+
+				// Collect all docker_compose actions
+				allActions := recipe.InitActions
+				for _, namedActionList := range recipe.NamedActions {
+					allActions = append(allActions, namedActionList...)
+				}
+
+				// Tear down each Docker Compose project
+				foundAny := false
+				for _, action := range allActions {
+					if action.Type == "docker_compose" && action.ProjectName != "" {
+						// Render the project name template
+						tmpl, err := template.New("project-name").Parse(action.ProjectName)
+						if err != nil {
+							continue
+						}
+						templateData := struct {
+							PlanName string
+						}{
+							PlanName: planName,
+						}
+						var renderedProjectName bytes.Buffer
+						if err := tmpl.Execute(&renderedProjectName, templateData); err != nil {
+							continue
+						}
+						projectName := renderedProjectName.String()
+
+						if projectName == "" {
+							continue
+						}
+
+						foundAny = true
+						fmt.Printf("    Stopping Docker Compose project: %s\n", projectName)
+						cmd := exec.Command("docker", "compose", "-p", projectName, "down", "--volumes", "--remove-orphans")
+						cmd.Stdout = os.Stdout
+						cmd.Stderr = os.Stderr
+						if err := cmd.Run(); err != nil {
+							fmt.Printf("    Warning: failed to stop project %s: %v\n", projectName, err)
+						} else {
+							fmt.Printf("    ✓ Stopped and removed Docker Compose project: %s\n", projectName)
+						}
+					}
+				}
+
+				if !foundAny {
+					fmt.Println("    No Docker Compose projects to clean up")
+				}
+				return nil
+			},
+		},
+		{
 			Name: "Mark plan as finished in .grove-plan.yml",
 			Check: func() (string, error) {
 				configPath := filepath.Join(planPath, ".grove-plan.yml")

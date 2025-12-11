@@ -193,7 +193,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.NoteRef, cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.NoteRef, "", cmd.Repos); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -713,22 +713,24 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		}
 	}
 
-	// Create a default .grove-plan.yml, using the determined worktree
-	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.NoteRef, cmd.Repos); err != nil {
+	// Create a default .grove-plan.yml, using the determined worktree and recipe name
+	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.NoteRef, cmd.Recipe, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("✓ Created .grove-plan.yml")
 	}
 
-	// Execute init actions after everything is set up
-	if len(recipe.Actions) > 0 {
+	// Execute init actions after everything is set up (only if --init flag is set)
+	if cmd.RunInit && len(recipe.InitActions) > 0 {
 		fmt.Println("\n▶️  Executing initialization actions from recipe...")
-		if err := executeInitActions(recipe.Actions, worktreeOverride, finalWorktree, templateData); err != nil {
+		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, templateData); err != nil {
 			// Log a warning but do not fail the entire plan init
 			fmt.Printf("⚠️  Warning: one or more init actions failed: %v\n", err)
 		} else {
 			fmt.Println("✓ Initialization actions completed successfully.")
 		}
+	} else if len(recipe.InitActions) > 0 && !cmd.RunInit {
+		fmt.Println("\n💡 Tip: This recipe has initialization actions. Run them with: flow plan action init")
 	}
 
 	// Execute on_start hook if plan was initialized from a note
@@ -923,8 +925,15 @@ func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
 }
 
 // createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
-func createDefaultPlanConfig(planPath, model, worktree, container, noteRef string, repos []string) error {
+func createDefaultPlanConfig(planPath, model, worktree, container, noteRef, recipe string, repos []string) error {
 	var configContent strings.Builder
+
+	// Recipe field (if applicable)
+	if recipe != "" {
+		configContent.WriteString("# Recipe used to create this plan\n")
+		configContent.WriteString(fmt.Sprintf("recipe: %s\n", recipe))
+		configContent.WriteString("\n")
+	}
 
 	configContent.WriteString("# Default model for jobs in this plan\n")
 	if model != "" {
@@ -1160,7 +1169,25 @@ func executeDockerComposeAction(action orchestration.InitAction, workDir string,
 		return fmt.Errorf("rendering overlay: %w", err)
 	}
 
-	// 3. Generate docker-compose.override.yml
+	// 3. Identify services where ports should be removed (ports: [] in overlay)
+	servicesToRemovePorts := identifyServicesWithEmptyPorts(renderedOverlay)
+
+	// 4. Process base compose files if we need to remove ports
+	var baseFiles []string
+	if len(servicesToRemovePorts) > 0 {
+		for _, baseFile := range action.Files {
+			sanitizedFile, err := sanitizeDockerComposeFile(baseFile, workDir, groveDockerDir, servicesToRemovePorts)
+			if err != nil {
+				return fmt.Errorf("sanitizing compose file %s: %w", baseFile, err)
+			}
+			baseFiles = append(baseFiles, sanitizedFile)
+		}
+	} else {
+		// No sanitization needed, use original files
+		baseFiles = action.Files
+	}
+
+	// 5. Generate docker-compose.override.yml
 	overridePath := filepath.Join(groveDockerDir, "docker-compose.override.yml")
 	overrideContent, err := yaml.Marshal(renderedOverlay)
 	if err != nil {
@@ -1173,7 +1200,7 @@ func executeDockerComposeAction(action orchestration.InitAction, workDir string,
 	}
 	fmt.Printf("    ✓ Generated %s\n", overridePath)
 
-	// 4. Execute docker compose
+	// 6. Execute docker compose
 	composeArgs := []string{"compose"}
 
 	// Project name for isolation
@@ -1189,8 +1216,8 @@ func executeDockerComposeAction(action orchestration.InitAction, workDir string,
 		composeArgs = append(composeArgs, "--project-name", renderedProjectName.String())
 	}
 
-	// Add user's compose files
-	for _, file := range action.Files {
+	// Add processed compose files
+	for _, file := range baseFiles {
 		composeArgs = append(composeArgs, "-f", file)
 	}
 	// Add our generated override file
@@ -1206,6 +1233,133 @@ func executeDockerComposeAction(action orchestration.InitAction, workDir string,
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// identifyServicesWithEmptyPorts examines the overlay to find services with ports: []
+func identifyServicesWithEmptyPorts(overlay map[string]interface{}) map[string]bool {
+	servicesToRemove := make(map[string]bool)
+
+	// Check if there's a services section
+	if servicesRaw, ok := overlay["services"]; ok {
+		if services, ok := servicesRaw.(map[string]interface{}); ok {
+			for serviceName, serviceDataRaw := range services {
+				if serviceData, ok := serviceDataRaw.(map[string]interface{}); ok {
+					if ports, ok := serviceData["ports"]; ok {
+						// Check if ports is an empty slice
+						if portsSlice, ok := ports.([]interface{}); ok && len(portsSlice) == 0 {
+							servicesToRemove[serviceName] = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return servicesToRemove
+}
+
+// sanitizeDockerComposeFile removes ports from specified services in a compose file
+func sanitizeDockerComposeFile(baseFile, workDir, groveDockerDir string, servicesToRemovePorts map[string]bool) (string, error) {
+	// Read the base file
+	var baseFilePath string
+	if filepath.IsAbs(baseFile) {
+		baseFilePath = baseFile
+	} else {
+		baseFilePath = filepath.Join(workDir, baseFile)
+	}
+
+	content, err := os.ReadFile(baseFilePath)
+	if err != nil {
+		return "", fmt.Errorf("reading base file %s: %w", baseFilePath, err)
+	}
+
+	// Parse YAML using yaml.v3 Node API to preserve structure and comments
+	var rootNode yaml.Node
+	if err := yaml.Unmarshal(content, &rootNode); err != nil {
+		return "", fmt.Errorf("parsing YAML from %s: %w", baseFilePath, err)
+	}
+
+	// Traverse and modify the YAML structure
+	modified := removePortsFromServices(&rootNode, servicesToRemovePorts)
+
+	// Only create sanitized file if we actually modified something
+	if !modified {
+		return baseFile, nil
+	}
+
+	// Marshal back to YAML
+	sanitizedContent, err := yaml.Marshal(&rootNode)
+	if err != nil {
+		return "", fmt.Errorf("marshaling sanitized YAML: %w", err)
+	}
+
+	// Write sanitized file
+	sanitizedFileName := fmt.Sprintf("docker-compose.base.%s.sanitized.yml", filepath.Base(filepath.Dir(baseFile)))
+	if filepath.Base(filepath.Dir(baseFile)) == filepath.Base(workDir) || filepath.Dir(baseFile) == "." {
+		sanitizedFileName = "docker-compose.base.sanitized.yml"
+	}
+	sanitizedPath := filepath.Join(groveDockerDir, sanitizedFileName)
+
+	header := "# This file is auto-generated by Grove Flow (sanitized to remove port bindings). Do not edit.\n"
+	if err := os.WriteFile(sanitizedPath, append([]byte(header), sanitizedContent...), 0644); err != nil {
+		return "", fmt.Errorf("writing sanitized file: %w", err)
+	}
+
+	fmt.Printf("    ✓ Generated sanitized compose file: %s\n", sanitizedPath)
+	return sanitizedPath, nil
+}
+
+// removePortsFromServices recursively traverses a yaml.Node and removes "ports" keys from specified services
+func removePortsFromServices(node *yaml.Node, servicesToRemovePorts map[string]bool) bool {
+	modified := false
+
+	// We're looking for the document node, then the mapping node
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		modified = removePortsFromServices(node.Content[0], servicesToRemovePorts) || modified
+	}
+
+	if node.Kind == yaml.MappingNode {
+		// Check if this mapping has a "services" key
+		for i := 0; i < len(node.Content)-1; i += 2 {
+			keyNode := node.Content[i]
+			valueNode := node.Content[i+1]
+
+			if keyNode.Value == "services" && valueNode.Kind == yaml.MappingNode {
+				// Found the services section, now look for our target services
+				for j := 0; j < len(valueNode.Content)-1; j += 2 {
+					serviceNameNode := valueNode.Content[j]
+					serviceDataNode := valueNode.Content[j+1]
+
+					if servicesToRemovePorts[serviceNameNode.Value] && serviceDataNode.Kind == yaml.MappingNode {
+						// Found a service we need to sanitize
+						// Look for "ports" key in this service
+						for k := 0; k < len(serviceDataNode.Content)-1; k += 2 {
+							if serviceDataNode.Content[k].Value == "ports" {
+								// Remove the ports key and its value
+								serviceDataNode.Content = append(
+									serviceDataNode.Content[:k],
+									serviceDataNode.Content[k+2:]...,
+								)
+								modified = true
+								break // Only one "ports" key per service
+							}
+						}
+					}
+				}
+			} else if valueNode.Kind == yaml.MappingNode || valueNode.Kind == yaml.SequenceNode {
+				// Recurse into nested structures
+				modified = removePortsFromServices(valueNode, servicesToRemovePorts) || modified
+			}
+		}
+	}
+
+	if node.Kind == yaml.SequenceNode {
+		for _, child := range node.Content {
+			modified = removePortsFromServices(child, servicesToRemovePorts) || modified
+		}
+	}
+
+	return modified
 }
 
 // renderOverlay recursively traverses a map and renders string values as templates.

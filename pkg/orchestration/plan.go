@@ -10,6 +10,7 @@ type PlanConfig struct {
 	Notes                string            `yaml:"notes,omitempty"`             // User notes/description for the plan
 	PrependDependencies  bool              `yaml:"prepend_dependencies,omitempty"` // Inline dependency content into prompt body by default
 	Hooks                map[string]string `yaml:"hooks,omitempty"`
+	Recipe               string            `yaml:"recipe,omitempty"` // Recipe used to create this plan
 }
 
 // Plan represents a collection of orchestration jobs.

@@ -36,6 +36,9 @@ func main() {
 		// scenarios.RecipeInitActionsEcosystemScenario,
 		scenarios.RecipeInitActionsFailureHandlingScenario,
 		scenarios.PlanDomainFilteringScenario,
+		scenarios.RecipeInitFlagScenario,
+		scenarios.RecipePlanActionCommandScenario,
+		scenarios.RecipeDockerComposePortRemovalScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
