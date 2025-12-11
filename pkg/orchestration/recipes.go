@@ -11,16 +11,65 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed builtin_recipes/*/*.md
 var builtinRecipeFS embed.FS
 
+// InitAction defines a single action to be performed during plan initialization.
+// These are defined in a recipe's `workspace_init.yml`.
+type InitAction struct {
+	Type        string                 `yaml:"type"` // "shell" or "docker_compose"
+	Description string                 `yaml:"description,omitempty"`
+	Repo        string                 `yaml:"repo,omitempty"`         // Optional sub-repo for ecosystem worktrees
+	Command     string                 `yaml:"command,omitempty"`      // For 'shell' type
+	Files       []string               `yaml:"files,omitempty"`        // For 'docker_compose': list of user's compose files
+	ProjectName string                 `yaml:"project_name,omitempty"` // For 'docker_compose' --project-name flag
+	Overlay     map[string]interface{} `yaml:"overlay,omitempty"`      // For 'docker_compose': the generic overlay
+}
+
+// loadInitActions parses a workspace_init.yml file and populates the Actions and Description fields of a Recipe.
+func loadInitActions(recipe *Recipe, recipeDir string, fs embed.FS) error {
+	var initData []byte
+	var err error
+
+	initFilePath := filepath.Join(recipeDir, "workspace_init.yml")
+
+	if (fs != embed.FS{}) { // A non-zero embed.FS indicates we are reading from embedded assets
+		initData, err = fs.ReadFile(initFilePath)
+	} else {
+		initData, err = os.ReadFile(initFilePath)
+	}
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // It's okay if the file doesn't exist
+		}
+		return err
+	}
+
+	var initConfig struct {
+		Description string       `yaml:"description"`
+		Actions     []InitAction `yaml:"actions"`
+	}
+
+	if err := yaml.Unmarshal(initData, &initConfig); err != nil {
+		return fmt.Errorf("parsing %s: %w", initFilePath, err)
+	}
+
+	recipe.Description = initConfig.Description
+	recipe.Actions = initConfig.Actions
+	return nil
+}
+
 type Recipe struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
 	Source      string            `json:"source,omitempty"` // [Built-in], [User], [Dynamic], or [Project]
-	Jobs        map[string][]byte `json:"-"` // Filename -> Content
+	Jobs        map[string][]byte `json:"-"`                // Filename -> Content
+	Actions     []InitAction      `yaml:"actions,omitempty"` // Loaded from workspace_init.yml
 }
 
 // GetBuiltinRecipe finds and returns a built-in recipe.
@@ -44,6 +93,10 @@ func GetBuiltinRecipe(name string) (*Recipe, error) {
 			}
 			recipe.Jobs[entry.Name()] = content
 		}
+	}
+
+	if err := loadInitActions(recipe, recipeDir, builtinRecipeFS); err != nil {
+		return nil, fmt.Errorf("loading init actions for recipe '%s': %w", name, err)
 	}
 
 	if len(recipe.Jobs) == 0 {
@@ -247,6 +300,10 @@ func GetProjectRecipe(name string) (*Recipe, error) {
 				}
 			}
 
+			if err := loadInitActions(recipe, recipeDir, embed.FS{}); err != nil {
+				return nil, fmt.Errorf("loading init actions for project recipe '%s': %w", name, err)
+			}
+
 			if len(recipe.Jobs) == 0 {
 				return nil, fmt.Errorf("recipe '%s' contains no job files", name)
 			}
@@ -291,6 +348,10 @@ func GetUserRecipe(name string) (*Recipe, error) {
 			}
 			recipe.Jobs[entry.Name()] = content
 		}
+	}
+
+	if err := loadInitActions(recipe, recipeDir, embed.FS{}); err != nil {
+		return nil, fmt.Errorf("loading init actions for user recipe '%s': %w", name, err)
 	}
 
 	if len(recipe.Jobs) == 0 {

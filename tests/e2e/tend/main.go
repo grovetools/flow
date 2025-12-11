@@ -30,6 +30,10 @@ func main() {
 		scenarios.PlanMergeUpdateWorktreeScenario,
 		scenarios.StandardFeatureRecipeScenario,
 		scenarios.PlanAddTemplateScenario,
+		scenarios.RecipeInitActionsShellScenario,
+		scenarios.RecipeInitActionsDockerComposeScenario,
+		// scenarios.RecipeInitActionsEcosystemScenario,
+		scenarios.RecipeInitActionsFailureHandlingScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
