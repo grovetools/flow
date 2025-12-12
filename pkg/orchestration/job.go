@@ -103,7 +103,7 @@ func (j *Job) IsRunnable() bool {
 		}
 
 		dependencyMet := false
-		if dep.Status == JobStatusCompleted {
+		if dep.Status == JobStatusCompleted || dep.Status == JobStatusAbandoned {
 			dependencyMet = true
 		} else if (j.Type == JobTypeInteractiveAgent || j.Type == JobTypeAgent) && dep.Type == JobTypeChat && dep.Status == JobStatusPendingUser {
 			// Special case: an interactive agent can run if its chat dependency is pending user input.

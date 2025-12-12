@@ -594,7 +594,7 @@ func getUnmetDependencies(job *orchestration.Job, plan *orchestration.Plan) []st
 		}
 
 		dependencyMet := false
-		if dep.Status == orchestration.JobStatusCompleted {
+		if dep.Status == orchestration.JobStatusCompleted || dep.Status == orchestration.JobStatusAbandoned {
 			dependencyMet = true
 		} else if (job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent) && dep.Type == orchestration.JobTypeChat && dep.Status == orchestration.JobStatusPendingUser {
 			// Special case: an interactive agent can run if its chat dependency is pending user input.

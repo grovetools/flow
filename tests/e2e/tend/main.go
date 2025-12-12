@@ -10,6 +10,7 @@ import (
 
 func main() {
 	allScenarios := []*harness.Scenario{
+		scenarios.AbandonedJobsScenario,
 		scenarios.AgentFromChatScenario,
 		scenarios.BriefingFilesScenario,
 		scenarios.CoreOrchestrationScenario,
@@ -23,6 +24,7 @@ func main() {
 		scenarios.JobManagementScenario,
 		scenarios.PlanListTUIScenario,
 		scenarios.PlanStatusTUIScenario,
+		scenarios.PlanStatusTUIAbandonedScenario,
 		scenarios.PlanStatusTUIFocusSwitchingScenario,
 		scenarios.PlanStatusTUILayoutToggleScenario,
 		scenarios.PlanStatusTUILogViewToggleScenario,

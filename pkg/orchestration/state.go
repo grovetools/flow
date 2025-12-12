@@ -71,35 +71,64 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 		return fmt.Errorf("read job file: %w", err)
 	}
 
-	// Update status in frontmatter
-	updates := map[string]interface{}{
-		"status":     string(newStatus),
-		"updated_at": time.Now().Format(time.RFC3339),
-	}
-
-	// Add started_at for running status
-	if newStatus == JobStatusRunning && job.StartTime.IsZero() {
-		updates["started_at"] = time.Now().Format(time.RFC3339)
-	}
-
-	// Add completed_at for terminal states
-	if newStatus == JobStatusCompleted || newStatus == JobStatusFailed {
-		updates["completed_at"] = time.Now().Format(time.RFC3339)
-		if !job.StartTime.IsZero() {
-			duration := time.Since(job.StartTime)
-			updates["duration"] = duration.String()
+	// For abandoned status, we need to parse frontmatter and add a note
+	if newStatus == JobStatusAbandoned {
+		frontmatter, body, err := sp.frontmatterParser.ParseFrontmatter(content)
+		if err != nil {
+			return fmt.Errorf("parsing frontmatter: %w", err)
 		}
-	}
 
-	// Apply update
-	newContent, err := sp.updateFrontmatter(content, updates)
-	if err != nil {
-		return fmt.Errorf("update frontmatter: %w", err)
-	}
+		// Apply updates to frontmatter map
+		frontmatter["status"] = string(newStatus)
+		frontmatter["updated_at"] = time.Now().Format(time.RFC3339)
 
-	// Write atomically
-	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
-		return fmt.Errorf("write file: %w", err)
+		// Add the abandoned note if not already present
+		noteMarker := []byte("This job was abandoned by the user.")
+		if !bytes.Contains(body, noteMarker) {
+			note := "\n\n---\n\n## Note\n\nThis job was abandoned by the user."
+			body = append(body, []byte(note)...)
+		}
+
+		newContent, err := RebuildMarkdownWithFrontmatter(frontmatter, body)
+		if err != nil {
+			return fmt.Errorf("rebuilding job content: %w", err)
+		}
+
+		// Write atomically
+		if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+			return fmt.Errorf("write file: %w", err)
+		}
+	} else {
+		// Update status in frontmatter
+		updates := map[string]interface{}{
+			"status":     string(newStatus),
+			"updated_at": time.Now().Format(time.RFC3339),
+		}
+
+		// Add started_at for running status
+		if newStatus == JobStatusRunning && job.StartTime.IsZero() {
+			updates["started_at"] = time.Now().Format(time.RFC3339)
+		}
+
+		// Add completed_at for terminal states
+		if newStatus == JobStatusCompleted || newStatus == JobStatusFailed {
+			updates["completed_at"] = time.Now().Format(time.RFC3339)
+			if !job.StartTime.IsZero() {
+				duration := time.Since(job.StartTime)
+				updates["duration"] = duration.String()
+			}
+		}
+
+		// Apply update
+		newContent, err := sp.updateFrontmatter(content, updates)
+		if err != nil {
+			return fmt.Errorf("update frontmatter: %w", err)
+		}
+
+		// Write atomically
+		if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+			return fmt.Errorf("write file: %w", err)
+		}
 	}
 
 	// Update in-memory state
@@ -406,7 +435,7 @@ func isValidStatus(status JobStatus) bool {
 	switch status {
 	case JobStatusPending, JobStatusRunning, JobStatusCompleted,
 		JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview,
-		JobStatusPendingUser, JobStatusPendingLLM:
+		JobStatusPendingUser, JobStatusPendingLLM, JobStatusAbandoned:
 		return true
 	}
 	return false

@@ -296,6 +296,9 @@ func createPlanSummary(plan *orchestration.Plan, expandedPath string) PlanSummar
 	if c := statusCounts[orchestration.JobStatusBlocked]; c > 0 {
 		statusParts = append(statusParts, fmt.Sprintf("%d blocked", c))
 	}
+	if c := statusCounts[orchestration.JobStatusAbandoned]; c > 0 {
+		statusParts = append(statusParts, fmt.Sprintf("%d abandoned", c))
+	}
 
 	status := "no jobs"
 	if len(statusParts) > 0 {
