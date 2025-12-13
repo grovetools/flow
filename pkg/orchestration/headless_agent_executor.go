@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,7 +56,7 @@ func (e *HeadlessAgentExecutor) Name() string {
 }
 
 // Execute runs an agent job in a worktree.
-func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
 	persister := NewStatePersister()
 
 	// Create lock file with the current process's PID.

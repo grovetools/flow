@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +54,8 @@ func (e *InteractiveAgentExecutor) Name() string {
 }
 
 // Execute runs an interactive agent job in a tmux session and blocks until completion.
-func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+// The output writer is ignored for interactive agents as they run in a separate tmux session.
+func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
 	// Determine workDir first, as it's needed for briefing file generation
 	workDir, err := e.determineWorkDir(ctx, job, plan)
 	if err != nil {
@@ -305,7 +307,7 @@ func (e *InteractiveAgentExecutor) generatePlanFromDependencies(ctx context.Cont
 	// Check if mocking is enabled - if so, always use llmClient regardless of model
 	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
 		opts := LLMOptions{Model: effectiveModel, WorkingDir: workDir}
-		return e.llmClient.Complete(ctx, job, plan, fullPrompt, opts)
+		return e.llmClient.Complete(ctx, job, plan, fullPrompt, opts, io.Discard)
 	}
 
 	if strings.HasPrefix(effectiveModel, "gemini") {
@@ -324,8 +326,9 @@ func (e *InteractiveAgentExecutor) generatePlanFromDependencies(ctx context.Cont
 	}
 
 	// Fallback for other models.
+	// Use io.Discard since this is for plan generation and the output isn't streamed
 	opts := LLMOptions{Model: effectiveModel, WorkingDir: workDir}
-	return e.llmClient.Complete(ctx, job, plan, fullPrompt, opts)
+	return e.llmClient.Complete(ctx, job, plan, fullPrompt, opts, io.Discard)
 }
 
 // waitForWindowClose waits for a specific tmux window to close

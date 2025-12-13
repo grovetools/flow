@@ -3,13 +3,14 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"sort"
-	
+
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/git"
 )
@@ -52,7 +53,7 @@ func (e *GenerateRecipeExecutor) Name() string {
 }
 
 // Execute runs a generate-recipe job
-func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
 		return fmt.Errorf("failed to create lock file: %w", err)
@@ -142,7 +143,7 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 		WorkingDir: workDir,
 	}
 
-	response, err := e.llmClient.Complete(ctx, job, plan, prompt, llmOpts)
+	response, err := e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()

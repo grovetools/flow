@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,25 @@ var (
 	log       = grovelogging.NewLogger("grove-flow")
 	prettyLog = grovelogging.NewPrettyLogger()
 )
+
+// isTUIMode checks if we're running in TUI mode
+func isTUIMode() bool {
+	return os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+}
+
+// printfUnlessTUI prints to stdout unless in TUI mode
+func printfUnlessTUI(format string, args ...interface{}) {
+	if !isTUIMode() {
+		fmt.Printf(format, args...)
+	}
+}
+
+// printlnUnlessTUI prints to stdout unless in TUI mode
+func printlnUnlessTUI(args ...interface{}) {
+	if !isTUIMode() {
+		fmt.Println(args...)
+	}
+}
 
 // ExecutorConfig holds configuration for executors.
 type ExecutorConfig struct {
@@ -72,7 +92,7 @@ func (e *OneShotExecutor) Name() string {
 }
 
 // Execute runs a oneshot job.
-func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
 	// Get request ID from context
 	requestID, _ := ctx.Value("request_id").(string)
 
@@ -95,7 +115,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					"skip_reason": "configured",
 				}).Info("Skipping interactive chat job")
 				prettyLog.InfoPretty(fmt.Sprintf("Skipping interactive chat job '%s' (running automatically)", job.Title))
-				return e.executeChatJob(ctx, job, plan)
+				return e.executeChatJob(ctx, job, plan, output)
 			}
 
 			// Loop until user chooses to run or complete
@@ -114,7 +134,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 				switch choice {
 				case "r", "run", "": // Default to run
 					prettyLog.InfoPretty("Running one turn of the chat...")
-					return e.executeChatJob(ctx, job, plan)
+					return e.executeChatJob(ctx, job, plan, output)
 				case "c", "complete":
 					prettyLog.InfoPretty("Marking chat as complete.")
 					job.Status = JobStatusCompleted
@@ -143,7 +163,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			}
 		}
 		// This is a single-job plan (e.g. from `flow chat run`), so execute directly.
-		return e.executeChatJob(ctx, job, plan)
+		return e.executeChatJob(ctx, job, plan, output)
 	}
 
 	// Create lock file with the current process's PID.
@@ -247,7 +267,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			"prompt":             prompt,
 			"prompt_chars":       len(prompt),
 		}).Info("Briefing file created")
-		prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
+		if isTUIMode() {
+			fmt.Fprintf(output, "Briefing file created at: %s\n", briefingFilePath)
+		} else {
+			prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
+		}
 	}
 
 	// Set environment for mock testing
@@ -265,23 +289,35 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// Determine the effective model to use with clear precedence
 	var effectiveModel string
+	var modelSource string
 
 	// 1. CLI flag (highest priority)
 	if e.config.ModelOverride != "" {
 		effectiveModel = e.config.ModelOverride
+		modelSource = "CLI override"
 	} else if job.Model != "" {
 		// 2. Job frontmatter model
 		effectiveModel = job.Model
+		modelSource = "job frontmatter"
 	} else if plan.Config != nil && plan.Config.Model != "" {
 		// 3. Plan config model
 		effectiveModel = plan.Config.Model
+		modelSource = "plan config"
 	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
 		// 4. Global config model
 		effectiveModel = plan.Orchestration.OneshotModel
+		modelSource = "global config"
 	} else {
 		// 5. Hardcoded fallback
 		effectiveModel = "claude-3-5-sonnet-20241022"
+		modelSource = "hardcoded fallback"
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"job_id":       job.ID,
+		"model":        effectiveModel,
+		"model_source": modelSource,
+	}).Debug("Resolved model for job execution")
 
 	// Call LLM based on model type
 	var response string
@@ -318,7 +354,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			ContextFiles:      contextFiles,
 			PromptSourceFiles: promptSourceFiles,
 		}
-		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts)
+		if isTUIMode() {
+			fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
+		}
+		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
 	}
 	if err != nil {
 		job.Status = JobStatusFailed
@@ -361,7 +400,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 	// Handle dependencies based on prepend_dependencies flag
 	if job.PrependDependencies {
 		// Prepend dependency content directly to the prompt body
-		fmt.Println("🔗 prepend_dependencies enabled - inlining dependency content into prompt body")
+		printlnUnlessTUI("🔗 prepend_dependencies enabled - inlining dependency content into prompt body")
 		var dependencyContentBuilder strings.Builder
 		if len(job.Dependencies) > 0 {
 			// Sort dependencies by filename for consistent order
@@ -374,7 +413,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				return sortedDeps[i].Filename < sortedDeps[j].Filename
 			})
 
-			fmt.Printf("   Prepending %d dependenc%s to prompt:\n", len(sortedDeps), func() string {
+			printfUnlessTUI("   Prepending %d dependenc%s to prompt:\n", len(sortedDeps), func() string {
 				if len(sortedDeps) == 1 {
 					return "y"
 				}
@@ -386,7 +425,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 					if err != nil {
 						return "", nil, nil, fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
 					}
-					fmt.Printf("     • %s (inlined, not uploaded as file)\n", dep.Filename)
+					printfUnlessTUI("     • %s (inlined, not uploaded as file)\n", dep.Filename)
 					dependencyContentBuilder.WriteString(fmt.Sprintf("\n\n---\n## Context from %s\n\n", dep.Filename))
 					_, depBody, _ := ParseFrontmatter(depContent)
 					dependencyContentBuilder.Write(depBody)
@@ -398,7 +437,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 	} else {
 		// Original logic: add dependencies to promptSourceFiles
 		if len(job.Dependencies) > 0 {
-			fmt.Printf("📎 Adding %d dependenc%s as separate file%s:\n", len(job.Dependencies), func() string {
+			printfUnlessTUI("📎 Adding %d dependenc%s as separate file%s:\n", len(job.Dependencies), func() string {
 				if len(job.Dependencies) == 1 {
 					return "y"
 				}
@@ -411,7 +450,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			}())
 			for _, dep := range job.Dependencies {
 				if dep != nil && dep.FilePath != "" {
-					fmt.Printf("     • %s (uploaded as file attachment)\n", dep.Filename)
+					printfUnlessTUI("     • %s (uploaded as file attachment)\n", dep.Filename)
 					promptSourceFiles = append(promptSourceFiles, dep.FilePath)
 				}
 			}
@@ -666,7 +705,7 @@ func NewMockLLMClient() LLMClient {
 }
 
 // Complete implements the LLMClient interface for mocking.
-func (m *MockLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error) {
+func (m *MockLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions, output io.Writer) (string, error) {
 	// If no response file, return a simple response
 	if m.responseFile == "" {
 		return "Mock LLM response for: " + strings.Split(prompt, "\n")[0], nil
@@ -1078,7 +1117,7 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 }
 
 // executeChatJob handles the conversational logic for chat-type jobs
-func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan) error {
+func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
 	// Generate a unique request ID for tracing this turn
 	requestID := "req-" + uuid.New().String()[:8]
 	ctx = context.WithValue(ctx, "request_id", requestID)
@@ -1247,7 +1286,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Handle dependencies - either prepend to conversation or collect for upload
 	var dependencyFilePaths []string
 	if job.PrependDependencies {
-		fmt.Println("🔗 prepend_dependencies enabled - inlining dependency content into chat history")
+		printlnUnlessTUI("🔗 prepend_dependencies enabled - inlining dependency content into chat history")
 		var dependencyContentBuilder strings.Builder
 		if len(job.Dependencies) > 0 {
 			// Sort dependencies by filename for consistent order
@@ -1260,7 +1299,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 				return sortedDeps[i].Filename < sortedDeps[j].Filename
 			})
 
-			fmt.Printf("   Prepending %d dependenc%s to chat:\n", len(sortedDeps), func() string {
+			printfUnlessTUI("   Prepending %d dependenc%s to chat:\n", len(sortedDeps), func() string {
 				if len(sortedDeps) == 1 {
 					return "y"
 				}
@@ -1273,7 +1312,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 						execErr = fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
 						return execErr
 					}
-					fmt.Printf("     • %s (inlined, not uploaded as file)\n", dep.Filename)
+					printfUnlessTUI("     • %s (inlined, not uploaded as file)\n", dep.Filename)
 					dependencyContentBuilder.WriteString(fmt.Sprintf("\n\n---\n## Context from %s\n\n", dep.Filename))
 					_, depBody, _ := ParseFrontmatter(depContent)
 					dependencyContentBuilder.Write(depBody)
@@ -1284,7 +1323,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		conversationHistory = dependencyContentBuilder.String() + conversationHistory
 	} else if len(job.Dependencies) > 0 {
 		// Collect dependency file paths for upload/attachment to LLM
-		fmt.Printf("📎 Collecting %d dependenc%s for upload:\n", len(job.Dependencies), func() string {
+		printfUnlessTUI("📎 Collecting %d dependenc%s for upload:\n", len(job.Dependencies), func() string {
 			if len(job.Dependencies) == 1 {
 				return "y"
 			}
@@ -1293,7 +1332,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		for _, dep := range job.Dependencies {
 			if dep != nil && dep.FilePath != "" {
 				dependencyFilePaths = append(dependencyFilePaths, dep.FilePath)
-				fmt.Printf("     • %s (will be uploaded as file attachment)\n", dep.Filename)
+				printfUnlessTUI("     • %s (will be uploaded as file attachment)\n", dep.Filename)
 			}
 		}
 	}
@@ -1336,11 +1375,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			contextPaths = append(contextPaths, claudePath)
 			log.WithField("file", claudePath).Debug("Found context file")
 		} else {
-			fmt.Printf("  Context file not found: %s (error: %v)\n", claudePath, err)
+			printfUnlessTUI("  Context file not found: %s (error: %v)\n", claudePath, err)
 		}
 	} else {
 		// No worktree, use the default context search
-		fmt.Println("  No worktree path, using default context search")
+		printlnUnlessTUI("  No worktree path, using default context search")
 		contextPaths = FindContextFiles(plan)
 	}
 
@@ -1348,10 +1387,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	var validContextPaths []string
 	for _, contextPath := range contextPaths {
 		if info, err := os.Stat(contextPath); err == nil {
-			fmt.Printf("  Successfully found context file: %s (%d bytes)\n", contextPath, info.Size())
+			printfUnlessTUI("  Successfully found context file: %s (%d bytes)\n", contextPath, info.Size())
 			validContextPaths = append(validContextPaths, contextPath)
 		} else {
-			fmt.Printf("  Failed to access context file: %s (error: %v)\n", contextPath, err)
+			printfUnlessTUI("  Failed to access context file: %s (error: %v)\n", contextPath, err)
 		}
 	}
 
@@ -1427,33 +1466,46 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 
 	if len(validContextPaths) > 0 {
-		fmt.Printf("✓ Including %d context file(s) as attachments\n", len(validContextPaths))
+		printfUnlessTUI("✓ Including %d context file(s) as attachments\n", len(validContextPaths))
 	} else {
-		fmt.Println("⚠️  No context files included in chat prompt")
+		printlnUnlessTUI("⚠️  No context files included in chat prompt")
 	}
 
 	// Determine effective model with clear precedence
 	var effectiveModel string
+	var modelSource string
 
 	// 1. CLI flag (highest priority)
 	if e.config.ModelOverride != "" {
 		effectiveModel = e.config.ModelOverride
+		modelSource = "CLI override"
 	} else if directive.Model != "" {
 		// 2. Chat directive model (for specific turns)
 		effectiveModel = directive.Model
+		modelSource = "chat directive"
 	} else if job.Model != "" {
 		// 3. Job frontmatter model
 		effectiveModel = job.Model
+		modelSource = "job frontmatter"
 	} else if plan.Config != nil && plan.Config.Model != "" {
 		// 4. Plan config model
 		effectiveModel = plan.Config.Model
+		modelSource = "plan config"
 	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
 		// 5. Global config model
 		effectiveModel = plan.Orchestration.OneshotModel
+		modelSource = "global config"
 	} else {
 		// 6. Hardcoded fallback
 		effectiveModel = "claude-3-5-sonnet-20241022"
+		modelSource = "hardcoded fallback"
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"job_id":       job.ID,
+		"model":        effectiveModel,
+		"model_source": modelSource,
+	}).Debug("Resolved model for chat job execution")
 
 	// Create LLM options with determined model
 	llmOpts := LLMOptions{
@@ -1545,15 +1597,21 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			JobID:    job.ID,
 			PlanName: plan.Name,
 		}
+		if isTUIMode() {
+			fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
+		}
 		response, err = e.geminiRunner.Run(ctx, opts)
 		if err != nil {
-			fmt.Printf("[DEBUG] Gemini API call failed with error: %v\n", err)
+			printfUnlessTUI("[DEBUG] Gemini API call failed with error: %v\n", err)
 			execErr = fmt.Errorf("Gemini API completion: %w", err)
 			return execErr
 		}
 	} else {
+		if isTUIMode() {
+			fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
+		}
 		// Use traditional llm command
-		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts)
+		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
 		if err != nil {
 			log.WithError(err).Debug("LLM call failed")
 			execErr = fmt.Errorf("LLM completion: %w", err)
@@ -1576,8 +1634,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		return execErr
 	}
 
-	fmt.Printf("✓ Added LLM response to chat: %s\n", job.FilePath)
-	fmt.Printf("✓ Chat job is now waiting for user input\n")
+	printfUnlessTUI("✓ Added LLM response to chat: %s\n", job.FilePath)
+	printfUnlessTUI("✓ Chat job is now waiting for user input\n")
 
 	// Update job status - chat jobs always go to pending_user (not completed)
 	job.Status = JobStatusPendingUser

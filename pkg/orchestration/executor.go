@@ -3,11 +3,13 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 )
 
 // Executor is the interface for job executors.
 type Executor interface {
-	Execute(ctx context.Context, job *Job, plan *Plan) error
+	Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error
 	Name() string
 }
 
@@ -44,5 +46,6 @@ func (r *ExecutorRegistry) ExecuteJob(ctx context.Context, job *Job, plan *Plan)
 		return err
 	}
 
-	return executor.Execute(ctx, job, plan)
+	// Use os.Stdout as the default writer for non-TUI contexts
+	return executor.Execute(ctx, job, plan, os.Stdout)
 }

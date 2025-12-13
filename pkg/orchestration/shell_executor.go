@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"time"
@@ -32,7 +33,7 @@ func (e *ShellExecutor) Name() string {
 }
 
 // Execute runs a shell job.
-func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
 	// Generate a unique request ID for tracing
 	requestID, _ := ctx.Value("request_id").(string)
 
@@ -98,13 +99,13 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	// Use "sh" instead of "/bin/sh" to be more portable
 	cmd := exec.CommandContext(ctx, "sh", "-c", job.PromptBody)
 	cmd.Dir = workDir
-	
+
 	// Set up environment for better debugging
-	cmd.Env = append(os.Environ(), 
+	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("GROVE_PLAN_DIR=%s", plan.Directory),
 		fmt.Sprintf("GROVE_WORK_DIR=%s", workDir),
 	)
-	
+
 	// Ensure the working directory exists
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		job.Status = JobStatusFailed
@@ -112,7 +113,10 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		return fmt.Errorf("failed to create working directory %s: %w", workDir, err)
 	}
 
-	output, execErr := cmd.CombinedOutput()
+	// Stream output directly to the provided writer
+	cmd.Stdout = output
+	cmd.Stderr = output
+	execErr := cmd.Run()
 
 	// Log execution result
 	duration := time.Since(job.StartTime)
@@ -126,23 +130,15 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	}
 
 	e.log.WithFields(logrus.Fields{
-		"job_id":        job.ID,
-		"request_id":    requestID,
-		"exit_code":     exitCode,
-		"duration_ms":   duration.Milliseconds(),
-		"output_length": len(output),
-		"success":       execErr == nil,
+		"job_id":      job.ID,
+		"request_id":  requestID,
+		"exit_code":   exitCode,
+		"duration_ms": duration.Milliseconds(),
+		"success":     execErr == nil,
 	}).Info("Shell job execution completed")
 
-	// Persist the output of the shell command to the job file for easy debugging and audit
-	if writeErr := job.AppendOutput(persister, string(output)); writeErr != nil {
-		// Log this error, but return the original command's error
-		e.log.WithFields(logrus.Fields{
-			"job_id": job.ID,
-			"error":  writeErr,
-		}).Warn("Failed to write output for job")
-		e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to write output for job %s: %v", job.ID, writeErr))
-	}
+	// Output is streamed directly, so we don't need to persist it separately
+	// The TUI or other consumers will handle the output via the io.Writer
 
 	// Update job status based on command result
 	job.EndTime = time.Now()
@@ -170,8 +166,8 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
 		}
-		execErr = fmt.Errorf("shell command failed (exit code: %v): %w\nCommand: %s\nWorking Dir: %s\nOutput: %s",
-			exitCode, execErr, job.PromptBody, workDir, string(output))
+		execErr = fmt.Errorf("shell command failed (exit code: %v): %w\nCommand: %s\nWorking Dir: %s",
+			exitCode, execErr, job.PromptBody, workDir)
 		return execErr
 	}
 

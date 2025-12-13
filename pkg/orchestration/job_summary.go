@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -68,7 +69,8 @@ func SummarizeJobContent(ctx context.Context, job *Job, plan *Plan, cfg SummaryC
 		WorkingDir: plan.Directory,
 	}
 
-	summary, err := llmClient.Complete(ctx, job, plan, finalPrompt, opts)
+	// Use io.Discard for summarization since we don't need to stream the output
+	summary, err := llmClient.Complete(ctx, job, plan, finalPrompt, opts, io.Discard)
 	if err != nil {
 		return "", fmt.Errorf("LLM completion for summary failed: %w", err)
 	}

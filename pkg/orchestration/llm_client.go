@@ -27,7 +27,7 @@ type LLMOptions struct {
 
 // LLMClient defines the interface for LLM interactions.
 type LLMClient interface {
-	Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error)
+	Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions, output io.Writer) (string, error)
 }
 
 // CommandLLMClient implements LLMClient using the llm command-line tool.
@@ -50,7 +50,7 @@ func NewCommandLLMClient() *CommandLLMClient {
 }
 
 // Complete sends a prompt to the LLM and returns the response.
-func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions) (string, error) {
+func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions, output io.Writer) (string, error) {
 	args := []string{}
 	if opts.Model != "" {
 		args = append(args, "-m", opts.Model)
@@ -202,16 +202,16 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		grovelogging.NewPrettyLogger().InfoPretty(fmt.Sprintf("LLM output is being logged to: %s", logFilePath))
 	}
 
-	// Capture output
+	// Capture output and stream to the provided writer
 	var stdout, stderr bytes.Buffer
 	if logFile != nil {
-		// Tee output to both buffers and the log file
-		execCmd.Stdout = io.MultiWriter(&stdout, logFile)
-		execCmd.Stderr = io.MultiWriter(&stderr, logFile)
+		// Tee output to buffers, log file, and the live output writer
+		execCmd.Stdout = io.MultiWriter(&stdout, logFile, output)
+		execCmd.Stderr = io.MultiWriter(&stderr, logFile, output)
 	} else {
-		// Fallback to just buffers if log file creation failed
-		execCmd.Stdout = &stdout
-		execCmd.Stderr = &stderr
+		// Fallback if log file creation failed
+		execCmd.Stdout = io.MultiWriter(&stdout, output)
+		execCmd.Stderr = io.MultiWriter(&stderr, output)
 	}
 
 	if err := execCmd.Run(); err != nil {
