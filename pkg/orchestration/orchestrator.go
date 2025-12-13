@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -375,6 +376,98 @@ func logFieldsToKeyVals(fields map[string]interface{}) []interface{} {
 	return result
 }
 
+// ExecuteJobWithWriter runs a single job and streams its output to the provided writer.
+// This is primarily for TUI integration where output needs to be captured and displayed.
+func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, output io.Writer) error {
+	// Generate a unique request ID for tracing this execution
+	requestID := "req-" + uuid.New().String()[:8]
+	ctx = context.WithValue(ctx, "request_id", requestID)
+
+	// Log job execution with full frontmatter details
+	logFields := map[string]interface{}{
+		"request_id": requestID,
+		"job_id":     job.ID,
+		"job_type":   job.Type,
+		"job_title":  job.Title,
+		"job_file":   job.FilePath,
+		"plan_name":  o.plan.Name,
+		"plan_dir":   o.plan.Directory,
+		"status":     job.Status,
+	}
+
+	// Add optional fields if present
+	if job.Model != "" {
+		logFields["model"] = job.Model
+	}
+	if job.Template != "" {
+		logFields["template"] = job.Template
+	}
+	if job.RulesFile != "" {
+		logFields["rules_file"] = job.RulesFile
+	}
+	if job.Repository != "" {
+		logFields["repository"] = job.Repository
+	}
+	if job.Worktree != "" {
+		logFields["worktree"] = job.Worktree
+	}
+	if len(job.Dependencies) > 0 {
+		depFiles := make([]string, len(job.Dependencies))
+		for i, dep := range job.Dependencies {
+			if dep != nil {
+				depFiles[i] = dep.Filename
+			}
+		}
+		logFields["dependencies"] = depFiles
+		logFields["dependency_count"] = len(job.Dependencies)
+	}
+	if job.PrependDependencies {
+		logFields["prepend_dependencies"] = job.PrependDependencies
+	}
+
+	// Special logging for interactive jobs
+	if job.Type == JobTypeInteractiveAgent {
+		o.logger.Info("Starting interactive job", logFieldsToKeyVals(logFields)...)
+	} else {
+		o.logger.Info("Executing job", logFieldsToKeyVals(logFields)...)
+	}
+
+	// Update status to running
+	if err := o.UpdateJobStatus(job, JobStatusRunning); err != nil {
+		return fmt.Errorf("update status to running: %w", err)
+	}
+
+	// Get executor
+	executor, ok := o.executors[job.Type]
+	if !ok {
+		return fmt.Errorf("no executor for job type: %s", job.Type)
+	}
+
+	// Execute job, passing the writer
+	execErr := executor.Execute(ctx, job, o.plan, output)
+
+	// Update final status (skip for chat and interactive agent jobs - they manage their own status)
+	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
+		finalStatus := JobStatusCompleted
+		if execErr != nil {
+			finalStatus = JobStatusFailed
+			o.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
+		}
+
+		if err := o.UpdateJobStatus(job, finalStatus); err != nil {
+			return fmt.Errorf("update final status: %w", err)
+		}
+	} else if execErr != nil {
+		// For chat jobs, only update status on error
+		o.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
+		if err := o.UpdateJobStatus(job, JobStatusFailed); err != nil {
+			return fmt.Errorf("update final status: %w", err)
+		}
+	}
+
+	return execErr
+}
+
 // executeJob runs a single job with the appropriate executor.
 func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 	// Generate a unique request ID for tracing this execution
@@ -441,8 +534,8 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 		return fmt.Errorf("no executor for job type: %s", job.Type)
 	}
 
-	// Execute job
-	execErr := executor.Execute(ctx, job, o.plan)
+	// Execute job with os.Stdout as default output
+	execErr := executor.Execute(ctx, job, o.plan, os.Stdout)
 
 	// Update final status (skip for chat and interactive agent jobs - they manage their own status)
 	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
