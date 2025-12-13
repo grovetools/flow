@@ -143,12 +143,8 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		e.prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
 	}
 
-	// Check if interactive jobs should be skipped
-	if e.skipInteractive {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("interactive agent job skipped due to --skip-interactive flag")
-	}
+	// Note: SkipInteractive flag controls whether to prompt for user input during execution,
+	// not whether to run interactive_agent jobs. Interactive agents launch in tmux regardless.
 
 	// Load config to get agent settings
 	coreCfg, err := config.LoadFrom(".")

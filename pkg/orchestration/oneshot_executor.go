@@ -1195,6 +1195,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	if lastTurn.Speaker == "llm" {
 		// Job is waiting for user input
 		log.WithField("job", job.Title).Info("Chat job is waiting for user input")
+		prettyLog.WarnPretty(fmt.Sprintf("Chat job '%s' is waiting for your response - edit the file to continue", job.Title))
 		job.Status = JobStatusPendingUser
 		updateJobFile(job)
 		log.Debug("Early return: job waiting for user input")
@@ -1204,6 +1205,15 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	if lastTurn.Speaker != "user" {
 		execErr = fmt.Errorf("unexpected last speaker: %s", lastTurn.Speaker)
 		return execErr
+	}
+
+	// Check if the last user turn has empty content
+	if strings.TrimSpace(lastTurn.Content) == "" {
+		log.WithField("job", job.Title).Info("Chat job has empty user prompt, skipping execution")
+		prettyLog.WarnPretty(fmt.Sprintf("Chat job '%s' has no content - add your prompt to the file", job.Title))
+		job.Status = JobStatusPendingUser
+		updateJobFile(job)
+		return nil
 	}
 
 	// Process the active directive

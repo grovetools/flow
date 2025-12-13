@@ -21,8 +21,12 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 
 	body := strings.TrimSpace(string(bodyBytes))
 	if body == "" {
-		// No content after frontmatter, so no turns.
-		return []*ChatTurn{}, nil
+		// Empty body means a newly created chat file - return initial user turn with empty content
+		return []*ChatTurn{{
+			Speaker:   "user",
+			Content:   "",
+			Timestamp: time.Now(),
+		}}, nil
 	}
 
 	// Find all grove directives in the content
