@@ -269,7 +269,6 @@ type statusTUIModel struct {
 	program          *tea.Program // Reference to the tea.Program for sending messages
 	logViewerWidth   int       // Cached log viewer width
 	logViewerHeight  int       // Cached log viewer height
-	flowCfg          *FlowConfig // Global flow configuration for orchestrator
 }
 
 
@@ -299,67 +298,8 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 	}
 }
 
-// getJobIDs extracts job IDs from a slice of jobs for logging
-func getJobIDs(jobs []*orchestration.Job) []string {
-	ids := make([]string, len(jobs))
-	for i, job := range jobs {
-		if job.ID != "" {
-			ids[i] = job.ID
-		} else {
-			ids[i] = job.Filename
-		}
-	}
-	return ids
-}
-
-// enrichPlanWithConfig injects global configuration into a plan object.
-// Only sets fields if they're not already set and flowCfg has non-zero values.
-func enrichPlanWithConfig(plan *orchestration.Plan, flowCfg *FlowConfig) {
-	logger := logging.NewLogger("flow-tui")
-
-	if plan == nil || flowCfg == nil {
-		logger.Debug("Skipping enrichPlanWithConfig: plan or flowCfg is nil")
-		return
-	}
-
-	// Initialize if nil
-	wasNil := plan.Orchestration == nil
-	if plan.Orchestration == nil {
-		plan.Orchestration = &orchestration.Config{}
-	}
-
-	// Track what we set
-	var updates []string
-
-	// Only set fields if not already set
-	if plan.Orchestration.OneshotModel == "" && flowCfg.OneshotModel != "" {
-		plan.Orchestration.OneshotModel = flowCfg.OneshotModel
-		updates = append(updates, "oneshot_model")
-	}
-	if plan.Orchestration.TargetAgentContainer == "" && flowCfg.TargetAgentContainer != "" {
-		plan.Orchestration.TargetAgentContainer = flowCfg.TargetAgentContainer
-		updates = append(updates, "target_agent_container")
-	}
-	if plan.Orchestration.PlansDirectory == "" && flowCfg.PlansDirectory != "" {
-		plan.Orchestration.PlansDirectory = flowCfg.PlansDirectory
-		updates = append(updates, "plans_directory")
-	}
-	if plan.Orchestration.MaxConsecutiveSteps == 0 && flowCfg.MaxConsecutiveSteps != 0 {
-		plan.Orchestration.MaxConsecutiveSteps = flowCfg.MaxConsecutiveSteps
-		updates = append(updates, "max_consecutive_steps")
-	}
-
-	logger.WithFields(map[string]interface{}{
-		"plan_name":              plan.Name,
-		"orchestration_was_nil":  wasNil,
-		"fields_updated":         updates,
-		"final_oneshot_model":    plan.Orchestration.OneshotModel,
-		"final_max_consec_steps": plan.Orchestration.MaxConsecutiveSteps,
-	}).Debug("Enriched plan with config")
-}
-
 // Initialize the model
-func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph, flowCfg *FlowConfig) statusTUIModel {
+func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph) statusTUIModel {
 	// Set TUI mode env var early so loggers are configured correctly
 	os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
@@ -424,7 +364,6 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		isRunningJob:     false,
 		runLogFile:       runLogPath,
 		program:          nil, // Will be set by runStatusTUI after creating the program
-		flowCfg:          flowCfg, // Store flow config for refresh operations
 	}
 }
 
@@ -598,7 +537,6 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
 			"num_jobs": len(jobs),
-			"job_ids":  getJobIDs(jobs),
 		}).Info("runJobsWithOrchestrator started")
 
 		// TUI mode is already set in newStatusTUIModel, but ensure it's set here too
@@ -882,8 +820,6 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}).Info("Cleared stale 'running' statuses during refresh")
 		}
 
-		// Re-apply global config to the reloaded plan object
-		enrichPlanWithConfig(plan, m.flowCfg)
 
 		graph, err := orchestration.BuildDependencyGraph(plan)
 		if err != nil {
@@ -1573,14 +1509,12 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.orchestrator != nil && m.program != nil {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":   len(jobsToRun),
-						"job_ids":    getJobIDs(jobsToRun),
 						"use_method": "orchestrator",
 					}).Info("Running jobs via orchestrator")
 					runCmd = runJobsWithOrchestrator(m.orchestrator, jobsToRun, m.program)
 				} else {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":        len(jobsToRun),
-						"job_ids":         getJobIDs(jobsToRun),
 						"use_method":      "subprocess",
 						"orchestrator_nil": m.orchestrator == nil,
 						"program_nil":     m.program == nil,
@@ -3040,28 +2974,7 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	// We'll set the program reference after creating it
 	var streamWriter *logviewer.StreamWriter
 
-	// Load global flow config to enrich the plan object
-	// This is the main part of the fix
-	logger := logging.NewLogger("flow-tui")
-	flowCfg, err := loadFlowConfig()
-	if err != nil {
-		// Log a warning but proceed, as some functionality might still work
-		logger.WithFields(map[string]interface{}{
-			"error": err,
-		}).Warn("Failed to load flow config, using empty config")
-		flowCfg = &FlowConfig{} // Use an empty config
-	} else {
-		logger.WithFields(map[string]interface{}{
-			"oneshot_model":          flowCfg.OneshotModel,
-			"target_agent_container": flowCfg.TargetAgentContainer,
-			"max_consecutive_steps":  flowCfg.MaxConsecutiveSteps,
-		}).Info("Loaded flow config for TUI")
-	}
-
-	// Enrich the plan with the global config before creating the TUI
-	enrichPlanWithConfig(plan, flowCfg)
-
-	model := newStatusTUIModel(plan, graph, flowCfg)
+	model := newStatusTUIModel(plan, graph)
 
 	// Use alt screen only when not in Neovim (to fix screen duplication)
 	// But disable it in Neovim to allow editor functionality
