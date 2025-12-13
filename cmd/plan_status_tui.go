@@ -267,6 +267,8 @@ type statusTUIModel struct {
 	isRunningJob     bool      // Track if a job is currently running
 	runLogFile       string    // Path to temporary log file for job output
 	program          *tea.Program // Reference to the tea.Program for sending messages
+	logViewerWidth   int       // Cached log viewer width
+	logViewerHeight  int       // Cached log viewer height
 }
 
 
@@ -528,22 +530,6 @@ func refreshTick() tea.Cmd {
 	})
 }
 
-// tuiLogWriter implements io.Writer and sends log lines as messages to the TUI.
-type tuiLogWriter struct {
-	program *tea.Program
-}
-
-// Write sends the byte slice as a log line to the TUI program.
-func (w *tuiLogWriter) Write(p []byte) (n int, err error) {
-	// Send the output as a log line message
-	if w.program != nil {
-		w.program.Send(logviewer.LogLineMsg{
-			Workspace: "Job Output",
-			Line:      string(p),
-		})
-	}
-	return len(p), nil
-}
 
 // runJobsWithOrchestrator executes jobs using the orchestrator and streams output to the TUI.
 func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program) tea.Cmd {
@@ -552,7 +538,7 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 		os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
 		// Create our custom writer that sends messages to the TUI program
-		writer := &tuiLogWriter{program: program}
+		writer := logviewer.NewStreamWriter(program, "Job Output")
 
 		// Redirect stdout and stderr to the TUI writer to prevent output mangling
 		oldStdout := os.Stdout
@@ -863,6 +849,29 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Height = msg.Height
 		m.help, _ = m.help.Update(msg)
 
+		// Calculate log viewer dimensions based on split mode
+		if m.showLogs {
+			if m.logSplitVertical {
+				// Vertical split (side-by-side)
+				// No borders, just separator (1 char) - much simpler calculation
+				m.logViewerWidth = (msg.Width / 2) - 2
+				m.logViewerHeight = msg.Height - 13 // Shifted down by 3, Follow moved to footer (+1)
+			} else {
+				// Horizontal split (top/bottom)
+				m.logViewerWidth = msg.Width - 4
+				// Give jobs 2/3, logs get 1/3
+				m.logViewerHeight = (msg.Height / 3) - 13
+			}
+
+			// Ensure minimum dimensions
+			if m.logViewerHeight < 5 {
+				m.logViewerHeight = 5
+			}
+			if m.logViewerWidth < 20 {
+				m.logViewerWidth = 20
+			}
+		}
+
 		// Start log viewer on first window size message if we have jobs and logs are enabled
 		if m.showLogs && m.activeLogJob == nil && len(m.jobs) > 0 {
 			job := m.jobs[m.cursor]
@@ -873,22 +882,19 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil {
 					logFile, _, err := logutil.FindLogFileForWorkspace(node)
 					if err == nil {
-						logHeight := m.height / 3
-						m.logViewer = logviewer.New(msg.Width, logHeight)
+						m.logViewer = logviewer.New(m.logViewerWidth, m.logViewerHeight)
 						cmd = m.logViewer.Start(map[string]string{node.Name: logFile})
 						return m, cmd
 					}
 				}
 			}
 			// If no logs found, still show the log viewer (it will show empty/waiting state)
-			logHeight := m.height / 3
-			m.logViewer = logviewer.New(msg.Width, logHeight)
+			m.logViewer = logviewer.New(m.logViewerWidth, m.logViewerHeight)
 		}
 
 		// Update log viewer size if active
 		if m.showLogs {
-			logHeight := m.height/3
-			m.logViewer, cmd = m.logViewer.Update(tea.WindowSizeMsg{Width: msg.Width, Height: logHeight})
+			m.logViewer, cmd = m.logViewer.Update(tea.WindowSizeMsg{Width: m.logViewerWidth, Height: m.logViewerHeight})
 			return m, cmd
 		}
 		return m, nil
@@ -1151,6 +1157,26 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keyMap.ToggleLayout):
 			if m.showLogs {
 				m.logSplitVertical = !m.logSplitVertical
+				// Recalculate dimensions based on new split mode
+				if m.logSplitVertical {
+					// Vertical split (side-by-side)
+					m.logViewerWidth = (m.width / 2) - 2
+					m.logViewerHeight = m.height - 13
+				} else {
+					// Horizontal split (top/bottom)
+					m.logViewerWidth = m.width - 4
+					m.logViewerHeight = (m.height / 3) - 13
+				}
+				// Ensure minimum dimensions
+				if m.logViewerHeight < 5 {
+					m.logViewerHeight = 5
+				}
+				if m.logViewerWidth < 20 {
+					m.logViewerWidth = 20
+				}
+				// Update log viewer with new dimensions
+				m.logViewer, cmd = m.logViewer.Update(tea.WindowSizeMsg{Width: m.logViewerWidth, Height: m.logViewerHeight})
+				return m, cmd
 			}
 			return m, nil
 
@@ -1252,7 +1278,26 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				m.showLogs = true
 				m.activeLogJob = job
-				m.logViewer = logviewer.New(m.width, m.height/3)
+
+				// Calculate log viewer dimensions based on split mode
+				if m.logSplitVertical {
+					// Vertical split (side-by-side)
+					m.logViewerWidth = (m.width / 2) - 2
+					m.logViewerHeight = m.height - 13
+				} else {
+					// Horizontal split (top/bottom)
+					m.logViewerWidth = m.width - 4
+					m.logViewerHeight = (m.height / 3) - 13
+				}
+				// Ensure minimum dimensions
+				if m.logViewerHeight < 5 {
+					m.logViewerHeight = 5
+				}
+				if m.logViewerWidth < 20 {
+					m.logViewerWidth = 20
+				}
+
+				m.logViewer = logviewer.New(m.logViewerWidth, m.logViewerHeight)
 				cmd = m.logViewer.Start(map[string]string{node.Name: logFile})
 				m.statusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Viewing logs for %s (press 'v' to close)", job.Title))
 				return m, cmd
@@ -1336,24 +1381,28 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					os.Truncate(m.runLogFile, 0)
 				}
 
-				// Configure the log viewer for output
-				// Ensure we have valid dimensions
-				logWidth := m.width
-				if logWidth == 0 {
-					logWidth = 80 // Fallback default
-				}
-				logHeight := m.height / 3
+				// Calculate log viewer dimensions based on split mode
 				if m.logSplitVertical {
-					logHeight = m.height / 2
+					// Vertical split (side-by-side)
+					m.logViewerWidth = (m.width / 2) - 2
+					m.logViewerHeight = m.height - 13
+				} else {
+					// Horizontal split (top/bottom)
+					m.logViewerWidth = m.width - 4
+					m.logViewerHeight = (m.height / 3) - 13
 				}
-				if logHeight == 0 {
-					logHeight = 20 // Fallback default
+				// Ensure minimum dimensions
+				if m.logViewerHeight < 5 {
+					m.logViewerHeight = 5
+				}
+				if m.logViewerWidth < 20 {
+					m.logViewerWidth = 20
 				}
 
-				m.logViewer = logviewer.New(logWidth, logHeight)
+				m.logViewer = logviewer.New(m.logViewerWidth, m.logViewerHeight)
 
 				// Initialize the log viewer with a WindowSizeMsg to set it to ready state
-				m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: logWidth, Height: logHeight})
+				m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: m.logViewerWidth, Height: m.logViewerHeight})
 
 				// Clear the log viewer and prepare for streaming or tailing
 				var logCmd tea.Cmd
@@ -1710,24 +1759,23 @@ func (m statusTUIModel) View() string {
 		// Render Footer
 		helpView := m.help.View()
 		viewModeIndicator := theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%s]", m.viewMode))
-		footer = helpView + viewModeIndicator
+
+		// Add follow status if logs are shown
+		followStatus := ""
+		if m.showLogs {
+			if m.logViewer.IsFollowing() {
+				followStatus = theme.DefaultTheme.Muted.Render(" • Follow: ON")
+			} else {
+				followStatus = theme.DefaultTheme.Muted.Render(" • Follow: OFF")
+			}
+		}
+
+		footer = helpView + viewModeIndicator + followStatus
 	}
 
 	// 4. Combine everything
 	var finalView string
 	if m.showLogs {
-		// Define pane styles for focus indication
-		jobsPaneStyle := lipgloss.NewStyle()
-		logsPaneStyle := lipgloss.NewStyle()
-
-		if m.focus == jobsPane {
-			jobsPaneStyle = jobsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Orange)
-			logsPaneStyle = logsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Border)
-		} else {
-			jobsPaneStyle = jobsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Border)
-			logsPaneStyle = logsPaneStyle.Border(lipgloss.RoundedBorder()).BorderForeground(theme.DefaultColors.Orange)
-		}
-
 		jobsView := lipgloss.JoinVertical(
 			lipgloss.Left,
 			styledHeader,
@@ -1735,38 +1783,49 @@ func (m statusTUIModel) View() string {
 			scrollIndicator,
 		)
 
-		var logHeight, logWidth, jobsHeight, jobsWidth int
+		var jobsWidth int
 
 		if m.logSplitVertical {
 			// Vertical split (side-by-side)
-			jobsWidth = m.width/2 - 4
-			logWidth = m.width - jobsWidth - 6
-			jobsHeight = m.height - 10 // Account for footer and margins
-			logHeight = jobsHeight
+			jobsWidth = m.width/2 - 2
 
-			m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: logWidth, Height: logHeight})
-			logView := logsPaneStyle.Padding(1).Width(logWidth).Height(logHeight).Render(m.logViewer.View())
+			// Create a simple vertical separator
+			separatorChar := "│"
+			if m.focus == logsPane {
+				separatorChar = "┃" // Thicker line when logs are focused
+			}
+			separatorHeight := m.height - 13 // Account for header and footer
+			// Add 3 lines of spacing at the top to match log viewer shift
+			separatorContent := "\n\n\n" + strings.Repeat(separatorChar+"\n", separatorHeight)
+			separator := lipgloss.NewStyle().
+				Foreground(theme.DefaultColors.Border).
+				Render(separatorContent)
 
-			jobsPane := jobsPaneStyle.Padding(1).Width(jobsWidth).Height(jobsHeight).Render(jobsView)
+			// Render panes without borders
+			// Add 3 lines of spacing at the top to shift log viewer down, and 2 spaces right padding
+			logViewWithSpacing := "\n\n\n" + m.logViewer.View()
+			logView := lipgloss.NewStyle().Width(m.logViewerWidth).PaddingRight(2).Render(logViewWithSpacing)
+			jobsPane := lipgloss.NewStyle().Width(jobsWidth).Render(jobsView)
 
-			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, logView)
+			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, separator, logView)
 			finalView = lipgloss.JoinVertical(lipgloss.Left, finalView, "\n", footer)
 
 		} else {
 			// Horizontal split (top/bottom)
-			jobsHeight = (m.height * 2) / 3
-			logHeight = m.height - jobsHeight - 6 // Account for headers, dividers, and margins
+			// Don't set explicit heights - let content flow naturally
+			logView := lipgloss.NewStyle().Render(m.logViewer.View())
 
-			m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: m.width - 4, Height: logHeight})
-			logView := logsPaneStyle.Render(m.logViewer.View())
+			jobsPane := lipgloss.NewStyle().Render(jobsView)
 
-			jobsPane := jobsPaneStyle.Render(jobsView)
-
-			// Create a divider
+			// Create a divider - thicker if logs are focused
+			dividerChar := "─"
+			if m.focus == logsPane {
+				dividerChar = "━"
+			}
 			divider := lipgloss.NewStyle().
 				Width(contentWidth).
-				Foreground(theme.DefaultTheme.Muted.GetForeground()).
-				Render(strings.Repeat("─", contentWidth))
+				Foreground(theme.DefaultColors.Border).
+				Render(strings.Repeat(dividerChar, contentWidth))
 
 			finalView = lipgloss.JoinVertical(
 				lipgloss.Left,
@@ -2821,7 +2880,8 @@ var initProgramRef *tea.Program
 // runStatusTUI runs the interactive TUI for plan status
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
 	// Create a TUI log writer that will receive all redirected output
-	tuiLogWriter := &tuiLogWriter{}
+	// We'll set the program reference after creating it
+	var streamWriter *logviewer.StreamWriter
 
 	model := newStatusTUIModel(plan, graph)
 
@@ -2835,11 +2895,11 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 
 	program := tea.NewProgram(model, opts...)
 
-	// Set the program reference for the log writer
-	tuiLogWriter.program = program
+	// Create the stream writer with the program reference
+	streamWriter = logviewer.NewStreamWriter(program, "System")
 
 	// Redirect all Grove loggers to our TUI writer
-	logging.SetGlobalOutput(tuiLogWriter)
+	logging.SetGlobalOutput(streamWriter)
 	defer logging.SetGlobalOutput(os.Stderr) // Ensure we reset on exit
 
 	// Store the program reference in a way that the model can access it
