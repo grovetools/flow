@@ -28,6 +28,8 @@ func main() {
 		scenarios.PlanStatusTUIFocusSwitchingScenario,
 		scenarios.PlanStatusTUILayoutToggleScenario,
 		scenarios.PlanStatusTUILogViewToggleScenario,
+		scenarios.PlanStatusTUILiveLogsScenario,
+		scenarios.PlanStatusTUIRunningJobBlockScenario,
 		scenarios.PlanFromNoteScenario,
 		scenarios.PlanMergeUpdateWorktreeScenario,
 		scenarios.StandardFeatureRecipeScenario,
