@@ -492,8 +492,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			return fmt.Errorf("failed to send agent command: %w", err)
 		}
 
-		// Conditionally switch to the agent window
-		if os.Getenv("TMUX") != "" {
+		// Conditionally switch to the agent window (but not when running from TUI)
+		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+		if os.Getenv("TMUX") != "" && !isTUIMode {
 			// Check if we are in the correct session before trying to select window
 			currentSessionCmd := exec.Command("tmux", "display-message", "-p", "#S")
 			currentSessionOutput, err := currentSessionCmd.Output()
@@ -513,8 +514,8 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 				p.log.WithError(err).Warn("Could not get current tmux session")
 				p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
 			}
-		} else {
-			// Not in tmux, print instructions
+		} else if !isTUIMode {
+			// Not in tmux, print instructions (unless in TUI mode where it's shown in logs)
 			p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
 		}
 

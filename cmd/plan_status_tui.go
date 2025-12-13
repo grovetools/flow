@@ -339,6 +339,12 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		logFile.Close() // Close it for now, it will be truncated on each run
 	}
 
+	// Start cursor at the bottom-most row
+	initialCursor := 0
+	if len(jobs) > 0 {
+		initialCursor = len(jobs) - 1
+	}
+
 	return statusTUIModel{
 		plan:           plan,
 		graph:          graph,
@@ -346,7 +352,7 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		jobs:           jobs,
 		jobParents:     parents,
 		jobIndents:     indents,
-		cursor:         0,
+		cursor:         initialCursor,
 		scrollOffset:   0,
 		selected:       make(map[string]bool),
 		statusSummary:  formatStatusSummary(plan),
@@ -908,6 +914,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Width = msg.Width
 		m.help.Height = msg.Height
 		m.help, _ = m.help.Update(msg)
+
+		// Adjust scroll offset to show cursor at bottom on first render
+		m.adjustScrollOffset()
 
 		// Calculate log viewer dimensions based on split mode
 		if m.showLogs {
