@@ -269,6 +269,7 @@ type statusTUIModel struct {
 	program          *tea.Program // Reference to the tea.Program for sending messages
 	logViewerWidth   int       // Cached log viewer width
 	logViewerHeight  int       // Cached log viewer height
+	flowCfg          *FlowConfig // Global flow configuration for orchestrator
 }
 
 
@@ -298,8 +299,67 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 	}
 }
 
+// getJobIDs extracts job IDs from a slice of jobs for logging
+func getJobIDs(jobs []*orchestration.Job) []string {
+	ids := make([]string, len(jobs))
+	for i, job := range jobs {
+		if job.ID != "" {
+			ids[i] = job.ID
+		} else {
+			ids[i] = job.Filename
+		}
+	}
+	return ids
+}
+
+// enrichPlanWithConfig injects global configuration into a plan object.
+// Only sets fields if they're not already set and flowCfg has non-zero values.
+func enrichPlanWithConfig(plan *orchestration.Plan, flowCfg *FlowConfig) {
+	logger := logging.NewLogger("flow-tui")
+
+	if plan == nil || flowCfg == nil {
+		logger.Debug("Skipping enrichPlanWithConfig: plan or flowCfg is nil")
+		return
+	}
+
+	// Initialize if nil
+	wasNil := plan.Orchestration == nil
+	if plan.Orchestration == nil {
+		plan.Orchestration = &orchestration.Config{}
+	}
+
+	// Track what we set
+	var updates []string
+
+	// Only set fields if not already set
+	if plan.Orchestration.OneshotModel == "" && flowCfg.OneshotModel != "" {
+		plan.Orchestration.OneshotModel = flowCfg.OneshotModel
+		updates = append(updates, "oneshot_model")
+	}
+	if plan.Orchestration.TargetAgentContainer == "" && flowCfg.TargetAgentContainer != "" {
+		plan.Orchestration.TargetAgentContainer = flowCfg.TargetAgentContainer
+		updates = append(updates, "target_agent_container")
+	}
+	if plan.Orchestration.PlansDirectory == "" && flowCfg.PlansDirectory != "" {
+		plan.Orchestration.PlansDirectory = flowCfg.PlansDirectory
+		updates = append(updates, "plans_directory")
+	}
+	if plan.Orchestration.MaxConsecutiveSteps == 0 && flowCfg.MaxConsecutiveSteps != 0 {
+		plan.Orchestration.MaxConsecutiveSteps = flowCfg.MaxConsecutiveSteps
+		updates = append(updates, "max_consecutive_steps")
+	}
+
+	logger.WithFields(map[string]interface{}{
+		"plan_name":              plan.Name,
+		"orchestration_was_nil":  wasNil,
+		"fields_updated":         updates,
+		"final_oneshot_model":    plan.Orchestration.OneshotModel,
+		"final_max_consec_steps": plan.Orchestration.MaxConsecutiveSteps,
+	}).Debug("Enriched plan with config")
+}
+
 // Initialize the model
-func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph) statusTUIModel {
+func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph, flowCfg *FlowConfig) statusTUIModel {
 	// Set TUI mode env var early so loggers are configured correctly
 	os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
@@ -364,6 +424,7 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		isRunningJob:     false,
 		runLogFile:       runLogPath,
 		program:          nil, // Will be set by runStatusTUI after creating the program
+		flowCfg:          flowCfg, // Store flow config for refresh operations
 	}
 }
 
@@ -534,6 +595,12 @@ func refreshTick() tea.Cmd {
 // runJobsWithOrchestrator executes jobs using the orchestrator and streams output to the TUI.
 func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program) tea.Cmd {
 	return func() tea.Msg {
+		logger := logging.NewLogger("flow-tui")
+		logger.WithFields(map[string]interface{}{
+			"num_jobs": len(jobs),
+			"job_ids":  getJobIDs(jobs),
+		}).Info("runJobsWithOrchestrator started")
+
 		// TUI mode is already set in newStatusTUIModel, but ensure it's set here too
 		os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
@@ -578,14 +645,30 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 		// Run jobs sequentially (orchestrator handles parallelism if needed)
 		ctx := context.Background()
 
-		for _, job := range jobs {
+		for i, job := range jobs {
+			logger.WithFields(map[string]interface{}{
+				"job_id":       job.ID,
+				"job_filename": job.Filename,
+				"job_index":    i + 1,
+				"total_jobs":   len(jobs),
+			}).Info("Executing job via orchestrator")
+
 			// Execute the job using the orchestrator, passing the TUI writer
 			if err := orchestrator.ExecuteJobWithWriter(ctx, job, writer); err != nil {
+				logger.WithFields(map[string]interface{}{
+					"job_id": job.ID,
+					"error":  err,
+				}).Error("Job execution failed")
 				// Return error for this job, but continue would be handled by orchestrator
 				return jobRunFinishedMsg{err: fmt.Errorf("job %s failed: %w", job.ID, err)}
 			}
+
+			logger.WithFields(map[string]interface{}{
+				"job_id": job.ID,
+			}).Info("Job execution completed successfully")
 		}
 
+		logger.Info("All jobs completed successfully")
 		return jobRunFinishedMsg{err: nil}
 	}
 }
@@ -767,15 +850,46 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case refreshMsg:
+		logger := logging.NewLogger("flow-tui")
+		logger.WithFields(map[string]interface{}{
+			"plan_dir": m.planDir,
+		}).Debug("TUI refresh started")
+
 		// Reload the plan
 		plan, err := orchestration.LoadPlan(m.planDir)
 		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"error": err,
+			}).Error("Failed to reload plan during refresh")
 			m.err = err
 			return m, nil
 		}
 
+		// Verify running jobs (check PIDs, clear stale "running" statuses)
+		logger.Debug("Verifying running job statuses (PID checks)")
+		VerifyRunningJobStatus(plan)
+
+		// Log any jobs that were marked as interrupted
+		var interruptedJobs []string
+		for _, job := range plan.Jobs {
+			if job.Status == "interrupted" {
+				interruptedJobs = append(interruptedJobs, job.Title)
+			}
+		}
+		if len(interruptedJobs) > 0 {
+			logger.WithFields(map[string]interface{}{
+				"interrupted_jobs": interruptedJobs,
+			}).Info("Cleared stale 'running' statuses during refresh")
+		}
+
+		// Re-apply global config to the reloaded plan object
+		enrichPlanWithConfig(plan, m.flowCfg)
+
 		graph, err := orchestration.BuildDependencyGraph(plan)
 		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"error": err,
+			}).Error("Failed to build dependency graph during refresh")
 			m.err = err
 			return m, nil
 		}
@@ -789,8 +903,18 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"error": err,
+			}).Error("Failed to recreate orchestrator during refresh - keeping old orchestrator")
 			m.statusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("Warning: Failed to recreate orchestrator: %v", err))
+			// IMPORTANT: Don't update m.plan if orchestrator creation failed
+			// This keeps the old orchestrator and old plan in sync
+			return m, nil
 		} else {
+			logger.WithFields(map[string]interface{}{
+				"plan_name": plan.Name,
+				"num_jobs":  len(plan.Jobs),
+			}).Info("Successfully recreated orchestrator during refresh")
 			m.orchestrator = orch
 		}
 
@@ -1304,8 +1428,12 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keyMap.Run):
+			logger := logging.NewLogger("flow-tui")
+			logger.Info("'r' key pressed - checking if jobs can run")
+
 			// Check if a job is already running from the TUI
 			if m.isRunningJob {
+				logger.Warn("Job already running in TUI - blocking new run")
 				m.statusSummary = theme.DefaultTheme.Warning.Render("A job is already running. Please wait for it to complete.")
 				return m, nil
 			}
@@ -1318,6 +1446,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if len(runningJobs) > 0 {
+				logger.WithFields(map[string]interface{}{
+					"running_job": runningJobs[0],
+				}).Warn("Job already running in plan - blocking new run")
 				m.statusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s is already running", runningJobs[0]))
 				return m, nil
 			}
@@ -1337,10 +1468,20 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				candidateJobs = []*orchestration.Job{m.jobs[m.cursor]}
 			}
 
+			logger.WithFields(map[string]interface{}{
+				"num_candidates": len(candidateJobs),
+			}).Info("Filtering candidate jobs by status")
+
 			// Filter out jobs that are not runnable
 			var jobsToRun []*orchestration.Job
 			var skippedReasons []string
 			for _, job := range candidateJobs {
+				logger.WithFields(map[string]interface{}{
+					"job_id":     job.ID,
+					"job_title":  job.Title,
+					"job_status": job.Status,
+				}).Debug("Checking job status")
+
 				switch job.Status {
 				case orchestration.JobStatusPending, orchestration.JobStatusFailed,
 				     orchestration.JobStatusTodo, orchestration.JobStatusNeedsReview,
@@ -1362,6 +1503,9 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// If no jobs are runnable, show appropriate message
 			if len(jobsToRun) == 0 {
+				logger.WithFields(map[string]interface{}{
+					"skipped_reasons": skippedReasons,
+				}).Warn("No runnable jobs after filtering")
 				if len(skippedReasons) > 0 {
 					m.statusSummary = theme.DefaultTheme.Warning.Render(skippedReasons[0])
 				} else {
@@ -1425,9 +1569,22 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Run the jobs using the orchestrator with direct output streaming
 				var runCmd tea.Cmd
+				logger := logging.NewLogger("flow-tui")
 				if m.orchestrator != nil && m.program != nil {
+					logger.WithFields(map[string]interface{}{
+						"num_jobs":   len(jobsToRun),
+						"job_ids":    getJobIDs(jobsToRun),
+						"use_method": "orchestrator",
+					}).Info("Running jobs via orchestrator")
 					runCmd = runJobsWithOrchestrator(m.orchestrator, jobsToRun, m.program)
 				} else {
+					logger.WithFields(map[string]interface{}{
+						"num_jobs":        len(jobsToRun),
+						"job_ids":         getJobIDs(jobsToRun),
+						"use_method":      "subprocess",
+						"orchestrator_nil": m.orchestrator == nil,
+						"program_nil":     m.program == nil,
+					}).Warn("Falling back to subprocess job execution")
 					// Fallback to old method if orchestrator is not available
 					runCmd = runJobsCmd(m.runLogFile, m.planDir, jobsToRun)
 				}
@@ -2883,7 +3040,28 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	// We'll set the program reference after creating it
 	var streamWriter *logviewer.StreamWriter
 
-	model := newStatusTUIModel(plan, graph)
+	// Load global flow config to enrich the plan object
+	// This is the main part of the fix
+	logger := logging.NewLogger("flow-tui")
+	flowCfg, err := loadFlowConfig()
+	if err != nil {
+		// Log a warning but proceed, as some functionality might still work
+		logger.WithFields(map[string]interface{}{
+			"error": err,
+		}).Warn("Failed to load flow config, using empty config")
+		flowCfg = &FlowConfig{} // Use an empty config
+	} else {
+		logger.WithFields(map[string]interface{}{
+			"oneshot_model":          flowCfg.OneshotModel,
+			"target_agent_container": flowCfg.TargetAgentContainer,
+			"max_consecutive_steps":  flowCfg.MaxConsecutiveSteps,
+		}).Info("Loaded flow config for TUI")
+	}
+
+	// Enrich the plan with the global config before creating the TUI
+	enrichPlanWithConfig(plan, flowCfg)
+
+	model := newStatusTUIModel(plan, graph, flowCfg)
 
 	// Use alt screen only when not in Neovim (to fix screen duplication)
 	// But disable it in Neovim to allow editor functionality
