@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/logging/logutil"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -226,6 +227,7 @@ func (v viewMode) String() string {
 type statusTUIModel struct {
 	plan          *orchestration.Plan
 	graph         *orchestration.DependencyGraph
+	orchestrator  *orchestration.Orchestrator // Direct orchestrator for job execution
 	jobs          []*orchestration.Job
 	jobParents    map[string]*orchestration.Job // Track parent in tree structure
 	jobIndents    map[string]int               // Track indentation level
@@ -262,6 +264,9 @@ type statusTUIModel struct {
 	activeLogJob     *orchestration.Job
 	focus            viewFocus // Track which pane is active
 	logSplitVertical bool      // Track log viewer layout
+	isRunningJob     bool      // Track if a job is currently running
+	runLogFile       string    // Path to temporary log file for job output
+	program          *tea.Program // Reference to the tea.Program for sending messages
 }
 
 
@@ -293,6 +298,9 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 
 // Initialize the model
 func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.DependencyGraph) statusTUIModel {
+	// Set TUI mode env var early so loggers are configured correctly
+	os.Setenv("GROVE_FLOW_TUI_MODE", "true")
+
 	// Flatten the job tree for navigation with parent tracking
 	jobs, parents, indents := flattenJobTreeWithParents(plan)
 
@@ -304,9 +312,35 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 
 	logViewerModel := logviewer.New(80, 20) // Initial size, will be updated
 
+	// Create orchestrator for direct job execution
+	orchConfig := &orchestration.OrchestratorConfig{
+		MaxParallelJobs:     1,    // TUI runs one job or selection at a time
+		CheckInterval:       5 * time.Second,
+		MaxConsecutiveSteps: 20,
+		SkipInteractive:     true, // Don't prompt for user input in TUI mode
+	}
+
+	// Create the orchestrator instance
+	orch, err := orchestration.NewOrchestrator(plan, orchConfig)
+	if err != nil {
+		// Log error but continue - the old path can still work
+		fmt.Fprintf(os.Stderr, "Warning: Failed to create orchestrator for TUI: %v\n", err)
+	}
+
+	// Create a temporary log file in the project's .grove/logs directory (kept for compatibility)
+	logsDir := filepath.Join(plan.Directory, ".grove", "logs")
+	os.MkdirAll(logsDir, 0755)
+	logFile, err2 := os.CreateTemp(logsDir, "flow-tui-run-*.log")
+	var runLogPath string
+	if err2 == nil {
+		runLogPath = logFile.Name()
+		logFile.Close() // Close it for now, it will be truncated on each run
+	}
+
 	return statusTUIModel{
 		plan:           plan,
 		graph:          graph,
+		orchestrator:   orch,
 		jobs:           jobs,
 		jobParents:     parents,
 		jobIndents:     indents,
@@ -325,6 +359,9 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		activeLogJob:     nil,
 		focus:            jobsPane,
 		logSplitVertical: true, // Default to vertical split
+		isRunningJob:     false,
+		runLogFile:       runLogPath,
+		program:          nil, // Will be set by runStatusTUI after creating the program
 	}
 }
 
@@ -459,6 +496,7 @@ type refreshTickMsg time.Time
 type renameCompleteMsg struct{ err error }
 type updateDepsCompleteMsg struct{ err error }
 type createJobCompleteMsg struct{ err error }
+type jobRunFinishedMsg struct{ err error }
 
 const refreshInterval = 2 * time.Second
 
@@ -490,11 +528,163 @@ func refreshTick() tea.Cmd {
 	})
 }
 
+// tuiLogWriter implements io.Writer and sends log lines as messages to the TUI.
+type tuiLogWriter struct {
+	program *tea.Program
+}
+
+// Write sends the byte slice as a log line to the TUI program.
+func (w *tuiLogWriter) Write(p []byte) (n int, err error) {
+	// Send the output as a log line message
+	if w.program != nil {
+		w.program.Send(logviewer.LogLineMsg{
+			Workspace: "Job Output",
+			Line:      string(p),
+		})
+	}
+	return len(p), nil
+}
+
+// runJobsWithOrchestrator executes jobs using the orchestrator and streams output to the TUI.
+func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program) tea.Cmd {
+	return func() tea.Msg {
+		// TUI mode is already set in newStatusTUIModel, but ensure it's set here too
+		os.Setenv("GROVE_FLOW_TUI_MODE", "true")
+
+		// Create our custom writer that sends messages to the TUI program
+		writer := &tuiLogWriter{program: program}
+
+		// Redirect stdout and stderr to the TUI writer to prevent output mangling
+		oldStdout := os.Stdout
+		oldStderr := os.Stderr
+
+		// Create a pipe to capture stdout/stderr
+		r, w, err := os.Pipe()
+		if err == nil {
+			os.Stdout = w
+			os.Stderr = w
+
+			// Start a goroutine to read from the pipe and send to TUI
+			done := make(chan struct{})
+			go func() {
+				buf := make([]byte, 1024)
+				for {
+					n, err := r.Read(buf)
+					if n > 0 {
+						writer.Write(buf[:n])
+					}
+					if err != nil {
+						break
+					}
+				}
+				close(done)
+			}()
+
+			defer func() {
+				w.Close()
+				<-done
+				r.Close()
+				os.Stdout = oldStdout
+				os.Stderr = oldStderr
+			}()
+		}
+
+		// Run jobs sequentially (orchestrator handles parallelism if needed)
+		ctx := context.Background()
+
+		for _, job := range jobs {
+			// Execute the job using the orchestrator, passing the TUI writer
+			if err := orchestrator.ExecuteJobWithWriter(ctx, job, writer); err != nil {
+				// Return error for this job, but continue would be handled by orchestrator
+				return jobRunFinishedMsg{err: fmt.Errorf("job %s failed: %w", job.ID, err)}
+			}
+		}
+
+		return jobRunFinishedMsg{err: nil}
+	}
+}
+
+// runJobsCmd creates a tea.Cmd that executes one or more jobs in the background,
+// streaming their output to a log file for the TUI to display.
+// DEPRECATED: This is the old implementation that spawns CLI commands.
+// Use runJobsWithOrchestrator instead.
+func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		// This command runs in a goroutine managed by the Bubble Tea runtime.
+
+		// Truncate the log file for the new run.
+		f, err := os.Create(logFile)
+		if err != nil {
+			return jobRunFinishedMsg{err: fmt.Errorf("failed to create log file: %w", err)}
+		}
+		defer f.Close()
+
+		// Write initial status to log
+		fmt.Fprintf(f, "Starting job execution...\n")
+		fmt.Fprintf(f, "Plan directory: %s\n", planDir)
+		fmt.Fprintf(f, "Running %d job(s):\n", len(jobs))
+		for _, job := range jobs {
+			fmt.Fprintf(f, "  - %s (%s)\n", job.Title, job.Filename)
+		}
+		fmt.Fprintf(f, "\n")
+		f.Sync() // Ensure it's written immediately
+
+		// Build the command arguments
+		// Run from the plan directory and pass just the filenames
+		args := []string{"flow", "plan", "run", "--yes"}
+		for _, job := range jobs {
+			// Use just the filename, no path
+			args = append(args, job.Filename)
+		}
+
+		// Log the command being run (format for readability)
+		fmt.Fprintf(f, "Command (running from: %s):\n", planDir)
+		fmt.Fprintf(f, "  grove flow plan run --yes")
+		for _, job := range jobs {
+			fmt.Fprintf(f, " %s", job.Filename)
+		}
+		fmt.Fprintf(f, "\n")
+		fmt.Fprintf(f, "================================================================================\n\n")
+		f.Sync()
+
+		// Use 'grove flow' to ensure proper environment setup for worktrees
+		cmd := exec.Command("grove", args...)
+		// Set the working directory to the plan directory
+		cmd.Dir = planDir
+		cmd.Stdout = f
+		cmd.Stderr = f
+		// Set an environment variable to indicate the job is run from the TUI
+		cmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
+
+		runErr := cmd.Run()
+
+		// Log completion status
+		fmt.Fprintf(f, "\n================================================================================\n")
+		if runErr != nil {
+			fmt.Fprintf(f, "Job execution failed: %v\n", runErr)
+		} else {
+			fmt.Fprintf(f, "Job execution completed successfully.\n")
+		}
+		f.Sync()
+
+		// After completion, return a message with the result.
+		return jobRunFinishedMsg{err: runErr}
+	}
+}
+
 // Init initializes the TUI
 func (m statusTUIModel) Init() tea.Cmd {
+	// Return a command that will send the initProgramMsg after the program has started
+	// This is executed after the event loop is running, so Send() won't deadlock
 	return tea.Batch(
 		blink(),
 		refreshTick(),
+		func() tea.Msg {
+			if initProgramRef != nil {
+				return initProgramMsg{program: initProgramRef}
+			}
+			return nil
+		},
 	)
 }
 
@@ -510,6 +700,11 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case initProgramMsg:
+		// Set the program reference so we can send messages for streaming output
+		m.program = msg.program
+		return m, nil
+
 	case renameCompleteMsg:
 		if msg.err != nil {
 			m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error renaming job: %v", msg.err))
@@ -532,6 +727,35 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job created successfully.")
 		}
+		return m, refreshPlan(m.planDir)
+
+	case jobRunFinishedMsg:
+		// Job run completed
+		m.isRunningJob = false
+
+		if msg.err != nil {
+			// Only show error if it's not just "exit status 1" which is generic
+			errStr := msg.err.Error()
+			if errStr == "exit status 1" {
+				// Job failed but we already have the details in the log
+				m.statusSummary = theme.DefaultTheme.Warning.Render("Job execution completed with errors. Check the log for details.")
+			} else {
+				m.statusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Job run failed: %v", msg.err))
+			}
+		} else {
+			m.statusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job run completed successfully.")
+		}
+
+		// Stop following the log file
+		m.logViewer.Stop()
+
+		// Keep the log viewer open so the user can review the output
+		// They can press 'v' to close it when ready
+
+		// Return focus to jobs pane
+		m.focus = jobsPane
+
+		// Refresh the plan to show updated statuses
 		return m, refreshPlan(m.planDir)
 
 	case editFileInTmuxMsg:
@@ -563,13 +787,27 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = err
 			return m, nil
 		}
-		
+
 		graph, err := orchestration.BuildDependencyGraph(plan)
 		if err != nil {
 			m.err = err
 			return m, nil
 		}
-		
+
+		// Recreate orchestrator with the refreshed plan
+		orchConfig := &orchestration.OrchestratorConfig{
+			MaxParallelJobs:     1,
+			CheckInterval:       5 * time.Second,
+			MaxConsecutiveSteps: 20,
+			SkipInteractive:     true,
+		}
+		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
+		if err != nil {
+			m.statusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("Warning: Failed to recreate orchestrator: %v", err))
+		} else {
+			m.orchestrator = orch
+		}
+
 		// Update model with refreshed data
 		m.plan = plan
 		m.graph = graph
@@ -577,8 +815,13 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.jobs = jobs
 		m.jobParents = parents
 		m.jobIndents = indents
-		m.statusSummary = formatStatusSummary(plan)
-		
+
+		// Only update status summary if not running a job
+		// (preserve the "Running..." message)
+		if !m.isRunningJob {
+			m.statusSummary = formatStatusSummary(plan)
+		}
+
 		// Adjust cursor if needed
 		if m.cursor >= len(m.jobs) {
 			m.cursor = len(m.jobs) - 1
@@ -1016,20 +1259,135 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keyMap.Run):
+			// Check if a job is already running from the TUI
+			if m.isRunningJob {
+				m.statusSummary = theme.DefaultTheme.Warning.Render("A job is already running. Please wait for it to complete.")
+				return m, nil
+			}
+
+			// Check if any jobs are already running in the plan
+			var runningJobs []string
+			for _, job := range m.jobs {
+				if job.Status == orchestration.JobStatusRunning {
+					runningJobs = append(runningJobs, job.Title)
+				}
+			}
+			if len(runningJobs) > 0 {
+				m.statusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s is already running", runningJobs[0]))
+				return m, nil
+			}
+
+			// Collect selected jobs or current job
+			var candidateJobs []*orchestration.Job
 			if len(m.selected) > 0 {
-				var selectedJobs []*orchestration.Job
 				for id := range m.selected {
 					for _, job := range m.jobs {
 						if job.ID == id {
-							selectedJobs = append(selectedJobs, job)
+							candidateJobs = append(candidateJobs, job)
 							break
 						}
 					}
 				}
-				return m, runJobs(m.plan.Directory, selectedJobs)
 			} else if m.cursor < len(m.jobs) {
-				job := m.jobs[m.cursor]
-				return m, runJob(m.plan.Directory, job)
+				candidateJobs = []*orchestration.Job{m.jobs[m.cursor]}
+			}
+
+			// Filter out jobs that are not runnable
+			var jobsToRun []*orchestration.Job
+			var skippedReasons []string
+			for _, job := range candidateJobs {
+				switch job.Status {
+				case orchestration.JobStatusPending, orchestration.JobStatusFailed,
+				     orchestration.JobStatusTodo, orchestration.JobStatusNeedsReview,
+				     orchestration.JobStatusBlocked, orchestration.JobStatusPendingUser,
+				     orchestration.JobStatusPendingLLM:
+					// These statuses are runnable
+					jobsToRun = append(jobsToRun, job)
+				case orchestration.JobStatusRunning:
+					skippedReasons = append(skippedReasons, fmt.Sprintf("%s is already running", job.Title))
+				case orchestration.JobStatusCompleted:
+					skippedReasons = append(skippedReasons, fmt.Sprintf("%s is already completed", job.Title))
+				case orchestration.JobStatusAbandoned, orchestration.JobStatusHold:
+					skippedReasons = append(skippedReasons, fmt.Sprintf("%s is on hold/abandoned", job.Title))
+				default:
+					// For any other status, skip
+					skippedReasons = append(skippedReasons, fmt.Sprintf("%s has status %s", job.Title, job.Status))
+				}
+			}
+
+			// If no jobs are runnable, show appropriate message
+			if len(jobsToRun) == 0 {
+				if len(skippedReasons) > 0 {
+					m.statusSummary = theme.DefaultTheme.Warning.Render(skippedReasons[0])
+				} else {
+					m.statusSummary = theme.DefaultTheme.Warning.Render("No runnable jobs selected")
+				}
+				return m, nil
+			}
+
+			if len(jobsToRun) > 0 {
+				// Start running the jobs asynchronously
+				m.isRunningJob = true
+				m.showLogs = true
+				m.focus = logsPane
+
+				// Clear the log file for the new run
+				if m.runLogFile != "" {
+					os.Truncate(m.runLogFile, 0)
+				}
+
+				// Configure the log viewer for output
+				// Ensure we have valid dimensions
+				logWidth := m.width
+				if logWidth == 0 {
+					logWidth = 80 // Fallback default
+				}
+				logHeight := m.height / 3
+				if m.logSplitVertical {
+					logHeight = m.height / 2
+				}
+				if logHeight == 0 {
+					logHeight = 20 // Fallback default
+				}
+
+				m.logViewer = logviewer.New(logWidth, logHeight)
+
+				// Initialize the log viewer with a WindowSizeMsg to set it to ready state
+				m.logViewer, _ = m.logViewer.Update(tea.WindowSizeMsg{Width: logWidth, Height: logHeight})
+
+				// Clear the log viewer and prepare for streaming or tailing
+				var logCmd tea.Cmd
+				if m.orchestrator != nil && m.program != nil {
+					// Using orchestrator - output will be streamed directly via messages
+					// The log viewer is already initialized and ready
+					logCmd = nil
+				} else {
+					// Fallback - tail the log file
+					logCmd = m.logViewer.Start(map[string]string{"Job Output": m.runLogFile})
+				}
+
+				// Update status message
+				jobCount := len(jobsToRun)
+				if jobCount == 1 {
+					m.statusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Running %s...", jobsToRun[0].Title))
+				} else {
+					m.statusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Running %d job(s)...", jobCount))
+				}
+
+				// Run the jobs using the orchestrator with direct output streaming
+				var runCmd tea.Cmd
+				if m.orchestrator != nil && m.program != nil {
+					runCmd = runJobsWithOrchestrator(m.orchestrator, jobsToRun, m.program)
+				} else {
+					// Fallback to old method if orchestrator is not available
+					runCmd = runJobsCmd(m.runLogFile, m.planDir, jobsToRun)
+				}
+
+				// Batch commands if logCmd exists
+				if logCmd != nil {
+					return m, tea.Batch(logCmd, runCmd)
+				}
+				return m, runCmd
 			}
 
 		case key.Matches(msg, m.keyMap.SetCompleted):
@@ -1837,19 +2195,20 @@ func editJob(job *orchestration.Job) tea.Cmd {
 	})
 }
 
-func runJob(planDir string, job *orchestration.Job) tea.Cmd {
-	// Run the job using 'grove flow plan run' for workspace-awareness
-	cmd := exec.Command("grove", "flow", "plan", "run", job.FilePath)
-	// Set an environment variable to indicate the job is run from the TUI
-	cmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
-
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		if err != nil {
-			return err
-		}
-		return refreshMsg{} // Refresh to show status changes
-	})
-}
+// runJob is now replaced by runJobsCmd for async execution
+// func runJob(planDir string, job *orchestration.Job) tea.Cmd {
+// 	// Run the job using 'grove flow plan run' for workspace-awareness
+// 	cmd := exec.Command("grove", "flow", "plan", "run", job.FilePath)
+// 	// Set an environment variable to indicate the job is run from the TUI
+// 	cmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
+//
+// 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+// 		if err != nil {
+// 			return err
+// 		}
+// 		return refreshMsg{} // Refresh to show status changes
+// 	})
+// }
 
 func executePlanResume(job *orchestration.Job) tea.Cmd {
 	return tea.ExecProcess(exec.Command("flow", "plan", "resume", job.FilePath),
@@ -1861,22 +2220,23 @@ func executePlanResume(job *orchestration.Job) tea.Cmd {
 		})
 }
 
-func runJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {
-	args := []string{"flow", "plan", "run"}
-	for _, job := range jobs {
-		args = append(args, job.FilePath)
-	}
-
-	cmd := exec.Command("grove", args...)
-	cmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
-
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		if err != nil {
-			return err
-		}
-		return refreshMsg{}
-	})
-}
+// runJobs is now replaced by runJobsCmd for async execution
+// func runJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {
+// 	args := []string{"flow", "plan", "run"}
+// 	for _, job := range jobs {
+// 		args = append(args, job.FilePath)
+// 	}
+//
+// 	cmd := exec.Command("grove", args...)
+// 	cmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
+//
+// 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+// 		if err != nil {
+// 			return err
+// 		}
+// 		return refreshMsg{}
+// 	})
+// }
 
 func viewLogsCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
@@ -2449,8 +2809,20 @@ func createAgentFromChatJobWithTitle(plan *orchestration.Plan, selectedJobs []*o
 	}
 }
 
+// initProgramMsg is sent to set the program reference in the model
+type initProgramMsg struct {
+	program *tea.Program
+}
+
+// initProgramRef is a package-level variable to store the program reference
+// so it can be set in the model's Init method
+var initProgramRef *tea.Program
+
 // runStatusTUI runs the interactive TUI for plan status
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
+	// Create a TUI log writer that will receive all redirected output
+	tuiLogWriter := &tuiLogWriter{}
+
 	model := newStatusTUIModel(plan, graph)
 
 	// Use alt screen only when not in Neovim (to fix screen duplication)
@@ -2462,6 +2834,17 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	opts = append(opts, tea.WithOutput(os.Stderr))
 
 	program := tea.NewProgram(model, opts...)
+
+	// Set the program reference for the log writer
+	tuiLogWriter.program = program
+
+	// Redirect all Grove loggers to our TUI writer
+	logging.SetGlobalOutput(tuiLogWriter)
+	defer logging.SetGlobalOutput(os.Stderr) // Ensure we reset on exit
+
+	// Store the program reference in a way that the model can access it
+	// We'll set it in the Init method instead of sending a message before the program starts
+	initProgramRef = program
 
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
