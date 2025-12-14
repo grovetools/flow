@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,9 +50,10 @@ type statusTUIKeyMap struct {
 	GoToBottom    key.Binding
 	PageUp        key.Binding
 	PageDown      key.Binding
-	ViewLogs      key.Binding
-	SwitchFocus   key.Binding
-	ToggleLayout  key.Binding
+	ViewLogs        key.Binding
+	SwitchFocus     key.Binding
+	ToggleLayout    key.Binding
+	ToggleLogFormat key.Binding
 }
 
 func newStatusTUIKeyMap() statusTUIKeyMap {
@@ -153,6 +155,10 @@ func newStatusTUIKeyMap() statusTUIKeyMap {
 			key.WithKeys("V"),
 			key.WithHelp("V", "toggle layout"),
 		),
+		ToggleLogFormat: key.NewBinding(
+			key.WithKeys("T"),
+			key.WithHelp("T", "toggle log format"),
+		),
 	}
 }
 
@@ -185,6 +191,7 @@ func (k statusTUIKeyMap) FullHelp() [][]key.Binding {
 			k.ViewLogs,
 			k.SwitchFocus,
 			k.ToggleLayout,
+			k.ToggleLogFormat,
 		},
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
@@ -264,6 +271,7 @@ type statusTUIModel struct {
 	activeLogJob     *orchestration.Job
 	focus            viewFocus // Track which pane is active
 	logSplitVertical bool      // Track log viewer layout
+	logFormatPretty  bool      // true for pretty logs, false for structured
 	isRunningJob     bool      // Track if a job is currently running
 	runLogFile       string    // Path to temporary log file for job output
 	program          *tea.Program // Reference to the tea.Program for sending messages
@@ -545,7 +553,7 @@ func refreshTick() tea.Cmd {
 
 
 // runJobsWithOrchestrator executes jobs using the orchestrator and streams output to the TUI.
-func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program) tea.Cmd {
+func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program, logFormatPretty bool) tea.Cmd {
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
@@ -557,6 +565,45 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 
 		// Create our custom writer that sends messages to the TUI program
 		writer := logviewer.NewStreamWriter(program, "Job Output")
+
+		// Save original logger outputs
+		oldGlobalOutput := logging.GetGlobalOutput()
+		oldPrettyOutput := logging.GetPrettyLogsOutput()
+
+		// Configure logger outputs based on format preference
+		logger.WithFields(map[string]interface{}{
+			"logFormatPretty": logFormatPretty,
+		}).Info("About to configure log outputs for job execution")
+
+		if logFormatPretty {
+			// Pretty mode: send pretty logs to TUI, silence structured logs
+			logging.SetGlobalOutput(io.Discard)
+			logging.SetPrettyLogsOutput(writer)
+
+			// Direct write test to verify writer works
+			writer.Write([]byte("=== PRETTY MODE ACTIVATED ===\n"))
+
+			// Send a test message to verify pretty logging is active
+			testPretty := logging.NewPrettyLogger()
+			testPretty.Status("info", "Pretty log mode active - you should see icons and colors")
+		} else {
+			// Structured mode: send structured logs to TUI, silence pretty logs
+			logging.SetGlobalOutput(writer)
+			logging.SetPrettyLogsOutput(io.Discard)
+
+			// Direct write test to verify writer works
+			writer.Write([]byte("=== STRUCTURED MODE ACTIVATED ===\n"))
+
+			// Send a test message to verify structured logging is active
+			testLogger := logging.NewLogger("flow-tui")
+			testLogger.Info("Structured log mode active")
+		}
+
+		// Restore logger outputs when done
+		defer func() {
+			logging.SetGlobalOutput(oldGlobalOutput)
+			logging.SetPrettyLogsOutput(oldPrettyOutput)
+		}()
 
 		// Redirect stdout and stderr to the TUI writer to prevent output mangling
 		oldStdout := os.Stdout
@@ -826,7 +873,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(interruptedJobs) > 0 {
 			logger.WithFields(map[string]interface{}{
 				"interrupted_jobs": interruptedJobs,
-			}).Info("Cleared stale 'running' statuses during refresh")
+			}).Debug("Cleared stale 'running' statuses during refresh")
 		}
 
 
@@ -1248,6 +1295,15 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case key.Matches(msg, m.keyMap.ToggleLogFormat):
+			m.logFormatPretty = !m.logFormatPretty
+			if m.logFormatPretty {
+				m.statusSummary = theme.DefaultTheme.Success.Render("Log format set to pretty")
+			} else {
+				m.statusSummary = theme.DefaultTheme.Success.Render("Log format set to structured")
+			}
+			return m, nil
+
 		case key.Matches(msg, m.keyMap.Up):
 			if m.cursor > 0 {
 				m.cursor--
@@ -1504,7 +1560,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						"num_jobs":   len(jobsToRun),
 						"use_method": "orchestrator",
 					}).Info("Running jobs via orchestrator")
-					runCmd = runJobsWithOrchestrator(m.orchestrator, jobsToRun, m.program)
+					runCmd = runJobsWithOrchestrator(m.orchestrator, jobsToRun, m.program, m.logFormatPretty)
 				} else {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":        len(jobsToRun),
@@ -1854,7 +1910,15 @@ func (m statusTUIModel) View() string {
 			}
 		}
 
-		footer = helpView + viewModeIndicator + followStatus
+		// Add log format indicator
+		logFormatIndicator := ""
+		if m.logFormatPretty {
+			logFormatIndicator = theme.DefaultTheme.Muted.Render(" • Logs: [pretty]")
+		} else {
+			logFormatIndicator = theme.DefaultTheme.Muted.Render(" • Logs: [structured]")
+		}
+
+		footer = helpView + viewModeIndicator + followStatus + logFormatIndicator
 	}
 
 	// 4. Combine everything
