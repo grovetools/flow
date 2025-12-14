@@ -366,7 +366,7 @@ func newStatusTUIModel(plan *orchestration.Plan, graph *orchestration.Dependency
 		showLogs:         false, // Start with logs hidden by default
 		activeLogJob:     nil,
 		focus:            jobsPane,
-		logSplitVertical: true, // Default to vertical split
+		logSplitVertical: false, // Default to horizontal split
 		isRunningJob:     false,
 		runLogFile:       runLogPath,
 		program:          nil, // Will be set by runStatusTUI after creating the program
@@ -392,6 +392,13 @@ func (m *statusTUIModel) getVisibleJobCount() int {
 	}
 
 	availableHeight := m.height - chromeLines
+
+	// If logs are shown in horizontal split, reduce available height for jobs pane
+	if m.showLogs && !m.logSplitVertical {
+		// Subtract log viewer height and divider (2 lines for divider + newlines)
+		availableHeight = availableHeight - m.logViewerHeight - 2
+	}
+
 	if availableHeight < 1 {
 		availableHeight = 1
 	}
@@ -795,9 +802,6 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshMsg:
 		logger := logging.NewLogger("flow-tui")
-		logger.WithFields(map[string]interface{}{
-			"plan_dir": m.planDir,
-		}).Debug("TUI refresh started")
 
 		// Reload the plan
 		plan, err := orchestration.LoadPlan(m.planDir)
@@ -810,7 +814,6 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Verify running jobs (check PIDs, clear stale "running" statuses)
-		logger.Debug("Verifying running job statuses (PID checks)")
 		VerifyRunningJobStatus(plan)
 
 		// Log any jobs that were marked as interrupted
@@ -853,10 +856,6 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// This keeps the old orchestrator and old plan in sync
 			return m, nil
 		} else {
-			logger.WithFields(map[string]interface{}{
-				"plan_name": plan.Name,
-				"num_jobs":  len(plan.Jobs),
-			}).Info("Successfully recreated orchestrator during refresh")
 			m.orchestrator = orch
 		}
 
@@ -928,8 +927,8 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Horizontal split (top/bottom)
 				m.logViewerWidth = msg.Width - 4
-				// Give jobs 2/3, logs get 1/3
-				m.logViewerHeight = (msg.Height / 3) - 13
+				// Give jobs 1/2, logs get 1/2
+				m.logViewerHeight = (msg.Height - 13) / 2
 			}
 
 			// Ensure minimum dimensions
@@ -1234,7 +1233,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					// Horizontal split (top/bottom)
 					m.logViewerWidth = m.width - 4
-					m.logViewerHeight = (m.height / 3) - 13
+					m.logViewerHeight = (m.height - 13) / 2
 				}
 				// Ensure minimum dimensions
 				if m.logViewerHeight < 5 {
@@ -1356,7 +1355,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					// Horizontal split (top/bottom)
 					m.logViewerWidth = m.width - 4
-					m.logViewerHeight = (m.height / 3) - 13
+					m.logViewerHeight = (m.height - 13) / 2
 				}
 				// Ensure minimum dimensions
 				if m.logViewerHeight < 5 {
@@ -1478,7 +1477,7 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					// Horizontal split (top/bottom)
 					m.logViewerWidth = m.width - 4
-					m.logViewerHeight = (m.height / 3) - 13
+					m.logViewerHeight = (m.height - 13) / 2
 				}
 				// Ensure minimum dimensions
 				if m.logViewerHeight < 5 {
