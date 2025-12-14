@@ -3,7 +3,6 @@ package status_tui
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,20 +71,19 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 		// Create our custom writer that sends messages to the TUI program
 		writer := logviewer.NewStreamWriter(program, "Job Output")
 
-		// Save original logger outputs
+		// Save original logger output
 		oldGlobalOutput := logging.GetGlobalOutput()
-		oldPrettyOutput := logging.GetPrettyLogsOutput()
 
 		// Configure logger outputs based on format preference
 		logger.WithFields(map[string]interface{}{
 			"logFormatPretty": logFormatPretty,
 		}).Info("About to configure log outputs for job execution")
 
-		if logFormatPretty {
-			// Pretty mode: send pretty logs to TUI, silence structured logs
-			logging.SetGlobalOutput(io.Discard)
-			logging.SetPrettyLogsOutput(writer)
+		// Both pretty and structured logs use the same global output
+		// So we just set the global output to the writer
+		logging.SetGlobalOutput(writer)
 
+		if logFormatPretty {
 			// Direct write test to verify writer works
 			writer.Write([]byte("=== PRETTY MODE ACTIVATED ===\n"))
 
@@ -93,10 +91,6 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 			testPretty := logging.NewPrettyLogger()
 			testPretty.Status("info", "Pretty log mode active - you should see icons and colors")
 		} else {
-			// Structured mode: send structured logs to TUI, silence pretty logs
-			logging.SetGlobalOutput(writer)
-			logging.SetPrettyLogsOutput(io.Discard)
-
 			// Direct write test to verify writer works
 			writer.Write([]byte("=== STRUCTURED MODE ACTIVATED ===\n"))
 
@@ -105,10 +99,9 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 			testLogger.Info("Structured log mode active")
 		}
 
-		// Restore logger outputs when done
+		// Restore logger output when done
 		defer func() {
 			logging.SetGlobalOutput(oldGlobalOutput)
-			logging.SetPrettyLogsOutput(oldPrettyOutput)
 		}()
 
 		// Redirect stdout and stderr to the TUI writer to prevent output mangling
