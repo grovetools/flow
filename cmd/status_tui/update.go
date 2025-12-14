@@ -551,15 +551,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case key.Matches(msg, m.KeyMap.ToggleLogFormat):
-			m.LogFormatPretty = !m.LogFormatPretty
-			if m.LogFormatPretty {
-				m.StatusSummary = theme.DefaultTheme.Success.Render("Log format set to pretty")
-			} else {
-				m.StatusSummary = theme.DefaultTheme.Success.Render("Log format set to structured")
-			}
-			return m, nil
-
 		case key.Matches(msg, m.KeyMap.Up):
 			if m.Cursor > 0 {
 				m.Cursor--
@@ -800,7 +791,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						"num_jobs":   len(jobsToRun),
 						"use_method": "orchestrator",
 					}).Info("Running jobs via orchestrator")
-					runCmd = runJobsWithOrchestrator(m.Orchestrator, jobsToRun, m.Program, m.LogFormatPretty)
+					runCmd = runJobsWithOrchestrator(m.Orchestrator, jobsToRun, m.Program)
 				} else {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":          len(jobsToRun),

@@ -28,10 +28,9 @@ type KeyMap struct {
 	GoToBottom      key.Binding
 	PageUp          key.Binding
 	PageDown        key.Binding
-	ViewLogs        key.Binding
-	SwitchFocus     key.Binding
-	ToggleLayout    key.Binding
-	ToggleLogFormat key.Binding
+	ViewLogs     key.Binding
+	SwitchFocus  key.Binding
+	ToggleLayout key.Binding
 }
 
 func NewKeyMap() KeyMap {
@@ -133,10 +132,6 @@ func NewKeyMap() KeyMap {
 			key.WithKeys("V"),
 			key.WithHelp("V", "toggle layout"),
 		),
-		ToggleLogFormat: key.NewBinding(
-			key.WithKeys("T"),
-			key.WithHelp("T", "toggle log format"),
-		),
 	}
 }
 
@@ -169,7 +164,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			k.ViewLogs,
 			k.SwitchFocus,
 			k.ToggleLayout,
-			k.ToggleLogFormat,
 		},
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),

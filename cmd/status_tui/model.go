@@ -76,11 +76,10 @@ type Model struct {
 	CreateJobDeps      []*orchestration.Job // For multi-select case
 	ShowLogs           bool
 	LogViewer          logviewer.Model
-	ActiveLogJob       *orchestration.Job
-	Focus              ViewFocus // Track which pane is active
-	LogSplitVertical   bool      // Track log viewer layout
-	LogFormatPretty    bool      // true for pretty logs, false for structured
-	IsRunningJob       bool      // Track if a job is currently running
+	ActiveLogJob     *orchestration.Job
+	Focus            ViewFocus // Track which pane is active
+	LogSplitVertical bool      // Track log viewer layout
+	IsRunningJob     bool      // Track if a job is currently running
 	RunLogFile         string    // Path to temporary log file for job output
 	Program            *tea.Program // Reference to the tea.Program for sending messages
 	LogViewerWidth     int       // Cached log viewer width
@@ -291,15 +290,7 @@ func (m Model) View() string {
 			}
 		}
 
-		// Add log format indicator
-		logFormatIndicator := ""
-		if m.LogFormatPretty {
-			logFormatIndicator = theme.DefaultTheme.Muted.Render(" • Logs: [pretty]")
-		} else {
-			logFormatIndicator = theme.DefaultTheme.Muted.Render(" • Logs: [structured]")
-		}
-
-		footer = helpView + viewModeIndicator + followStatus + logFormatIndicator
+		footer = helpView + viewModeIndicator + followStatus
 	}
 
 	// 4. Combine everything

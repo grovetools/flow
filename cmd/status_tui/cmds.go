@@ -58,7 +58,7 @@ func refreshTick() tea.Cmd {
 }
 
 // runJobsWithOrchestrator executes jobs using the orchestrator and streams output to the TUI.
-func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program, logFormatPretty bool) tea.Cmd {
+func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program) tea.Cmd {
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
@@ -74,30 +74,8 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 		// Save original logger output
 		oldGlobalOutput := logging.GetGlobalOutput()
 
-		// Configure logger outputs based on format preference
-		logger.WithFields(map[string]interface{}{
-			"logFormatPretty": logFormatPretty,
-		}).Info("About to configure log outputs for job execution")
-
-		// Both pretty and structured logs use the same global output
-		// So we just set the global output to the writer
+		// Set the global output to the writer
 		logging.SetGlobalOutput(writer)
-
-		if logFormatPretty {
-			// Direct write test to verify writer works
-			writer.Write([]byte("=== PRETTY MODE ACTIVATED ===\n"))
-
-			// Send a test message to verify pretty logging is active
-			testPretty := logging.NewPrettyLogger()
-			testPretty.Status("info", "Pretty log mode active - you should see icons and colors")
-		} else {
-			// Direct write test to verify writer works
-			writer.Write([]byte("=== STRUCTURED MODE ACTIVATED ===\n"))
-
-			// Send a test message to verify structured logging is active
-			testLogger := logging.NewLogger("flow-tui")
-			testLogger.Info("Structured log mode active")
-		}
 
 		// Restore logger output when done
 		defer func() {
