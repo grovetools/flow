@@ -1382,21 +1382,6 @@ func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// Check if any jobs are already running in the plan
-			var runningJobs []string
-			for _, job := range m.jobs {
-				if job.Status == orchestration.JobStatusRunning {
-					runningJobs = append(runningJobs, job.Title)
-				}
-			}
-			if len(runningJobs) > 0 {
-				logger.WithFields(map[string]interface{}{
-					"running_job": runningJobs[0],
-				}).Warn("Job already running in plan - blocking new run")
-				m.statusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("%s is already running", runningJobs[0]))
-				return m, nil
-			}
-
 			// Collect selected jobs or current job
 			var candidateJobs []*orchestration.Job
 			if len(m.selected) > 0 {
