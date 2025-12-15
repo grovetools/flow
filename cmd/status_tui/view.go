@@ -36,6 +36,16 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 	}
 }
 
+// renderTableViewWithWidth renders the jobs as a table with a maximum width constraint
+func (m Model) renderTableViewWithWidth(maxWidth int) string {
+	tableStr := m.renderTableView()
+	// Apply width constraint to prevent overflow
+	if maxWidth > 0 {
+		return lipgloss.NewStyle().MaxWidth(maxWidth).Render(tableStr)
+	}
+	return tableStr
+}
+
 // renderTableView renders the jobs as a table with JOB, TYPE, and STATUS columns
 func (m Model) renderTableView() string {
 	t := theme.DefaultTheme

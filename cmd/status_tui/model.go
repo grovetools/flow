@@ -234,11 +234,21 @@ func (m Model) View() string {
 		MarginBottom(1).
 		Render(headerText)
 
-	// 2. Render Main Content (Table or Tree)
+	// 2. Calculate jobs pane width first (needed for rendering)
+	var jobsContentWidth int
+	if m.ShowLogs && m.LogSplitVertical {
+		// In vertical split, use calculated width
+		jobsContentWidth = m.JobsPaneWidth
+	} else {
+		// In horizontal split or no logs, use full content width
+		jobsContentWidth = contentWidth
+	}
+
+	// 2b. Render Main Content (Table or Tree) with width constraint
 	var mainContent string
 	switch m.ViewMode {
 	case TableView:
-		mainContent = m.renderTableView()
+		mainContent = m.renderTableViewWithWidth(jobsContentWidth)
 	default: // TreeView
 		mainContent = m.renderJobTree()
 	}
@@ -384,7 +394,7 @@ func (m Model) View() string {
 			dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth-2))
 			logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + logContentWithScrollbar
 			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
-			jobsPane := lipgloss.NewStyle().Width(jobsWidth).Render(jobsView)
+			jobsPane := lipgloss.NewStyle().Width(jobsWidth).MaxWidth(jobsWidth).Render(jobsView)
 
 			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, separator, logView)
 			finalView = lipgloss.JoinVertical(lipgloss.Left, finalView, "\n", footer)
@@ -488,69 +498,74 @@ func (m Model) View() string {
 }
 
 // calculateOptimalLogHeight calculates the log viewer height for horizontal split
-// It expands to fill available space but caps at 50% of total height when many jobs present
+// It prioritizes log visibility while ensuring jobs section remains usable
 func (m *Model) calculateOptimalLogHeight() int {
 	// Chrome: footer (1), top margin (1), divider (1) = 3 lines
 	// Note: Header is NOT counted here because it's rendered INSIDE jobsPane
 	chromeLines := 3
 
-	// Calculate EXACTLY how many lines jobs section needs (visual height)
-	jobsNeeded := len(m.Jobs) // Each job is 1 line in table
-	if m.ShowSummaries {
-		jobsNeeded = jobsNeeded * 2 // Each job takes 2 lines with summaries
-	}
-
-	// Add header (part of jobs pane visual height)
-	jobsNeeded += 3 // Header: icon + title + margin
-
-	// Add table/tree chrome
-	if m.ViewMode == TableView {
-		jobsNeeded += 4 // Table headers and borders
-	} else {
-		jobsNeeded += 1 // Tree view overhead
-	}
-
-	// Add scroll indicator if needed
-	if len(m.Jobs) > 1 {
-		jobsNeeded += 1 // Scroll indicator line
-	}
-
 	// Total available for content (excluding header, footer, margins, divider)
 	availableHeight := m.Height - chromeLines - 1 // -1 for divider line
 
-	// Calculate log height: give logs remaining space after jobs section
-	logHeight := availableHeight - jobsNeeded
-
-	// Apply different caps based on number of jobs
-	var maxLogHeight int
-	if len(m.Jobs) <= 5 {
-		// Few jobs: cap logs at 65% so jobs section gets more space
-		maxLogHeight = (availableHeight * 65) / 100
-	} else if len(m.Jobs) <= 15 {
-		// Medium jobs: cap logs at 50% for balanced split
-		maxLogHeight = availableHeight / 2
+	// Calculate minimum jobs section height (header + table chrome + minimum visible rows)
+	minJobsHeight := 3 // Header: icon + title + margin
+	if m.ViewMode == TableView {
+		minJobsHeight += 4 // Table headers and borders
 	} else {
-		// Many jobs: cap logs at 40% to prioritize job visibility
-		maxLogHeight = (availableHeight * 4) / 10
+		minJobsHeight += 1 // Tree view overhead
 	}
 
-	// Only apply cap if it wouldn't squeeze jobs section
-	if logHeight > maxLogHeight && (availableHeight - maxLogHeight) >= jobsNeeded {
-		logHeight = maxLogHeight
+	// Add minimum visible job rows (ensure at least 5-10 jobs are visible)
+	minVisibleJobs := 5
+	if len(m.Jobs) > 10 {
+		minVisibleJobs = 10 // Show more jobs if we have many
+	}
+	if len(m.Jobs) < minVisibleJobs {
+		minVisibleJobs = len(m.Jobs) // Don't exceed actual job count
+	}
+	if m.ShowSummaries {
+		minJobsHeight += minVisibleJobs * 2 // Each job takes 2 lines with summaries
+	} else {
+		minJobsHeight += minVisibleJobs
 	}
 
-	// Ensure minimum
-	if logHeight < 5 {
-		logHeight = 5
+	// Add scroll indicator if needed
+	if len(m.Jobs) > minVisibleJobs {
+		minJobsHeight += 1 // Scroll indicator line
+	}
+
+	// Prioritize logs: give them 50-60% of available space
+	// The jobs section will scroll if it has more jobs than fit in remaining space
+	logHeight := (availableHeight * 55) / 100
+
+	// Ensure logs get at least some reasonable space
+	minLogHeight := 10
+	if logHeight < minLogHeight {
+		logHeight = minLogHeight
+	}
+
+	// Ensure jobs section has minimum space too
+	if availableHeight - logHeight < minJobsHeight {
+		// Not enough room for both, give jobs minimum and logs get the rest
+		logHeight = availableHeight - minJobsHeight
+		if logHeight < 5 {
+			logHeight = 5 // Absolute minimum for logs
+		}
 	}
 
 	return logHeight
 }
 
 // calculateMinJobsPaneWidth calculates the minimum width needed for the jobs pane
-// based on actual content (job names, indentation, type, status)
+// based on visible jobs (job names, indentation, type, status)
 func (m *Model) calculateMinJobsPaneWidth() int {
 	if len(m.Jobs) == 0 {
+		return 60 // Default minimum
+	}
+
+	// Only measure visible jobs to optimize width calculation
+	visibleJobs := m.getVisibleJobs()
+	if len(visibleJobs) == 0 {
 		return 60 // Default minimum
 	}
 
@@ -558,7 +573,7 @@ func (m *Model) calculateMinJobsPaneWidth() int {
 	maxTypeColWidth := 0
 	maxStatusColWidth := 0
 
-	for _, job := range m.Jobs {
+	for _, job := range visibleJobs {
 		// Calculate JOB column width: indent + tree prefix + icon + space + filename
 		indent := m.JobIndents[job.ID]
 		treeChars := 0
@@ -583,6 +598,12 @@ func (m *Model) calculateMinJobsPaneWidth() int {
 		if statusWidth > maxStatusColWidth {
 			maxStatusColWidth = statusWidth
 		}
+	}
+
+	// Cap individual column widths to prevent extremely long filenames from dominating
+	const maxJobColWidthCap = 50  // Long filenames will wrap/truncate in table
+	if maxJobColWidth > maxJobColWidthCap {
+		maxJobColWidth = maxJobColWidthCap
 	}
 
 	// SEL column is fixed at ~5 chars
