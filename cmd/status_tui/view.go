@@ -569,3 +569,15 @@ func (m *Model) getVisibleJobs() []*orchestration.Job {
 	}
 	return m.Jobs[start:end]
 }
+
+func (m Model) renderFrontmatterPane() string {
+	return lipgloss.NewStyle().Align(lipgloss.Center).Render("Frontmatter View Placeholder")
+}
+
+func (m Model) renderBriefingPane() string {
+	return lipgloss.NewStyle().Align(lipgloss.Center).Render("Briefing View Placeholder")
+}
+
+func (m Model) renderEditPane() string {
+	return lipgloss.NewStyle().Align(lipgloss.Center).Render("Edit View Placeholder")
+}

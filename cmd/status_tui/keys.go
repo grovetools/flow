@@ -26,11 +26,12 @@ type KeyMap struct {
 	ToggleView      key.Binding
 	GoToTop         key.Binding
 	GoToBottom      key.Binding
-	PageUp          key.Binding
-	PageDown        key.Binding
-	ViewLogs     key.Binding
-	SwitchFocus  key.Binding
-	ToggleLayout key.Binding
+	PageUp            key.Binding
+	PageDown          key.Binding
+	ViewLogs          key.Binding
+	CycleDetailPane   key.Binding
+	SwitchFocus       key.Binding
+	ToggleLayout      key.Binding
 }
 
 func NewKeyMap() KeyMap {
@@ -124,6 +125,10 @@ func NewKeyMap() KeyMap {
 			key.WithKeys("v"),
 			key.WithHelp("v", "toggle log view"),
 		),
+		CycleDetailPane: key.NewBinding(
+			key.WithKeys("v"),
+			key.WithHelp("v", "cycle detail pane"),
+		),
 		SwitchFocus: key.NewBinding(
 			key.WithKeys("tab", "shift+tab"),
 			key.WithHelp("tab/shift+tab", "switch focus"),
@@ -161,7 +166,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Views")),
 			k.ToggleView,
 			k.ToggleSummaries,
-			k.ViewLogs,
+			k.CycleDetailPane,
 			k.SwitchFocus,
 			k.ToggleLayout,
 		},

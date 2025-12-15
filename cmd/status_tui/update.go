@@ -637,7 +637,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor > 0 {
 				m.Cursor--
 				m.adjustScrollOffset()
-				if m.ShowLogs && !m.IsRunningJob {
+				if m.ShowLogs && !m.IsRunningJob && m.ActiveDetailPane == LogsPaneDetail {
 					job := m.Jobs[m.Cursor]
 					return m, loadLogContentCmd(m.Plan, job)
 				}
@@ -647,7 +647,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
-				if m.ShowLogs && !m.IsRunningJob {
+				if m.ShowLogs && !m.IsRunningJob && m.ActiveDetailPane == LogsPaneDetail {
 					job := m.Jobs[m.Cursor]
 					return m, loadLogContentCmd(m.Plan, job)
 				}
@@ -705,40 +705,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, editJob(job)
 			}
 
-		case key.Matches(msg, m.KeyMap.ViewLogs):
-			if m.ShowLogs {
-				// Close the log viewer
+		case key.Matches(msg, m.KeyMap.CycleDetailPane):
+			// Cycle through panes: None -> Logs -> Frontmatter -> Briefing -> Edit -> None
+			m.ActiveDetailPane = (m.ActiveDetailPane + 1) % 5 // 5 states total
+
+			if m.ActiveDetailPane == NoPane {
 				m.LogViewer.Stop()
 				m.ShowLogs = false
 				m.Focus = JobsPane
 				m.ActiveLogJob = nil
 				m.StatusSummary = ""
-			} else if m.Cursor < len(m.Jobs) {
-				// Open the log viewer and focus it
-				m.ShowLogs = true
-				m.Focus = LogsPane
-				job := m.Jobs[m.Cursor]
-				m.ActiveLogJob = job
+				return m, nil
+			}
 
-				// Check if this is a running agent job
-				isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
-				isRunning := job.Status == orchestration.JobStatusRunning
+			// If we opened a pane, show it and focus it
+			m.ShowLogs = true
+			m.Focus = LogsPane
+
+			if m.Cursor < len(m.Jobs) {
+				job := m.Jobs[m.Cursor]
+				m.ActiveLogJob = job // Keep track of the job for which we're showing details
 
 				// Centralized layout calculation
 				m.updateLayoutDimensions()
-
 				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
 				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
 
-				if isAgentJob && isRunning {
-					// Live stream agent logs - load existing (streaming will start automatically when ready)
-					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Streaming agent logs for %s (press 'v' to close)", job.Title))
-					return m, loadAndStreamAgentLogsCmd(m.Plan, job)
+				// Trigger content loading for the active pane
+				switch m.ActiveDetailPane {
+				case LogsPaneDetail:
+					isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+					isRunning := job.Status == orchestration.JobStatusRunning
+					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading logs for %s...", job.Title))
+					if isAgentJob && isRunning {
+						return m, loadAndStreamAgentLogsCmd(m.Plan, job)
+					}
+					return m, loadLogContentCmd(m.Plan, job)
+				case FrontmatterPane:
+					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title))
+					// Placeholder: Replace with actual load command in Phase 2
+					m.frontmatterContent = "Frontmatter for " + job.Title
+					return m, nil
+				case BriefingPane:
+					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading briefing for %s...", job.Title))
+					// Placeholder: Replace with actual load command in Phase 2
+					m.briefingContent = "Briefing for " + job.Title
+					return m, nil
+				case EditPane:
+					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
+					// Placeholder: Replace with actual load command in Phase 3
+					m.editContent = "File content for " + job.Title
+					return m, nil
 				}
-
-				// Fallback to existing behavior for other jobs or non-running agents
-				m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Viewing logs for %s (press 'v' to close)", job.Title))
-				return m, loadLogContentCmd(m.Plan, job)
 			}
 
 		case key.Matches(msg, m.KeyMap.Run):

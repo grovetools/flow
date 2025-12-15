@@ -52,6 +52,16 @@ const (
 	LogsPane
 )
 
+type DetailPane int
+
+const (
+	NoPane DetailPane = iota
+	LogsPaneDetail
+	FrontmatterPane
+	BriefingPane
+	EditPane
+)
+
 func (v ViewMode) String() string {
 	return [...]string{"table", "tree"}[v]
 }
@@ -90,14 +100,18 @@ type Model struct {
 	CreatingJob        bool
 	CreateJobInput     textinput.Model
 	CreateJobType      string // "xml" or "impl"
-	CreateJobBaseJob   *orchestration.Job
-	CreateJobDeps      []*orchestration.Job // For multi-select case
-	ShowLogs           bool
-	LogViewer          logviewer.Model
-	ActiveLogJob     *orchestration.Job
-	Focus            ViewFocus // Track which pane is active
-	LogSplitVertical bool      // Track log viewer layout
-	IsRunningJob     bool      // Track if a job is currently running
+	CreateJobBaseJob    *orchestration.Job
+	CreateJobDeps       []*orchestration.Job // For multi-select case
+	ShowLogs            bool
+	LogViewer           logviewer.Model
+	ActiveLogJob        *orchestration.Job
+	ActiveDetailPane    DetailPane
+	frontmatterContent  string
+	briefingContent     string
+	editContent         string
+	Focus               ViewFocus // Track which pane is active
+	LogSplitVertical    bool      // Track log viewer layout
+	IsRunningJob        bool      // Track if a job is currently running
 	RunLogFile         string    // Path to temporary log file for job output
 	Program            *tea.Program // Reference to the tea.Program for sending messages
 	LogViewerWidth     int       // Cached log viewer width
@@ -172,6 +186,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		LogViewer:        logViewerModel,
 		ShowLogs:         false, // Start with logs hidden by default
 		ActiveLogJob:     nil,
+		ActiveDetailPane: NoPane,
 		Focus:            JobsPane,
 		LogSplitVertical: false, // Default to horizontal split
 		IsRunningJob:     false,
@@ -251,6 +266,19 @@ func (m Model) renderLogsPane(contentWidth int) (string, string) {
 	var logHeader string
 	if m.Cursor < len(m.Jobs) {
 		currentJob := m.Jobs[m.Cursor]
+
+		var paneTitle string
+		switch m.ActiveDetailPane {
+		case LogsPaneDetail:
+			paneTitle = "Logs"
+		case FrontmatterPane:
+			paneTitle = "Frontmatter"
+		case BriefingPane:
+			paneTitle = "Briefing"
+		case EditPane:
+			paneTitle = "Edit"
+		}
+
 		jobIcon := getJobIcon(currentJob)
 		jobTitle := currentJob.Title
 		if jobTitle == "" {
@@ -271,7 +299,7 @@ func (m Model) renderLogsPane(contentWidth int) (string, string) {
 		if totalLines > 0 {
 			scrollInfo = theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%d/%d]", currentLine, totalLines))
 		}
-		logHeader = fmt.Sprintf("%s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
+		logHeader = fmt.Sprintf("%s: %s  %s%s • %s • %s%s", paneTitle, jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
 		logHeader = theme.DefaultTheme.Bold.Render(logHeader)
 	}
 
