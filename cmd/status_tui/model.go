@@ -340,8 +340,9 @@ func (m Model) View() string {
 
 			// Render panes without borders
 			// Add 3 lines of spacing at the top to shift log viewer down, 1 space left padding, and 2 spaces right padding
-			logViewWithSpacing := "\n\n\n" + m.LogViewer.View()
-			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).PaddingLeft(1).PaddingRight(2).Render(logViewWithSpacing)
+			logViewContent := m.LogViewer.View()
+			logViewWithSpacing := "\n\n\n" + logViewContent
+			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(2).Render(logViewWithSpacing)
 			jobsPane := lipgloss.NewStyle().Width(jobsWidth).Render(jobsView)
 
 			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, separator, logView)
@@ -349,8 +350,7 @@ func (m Model) View() string {
 
 		} else {
 			// Horizontal split (top/bottom)
-			// Don't set explicit heights - let content flow naturally
-			logView := lipgloss.NewStyle().PaddingLeft(1).Render(m.LogViewer.View())
+			logView := lipgloss.NewStyle().PaddingLeft(1).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(m.LogViewer.View())
 
 			jobsPane := lipgloss.NewStyle().Render(jobsView)
 
@@ -373,10 +373,8 @@ func (m Model) View() string {
 			finalView = lipgloss.JoinVertical(
 				lipgloss.Left,
 				jobsPane,
-				"\n",
 				divider,
 				logView,
-				"\n",
 				footer,
 			)
 		}
