@@ -311,44 +311,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Adjust scroll offset to show cursor at bottom on first render
 		m.adjustScrollOffset()
 
-		// Always calculate JobsPaneWidth for vertical split, even if logs aren't shown yet
-		const minLogsWidth = 50
-		const separatorWidth = 3 // separator + margins
-
-		if m.LogSplitVertical {
-			// Calculate actual width needed based on job content
-			minJobsWidth := m.calculateMinJobsPaneWidth()
-
-			if msg.Width < minJobsWidth+minLogsWidth+separatorWidth {
-				// Terminal is too narrow, fall back to horizontal split
-				m.LogSplitVertical = false
-				m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
-			} else {
-				// Enough space for vertical split, use calculated width
-				m.JobsPaneWidth = minJobsWidth
-			}
-		}
-
-		// Calculate log viewer dimensions based on split mode
-		if m.ShowLogs {
-			if m.LogSplitVertical {
-				// Vertical split (side-by-side)
-				m.LogViewerWidth = msg.Width - m.JobsPaneWidth - separatorWidth
-				m.LogViewerHeight = msg.Height - 5 // Account for header, footer, and margins
-			} else {
-				// Horizontal split (top/bottom)
-				m.LogViewerWidth = msg.Width - 4
-				m.LogViewerHeight = m.calculateOptimalLogHeight()
-			}
-
-			// Ensure minimum dimensions
-			if m.LogViewerHeight < 5 {
-				m.LogViewerHeight = 5
-			}
-			if m.LogViewerWidth < 20 {
-				m.LogViewerWidth = 20
-			}
-		}
+		// Centralized layout calculation
+		m.updateLayoutDimensions()
 
 		// Start log viewer on first window size message if we have jobs and logs are enabled
 		if m.ShowLogs && m.ActiveLogJob == nil && len(m.Jobs) > 0 {
@@ -660,41 +624,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ShowLogs {
 				m.LogSplitVertical = !m.LogSplitVertical
 
-				// Always calculate JobsPaneWidth for vertical split
-				const minLogsWidth = 50
-				const separatorWidth = 3 // separator + margins
+				// Centralized layout calculation
+				m.updateLayoutDimensions()
 
-				if m.LogSplitVertical {
-					// Calculate actual width needed based on job content
-					minJobsWidth := m.calculateMinJobsPaneWidth()
-
-					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
-						// Terminal is too narrow, fall back to horizontal split
-						m.LogSplitVertical = false
-						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
-					} else {
-						// Enough space for vertical split, use calculated width
-						m.JobsPaneWidth = minJobsWidth
-					}
-				}
-
-				// Recalculate dimensions based on new split mode
-				if m.LogSplitVertical {
-					// Vertical split (side-by-side)
-					m.LogViewerWidth = m.Width - m.JobsPaneWidth - separatorWidth
-					m.LogViewerHeight = m.Height - 5
-				} else {
-					// Horizontal split (top/bottom)
-					m.LogViewerWidth = m.Width - 4
-					m.LogViewerHeight = m.calculateOptimalLogHeight()
-				}
-				// Ensure minimum dimensions
-				if m.LogViewerHeight < 5 {
-					m.LogViewerHeight = 5
-				}
-				if m.LogViewerWidth < 20 {
-					m.LogViewerWidth = 20
-				}
 				// Update log viewer with new dimensions
 				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
 				return m, cmd
@@ -792,41 +724,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
 				isRunning := job.Status == orchestration.JobStatusRunning
 
-				// Always calculate JobsPaneWidth for vertical split
-				const minLogsWidth = 50
-				const separatorWidth = 3 // separator + margins
-
-				if m.LogSplitVertical {
-					// Calculate actual width needed based on job content
-					minJobsWidth := m.calculateMinJobsPaneWidth()
-
-					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
-						// Terminal is too narrow, fall back to horizontal split
-						m.LogSplitVertical = false
-						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
-					} else {
-						// Enough space for vertical split, use calculated width
-						m.JobsPaneWidth = minJobsWidth
-					}
-				}
-
-				// Calculate log viewer dimensions based on split mode
-				if m.LogSplitVertical {
-					// Vertical split (side-by-side)
-					m.LogViewerWidth = m.Width - m.JobsPaneWidth - separatorWidth
-					m.LogViewerHeight = m.Height - 5
-				} else {
-					// Horizontal split (top/bottom)
-					m.LogViewerWidth = m.Width - 4
-					m.LogViewerHeight = m.calculateOptimalLogHeight()
-				}
-				// Ensure minimum dimensions
-				if m.LogViewerHeight < 5 {
-					m.LogViewerHeight = 5
-				}
-				if m.LogViewerWidth < 20 {
-					m.LogViewerWidth = 20
-				}
+				// Centralized layout calculation
+				m.updateLayoutDimensions()
 
 				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
 				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
@@ -923,41 +822,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ShowLogs = true
 				m.Focus = LogsPane
 
-				// Always calculate JobsPaneWidth for vertical split
-				const minLogsWidth = 50
-				const separatorWidth = 3 // separator + margins
-
-				if m.LogSplitVertical {
-					// Calculate actual width needed based on job content
-					minJobsWidth := m.calculateMinJobsPaneWidth()
-
-					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
-						// Terminal is too narrow, fall back to horizontal split
-						m.LogSplitVertical = false
-						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
-					} else {
-						// Enough space for vertical split, use calculated width
-						m.JobsPaneWidth = minJobsWidth
-					}
-				}
-
-				// Calculate log viewer dimensions based on split mode
-				if m.LogSplitVertical {
-					// Vertical split (side-by-side)
-					m.LogViewerWidth = m.Width - m.JobsPaneWidth - separatorWidth
-					m.LogViewerHeight = m.Height - 5
-				} else {
-					// Horizontal split (top/bottom)
-					m.LogViewerWidth = m.Width - 4
-					m.LogViewerHeight = m.calculateOptimalLogHeight()
-				}
-				// Ensure minimum dimensions
-				if m.LogViewerHeight < 5 {
-					m.LogViewerHeight = 5
-				}
-				if m.LogViewerWidth < 20 {
-					m.LogViewerWidth = 20
-				}
+				// Centralized layout calculation
+				m.updateLayoutDimensions()
 
 				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
 

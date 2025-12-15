@@ -27,6 +27,24 @@ const (
 	TreeView
 )
 
+const (
+	// Heights
+	headerHeight            = 2 // Includes label and bottom margin
+	footerHeight            = 1
+	horizontalDividerHeight = 1
+	logHeaderHeight         = 3 // Header text + two divider lines
+
+	// Widths
+	minLogsWidth           = 50
+	verticalSeparatorWidth = 3 // Separator + margins
+
+	// Margins
+	topMargin    = 1
+	bottomMargin = 0
+	leftMargin   = 2
+	rightMargin  = 2
+)
+
 type ViewFocus int
 
 const (
@@ -183,6 +201,140 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
+// renderJobsPane renders the top (or left) pane containing the plan header and jobs list.
+func (m Model) renderJobsPane(contentWidth int) string {
+	// 1. Create Header
+	headerLabel := theme.DefaultTheme.Bold.Render(theme.IconPlan + " Plan Status: ")
+	planName := theme.DefaultTheme.Bold.Render(m.Plan.Name)
+	headerText := headerLabel + planName
+	styledHeader := lipgloss.NewStyle().
+		Background(theme.DefaultTheme.Header.GetBackground()).
+		Align(lipgloss.Left).
+		Width(contentWidth).
+		MarginBottom(1).
+		Render(headerText)
+
+	// 2. Render Main Content (Table or Tree)
+	var mainContent string
+	switch m.ViewMode {
+	case TableView:
+		mainContent = m.renderTableViewWithWidth(contentWidth)
+	default: // TreeView
+		mainContent = m.renderJobTree()
+	}
+
+	// 3. Add scroll indicators
+	scrollIndicator := ""
+	if len(m.Jobs) > 0 {
+		visibleLines := m.getVisibleJobCount()
+		hasMore := m.ScrollOffset+visibleLines < len(m.Jobs)
+		hasLess := m.ScrollOffset > 0
+		if hasLess || hasMore {
+			indicator := ""
+			if hasLess {
+				indicator += "↑ "
+			}
+			indicator += fmt.Sprintf("[%d/%d]", m.Cursor+1, len(m.Jobs))
+			if hasMore {
+				indicator += " ↓"
+			}
+			scrollIndicator = "\n" + theme.DefaultTheme.Muted.Render(indicator)
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, styledHeader, mainContent, scrollIndicator)
+}
+
+// renderLogsPane renders the bottom (or right) pane containing the log viewer.
+func (m Model) renderLogsPane(contentWidth int) (string, string) {
+	// Create log section header
+	var logHeader string
+	if m.Cursor < len(m.Jobs) {
+		currentJob := m.Jobs[m.Cursor]
+		jobIcon := getJobIcon(currentJob)
+		jobTitle := currentJob.Title
+		if jobTitle == "" {
+			jobTitle = currentJob.Filename
+		}
+		statusIcon := m.getStatusIcon(currentJob.Status)
+		filenameDisplay := ""
+		if jobTitle != currentJob.Filename {
+			filenameDisplay = fmt.Sprintf(" (%s)", currentJob.Filename)
+		}
+		templateName := currentJob.Template
+		if templateName == "" {
+			templateName = "none"
+		}
+		template := theme.DefaultTheme.Muted.Italic(true).Render(fmt.Sprintf("template: %s", templateName))
+		currentLine, totalLines := m.LogViewer.GetScrollInfo()
+		scrollInfo := ""
+		if totalLines > 0 {
+			scrollInfo = theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%d/%d]", currentLine, totalLines))
+		}
+		logHeader = fmt.Sprintf("%s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
+		logHeader = theme.DefaultTheme.Bold.Render(logHeader)
+	}
+
+	// Create a separator
+	var separator string
+	if m.LogSplitVertical {
+		separatorHeight := m.Height - 8
+		var separatorLines []string
+		separatorLines = append(separatorLines, "", "", "") // Top spacing
+		halfHeight := separatorHeight / 2
+		for i := 0; i < separatorHeight; i++ {
+			style := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border)
+			if (i < halfHeight && m.Focus == JobsPane) || (i >= halfHeight && m.Focus == LogsPane) {
+				style = theme.DefaultTheme.Highlight
+			}
+			separatorLines = append(separatorLines, style.Render("│"))
+		}
+		separator = strings.Join(separatorLines, "\n")
+	} else {
+		halfWidth := contentWidth / 2
+		leftHalf := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", halfWidth))
+		rightHalf := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", contentWidth-halfWidth))
+		if m.Focus == JobsPane {
+			leftHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", halfWidth))
+		} else {
+			rightHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", contentWidth-halfWidth))
+		}
+		separator = leftHalf + rightHalf
+	}
+
+	// Render log content with scrollbar
+	logContentWithScrollbar := m.addScrollbarToContent(m.LogViewer.View(), m.LogViewerHeight-logHeaderHeight-1) // -1 for spacing
+	dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth-2))
+	logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + logContentWithScrollbar
+
+	// Adjust padding/width based on split direction
+	var logView string
+	if m.LogSplitVertical {
+		logView = lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
+	} else {
+		logHeader = " " + logHeader // Add left padding for horizontal view
+		paddedContent := m.addScrollbarToContent(" "+m.LogViewer.View(), m.LogViewerHeight-logHeaderHeight)
+		logView = lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logHeader + "\n" + dividerLine + "\n" + paddedContent)
+	}
+
+	return logView, separator
+}
+
+// renderFooter renders the help and status message footer.
+func (m Model) renderFooter() string {
+	helpView := m.Help.View()
+	viewModeIndicator := theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%s]", m.ViewMode))
+	followStatus := ""
+	if m.ShowLogs {
+		if m.LogViewer.IsFollowing() {
+			followStatus = theme.DefaultTheme.Muted.Render(" • Follow: ON")
+		} else {
+			followStatus = theme.DefaultTheme.Muted.Render(" • Follow: OFF")
+		}
+	}
+	return helpView + viewModeIndicator + followStatus
+}
+
 // View renders the TUI
 func (m Model) View() string {
 	if m.Err != nil {
@@ -220,60 +372,18 @@ func (m Model) View() string {
 		contentWidth = 40
 	}
 
-	// 1. Create Header with subtle coloring
-	// Header uses terminal default colors with bold for emphasis.
-	// See: plans/tui-updates/14-terminal-ui-styling-philosophy.md
-	headerLabel := theme.DefaultTheme.Bold.Render(theme.IconPlan + " Plan Status: ")
-	planName := theme.DefaultTheme.Bold.Render(m.Plan.Name)
-	headerText := headerLabel + planName
-
-	styledHeader := lipgloss.NewStyle().
-		Background(theme.DefaultTheme.Header.GetBackground()).
-		Align(lipgloss.Left).
-		Width(contentWidth).
-		MarginBottom(1).
-		Render(headerText)
-
-	// 2. Calculate jobs pane width first (needed for rendering)
+	// Calculate jobs pane width for proper rendering
 	var jobsContentWidth int
 	if m.ShowLogs && m.LogSplitVertical {
-		// In vertical split, use calculated width
 		jobsContentWidth = m.JobsPaneWidth
 	} else {
-		// In horizontal split or no logs, use full content width
 		jobsContentWidth = contentWidth
 	}
 
-	// 2b. Render Main Content (Table or Tree) with width constraint
-	var mainContent string
-	switch m.ViewMode {
-	case TableView:
-		mainContent = m.renderTableViewWithWidth(jobsContentWidth)
-	default: // TreeView
-		mainContent = m.renderJobTree()
-	}
+	// Render the main components
+	jobsPane := m.renderJobsPane(jobsContentWidth)
 
-	// 2b. Add scroll indicators if needed
-	scrollIndicator := ""
-	if len(m.Jobs) > 0 {
-		visibleLines := m.getVisibleJobCount()
-		hasMore := m.ScrollOffset+visibleLines < len(m.Jobs)
-		hasLess := m.ScrollOffset > 0
-
-		if hasLess || hasMore {
-			indicator := ""
-			if hasLess {
-				indicator += "↑ "
-			}
-			indicator += fmt.Sprintf("[%d/%d]", m.Cursor+1, len(m.Jobs))
-			if hasMore {
-				indicator += " ↓"
-			}
-			scrollIndicator = "\n" + theme.DefaultTheme.Muted.Render(indicator)
-		}
-	}
-
-	// 3. Handle confirmation dialog or help footer
+	// Handle confirmation dialog or regular footer
 	var footer string
 	if m.ConfirmArchive {
 		if len(m.Selected) > 0 {
@@ -287,229 +397,40 @@ func (m Model) View() string {
 				Render(fmt.Sprintf("Archive '%s'? (y/n)", job.Filename))
 		}
 	} else {
-		// Render Footer
-		helpView := m.Help.View()
-		viewModeIndicator := theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%s]", m.ViewMode))
-
-		// Add follow status if logs are shown
-		followStatus := ""
-		if m.ShowLogs {
-			if m.LogViewer.IsFollowing() {
-				followStatus = theme.DefaultTheme.Muted.Render(" • Follow: ON")
-			} else {
-				followStatus = theme.DefaultTheme.Muted.Render(" • Follow: OFF")
-			}
-		}
-
-		footer = helpView + viewModeIndicator + followStatus
+		footer = m.renderFooter()
 	}
 
-	// 4. Combine everything
 	var finalView string
 	if m.ShowLogs {
-		jobsView := lipgloss.JoinVertical(
-			lipgloss.Left,
-			styledHeader,
-			mainContent,
-			scrollIndicator,
-		)
-
-		var jobsWidth int
-
+		logsPane, separator := m.renderLogsPane(contentWidth)
 		if m.LogSplitVertical {
-			// Vertical split (side-by-side)
-			jobsWidth = m.JobsPaneWidth
-
-			// Create a single-column vertical separator split in half
-			// Top half highlights when jobs pane focused, bottom half when logs focused
-			separatorHeight := m.Height - 8 // Account for header, footer, and margins
-			var separatorLines []string
-
-			// Add 3 lines of spacing at the top to match log viewer shift
-			separatorLines = append(separatorLines, "", "", "")
-
-			halfHeight := separatorHeight / 2
-
-			for i := 0; i < separatorHeight; i++ {
-				if i < halfHeight {
-					// Top half of separator
-					if m.Focus == JobsPane {
-						separatorLines = append(separatorLines, theme.DefaultTheme.Highlight.Render("│"))
-					} else {
-						separatorLines = append(separatorLines, lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render("│"))
-					}
-				} else {
-					// Bottom half of separator
-					if m.Focus == LogsPane {
-						separatorLines = append(separatorLines, theme.DefaultTheme.Highlight.Render("│"))
-					} else {
-						separatorLines = append(separatorLines, lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render("│"))
-					}
-				}
-			}
-			separator := strings.Join(separatorLines, "\n")
-
-			// Render panes without borders
-			// Create log section header with job info - use current cursor job
-			var logHeader string
-			if m.Cursor < len(m.Jobs) {
-				currentJob := m.Jobs[m.Cursor]
-				jobIcon := getJobIcon(currentJob)
-				jobTitle := currentJob.Title
-				if jobTitle == "" {
-					jobTitle = currentJob.Filename
-				}
-				statusIcon := m.getStatusIcon(currentJob.Status)
-
-				// Build filename display (in parens if different from title)
-				filenameDisplay := ""
-				if jobTitle != currentJob.Filename {
-					filenameDisplay = fmt.Sprintf(" (%s)", currentJob.Filename)
-				}
-
-				templateName := currentJob.Template
-				if templateName == "" {
-					templateName = "none"
-				}
-				template := theme.DefaultTheme.Muted.Italic(true).Render(fmt.Sprintf("template: %s", templateName))
-
-				// Get scroll position info
-				currentLine, totalLines := m.LogViewer.GetScrollInfo()
-				scrollInfo := ""
-				if totalLines > 0 {
-					scrollInfo = theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%d/%d]", currentLine, totalLines))
-				}
-
-				logHeader = fmt.Sprintf("%s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
-				logHeader = theme.DefaultTheme.Bold.Render(logHeader)
-			}
-
-			// Add header and spacing at the top, 1 space left padding
-			logViewContent := m.LogViewer.View()
-
-			// Add scrollbar to the right side of log content
-			logContentWithScrollbar := m.addScrollbarToContent(logViewContent, m.LogViewerHeight-5) // -5 for top divider (1) + header (1) + bottom divider (1) + blank line (1) + spacing (1)
-
-			// Add muted divider lines above and below header (span width minus left/right padding)
-			dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth-2))
-			logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + logContentWithScrollbar
-			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
-
-			// Constrain jobs pane height to prevent overflow
-			maxJobsPaneHeight := m.Height - 4 // footer + margins
+			// Constrain jobs pane height for vertical split
+			maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin)
 			if maxJobsPaneHeight < 10 {
 				maxJobsPaneHeight = 10
 			}
-			jobsPane := lipgloss.NewStyle().Width(jobsWidth).MaxWidth(jobsWidth).MaxHeight(maxJobsPaneHeight).Render(jobsView)
+			jobsPaneStyled := lipgloss.NewStyle().Width(m.JobsPaneWidth).MaxWidth(m.JobsPaneWidth).MaxHeight(maxJobsPaneHeight).Render(jobsPane)
 
-			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, separator, logView)
-			finalView = lipgloss.JoinVertical(lipgloss.Left, finalView, "\n", footer)
-
+			combinedPanes := lipgloss.JoinHorizontal(lipgloss.Top, jobsPaneStyled, separator, logsPane)
+			finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, "\n", footer)
 		} else {
-			// Horizontal split (top/bottom)
-			// Create log section header with job info - use current cursor job
-			var logHeader string
-			if m.Cursor < len(m.Jobs) {
-				currentJob := m.Jobs[m.Cursor]
-				jobIcon := getJobIcon(currentJob)
-				jobTitle := currentJob.Title
-				if jobTitle == "" {
-					jobTitle = currentJob.Filename
-				}
-				statusIcon := m.getStatusIcon(currentJob.Status)
-
-				// Build filename display (in parens if different from title)
-				filenameDisplay := ""
-				if jobTitle != currentJob.Filename {
-					filenameDisplay = fmt.Sprintf(" (%s)", currentJob.Filename)
-				}
-
-				templateName := currentJob.Template
-				if templateName == "" {
-					templateName = "none"
-				}
-				template := theme.DefaultTheme.Muted.Italic(true).Render(fmt.Sprintf("template: %s", templateName))
-
-				// Get scroll position info
-				currentLine, totalLines := m.LogViewer.GetScrollInfo()
-				scrollInfo := ""
-				if totalLines > 0 {
-					scrollInfo = theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%d/%d]", currentLine, totalLines))
-				}
-
-				// Add left padding to header text
-				logHeader = fmt.Sprintf(" %s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
-				logHeader = theme.DefaultTheme.Bold.Render(logHeader)
-
-				// Add muted divider line under header (full width, no left padding)
-				dividerWidth := m.Width - 4
-				if dividerWidth < 40 {
-					dividerWidth = 40
-				}
-				dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", dividerWidth))
-				logHeader = logHeader + "\n" + dividerLine + "\n"
-			}
-
-			// Add scrollbar to log content with left padding
-			rawLogContent := m.LogViewer.View()
-			// Add 1 space left padding to each line of content
-			contentLines := strings.Split(rawLogContent, "\n")
-			for i, line := range contentLines {
-				contentLines[i] = " " + line
-			}
-			paddedContent := strings.Join(contentLines, "\n")
-			logContentWithScrollbar := m.addScrollbarToContent(paddedContent, m.LogViewerHeight-4) // -4 for header (1) + divider (1) + blank line (1) + spacing (1)
-			logViewContent := logHeader + logContentWithScrollbar
-			logView := lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logViewContent)
-
-			// Calculate jobs pane height: total height minus (log height + divider + footer + margins)
-			jobsPaneHeight := m.Height - m.LogViewerHeight - 5 // -5 for divider, footer, margins
+			// Constrain jobs pane height for horizontal split
+			jobsPaneHeight := m.Height - m.LogViewerHeight - (horizontalDividerHeight + footerHeight + topMargin + bottomMargin)
 			if jobsPaneHeight < 10 {
-				jobsPaneHeight = 10 // Minimum
+				jobsPaneHeight = 10
 			}
-			jobsPane := lipgloss.NewStyle().MaxHeight(jobsPaneHeight).Render(jobsView)
+			jobsPaneStyled := lipgloss.NewStyle().MaxHeight(jobsPaneHeight).Render(jobsPane)
 
-			// Create a single-line divider split in half
-			// Left half highlights when jobs pane focused, right half when logs focused
-			halfWidth := contentWidth / 2
-			var leftHalf, rightHalf string
-
-			if m.Focus == JobsPane {
-				// Jobs pane focused: highlight left half
-				leftHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", halfWidth))
-				rightHalf = lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", contentWidth-halfWidth))
-			} else {
-				// Logs pane focused: highlight right half
-				leftHalf = lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", halfWidth))
-				rightHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", contentWidth-halfWidth))
-			}
-			divider := leftHalf + rightHalf
-
-			finalView = lipgloss.JoinVertical(
-				lipgloss.Left,
-				jobsPane,
-				divider,
-				logView,
-				footer,
-			)
+			finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane, footer)
 		}
 	} else {
-		// No logs shown - constrain main content to prevent overflow
-		// Available height = total - header - scroll indicator - footer - margins
-		maxContentHeight := m.Height - 8 // header(2) + scroll(1) + footer(1) + margins(2) + spacing(2)
+		// No logs view
+		maxContentHeight := m.Height - (headerHeight + footerHeight + topMargin + bottomMargin + 2) // +2 for scroll indicator and spacing
 		if maxContentHeight < 10 {
 			maxContentHeight = 10
 		}
-		constrainedContent := lipgloss.NewStyle().MaxHeight(maxContentHeight).Render(mainContent)
-
-		finalView = lipgloss.JoinVertical(
-			lipgloss.Left,
-			styledHeader,
-			constrainedContent,
-			scrollIndicator,
-			"\n", // Space before footer
-			footer,
-		)
+		constrainedContent := lipgloss.NewStyle().MaxHeight(maxContentHeight).Render(jobsPane)
+		finalView = lipgloss.JoinVertical(lipgloss.Left, constrainedContent, "\n", footer)
 	}
 
 	// Add overall margin - minimal vertical margin to maximize screen usage
@@ -519,14 +440,8 @@ func (m Model) View() string {
 // calculateOptimalLogHeight calculates the log viewer height for horizontal split
 // It prioritizes log visibility while ensuring jobs section remains usable
 func (m *Model) calculateOptimalLogHeight() int {
-	// Total chrome that takes up screen space:
-	// - top margin (1)
-	// - header with margin (2)
-	// - footer (1)
-	// - divider between jobs and logs (1)
-	// - log header with dividers (3)
-	// Total: 8 lines of chrome
-	chromeLines := 8
+	// Total chrome height
+	chromeLines := topMargin + headerHeight + footerHeight + horizontalDividerHeight
 
 	// Total available for content (jobs list + log content)
 	availableHeight := m.Height - chromeLines
@@ -649,6 +564,37 @@ func (m *Model) calculateMinJobsPaneWidth() int {
 	return totalWidth
 }
 
+// updateLayoutDimensions centralizes the logic for calculating pane sizes.
+func (m *Model) updateLayoutDimensions() {
+	if m.LogSplitVertical {
+		minJobsWidth := m.calculateMinJobsPaneWidth()
+		if m.Width < minJobsWidth+minLogsWidth+verticalSeparatorWidth {
+			m.LogSplitVertical = false
+			m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
+		} else {
+			m.JobsPaneWidth = minJobsWidth
+		}
+	}
+
+	if m.ShowLogs {
+		if m.LogSplitVertical {
+			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth
+			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
+		} else {
+			m.LogViewerWidth = m.Width - (leftMargin + rightMargin)
+			m.LogViewerHeight = m.calculateOptimalLogHeight()
+		}
+
+		// Ensure minimum dimensions
+		if m.LogViewerHeight < 8 { // Increased minimum height for usability
+			m.LogViewerHeight = 8
+		}
+		if m.LogViewerWidth < 20 {
+			m.LogViewerWidth = 20
+		}
+	}
+}
+
 // getVisibleJobCount returns how many jobs can be displayed in the viewport
 func (m *Model) getVisibleJobCount() int {
 	if m.Height == 0 {
@@ -656,23 +602,20 @@ func (m *Model) getVisibleJobCount() int {
 	}
 
 	// Calculate available height for job list
-	// Account for UI chrome:
-	// - header (3 lines: label + margin)
-	// - table headers/borders (4 lines in table view, 1 in tree view)
-	// - scroll indicator (1 line)
-	// - footer (1 line)
-	// - margins (1 line top, 0 bottom)
-	chromeLines := 10
-	if m.ViewMode == TreeView {
-		chromeLines = 7 // tree view has less overhead (no table borders/headers)
+	var tableChrome int
+	if m.ViewMode == TableView {
+		tableChrome = 4 // table headers and borders
+	} else {
+		tableChrome = 1 // tree view has less overhead
 	}
+
+	chromeLines := topMargin + headerHeight + tableChrome + footerHeight + 1 // +1 for scroll indicator
 
 	availableHeight := m.Height - chromeLines
 
-	// If logs are shown in horizontal split, reduce available height for jobs pane
+	// If logs are shown in horizontal split, reduce available height
 	if m.ShowLogs && !m.LogSplitVertical {
-		// Subtract log viewer height and divider (2 lines for divider + newlines)
-		availableHeight = availableHeight - m.LogViewerHeight - 2
+		availableHeight -= (m.LogViewerHeight + horizontalDividerHeight)
 	}
 
 	if availableHeight < 1 {
