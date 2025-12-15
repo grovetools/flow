@@ -393,6 +393,66 @@ func (m Model) View() string {
 	return lipgloss.NewStyle().Margin(1, 2, 0, 2).Render(finalView)
 }
 
+// calculateOptimalLogHeight calculates the log viewer height for horizontal split
+// It expands to fill available space but caps at 50% of total height when many jobs present
+func (m *Model) calculateOptimalLogHeight() int {
+	// Chrome: footer (1), top margin (1), divider (1) = 3 lines
+	// Note: Header is NOT counted here because it's rendered INSIDE jobsPane
+	chromeLines := 3
+
+	// Calculate EXACTLY how many lines jobs section needs (visual height)
+	jobsNeeded := len(m.Jobs) // Each job is 1 line in table
+	if m.ShowSummaries {
+		jobsNeeded = jobsNeeded * 2 // Each job takes 2 lines with summaries
+	}
+
+	// Add header (part of jobs pane visual height)
+	jobsNeeded += 3 // Header: icon + title + margin
+
+	// Add table/tree chrome
+	if m.ViewMode == TableView {
+		jobsNeeded += 4 // Table headers and borders
+	} else {
+		jobsNeeded += 1 // Tree view overhead
+	}
+
+	// Add scroll indicator if needed
+	if len(m.Jobs) > 1 {
+		jobsNeeded += 1 // Scroll indicator line
+	}
+
+	// Total available for content (excluding header, footer, margins, divider)
+	availableHeight := m.Height - chromeLines - 1 // -1 for divider line
+
+	// Calculate log height: give logs remaining space after jobs section
+	logHeight := availableHeight - jobsNeeded
+
+	// Apply different caps based on number of jobs
+	var maxLogHeight int
+	if len(m.Jobs) <= 5 {
+		// Few jobs: cap logs at 65% so jobs section gets more space
+		maxLogHeight = (availableHeight * 65) / 100
+	} else if len(m.Jobs) <= 15 {
+		// Medium jobs: cap logs at 50% for balanced split
+		maxLogHeight = availableHeight / 2
+	} else {
+		// Many jobs: cap logs at 40% to prioritize job visibility
+		maxLogHeight = (availableHeight * 4) / 10
+	}
+
+	// Only apply cap if it wouldn't squeeze jobs section
+	if logHeight > maxLogHeight && (availableHeight - maxLogHeight) >= jobsNeeded {
+		logHeight = maxLogHeight
+	}
+
+	// Ensure minimum
+	if logHeight < 5 {
+		logHeight = 5
+	}
+
+	return logHeight
+}
+
 // getVisibleJobCount returns how many jobs can be displayed in the viewport
 func (m *Model) getVisibleJobCount() int {
 	if m.Height == 0 {
