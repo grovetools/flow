@@ -394,7 +394,13 @@ func (m Model) View() string {
 			dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth-2))
 			logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + logContentWithScrollbar
 			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
-			jobsPane := lipgloss.NewStyle().Width(jobsWidth).MaxWidth(jobsWidth).Render(jobsView)
+
+			// Constrain jobs pane height to prevent overflow
+			maxJobsPaneHeight := m.Height - 4 // footer + margins
+			if maxJobsPaneHeight < 10 {
+				maxJobsPaneHeight = 10
+			}
+			jobsPane := lipgloss.NewStyle().Width(jobsWidth).MaxWidth(jobsWidth).MaxHeight(maxJobsPaneHeight).Render(jobsView)
 
 			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, separator, logView)
 			finalView = lipgloss.JoinVertical(lipgloss.Left, finalView, "\n", footer)
@@ -456,7 +462,12 @@ func (m Model) View() string {
 			logViewContent := logHeader + logContentWithScrollbar
 			logView := lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logViewContent)
 
-			jobsPane := lipgloss.NewStyle().Render(jobsView)
+			// Calculate jobs pane height: total height minus (log height + divider + footer + margins)
+			jobsPaneHeight := m.Height - m.LogViewerHeight - 5 // -5 for divider, footer, margins
+			if jobsPaneHeight < 10 {
+				jobsPaneHeight = 10 // Minimum
+			}
+			jobsPane := lipgloss.NewStyle().MaxHeight(jobsPaneHeight).Render(jobsView)
 
 			// Create a single-line divider split in half
 			// Left half highlights when jobs pane focused, right half when logs focused
@@ -483,10 +494,18 @@ func (m Model) View() string {
 			)
 		}
 	} else {
+		// No logs shown - constrain main content to prevent overflow
+		// Available height = total - header - scroll indicator - footer - margins
+		maxContentHeight := m.Height - 8 // header(2) + scroll(1) + footer(1) + margins(2) + spacing(2)
+		if maxContentHeight < 10 {
+			maxContentHeight = 10
+		}
+		constrainedContent := lipgloss.NewStyle().MaxHeight(maxContentHeight).Render(mainContent)
+
 		finalView = lipgloss.JoinVertical(
 			lipgloss.Left,
 			styledHeader,
-			mainContent,
+			constrainedContent,
 			scrollIndicator,
 			"\n", // Space before footer
 			footer,
@@ -500,25 +519,33 @@ func (m Model) View() string {
 // calculateOptimalLogHeight calculates the log viewer height for horizontal split
 // It prioritizes log visibility while ensuring jobs section remains usable
 func (m *Model) calculateOptimalLogHeight() int {
-	// Chrome: footer (1), top margin (1), divider (1) = 3 lines
-	// Note: Header is NOT counted here because it's rendered INSIDE jobsPane
-	chromeLines := 3
+	// Total chrome that takes up screen space:
+	// - top margin (1)
+	// - header with margin (2)
+	// - footer (1)
+	// - divider between jobs and logs (1)
+	// - log header with dividers (3)
+	// Total: 8 lines of chrome
+	chromeLines := 8
 
-	// Total available for content (excluding header, footer, margins, divider)
-	availableHeight := m.Height - chromeLines - 1 // -1 for divider line
+	// Total available for content (jobs list + log content)
+	availableHeight := m.Height - chromeLines
+	if availableHeight < 10 {
+		availableHeight = 10 // Ensure some minimum
+	}
 
-	// Calculate minimum jobs section height (header + table chrome + minimum visible rows)
-	minJobsHeight := 3 // Header: icon + title + margin
+	// Calculate minimum jobs section height (table chrome + minimum visible rows)
+	minJobsHeight := 0
 	if m.ViewMode == TableView {
 		minJobsHeight += 4 // Table headers and borders
 	} else {
 		minJobsHeight += 1 // Tree view overhead
 	}
 
-	// Add minimum visible job rows (ensure at least 5-10 jobs are visible)
+	// Add minimum visible job rows (ensure at least 5-8 jobs are visible)
 	minVisibleJobs := 5
-	if len(m.Jobs) > 10 {
-		minVisibleJobs = 10 // Show more jobs if we have many
+	if len(m.Jobs) > 8 {
+		minVisibleJobs = 8 // Show fewer jobs to give logs more space
 	}
 	if len(m.Jobs) < minVisibleJobs {
 		minVisibleJobs = len(m.Jobs) // Don't exceed actual job count
@@ -534,23 +561,18 @@ func (m *Model) calculateOptimalLogHeight() int {
 		minJobsHeight += 1 // Scroll indicator line
 	}
 
-	// Prioritize logs: give them 50-60% of available space
-	// The jobs section will scroll if it has more jobs than fit in remaining space
+	// Give logs 55-60% of available space, but ensure jobs get their minimum
 	logHeight := (availableHeight * 55) / 100
 
-	// Ensure logs get at least some reasonable space
-	minLogHeight := 10
-	if logHeight < minLogHeight {
-		logHeight = minLogHeight
-	}
-
-	// Ensure jobs section has minimum space too
+	// Ensure jobs section has minimum space
 	if availableHeight - logHeight < minJobsHeight {
 		// Not enough room for both, give jobs minimum and logs get the rest
 		logHeight = availableHeight - minJobsHeight
-		if logHeight < 5 {
-			logHeight = 5 // Absolute minimum for logs
-		}
+	}
+
+	// Ensure logs get at least some reasonable space
+	if logHeight < 8 {
+		logHeight = 8 // Absolute minimum for logs
 	}
 
 	return logHeight
