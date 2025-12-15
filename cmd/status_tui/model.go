@@ -405,7 +405,8 @@ func (m Model) View() string {
 		logsPane, separator := m.renderLogsPane(contentWidth)
 		if m.LogSplitVertical {
 			// Constrain jobs pane height for vertical split
-			maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin)
+			// Account for: footer + newline before footer + top/bottom margins
+			maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
 			if maxJobsPaneHeight < 10 {
 				maxJobsPaneHeight = 10
 			}
@@ -424,13 +425,13 @@ func (m Model) View() string {
 			finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane, footer)
 		}
 	} else {
-		// No logs view
-		maxContentHeight := m.Height - (headerHeight + footerHeight + topMargin + bottomMargin + 2) // +2 for scroll indicator and spacing
-		if maxContentHeight < 10 {
-			maxContentHeight = 10
+		// No logs view - use same height calculation as vertical split mode
+		maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
+		if maxJobsPaneHeight < 10 {
+			maxJobsPaneHeight = 10
 		}
-		constrainedContent := lipgloss.NewStyle().MaxHeight(maxContentHeight).Render(jobsPane)
-		finalView = lipgloss.JoinVertical(lipgloss.Left, constrainedContent, "\n", footer)
+		jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxJobsPaneHeight).Render(jobsPane)
+		finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, "\n", footer)
 	}
 
 	// Add overall margin - minimal vertical margin to maximize screen usage
@@ -616,6 +617,11 @@ func (m *Model) getVisibleJobCount() int {
 	// If logs are shown in horizontal split, reduce available height
 	if m.ShowLogs && !m.LogSplitVertical {
 		availableHeight -= (m.LogViewerHeight + horizontalDividerHeight)
+	}
+
+	// In vertical split mode with logs OR no-logs mode, account for additional spacing
+	if (m.ShowLogs && m.LogSplitVertical) || !m.ShowLogs {
+		availableHeight -= 2 // Account for newline and spacing before footer (same as vertical split)
 	}
 
 	if availableHeight < 1 {
