@@ -339,10 +339,48 @@ func (m Model) View() string {
 			separator := strings.Join(separatorLines, "\n")
 
 			// Render panes without borders
-			// Add 3 lines of spacing at the top to shift log viewer down, 1 space left padding, and 2 spaces right padding
+			// Create log section header with job info - use current cursor job
+			var logHeader string
+			if m.Cursor < len(m.Jobs) {
+				currentJob := m.Jobs[m.Cursor]
+				jobIcon := getJobIcon(currentJob)
+				jobTitle := currentJob.Title
+				if jobTitle == "" {
+					jobTitle = currentJob.Filename
+				}
+				statusIcon := m.getStatusIcon(currentJob.Status)
+
+				// Build filename display (in parens if different from title)
+				filenameDisplay := ""
+				if jobTitle != currentJob.Filename {
+					filenameDisplay = fmt.Sprintf(" (%s)", currentJob.Filename)
+				}
+
+				templateName := currentJob.Template
+				if templateName == "" {
+					templateName = "none"
+				}
+				template := theme.DefaultTheme.Muted.Italic(true).Render(fmt.Sprintf("template: %s", templateName))
+
+				// Get scroll position info
+				currentLine, totalLines := m.LogViewer.GetScrollInfo()
+				scrollInfo := ""
+				if totalLines > 0 {
+					scrollInfo = theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%d/%d]", currentLine, totalLines))
+				}
+
+				logHeader = fmt.Sprintf("%s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
+				logHeader = theme.DefaultTheme.Bold.Render(logHeader)
+			}
+
+			// Add header and spacing at the top, 1 space left padding
 			logViewContent := m.LogViewer.View()
-			logViewWithSpacing := "\n\n\n" + logViewContent
-			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(2).Render(logViewWithSpacing)
+
+			// Add scrollbar to the right side of log content
+			logContentWithScrollbar := m.addScrollbarToContent(logViewContent, m.LogViewerHeight-3) // -3 for header (1) + blank lines (2)
+
+			logViewWithHeader := logHeader + "\n\n" + logContentWithScrollbar
+			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
 			jobsPane := lipgloss.NewStyle().Width(jobsWidth).Render(jobsView)
 
 			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, separator, logView)
@@ -350,7 +388,45 @@ func (m Model) View() string {
 
 		} else {
 			// Horizontal split (top/bottom)
-			logView := lipgloss.NewStyle().PaddingLeft(1).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(m.LogViewer.View())
+			// Create log section header with job info - use current cursor job
+			var logHeader string
+			if m.Cursor < len(m.Jobs) {
+				currentJob := m.Jobs[m.Cursor]
+				jobIcon := getJobIcon(currentJob)
+				jobTitle := currentJob.Title
+				if jobTitle == "" {
+					jobTitle = currentJob.Filename
+				}
+				statusIcon := m.getStatusIcon(currentJob.Status)
+
+				// Build filename display (in parens if different from title)
+				filenameDisplay := ""
+				if jobTitle != currentJob.Filename {
+					filenameDisplay = fmt.Sprintf(" (%s)", currentJob.Filename)
+				}
+
+				templateName := currentJob.Template
+				if templateName == "" {
+					templateName = "none"
+				}
+				template := theme.DefaultTheme.Muted.Italic(true).Render(fmt.Sprintf("template: %s", templateName))
+
+				// Get scroll position info
+				currentLine, totalLines := m.LogViewer.GetScrollInfo()
+				scrollInfo := ""
+				if totalLines > 0 {
+					scrollInfo = theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%d/%d]", currentLine, totalLines))
+				}
+
+				logHeader = fmt.Sprintf("%s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
+				logHeader = theme.DefaultTheme.Bold.Render(logHeader) + "\n\n"
+			}
+
+			// Add scrollbar to log content
+			rawLogContent := m.LogViewer.View()
+			logContentWithScrollbar := m.addScrollbarToContent(rawLogContent, m.LogViewerHeight-3) // -3 for header (1) + blank lines (2)
+			logViewContent := logHeader + logContentWithScrollbar
+			logView := lipgloss.NewStyle().PaddingLeft(1).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logViewContent)
 
 			jobsPane := lipgloss.NewStyle().Render(jobsView)
 
@@ -492,6 +568,123 @@ func (m *Model) getVisibleJobCount() int {
 	}
 
 	return availableHeight
+}
+
+// addScrollbarToContent adds a scrollbar to the right side of log content
+func (m *Model) addScrollbarToContent(content string, viewHeight int) string {
+	lines := strings.Split(content, "\n")
+	currentLine, totalLines := m.LogViewer.GetScrollInfo()
+	scrollPercent := m.LogViewer.GetScrollPercent()
+
+	if totalLines == 0 || viewHeight == 0 {
+		return content
+	}
+
+	// Generate scrollbar
+	scrollbar := m.generateScrollbar(viewHeight, currentLine, totalLines, scrollPercent)
+
+	// The viewport has already wrapped content to its width
+	// We need to ensure each line + scrollbar fits within LogViewerWidth
+	// Account for: left padding (1) + content + space before scrollbar (1) + scrollbar (1) + right padding (1) = 4
+	// So max line width should be LogViewerWidth - 4
+	maxLineWidth := m.LogViewerWidth - 4
+
+	// Combine lines with scrollbar
+	var result []string
+	for i := 0; i < viewHeight; i++ {
+		scrollbarChar := " "
+		if i < len(scrollbar) {
+			scrollbarChar = scrollbar[i]
+		}
+
+		// Get the line, or empty string if we've run out of content lines
+		line := ""
+		if i < len(lines) {
+			line = lines[i]
+		}
+
+		// Measure the visual width (accounting for ANSI codes)
+		visualWidth := lipgloss.Width(line)
+
+		// Pad to fixed width to align scrollbar
+		if visualWidth < maxLineWidth {
+			// Add padding spaces
+			line = line + strings.Repeat(" ", maxLineWidth-visualWidth)
+		} else if visualWidth > maxLineWidth {
+			// Truncate if somehow too long (shouldn't happen if viewport is sized correctly)
+			// This is tricky with ANSI codes, so we use lipgloss to handle it
+			line = lipgloss.NewStyle().MaxWidth(maxLineWidth).Render(line)
+			// Re-pad after truncation
+			visualWidth = lipgloss.Width(line)
+			if visualWidth < maxLineWidth {
+				line = line + strings.Repeat(" ", maxLineWidth-visualWidth)
+			}
+		}
+
+		result = append(result, line+" "+scrollbarChar)
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// generateScrollbar creates a visual scrollbar
+func (m *Model) generateScrollbar(viewHeight, currentLine, totalLines int, scrollPercent float64) []string {
+	if totalLines == 0 || viewHeight == 0 {
+		return []string{}
+	}
+
+	scrollbar := make([]string, viewHeight)
+
+	// If content fits entirely in view, show all thumb
+	if totalLines <= viewHeight {
+		for i := 0; i < viewHeight; i++ {
+			scrollbar[i] = theme.DefaultTheme.Muted.Render("█") // All thumb
+		}
+		return scrollbar
+	}
+
+	// Calculate scrollbar thumb size proportional to visible content
+	thumbSize := max(1, (viewHeight*viewHeight)/totalLines)
+
+	// Use the viewport's scroll percentage directly (0.0 to 1.0)
+	// This is more reliable than calculating it ourselves
+	scrollProgress := scrollPercent
+	if scrollProgress < 0 {
+		scrollProgress = 0
+	}
+	if scrollProgress > 1 {
+		scrollProgress = 1
+	}
+
+	// Calculate thumb position in scrollbar
+	maxThumbStart := viewHeight - thumbSize
+	thumbStart := int(float64(maxThumbStart)*scrollProgress + 0.5) // +0.5 for rounding
+
+	// Ensure thumb doesn't go out of bounds
+	if thumbStart < 0 {
+		thumbStart = 0
+	}
+	if thumbStart > maxThumbStart {
+		thumbStart = maxThumbStart
+	}
+
+	// Generate scrollbar characters with muted styling
+	for i := 0; i < viewHeight; i++ {
+		if i >= thumbStart && i < thumbStart+thumbSize {
+			scrollbar[i] = theme.DefaultTheme.Muted.Render("█") // Thumb
+		} else {
+			scrollbar[i] = theme.DefaultTheme.Muted.Render("░") // Track
+		}
+	}
+
+	return scrollbar
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // adjustScrollOffset ensures the cursor is visible within the viewport

@@ -2,6 +2,7 @@ package status_tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -42,7 +43,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.LogViewer.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error loading logs: %v", msg.Err)))
 		} else {
-			m.LogViewer.SetContent(msg.Content)
+			// Apply muted styling to "No logs found" messages
+			content := msg.Content
+			if strings.HasPrefix(content, "No logs found") {
+				content = theme.DefaultTheme.Muted.Render(content)
+			}
+			m.LogViewer.SetContent(content)
 		}
 
 		var cmds []tea.Cmd

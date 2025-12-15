@@ -287,6 +287,24 @@ func (m Model) renderJobTree() string {
 	return s.String()
 }
 
+// getJobIcon returns the icon for a job type
+func getJobIcon(job *orchestration.Job) string {
+	switch job.Type {
+	case "interactive_agent":
+		return theme.IconInteractiveAgent
+	case "headless_agent":
+		return theme.IconHeadlessAgent
+	case "chat":
+		return theme.IconChat
+	case "oneshot":
+		return theme.IconOneshot
+	case "shell":
+		return theme.IconShell
+	default:
+		return theme.IconChat // Default fallback
+	}
+}
+
 // getStatusIcon returns a colored dot indicator for a job status
 func (m Model) getStatusIcon(status orchestration.JobStatus) string {
 	statusStyles := getStatusStyles()
