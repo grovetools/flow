@@ -547,6 +547,65 @@ func (m *Model) calculateOptimalLogHeight() int {
 	return logHeight
 }
 
+// calculateMinJobsPaneWidth calculates the minimum width needed for the jobs pane
+// based on actual content (job names, indentation, type, status)
+func (m *Model) calculateMinJobsPaneWidth() int {
+	if len(m.Jobs) == 0 {
+		return 60 // Default minimum
+	}
+
+	maxJobColWidth := 0
+	maxTypeColWidth := 0
+	maxStatusColWidth := 0
+
+	for _, job := range m.Jobs {
+		// Calculate JOB column width: indent + tree prefix + icon + space + filename
+		indent := m.JobIndents[job.ID]
+		treeChars := 0
+		if indent > 0 {
+			treeChars = (indent * 2) + 3 // "  " per level + "└─ " or "├─ "
+		}
+
+		// Icon (3 chars with space) + filename
+		jobColWidth := treeChars + 3 + len(job.Filename)
+		if jobColWidth > maxJobColWidth {
+			maxJobColWidth = jobColWidth
+		}
+
+		// Calculate TYPE column width: icon + space + type name
+		typeWidth := 3 + len(job.Type) // icon + space + type
+		if typeWidth > maxTypeColWidth {
+			maxTypeColWidth = typeWidth
+		}
+
+		// Calculate STATUS column width
+		statusWidth := len(job.Status)
+		if statusWidth > maxStatusColWidth {
+			maxStatusColWidth = statusWidth
+		}
+	}
+
+	// SEL column is fixed at ~5 chars
+	selWidth := 5
+
+	// Add padding and borders: each column has padding, plus table borders
+	// Typical table has: | SEL | JOB | TYPE | STATUS |
+	// That's 5 separators + column padding (2 per column = 8)
+	borders := 13
+
+	totalWidth := selWidth + maxJobColWidth + maxTypeColWidth + maxStatusColWidth + borders
+
+	// Apply reasonable bounds
+	if totalWidth < 60 {
+		totalWidth = 60 // Absolute minimum
+	}
+	if totalWidth > 100 {
+		totalWidth = 100 // Cap at reasonable max to give logs more space
+	}
+
+	return totalWidth
+}
+
 // getVisibleJobCount returns how many jobs can be displayed in the viewport
 func (m *Model) getVisibleJobCount() int {
 	if m.Height == 0 {

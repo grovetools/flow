@@ -312,17 +312,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.adjustScrollOffset()
 
 		// Always calculate JobsPaneWidth for vertical split, even if logs aren't shown yet
-		const minJobsWidth = 85
 		const minLogsWidth = 50
 		const separatorWidth = 3 // separator + margins
 
 		if m.LogSplitVertical {
+			// Calculate actual width needed based on job content
+			minJobsWidth := m.calculateMinJobsPaneWidth()
+
 			if msg.Width < minJobsWidth+minLogsWidth+separatorWidth {
 				// Terminal is too narrow, fall back to horizontal split
 				m.LogSplitVertical = false
 				m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
 			} else {
-				// Enough space for vertical split, prioritize jobs pane
+				// Enough space for vertical split, use calculated width
 				m.JobsPaneWidth = minJobsWidth
 			}
 		}
@@ -659,17 +661,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.LogSplitVertical = !m.LogSplitVertical
 
 				// Always calculate JobsPaneWidth for vertical split
-				const minJobsWidth = 85
 				const minLogsWidth = 50
 				const separatorWidth = 3 // separator + margins
 
 				if m.LogSplitVertical {
+					// Calculate actual width needed based on job content
+					minJobsWidth := m.calculateMinJobsPaneWidth()
+
 					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
 						// Terminal is too narrow, fall back to horizontal split
 						m.LogSplitVertical = false
 						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
 					} else {
-						// Enough space for vertical split, prioritize jobs pane
+						// Enough space for vertical split, use calculated width
 						m.JobsPaneWidth = minJobsWidth
 					}
 				}
@@ -789,17 +793,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				isRunning := job.Status == orchestration.JobStatusRunning
 
 				// Always calculate JobsPaneWidth for vertical split
-				const minJobsWidth = 85
 				const minLogsWidth = 50
 				const separatorWidth = 3 // separator + margins
 
 				if m.LogSplitVertical {
+					// Calculate actual width needed based on job content
+					minJobsWidth := m.calculateMinJobsPaneWidth()
+
 					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
 						// Terminal is too narrow, fall back to horizontal split
 						m.LogSplitVertical = false
 						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
 					} else {
-						// Enough space for vertical split, prioritize jobs pane
+						// Enough space for vertical split, use calculated width
 						m.JobsPaneWidth = minJobsWidth
 					}
 				}
@@ -918,17 +924,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Focus = LogsPane
 
 				// Always calculate JobsPaneWidth for vertical split
-				const minJobsWidth = 85
 				const minLogsWidth = 50
 				const separatorWidth = 3 // separator + margins
 
 				if m.LogSplitVertical {
+					// Calculate actual width needed based on job content
+					minJobsWidth := m.calculateMinJobsPaneWidth()
+
 					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
 						// Terminal is too narrow, fall back to horizontal split
 						m.LogSplitVertical = false
 						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
 					} else {
-						// Enough space for vertical split, prioritize jobs pane
+						// Enough space for vertical split, use calculated width
 						m.JobsPaneWidth = minJobsWidth
 					}
 				}
