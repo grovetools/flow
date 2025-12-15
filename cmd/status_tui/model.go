@@ -404,8 +404,7 @@ func (m Model) View() string {
 	if m.ShowLogs {
 		logsPane, separator := m.renderLogsPane(contentWidth)
 		if m.LogSplitVertical {
-			// Constrain jobs pane height for vertical split
-			// Account for: footer + newline before footer + top/bottom margins
+			// Vertical split: constrain jobs pane height
 			maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
 			if maxJobsPaneHeight < 10 {
 				maxJobsPaneHeight = 10
@@ -415,17 +414,17 @@ func (m Model) View() string {
 			combinedPanes := lipgloss.JoinHorizontal(lipgloss.Top, jobsPaneStyled, separator, logsPane)
 			finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, "\n", footer)
 		} else {
-			// Constrain jobs pane height for horizontal split
-			jobsPaneHeight := m.Height - m.LogViewerHeight - (horizontalDividerHeight + footerHeight + topMargin + bottomMargin)
-			if jobsPaneHeight < 10 {
-				jobsPaneHeight = 10
+			// Horizontal split: account for log viewer height
+			maxJobsPaneHeight := m.Height - m.LogViewerHeight - (horizontalDividerHeight + footerHeight + topMargin + bottomMargin)
+			if maxJobsPaneHeight < 10 {
+				maxJobsPaneHeight = 10
 			}
-			jobsPaneStyled := lipgloss.NewStyle().MaxHeight(jobsPaneHeight).Render(jobsPane)
+			jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxJobsPaneHeight).Render(jobsPane)
 
 			finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane, footer)
 		}
 	} else {
-		// No logs view - use same height calculation as vertical split mode
+		// No logs: use same calculation as vertical split
 		maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
 		if maxJobsPaneHeight < 10 {
 			maxJobsPaneHeight = 10
@@ -614,14 +613,14 @@ func (m *Model) getVisibleJobCount() int {
 
 	availableHeight := m.Height - chromeLines
 
-	// If logs are shown in horizontal split, reduce available height
+	// Adjust for log viewer in horizontal split
 	if m.ShowLogs && !m.LogSplitVertical {
 		availableHeight -= (m.LogViewerHeight + horizontalDividerHeight)
 	}
 
-	// In vertical split mode with logs OR no-logs mode, account for additional spacing
+	// Account for footer spacing in vertical split and no-logs modes
 	if (m.ShowLogs && m.LogSplitVertical) || !m.ShowLogs {
-		availableHeight -= 2 // Account for newline and spacing before footer (same as vertical split)
+		availableHeight -= 2 // Newline and spacing before footer
 	}
 
 	if availableHeight < 1 {
