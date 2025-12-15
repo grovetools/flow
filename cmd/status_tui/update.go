@@ -58,7 +58,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger.WithFields(map[string]interface{}{
 				"job_id": m.ActiveLogJob.ID,
 			}).Info("Starting agent log streaming")
-			cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, m.Program))
+			cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, m.Program, msg.ExistingLogs))
 		}
 
 		if len(cmds) > 0 {

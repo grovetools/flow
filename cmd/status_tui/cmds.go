@@ -15,6 +15,7 @@ import (
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/tui/components/logviewer"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
@@ -42,10 +43,11 @@ func retryLoadAgentLogsAfterDelay() tea.Cmd {
 
 // LogContentLoadedMsg is sent when historical log content has been loaded from a file.
 type LogContentLoadedMsg struct {
-	Content      string
-	Err          error
-	ShouldRetry  bool // If true, we should retry loading after a delay
-	StartStreaming bool // If true, we should start streaming (agent session is ready)
+	Content        string
+	Err            error
+	ShouldRetry    bool   // If true, we should retry loading after a delay
+	StartStreaming bool   // If true, we should start streaming (agent session is ready)
+	ExistingLogs   string // Existing logs to write to file before streaming
 }
 
 // loadLogContentCmd creates a command to asynchronously read a job's log file.
@@ -132,27 +134,34 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			logsStr := string(existingLogs)
 			logsStr = strings.ReplaceAll(logsStr, "=== End of session ===", "")
 			logsStr = strings.TrimRight(logsStr, "\n")
-			content = logsStr + "\n\n--- Live Stream (new content below) ---\n\n"
+			// Create an attractive separator for live stream content
+			separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
+			streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
+			content = logsStr + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
 		} else {
 			content = "⏳ Agent session found, waiting for logs...\n"
 		}
 
 		// Signal that we should start streaming now that the session is ready
 		logger.WithFields(map[string]interface{}{
-			"job_spec": jobSpec,
+			"job_spec":              jobSpec,
+			"existing_logs_length":  len(existingLogs),
 		}).Info("Starting agent log stream")
 
 		return LogContentLoadedMsg{
 			Content:        content,
 			ShouldRetry:    false,
 			StartStreaming: true,
+			ExistingLogs:   string(existingLogs), // Pass existing logs to be written to file
 		}
 	}
 }
 
 // streamAgentLogsCmd creates a background process to stream agent logs.
-func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, program *tea.Program) tea.Cmd {
+func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, program *tea.Program, existingLogs string) tea.Cmd {
 	return func() tea.Msg {
+		logger := logging.NewLogger("flow-tui")
+
 		// Get the log file path for this job
 		logPath, err := orchestration.GetJobLogPath(plan, job)
 		if err != nil {
@@ -163,6 +172,20 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, progra
 		logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err)}
+		}
+
+		// Write existing logs to the file first (if any)
+		if existingLogs != "" {
+			logger.WithFields(map[string]interface{}{
+				"log_path":    logPath,
+				"logs_length": len(existingLogs),
+			}).Info("Writing existing agent logs to file before streaming")
+
+			if _, err := logFile.WriteString(existingLogs); err != nil {
+				logFile.Close()
+				return LogContentLoadedMsg{Err: fmt.Errorf("failed to write existing logs: %w", err)}
+			}
+			logFile.Sync() // Ensure existing logs are written
 		}
 
 		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
@@ -193,9 +216,10 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, progra
 				// Write to log file
 				fmt.Fprintln(logFile, line)
 				logFile.Sync() // Ensure it's written immediately
-				// Send to TUI as a LogLineMsg
+				// Send to TUI as a LogLineMsg with "Job Output" workspace to avoid [] prefix
 				program.Send(logviewer.LogLineMsg{
-					Line: line,
+					Workspace: "Job Output",
+					Line:      line,
 				})
 			}
 			// Check for scanner errors
