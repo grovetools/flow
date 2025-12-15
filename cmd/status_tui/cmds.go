@@ -91,6 +91,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		// Try to get session info first to see if the agent has started
 		logger.Debug("About to call get-session-info")
 		sessionCmd := exec.Command("grove", "aglogs", "get-session-info", jobSpec)
+		sessionCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 		logger.Debug("Created session command, calling Output()")
 		sessionInfo, sessionErr := sessionCmd.Output() // Use Output() instead of CombinedOutput() to only get stdout
 		logger.WithFields(map[string]interface{}{
@@ -133,6 +134,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 
 		// Read existing agent logs using 'aglogs read'
 		readCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+		readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 		existingLogs, err := readCmd.Output()
 
 		logger.WithFields(map[string]interface{}{
@@ -224,6 +226,7 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, progra
 
 		// Start streaming new content
 		streamCmd := exec.Command("grove", "aglogs", "stream", jobSpec)
+		streamCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 
 		stdout, err := streamCmd.StdoutPipe()
 		if err != nil {
