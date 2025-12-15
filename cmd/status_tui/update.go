@@ -311,17 +311,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Adjust scroll offset to show cursor at bottom on first render
 		m.adjustScrollOffset()
 
+		// Always calculate JobsPaneWidth for vertical split, even if logs aren't shown yet
+		const minJobsWidth = 85
+		const minLogsWidth = 50
+		const separatorWidth = 3 // separator + margins
+
+		if m.LogSplitVertical {
+			if msg.Width < minJobsWidth+minLogsWidth+separatorWidth {
+				// Terminal is too narrow, fall back to horizontal split
+				m.LogSplitVertical = false
+				m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
+			} else {
+				// Enough space for vertical split, prioritize jobs pane
+				m.JobsPaneWidth = minJobsWidth
+			}
+		}
+
 		// Calculate log viewer dimensions based on split mode
 		if m.ShowLogs {
 			if m.LogSplitVertical {
 				// Vertical split (side-by-side)
-				// No borders, just separator (1 char) - much simpler calculation
-				m.LogViewerWidth = (msg.Width / 2) - 2
+				m.LogViewerWidth = msg.Width - m.JobsPaneWidth - separatorWidth
 				m.LogViewerHeight = msg.Height - 5 // Account for header, footer, and margins
 			} else {
 				// Horizontal split (top/bottom)
 				m.LogViewerWidth = msg.Width - 4
-				// Calculate optimal height: expand to fill space but cap at 50%
 				m.LogViewerHeight = m.calculateOptimalLogHeight()
 			}
 
@@ -643,10 +657,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.ToggleLayout):
 			if m.ShowLogs {
 				m.LogSplitVertical = !m.LogSplitVertical
+
+				// Always calculate JobsPaneWidth for vertical split
+				const minJobsWidth = 85
+				const minLogsWidth = 50
+				const separatorWidth = 3 // separator + margins
+
+				if m.LogSplitVertical {
+					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
+						// Terminal is too narrow, fall back to horizontal split
+						m.LogSplitVertical = false
+						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
+					} else {
+						// Enough space for vertical split, prioritize jobs pane
+						m.JobsPaneWidth = minJobsWidth
+					}
+				}
+
 				// Recalculate dimensions based on new split mode
 				if m.LogSplitVertical {
 					// Vertical split (side-by-side)
-					m.LogViewerWidth = (m.Width / 2) - 2
+					m.LogViewerWidth = m.Width - m.JobsPaneWidth - separatorWidth
 					m.LogViewerHeight = m.Height - 5
 				} else {
 					// Horizontal split (top/bottom)
@@ -757,10 +788,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
 				isRunning := job.Status == orchestration.JobStatusRunning
 
+				// Always calculate JobsPaneWidth for vertical split
+				const minJobsWidth = 85
+				const minLogsWidth = 50
+				const separatorWidth = 3 // separator + margins
+
+				if m.LogSplitVertical {
+					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
+						// Terminal is too narrow, fall back to horizontal split
+						m.LogSplitVertical = false
+						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
+					} else {
+						// Enough space for vertical split, prioritize jobs pane
+						m.JobsPaneWidth = minJobsWidth
+					}
+				}
+
 				// Calculate log viewer dimensions based on split mode
 				if m.LogSplitVertical {
 					// Vertical split (side-by-side)
-					m.LogViewerWidth = (m.Width / 2) - 2
+					m.LogViewerWidth = m.Width - m.JobsPaneWidth - separatorWidth
 					m.LogViewerHeight = m.Height - 5
 				} else {
 					// Horizontal split (top/bottom)
@@ -870,10 +917,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ShowLogs = true
 				m.Focus = LogsPane
 
+				// Always calculate JobsPaneWidth for vertical split
+				const minJobsWidth = 85
+				const minLogsWidth = 50
+				const separatorWidth = 3 // separator + margins
+
+				if m.LogSplitVertical {
+					if m.Width < minJobsWidth+minLogsWidth+separatorWidth {
+						// Terminal is too narrow, fall back to horizontal split
+						m.LogSplitVertical = false
+						m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
+					} else {
+						// Enough space for vertical split, prioritize jobs pane
+						m.JobsPaneWidth = minJobsWidth
+					}
+				}
+
 				// Calculate log viewer dimensions based on split mode
 				if m.LogSplitVertical {
 					// Vertical split (side-by-side)
-					m.LogViewerWidth = (m.Width / 2) - 2
+					m.LogViewerWidth = m.Width - m.JobsPaneWidth - separatorWidth
 					m.LogViewerHeight = m.Height - 5
 				} else {
 					// Horizontal split (top/bottom)

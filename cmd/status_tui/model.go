@@ -84,6 +84,7 @@ type Model struct {
 	Program            *tea.Program // Reference to the tea.Program for sending messages
 	LogViewerWidth     int       // Cached log viewer width
 	LogViewerHeight    int       // Cached log viewer height
+	JobsPaneWidth      int       // Cached jobs pane width for vertical split
 }
 
 // New creates a new Model
@@ -307,7 +308,7 @@ func (m Model) View() string {
 
 		if m.LogSplitVertical {
 			// Vertical split (side-by-side)
-			jobsWidth = m.Width/2 - 2
+			jobsWidth = m.JobsPaneWidth
 
 			// Create a single-column vertical separator split in half
 			// Top half highlights when jobs pane focused, bottom half when logs focused
