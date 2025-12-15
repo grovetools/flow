@@ -29,10 +29,87 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case LogContentLoadedMsg:
+		logger := logging.NewLogger("flow-tui")
+		logger.WithFields(map[string]interface{}{
+			"has_error":        msg.Err != nil,
+			"should_retry":     msg.ShouldRetry,
+			"start_streaming":  msg.StartStreaming,
+			"content_length":   len(msg.Content),
+			"show_logs":        m.ShowLogs,
+			"active_log_job":   m.ActiveLogJob != nil,
+		}).Info("Received LogContentLoadedMsg")
+
 		if msg.Err != nil {
 			m.LogViewer.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error loading logs: %v", msg.Err)))
 		} else {
 			m.LogViewer.SetContent(msg.Content)
+		}
+
+		var cmds []tea.Cmd
+
+		// If we should retry (agent session hasn't started yet), schedule a retry
+		if msg.ShouldRetry {
+			logger.Info("Scheduling retry for agent log loading")
+			cmds = append(cmds, retryLoadAgentLogsAfterDelay())
+		}
+
+		// If we should start streaming (session is ready), start the stream
+		if msg.StartStreaming && m.ActiveLogJob != nil {
+			logger.WithFields(map[string]interface{}{
+				"job_id": m.ActiveLogJob.ID,
+			}).Info("Starting agent log streaming")
+			cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, m.Program))
+		}
+
+		if len(cmds) > 0 {
+			logger.WithFields(map[string]interface{}{
+				"num_cmds": len(cmds),
+			}).Info("Returning batched commands")
+			return m, tea.Batch(cmds...)
+		}
+		logger.Info("No commands to return")
+		return m, nil
+
+	case RetryLoadAgentLogsMsg:
+		logger := logging.NewLogger("flow-tui")
+		logger.WithFields(map[string]interface{}{
+			"show_logs":      m.ShowLogs,
+			"has_active_job": m.ActiveLogJob != nil,
+		}).Info("Received RetryLoadAgentLogsMsg")
+
+		// Only retry if we're still showing logs for an agent job
+		if m.ShowLogs && m.ActiveLogJob != nil {
+			// Get fresh job status from the plan (don't use cached ActiveLogJob)
+			var currentJob *orchestration.Job
+			for _, job := range m.Jobs {
+				if job.ID == m.ActiveLogJob.ID {
+					currentJob = job
+					break
+				}
+			}
+
+			if currentJob != nil {
+				isAgentJob := currentJob.Type == orchestration.JobTypeInteractiveAgent || currentJob.Type == orchestration.JobTypeHeadlessAgent
+
+				logger.WithFields(map[string]interface{}{
+					"job_id":       currentJob.ID,
+					"is_agent_job": isAgentJob,
+					"job_status":   currentJob.Status,
+				}).Info("Retry conditions checked")
+
+				// Retry as long as it's an agent job, regardless of status
+				// This allows us to pick up logs even if the job completed quickly
+				if isAgentJob {
+					// Update the active log job reference and retry loading agent logs
+					m.ActiveLogJob = currentJob
+					logger.Info("Retrying agent log load")
+					return m, loadAndStreamAgentLogsCmd(m.Plan, currentJob)
+				}
+			} else {
+				logger.Warn("Could not find current job for retry")
+			}
+		} else {
+			logger.Info("Not retrying - logs not shown or no active job")
 		}
 		return m, nil
 
@@ -670,6 +747,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				job := m.Jobs[m.Cursor]
 				m.ActiveLogJob = job
 
+				// Check if this is a running agent job
+				isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+				isRunning := job.Status == orchestration.JobStatusRunning
+
 				// Calculate log viewer dimensions based on split mode
 				if m.LogSplitVertical {
 					// Vertical split (side-by-side)
@@ -691,6 +772,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
 				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
 
+				if isAgentJob && isRunning {
+					// Live stream agent logs - load existing (streaming will start automatically when ready)
+					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Streaming agent logs for %s (press 'v' to close)", job.Title))
+					return m, loadAndStreamAgentLogsCmd(m.Plan, job)
+				}
+
+				// Fallback to existing behavior for other jobs or non-running agents
 				m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Viewing logs for %s (press 'v' to close)", job.Title))
 				return m, loadLogContentCmd(m.Plan, job)
 			}
@@ -827,7 +915,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					runCmd = runJobsCmd(m.RunLogFile, m.PlanDir, jobsToRun)
 				}
 
-				return m, runCmd
+				// For interactive agent jobs, also start agent log streaming
+				var cmds []tea.Cmd
+				cmds = append(cmds, runCmd)
+
+				// Check if any of the jobs being run are interactive agents
+				for _, job := range jobsToRun {
+					isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+
+					logger.WithFields(map[string]interface{}{
+						"job_id":       job.ID,
+						"job_type":     job.Type,
+						"is_agent_job": isAgentJob,
+					}).Debug("Checking if job is agent type")
+
+					if isAgentJob {
+						// Set this as the active log job
+						m.ActiveLogJob = job
+
+						logger.WithFields(map[string]interface{}{
+							"job_id": job.ID,
+						}).Info("Starting agent log streaming for running job")
+
+						// Start streaming agent logs (with retry for when session starts)
+						cmds = append(cmds, loadAndStreamAgentLogsCmd(m.Plan, job))
+						break // Only handle the first agent job
+					}
+				}
+
+				return m, tea.Batch(cmds...)
 			}
 
 		case key.Matches(msg, m.KeyMap.SetCompleted):
