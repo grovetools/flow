@@ -118,6 +118,19 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			}
 		}
 
+		// First, read orchestrator logs that are already in the .log file
+		logPath, err := orchestration.GetJobLogPath(plan, job)
+		var orchestratorLogs string
+		if err == nil {
+			if existingContent, err := os.ReadFile(logPath); err == nil {
+				orchestratorLogs = string(existingContent)
+				logger.WithFields(map[string]interface{}{
+					"log_path":       logPath,
+					"content_length": len(orchestratorLogs),
+				}).Debug("Read existing orchestrator logs from file")
+			}
+		}
+
 		// Read existing agent logs using 'aglogs read'
 		readCmd := exec.Command("grove", "aglogs", "read", jobSpec)
 		existingLogs, err := readCmd.Output()
@@ -129,6 +142,11 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		}).Debug("Read existing agent logs")
 
 		content := ""
+		// Start with orchestrator logs if we have them
+		if orchestratorLogs != "" {
+			content = orchestratorLogs + "\n"
+		}
+
 		if err == nil && len(existingLogs) > 0 {
 			// Strip the "=== End of session ===" marker since we're going to stream more
 			logsStr := string(existingLogs)
@@ -137,9 +155,11 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			// Create an attractive separator for live stream content
 			separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
 			streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
-			content = logsStr + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
+			content += logsStr + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
 		} else {
-			content = "⏳ Agent session found, waiting for logs...\n"
+			if content == "" {
+				content = "⏳ Agent session found, waiting for logs...\n"
+			}
 		}
 
 		// Signal that we should start streaming now that the session is ready
@@ -168,14 +188,22 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, progra
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to get log path: %w", err)}
 		}
 
+		// Read the current file content to check if agent logs are already there
+		currentContent, err := os.ReadFile(logPath)
+		alreadyHasAgentLogs := false
+		if err == nil {
+			// Check if the file already contains the agent session header
+			alreadyHasAgentLogs = strings.Contains(string(currentContent), "=== Job:")
+		}
+
 		// Open the log file in append mode
 		logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err)}
 		}
 
-		// Write existing logs to the file first (if any)
-		if existingLogs != "" {
+		// Write existing agent logs to the file only if not already present
+		if existingLogs != "" && !alreadyHasAgentLogs {
 			logger.WithFields(map[string]interface{}{
 				"log_path":    logPath,
 				"logs_length": len(existingLogs),
@@ -186,6 +214,10 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, progra
 				return LogContentLoadedMsg{Err: fmt.Errorf("failed to write existing logs: %w", err)}
 			}
 			logFile.Sync() // Ensure existing logs are written
+		} else if alreadyHasAgentLogs {
+			logger.WithFields(map[string]interface{}{
+				"log_path": logPath,
+			}).Debug("Agent logs already in file, skipping duplicate write")
 		}
 
 		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
