@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/cli"
@@ -154,7 +155,16 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent {
 			pid, _, err := findClaudeSessionInfo(job.ID)
 			if err != nil {
-				// Could not find session info (e.g., session directory deleted), mark as interrupted
+				// Give agent jobs a grace period to register with grove-hooks
+				// Agents don't register until their first hook call, which can take 5-30 seconds
+				gracePeriod := 30 * time.Second
+				timeSinceUpdate := time.Since(job.UpdatedAt)
+
+				if timeSinceUpdate < gracePeriod {
+					// Job just started, give it time to register
+					continue
+				}
+				// Grace period expired, mark as interrupted
 				job.Status = JobStatusInterrupted
 				continue
 			}

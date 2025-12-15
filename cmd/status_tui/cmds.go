@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -127,7 +128,11 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 
 		content := ""
 		if err == nil && len(existingLogs) > 0 {
-			content = string(existingLogs) + "\n\n--- Live Stream (new content below) ---\n\n"
+			// Strip the "=== End of session ===" marker since we're going to stream more
+			logsStr := string(existingLogs)
+			logsStr = strings.ReplaceAll(logsStr, "=== End of session ===", "")
+			logsStr = strings.TrimRight(logsStr, "\n")
+			content = logsStr + "\n\n--- Live Stream (new content below) ---\n\n"
 		} else {
 			content = "⏳ Agent session found, waiting for logs...\n"
 		}
