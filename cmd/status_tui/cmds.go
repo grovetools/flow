@@ -17,6 +17,7 @@ import (
 	"github.com/mattsolo1/grove-core/tui/components/logviewer"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"gopkg.in/yaml.v3"
 )
 
 // Message types
@@ -33,6 +34,21 @@ type UpdateDepsCompleteMsg struct{ Err error }
 type CreateJobCompleteMsg struct{ Err error }
 type JobRunFinishedMsg struct{ Err error }
 type RetryLoadAgentLogsMsg struct{}
+
+type FrontmatterContentLoadedMsg struct {
+	Content string
+	Err     error
+}
+
+type BriefingContentLoadedMsg struct {
+	Content string
+	Err     error
+}
+
+type EditContentLoadedMsg struct {
+	Content string
+	Err     error
+}
 
 // retryLoadAgentLogsAfterDelay creates a command that waits and then triggers a retry
 func retryLoadAgentLogsAfterDelay() tea.Cmd {
@@ -69,6 +85,80 @@ func loadLogContentCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd
 		}
 
 		return LogContentLoadedMsg{Content: string(content)}
+	}
+}
+
+// loadFrontmatterCmd creates a command to load and format a job's frontmatter.
+func loadFrontmatterCmd(job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		content, err := os.ReadFile(job.FilePath)
+		if err != nil {
+			return FrontmatterContentLoadedMsg{Err: err}
+		}
+
+		fm, _, err := orchestration.ParseFrontmatter(content)
+		if err != nil {
+			return FrontmatterContentLoadedMsg{Err: err}
+		}
+
+		// Marshal to YAML for pretty printing
+		yamlBytes, err := yaml.Marshal(fm)
+		if err != nil {
+			return FrontmatterContentLoadedMsg{Err: err}
+		}
+
+		return FrontmatterContentLoadedMsg{Content: string(yamlBytes)}
+	}
+}
+
+// loadBriefingCmd finds and loads the most recent briefing file for a job.
+func loadBriefingCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		artifactsDir := filepath.Join(plan.Directory, ".artifacts")
+		pattern := fmt.Sprintf("briefing-%s-*.xml", job.ID)
+		files, err := filepath.Glob(filepath.Join(artifactsDir, pattern))
+		if err != nil {
+			return BriefingContentLoadedMsg{Err: err}
+		}
+
+		if len(files) == 0 {
+			return BriefingContentLoadedMsg{Content: "No briefing file found for this job."}
+		}
+
+		// Find the most recent file
+		var mostRecentFile string
+		var latestModTime time.Time
+		for _, file := range files {
+			info, err := os.Stat(file)
+			if err == nil {
+				if info.ModTime().After(latestModTime) {
+					latestModTime = info.ModTime()
+					mostRecentFile = file
+				}
+			}
+		}
+
+		if mostRecentFile == "" {
+			return BriefingContentLoadedMsg{Content: "Could not determine the most recent briefing file."}
+		}
+
+		content, err := os.ReadFile(mostRecentFile)
+		if err != nil {
+			return BriefingContentLoadedMsg{Err: err}
+		}
+
+		return BriefingContentLoadedMsg{Content: string(content)}
+	}
+}
+
+// loadJobFileContentCmd creates a command to load the raw content of a job file.
+func loadJobFileContentCmd(job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		content, err := os.ReadFile(job.FilePath)
+		if err != nil {
+			return EditContentLoadedMsg{Err: err}
+		}
+		return EditContentLoadedMsg{Content: string(content)}
 	}
 }
 

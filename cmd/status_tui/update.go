@@ -76,6 +76,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.Info("No commands to return")
 		return m, nil
 
+	case FrontmatterContentLoadedMsg:
+		if m.ActiveDetailPane == FrontmatterPane {
+			if msg.Err != nil {
+				m.frontmatterViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
+			} else {
+				m.frontmatterViewport.SetContent(msg.Content)
+			}
+		}
+		return m, nil
+
+	case BriefingContentLoadedMsg:
+		if m.ActiveDetailPane == BriefingPane {
+			if msg.Err != nil {
+				m.briefingViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
+			} else {
+				m.briefingViewport.SetContent(msg.Content)
+			}
+		}
+		return m, nil
+
+	case EditContentLoadedMsg:
+		if m.ActiveDetailPane == EditPane {
+			if msg.Err != nil {
+				m.editViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
+			} else {
+				m.editViewport.SetContent(msg.Content)
+			}
+		}
+		return m, nil
+
 	case RetryLoadAgentLogsMsg:
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
@@ -313,6 +343,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Centralized layout calculation
 		m.updateLayoutDimensions()
+
+		// Update viewport sizes
+		m.frontmatterViewport.Width = m.LogViewerWidth
+		m.frontmatterViewport.Height = m.LogViewerHeight
+		m.briefingViewport.Width = m.LogViewerWidth
+		m.briefingViewport.Height = m.LogViewerHeight
+		m.editViewport.Width = m.LogViewerWidth
+		m.editViewport.Height = m.LogViewerHeight
 
 		// Start log viewer on first window size message if we have jobs and logs are enabled
 		if m.ShowLogs && m.ActiveLogJob == nil && len(m.Jobs) > 0 {
@@ -581,8 +619,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.WaitingForG {
 					m.WaitingForG = false
 				}
-				// Delegate other keys to the log viewer for scrolling, etc.
-				m.LogViewer, cmd = m.LogViewer.Update(msg)
+
+				// Delegate other keys to the active viewport for scrolling, etc.
+				switch m.ActiveDetailPane {
+				case LogsPaneDetail:
+					m.LogViewer, cmd = m.LogViewer.Update(msg)
+				case FrontmatterPane:
+					m.frontmatterViewport, cmd = m.frontmatterViewport.Update(msg)
+				case BriefingPane:
+					m.briefingViewport, cmd = m.briefingViewport.Update(msg)
+				case EditPane:
+					m.editViewport, cmd = m.editViewport.Update(msg)
+				}
 				return m, cmd
 			}
 		}
@@ -731,6 +779,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
 				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
 
+				// Update viewport sizes for all panes
+				m.frontmatterViewport.Width = m.LogViewerWidth
+				m.frontmatterViewport.Height = m.LogViewerHeight
+				m.briefingViewport.Width = m.LogViewerWidth
+				m.briefingViewport.Height = m.LogViewerHeight
+				m.editViewport.Width = m.LogViewerWidth
+				m.editViewport.Height = m.LogViewerHeight
+
 				// Trigger content loading for the active pane
 				switch m.ActiveDetailPane {
 				case LogsPaneDetail:
@@ -743,19 +799,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, loadLogContentCmd(m.Plan, job)
 				case FrontmatterPane:
 					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title))
-					// Placeholder: Replace with actual load command in Phase 2
-					m.frontmatterContent = "Frontmatter for " + job.Title
-					return m, nil
+					return m, loadFrontmatterCmd(job)
 				case BriefingPane:
 					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading briefing for %s...", job.Title))
-					// Placeholder: Replace with actual load command in Phase 2
-					m.briefingContent = "Briefing for " + job.Title
-					return m, nil
+					return m, loadBriefingCmd(m.Plan, job)
 				case EditPane:
 					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
-					// Placeholder: Replace with actual load command in Phase 3
-					m.editContent = "File content for " + job.Title
-					return m, nil
+					return m, loadJobFileContentCmd(job)
 				}
 			}
 

@@ -28,7 +28,6 @@ type KeyMap struct {
 	GoToBottom      key.Binding
 	PageUp            key.Binding
 	PageDown          key.Binding
-	ViewLogs          key.Binding
 	CycleDetailPane   key.Binding
 	SwitchFocus       key.Binding
 	ToggleLayout      key.Binding
@@ -120,10 +119,6 @@ func NewKeyMap() KeyMap {
 		PageDown: key.NewBinding(
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "page down"),
-		),
-		ViewLogs: key.NewBinding(
-			key.WithKeys("v"),
-			key.WithHelp("v", "toggle log view"),
 		),
 		CycleDetailPane: key.NewBinding(
 			key.WithKeys("v"),

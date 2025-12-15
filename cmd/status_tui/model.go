@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/tui/components/help"
@@ -106,9 +107,9 @@ type Model struct {
 	LogViewer           logviewer.Model
 	ActiveLogJob        *orchestration.Job
 	ActiveDetailPane    DetailPane
-	frontmatterContent  string
-	briefingContent     string
-	editContent         string
+	frontmatterViewport viewport.Model
+	briefingViewport    viewport.Model
+	editViewport        viewport.Model
 	Focus               ViewFocus // Track which pane is active
 	LogSplitVertical    bool      // Track log viewer layout
 	IsRunningJob        bool      // Track if a job is currently running
@@ -134,6 +135,11 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		Build()
 
 	logViewerModel := logviewer.New(80, 20) // Initial size, will be updated
+
+	// Initialize new viewports
+	frontmatterVp := viewport.New(80, 20)
+	briefingVp := viewport.New(80, 20)
+	editVp := viewport.New(80, 20)
 
 	// Create orchestrator for direct job execution
 	orchConfig := &orchestration.OrchestratorConfig{
@@ -189,9 +195,12 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		ActiveDetailPane: NoPane,
 		Focus:            JobsPane,
 		LogSplitVertical: false, // Default to horizontal split
-		IsRunningJob:     false,
-		RunLogFile:       runLogPath,
-		Program:          nil, // Will be set by SetProgram after creating the program
+		IsRunningJob:        false,
+		RunLogFile:          runLogPath,
+		Program:             nil, // Will be set by SetProgram after creating the program
+		frontmatterViewport: frontmatterVp,
+		briefingViewport:    briefingVp,
+		editViewport:        editVp,
 	}
 }
 
@@ -260,8 +269,8 @@ func (m Model) renderJobsPane(contentWidth int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, styledHeader, mainContent, scrollIndicator)
 }
 
-// renderLogsPane renders the bottom (or right) pane containing the log viewer.
-func (m Model) renderLogsPane(contentWidth int) (string, string) {
+// renderLogsPane renders the bottom (or right) pane containing the detail view.
+func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, string) {
 	// Create log section header
 	var logHeader string
 	if m.Cursor < len(m.Jobs) {
@@ -331,7 +340,7 @@ func (m Model) renderLogsPane(contentWidth int) (string, string) {
 	}
 
 	// Render log content with scrollbar
-	logContentWithScrollbar := m.addScrollbarToContent(m.LogViewer.View(), m.LogViewerHeight-logHeaderHeight-1) // -1 for spacing
+	logContentWithScrollbar := m.addScrollbarToContent(paneContent, m.LogViewerHeight-logHeaderHeight-1) // -1 for spacing
 	dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth-2))
 	logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + logContentWithScrollbar
 
@@ -341,7 +350,7 @@ func (m Model) renderLogsPane(contentWidth int) (string, string) {
 		logView = lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
 	} else {
 		logHeader = " " + logHeader // Add left padding for horizontal view
-		paddedContent := m.addScrollbarToContent(" "+m.LogViewer.View(), m.LogViewerHeight-logHeaderHeight)
+		paddedContent := m.addScrollbarToContent(" "+paneContent, m.LogViewerHeight-logHeaderHeight)
 		logView = lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logHeader + "\n" + dividerLine + "\n" + paddedContent)
 	}
 
@@ -429,8 +438,21 @@ func (m Model) View() string {
 	}
 
 	var finalView string
-	if m.ShowLogs {
-		logsPane, separator := m.renderLogsPane(contentWidth)
+	if m.ActiveDetailPane != NoPane {
+		var detailContent string
+		switch m.ActiveDetailPane {
+		case LogsPaneDetail:
+			detailContent = m.LogViewer.View()
+		case FrontmatterPane:
+			detailContent = m.frontmatterViewport.View()
+		case BriefingPane:
+			detailContent = m.briefingViewport.View()
+		case EditPane:
+			detailContent = m.editViewport.View()
+		}
+
+		// Use the existing renderLogsPane structure but pass in the dynamic content
+		logsPane, separator := m.renderLogsPane(contentWidth, detailContent)
 		if m.LogSplitVertical {
 			// Vertical split: constrain jobs pane height
 			maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
