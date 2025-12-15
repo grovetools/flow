@@ -377,9 +377,11 @@ func (m Model) View() string {
 			logViewContent := m.LogViewer.View()
 
 			// Add scrollbar to the right side of log content
-			logContentWithScrollbar := m.addScrollbarToContent(logViewContent, m.LogViewerHeight-3) // -3 for header (1) + blank lines (2)
+			logContentWithScrollbar := m.addScrollbarToContent(logViewContent, m.LogViewerHeight-5) // -5 for top divider (1) + header (1) + bottom divider (1) + blank line (1) + spacing (1)
 
-			logViewWithHeader := logHeader + "\n\n" + logContentWithScrollbar
+			// Add muted divider lines above and below header (span width minus left/right padding)
+			dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth-2))
+			logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + logContentWithScrollbar
 			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
 			jobsPane := lipgloss.NewStyle().Width(jobsWidth).Render(jobsView)
 
@@ -418,15 +420,30 @@ func (m Model) View() string {
 					scrollInfo = theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%d/%d]", currentLine, totalLines))
 				}
 
-				logHeader = fmt.Sprintf("%s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
-				logHeader = theme.DefaultTheme.Bold.Render(logHeader) + "\n\n"
+				// Add left padding to header text
+				logHeader = fmt.Sprintf(" %s  %s%s • %s • %s%s", jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
+				logHeader = theme.DefaultTheme.Bold.Render(logHeader)
+
+				// Add muted divider line under header (full width, no left padding)
+				dividerWidth := m.Width - 4
+				if dividerWidth < 40 {
+					dividerWidth = 40
+				}
+				dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", dividerWidth))
+				logHeader = logHeader + "\n" + dividerLine + "\n"
 			}
 
-			// Add scrollbar to log content
+			// Add scrollbar to log content with left padding
 			rawLogContent := m.LogViewer.View()
-			logContentWithScrollbar := m.addScrollbarToContent(rawLogContent, m.LogViewerHeight-3) // -3 for header (1) + blank lines (2)
+			// Add 1 space left padding to each line of content
+			contentLines := strings.Split(rawLogContent, "\n")
+			for i, line := range contentLines {
+				contentLines[i] = " " + line
+			}
+			paddedContent := strings.Join(contentLines, "\n")
+			logContentWithScrollbar := m.addScrollbarToContent(paddedContent, m.LogViewerHeight-4) // -4 for header (1) + divider (1) + blank line (1) + spacing (1)
 			logViewContent := logHeader + logContentWithScrollbar
-			logView := lipgloss.NewStyle().PaddingLeft(1).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logViewContent)
+			logView := lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logViewContent)
 
 			jobsPane := lipgloss.NewStyle().Render(jobsView)
 
