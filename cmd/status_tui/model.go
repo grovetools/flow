@@ -311,7 +311,7 @@ func (m Model) View() string {
 
 			// Create a single-column vertical separator split in half
 			// Top half highlights when jobs pane focused, bottom half when logs focused
-			separatorHeight := m.Height - 13 // Account for header and footer
+			separatorHeight := m.Height - 8 // Account for header, footer, and margins
 			var separatorLines []string
 
 			// Add 3 lines of spacing at the top to match log viewer shift
@@ -389,8 +389,8 @@ func (m Model) View() string {
 		)
 	}
 
-	// Add overall margin
-	return lipgloss.NewStyle().Margin(1, 2).Render(finalView)
+	// Add overall margin - minimal vertical margin to maximize screen usage
+	return lipgloss.NewStyle().Margin(1, 2, 0, 2).Render(finalView)
 }
 
 // getVisibleJobCount returns how many jobs can be displayed in the viewport
@@ -404,11 +404,11 @@ func (m *Model) getVisibleJobCount() int {
 	// - header (3 lines: label + margin)
 	// - table headers/borders (4 lines in table view, 1 in tree view)
 	// - scroll indicator (1 line)
-	// - footer spacing (2 lines)
-	// - margins (4 lines: 2 top + 2 bottom)
-	chromeLines := 14
+	// - footer (1 line)
+	// - margins (1 line top, 0 bottom)
+	chromeLines := 10
 	if m.ViewMode == TreeView {
-		chromeLines = 11 // tree view has less overhead (no table borders/headers)
+		chromeLines = 7 // tree view has less overhead (no table borders/headers)
 	}
 
 	availableHeight := m.Height - chromeLines
