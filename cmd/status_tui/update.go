@@ -28,6 +28,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case LogContentLoadedMsg:
+		if msg.Err != nil {
+			m.LogViewer.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error loading logs: %v", msg.Err)))
+		} else {
+			m.LogViewer.SetContent(msg.Content)
+		}
+		return m, nil
+
 	case RenameCompleteMsg:
 		if msg.Err != nil {
 			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error renaming job: %v", msg.Err))
@@ -475,17 +483,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// If log viewer is showing and focused, delegate most keys to it first.
 		if m.ShowLogs && m.Focus == LogsPane {
 			switch msg.String() {
+			case "q", "ctrl+c":
+				// Let 'q' and 'ctrl+c' be handled by the main logic to quit.
+			case "?":
+				// Let '?' be handled by the main logic to show help.
 			case "v":
 				// Let 'v' be handled by the main logic to close the viewer.
 			case "V":
 				// Let 'V' be handled by the main logic to toggle layout.
-			case "tab":
-				// Let 'tab' be handled by the main logic to switch focus.
+			case "tab", "shift+tab":
+				// Let 'tab' and 'shift+tab' be handled by the main logic to switch focus.
 			case "esc":
 				// 'esc' switches focus back to the jobs pane.
 				m.Focus = JobsPane
 				return m, nil
+			case "g":
+				if m.WaitingForG {
+					// Second 'g' - jump to top of logs
+					m.LogViewer.GotoTop()
+					m.WaitingForG = false
+					return m, nil
+				} else {
+					// First 'g' - wait for second
+					m.WaitingForG = true
+					return m, nil
+				}
+			case "G":
+				// Jump to bottom of logs
+				m.LogViewer.GotoBottom()
+				m.WaitingForG = false // Clear any pending 'g'
+				return m, nil
 			default:
+				// Clear waiting for 'g' if any other key is pressed
+				if m.WaitingForG {
+					m.WaitingForG = false
+				}
 				// Delegate other keys to the log viewer for scrolling, etc.
 				m.LogViewer, cmd = m.LogViewer.Update(msg)
 				return m, cmd
@@ -555,12 +587,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor > 0 {
 				m.Cursor--
 				m.adjustScrollOffset()
+				if m.ShowLogs && !m.IsRunningJob {
+					job := m.Jobs[m.Cursor]
+					return m, loadLogContentCmd(m.Plan, job)
+				}
 			}
 
 		case key.Matches(msg, m.KeyMap.Down):
 			if m.Cursor < len(m.Jobs)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
+				if m.ShowLogs && !m.IsRunningJob {
+					job := m.Jobs[m.Cursor]
+					return m, loadLogContentCmd(m.Plan, job)
+				}
 			}
 
 		case key.Matches(msg, m.KeyMap.GoToBottom):
@@ -625,29 +665,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StatusSummary = ""
 			} else if m.Cursor < len(m.Jobs) {
 				// Open the log viewer and focus it
+				m.ShowLogs = true
 				m.Focus = LogsPane
 				job := m.Jobs[m.Cursor]
-
-				// Find workspace for the job
-				workDir, err := orchestration.DetermineWorkingDirectory(m.Plan, job)
-				if err != nil {
-					m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error finding workspace: %v", err))
-					return m, nil
-				}
-				node, err := workspace.GetProjectByPath(workDir)
-				if err != nil {
-					m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error getting workspace node: %v", err))
-					return m, nil
-				}
-
-				// Find log file
-				logFile, _, err := logutil.FindLogFileForWorkspace(node)
-				if err != nil {
-					m.StatusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("No logs found for %s", job.Title))
-					return m, nil
-				}
-
-				m.ShowLogs = true
 				m.ActiveLogJob = job
 
 				// Calculate log viewer dimensions based on split mode
@@ -669,9 +689,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
-				cmd = m.LogViewer.Start(map[string]string{node.Name: logFile})
+				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+
 				m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Viewing logs for %s (press 'v' to close)", job.Title))
-				return m, cmd
+				return m, loadLogContentCmd(m.Plan, job)
 			}
 
 		case key.Matches(msg, m.KeyMap.Run):
@@ -747,6 +768,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if len(jobsToRun) > 0 {
+				// Clear the log viewer to prepare for new live output
+				m.LogViewer.Clear()
+
 				// Start running the jobs asynchronously
 				m.IsRunningJob = true
 				m.ShowLogs = true

@@ -309,22 +309,39 @@ func (m Model) View() string {
 			// Vertical split (side-by-side)
 			jobsWidth = m.Width/2 - 2
 
-			// Create a simple vertical separator
-			separatorChar := "│"
-			if m.Focus == LogsPane {
-				separatorChar = "┃" // Thicker line when logs are focused
-			}
+			// Create a single-column vertical separator split in half
+			// Top half highlights when jobs pane focused, bottom half when logs focused
 			separatorHeight := m.Height - 13 // Account for header and footer
+			var separatorLines []string
+
 			// Add 3 lines of spacing at the top to match log viewer shift
-			separatorContent := "\n\n\n" + strings.Repeat(separatorChar+"\n", separatorHeight)
-			separator := lipgloss.NewStyle().
-				Foreground(theme.DefaultColors.Border).
-				Render(separatorContent)
+			separatorLines = append(separatorLines, "", "", "")
+
+			halfHeight := separatorHeight / 2
+
+			for i := 0; i < separatorHeight; i++ {
+				if i < halfHeight {
+					// Top half of separator
+					if m.Focus == JobsPane {
+						separatorLines = append(separatorLines, theme.DefaultTheme.Highlight.Render("│"))
+					} else {
+						separatorLines = append(separatorLines, lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render("│"))
+					}
+				} else {
+					// Bottom half of separator
+					if m.Focus == LogsPane {
+						separatorLines = append(separatorLines, theme.DefaultTheme.Highlight.Render("│"))
+					} else {
+						separatorLines = append(separatorLines, lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render("│"))
+					}
+				}
+			}
+			separator := strings.Join(separatorLines, "\n")
 
 			// Render panes without borders
-			// Add 3 lines of spacing at the top to shift log viewer down, and 2 spaces right padding
+			// Add 3 lines of spacing at the top to shift log viewer down, 1 space left padding, and 2 spaces right padding
 			logViewWithSpacing := "\n\n\n" + m.LogViewer.View()
-			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).PaddingRight(2).Render(logViewWithSpacing)
+			logView := lipgloss.NewStyle().Width(m.LogViewerWidth).PaddingLeft(1).PaddingRight(2).Render(logViewWithSpacing)
 			jobsPane := lipgloss.NewStyle().Width(jobsWidth).Render(jobsView)
 
 			finalView = lipgloss.JoinHorizontal(lipgloss.Top, jobsPane, separator, logView)
@@ -333,19 +350,25 @@ func (m Model) View() string {
 		} else {
 			// Horizontal split (top/bottom)
 			// Don't set explicit heights - let content flow naturally
-			logView := lipgloss.NewStyle().Render(m.LogViewer.View())
+			logView := lipgloss.NewStyle().PaddingLeft(1).Render(m.LogViewer.View())
 
 			jobsPane := lipgloss.NewStyle().Render(jobsView)
 
-			// Create a divider - thicker if logs are focused
-			dividerChar := "─"
-			if m.Focus == LogsPane {
-				dividerChar = "━"
+			// Create a single-line divider split in half
+			// Left half highlights when jobs pane focused, right half when logs focused
+			halfWidth := contentWidth / 2
+			var leftHalf, rightHalf string
+
+			if m.Focus == JobsPane {
+				// Jobs pane focused: highlight left half
+				leftHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", halfWidth))
+				rightHalf = lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", contentWidth-halfWidth))
+			} else {
+				// Logs pane focused: highlight right half
+				leftHalf = lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", halfWidth))
+				rightHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", contentWidth-halfWidth))
 			}
-			divider := lipgloss.NewStyle().
-				Width(contentWidth).
-				Foreground(theme.DefaultColors.Border).
-				Render(strings.Repeat(dividerChar, contentWidth))
+			divider := leftHalf + rightHalf
 
 			finalView = lipgloss.JoinVertical(
 				lipgloss.Left,

@@ -3,6 +3,7 @@ package status_tui
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,34 @@ type RenameCompleteMsg struct{ Err error }
 type UpdateDepsCompleteMsg struct{ Err error }
 type CreateJobCompleteMsg struct{ Err error }
 type JobRunFinishedMsg struct{ Err error }
+
+// LogContentLoadedMsg is sent when historical log content has been loaded from a file.
+type LogContentLoadedMsg struct {
+	Content string
+	Err     error
+}
+
+// loadLogContentCmd creates a command to asynchronously read a job's log file.
+func loadLogContentCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		logPath, err := orchestration.GetJobLogPath(plan, job)
+		if err != nil {
+			return LogContentLoadedMsg{Err: err}
+		}
+
+		if _, err := os.Stat(logPath); os.IsNotExist(err) {
+			// It's not an error if the log file doesn't exist yet.
+			return LogContentLoadedMsg{Content: fmt.Sprintf("No logs found for %s.", job.Title)}
+		}
+
+		content, err := os.ReadFile(logPath)
+		if err != nil {
+			return LogContentLoadedMsg{Err: err}
+		}
+
+		return LogContentLoadedMsg{Content: string(content)}
+	}
+}
 
 func renameJobCmd(plan *orchestration.Plan, job *orchestration.Job, newTitle string) tea.Cmd {
 	return func() tea.Msg {
@@ -68,56 +97,11 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 		// TUI mode is already set in newStatusTUIModel, but ensure it's set here too
 		os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
-		// Create our custom writer that sends messages to the TUI program
-		writer := logviewer.NewStreamWriter(program, "Job Output")
-
-		// Save original logger output
-		oldGlobalOutput := logging.GetGlobalOutput()
-
-		// Set the global output to the writer
-		logging.SetGlobalOutput(writer)
-
-		// Restore logger output when done
-		defer func() {
-			logging.SetGlobalOutput(oldGlobalOutput)
-		}()
-
-		// Redirect stdout and stderr to the TUI writer to prevent output mangling
+		// Save original stdout/stderr
 		oldStdout := os.Stdout
 		oldStderr := os.Stderr
+		oldGlobalOutput := logging.GetGlobalOutput()
 
-		// Create a pipe to capture stdout/stderr
-		r, w, err := os.Pipe()
-		if err == nil {
-			os.Stdout = w
-			os.Stderr = w
-
-			// Start a goroutine to read from the pipe and send to TUI
-			done := make(chan struct{})
-			go func() {
-				buf := make([]byte, 1024)
-				for {
-					n, err := r.Read(buf)
-					if n > 0 {
-						writer.Write(buf[:n])
-					}
-					if err != nil {
-						break
-					}
-				}
-				close(done)
-			}()
-
-			defer func() {
-				w.Close()
-				<-done
-				r.Close()
-				os.Stdout = oldStdout
-				os.Stderr = oldStderr
-			}()
-		}
-
-		// Run jobs sequentially (orchestrator handles parallelism if needed)
 		ctx := context.Background()
 
 		for i, job := range jobs {
@@ -128,20 +112,90 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 				"total_jobs":   len(jobs),
 			}).Info("Executing job via orchestrator")
 
-			// Execute the job using the orchestrator, passing the TUI writer
-			if err := orchestrator.ExecuteJobWithWriter(ctx, job, writer); err != nil {
-				logger.WithFields(map[string]interface{}{
-					"job_id": job.ID,
-					"error":  err,
-				}).Error("Job execution failed")
-				// Return error for this job, but continue would be handled by orchestrator
-				return JobRunFinishedMsg{Err: fmt.Errorf("job %s failed: %w", job.ID, err)}
+			// 1. Get the log file path for the job.
+			logFilePath, err := orchestration.GetJobLogPath(orchestrator.Plan, job)
+			if err != nil {
+				return JobRunFinishedMsg{Err: fmt.Errorf("failed to get log path for job %s: %w", job.ID, err)}
+			}
+
+			// 2. Open the log file in append mode.
+			logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return JobRunFinishedMsg{Err: fmt.Errorf("failed to open log file %s: %w", logFilePath, err)}
+			}
+
+			// 3. Create a StreamWriter for live TUI updates. Use "Job Output" to avoid prefix.
+			tuiWriter := logviewer.NewStreamWriter(program, "Job Output")
+
+			// 4. Create a MultiWriter to write to both the file and the TUI.
+			multiWriter := io.MultiWriter(logFile, tuiWriter)
+
+			// 5. Set global logging output to the MultiWriter
+			logging.SetGlobalOutput(multiWriter)
+
+			// 6. Redirect stdout/stderr to capture all output
+			r, w, err := os.Pipe()
+			if err == nil {
+				os.Stdout = w
+				os.Stderr = w
+
+				// Start a goroutine to read from the pipe and send to MultiWriter
+				done := make(chan struct{})
+				go func() {
+					buf := make([]byte, 1024)
+					for {
+						n, err := r.Read(buf)
+						if n > 0 {
+							multiWriter.Write(buf[:n])
+						}
+						if err != nil {
+							break
+						}
+					}
+					close(done)
+				}()
+
+				// 7. Execute the job, passing the MultiWriter.
+				execErr := orchestrator.ExecuteJobWithWriter(ctx, job, multiWriter)
+
+				// 8. Restore stdout/stderr
+				w.Close()
+				<-done
+				r.Close()
+				os.Stdout = oldStdout
+				os.Stderr = oldStderr
+
+				logFile.Close()
+
+				if execErr != nil {
+					logger.WithFields(map[string]interface{}{
+						"job_id": job.ID,
+						"error":  execErr,
+					}).Error("Job execution failed")
+					logging.SetGlobalOutput(oldGlobalOutput)
+					return JobRunFinishedMsg{Err: fmt.Errorf("job %s failed: %w", job.ID, execErr)}
+				}
+			} else {
+				// Fallback if pipe creation fails
+				execErr := orchestrator.ExecuteJobWithWriter(ctx, job, multiWriter)
+				logFile.Close()
+				if execErr != nil {
+					logger.WithFields(map[string]interface{}{
+						"job_id": job.ID,
+						"error":  execErr,
+					}).Error("Job execution failed")
+					logging.SetGlobalOutput(oldGlobalOutput)
+					return JobRunFinishedMsg{Err: fmt.Errorf("job %s failed: %w", job.ID, execErr)}
+				}
 			}
 
 			logger.WithFields(map[string]interface{}{
 				"job_id": job.ID,
 			}).Info("Job execution completed successfully")
 		}
+
+		// Restore global output
+		logging.SetGlobalOutput(oldGlobalOutput)
 
 		logger.Info("All jobs completed successfully")
 		return JobRunFinishedMsg{Err: nil}

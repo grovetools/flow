@@ -36,7 +36,7 @@ type OrchestratorConfig struct {
 
 // Orchestrator coordinates job execution and manages state.
 type Orchestrator struct {
-	plan            *Plan
+	Plan            *Plan
 	executors       map[JobType]Executor
 	dependencyGraph *DependencyGraph
 	config          *OrchestratorConfig
@@ -76,7 +76,7 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig) (*Orchestrator, err
 	stateManager := NewStateManager(plan.Directory)
 
 	orch := &Orchestrator{
-		plan:            plan,
+		Plan:            plan,
 		executors:       make(map[JobType]Executor),
 		dependencyGraph: graph,
 		config:          config,
@@ -146,7 +146,7 @@ func (o *Orchestrator) registerExecutors() {
 func (o *Orchestrator) RunJob(ctx context.Context, jobFile string) error {
 	// Find job by filename
 	var job *Job
-	for _, j := range o.plan.Jobs {
+	for _, j := range o.Plan.Jobs {
 		if j.FilePath == jobFile {
 			job = j
 			break
@@ -197,7 +197,7 @@ func (o *Orchestrator) RunNext(ctx context.Context) error {
 
 // RunAll executes all jobs in the plan.
 func (o *Orchestrator) RunAll(ctx context.Context) error {
-	o.logger.Info("Starting orchestration", "plan", o.plan.Name)
+	o.logger.Info("Starting orchestration", "plan", o.Plan.Name)
 
 	stepCount := 0
 	limit := o.config.MaxConsecutiveSteps
@@ -267,8 +267,8 @@ func (o *Orchestrator) RunAll(ctx context.Context) error {
 func (o *Orchestrator) reloadJobStatusesFromDisk() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	
-	for _, job := range o.plan.Jobs {
+
+	for _, job := range o.Plan.Jobs {
 		// Load the job file to get the current status
 		diskJob, err := LoadJob(job.FilePath)
 		if err != nil {
@@ -302,10 +302,10 @@ func (o *Orchestrator) GetStatus() *PlanStatus {
 	defer o.mu.Unlock()
 
 	status := &PlanStatus{
-		Total: len(o.plan.Jobs),
+		Total: len(o.Plan.Jobs),
 	}
 
-	for _, job := range o.plan.Jobs {
+	for _, job := range o.Plan.Jobs {
 		switch job.Status {
 		case JobStatusPending, JobStatusPendingUser, JobStatusPendingLLM:
 			status.Pending++
@@ -390,8 +390,8 @@ func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, outpu
 		"job_type":   job.Type,
 		"job_title":  job.Title,
 		"job_file":   job.FilePath,
-		"plan_name":  o.plan.Name,
-		"plan_dir":   o.plan.Directory,
+		"plan_name":  o.Plan.Name,
+		"plan_dir":   o.Plan.Directory,
 		"status":     job.Status,
 	}
 
@@ -444,7 +444,7 @@ func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, outpu
 	}
 
 	// Execute job, passing the writer
-	execErr := executor.Execute(ctx, job, o.plan, output)
+	execErr := executor.Execute(ctx, job, o.Plan, output)
 
 	// Update final status (skip for chat and interactive agent jobs - they manage their own status)
 	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
@@ -481,8 +481,8 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 		"job_type":     job.Type,
 		"job_title":    job.Title,
 		"job_file":     job.FilePath,
-		"plan_name":    o.plan.Name,
-		"plan_dir":     o.plan.Directory,
+		"plan_name":    o.Plan.Name,
+		"plan_dir":     o.Plan.Directory,
 		"status":       job.Status,
 	}
 
@@ -535,7 +535,7 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 	}
 
 	// Execute job with os.Stdout as default output
-	execErr := executor.Execute(ctx, job, o.plan, os.Stdout)
+	execErr := executor.Execute(ctx, job, o.Plan, os.Stdout)
 
 	// Update final status (skip for chat and interactive agent jobs - they manage their own status)
 	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
@@ -595,7 +595,7 @@ func (o *Orchestrator) UpdateJobStatus(job *Job, status JobStatus) error {
 		go func() {
 			o.logger.Info("Generating job summary", "job", job.ID)
 			ctx := context.Background()
-			summary, err := SummarizeJobContent(ctx, job, o.plan, *o.config.SummaryConfig)
+			summary, err := SummarizeJobContent(ctx, job, o.Plan, *o.config.SummaryConfig)
 			if err != nil {
 				o.logger.Error("Failed to generate job summary", "job", job.ID, "error", err)
 				return

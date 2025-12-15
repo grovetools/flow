@@ -125,8 +125,8 @@ func NewKeyMap() KeyMap {
 			key.WithHelp("v", "toggle log view"),
 		),
 		SwitchFocus: key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "switch focus"),
+			key.WithKeys("tab", "shift+tab"),
+			key.WithHelp("tab/shift+tab", "switch focus"),
 		),
 		ToggleLayout: key.NewBinding(
 			key.WithKeys("V"),
