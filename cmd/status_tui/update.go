@@ -311,7 +311,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Vertical split (side-by-side)
 				// No borders, just separator (1 char) - much simpler calculation
 				m.LogViewerWidth = (msg.Width / 2) - 2
-				m.LogViewerHeight = msg.Height - 8 // Account for header, footer, and margins
+				m.LogViewerHeight = msg.Height - 5 // Account for header, footer, and margins
 			} else {
 				// Horizontal split (top/bottom)
 				m.LogViewerWidth = msg.Width - 4
@@ -641,7 +641,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.LogSplitVertical {
 					// Vertical split (side-by-side)
 					m.LogViewerWidth = (m.Width / 2) - 2
-					m.LogViewerHeight = m.Height - 8
+					m.LogViewerHeight = m.Height - 5
 				} else {
 					// Horizontal split (top/bottom)
 					m.LogViewerWidth = m.Width - 4
@@ -755,7 +755,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.LogSplitVertical {
 					// Vertical split (side-by-side)
 					m.LogViewerWidth = (m.Width / 2) - 2
-					m.LogViewerHeight = m.Height - 8
+					m.LogViewerHeight = m.Height - 5
 				} else {
 					// Horizontal split (top/bottom)
 					m.LogViewerWidth = m.Width - 4
@@ -868,7 +868,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.LogSplitVertical {
 					// Vertical split (side-by-side)
 					m.LogViewerWidth = (m.Width / 2) - 2
-					m.LogViewerHeight = m.Height - 8
+					m.LogViewerHeight = m.Height - 5
 				} else {
 					// Horizontal split (top/bottom)
 					m.LogViewerWidth = m.Width - 4
