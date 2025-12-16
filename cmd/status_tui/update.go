@@ -885,8 +885,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Start running the jobs asynchronously
 				m.IsRunningJob = true
+				m.ActiveDetailPane = LogsPaneDetail // Switch to log viewer pane
 				m.ShowLogs = true
 				m.Focus = LogsPane
+
+				// Set the active job for the log pane header. If multiple jobs, use the first.
+				// This might be overridden later if an agent job is found.
+				m.ActiveLogJob = jobsToRun[0]
 
 				// Centralized layout calculation
 				m.updateLayoutDimensions()

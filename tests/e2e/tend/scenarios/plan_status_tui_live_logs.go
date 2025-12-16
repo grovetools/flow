@@ -281,3 +281,132 @@ func verifyCanRunAfterCompletion(ctx *harness.Context) error {
 
 	return nil
 }
+
+// PlanStatusTUILogsOnStartScenario tests that the log viewer automatically opens when starting a job.
+var PlanStatusTUILogsOnStartScenario = harness.NewScenarioWithOptions(
+	"plan-status-tui-logs-on-start",
+	"Verifies that pressing 'r' to run a job automatically opens the log viewer pane.",
+	[]string{"tui", "plan", "status", "logs", "autoopen"},
+	[]harness.Step{
+		harness.NewStep("Setup environment with test jobs", setupJobsForLogsOnStart),
+		harness.NewStep("Launch status TUI", launchStatusTUIForLogsOnStart),
+		harness.NewStep("Verify log viewer opens automatically on job start", verifyLogViewerAutoOpens),
+		harness.NewStep("Quit the TUI", quitStatusTUI),
+	},
+	true,  // localOnly = true, as it requires tmux
+	false, // explicitOnly = false
+)
+
+// setupJobsForLogsOnStart creates a simple job for testing automatic log viewer opening.
+func setupJobsForLogsOnStart(ctx *harness.Context) error {
+	projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "logs-on-start-project")
+	if err != nil {
+		return err
+	}
+
+	// Set home_dir for TUI launch
+	ctx.Set("home_dir", ctx.HomeDir())
+
+	// Initialize the plan
+	initCmd := ctx.Bin("plan", "init", "logs-on-start-plan")
+	initCmd.Dir(projectDir)
+	if result := initCmd.Run(); result.Error != nil {
+		return fmt.Errorf("plan init failed: %w", result.Error)
+	}
+	planPath := filepath.Join(notebooksRoot, "workspaces", "logs-on-start-project", "plans", "logs-on-start-plan")
+	ctx.Set("plan_path", planPath)
+
+	// Add a simple job that produces some output
+	job := ctx.Bin("plan", "add", "logs-on-start-plan", "--type", "shell", "--title", "Test Job",
+		"-p", "echo 'Starting test...'; sleep 1; echo 'Test complete!'")
+	job.Dir(projectDir)
+	if result := job.Run(); result.Error != nil {
+		return fmt.Errorf("failed to add Test Job: %w", result.Error)
+	}
+
+	return nil
+}
+
+// launchStatusTUIForLogsOnStart starts the TUI for the logs-on-start test.
+func launchStatusTUIForLogsOnStart(ctx *harness.Context) error {
+	projectDir := ctx.GetString("project_dir")
+	homeDir := ctx.GetString("home_dir")
+
+	flowBinary, err := findFlowBinary()
+	if err != nil {
+		return err
+	}
+
+	// Create wrapper script
+	wrapperScript := filepath.Join(ctx.RootDir, "run-flow-logs-on-start")
+	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status logs-on-start-plan\n",
+		homeDir, projectDir, flowBinary)
+	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
+		return fmt.Errorf("failed to create wrapper script: %w", err)
+	}
+	if err := os.Chmod(wrapperScript, 0755); err != nil {
+		return fmt.Errorf("failed to make wrapper script executable: %w", err)
+	}
+
+	session, err := ctx.StartTUI(wrapperScript, []string{})
+	if err != nil {
+		return fmt.Errorf("failed to start TUI: %w", err)
+	}
+	ctx.Set("tui_session", session)
+
+	// Wait for TUI to load
+	if err := session.WaitForText("Plan Status", 10*time.Second); err != nil {
+		content, _ := session.Capture()
+		return fmt.Errorf("TUI did not load: %w\nContent:\n%s", err, content)
+	}
+
+	return session.WaitStable()
+}
+
+// verifyLogViewerAutoOpens verifies that the log viewer automatically opens when starting a job.
+func verifyLogViewerAutoOpens(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	// Capture initial state - should NOT have log viewer open
+	time.Sleep(500 * time.Millisecond)
+	initialContent, err := session.Capture(tui.WithCleanedOutput())
+	if err != nil {
+		return err
+	}
+
+	// Verify we're NOT currently in the log viewer (no "Follow:" indicator)
+	if strings.Contains(initialContent, "Follow:") {
+		return fmt.Errorf("log viewer should not be open initially, but found 'Follow:' indicator")
+	}
+
+	// Send 'r' to run the job (cursor should be on the first job by default)
+	if err := session.SendKeys("r"); err != nil {
+		return fmt.Errorf("failed to send 'r' key: %w", err)
+	}
+
+	// Verify that the log viewer AUTOMATICALLY opens (this is the key feature being tested)
+	// We should see the "Follow:" indicator which is part of the log viewer UI
+	if err := session.WaitForText("Follow:", 5*time.Second); err != nil {
+		content, _ := session.Capture()
+		return fmt.Errorf("log viewer did not automatically open after starting job: %w\nContent:\n%s", err, content)
+	}
+
+	// Additionally verify we can see the job header in the log pane
+	content, err := session.Capture(tui.WithCleanedOutput())
+	if err != nil {
+		return err
+	}
+
+	// The log viewer should show the job that's running
+	if !strings.Contains(content, "Test Job") {
+		return fmt.Errorf("expected to see 'Test Job' in log viewer header: %s", content)
+	}
+
+	// Verify we see the job output
+	if err := session.WaitForText("Starting test", 5*time.Second); err != nil {
+		content, _ := session.Capture()
+		return fmt.Errorf("expected to see job output in log viewer: %s", content)
+	}
+
+	return nil
+}

@@ -30,6 +30,7 @@ func main() {
 		scenarios.PlanStatusTUILogViewToggleScenario,
 		scenarios.PlanStatusTUILiveLogsScenario,
 		scenarios.PlanStatusTUIRunningJobBlockScenario,
+		scenarios.PlanStatusTUILogsOnStartScenario,
 		scenarios.PlanStatusTUIOnlyScenario,
 		scenarios.PlanStatusTUIColumnToggleScenario,
 		scenarios.PlanStatusTUIColumnPersistenceScenario,
