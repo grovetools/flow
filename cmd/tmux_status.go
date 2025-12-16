@@ -33,7 +33,6 @@ If not in a tmux session, falls back to running the TUI directly.`,
 				statusCmd := &cobra.Command{
 					Use: "status",
 				}
-				statusTUI = true
 				return RunPlanStatus(statusCmd, args)
 			}
 
@@ -43,7 +42,7 @@ If not in a tmux session, falls back to running the TUI directly.`,
 				flowBin = os.Args[0] // Fall back to current executable
 			}
 
-			command := fmt.Sprintf("%s plan status -t", flowBin)
+			command := fmt.Sprintf("%s plan status", flowBin)
 			if dir != "" {
 				command += fmt.Sprintf(" %s", dir)
 			}

@@ -63,16 +63,14 @@ With multiple job file arguments, runs those jobs in parallel.`,
 func NewStatusCmd() *cobra.Command {
 	statusCmd := &cobra.Command{
 		Use:   "status [directory]",
-		Short: "Show plan status",
-		Long: `Show the status of all jobs in an orchestration plan.
-If no directory is specified, uses the active job if set.`,
+		Short: "Show plan status in an interactive TUI",
+		Long: `Show the status of all jobs in an orchestration plan within an interactive TUI.
+If no directory is specified, uses the active job if set.
+If no active job is set, it will launch the plan browser.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanStatus,
 	}
-	statusCmd.Flags().BoolVarP(&statusVerbose, "verbose", "v", false, "Show detailed job information")
-	statusCmd.Flags().BoolVarP(&statusGraph, "graph", "g", false, "Show dependency graph")
-	statusCmd.Flags().StringVarP(&statusFormat, "format", "f", "tree", "Output format: tree, list, json")
-	statusCmd.Flags().BoolVarP(&statusTUI, "tui", "t", false, "Launch interactive TUI")
+	statusCmd.Flags().BoolVarP(&statusTUI, "tui", "t", false, "Launch interactive TUI (default behavior, kept for backwards compatibility)")
 	return statusCmd
 }
 

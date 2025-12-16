@@ -16,7 +16,6 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	// Inject the helper functions into the status_tui package
 	status_tui.FindRootJobsFunc = ExportedFindRootJobs
 	status_tui.FindAllDependentsFunc = ExportedFindAllDependents
-	status_tui.FormatStatusSummaryFunc = ExportedFormatStatusSummary
 	status_tui.VerifyRunningJobStatusFunc = ExportedVerifyRunningJobStatus
 	status_tui.CompleteJobFunc = ExportedCompleteJob
 

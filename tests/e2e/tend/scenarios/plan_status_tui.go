@@ -12,7 +12,7 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/tui"
 )
 
-// PlanStatusTUIScenario tests the interactive `flow plan status -t` command.
+// PlanStatusTUIScenario tests the interactive `flow plan status` command.
 var PlanStatusTUIScenario = harness.NewScenarioWithOptions(
 	"plan-status-tui",
 	"Verifies the plan status TUI can display jobs and navigate the interface.",
@@ -104,7 +104,7 @@ func launchStatusTUIAndVerify(ctx *harness.Context) error {
 
 	// Create a wrapper script to run flow from the project directory
 	wrapperScript := filepath.Join(ctx.RootDir, "run-flow-status-tui")
-	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status -t dependency-plan\n", homeDir, projectDir, flowBinary)
+	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status dependency-plan\n", homeDir, projectDir, flowBinary)
 	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
 		return fmt.Errorf("failed to create wrapper script: %w", err)
 	}
@@ -117,7 +117,7 @@ func launchStatusTUIAndVerify(ctx *harness.Context) error {
 		[]string{},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to start `flow plan status -t`: %w", err)
+		return fmt.Errorf("failed to start `flow plan status`: %w", err)
 	}
 	ctx.Set("tui_session", session)
 

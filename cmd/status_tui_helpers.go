@@ -12,11 +12,6 @@ func ExportedFindAllDependents(job *orchestration.Job, plan *orchestration.Plan)
 	return findAllDependents(job, plan)
 }
 
-// ExportedFormatStatusSummary exports formatStatusSummary for use by the status_tui package
-func ExportedFormatStatusSummary(plan *orchestration.Plan) string {
-	return formatStatusSummary(plan)
-}
-
 // ExportedVerifyRunningJobStatus exports VerifyRunningJobStatus for use by the status_tui package
 func ExportedVerifyRunningJobStatus(plan *orchestration.Plan) {
 	VerifyRunningJobStatus(plan)

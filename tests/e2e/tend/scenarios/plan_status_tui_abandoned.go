@@ -96,7 +96,7 @@ func launchTUIWithAbandonedJobs(ctx *harness.Context) error {
 
 	// Create a wrapper script to run flow from the project directory
 	wrapperScript := filepath.Join(ctx.RootDir, "run-flow-status-tui-abandoned")
-	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status -t abandoned-tui-plan\n", homeDir, projectDir, flowBinary)
+	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status abandoned-tui-plan\n", homeDir, projectDir, flowBinary)
 	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
 		return fmt.Errorf("failed to create wrapper script: %w", err)
 	}
@@ -109,7 +109,7 @@ func launchTUIWithAbandonedJobs(ctx *harness.Context) error {
 		[]string{},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to start `flow plan status -t`: %w", err)
+		return fmt.Errorf("failed to start `flow plan status`: %w", err)
 	}
 	ctx.Set("tui_session", session)
 

@@ -78,7 +78,7 @@ func launchStatusTUIForLiveLogs(ctx *harness.Context) error {
 
 	// Create wrapper script
 	wrapperScript := filepath.Join(ctx.RootDir, "run-flow-live-logs")
-	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status -t live-logs-plan\n",
+	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status live-logs-plan\n",
 		homeDir, projectDir, flowBinary)
 	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
 		return fmt.Errorf("failed to create wrapper script: %w", err)

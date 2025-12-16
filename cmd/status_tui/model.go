@@ -21,13 +21,6 @@ import (
 // so it can be set in the model's Init method
 var initProgramRef *tea.Program
 
-type ViewMode int
-
-const (
-	TableView ViewMode = iota
-	TreeView
-)
-
 const (
 	// Heights
 	headerHeight            = 2 // Includes label and bottom margin
@@ -63,10 +56,6 @@ const (
 	EditPane
 )
 
-func (v ViewMode) String() string {
-	return [...]string{"table", "tree"}[v]
-}
-
 // Model represents the state of the TUI
 type Model struct {
 	Plan               *orchestration.Plan
@@ -91,7 +80,6 @@ type Model struct {
 	Help               help.Model
 	WaitingForG        bool      // Track if we're waiting for second 'g' in 'gg' sequence
 	CursorVisible      bool      // Track cursor visibility for blinking animation
-	ViewMode           ViewMode  // Current view mode (table or tree)
 	Renaming           bool
 	RenameInput        textinput.Model
 	RenameJobIndex     int
@@ -188,7 +176,6 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		KeyMap:           keyMap,
 		Help:             helpModel,
 		CursorVisible:    true,
-		ViewMode:         TableView, // Default to table view
 		LogViewer:        logViewerModel,
 		ShowLogs:         false, // Start with logs hidden by default
 		ActiveLogJob:     nil,
@@ -238,14 +225,8 @@ func (m Model) renderJobsPane(contentWidth int) string {
 		MarginBottom(1).
 		Render(headerText)
 
-	// 2. Render Main Content (Table or Tree)
-	var mainContent string
-	switch m.ViewMode {
-	case TableView:
-		mainContent = m.renderTableViewWithWidth(contentWidth)
-	default: // TreeView
-		mainContent = m.renderJobTree()
-	}
+	// 2. Render Main Content (Table view only)
+	mainContent := m.renderTableViewWithWidth(contentWidth)
 
 	// 3. Add scroll indicators
 	scrollIndicator := ""
@@ -360,7 +341,6 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, str
 // renderFooter renders the help and status message footer.
 func (m Model) renderFooter() string {
 	helpView := m.Help.View()
-	viewModeIndicator := theme.DefaultTheme.Muted.Render(fmt.Sprintf(" [%s]", m.ViewMode))
 	followStatus := ""
 	if m.ShowLogs {
 		if m.LogViewer.IsFollowing() {
@@ -369,7 +349,7 @@ func (m Model) renderFooter() string {
 			followStatus = theme.DefaultTheme.Muted.Render(" • Follow: OFF")
 		}
 	}
-	return helpView + viewModeIndicator + followStatus
+	return helpView + followStatus
 }
 
 // View renders the TUI
@@ -500,12 +480,7 @@ func (m *Model) calculateOptimalLogHeight() int {
 	}
 
 	// Calculate minimum jobs section height (table chrome + minimum visible rows)
-	minJobsHeight := 0
-	if m.ViewMode == TableView {
-		minJobsHeight += 4 // Table headers and borders
-	} else {
-		minJobsHeight += 1 // Tree view overhead
-	}
+	minJobsHeight := 4 // Table headers and borders
 
 	// Add minimum visible job rows (ensure at least 5-8 jobs are visible)
 	minVisibleJobs := 5
@@ -652,12 +627,7 @@ func (m *Model) getVisibleJobCount() int {
 	}
 
 	// Calculate available height for job list
-	var tableChrome int
-	if m.ViewMode == TableView {
-		tableChrome = 4 // table headers and borders
-	} else {
-		tableChrome = 1 // tree view has less overhead
-	}
+	tableChrome := 4 // table headers and borders
 
 	chromeLines := topMargin + headerHeight + tableChrome + footerHeight + 1 // +1 for scroll indicator
 
@@ -874,7 +844,6 @@ func addJobAndDependentsWithParent(job *orchestration.Job, plan *orchestration.P
 var (
 	FindRootJobsFunc       func(*orchestration.Plan) []*orchestration.Job
 	FindAllDependentsFunc  func(*orchestration.Job, *orchestration.Plan) []*orchestration.Job
-	FormatStatusSummaryFunc func(*orchestration.Plan) string
 )
 
 // Helper functions that call the injected functions
@@ -893,8 +862,6 @@ func findAllDependentsHelper(job *orchestration.Job, plan *orchestration.Plan) [
 }
 
 func formatStatusSummaryHelper(plan *orchestration.Plan) string {
-	if FormatStatusSummaryFunc != nil {
-		return FormatStatusSummaryFunc(plan)
-	}
+	// Status summary is no longer used in TUI-only mode
 	return ""
 }

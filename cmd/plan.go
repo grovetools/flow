@@ -26,8 +26,8 @@ If no directory is provided, an interactive TUI will be launched.`,
 
 var planStatusCmd = &cobra.Command{
 	Use:   "status [directory]",
-	Short: "Show plan status (use: flow status)",
-	Long: `Show the status of all jobs in an orchestration plan.
+	Short: "Show plan status in an interactive TUI (use: flow status)",
+	Long: `Show the status of all jobs in an orchestration plan in an interactive TUI.
 If no directory is specified, uses the active job if set.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanStatus,
