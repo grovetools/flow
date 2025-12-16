@@ -637,6 +637,26 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			frontmatter["id"] = filenameToUniqueID[filename]
 		}
 
+		// Ensure title field exists - required for job validation
+		if _, hasTitle := frontmatter["title"]; !hasTitle {
+			// Generate title from filename if not present in recipe
+			title := strings.TrimSuffix(filename, filepath.Ext(filename))
+			frontmatter["title"] = title
+		}
+
+		// Ensure status field exists - required for job validation
+		if _, hasStatus := frontmatter["status"]; !hasStatus {
+			frontmatter["status"] = "pending"
+		}
+
+		// Validate and potentially fix the type field
+		if typeVal, hasType := frontmatter["type"]; hasType {
+			typeStr, _ := typeVal.(string)
+			// Fix common mistake: hyphen instead of underscore in job types
+			typeStr = strings.ReplaceAll(typeStr, "-", "_")
+			frontmatter["type"] = typeStr
+		}
+
 		// Remap dependencies from original recipe IDs to new unique IDs
 		if depends, ok := frontmatter["depends_on"].([]interface{}); ok {
 			var remappedDeps []string
