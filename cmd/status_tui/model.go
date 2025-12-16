@@ -494,7 +494,11 @@ func (m Model) View() string {
 			}
 			jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxJobsPaneHeight).Render(jobsPane)
 
-			finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane, footer)
+			// Push footer to bottom by setting height on combined content
+			contentHeight := m.Height - topMargin - bottomMargin - footerHeight
+			combinedContent := lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane)
+			combinedContent = lipgloss.NewStyle().Height(contentHeight).Render(combinedContent)
+			finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, footer)
 		}
 	} else {
 		// No logs: use same calculation as vertical split
@@ -544,8 +548,8 @@ func (m *Model) calculateOptimalLogHeight() int {
 		minJobsHeight += 1 // Scroll indicator line
 	}
 
-	// Give logs 55-60% of available space, but ensure jobs get their minimum
-	logHeight := (availableHeight * 55) / 100
+	// Give logs most of the available space, but ensure jobs get their minimum
+	logHeight := availableHeight - minJobsHeight - 4 // Reserve 4 lines buffer
 
 	// Ensure jobs section has minimum space
 	if availableHeight - logHeight < minJobsHeight {
