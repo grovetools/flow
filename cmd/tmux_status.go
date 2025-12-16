@@ -13,7 +13,6 @@ import (
 // NewTmuxStatusCmd returns the command for opening plan status in a tmux window.
 func NewTmuxStatusCmd() *cobra.Command {
 	var windowName string
-	var windowIndex int
 
 	cmd := &cobra.Command{
 		Use:   "status [directory]",
@@ -51,7 +50,7 @@ If not in a tmux session, falls back to running the TUI directly.`,
 
 			// Use the tmux client to manage the window with error handling
 			ctx := context.Background()
-			if err := client.FocusOrRunTUIWithErrorHandling(ctx, command, windowName, windowIndex); err != nil {
+			if err := client.FocusOrRunTUIWithErrorHandling(ctx, command, windowName, -1); err != nil {
 				return fmt.Errorf("failed to open in tmux window: %w", err)
 			}
 
@@ -65,7 +64,6 @@ If not in a tmux session, falls back to running the TUI directly.`,
 	}
 
 	cmd.Flags().StringVar(&windowName, "window-name", "plan", "Name of the tmux window")
-	cmd.Flags().IntVar(&windowIndex, "window-index", 2, "Index (position) for the tmux window")
 
 	return cmd
 }
