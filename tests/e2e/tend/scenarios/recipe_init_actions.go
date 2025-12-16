@@ -58,9 +58,9 @@ This is a test recipe to verify shell init actions.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with shell actions
-			workspaceInitContent := `description: Recipe with shell init actions
-actions:
+			// Create recipe.yml with shell init actions
+			recipeContent := `description: Recipe with shell init actions
+init:
   - type: shell
     description: Create test directory
     command: mkdir -p test-output
@@ -73,8 +73,8 @@ actions:
     description: Create another file
     command: echo "This is a test" > test-output/hello.txt
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil
@@ -84,7 +84,7 @@ actions:
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Bin("plan", "init", "shell-test-plan", "--recipe", "shell-test-recipe", "--worktree")
+			cmd := ctx.Bin("plan", "init", "shell-test-plan", "--recipe", "shell-test-recipe", "--worktree", "--init")
 			cmd.Dir(projectDir)
 
 			result := cmd.Run()
@@ -214,9 +214,9 @@ This recipe starts Docker Compose services.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with docker_compose action
-			workspaceInitContent := `description: Recipe with docker_compose init action
-actions:
+			// Create recipe.yml with docker_compose init action
+			recipeContent := `description: Recipe with docker_compose init action
+init:
   - type: docker_compose
     description: Start development environment
     project_name: "grove-{{ .PlanName }}"
@@ -228,8 +228,8 @@ actions:
           environment:
             - PLAN_NAME={{ .PlanName }}
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil
@@ -239,7 +239,7 @@ actions:
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Bin("plan", "init", "docker-plan", "--recipe", "docker-compose-recipe", "--worktree")
+			cmd := ctx.Bin("plan", "init", "docker-plan", "--recipe", "docker-compose-recipe", "--worktree", "--init")
 			cmd.Dir(projectDir)
 
 			result := cmd.Run()
@@ -398,9 +398,9 @@ Test recipe for ecosystem workflows.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with repo-specific actions
-			workspaceInitContent := `description: Recipe with ecosystem-specific init actions
-actions:
+			// Create recipe.yml with repo-specific actions
+			recipeContent := `description: Recipe with ecosystem-specific init actions
+init:
   - type: shell
     description: Setup backend dependencies
     repo: backend
@@ -415,8 +415,8 @@ actions:
     description: Create shared config
     command: echo "Shared config" > shared-config.txt
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil
@@ -426,7 +426,7 @@ actions:
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Bin("plan", "init", "ecosystem-plan", "--recipe", "ecosystem-recipe", "--worktree")
+			cmd := ctx.Bin("plan", "init", "ecosystem-plan", "--recipe", "ecosystem-recipe", "--worktree", "--init")
 			cmd.Dir(projectDir)
 
 			result := cmd.Run()
@@ -536,9 +536,9 @@ This is a test recipe in the notebook directory to verify shell init actions.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with shell actions
-			workspaceInitContent := `description: Notebook recipe with shell init actions
-actions:
+			// Create recipe.yml with shell actions
+			recipeContent := `description: Notebook recipe with shell init actions
+init:
   - type: shell
     description: Create notebook test directory
     command: mkdir -p notebook-test-output
@@ -547,8 +547,8 @@ actions:
     description: Write test file with template from notebook
     command: echo "NotebookPlan:{{ .PlanName }}" > notebook-test-output/notebook-plan.txt
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil
@@ -558,7 +558,7 @@ actions:
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Bin("plan", "init", "notebook-shell-plan", "--recipe", "notebook-shell-recipe", "--worktree")
+			cmd := ctx.Bin("plan", "init", "notebook-shell-plan", "--recipe", "notebook-shell-recipe", "--worktree", "--init")
 			cmd.Dir(projectDir)
 
 			result := cmd.Run()
@@ -656,9 +656,9 @@ This recipe has a failing action.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with a failing action
-			workspaceInitContent := `description: Recipe with failing action
-actions:
+			// Create recipe.yml with a failing action
+			recipeContent := `description: Recipe with failing action
+init:
   - type: shell
     description: This action will fail
     command: exit 1
@@ -667,8 +667,8 @@ actions:
     description: This action should not run
     command: echo "Should not run" > should-not-exist.txt
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil
@@ -678,7 +678,7 @@ actions:
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
 
-			cmd := ctx.Bin("plan", "init", "failure-plan", "--recipe", "failing-recipe", "--worktree")
+			cmd := ctx.Bin("plan", "init", "failure-plan", "--recipe", "failing-recipe", "--worktree", "--init")
 			cmd.Dir(projectDir)
 
 			result := cmd.Run()
@@ -690,7 +690,7 @@ actions:
 			}
 
 			// Verify warning was shown
-			if !strings.Contains(result.Stdout, "Warning") {
+			if !strings.Contains(result.Stdout, "Warning") && !strings.Contains(result.Stderr, "Warning") {
 				return fmt.Errorf("expected warning message about init action failure")
 			}
 

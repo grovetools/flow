@@ -55,8 +55,8 @@ Test recipe for init flag.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with new format
-			workspaceInitContent := `description: Recipe with init and named actions
+			// Create recipe.yml with init and named actions
+			recipeContent := `description: Recipe with init and named actions
 
 init:
   - type: shell
@@ -69,8 +69,8 @@ actions:
       description: Start development
       command: echo "Dev started" > dev-started.txt
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil
@@ -233,8 +233,8 @@ Test recipe for plan action command.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with init and named actions
-			workspaceInitContent := `description: Recipe with named actions
+			// Create recipe.yml with init and named actions
+			recipeContent := `description: Recipe with named actions
 
 init:
   - type: shell
@@ -257,8 +257,8 @@ actions:
       description: Run test suite
       command: echo "Tests passed" > test-results.txt
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil
@@ -486,8 +486,8 @@ Test recipe for port removal.
 				return fmt.Errorf("creating job file: %w", err)
 			}
 
-			// Create workspace_init.yml with ports: [] to remove port bindings
-			workspaceInitContent := `description: Recipe that removes port bindings
+			// Create recipe.yml with ports: [] to remove port bindings
+			recipeContent := `description: Recipe that removes port bindings
 
 init:
   - type: docker_compose
@@ -505,8 +505,8 @@ init:
             - "traefik.enable=true"
             - "traefik.http.routers.nginx-{{ .PlanName }}.rule=Host(` + "`nginx.{{ .PlanName }}.localhost`" + `)"
 `
-			if err := fs.WriteString(filepath.Join(recipesDir, "workspace_init.yml"), workspaceInitContent); err != nil {
-				return fmt.Errorf("creating workspace_init.yml: %w", err)
+			if err := fs.WriteString(filepath.Join(recipesDir, "recipe.yml"), recipeContent); err != nil {
+				return fmt.Errorf("creating recipe.yml: %w", err)
 			}
 
 			return nil

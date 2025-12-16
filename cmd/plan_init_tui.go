@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -115,6 +116,40 @@ func (k planInitTUIKeyMap) FullHelp() [][]key.Binding {
 	return k.Base.FullHelp()
 }
 
+// getDefaultNoteTargetFile returns the appropriate default note target file for a given recipe.
+// It first checks the recipe's DefaultNoteTarget field, then falls back to the first job file alphabetically.
+func getDefaultNoteTargetFile(recipeName string) string {
+	if recipeName == "none" || recipeName == "" {
+		return ""
+	}
+
+	_, getRecipeCmd, _ := loadFlowConfigWithDynamicRecipes()
+	recipe, err := orchestration.GetRecipe(recipeName, getRecipeCmd)
+	if err != nil || recipe == nil {
+		return ""
+	}
+
+	// 1. Prefer the explicitly defined default target from the recipe.
+	if recipe.DefaultNoteTarget != "" {
+		return recipe.DefaultNoteTarget
+	}
+
+	// 2. Fallback to the first job file alphabetically if no default is specified.
+	if len(recipe.Jobs) == 0 {
+		return ""
+	}
+	var jobFiles []string
+	for filename := range recipe.Jobs {
+		jobFiles = append(jobFiles, filename)
+	}
+	sort.Strings(jobFiles)
+
+	if len(jobFiles) > 0 {
+		return jobFiles[0]
+	}
+	return ""
+}
+
 // planInitTUIModel represents the state of the new plan creation TUI.
 type planInitTUIModel struct {
 	plansDirectory    string
@@ -200,8 +235,14 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	m.extractFromInput.Width = 41
 
 	m.noteTargetFileInput = textinput.New()
-	m.noteTargetFileInput.Placeholder = "02-spec.md"
-	m.noteTargetFileInput.SetValue("02-spec.md")
+	// Get the default recipe name to determine the initial note target file
+	defaultRecipeName := ""
+	if item, ok := m.recipeList.SelectedItem().(item); ok {
+		defaultRecipeName = string(item)
+	}
+	initialNoteTarget := getDefaultNoteTargetFile(defaultRecipeName)
+	m.noteTargetFileInput.Placeholder = initialNoteTarget
+	m.noteTargetFileInput.SetValue(initialNoteTarget)
 	m.noteTargetFileInput.Width = 41
 
 	// Set default values for checkboxes
@@ -517,8 +558,22 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.focusIndex {
 		case 0:
 			m.nameInput, cmd = m.nameInput.Update(msg)
-		case 1:
+		case 1: // Recipe list
+			prevSelection := m.recipeList.SelectedItem()
 			m.recipeList, cmd = m.recipeList.Update(msg)
+			newSelection := m.recipeList.SelectedItem()
+
+			if prevSelection != newSelection && newSelection != nil {
+				selectedRecipeName := string(newSelection.(item))
+				defaultTarget := getDefaultNoteTargetFile(selectedRecipeName)
+				m.noteTargetFileInput.SetValue(defaultTarget)
+
+				if defaultTarget != "" {
+					m.noteTargetFileInput.Placeholder = defaultTarget
+				} else {
+					m.noteTargetFileInput.Placeholder = "job-filename.md"
+				}
+			}
 		case 2:
 			m.modelList, cmd = m.modelList.Update(msg)
 		case 5:

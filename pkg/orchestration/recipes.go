@@ -32,12 +32,12 @@ type InitAction struct {
 	Overlay     map[string]interface{} `yaml:"overlay,omitempty"`      // For 'docker_compose': the generic overlay
 }
 
-// loadInitActions parses a workspace_init.yml file and populates the Actions and Description fields of a Recipe.
-func loadInitActions(recipe *Recipe, recipeDir string, fs embed.FS) error {
+// loadRecipeMetadata parses a recipe.yml file and populates the metadata fields of a Recipe.
+func loadRecipeMetadata(recipe *Recipe, recipeDir string, fs embed.FS) error {
 	var initData []byte
 	var err error
 
-	initFilePath := filepath.Join(recipeDir, "workspace_init.yml")
+	initFilePath := filepath.Join(recipeDir, "recipe.yml")
 
 	if (fs != embed.FS{}) { // A non-zero embed.FS indicates we are reading from embedded assets
 		initData, err = fs.ReadFile(initFilePath)
@@ -53,9 +53,10 @@ func loadInitActions(recipe *Recipe, recipeDir string, fs embed.FS) error {
 	}
 
 	var initConfig struct {
-		Description string                      `yaml:"description"`
-		Init        []InitAction                `yaml:"init"`    // Actions that run with --init flag
-		Actions     map[string][]InitAction     `yaml:"actions"` // Named, on-demand action groups
+		Description       string                  `yaml:"description"`
+		DefaultNoteTarget string                  `yaml:"default_note_target"`
+		Init              []InitAction            `yaml:"init"`    // Actions that run with --init flag
+		Actions           map[string][]InitAction `yaml:"actions"` // Named, on-demand action groups
 	}
 
 	if err := yaml.Unmarshal(initData, &initConfig); err != nil {
@@ -63,6 +64,7 @@ func loadInitActions(recipe *Recipe, recipeDir string, fs embed.FS) error {
 	}
 
 	recipe.Description = initConfig.Description
+	recipe.DefaultNoteTarget = initConfig.DefaultNoteTarget
 	recipe.InitActions = initConfig.Init
 	recipe.NamedActions = initConfig.Actions
 
@@ -83,13 +85,14 @@ func loadInitActions(recipe *Recipe, recipeDir string, fs embed.FS) error {
 }
 
 type Recipe struct {
-	Name         string                      `json:"name"`
-	Description  string                      `json:"description"`
-	Source       string                      `json:"source,omitempty"` // [Built-in], [User], [Dynamic], or [Project]
-	Domain       string                      `json:"domain,omitempty"` // "generic" or "grove"
-	Jobs         map[string][]byte           `json:"-"`                // Filename -> Content
-	InitActions  []InitAction                `yaml:"init,omitempty"`   // Actions that run with --init flag
-	NamedActions map[string][]InitAction     `yaml:"actions,omitempty"` // Named, on-demand action groups
+	Name              string                      `json:"name"`
+	Description       string                      `json:"description"`
+	Source            string                      `json:"source,omitempty"`  // [Built-in], [User], [Dynamic], or [Project]
+	Domain            string                      `json:"domain,omitempty"`  // "generic" or "grove"
+	DefaultNoteTarget string                      `json:"-"`                 // This will be populated from recipe.yml
+	Jobs              map[string][]byte           `json:"-"`                 // Filename -> Content
+	InitActions       []InitAction                `yaml:"init,omitempty"`    // Actions that run with --init flag
+	NamedActions      map[string][]InitAction     `yaml:"actions,omitempty"` // Named, on-demand action groups
 }
 
 // GetBuiltinRecipe finds and returns a built-in recipe.
@@ -120,9 +123,9 @@ func GetBuiltinRecipe(name string) (*Recipe, error) {
 		if len(recipe.Jobs) == 0 {
 			return nil, fmt.Errorf("recipe '%s' contains no job files", name)
 		}
-		// Load init actions if present
-		if err := loadInitActions(recipe, recipeDir, builtinRecipeFS); err != nil {
-			return nil, fmt.Errorf("loading init actions for recipe '%s': %w", name, err)
+		// Load recipe metadata if present
+		if err := loadRecipeMetadata(recipe, recipeDir, builtinRecipeFS); err != nil {
+			return nil, fmt.Errorf("loading recipe metadata for recipe '%s': %w", name, err)
 		}
 
 		return recipe, nil
@@ -161,9 +164,9 @@ func GetBuiltinRecipe(name string) (*Recipe, error) {
 			if len(recipe.Jobs) > 0 {
 				recipe.Domain = domain
 
-				// Load init actions if present
-				if err := loadInitActions(recipe, recipeDir, builtinRecipeFS); err != nil {
-					return nil, fmt.Errorf("loading init actions for recipe '%s': %w", name, err)
+				// Load recipe metadata if present
+				if err := loadRecipeMetadata(recipe, recipeDir, builtinRecipeFS); err != nil {
+					return nil, fmt.Errorf("loading recipe metadata for recipe '%s': %w", name, err)
 				}
 				return recipe, nil
 			}
@@ -212,20 +215,6 @@ func ListBuiltinRecipes() ([]*Recipe, error) {
 					if err != nil {
 						// Log or skip? For now, skip.
 						continue
-					}
-					// Attempt to find a description. For now, it's hardcoded.
-					// Later, this could come from a recipe.yml.
-					if recipe.Name == "standard-feature" {
-						recipe.Description = "A standard workflow: spec -> implement -> review."
-					}
-					if recipe.Name == "chat" {
-						recipe.Description = "A single chat job for discussion and planning."
-					}
-					if recipe.Name == "chat-workflow" {
-						recipe.Description = "A chat-driven workflow: chat -> implement -> review."
-					}
-					if recipe.Name == "docgen-customize" {
-						recipe.Description = "Customize and generate documentation: plan -> generate."
 					}
 					recipe.Domain = domain
 					recipes = append(recipes, recipe)
@@ -395,8 +384,8 @@ func GetProjectRecipe(name string) (*Recipe, error) {
 				}
 			}
 
-			if err := loadInitActions(recipe, recipeDir, embed.FS{}); err != nil {
-				return nil, fmt.Errorf("loading init actions for project recipe '%s': %w", name, err)
+			if err := loadRecipeMetadata(recipe, recipeDir, embed.FS{}); err != nil {
+				return nil, fmt.Errorf("loading recipe metadata for project recipe '%s': %w", name, err)
 			}
 			if len(recipe.Jobs) == 0 {
 				return nil, fmt.Errorf("recipe '%s' contains no job files", name)
@@ -444,8 +433,8 @@ func GetUserRecipe(name string) (*Recipe, error) {
 		}
 	}
 
-	if err := loadInitActions(recipe, recipeDir, embed.FS{}); err != nil {
-		return nil, fmt.Errorf("loading init actions for user recipe '%s': %w", name, err)
+	if err := loadRecipeMetadata(recipe, recipeDir, embed.FS{}); err != nil {
+		return nil, fmt.Errorf("loading recipe metadata for user recipe '%s': %w", name, err)
 	}
 
 	if len(recipe.Jobs) == 0 {
@@ -483,8 +472,8 @@ func GetNotebookRecipe(name string) (*Recipe, error) {
 		}
 	}
 
-	if err := loadInitActions(recipe, recipeDir, embed.FS{}); err != nil {
-		return nil, fmt.Errorf("loading init actions for notebook recipe '%s': %w", name, err)
+	if err := loadRecipeMetadata(recipe, recipeDir, embed.FS{}); err != nil {
+		return nil, fmt.Errorf("loading recipe metadata for notebook recipe '%s': %w", name, err)
 	}
 
 	if len(recipe.Jobs) == 0 {
