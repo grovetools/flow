@@ -712,7 +712,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor--
 				m.adjustScrollOffset()
 				if m.ShowLogs && !m.IsRunningJob {
-					return m, m.reloadActiveDetailPane()
+					return m.reloadActiveDetailPane()
 				}
 			}
 
@@ -721,7 +721,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor++
 				m.adjustScrollOffset()
 				if m.ShowLogs && !m.IsRunningJob {
-					return m, m.reloadActiveDetailPane()
+					return m.reloadActiveDetailPane()
 				}
 			}
 
@@ -1210,31 +1210,43 @@ func completeJobHelper(job *orchestration.Job, plan *orchestration.Plan, silent 
 }
 
 // reloadActiveDetailPane reloads content for the currently active detail pane
-func (m Model) reloadActiveDetailPane() tea.Cmd {
+func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	if m.Cursor >= len(m.Jobs) || m.ActiveDetailPane == NoPane {
-		return nil
+		return m, nil
 	}
 
 	job := m.Jobs[m.Cursor]
 	m.ActiveLogJob = job
 
+	// Clear the current content immediately to avoid showing stale data
+	switch m.ActiveDetailPane {
+	case LogsPaneDetail:
+		m.LogViewer.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading logs for %s...", job.Title)))
+	case FrontmatterPane:
+		m.frontmatterViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title)))
+	case BriefingPane:
+		m.briefingViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading briefing for %s...", job.Title)))
+	case EditPane:
+		m.editViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading file content for %s...", job.Title)))
+	}
+
+	// Trigger the actual content loading
 	switch m.ActiveDetailPane {
 	case LogsPaneDetail:
 		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
-		isRunning := job.Status == orchestration.JobStatusRunning
-		if isAgentJob && isRunning {
-			return loadAndStreamAgentLogsCmd(m.Plan, job)
+		if isAgentJob {
+			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
 		}
-		return loadLogContentCmd(m.Plan, job)
+		return m, loadLogContentCmd(m.Plan, job)
 	case FrontmatterPane:
-		return loadFrontmatterCmd(job)
+		return m, loadFrontmatterCmd(job)
 	case BriefingPane:
-		return loadBriefingCmd(m.Plan, job)
+		return m, loadBriefingCmd(m.Plan, job)
 	case EditPane:
-		return loadJobFileContentCmd(job)
+		return m, loadJobFileContentCmd(job)
 	}
 
-	return nil
+	return m, nil
 }
 
 // openDetailPane opens a specific detail pane and loads its content
@@ -1267,9 +1279,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	switch pane {
 	case LogsPaneDetail:
 		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
-		isRunning := job.Status == orchestration.JobStatusRunning
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading logs for %s...", job.Title))
-		if isAgentJob && isRunning {
+		if isAgentJob {
 			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
 		}
 		return m, loadLogContentCmd(m.Plan, job)

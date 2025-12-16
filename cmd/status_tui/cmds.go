@@ -184,38 +184,53 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		readOutput, readErr := readCmd.Output()
 
 		logger.WithFields(map[string]interface{}{
-			"job_spec":    jobSpec,
-			"output_len":  len(readOutput),
-			"error":       readErr,
+			"job_spec":   jobSpec,
+			"output_len": len(readOutput),
+			"error":      readErr,
 		}).Debug("aglogs read completed")
 
 		if readErr != nil {
-			// aglogs read failed, maybe the session isn't registered yet. Retry.
-			return LogContentLoadedMsg{
-				Content:     "⏳ Waiting for agent session to start...\n(This may take a few seconds)\n",
-				ShouldRetry: true,
+			if job.Status == orchestration.JobStatusRunning {
+				// Job is running, so it's valid to assume the session is initializing. Retry.
+				return LogContentLoadedMsg{
+					Content:     "⏳ Waiting for agent session to start...\n(This may take a few seconds)\n",
+					ShouldRetry: true,
+				}
+			} else {
+				// Job is not running, so logs should be present. Failure means no logs were found. Do not retry.
+				return LogContentLoadedMsg{
+					Content:     fmt.Sprintf("No agent logs found for job '%s'.\nError from aglogs: %v", job.Title, readErr),
+					ShouldRetry: false,
+				}
 			}
 		}
 
-		// Success! We have historical formatted logs
+		// Success! We have historical formatted logs.
 		content := string(readOutput)
-		if content != "" {
-			// Add a separator before the live stream
-			separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
-			streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
-			content = content + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
-		} else {
-			content = "⏳ Agent session found, waiting for logs...\n"
+		shouldStream := job.Status == orchestration.JobStatusRunning
+
+		if shouldStream {
+			if content != "" {
+				// Add a separator before the live stream
+				separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
+				streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
+				content = content + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
+			} else {
+				content = "⏳ Agent session found, waiting for logs...\n"
+			}
+		} else if content == "" {
+			content = theme.DefaultTheme.Muted.Render(fmt.Sprintf("No agent logs found for completed job '%s'.", job.Title))
 		}
 
 		logger.WithFields(map[string]interface{}{
-			"job_spec": jobSpec,
+			"job_spec":      jobSpec,
+			"should_stream": shouldStream,
 		}).Info("Starting agent log stream")
 
 		return LogContentLoadedMsg{
 			Content:        content,
 			ShouldRetry:    false,
-			StartStreaming: true,
+			StartStreaming: shouldStream,
 			LogFilePath:    jobSpec, // Pass the job spec for streaming
 		}
 	}
