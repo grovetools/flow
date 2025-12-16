@@ -12,6 +12,7 @@ func main() {
 	allScenarios := []*harness.Scenario{
 		scenarios.AbandonedJobsScenario,
 		scenarios.AgentFromChatScenario,
+		scenarios.AgentLogViewerScenario,
 		scenarios.BriefingFilesScenario,
 		scenarios.CoreOrchestrationScenario,
 		scenarios.DependencyWorkflowScenario,
