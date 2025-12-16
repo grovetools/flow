@@ -2,11 +2,13 @@ package status_tui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -95,6 +97,10 @@ type Model struct {
 	LogViewer           logviewer.Model
 	ActiveLogJob        *orchestration.Job
 	ActiveDetailPane    DetailPane
+	columnSelectMode    bool
+	columnList          list.Model
+	availableColumns    []string
+	columnVisibility    map[string]bool
 	frontmatterViewport viewport.Model
 	briefingViewport    viewport.Model
 	editViewport        viewport.Model
@@ -144,6 +150,34 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to create orchestrator for TUI: %v\n", err)
 	}
 
+	// Column Visibility Setup
+	availableColumns := []string{"JOB", "TITLE", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "PREPEND", "UPDATED", "COMPLETED", "DURATION"}
+	state, err := loadState()
+	if err != nil {
+		// On error, use defaults
+		state = &tuiState{ColumnVisibility: defaultColumnVisibility()}
+	}
+	columnVisibility := state.ColumnVisibility
+	// Ensure all available columns have an entry in the visibility map
+	for _, col := range availableColumns {
+		if _, ok := columnVisibility[col]; !ok {
+			// Add new columns with a default visibility (false, unless it's TEMPLATE)
+			columnVisibility[col] = (col == "TEMPLATE")
+		}
+	}
+
+	var columnItems []list.Item
+	for _, col := range availableColumns {
+		columnItems = append(columnItems, columnSelectItem{name: col})
+	}
+
+	columnList := list.New(columnItems, columnSelectDelegate{visibility: &columnVisibility}, 35, 14)
+	columnList.Title = "Toggle Column Visibility"
+	columnList.SetShowHelp(false)
+	columnList.SetFilteringEnabled(false)
+	columnList.SetShowStatusBar(false)
+	columnList.SetShowPagination(false)
+
 	// Create a temporary log file in the project's .grove/logs directory (kept for compatibility)
 	logsDir := filepath.Join(plan.Directory, ".grove", "logs")
 	os.MkdirAll(logsDir, 0755)
@@ -180,6 +214,10 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		ShowLogs:         false, // Start with logs hidden by default
 		ActiveLogJob:     nil,
 		ActiveDetailPane: NoPane,
+		columnSelectMode:    false,
+		columnList:          columnList,
+		availableColumns:    availableColumns,
+		columnVisibility:    columnVisibility,
 		Focus:            JobsPane,
 		LogSplitVertical: false, // Default to horizontal split
 		IsRunningJob:        false,
@@ -356,6 +394,11 @@ func (m Model) renderFooter() string {
 func (m Model) View() string {
 	if m.Err != nil {
 		return fmt.Sprintf("Error: %v\n", m.Err)
+	}
+
+	// If column selection mode is active, render it and return
+	if m.columnSelectMode {
+		return m.renderColumnSelectView()
 	}
 
 	// If renaming, show the rename dialog and return
@@ -864,4 +907,44 @@ func findAllDependentsHelper(job *orchestration.Job, plan *orchestration.Plan) [
 func formatStatusSummaryHelper(plan *orchestration.Plan) string {
 	// Status summary is no longer used in TUI-only mode
 	return ""
+}
+
+// columnSelectItem represents an item in the column visibility list
+type columnSelectItem struct {
+	name string
+}
+
+func (i columnSelectItem) FilterValue() string { return i.name }
+func (i columnSelectItem) Title() string       { return i.name }
+func (i columnSelectItem) Description() string { return "" }
+
+// columnSelectDelegate is a custom delegate with minimal spacing
+type columnSelectDelegate struct {
+	visibility *map[string]bool
+}
+
+func (d columnSelectDelegate) Height() int                             { return 1 }
+func (d columnSelectDelegate) Spacing() int                            { return 0 }
+func (d columnSelectDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d columnSelectDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(columnSelectItem)
+	if !ok {
+		return
+	}
+
+	var checkbox string
+	if (*d.visibility)[i.name] {
+		checkbox = theme.DefaultTheme.Success.Render("[x]")
+	} else {
+		checkbox = theme.DefaultTheme.Muted.Render("[ ]")
+	}
+
+	str := fmt.Sprintf("%s %s", checkbox, i.Title())
+	if index == m.Index() {
+		str = lipgloss.NewStyle().Foreground(theme.DefaultTheme.Colors.Orange).Render("│ " + str)
+	} else {
+		str = "  " + str
+	}
+
+	fmt.Fprint(w, str)
 }

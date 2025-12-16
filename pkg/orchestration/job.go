@@ -50,9 +50,11 @@ type Job struct {
 	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
 	PrependDependencies  bool         `yaml:"prepend_dependencies,omitempty" json:"prepend_dependencies,omitempty"`
 	OnCompleteStatus     string       `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty"`
-	CreatedAt            time.Time    `yaml:"created_at,omitempty" json:"created_at,omitempty"`
-	UpdatedAt            time.Time    `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
-	Summary              string       `yaml:"summary,omitempty" json:"summary,omitempty"`
+	CreatedAt            time.Time     `yaml:"created_at,omitempty" json:"created_at,omitempty"`
+	UpdatedAt            time.Time     `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+	CompletedAt          time.Time     `yaml:"completed_at,omitempty" json:"completed_at,omitempty"`
+	Duration             time.Duration `yaml:"duration,omitempty" json:"duration,omitempty"`
+	Summary              string        `yaml:"summary,omitempty" json:"summary,omitempty"`
 	SourcePlan           string       `yaml:"source_plan,omitempty" json:"source_plan,omitempty"`
 	RecipeName           string       `yaml:"recipe_name,omitempty" json:"recipe_name,omitempty"`
 	GeneratePlanFrom     bool         `yaml:"generate_plan_from,omitempty" json:"generate_plan_from,omitempty"`

@@ -82,6 +82,13 @@
       "type": "string",
       "format": "date-time"
     },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration": {
+      "type": "integer"
+    },
     "summary": {
       "type": "string"
     },

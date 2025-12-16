@@ -3,6 +3,7 @@ package status_tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	gtable "github.com/mattsolo1/grove-core/tui/components/table"
@@ -36,6 +37,66 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 	}
 }
 
+// formatRelativeTime formats a time as a relative string (e.g., "2h ago", "3d ago")
+func formatRelativeTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+
+	duration := time.Since(t)
+
+	if duration < time.Minute {
+		return "just now"
+	} else if duration < time.Hour {
+		minutes := int(duration.Minutes())
+		return fmt.Sprintf("%dm ago", minutes)
+	} else if duration < 24*time.Hour {
+		hours := int(duration.Hours())
+		return fmt.Sprintf("%dh ago", hours)
+	} else if duration < 7*24*time.Hour {
+		days := int(duration.Hours() / 24)
+		return fmt.Sprintf("%dd ago", days)
+	} else if duration < 30*24*time.Hour {
+		weeks := int(duration.Hours() / 24 / 7)
+		return fmt.Sprintf("%dw ago", weeks)
+	} else {
+		months := int(duration.Hours() / 24 / 30)
+		return fmt.Sprintf("%dmo ago", months)
+	}
+}
+
+// formatDuration formats a duration as a compact string (e.g., "2m 5s", "1h 23m")
+func formatDuration(d time.Duration) string {
+	if d == 0 {
+		return "-"
+	}
+
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	} else if d < time.Hour {
+		minutes := int(d.Minutes())
+		seconds := int(d.Seconds()) % 60
+		if seconds > 0 {
+			return fmt.Sprintf("%dm %ds", minutes, seconds)
+		}
+		return fmt.Sprintf("%dm", minutes)
+	} else if d < 24*time.Hour {
+		hours := int(d.Hours())
+		minutes := int(d.Minutes()) % 60
+		if minutes > 0 {
+			return fmt.Sprintf("%dh %dm", hours, minutes)
+		}
+		return fmt.Sprintf("%dh", hours)
+	} else {
+		days := int(d.Hours() / 24)
+		hours := int(d.Hours()) % 24
+		if hours > 0 {
+			return fmt.Sprintf("%dd %dh", days, hours)
+		}
+		return fmt.Sprintf("%dd", days)
+	}
+}
+
 // renderTableViewWithWidth renders the jobs as a table with a maximum width constraint
 func (m Model) renderTableViewWithWidth(maxWidth int) string {
 	tableStr := m.renderTableView()
@@ -46,115 +107,164 @@ func (m Model) renderTableViewWithWidth(maxWidth int) string {
 	return tableStr
 }
 
-// renderTableView renders the jobs as a table with JOB, TYPE, and STATUS columns
+// renderTableView renders the jobs as a table with configurable columns
 func (m Model) renderTableView() string {
 	t := theme.DefaultTheme
-	headers := []string{"SEL", "JOB", "TYPE", "STATUS"}
+
+	// Check if any jobs are selected
+	hasSelection := len(m.Selected) > 0
+
+	// Dynamically build headers from visible columns
+	var headers []string
+
+	// Always add SEL column first if there are selections
+	if hasSelection {
+		headers = append(headers, "SEL")
+	}
+
+	// Add other visible columns
+	for _, colName := range m.availableColumns {
+		if m.columnVisibility[colName] {
+			headers = append(headers, colName)
+		}
+	}
+
 	var rows [][]string
 
 	visibleJobs := m.getVisibleJobs()
 	statusStyles := getStatusStyles()
 
 	for i, job := range visibleJobs {
-		// Selection checkbox
-		var selCheckbox string
-		if m.Selected[job.ID] {
-			selCheckbox = t.Success.Render(theme.IconSelect)
-		} else {
-			selCheckbox = theme.IconUnselect
-		}
-		// JOB column (with tree indentation and connectors)
-		indent := m.JobIndents[job.ID]
+		var row []string
 
-		// Build tree prefix with connectors
-		var treePrefix string
-		if indent > 0 {
-			// Add spacing for parent levels
-			treePrefix = strings.Repeat("  ", indent-1)
-
-			// Determine if this is the last child at this level
-			globalIndex := m.ScrollOffset + i
-			isLast := true
-			for j := globalIndex + 1; j < len(m.Jobs); j++ {
-				if m.JobIndents[m.Jobs[j].ID] == indent {
-					isLast = false
-					break
+		for _, colName := range headers {
+			var cell string
+			switch strings.ToUpper(colName) {
+			case "SEL":
+				// This case is only reached if hasSelection is true
+				// (otherwise SEL is not in headers)
+				if m.Selected[job.ID] {
+					cell = t.Success.Render(theme.IconSelect)
+				} else {
+					cell = theme.IconUnselect
 				}
-				if m.JobIndents[m.Jobs[j].ID] < indent {
-					break
+			case "JOB":
+				indent := m.JobIndents[job.ID]
+				var treePrefix string
+				if indent > 0 {
+					treePrefix = strings.Repeat("  ", indent-1)
+					globalIndex := m.ScrollOffset + i
+					isLast := true
+					for j := globalIndex + 1; j < len(m.Jobs); j++ {
+						if m.JobIndents[m.Jobs[j].ID] == indent {
+							isLast = false; break
+						}
+						if m.JobIndents[m.Jobs[j].ID] < indent {
+							break
+						}
+					}
+					if isLast { treePrefix += "└─ " } else { treePrefix += "├─ " }
 				}
+				statusIcon := m.getStatusIcon(job.Status)
+				var filename string
+				if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+					filename = t.Muted.Render(job.Filename)
+				} else {
+					filename = job.Filename
+				}
+				cell = fmt.Sprintf("%s%s %s", treePrefix, statusIcon, filename)
+			case "TITLE":
+				titleText := job.Title
+				if titleText == "" {
+					cell = t.Muted.Render("-")
+				} else {
+					if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+						cell = t.Muted.Render(titleText)
+					} else {
+						cell = titleText
+					}
+				}
+			case "TYPE":
+				var jobTypeSymbol string
+				switch job.Type {
+				case "interactive_agent": jobTypeSymbol = theme.IconInteractiveAgent
+				case "headless_agent": jobTypeSymbol = theme.IconHeadlessAgent
+				case "chat": jobTypeSymbol = theme.IconChat
+				case "oneshot": jobTypeSymbol = theme.IconOneshot
+				case "shell": jobTypeSymbol = theme.IconShell
+				default: jobTypeSymbol = ""
+				}
+				var typeCol string
+				if jobTypeSymbol != "" { typeCol = fmt.Sprintf("%s %s", jobTypeSymbol, job.Type) } else { typeCol = string(job.Type) }
+				if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+					cell = t.Muted.Render(typeCol)
+				} else {
+					cell = typeCol
+				}
+			case "STATUS":
+				statusStyle := theme.DefaultTheme.Muted
+				if style, ok := statusStyles[job.Status]; ok {
+					statusStyle = style
+				}
+				statusText := statusStyle.Render(string(job.Status))
+				if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+					cell = t.Muted.Render(string(job.Status))
+				} else {
+					cell = statusText
+				}
+			case "TEMPLATE":
+				templateText := job.Template
+				if templateText == "" {
+					templateText = t.Muted.Render("-")
+				}
+				cell = templateText
+			case "MODEL":
+				modelText := job.Model
+				if modelText == "" {
+					cell = t.Muted.Render("-")
+				} else {
+					cell = t.Muted.Render(modelText)
+				}
+			case "WORKTREE":
+				worktreeText := job.Worktree
+				if worktreeText == "" {
+					cell = t.Muted.Render("-")
+				} else {
+					cell = t.Muted.Render(worktreeText)
+				}
+			case "PREPEND":
+				if job.PrependDependencies {
+					cell = t.Success.Render("✓")
+				} else {
+					cell = t.Muted.Render("-")
+				}
+			case "UPDATED":
+				cell = t.Muted.Render(formatRelativeTime(job.UpdatedAt))
+			case "COMPLETED":
+				if !job.CompletedAt.IsZero() {
+					cell = t.Muted.Render(formatRelativeTime(job.CompletedAt))
+				} else {
+					cell = t.Muted.Render("-")
+				}
+			case "DURATION":
+				if job.Duration > 0 {
+					cell = t.Muted.Render(formatDuration(job.Duration))
+				} else {
+					cell = t.Muted.Render("-")
+				}
+			default:
+				cell = t.Muted.Render("?")
 			}
-
-			// Add tree connector
-			if isLast {
-				treePrefix += "└─ "
-			} else {
-				treePrefix += "├─ "
-			}
+			row = append(row, cell)
 		}
-
-		statusIcon := m.getStatusIcon(job.Status)
-
-		// Apply muted styling to filename for completed/abandoned jobs
-		var filename string
-		if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
-			filename = t.Muted.Render(job.Filename)
-		} else {
-			filename = job.Filename
-		}
-
-		jobCol := fmt.Sprintf("%s%s %s", treePrefix, statusIcon, filename)
-
-		// TYPE column with icon
-		var jobTypeSymbol string
-		switch job.Type {
-		case "interactive_agent":
-			jobTypeSymbol = theme.IconInteractiveAgent
-		case "headless_agent":
-			jobTypeSymbol = theme.IconHeadlessAgent
-		case "chat":
-			jobTypeSymbol = theme.IconChat
-		case "oneshot":
-			jobTypeSymbol = theme.IconOneshot
-		case "shell":
-			jobTypeSymbol = theme.IconShell
-		default:
-			jobTypeSymbol = ""
-		}
-		var typeCol string
-		if jobTypeSymbol != "" {
-			typeCol = fmt.Sprintf("%s %s", jobTypeSymbol, job.Type)
-		} else {
-			typeCol = string(job.Type)
-		}
-
-		// STATUS column
-		statusStyle := theme.DefaultTheme.Muted
-		if style, ok := statusStyles[job.Status]; ok {
-			statusStyle = style
-		}
-		statusText := statusStyle.Render(string(job.Status))
-
-		// Apply muted styling to type and status for completed/abandoned jobs
-		var finalTypeCol, finalStatusCol string
-		if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
-			finalTypeCol = t.Muted.Render(typeCol)
-			finalStatusCol = t.Muted.Render(string(job.Status))
-		} else {
-			finalTypeCol = typeCol
-			finalStatusCol = statusText
-		}
-
-		rows = append(rows, []string{selCheckbox, jobCol, finalTypeCol, finalStatusCol})
+		rows = append(rows, row)
 	}
 
 	if len(rows) == 0 {
 		return "\n" + t.Muted.Render("No jobs to display.")
 	}
 
-	// Use gtable.SelectableTable
 	tableStr := gtable.SelectableTable(headers, rows, m.Cursor-m.ScrollOffset)
-
 	return tableStr
 }
 
@@ -429,4 +539,21 @@ func (m *Model) getVisibleJobs() []*orchestration.Job {
 		return []*orchestration.Job{}
 	}
 	return m.Jobs[start:end]
+}
+
+// renderColumnSelectView renders the UI for toggling column visibility.
+func (m Model) renderColumnSelectView() string {
+	listView := m.columnList.View()
+	styledView := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Colors.Cyan).
+		Padding(1, 2).
+		Render(listView)
+	helpText := lipgloss.NewStyle().
+		Faint(true).
+		Width(lipgloss.Width(styledView)).
+		Align(lipgloss.Center).
+		Render("\n\nPress space to toggle • Enter/Esc/T to close")
+	content := lipgloss.JoinVertical(lipgloss.Left, styledView, helpText)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, content)
 }

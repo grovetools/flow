@@ -574,6 +574,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle column selection mode first
+		if m.columnSelectMode {
+			switch msg.String() {
+			case "T", "enter", "esc":
+				m.columnSelectMode = false
+				return m, nil
+			case " ":
+				// Toggle selection
+				if i, ok := m.columnList.SelectedItem().(columnSelectItem); ok {
+					m.columnVisibility[i.name] = !m.columnVisibility[i.name]
+					// Save state to disk
+					_ = saveState(m.columnVisibility)
+				}
+				return m, nil
+			default:
+				m.columnList, cmd = m.columnList.Update(msg)
+				return m, cmd
+			}
+		}
+
 		// If help is showing, let it handle key messages (for scrolling and closing)
 		if m.Help.ShowAll {
 			var cmd tea.Cmd
@@ -1144,6 +1164,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.ToggleSummaries):
 			m.ShowSummaries = !m.ShowSummaries
+
+		case key.Matches(msg, m.KeyMap.ToggleView):
+			if m.ViewMode == TreeView {
+				m.ViewMode = TableView
+			} else {
+				m.ViewMode = TreeView
+			}
+		case key.Matches(msg, m.KeyMap.ToggleColumns):
+			m.columnSelectMode = true
+
 		}
 	}
 

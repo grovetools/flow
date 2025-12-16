@@ -31,6 +31,8 @@ func main() {
 		scenarios.PlanStatusTUILiveLogsScenario,
 		scenarios.PlanStatusTUIRunningJobBlockScenario,
 		scenarios.PlanStatusTUIOnlyScenario,
+		scenarios.PlanStatusTUIColumnToggleScenario,
+		scenarios.PlanStatusTUIColumnPersistenceScenario,
 		scenarios.PlanFromNoteScenario,
 		scenarios.PlanMergeUpdateWorktreeScenario,
 		scenarios.StandardFeatureRecipeScenario,
