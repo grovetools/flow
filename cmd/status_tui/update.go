@@ -580,6 +580,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "T", "enter", "esc":
 				m.columnSelectMode = false
+				// Recalculate layout dimensions with new column visibility
+				m.updateLayoutDimensions()
+				// Update log viewer size if active
+				if m.ShowLogs {
+					m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+					return m, cmd
+				}
 				return m, nil
 			case " ":
 				// Toggle selection

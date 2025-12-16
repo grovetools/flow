@@ -11,6 +11,12 @@ import (
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
+const (
+	// Column width caps for table rendering
+	maxJobColumnWidth   = 30
+	maxTitleColumnWidth = 30
+)
+
 // getStatusStyles returns theme-based styles for job statuses with subtle colors
 func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 	return map[orchestration.JobStatus]lipgloss.Style{
@@ -167,11 +173,17 @@ func (m Model) renderTableView() string {
 					if isLast { treePrefix += "└─ " } else { treePrefix += "├─ " }
 				}
 				statusIcon := m.getStatusIcon(job.Status)
-				var filename string
+
+				// Calculate available width for filename
+				// Cap JOB column at reasonable width
+				maxFilenameWidth := maxJobColumnWidth - len(treePrefix) - 2 // 2 for icon + space
+				filename := job.Filename
+				if len(filename) > maxFilenameWidth && maxFilenameWidth > 3 {
+					filename = filename[:maxFilenameWidth-3] + "..."
+				}
+
 				if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
-					filename = t.Muted.Render(job.Filename)
-				} else {
-					filename = job.Filename
+					filename = t.Muted.Render(filename)
 				}
 				cell = fmt.Sprintf("%s%s %s", treePrefix, statusIcon, filename)
 			case "TITLE":
@@ -179,6 +191,10 @@ func (m Model) renderTableView() string {
 				if titleText == "" {
 					cell = t.Muted.Render("-")
 				} else {
+					// Cap title at maxTitleColumnWidth with ellipsis
+					if len(titleText) > maxTitleColumnWidth {
+						titleText = titleText[:maxTitleColumnWidth-3] + "..."
+					}
 					if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
 						cell = t.Muted.Render(titleText)
 					} else {

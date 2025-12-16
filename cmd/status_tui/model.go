@@ -561,72 +561,104 @@ func (m *Model) calculateOptimalLogHeight() int {
 	return logHeight
 }
 
-// calculateMinJobsPaneWidth calculates the minimum width needed for the jobs pane
-// based on visible jobs (job names, indentation, type, status)
-func (m *Model) calculateMinJobsPaneWidth() int {
+// calculateJobsPaneWidth calculates the optimal width for the jobs pane
+// based on the content of the currently visible columns.
+func (m *Model) calculateJobsPaneWidth() int {
 	if len(m.Jobs) == 0 {
 		return 60 // Default minimum
 	}
 
-	// Only measure visible jobs to optimize width calculation
+	// 1. Initialize max widths with header lengths
+	columnWidths := make(map[string]int)
+	for _, colName := range m.availableColumns {
+		if m.columnVisibility[colName] {
+			columnWidths[colName] = lipgloss.Width(colName)
+		}
+	}
+
+	// 2. Iterate through visible jobs to find the max width for each visible column
 	visibleJobs := m.getVisibleJobs()
 	if len(visibleJobs) == 0 {
-		return 60 // Default minimum
+		// Fallback if no jobs are visible (e.g., empty plan)
+		return 60
 	}
-
-	maxJobColWidth := 0
-	maxTypeColWidth := 0
-	maxStatusColWidth := 0
 
 	for _, job := range visibleJobs {
-		// Calculate JOB column width: indent + tree prefix + icon + space + filename
-		indent := m.JobIndents[job.ID]
-		treeChars := 0
-		if indent > 0 {
-			treeChars = (indent * 2) + 3 // "  " per level + "└─ " or "├─ "
+		// Calculate rendered width for each potential column
+		// This logic mirrors the rendering in view.go
+		if m.columnVisibility["JOB"] {
+			indent := m.JobIndents[job.ID]
+			treePrefixWidth := 0
+			if indent > 0 {
+				// Matches view.go: strings.Repeat("  ", indent-1) + "└─ " or "├─ "
+				treePrefixWidth = ((indent - 1) * 2) + 3 // "  " per level above 1 + "└─ " (3 chars)
+			}
+			// statusIcon (1 visual char, but may have ANSI codes) + space (1) + filename
+			jobColWidth := treePrefixWidth + 2 + lipgloss.Width(job.Filename)
+			// Cap at maxJobColumnWidth to match truncation in view.go
+			if jobColWidth > maxJobColumnWidth {
+				jobColWidth = maxJobColumnWidth
+			}
+			if jobColWidth > columnWidths["JOB"] {
+				columnWidths["JOB"] = jobColWidth
+			}
 		}
-
-		// Icon (3 chars with space) + filename
-		jobColWidth := treeChars + 3 + len(job.Filename)
-		if jobColWidth > maxJobColWidth {
-			maxJobColWidth = jobColWidth
+		if m.columnVisibility["TITLE"] {
+			titleWidth := lipgloss.Width(job.Title)
+			// Cap at maxTitleColumnWidth to match truncation in view.go
+			if titleWidth > maxTitleColumnWidth {
+				titleWidth = maxTitleColumnWidth
+			}
+			if titleWidth > columnWidths["TITLE"] {
+				columnWidths["TITLE"] = titleWidth
+			}
 		}
-
-		// Calculate TYPE column width: icon + space + type name
-		typeWidth := 3 + len(job.Type) // icon + space + type
-		if typeWidth > maxTypeColWidth {
-			maxTypeColWidth = typeWidth
+		if m.columnVisibility["TYPE"] {
+			// icon + space + type name
+			typeWidth := 2 + lipgloss.Width(string(job.Type))
+			if typeWidth > columnWidths["TYPE"] {
+				columnWidths["TYPE"] = typeWidth
+			}
 		}
+		// ... other columns can be added here if needed ...
+	}
 
-		// Calculate STATUS column width
-		statusWidth := len(job.Status)
-		if statusWidth > maxStatusColWidth {
-			maxStatusColWidth = statusWidth
+	// 3. Sum up the widths of visible columns and add padding/borders
+	totalWidth := 0
+	hasSelection := len(m.Selected) > 0
+
+	// Count visible columns
+	visibleColCount := 0
+	if hasSelection {
+		visibleColCount++
+		totalWidth += 3 // "SEL" column width
+	}
+
+	for _, colName := range m.availableColumns {
+		if m.columnVisibility[colName] {
+			visibleColCount++
+			width := columnWidths[colName]
+			totalWidth += width
 		}
 	}
 
-	// Cap individual column widths to prevent extremely long filenames from dominating
-	const maxJobColWidthCap = 50  // Long filenames will wrap/truncate in table
-	if maxJobColWidth > maxJobColWidthCap {
-		maxJobColWidth = maxJobColWidthCap
+	// Add table formatting: left border (1) + right border (1) + separators between columns (3 each)
+	// Format is: "│ col1 │ col2 │ col3 │"
+	if visibleColCount > 0 {
+		totalWidth += 2 // Left and right borders
+		totalWidth += (visibleColCount - 1) * 3 // Separators between columns: " │ "
+		totalWidth += visibleColCount * 2 // Padding: 1 space on each side of each column
+		totalWidth += 4 // Extra spacing buffer
 	}
 
-	// SEL column is fixed at ~5 chars
-	selWidth := 5
-
-	// Add padding and borders: each column has padding, plus table borders
-	// Typical table has: | SEL | JOB | TYPE | STATUS |
-	// That's 5 separators + column padding (2 per column = 8)
-	borders := 13
-
-	totalWidth := selWidth + maxJobColWidth + maxTypeColWidth + maxStatusColWidth + borders
-
-	// Apply reasonable bounds
+	// 4. Apply reasonable bounds to the final calculated width
 	if totalWidth < 60 {
 		totalWidth = 60 // Absolute minimum
 	}
-	if totalWidth > 100 {
-		totalWidth = 100 // Cap at reasonable max to give logs more space
+	// Cap at 80% of terminal width to ensure logs are always somewhat visible
+	maxWidth := int(float64(m.Width) * 0.8)
+	if totalWidth > maxWidth {
+		totalWidth = maxWidth
 	}
 
 	return totalWidth
@@ -635,12 +667,10 @@ func (m *Model) calculateMinJobsPaneWidth() int {
 // updateLayoutDimensions centralizes the logic for calculating pane sizes.
 func (m *Model) updateLayoutDimensions() {
 	if m.LogSplitVertical {
-		minJobsWidth := m.calculateMinJobsPaneWidth()
-		if m.Width < minJobsWidth+minLogsWidth+verticalSeparatorWidth {
+		m.JobsPaneWidth = m.calculateJobsPaneWidth()
+		if m.Width < m.JobsPaneWidth+minLogsWidth+verticalSeparatorWidth {
 			m.LogSplitVertical = false
 			m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
-		} else {
-			m.JobsPaneWidth = minJobsWidth
 		}
 	}
 
