@@ -120,6 +120,36 @@ func (j *Job) IsRunnable() bool {
 	return true
 }
 
+// CanBeRetried checks if a failed job can be manually retried.
+// This is used when a user explicitly targets a failed job for re-execution.
+func (j *Job) CanBeRetried() bool {
+	// Only failed jobs can be retried
+	if j.Status != JobStatusFailed {
+		return false
+	}
+
+	// Check if all dependencies are met
+	for _, dep := range j.Dependencies {
+		if dep == nil {
+			return false
+		}
+
+		dependencyMet := false
+		if dep.Status == JobStatusCompleted || dep.Status == JobStatusAbandoned {
+			dependencyMet = true
+		} else if (j.Type == JobTypeInteractiveAgent || j.Type == JobTypeAgent) && dep.Type == JobTypeChat && dep.Status == JobStatusPendingUser {
+			// Special case: an interactive agent can run if its chat dependency is pending user input.
+			dependencyMet = true
+		}
+
+		if !dependencyMet {
+			return false
+		}
+	}
+
+	return true
+}
+
 // UpdateStatus updates the job status using the state persister.
 func (j *Job) UpdateStatus(sp *StatePersister, newStatus JobStatus) error {
 	return sp.UpdateJobStatus(j, newStatus)

@@ -852,24 +852,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					"job_id":     job.ID,
 					"job_title":  job.Title,
 					"job_status": job.Status,
-				}).Debug("Checking job status")
+				}).Debug("Checking if job is runnable")
 
-				switch job.Status {
-				case orchestration.JobStatusPending, orchestration.JobStatusFailed,
-					orchestration.JobStatusTodo, orchestration.JobStatusNeedsReview,
-					orchestration.JobStatusBlocked, orchestration.JobStatusPendingUser,
-					orchestration.JobStatusPendingLLM:
-					// These statuses are runnable
+				if job.IsRunnable() {
 					jobsToRun = append(jobsToRun, job)
-				case orchestration.JobStatusRunning:
-					skippedReasons = append(skippedReasons, fmt.Sprintf("%s is already running", job.Title))
-				case orchestration.JobStatusCompleted:
-					skippedReasons = append(skippedReasons, fmt.Sprintf("%s is already completed", job.Title))
-				case orchestration.JobStatusAbandoned, orchestration.JobStatusHold:
-					skippedReasons = append(skippedReasons, fmt.Sprintf("%s is on hold/abandoned", job.Title))
-				default:
-					// For any other status, skip
-					skippedReasons = append(skippedReasons, fmt.Sprintf("%s has status %s", job.Title, job.Status))
+				} else {
+					var reason string
+					switch job.Status {
+					case orchestration.JobStatusCompleted:
+						reason = "is already completed."
+					case orchestration.JobStatusRunning:
+						reason = "is already running."
+					case orchestration.JobStatusAbandoned, orchestration.JobStatusHold:
+						reason = "is on hold/abandoned."
+					case orchestration.JobStatusPending, orchestration.JobStatusBlocked, orchestration.JobStatusFailed:
+						// Since IsRunnable() returned false, it must be because dependencies are not met.
+						reason = "is blocked by unmet dependencies."
+					default:
+						reason = fmt.Sprintf("is not in a runnable state (status: %s).", job.Status)
+					}
+					skippedReasons = append(skippedReasons, fmt.Sprintf("'%s' %s", job.Title, reason))
 				}
 			}
 

@@ -19,6 +19,7 @@ func main() {
 		scenarios.AgentWorktreeLifecycleScenario,
 		scenarios.ChatAndExtractWorkflowScenario,
 		scenarios.JobFailureAndRecoveryScenario,
+		scenarios.FailedJobRerunnableScenario,
 		scenarios.PlanLifecycleScenario,
 		scenarios.PlanFinishEcosystemScenario,
 		scenarios.JobManagementScenario,

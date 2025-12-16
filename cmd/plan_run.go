@@ -474,17 +474,18 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 	// Get current status
 	status := orch.GetStatus()
 
-	if status.Pending == 0 && status.Running == 0 {
+	// Get runnable jobs first to determine if there's anything to do
+	graph, _ := orchestration.BuildDependencyGraph(plan)
+	runnable := graph.GetRunnableJobs()
+
+	// Check if we're truly done (no pending, no running, no runnable jobs)
+	if status.Pending == 0 && status.Running == 0 && len(runnable) == 0 {
 		if status.Failed > 0 {
 			return fmt.Errorf("no runnable jobs - %d jobs failed", status.Failed)
 		}
 		fmt.Println("All jobs completed!")
 		return nil
 	}
-
-	// Get runnable jobs
-	graph, _ := orchestration.BuildDependencyGraph(plan)
-	runnable := graph.GetRunnableJobs()
 
 	if len(runnable) == 0 {
 		if status.Running > 0 {

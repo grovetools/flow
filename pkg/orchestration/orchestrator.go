@@ -157,7 +157,12 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobFile string) error {
 		return fmt.Errorf("job not found: %s", jobFile)
 	}
 
-	// Validate job is runnable
+	// Check if job is already completed
+	if job.Status == JobStatusCompleted {
+		return fmt.Errorf("job already completed: %s", jobFile)
+	}
+
+	// Validate job is runnable or can be retried
 	runnable := o.dependencyGraph.GetRunnableJobs()
 	isRunnable := false
 	for _, r := range runnable {
@@ -167,11 +172,13 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobFile string) error {
 		}
 	}
 
+	// If not in the runnable list, check if it's a failed job that can be retried
 	if !isRunnable {
-		if job.Status == JobStatusCompleted {
-			return fmt.Errorf("job already completed: %s", jobFile)
+		if job.CanBeRetried() {
+			isRunnable = true
+		} else {
+			return fmt.Errorf("job %s is not runnable (dependencies not met or in wrong status)", job.ID)
 		}
-		return fmt.Errorf("job %s is not runnable (dependencies not met or in wrong status)", job.ID)
 	}
 
 	// Execute job
