@@ -461,7 +461,16 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 		p.log.WithField("window", agentWindowName).Info("Creating window for agent")
 		p.prettyLog.InfoPretty(fmt.Sprintf("Creating window '%s' for agent...", agentWindowName))
-		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", agentWindowName, "-c", workDir); err != nil {
+
+		// Build new-window command args - add -d flag if in TUI mode to prevent auto-select
+		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+		newWindowArgs := []string{"new-window"}
+		if isTUIMode {
+			newWindowArgs = append(newWindowArgs, "-d") // Create window in background (don't select it)
+		}
+		newWindowArgs = append(newWindowArgs, "-t", sessionName, "-n", agentWindowName, "-c", workDir)
+
+		if err := executor.Execute("tmux", newWindowArgs...); err != nil {
 			p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
 		}
 
@@ -493,7 +502,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		}
 
 		// Conditionally switch to the agent window (but not when running from TUI)
-		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+		// Note: isTUIMode already declared above when building new-window args
 		if os.Getenv("TMUX") != "" && !isTUIMode {
 			// Check if we are in the correct session before trying to select window
 			currentSessionCmd := exec.Command("tmux", "display-message", "-p", "#S")
@@ -579,7 +588,15 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	executor := &flowexec.RealCommandExecutor{}
 
-	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir); err != nil {
+	// Build new-window command args - add -d flag if in TUI mode to prevent auto-select
+	isTUIModeForNonWorktree := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+	newWindowArgsNonWorktree := []string{"new-window"}
+	if isTUIModeForNonWorktree {
+		newWindowArgsNonWorktree = append(newWindowArgsNonWorktree, "-d")
+	}
+	newWindowArgsNonWorktree = append(newWindowArgsNonWorktree, "-t", sessionName, "-n", windowName, "-c", workDir)
+
+	if err := executor.Execute("tmux", newWindowArgsNonWorktree...); err != nil {
 		if strings.Contains(err.Error(), "duplicate window") {
 			p.log.WithField("window", windowName).Info("Window already exists, attempting to kill it first")
 			p.prettyLog.InfoPretty(fmt.Sprintf("Window '%s' already exists, attempting to kill it first", windowName))

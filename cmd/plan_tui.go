@@ -1699,11 +1699,17 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 			return nil
 		},
 		// Then run the open command via 'grove' for workspace-awareness
-		tea.ExecProcess(exec.Command("grove", "flow", "plan", "open"),
-			func(err error) tea.Msg {
-				// When plan open completes, stay in the TUI
-				return nil
-			}),
+		func() tea.Cmd {
+			openCmd := exec.Command("grove", "flow", "plan", "open")
+			// Ensure the subprocess knows it's being called from a TUI
+			openCmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
+
+			return tea.ExecProcess(openCmd,
+				func(err error) tea.Msg {
+					// When plan open completes, stay in the TUI
+					return nil
+				})
+		}(),
 	)
 }
 

@@ -128,15 +128,16 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		// Session created successfully
 		fmt.Printf("✓ Session '%s' created\n", sessionName)
 
-		// Switch to the new session if we're already in tmux
-		if os.Getenv("TMUX") != "" {
+		// Switch to the new session if we're already in tmux, but not if launched from another TUI
+		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+		if os.Getenv("TMUX") != "" && !isTUIMode {
 			executor := &groveexec.RealCommandExecutor{}
 			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 				fmt.Printf("Note: Could not switch to session (attach manually): tmux attach -t %s\n", sessionName)
 			} else {
 				fmt.Printf("✓ Switched to session '%s'\n", sessionName)
 			}
-		} else {
+		} else if !isTUIMode {
 			fmt.Printf("  Attach with: tmux attach -t %s\n", sessionName)
 		}
 		return nil
@@ -246,15 +247,18 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 				// Session exists, switch to it
 				fmt.Printf("✓ Switching to existing session '%s'...\n", sessionName)
 				
-				// If we're already in tmux, switch to the session
-				if os.Getenv("TMUX") != "" {
-					if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
-						fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
-					}
-				} else {
-					// Not in tmux, attach to the session
-					if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
-						return fmt.Errorf("failed to attach to session: %w", err)
+				isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+				if !isTUIMode {
+					// If we're already in tmux, switch to the session
+					if os.Getenv("TMUX") != "" {
+						if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+							fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
+						}
+					} else {
+						// Not in tmux, attach to the session
+						if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
+							return fmt.Errorf("failed to attach to session: %w", err)
+						}
 					}
 				}
 				return nil
@@ -292,17 +296,20 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 		return fmt.Errorf("failed to send command: %w", err)
 	}
 
-	// If we're already in tmux, switch to the new session
-	if os.Getenv("TMUX") != "" {
-		fmt.Printf("✓ Switching to session '%s'...\n", sessionName)
-		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
-			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
-		}
-	} else {
-		// Not in tmux, attach to the new session
-		fmt.Printf("✓ Attaching to session '%s'...\n", sessionName)
-		if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
-			return fmt.Errorf("failed to attach to session: %w", err)
+	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+	if !isTUIMode {
+		// If we're already in tmux, switch to the new session
+		if os.Getenv("TMUX") != "" {
+			fmt.Printf("✓ Switching to session '%s'...\n", sessionName)
+			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+				fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
+			}
+		} else {
+			// Not in tmux, attach to the new session
+			fmt.Printf("✓ Attaching to session '%s'...\n", sessionName)
+			if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
+				return fmt.Errorf("failed to attach to session: %w", err)
+			}
 		}
 	}
 
