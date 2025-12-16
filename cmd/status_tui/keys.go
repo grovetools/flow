@@ -28,7 +28,12 @@ type KeyMap struct {
 	GoToBottom      key.Binding
 	PageUp            key.Binding
 	PageDown          key.Binding
+	ViewLogs          key.Binding
+	ViewFrontmatter   key.Binding
+	ViewBriefing      key.Binding
+	ViewEdit          key.Binding
 	CycleDetailPane   key.Binding
+	CloseDetailPane   key.Binding
 	SwitchFocus       key.Binding
 	ToggleLayout      key.Binding
 }
@@ -120,9 +125,29 @@ func NewKeyMap() KeyMap {
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "page down"),
 		),
+		ViewLogs: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", "view logs"),
+		),
+		ViewFrontmatter: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "view frontmatter"),
+		),
+		ViewBriefing: key.NewBinding(
+			key.WithKeys("b"),
+			key.WithHelp("b", "view briefing"),
+		),
+		ViewEdit: key.NewBinding(
+			key.WithKeys("m", "p"),
+			key.WithHelp("m/p", "preview markdown"),
+		),
 		CycleDetailPane: key.NewBinding(
 			key.WithKeys("v"),
-			key.WithHelp("v", "cycle detail pane"),
+			key.WithHelp("v", "toggle detail pane"),
+		),
+		CloseDetailPane: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "close detail pane"),
 		),
 		SwitchFocus: key.NewBinding(
 			key.WithKeys("tab", "shift+tab"),
@@ -161,7 +186,12 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Views")),
 			k.ToggleView,
 			k.ToggleSummaries,
+			k.ViewLogs,
+			k.ViewFrontmatter,
+			k.ViewBriefing,
+			k.ViewEdit,
 			k.CycleDetailPane,
+			k.CloseDetailPane,
 			k.SwitchFocus,
 			k.ToggleLayout,
 		},

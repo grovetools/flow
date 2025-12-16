@@ -588,16 +588,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let 'q' and 'ctrl+c' be handled by the main logic to quit.
 			case "?":
 				// Let '?' be handled by the main logic to show help.
-			case "v":
-				// Let 'v' be handled by the main logic to close the viewer.
-			case "V":
-				// Let 'V' be handled by the main logic to toggle layout.
+			case "l", "f", "b", "m", "p", "v":
+				// Let pane switching keys be handled by the main logic.
 			case "tab", "shift+tab":
 				// Let 'tab' and 'shift+tab' be handled by the main logic to switch focus.
+			case "V":
+				// Let 'V' be handled by the main logic to toggle layout.
 			case "esc":
-				// 'esc' switches focus back to the jobs pane.
-				m.Focus = JobsPane
-				return m, nil
+				// 'esc' closes the detail pane (handled by main logic below)
 			case "g":
 				if m.WaitingForG {
 					// Second 'g' - jump to top of logs
@@ -685,9 +683,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor > 0 {
 				m.Cursor--
 				m.adjustScrollOffset()
-				if m.ShowLogs && !m.IsRunningJob && m.ActiveDetailPane == LogsPaneDetail {
-					job := m.Jobs[m.Cursor]
-					return m, loadLogContentCmd(m.Plan, job)
+				if m.ShowLogs && !m.IsRunningJob {
+					return m, m.reloadActiveDetailPane()
 				}
 			}
 
@@ -695,9 +692,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
-				if m.ShowLogs && !m.IsRunningJob && m.ActiveDetailPane == LogsPaneDetail {
-					job := m.Jobs[m.Cursor]
-					return m, loadLogContentCmd(m.Plan, job)
+				if m.ShowLogs && !m.IsRunningJob {
+					return m, m.reloadActiveDetailPane()
 				}
 			}
 
@@ -753,61 +749,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, editJob(job)
 			}
 
-		case key.Matches(msg, m.KeyMap.CycleDetailPane):
-			// Cycle through panes: None -> Logs -> Frontmatter -> Briefing -> Edit -> None
-			m.ActiveDetailPane = (m.ActiveDetailPane + 1) % 5 // 5 states total
+		case key.Matches(msg, m.KeyMap.ViewLogs):
+			return m.openDetailPane(LogsPaneDetail)
 
+		case key.Matches(msg, m.KeyMap.ViewFrontmatter):
+			return m.openDetailPane(FrontmatterPane)
+
+		case key.Matches(msg, m.KeyMap.ViewBriefing):
+			return m.openDetailPane(BriefingPane)
+
+		case key.Matches(msg, m.KeyMap.ViewEdit):
+			return m.openDetailPane(EditPane)
+
+		case key.Matches(msg, m.KeyMap.CycleDetailPane):
+			// Toggle detail pane visibility (show/hide)
 			if m.ActiveDetailPane == NoPane {
+				// If closed, open logs pane by default
+				return m.openDetailPane(LogsPaneDetail)
+			} else {
+				// If any pane is open, close it
 				m.LogViewer.Stop()
 				m.ShowLogs = false
 				m.Focus = JobsPane
 				m.ActiveLogJob = nil
+				m.ActiveDetailPane = NoPane
 				m.StatusSummary = ""
 				return m, nil
 			}
 
-			// If we opened a pane, show it and focus it
-			m.ShowLogs = true
-			m.Focus = LogsPane
-
-			if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
-				m.ActiveLogJob = job // Keep track of the job for which we're showing details
-
-				// Centralized layout calculation
-				m.updateLayoutDimensions()
-				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
-				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
-
-				// Update viewport sizes for all panes
-				m.frontmatterViewport.Width = m.LogViewerWidth
-				m.frontmatterViewport.Height = m.LogViewerHeight
-				m.briefingViewport.Width = m.LogViewerWidth
-				m.briefingViewport.Height = m.LogViewerHeight
-				m.editViewport.Width = m.LogViewerWidth
-				m.editViewport.Height = m.LogViewerHeight
-
-				// Trigger content loading for the active pane
-				switch m.ActiveDetailPane {
-				case LogsPaneDetail:
-					isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
-					isRunning := job.Status == orchestration.JobStatusRunning
-					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading logs for %s...", job.Title))
-					if isAgentJob && isRunning {
-						return m, loadAndStreamAgentLogsCmd(m.Plan, job)
-					}
-					return m, loadLogContentCmd(m.Plan, job)
-				case FrontmatterPane:
-					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title))
-					return m, loadFrontmatterCmd(job)
-				case BriefingPane:
-					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading briefing for %s...", job.Title))
-					return m, loadBriefingCmd(m.Plan, job)
-				case EditPane:
-					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
-					return m, loadJobFileContentCmd(job)
-				}
-			}
+		case key.Matches(msg, m.KeyMap.CloseDetailPane):
+			m.LogViewer.Stop()
+			m.ShowLogs = false
+			m.Focus = JobsPane
+			m.ActiveLogJob = nil
+			m.ActiveDetailPane = NoPane
+			m.StatusSummary = ""
+			return m, nil
 
 		case key.Matches(msg, m.KeyMap.Run):
 			logger := logging.NewLogger("flow-tui")
@@ -1198,4 +1175,82 @@ func completeJobHelper(job *orchestration.Job, plan *orchestration.Plan, silent 
 		return CompleteJobFunc(job, plan, silent)
 	}
 	return nil
+}
+
+// reloadActiveDetailPane reloads content for the currently active detail pane
+func (m Model) reloadActiveDetailPane() tea.Cmd {
+	if m.Cursor >= len(m.Jobs) || m.ActiveDetailPane == NoPane {
+		return nil
+	}
+
+	job := m.Jobs[m.Cursor]
+	m.ActiveLogJob = job
+
+	switch m.ActiveDetailPane {
+	case LogsPaneDetail:
+		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+		isRunning := job.Status == orchestration.JobStatusRunning
+		if isAgentJob && isRunning {
+			return loadAndStreamAgentLogsCmd(m.Plan, job)
+		}
+		return loadLogContentCmd(m.Plan, job)
+	case FrontmatterPane:
+		return loadFrontmatterCmd(job)
+	case BriefingPane:
+		return loadBriefingCmd(m.Plan, job)
+	case EditPane:
+		return loadJobFileContentCmd(job)
+	}
+
+	return nil
+}
+
+// openDetailPane opens a specific detail pane and loads its content
+func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
+	m.ActiveDetailPane = pane
+	m.ShowLogs = true
+	// Don't auto-focus the detail pane - keep current focus
+
+	if m.Cursor >= len(m.Jobs) {
+		return m, nil
+	}
+
+	job := m.Jobs[m.Cursor]
+	m.ActiveLogJob = job
+
+	// Centralized layout calculation
+	m.updateLayoutDimensions()
+	m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
+	m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+
+	// Update viewport sizes for all panes
+	m.frontmatterViewport.Width = m.LogViewerWidth
+	m.frontmatterViewport.Height = m.LogViewerHeight
+	m.briefingViewport.Width = m.LogViewerWidth
+	m.briefingViewport.Height = m.LogViewerHeight
+	m.editViewport.Width = m.LogViewerWidth
+	m.editViewport.Height = m.LogViewerHeight
+
+	// Trigger content loading for the active pane
+	switch pane {
+	case LogsPaneDetail:
+		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+		isRunning := job.Status == orchestration.JobStatusRunning
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading logs for %s...", job.Title))
+		if isAgentJob && isRunning {
+			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
+		}
+		return m, loadLogContentCmd(m.Plan, job)
+	case FrontmatterPane:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title))
+		return m, loadFrontmatterCmd(job)
+	case BriefingPane:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading briefing for %s...", job.Title))
+		return m, loadBriefingCmd(m.Plan, job)
+	case EditPane:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
+		return m, loadJobFileContentCmd(job)
+	}
+
+	return m, nil
 }
