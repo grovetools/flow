@@ -63,7 +63,7 @@ type LogContentLoadedMsg struct {
 	Err            error
 	ShouldRetry    bool   // If true, we should retry loading after a delay
 	StartStreaming bool   // If true, we should start streaming (agent session is ready)
-	ExistingLogs   string // Existing logs to write to file before streaming
+	LogFilePath    string // The path to the log file to stream
 }
 
 // loadLogContentCmd creates a command to asynchronously read a job's log file.
@@ -172,199 +172,88 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
-		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+		jobSpec := job.FilePath // Use direct job file path for the spec
 
 		logger.WithFields(map[string]interface{}{
 			"job_spec": jobSpec,
 		}).Info("loadAndStreamAgentLogsCmd executing")
 
-		// Try to get session info first to see if the agent has started
-		logger.Debug("About to call get-session-info")
-		sessionCmd := exec.Command("grove", "aglogs", "get-session-info", jobSpec)
-		sessionCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
-		logger.Debug("Created session command, calling Output()")
-		sessionInfo, sessionErr := sessionCmd.Output() // Use Output() instead of CombinedOutput() to only get stdout
-		logger.WithFields(map[string]interface{}{
-			"output_len": len(sessionInfo),
-			"error":      sessionErr,
-		}).Debug("get-session-info completed")
-
-		// Check if we got valid JSON output (indicates session exists)
-		sessionExists := len(sessionInfo) > 0 && string(sessionInfo)[0] == '{'
+		// Try to read historical logs using aglogs read (formatted output)
+		readCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+		readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+		readOutput, readErr := readCmd.Output()
 
 		logger.WithFields(map[string]interface{}{
-			"job_spec":       jobSpec,
-			"session_exists": sessionExists,
-			"output_length":  len(sessionInfo),
-		}).Info("Checking for agent session")
+			"job_spec":    jobSpec,
+			"output_len":  len(readOutput),
+			"error":       readErr,
+		}).Debug("aglogs read completed")
 
-		if !sessionExists {
-			// Agent session hasn't started yet - signal that we should retry
-			logger.WithFields(map[string]interface{}{
-				"job_spec": jobSpec,
-			}).Debug("Agent session not found, will retry")
+		if readErr != nil {
+			// aglogs read failed, maybe the session isn't registered yet. Retry.
 			return LogContentLoadedMsg{
 				Content:     "⏳ Waiting for agent session to start...\n(This may take a few seconds)\n",
 				ShouldRetry: true,
 			}
 		}
 
-		// First, read orchestrator logs that are already in the .log file
-		logPath, err := orchestration.GetJobLogPath(plan, job)
-		var orchestratorLogs string
-		if err == nil {
-			if existingContent, err := os.ReadFile(logPath); err == nil {
-				orchestratorLogs = string(existingContent)
-				logger.WithFields(map[string]interface{}{
-					"log_path":       logPath,
-					"content_length": len(orchestratorLogs),
-				}).Debug("Read existing orchestrator logs from file")
-			}
-		}
-
-		// Read existing agent logs using 'aglogs read'
-		readCmd := exec.Command("grove", "aglogs", "read", jobSpec)
-		readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
-		existingLogs, err := readCmd.Output()
-
-		logger.WithFields(map[string]interface{}{
-			"job_spec":    jobSpec,
-			"logs_length": len(existingLogs),
-			"error":       err,
-		}).Debug("Read existing agent logs")
-
-		content := ""
-		// Start with orchestrator logs if we have them
-		if orchestratorLogs != "" {
-			content = orchestratorLogs + "\n"
-		}
-
-		if err == nil && len(existingLogs) > 0 {
-			// Strip the "=== End of session ===" marker since we're going to stream more
-			logsStr := string(existingLogs)
-			logsStr = strings.ReplaceAll(logsStr, "=== End of session ===", "")
-			logsStr = strings.TrimRight(logsStr, "\n")
-			// Create an attractive separator for live stream content
+		// Success! We have historical formatted logs
+		content := string(readOutput)
+		if content != "" {
+			// Add a separator before the live stream
 			separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
 			streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
-			content += logsStr + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
+			content = content + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
 		} else {
-			if content == "" {
-				content = "⏳ Agent session found, waiting for logs...\n"
-			}
+			content = "⏳ Agent session found, waiting for logs...\n"
 		}
 
-		// Signal that we should start streaming now that the session is ready
 		logger.WithFields(map[string]interface{}{
-			"job_spec":              jobSpec,
-			"existing_logs_length":  len(existingLogs),
+			"job_spec": jobSpec,
 		}).Info("Starting agent log stream")
 
 		return LogContentLoadedMsg{
 			Content:        content,
 			ShouldRetry:    false,
 			StartStreaming: true,
-			ExistingLogs:   string(existingLogs), // Pass existing logs to be written to file
+			LogFilePath:    jobSpec, // Pass the job spec for streaming
 		}
 	}
 }
 
-// streamAgentLogsCmd creates a background process to stream agent logs.
-func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, program *tea.Program, existingLogs string) tea.Cmd {
+// streamAgentLogsCmd creates a background process to stream agent logs from a specific file.
+func streamAgentLogsCmd(logFilePath string, program *tea.Program) tea.Cmd {
 	return func() tea.Msg {
-		logger := logging.NewLogger("flow-tui")
-
-		// Get the log file path for this job
-		logPath, err := orchestration.GetJobLogPath(plan, job)
-		if err != nil {
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to get log path: %w", err)}
-		}
-
-		// Read the current file content to check if agent logs are already there
-		currentContent, err := os.ReadFile(logPath)
-		alreadyHasAgentLogs := false
-		if err == nil {
-			// Check if the file already contains the agent session header
-			alreadyHasAgentLogs = strings.Contains(string(currentContent), "=== Job:")
-		}
-
-		// Open the log file in append mode
-		logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err)}
-		}
-
-		// Write existing agent logs to the file only if not already present
-		if existingLogs != "" && !alreadyHasAgentLogs {
-			logger.WithFields(map[string]interface{}{
-				"log_path":    logPath,
-				"logs_length": len(existingLogs),
-			}).Info("Writing existing agent logs to file before streaming")
-
-			if _, err := logFile.WriteString(existingLogs); err != nil {
-				logFile.Close()
-				return LogContentLoadedMsg{Err: fmt.Errorf("failed to write existing logs: %w", err)}
-			}
-			logFile.Sync() // Ensure existing logs are written
-		} else if alreadyHasAgentLogs {
-			logger.WithFields(map[string]interface{}{
-				"log_path": logPath,
-			}).Debug("Agent logs already in file, skipping duplicate write")
-		}
-
-		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
-
-		// Start streaming new content
-		streamCmd := exec.Command("grove", "aglogs", "stream", jobSpec)
+		// Start streaming new content using the direct file path
+		streamCmd := exec.Command("grove", "aglogs", "stream", logFilePath)
 		streamCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 
 		stdout, err := streamCmd.StdoutPipe()
 		if err != nil {
-			logFile.Close()
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to create stdout pipe: %w", err)}
 		}
 
 		if err := streamCmd.Start(); err != nil {
-			logFile.Close()
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start aglogs stream: %w", err)}
 		}
 
-		// Stream output line by line back to the TUI and write to log file.
+		// Stream output line by line back to the TUI
 		go func() {
 			logger := logging.NewLogger("flow-tui")
-			defer logFile.Close()
+			defer stdout.Close()
 			scanner := bufio.NewScanner(stdout)
-			lineCount := 0
 			for scanner.Scan() {
 				line := scanner.Text()
-				lineCount++
-				// Write to log file
-				fmt.Fprintln(logFile, line)
-				logFile.Sync() // Ensure it's written immediately
-				// Send to TUI as a LogLineMsg with "Job Output" workspace to avoid [] prefix
 				program.Send(logviewer.LogLineMsg{
 					Workspace: "Job Output",
 					Line:      line,
 				})
 			}
-			// Check for scanner errors
 			if err := scanner.Err(); err != nil {
-				logger.WithFields(map[string]interface{}{
-					"error":      err,
-					"line_count": lineCount,
-				}).Error("Scanner error in agent log stream")
-			} else {
-				logger.WithFields(map[string]interface{}{
-					"line_count": lineCount,
-				}).Info("Agent log stream ended normally")
+				logger.WithError(err).Error("Scanner error in agent log stream")
 			}
-			// When the command finishes, wait for it.
 			if err := streamCmd.Wait(); err != nil {
-				logger.WithFields(map[string]interface{}{
-					"error": err,
-				}).Error("aglogs stream command exited with error")
-			} else {
-				logger.Info("aglogs stream command exited successfully")
+				logger.WithError(err).Error("aglogs stream command exited with error")
 			}
 		}()
 
