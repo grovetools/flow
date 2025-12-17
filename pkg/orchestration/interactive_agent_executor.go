@@ -4,16 +4,20 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mattsolo1/grove-core/config"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/sanitize"
@@ -501,6 +505,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			return fmt.Errorf("failed to send agent command: %w", err)
 		}
 
+		// Launch session registration in a detached background process
+		// This will discover the Claude Code session ID and register it with the job
+		go p.discoverAndRegisterSession(job, plan, workDir, targetPane)
+
 		// Conditionally switch to the agent window (but not when running from TUI)
 		// Note: isTUIMode already declared above when building new-window args
 		if os.Getenv("TMUX") != "" && !isTUIMode {
@@ -649,6 +657,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
 	}
 
+	// Launch session registration in a detached background process
+	// This will discover the Claude Code session ID and register it with the job
+	go p.discoverAndRegisterSession(job, plan, workDir, targetPane)
+
 	p.log.WithField("window", windowName).Info("Interactive host session launched")
 	p.prettyLog.InfoPretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName))
 	p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
@@ -687,6 +699,260 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
 	return projInfo.Identifier(), nil
+}
+
+// discoverAndRegisterSession discovers the Claude Code session ID and creates session files for grove-hooks
+func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, workDir, targetPane string) {
+	defer func() {
+		if r := recover(); r != nil {
+			p.log.WithFields(logrus.Fields{
+				"job_id": job.ID,
+				"panic":  r,
+			}).Error("Panic in session registration")
+		}
+	}()
+
+	p.log.WithFields(logrus.Fields{
+		"job_id":      job.ID,
+		"plan":        plan.Name,
+		"target_pane": targetPane,
+	}).Info("Starting Claude Code session discovery and registration")
+
+	// Wait for the Claude Code process to start
+	time.Sleep(2 * time.Second)
+
+	// Find the PID of the Claude Code process (node process running claude-code)
+	claudePID, err := p.findClaudePIDForPane(targetPane)
+	if err != nil {
+		p.log.WithError(err).Warn("Failed to find Claude Code PID - session won't be registered")
+		return
+	}
+
+	p.log.WithField("pid", claudePID).Info("Found Claude Code PID")
+
+	// Use job ID as the session ID for consistency with flow jobs
+	sessionID := job.ID
+
+	// Discover the Claude session ID by finding the most recent session file for this workspace
+	// Retry for up to 10 seconds since Claude takes a moment to create the session file
+	var claudeSessionID string
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		claudeSessionID, err = p.findClaudeSessionID(workDir)
+		if err == nil {
+			p.log.WithField("claude_session_id", claudeSessionID).Info("Found Claude session ID")
+			break
+		}
+		if i < maxRetries-1 {
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	if claudeSessionID == "" {
+		p.log.WithError(err).Warn("Failed to find Claude session ID after retries - will use job ID as fallback")
+		claudeSessionID = sessionID
+	}
+
+	// Get user info
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "unknown"
+	}
+
+	// Get git info
+	repo, branch := getGitInfo(workDir)
+
+	// Create metadata
+	metadata := sessions.SessionMetadata{
+		SessionID:        sessionID,
+		ClaudeSessionID:  claudeSessionID,
+		Provider:         "claude",
+		PID:              claudePID,
+		WorkingDirectory: workDir,
+		User:             user,
+		Repo:             repo,
+		Branch:           branch,
+		StartedAt:        time.Now(),
+		JobTitle:         job.Title,
+		PlanName:         plan.Name,
+		JobFilePath:      job.FilePath,
+		Type:             "interactive_agent",
+	}
+
+	// Write session files for grove-hooks discovery
+	groveSessionsDir := filepath.Join(os.Getenv("HOME"), ".grove", "hooks", "sessions")
+	sessionDir := filepath.Join(groveSessionsDir, sessionID)
+
+	// Create session directory
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		p.log.WithError(err).Error("Failed to create session directory")
+		return
+	}
+
+	// Write PID file
+	pidFile := filepath.Join(sessionDir, "pid.lock")
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", claudePID)), 0644); err != nil {
+		p.log.WithError(err).Error("Failed to write PID file")
+		return
+	}
+
+	// Write metadata file
+	metadataFile := filepath.Join(sessionDir, "metadata.json")
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		p.log.WithError(err).Error("Failed to marshal metadata")
+		return
+	}
+
+	if err := os.WriteFile(metadataFile, metadataJSON, 0644); err != nil {
+		p.log.WithError(err).Error("Failed to write metadata file")
+		return
+	}
+
+	p.log.WithFields(logrus.Fields{
+		"session_id":   sessionID,
+		"session_dir":  sessionDir,
+		"pid":          claudePID,
+	}).Info("Successfully registered Claude Code session")
+}
+
+// findClaudeSessionID finds the Claude Code session ID by looking for the most recent session file
+func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error) {
+	// Claude stores sessions in ~/.claude/projects/<sanitized-path>/*.jsonl
+	// The directory name is the working directory with slashes replaced
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	// Sanitize the working directory path to match Claude's format
+	sanitizedPath := strings.ReplaceAll(workDir, "/", "-")
+	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects", sanitizedPath)
+
+	// Check if the directory exists
+	if _, err := os.Stat(claudeProjectsDir); os.IsNotExist(err) {
+		return "", fmt.Errorf("Claude projects directory not found: %s", claudeProjectsDir)
+	}
+
+	// Find the most recent .jsonl file (excluding agent-*.jsonl files which are sub-agents)
+	entries, err := os.ReadDir(claudeProjectsDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read Claude projects directory: %w", err)
+	}
+
+	var latestFile string
+	var latestTime time.Time
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		// Skip agent-* files (sub-agents)
+		if strings.HasPrefix(entry.Name(), "agent-") {
+			continue
+		}
+
+		if !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		if info.ModTime().After(latestTime) {
+			latestTime = info.ModTime()
+			latestFile = entry.Name()
+		}
+	}
+
+	if latestFile == "" {
+		return "", fmt.Errorf("no Claude session files found in %s", claudeProjectsDir)
+	}
+
+	// Extract session ID from filename (remove .jsonl extension)
+	sessionID := strings.TrimSuffix(latestFile, ".jsonl")
+	return sessionID, nil
+}
+
+// findClaudePIDForPane finds the PID of the Claude Code process running in a specific tmux pane
+func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string) (int, error) {
+	// Use tmux display-message to get the pane PID
+	cmd := osexec.Command("tmux", "display-message", "-p", "-t", targetPane, "#{pane_pid}")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get pane PID: %w", err)
+	}
+
+	shellPID, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse pane PID: %w", err)
+	}
+
+	// Find the 'claude' process that is a descendant of that shell
+	// Try 'claude' first (for the binary), then 'node' (for Node.js-based versions)
+	pid, err := p.findDescendantPID(shellPID, "claude")
+	if err != nil {
+		// Fallback to searching for node
+		pid, err = p.findDescendantPID(shellPID, "node")
+		if err != nil {
+			return 0, fmt.Errorf("failed to find claude or node process: %w", err)
+		}
+	}
+	return pid, nil
+}
+
+// findDescendantPID recursively finds a descendant process with a given name.
+func (p *ClaudeAgentProvider) findDescendantPID(parentPID int, targetComm string) (int, error) {
+	// Get all processes
+	cmd := osexec.Command("ps", "-o", "pid,ppid,comm")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	// Build a process tree (map of ppid to children) and a pid-to-command map
+	tree := make(map[int][]int)
+	pidToComm := make(map[int]string)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines[1:] { // skip header
+		fields := strings.Fields(line)
+		if len(fields) >= 3 {
+			pid, _ := strconv.Atoi(fields[0])
+			ppid, _ := strconv.Atoi(fields[1])
+			comm := fields[2]
+			tree[ppid] = append(tree[ppid], pid)
+			pidToComm[pid] = comm
+		}
+	}
+
+	// Traverse from parentPID using breadth-first search
+	queue := []int{parentPID}
+	visited := make(map[int]bool)
+
+	for len(queue) > 0 {
+		currentPID := queue[0]
+		queue = queue[1:]
+
+		if visited[currentPID] {
+			continue
+		}
+		visited[currentPID] = true
+
+		// Check if the current process is the target
+		if comm, ok := pidToComm[currentPID]; ok && strings.Contains(comm, targetComm) {
+			return currentPID, nil
+		}
+
+		// Add children to the queue
+		if children, ok := tree[currentPID]; ok {
+			queue = append(queue, children...)
+		}
+	}
+
+	return 0, fmt.Errorf("descendant process '%s' not found for parent PID %d", targetComm, parentPID)
 }
 
 // gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
