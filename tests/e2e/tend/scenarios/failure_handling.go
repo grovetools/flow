@@ -82,8 +82,8 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 				return fmt.Errorf("expected plan run to fail, but it succeeded: %w", err)
 			}
 
-			// Use `flow plan status --format json` to get detailed job statuses.
-			statusCmd := ctx.Bin("plan", "status", planPath, "--format", "json")
+			// Use `flow plan status --json` to get detailed job statuses.
+			statusCmd := ctx.Bin("plan", "status", planPath, "--json")
 			statusCmd.Dir(projectDir)
 			statusResult := statusCmd.Run()
 			if statusResult.Error != nil {
@@ -151,8 +151,8 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 				return fmt.Errorf("expected plan run to succeed after fix, but it failed: %w", err)
 			}
 
-			// Use `flow plan status --format json` again to verify final statuses.
-			statusCmd := ctx.Bin("plan", "status", planPath, "--format", "json")
+			// Use `flow plan status --json` again to verify final statuses.
+			statusCmd := ctx.Bin("plan", "status", planPath, "--json")
 			statusCmd.Dir(projectDir)
 			statusResult := statusCmd.Run()
 			if statusResult.Error != nil {

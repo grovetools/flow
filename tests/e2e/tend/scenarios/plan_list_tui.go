@@ -151,9 +151,9 @@ var PlanListTUIScenario = harness.NewScenarioWithOptions(
 				return fmt.Errorf("failed to send 'Enter' key: %w", err)
 			}
 
-			// Wait for the status view to load by looking for a header that indicates we're in status view.
-			// The exact plan name in the header may vary, so we'll look for a generic status indicator.
-			if err := session.WaitForText("STATUS", 5*time.Second); err != nil {
+			// Wait for the status view to load by looking for the "Plan Status" header
+			// (STATUS column name is not visible since the column is hidden by default)
+			if err := session.WaitForText("Plan Status", 5*time.Second); err != nil {
 				content, _ := session.Capture()
 				return fmt.Errorf("plan status view did not open: %w\nContent:\n%s", err, content)
 			}

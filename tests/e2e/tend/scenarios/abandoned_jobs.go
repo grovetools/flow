@@ -224,8 +224,8 @@ var AbandonedJobsScenario = harness.NewScenario(
 		harness.NewStep("Test plan status shows abandoned job correctly", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
-			// Run plan status command
-			statusCmd := ctx.Bin("plan", "status", "abandoned-plan")
+			// Run plan status command with --json flag to avoid TUI
+			statusCmd := ctx.Bin("plan", "status", "abandoned-plan", "--json")
 			statusCmd.Dir(projectDir)
 			result := statusCmd.Run()
 			ctx.ShowCommandOutput(statusCmd.String(), result.Stdout, result.Stderr)

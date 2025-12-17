@@ -72,13 +72,12 @@ func verifyOldFlagsRemoved(ctx *harness.Context) error {
 
 	// Test that old status-specific flags result in error or are not recognized
 	// Note: -v/--verbose is a global flag, not a status-specific flag, so we don't test it here
+	// Note: --tui/-t is kept for backwards compatibility, so we don't test it here
 	oldFlags := []string{
 		"--graph",
 		"-g",
 		"--format",
 		"-f",
-		"--tui",
-		"-t",
 	}
 
 	for _, flag := range oldFlags {
@@ -105,7 +104,7 @@ func verifyOldFlagsRemoved(ctx *harness.Context) error {
 		return fmt.Errorf("failed to get help: %w", helpResult.Error)
 	}
 
-	flagsToCheck := []string{"--graph", "--format", "--tui"}
+	flagsToCheck := []string{"--graph", "--format"}
 	for _, flag := range flagsToCheck {
 		if strings.Contains(helpResult.Stdout, flag) {
 			return fmt.Errorf("help text should not mention removed flag %s, but it does:\n%s", flag, helpResult.Stdout)

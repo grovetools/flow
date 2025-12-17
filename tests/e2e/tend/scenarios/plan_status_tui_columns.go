@@ -108,9 +108,8 @@ func launchTUIAndVerifyDefaultColumns(ctx *harness.Context) error {
 		return fmt.Errorf("expected 'TEMPLATE' column header to be visible by default, not found in:\n%s", content)
 	}
 
-	// STATUS should NOT be visible by default (it's hidden in the new defaults)
-	// We need to be careful here as "STATUS" might appear in other contexts
-	// Let's check that STATUS doesn't appear as a header in the table
+	// STATUS should NOT be visible by default (it's hidden in the defaults)
+	// We need to verify that STATUS doesn't appear as a header in the table
 	lines := strings.Split(content, "\n")
 	hasStatusHeader := false
 	for _, line := range lines {
@@ -166,7 +165,8 @@ func verifyColumnToggleDialog(ctx *harness.Context) error {
 	}
 
 	// Verify some column names are listed (TEMPLATE might be out of view initially)
-	expectedColumns := []string{"SEL", "JOB", "TYPE", "STATUS"}
+	// Note: SEL is not a toggleable column, it's always visible for multi-select
+	expectedColumns := []string{"JOB", "TYPE", "STATUS"}
 	for _, col := range expectedColumns {
 		if !strings.Contains(content, col) {
 			return fmt.Errorf("expected column '%s' to be listed in dialog, not found in:\n%s", col, content)
@@ -192,7 +192,7 @@ func toggleStatusColumn(ctx *harness.Context) error {
 
 	time.Sleep(300 * time.Millisecond)
 
-	// Navigate down to STATUS (it's the 4th item: SEL, JOB, TYPE, STATUS)
+	// Navigate down to STATUS (it's the 4th item: JOB, TITLE, TYPE, STATUS)
 	for i := 0; i < 3; i++ {
 		if err := session.SendKeys("down"); err != nil {
 			return fmt.Errorf("failed to send 'down' key: %w", err)
@@ -200,7 +200,7 @@ func toggleStatusColumn(ctx *harness.Context) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Toggle the STATUS column with space
+	// Toggle the STATUS column with space (turning it ON since it's hidden by default)
 	if err := session.SendKeys(" "); err != nil {
 		return fmt.Errorf("failed to send space key: %w", err)
 	}

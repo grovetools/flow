@@ -162,7 +162,8 @@ var HoistedCommandsScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			planName := ctx.GetString("plan_name")
 
-			cmd := ctx.Bin("status", planName)
+			// Use --json flag to avoid TUI requirement
+			cmd := ctx.Bin("status", planName, "--json")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -469,8 +470,8 @@ var HoistedCommandsScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			planName := ctx.GetString("plan_name")
 
-			// Test that the old command structure still works
-			cmd := ctx.Bin("plan", "status", planName)
+			// Test that the old command structure still works (use --json to avoid TUI)
+			cmd := ctx.Bin("plan", "status", planName, "--json")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 
@@ -598,8 +599,8 @@ var HoistedCommandsWithActiveJobScenario = harness.NewScenario(
 				return fmt.Errorf("failed to set active job: %w", err)
 			}
 
-			// Now test status without specifying the plan
-			cmd = ctx.Bin("status")
+			// Now test status without specifying the plan (use --json to avoid TUI)
+			cmd = ctx.Bin("status", "--json")
 			cmd.Dir(projectDir)
 			result = cmd.Run()
 			ctx.ShowCommandOutput("flow status with active job", result.Stdout, result.Stderr)
