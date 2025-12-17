@@ -61,11 +61,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// If we should start streaming (session is ready), start the stream
 		if msg.StartStreaming && m.ActiveLogJob != nil && msg.LogFilePath != "" {
-			logger.WithFields(map[string]interface{}{
-				"job_id":       m.ActiveLogJob.ID,
-				"log_file_path": msg.LogFilePath,
-			}).Info("Starting agent log streaming")
-			cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
+			// Only start streaming if we're not already streaming for this job
+			if m.StreamingJobID != m.ActiveLogJob.ID {
+				logger.WithFields(map[string]interface{}{
+					"job_id":         m.ActiveLogJob.ID,
+					"log_file_path":  msg.LogFilePath,
+					"was_streaming":  m.StreamingJobID,
+				}).Info("Starting agent log streaming")
+				m.StreamingJobID = m.ActiveLogJob.ID
+				cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
+			} else {
+				logger.WithFields(map[string]interface{}{
+					"job_id": m.ActiveLogJob.ID,
+				}).Debug("Skipping duplicate stream start - already streaming for this job")
+			}
 		}
 
 		if len(cmds) > 0 {

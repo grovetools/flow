@@ -96,6 +96,7 @@ type Model struct {
 	ShowLogs            bool
 	LogViewer           logviewer.Model
 	ActiveLogJob        *orchestration.Job
+	StreamingJobID      string // Track which job is currently streaming to prevent duplicates
 	ActiveDetailPane    DetailPane
 	columnSelectMode    bool
 	columnList          list.Model
