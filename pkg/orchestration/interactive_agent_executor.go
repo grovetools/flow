@@ -762,6 +762,15 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	// Get git info
 	repo, branch := getGitInfo(workDir)
 
+	// Build the transcript path for Claude
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		p.log.WithError(err).Error("Failed to get user home directory for transcript path")
+		return
+	}
+	sanitizedPath := strings.ReplaceAll(workDir, "/", "-")
+	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
+
 	// Create metadata
 	metadata := sessions.SessionMetadata{
 		SessionID:        sessionID,
@@ -777,10 +786,11 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 		PlanName:         plan.Name,
 		JobFilePath:      job.FilePath,
 		Type:             "interactive_agent",
+		TranscriptPath:   transcriptPath,
 	}
 
 	// Write session files for grove-hooks discovery
-	groveSessionsDir := filepath.Join(os.Getenv("HOME"), ".grove", "hooks", "sessions")
+	groveSessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
 	sessionDir := filepath.Join(groveSessionsDir, sessionID)
 
 	// Create session directory
