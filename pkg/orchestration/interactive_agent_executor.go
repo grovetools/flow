@@ -722,34 +722,50 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	time.Sleep(2 * time.Second)
 
 	// Find the PID of the Claude Code process (node process running claude-code)
+	p.log.WithField("target_pane", targetPane).Debug("SESSION_DISCOVERY: Finding Claude PID for pane")
 	claudePID, err := p.findClaudePIDForPane(targetPane)
 	if err != nil {
-		p.log.WithError(err).Warn("Failed to find Claude Code PID - session won't be registered")
+		p.log.WithFields(logrus.Fields{
+			"error":       err,
+			"target_pane": targetPane,
+		}).Error("SESSION_DISCOVERY: Failed to find Claude Code PID - session won't be registered")
 		return
 	}
 
-	p.log.WithField("pid", claudePID).Info("Found Claude Code PID")
+	p.log.WithField("pid", claudePID).Info("SESSION_DISCOVERY: Found Claude Code PID")
 
 	// Use job ID as the session ID for consistency with flow jobs
 	sessionID := job.ID
 
 	// Discover the Claude session ID by finding the most recent session file for this workspace
 	// Retry for up to 10 seconds since Claude takes a moment to create the session file
+	p.log.WithField("work_dir", workDir).Debug("SESSION_DISCOVERY: Starting Claude session ID discovery")
 	var claudeSessionID string
 	maxRetries := 10
 	for i := 0; i < maxRetries; i++ {
 		claudeSessionID, err = p.findClaudeSessionID(workDir)
 		if err == nil {
-			p.log.WithField("claude_session_id", claudeSessionID).Info("Found Claude session ID")
+			p.log.WithFields(logrus.Fields{
+				"claude_session_id": claudeSessionID,
+				"retry_count":       i,
+			}).Info("SESSION_DISCOVERY: Found Claude session ID")
 			break
 		}
+		p.log.WithFields(logrus.Fields{
+			"error":       err,
+			"retry_count": i,
+			"max_retries": maxRetries,
+		}).Debug("SESSION_DISCOVERY: Claude session ID not found yet, retrying...")
 		if i < maxRetries-1 {
 			time.Sleep(1 * time.Second)
 		}
 	}
 
 	if claudeSessionID == "" {
-		p.log.WithError(err).Warn("Failed to find Claude session ID after retries - will use job ID as fallback")
+		p.log.WithFields(logrus.Fields{
+			"error":   err,
+			"fallback": sessionID,
+		}).Warn("SESSION_DISCOVERY: Failed to find Claude session ID after retries - will use job ID as fallback")
 		claudeSessionID = sessionID
 	}
 
@@ -765,11 +781,18 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	// Build the transcript path for Claude
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		p.log.WithError(err).Error("Failed to get user home directory for transcript path")
+		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to get user home directory for transcript path")
 		return
 	}
 	sanitizedPath := strings.ReplaceAll(workDir, "/", "-")
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
+
+	p.log.WithFields(logrus.Fields{
+		"home_dir":        homeDir,
+		"work_dir":        workDir,
+		"sanitized_path":  sanitizedPath,
+		"transcript_path": transcriptPath,
+	}).Info("SESSION_DISCOVERY: Built transcript path")
 
 	// Create metadata
 	metadata := sessions.SessionMetadata{
@@ -789,41 +812,73 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 		TranscriptPath:   transcriptPath,
 	}
 
+	p.log.WithFields(logrus.Fields{
+		"session_id":       sessionID,
+		"claude_session_id": claudeSessionID,
+		"transcript_path":  transcriptPath,
+		"job_title":        job.Title,
+		"plan_name":        plan.Name,
+	}).Info("SESSION_DISCOVERY: Created session metadata")
+
 	// Write session files for grove-hooks discovery
 	groveSessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
 	sessionDir := filepath.Join(groveSessionsDir, sessionID)
 
+	p.log.WithFields(logrus.Fields{
+		"sessions_dir": groveSessionsDir,
+		"session_dir":  sessionDir,
+	}).Debug("SESSION_DISCOVERY: Creating session directory")
+
 	// Create session directory
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		p.log.WithError(err).Error("Failed to create session directory")
+		p.log.WithFields(logrus.Fields{
+			"error":       err,
+			"session_dir": sessionDir,
+		}).Error("SESSION_DISCOVERY: Failed to create session directory")
 		return
 	}
 
 	// Write PID file
 	pidFile := filepath.Join(sessionDir, "pid.lock")
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", claudePID)), 0644); err != nil {
-		p.log.WithError(err).Error("Failed to write PID file")
+		p.log.WithFields(logrus.Fields{
+			"error":    err,
+			"pid_file": pidFile,
+			"pid":      claudePID,
+		}).Error("SESSION_DISCOVERY: Failed to write PID file")
 		return
 	}
+	p.log.WithFields(logrus.Fields{
+		"pid_file": pidFile,
+		"pid":      claudePID,
+	}).Debug("SESSION_DISCOVERY: Wrote PID file")
 
 	// Write metadata file
 	metadataFile := filepath.Join(sessionDir, "metadata.json")
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
-		p.log.WithError(err).Error("Failed to marshal metadata")
+		p.log.WithFields(logrus.Fields{
+			"error":         err,
+			"metadata_file": metadataFile,
+		}).Error("SESSION_DISCOVERY: Failed to marshal metadata")
 		return
 	}
 
 	if err := os.WriteFile(metadataFile, metadataJSON, 0644); err != nil {
-		p.log.WithError(err).Error("Failed to write metadata file")
+		p.log.WithFields(logrus.Fields{
+			"error":         err,
+			"metadata_file": metadataFile,
+		}).Error("SESSION_DISCOVERY: Failed to write metadata file")
 		return
 	}
 
 	p.log.WithFields(logrus.Fields{
-		"session_id":   sessionID,
-		"session_dir":  sessionDir,
-		"pid":          claudePID,
-	}).Info("Successfully registered Claude Code session")
+		"session_id":    sessionID,
+		"session_dir":   sessionDir,
+		"pid":           claudePID,
+		"metadata_file": metadataFile,
+		"pid_file":      pidFile,
+	}).Info("SESSION_DISCOVERY: Successfully registered Claude Code session")
 }
 
 // findClaudeSessionID finds the Claude Code session ID by looking for the most recent session file
@@ -832,6 +887,7 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error
 	// The directory name is the working directory with slashes replaced
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to get user home directory")
 		return "", err
 	}
 
@@ -839,16 +895,26 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error
 	sanitizedPath := strings.ReplaceAll(workDir, "/", "-")
 	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects", sanitizedPath)
 
+	p.log.WithFields(logrus.Fields{
+		"work_dir":            workDir,
+		"sanitized_path":      sanitizedPath,
+		"claude_projects_dir": claudeProjectsDir,
+	}).Debug("SESSION_DISCOVERY: Looking for Claude session files")
+
 	// Check if the directory exists
 	if _, err := os.Stat(claudeProjectsDir); os.IsNotExist(err) {
+		p.log.WithField("claude_projects_dir", claudeProjectsDir).Debug("SESSION_DISCOVERY: Claude projects directory not found")
 		return "", fmt.Errorf("Claude projects directory not found: %s", claudeProjectsDir)
 	}
 
 	// Find the most recent .jsonl file (excluding agent-*.jsonl files which are sub-agents)
 	entries, err := os.ReadDir(claudeProjectsDir)
 	if err != nil {
+		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to read Claude projects directory")
 		return "", fmt.Errorf("failed to read Claude projects directory: %w", err)
 	}
+
+	p.log.WithField("entry_count", len(entries)).Debug("SESSION_DISCOVERY: Found entries in Claude projects directory")
 
 	var latestFile string
 	var latestTime time.Time
@@ -879,11 +945,17 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error
 	}
 
 	if latestFile == "" {
+		p.log.WithField("claude_projects_dir", claudeProjectsDir).Warn("SESSION_DISCOVERY: No Claude session files found")
 		return "", fmt.Errorf("no Claude session files found in %s", claudeProjectsDir)
 	}
 
 	// Extract session ID from filename (remove .jsonl extension)
 	sessionID := strings.TrimSuffix(latestFile, ".jsonl")
+	p.log.WithFields(logrus.Fields{
+		"latest_file":    latestFile,
+		"session_id":     sessionID,
+		"modified_time":  latestTime,
+	}).Debug("SESSION_DISCOVERY: Found latest Claude session file")
 	return sessionID, nil
 }
 
