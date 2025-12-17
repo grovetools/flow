@@ -172,7 +172,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
-		jobSpec := job.FilePath // Use direct job file path for the spec
+		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename) // Use plan/job spec format
 
 		logger.WithFields(map[string]interface{}{
 			"job_spec": jobSpec,
@@ -305,6 +305,7 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 		go func() {
 			logger := logging.NewLogger("flow-tui")
 			defer logFile.Close()
+			defer stdout.Close()
 			scanner := bufio.NewScanner(stdout)
 			lineCount := 0
 			for scanner.Scan() {
