@@ -65,7 +65,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"job_id":       m.ActiveLogJob.ID,
 				"log_file_path": msg.LogFilePath,
 			}).Info("Starting agent log streaming")
-			cmds = append(cmds, streamAgentLogsCmd(msg.LogFilePath, m.Program))
+			cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
 		}
 
 		if len(cmds) > 0 {

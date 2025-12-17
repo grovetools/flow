@@ -237,38 +237,104 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 }
 
 // streamAgentLogsCmd creates a background process to stream agent logs from a specific file.
-func streamAgentLogsCmd(logFilePath string, program *tea.Program) tea.Cmd {
+func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFilePath string, program *tea.Program) tea.Cmd {
 	return func() tea.Msg {
+		logger := logging.NewLogger("flow-tui")
+
+		// Get the log file path for this job
+		jobLogPath, err := orchestration.GetJobLogPath(plan, job)
+		if err != nil {
+			return LogContentLoadedMsg{Err: fmt.Errorf("failed to get log path: %w", err)}
+		}
+
+		// Read the current file content to check if agent logs are already there
+		currentContent, err := os.ReadFile(jobLogPath)
+		alreadyHasAgentLogs := false
+		if err == nil {
+			// Check if the file already contains the agent session header
+			alreadyHasAgentLogs = strings.Contains(string(currentContent), "=== Job:")
+		}
+
+		// Open the log file in append mode
+		logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err)}
+		}
+
+		// If we don't have agent logs yet, write the historical logs from aglogs read
+		if !alreadyHasAgentLogs {
+			// Read existing agent logs using 'aglogs read' to get historical content
+			readCmd := exec.Command("grove", "aglogs", "read", logFilePath)
+			readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+			existingLogs, err := readCmd.Output()
+
+			if err == nil && len(existingLogs) > 0 {
+				logger.WithFields(map[string]interface{}{
+					"log_path":    jobLogPath,
+					"logs_length": len(existingLogs),
+				}).Info("Writing existing agent logs to file before streaming")
+
+				if _, err := logFile.Write(existingLogs); err != nil {
+					logFile.Close()
+					return LogContentLoadedMsg{Err: fmt.Errorf("failed to write existing logs: %w", err)}
+				}
+				logFile.Sync() // Ensure existing logs are written
+			}
+		} else {
+			logger.WithFields(map[string]interface{}{
+				"log_path": jobLogPath,
+			}).Debug("Agent logs already in file, skipping duplicate write")
+		}
+
 		// Start streaming new content using the direct file path
 		streamCmd := exec.Command("grove", "aglogs", "stream", logFilePath)
 		streamCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 
 		stdout, err := streamCmd.StdoutPipe()
 		if err != nil {
+			logFile.Close()
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to create stdout pipe: %w", err)}
 		}
 
 		if err := streamCmd.Start(); err != nil {
+			logFile.Close()
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start aglogs stream: %w", err)}
 		}
 
-		// Stream output line by line back to the TUI
+		// Stream output line by line back to the TUI and write to log file
 		go func() {
 			logger := logging.NewLogger("flow-tui")
-			defer stdout.Close()
+			defer logFile.Close()
 			scanner := bufio.NewScanner(stdout)
+			lineCount := 0
 			for scanner.Scan() {
 				line := scanner.Text()
+				lineCount++
+				// Write to log file
+				fmt.Fprintln(logFile, line)
+				logFile.Sync() // Ensure it's written immediately
+				// Send to TUI as a LogLineMsg with "Job Output" workspace to avoid [] prefix
 				program.Send(logviewer.LogLineMsg{
 					Workspace: "Job Output",
 					Line:      line,
 				})
 			}
 			if err := scanner.Err(); err != nil {
-				logger.WithError(err).Error("Scanner error in agent log stream")
+				logger.WithFields(map[string]interface{}{
+					"error":      err,
+					"line_count": lineCount,
+				}).Error("Scanner error in agent log stream")
+			} else {
+				logger.WithFields(map[string]interface{}{
+					"line_count": lineCount,
+				}).Info("Agent log stream ended normally")
 			}
 			if err := streamCmd.Wait(); err != nil {
-				logger.WithError(err).Error("aglogs stream command exited with error")
+				logger.WithFields(map[string]interface{}{
+					"error": err,
+				}).Error("aglogs stream command exited with error")
+			} else {
+				logger.Info("aglogs stream command exited successfully")
 			}
 		}()
 
