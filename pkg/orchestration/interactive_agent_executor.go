@@ -737,13 +737,20 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	// Use job ID as the session ID for consistency with flow jobs
 	sessionID := job.ID
 
+	// Record the job start time - we'll only consider session files created after this time
+	// This prevents reusing old session files from previous jobs
+	jobStartTime := time.Now()
+
 	// Discover the Claude session ID by finding the most recent session file for this workspace
-	// Retry for up to 10 seconds since Claude takes a moment to create the session file
-	p.log.WithField("work_dir", workDir).Debug("SESSION_DISCOVERY: Starting Claude session ID discovery")
+	// Retry for up to 30 seconds since Claude takes time to create the session file and directory
+	p.log.WithFields(logrus.Fields{
+		"work_dir":       workDir,
+		"job_start_time": jobStartTime,
+	}).Debug("SESSION_DISCOVERY: Starting Claude session ID discovery")
 	var claudeSessionID string
-	maxRetries := 10
+	maxRetries := 30
 	for i := 0; i < maxRetries; i++ {
-		claudeSessionID, err = p.findClaudeSessionID(workDir)
+		claudeSessionID, err = p.findClaudeSessionID(workDir, jobStartTime)
 		if err == nil {
 			p.log.WithFields(logrus.Fields{
 				"claude_session_id": claudeSessionID,
@@ -784,7 +791,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to get user home directory for transcript path")
 		return
 	}
-	sanitizedPath := strings.ReplaceAll(workDir, "/", "-")
+	sanitizedPath := sanitizePathForClaude(workDir)
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
 
 	p.log.WithFields(logrus.Fields{
@@ -881,8 +888,21 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	}).Info("SESSION_DISCOVERY: Successfully registered Claude Code session")
 }
 
+// sanitizePathForClaude replicates Claude's path sanitization algorithm
+// Claude replaces "/" with "-" and then replaces "-." with "--"
+func sanitizePathForClaude(path string) string {
+	// First replace all "/" with "-"
+	result := strings.ReplaceAll(path, "/", "-")
+
+	// Then replace all "-." with "--" to handle hidden directories like .grove-worktrees
+	result = strings.ReplaceAll(result, "-.", "--")
+
+	return result
+}
+
 // findClaudeSessionID finds the Claude Code session ID by looking for the most recent session file
-func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error) {
+// created after the specified job start time (to avoid reusing old sessions)
+func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime time.Time) (string, error) {
 	// Claude stores sessions in ~/.claude/projects/<sanitized-path>/*.jsonl
 	// The directory name is the working directory with slashes replaced
 	homeDir, err := os.UserHomeDir()
@@ -892,13 +912,15 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error
 	}
 
 	// Sanitize the working directory path to match Claude's format
-	sanitizedPath := strings.ReplaceAll(workDir, "/", "-")
+	// Claude replaces "/" with "-" and removes leading "." from path components
+	sanitizedPath := sanitizePathForClaude(workDir)
 	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects", sanitizedPath)
 
 	p.log.WithFields(logrus.Fields{
 		"work_dir":            workDir,
 		"sanitized_path":      sanitizedPath,
 		"claude_projects_dir": claudeProjectsDir,
+		"job_start_time":      jobStartTime,
 	}).Debug("SESSION_DISCOVERY: Looking for Claude session files")
 
 	// Check if the directory exists
@@ -908,6 +930,7 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error
 	}
 
 	// Find the most recent .jsonl file (excluding agent-*.jsonl files which are sub-agents)
+	// Only consider files modified AFTER the job started to avoid reusing old sessions
 	entries, err := os.ReadDir(claudeProjectsDir)
 	if err != nil {
 		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to read Claude projects directory")
@@ -935,6 +958,17 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string) (string, error
 
 		info, err := entry.Info()
 		if err != nil {
+			continue
+		}
+
+		// Only consider files modified after the job started
+		// This prevents reusing old session files from previous jobs
+		if !info.ModTime().After(jobStartTime) {
+			p.log.WithFields(logrus.Fields{
+				"file":          entry.Name(),
+				"mod_time":      info.ModTime(),
+				"job_start_time": jobStartTime,
+			}).Debug("SESSION_DISCOVERY: Skipping old session file")
 			continue
 		}
 
