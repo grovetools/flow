@@ -220,7 +220,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		availableColumns:    availableColumns,
 		columnVisibility:    columnVisibility,
 		Focus:            JobsPane,
-		LogSplitVertical: false, // Default to horizontal split
+		LogSplitVertical: state.LogSplitVertical, // Apply loaded state
 		IsRunningJob:        false,
 		RunLogFile:          runLogPath,
 		Program:             nil, // Will be set by SetProgram after creating the program

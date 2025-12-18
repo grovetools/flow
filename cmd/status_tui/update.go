@@ -608,7 +608,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if i, ok := m.columnList.SelectedItem().(columnSelectItem); ok {
 					m.columnVisibility[i.name] = !m.columnVisibility[i.name]
 					// Save state to disk
-					_ = saveState(m.columnVisibility)
+					_ = saveState(m.columnVisibility, m.LogSplitVertical)
 				}
 				return m, nil
 			default:
@@ -712,6 +712,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.ToggleLayout):
 			if m.ShowLogs {
 				m.LogSplitVertical = !m.LogSplitVertical
+				// Save the new state
+				_ = saveState(m.columnVisibility, m.LogSplitVertical)
 
 				// Centralized layout calculation
 				m.updateLayoutDimensions()

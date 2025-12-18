@@ -9,6 +9,7 @@ import (
 // tuiState holds persistent TUI settings.
 type tuiState struct {
 	ColumnVisibility map[string]bool `json:"column_visibility"`
+	LogSplitVertical bool            `json:"log_split_vertical,omitempty"`
 }
 
 // getStateFilePath returns the path to the TUI state file.
@@ -54,6 +55,7 @@ func loadState() (*tuiState, error) {
 			// Return default state if file doesn't exist
 			return &tuiState{
 				ColumnVisibility: defaultColumnVisibility(),
+				LogSplitVertical: false, // Default to horizontal
 			}, nil
 		}
 		return nil, err
@@ -64,14 +66,20 @@ func loadState() (*tuiState, error) {
 		// On parse error, return default state
 		return &tuiState{
 			ColumnVisibility: defaultColumnVisibility(),
+			LogSplitVertical: false, // Default to horizontal
 		}, nil
+	}
+
+	// Ensure default visibility map exists if it's nil
+	if state.ColumnVisibility == nil {
+		state.ColumnVisibility = defaultColumnVisibility()
 	}
 
 	return &state, nil
 }
 
 // saveState saves the TUI state to disk.
-func saveState(visibility map[string]bool) error {
+func saveState(visibility map[string]bool, logSplitVertical bool) error {
 	path, err := getStateFilePath()
 	if err != nil {
 		return err
@@ -79,6 +87,7 @@ func saveState(visibility map[string]bool) error {
 
 	state := tuiState{
 		ColumnVisibility: visibility,
+		LogSplitVertical: logSplitVertical,
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")

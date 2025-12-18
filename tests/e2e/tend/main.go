@@ -33,6 +33,7 @@ func main() {
 		scenarios.PlanStatusTUIOnlyScenario,
 		scenarios.PlanStatusTUIColumnToggleScenario,
 		scenarios.PlanStatusTUIColumnPersistenceScenario,
+		scenarios.PlanStatusTUILayoutPersistenceScenario,
 		scenarios.PlanFromNoteScenario,
 		scenarios.PlanMergeUpdateWorktreeScenario,
 		scenarios.StandardFeatureRecipeScenario,
