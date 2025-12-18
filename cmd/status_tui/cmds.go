@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/tui/components/logviewer"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -164,6 +165,9 @@ func loadJobFileContentCmd(job *orchestration.Job) tea.Cmd {
 }
 
 // loadAndStreamAgentLogsCmd first loads existing agent logs, then triggers streaming.
+// This function implements fast-path optimization:
+// - For completed jobs: read directly from job.log if available
+// - For running jobs: try to get direct transcript path from session registry
 func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	logger := logging.NewLogger("flow-tui")
 	logger.WithFields(map[string]interface{}{
@@ -173,69 +177,123 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
-		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename) // Use plan/job spec format
+		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
 
 		logger.WithFields(map[string]interface{}{
 			"job_spec": jobSpec,
 		}).Info("loadAndStreamAgentLogsCmd executing")
 
-		// Try to read historical logs using aglogs read (formatted output)
-		readCmd := exec.Command("grove", "aglogs", "read", jobSpec)
-		readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
-		readOutput, readErr := readCmd.Output()
+		// Fast path: read from job.log which contains ANSI-formatted output (for both completed and running jobs)
+		jobLogPath, err := orchestration.GetJobLogPath(plan, job)
+		if err == nil {
+			if _, statErr := os.Stat(jobLogPath); statErr == nil {
+				// Read the job.log file directly - it contains ANSI-formatted aglogs output
+				content, readErr := os.ReadFile(jobLogPath)
+				if readErr == nil && len(content) > 0 {
+					logger.WithFields(map[string]interface{}{
+						"log_path":    jobLogPath,
+						"is_running":  job.Status == orchestration.JobStatusRunning,
+						"content_len": len(content),
+					}).Debug("Fast path: read job logs from job.log")
 
-		logger.WithFields(map[string]interface{}{
-			"job_spec":   jobSpec,
-			"output_len": len(readOutput),
-			"error":      readErr,
-		}).Debug("aglogs read completed")
+					contentStr := string(content)
+					shouldStream := job.Status == orchestration.JobStatusRunning
 
-		if readErr != nil {
-			if job.Status == orchestration.JobStatusRunning {
-				// Job is running, so it's valid to assume the session is initializing. Retry.
+					if shouldStream {
+						// Add a separator before the live stream
+						separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
+						streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
+						contentStr = contentStr + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
+
+						// Get the direct transcript path for streaming
+						var logSpec string = jobSpec
+						if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
+							if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata.TranscriptPath != "" {
+								logger.WithFields(map[string]interface{}{
+									"job_id":          job.ID,
+									"transcript_path": metadata.TranscriptPath,
+								}).Debug("Found direct transcript path from session registry for streaming")
+								logSpec = metadata.TranscriptPath
+							}
+						}
+
+						return LogContentLoadedMsg{
+							Content:        contentStr,
+							ShouldRetry:    false,
+							StartStreaming: true,
+							LogFilePath:    logSpec,
+							JobID:          job.ID,
+						}
+					}
+
+					// Completed job - just show the content
+					return LogContentLoadedMsg{
+						Content:        contentStr,
+						ShouldRetry:    false,
+						StartStreaming: false,
+						JobID:          job.ID,
+					}
+				}
+			}
+		}
+
+		// Fallback: job.log doesn't exist yet (running job just started)
+		if job.Status == orchestration.JobStatusRunning {
+			// Try to get direct transcript path from session registry
+			var logSpec string = jobSpec
+			if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
+				if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata.TranscriptPath != "" {
+					logger.WithFields(map[string]interface{}{
+						"job_id":          job.ID,
+						"transcript_path": metadata.TranscriptPath,
+					}).Debug("Fast path: found direct transcript path from session registry")
+					logSpec = metadata.TranscriptPath
+				}
+			}
+
+			// Try to read historical logs using aglogs read
+			readCmd := exec.Command("grove", "aglogs", "read", logSpec)
+			readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+			readOutput, readErr := readCmd.Output()
+
+			logger.WithFields(map[string]interface{}{
+				"log_spec":   logSpec,
+				"output_len": len(readOutput),
+				"error":      readErr,
+			}).Debug("aglogs read completed")
+
+			if readErr != nil {
+				// Session is still initializing, retry
 				return LogContentLoadedMsg{
 					Content:     "⏳ Waiting for agent session to start...\n(This may take a few seconds)\n",
 					ShouldRetry: true,
 					JobID:       job.ID,
 				}
-			} else {
-				// Job is not running, so logs should be present. Failure means no logs were found. Do not retry.
-				return LogContentLoadedMsg{
-					Content:     fmt.Sprintf("No agent logs found for job '%s'.\nError from aglogs: %v", job.Title, readErr),
-					ShouldRetry: false,
-					JobID:       job.ID,
-				}
 			}
-		}
 
-		// Success! We have historical formatted logs.
-		content := string(readOutput)
-		shouldStream := job.Status == orchestration.JobStatusRunning
-
-		if shouldStream {
+			content := string(readOutput)
 			if content != "" {
-				// Add a separator before the live stream
 				separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
 				streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
 				content = content + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
 			} else {
 				content = "⏳ Agent session found, waiting for logs...\n"
 			}
-		} else if content == "" {
-			content = theme.DefaultTheme.Muted.Render(fmt.Sprintf("No agent logs found for completed job '%s'.", job.Title))
+
+			return LogContentLoadedMsg{
+				Content:        content,
+				ShouldRetry:    false,
+				StartStreaming: true,
+				LogFilePath:    logSpec,
+				JobID:          job.ID,
+			}
 		}
 
-		logger.WithFields(map[string]interface{}{
-			"job_spec":      jobSpec,
-			"should_stream": shouldStream,
-		}).Info("Starting agent log stream")
-
+		// Completed job with no logs
 		return LogContentLoadedMsg{
-			Content:        content,
-			ShouldRetry:    false,
-			StartStreaming: shouldStream,
-			LogFilePath:    jobSpec, // Pass the job spec for streaming
-			JobID:          job.ID,
+			Content:     theme.DefaultTheme.Muted.Render(fmt.Sprintf("No agent logs found for completed job '%s'.", job.Title)),
+			ShouldRetry: false,
+			JobID:       job.ID,
 		}
 	}
 }
@@ -315,13 +373,23 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 			for scanner.Scan() {
 				line := scanner.Text()
 				lineCount++
-				// Write to log file
-				fmt.Fprintln(logFile, line)
+
+				// Strip the [job-id] prefix from streamed lines for cleaner display and storage
+				displayLine := line
+				if strings.HasPrefix(line, "[") {
+					if endIdx := strings.Index(line, "] "); endIdx > 0 {
+						displayLine = line[endIdx+2:]
+					}
+				}
+
+				// Write to log file (without job-id prefix)
+				fmt.Fprintln(logFile, displayLine)
 				logFile.Sync() // Ensure it's written immediately
+
 				// Send to TUI as a LogLineMsg with job.ID to tag the source
 				program.Send(logviewer.LogLineMsg{
 					Workspace: job.ID,
-					Line:      line,
+					Line:      displayLine,
 				})
 			}
 			if err := scanner.Err(); err != nil {

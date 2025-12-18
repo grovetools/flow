@@ -184,10 +184,10 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 
 // runAgentInWorktree executes the agent in the worktree context and returns its output.
 func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan) (string, error) {
-	logDir := ResolveLogDirectory(plan, job)
-	logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", job.ID))
-	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
-		return "", fmt.Errorf("create log directory: %w", err)
+	// Use the standard job.log path (same as interactive_agent)
+	logFile, err := GetJobLogPath(plan, job)
+	if err != nil {
+		return "", fmt.Errorf("get job log path: %w", err)
 	}
 
 	log, err := os.Create(logFile)
@@ -260,11 +260,12 @@ func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree string, prom
 	return nil
 }
 
-// appendTranscript uses aglogs to get the formatted transcript and appends it to the job file.
+// appendTranscript uses aglogs to get the formatted transcript and appends it to both the job file and job.log.
 func (e *HeadlessAgentExecutor) appendTranscript(job *Job, plan *Plan) error {
-	// Use aglogs to read the transcript for the completed job
+	// Use aglogs to read the transcript for the completed job with ANSI colors
 	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
 	cmd := exec.Command("grove", "aglogs", "read", jobSpec)
+	cmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 
 	transcript, err := cmd.CombinedOutput()
 	if err != nil {
@@ -276,6 +277,14 @@ func (e *HeadlessAgentExecutor) appendTranscript(job *Job, plan *Plan) error {
 	if len(strings.TrimSpace(string(transcript))) == 0 || strings.Contains(string(transcript), "no sessions found with job") {
 		log.Info("No transcript found for job")
 		return nil
+	}
+
+	// Write formatted transcript to job.log (replacing raw output)
+	jobLogPath, err := GetJobLogPath(plan, job)
+	if err == nil {
+		if err := os.WriteFile(jobLogPath, transcript, 0o644); err != nil {
+			log.WithError(err).Warn("Failed to write formatted transcript to job.log")
+		}
 	}
 
 	// Read current content of the job file
