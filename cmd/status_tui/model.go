@@ -374,7 +374,8 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, str
 	} else {
 		logHeader = " " + logHeader // Add left padding for horizontal view
 		paddedContent := lipgloss.NewStyle().PaddingLeft(1).Render(paneContent)
-		logView = lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logHeader + "\n" + dividerLine + "\n" + paddedContent)
+		// Ensure the log view uses the full calculated width
+		logView = lipgloss.NewStyle().Width(contentWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logHeader + "\n" + dividerLine + "\n" + paddedContent)
 	}
 
 	return logView, separator
