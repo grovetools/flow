@@ -64,6 +64,7 @@ type LogContentLoadedMsg struct {
 	ShouldRetry    bool   // If true, we should retry loading after a delay
 	StartStreaming bool   // If true, we should start streaming (agent session is ready)
 	LogFilePath    string // The path to the log file to stream
+	JobID          string // The ID of the job this message belongs to
 }
 
 // loadLogContentCmd creates a command to asynchronously read a job's log file.
@@ -71,20 +72,20 @@ func loadLogContentCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd
 	return func() tea.Msg {
 		logPath, err := orchestration.GetJobLogPath(plan, job)
 		if err != nil {
-			return LogContentLoadedMsg{Err: err}
+			return LogContentLoadedMsg{Err: err, JobID: job.ID}
 		}
 
 		if _, err := os.Stat(logPath); os.IsNotExist(err) {
 			// It's not an error if the log file doesn't exist yet.
-			return LogContentLoadedMsg{Content: fmt.Sprintf("No logs found for %s.", job.Title)}
+			return LogContentLoadedMsg{Content: fmt.Sprintf("No logs found for %s.", job.Title), JobID: job.ID}
 		}
 
 		content, err := os.ReadFile(logPath)
 		if err != nil {
-			return LogContentLoadedMsg{Err: err}
+			return LogContentLoadedMsg{Err: err, JobID: job.ID}
 		}
 
-		return LogContentLoadedMsg{Content: string(content)}
+		return LogContentLoadedMsg{Content: string(content), JobID: job.ID}
 	}
 }
 
@@ -195,12 +196,14 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				return LogContentLoadedMsg{
 					Content:     "⏳ Waiting for agent session to start...\n(This may take a few seconds)\n",
 					ShouldRetry: true,
+					JobID:       job.ID,
 				}
 			} else {
 				// Job is not running, so logs should be present. Failure means no logs were found. Do not retry.
 				return LogContentLoadedMsg{
 					Content:     fmt.Sprintf("No agent logs found for job '%s'.\nError from aglogs: %v", job.Title, readErr),
 					ShouldRetry: false,
+					JobID:       job.ID,
 				}
 			}
 		}
@@ -232,6 +235,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			ShouldRetry:    false,
 			StartStreaming: shouldStream,
 			LogFilePath:    jobSpec, // Pass the job spec for streaming
+			JobID:          job.ID,
 		}
 	}
 }

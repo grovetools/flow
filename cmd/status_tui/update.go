@@ -30,6 +30,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case LogContentLoadedMsg:
+		// Guard clause: Discard stale messages for jobs that are no longer selected
+		if m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID {
+			// This is a stale message for a job that is no longer selected.
+			// Discard it to prevent race conditions where old content overwrites new.
+			return m, nil
+		}
+
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
 			"has_error":        msg.Err != nil,
