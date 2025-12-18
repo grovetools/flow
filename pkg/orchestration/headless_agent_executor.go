@@ -163,9 +163,6 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		log.WithField("job_id", job.ID).Info("[HEADLESS] Formatted transcript appended successfully")
 	}
 
-	// Note: Context regeneration is already handled by the agent during execution,
-	// so we don't need to regenerate it here (unlike oneshot/shell executors).
-
 	return execErr
 }
 

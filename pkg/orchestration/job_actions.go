@@ -25,16 +25,26 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	}).Info("[TRANSCRIPT] Starting transcript append")
 
 	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
-	cmd := exec.Command("grove", "aglogs", "read", jobSpec)
-	cmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+
+	// Get formatted transcript for job.log (with ANSI colors)
+	formattedCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+	formattedCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+	formattedOutput, formattedErr := formattedCmd.CombinedOutput()
+	formattedStr := string(formattedOutput)
+
+	// Get plain text transcript for .md file (without ANSI colors)
+	plainCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+	plainOutput, plainErr := plainCmd.CombinedOutput()
+	plainStr := string(plainOutput)
 
 	log.WithFields(map[string]interface{}{
 		"job_id":   job.ID,
 		"job_spec": jobSpec,
 	}).Info("[TRANSCRIPT] Running aglogs read")
 
-	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
+	// Use plain text for error checking and .md file writing
+	err := plainErr
+	outputStr := plainStr
 
 	// Check if a transcript was found. `aglogs read` returns an error if not found.
 	if err != nil || len(strings.TrimSpace(outputStr)) == 0 || strings.Contains(outputStr, "no sessions found with job") {
@@ -76,7 +86,8 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	}
 
 	var newContent string
-	transcriptOutput := outputStr
+	// Use plain text for .md file
+	transcriptOutput := plainStr
 
 	if strings.Contains(string(content), "## Transcript") {
 		existingContent := string(content)
@@ -116,18 +127,21 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	// Also write the formatted transcript to job.log for TUI fast-path loading
 	jobLogPath, err := GetJobLogPath(plan, job)
 	if err == nil {
-		if err := os.WriteFile(jobLogPath, []byte(transcriptOutput), 0644); err != nil {
-			// Log a warning but don't fail - this is just for TUI optimization
-			log.WithFields(map[string]interface{}{
-				"job_id":  job.ID,
-				"logpath": jobLogPath,
-				"error":   err,
-			}).Warn("[TRANSCRIPT] Failed to write formatted transcript to job.log")
-		} else {
-			log.WithFields(map[string]interface{}{
-				"job_id":  job.ID,
-				"logpath": jobLogPath,
-			}).Info("[TRANSCRIPT] Successfully wrote formatted transcript to job.log")
+		// Use formatted version (with ANSI colors) for job.log
+		if formattedErr == nil && len(formattedStr) > 0 {
+			if err := os.WriteFile(jobLogPath, []byte(formattedStr), 0644); err != nil {
+				// Log a warning but don't fail - this is just for TUI optimization
+				log.WithFields(map[string]interface{}{
+					"job_id":  job.ID,
+					"logpath": jobLogPath,
+					"error":   err,
+				}).Warn("[TRANSCRIPT] Failed to write formatted transcript to job.log")
+			} else {
+				log.WithFields(map[string]interface{}{
+					"job_id":  job.ID,
+					"logpath": jobLogPath,
+				}).Info("[TRANSCRIPT] Successfully wrote formatted transcript to job.log")
+			}
 		}
 	}
 

@@ -392,13 +392,6 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// Regenerate context before launching the agent
-	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil)
-	if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "interactive-agent", job, plan); err != nil {
-		p.log.WithError(err).Warn("Failed to generate job-specific context for interactive session")
-		p.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
-	}
-
 	// Create tmux client
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {

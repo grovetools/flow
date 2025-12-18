@@ -490,9 +490,11 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 				logFile.Sync() // Ensure it's written immediately
 
 				// Send to TUI as a LogLineMsg with job.ID to tag the source
+				// NoPrefix=true prevents the logviewer from adding [job-id] prefix
 				program.Send(logviewer.LogLineMsg{
 					Workspace: job.ID,
 					Line:      displayLine,
+					NoPrefix:  true,
 				})
 			}
 			if err := scanner.Err(); err != nil {
