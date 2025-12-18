@@ -22,7 +22,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		"job_type":  job.Type,
 		"plan_name": plan.Name,
 		"filename":  job.Filename,
-	}).Info("[TRANSCRIPT] Starting transcript append")
+	}).Debug("[TRANSCRIPT] Starting transcript append")
 
 	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
 
@@ -40,7 +40,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	log.WithFields(map[string]interface{}{
 		"job_id":   job.ID,
 		"job_spec": jobSpec,
-	}).Info("[TRANSCRIPT] Running aglogs read")
+	}).Debug("[TRANSCRIPT] Running aglogs read")
 
 	// Use plain text for error checking and .md file writing
 	err := plainErr
@@ -77,7 +77,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	log.WithFields(map[string]interface{}{
 		"job_id":     job.ID,
 		"output_len": len(outputStr),
-	}).Info("[TRANSCRIPT] Successfully retrieved transcript from aglogs")
+	}).Debug("[TRANSCRIPT] Successfully retrieved transcript from aglogs")
 
 	// Transcript was found, so proceed with appending it.
 	content, err := os.ReadFile(job.FilePath)
@@ -131,7 +131,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	log.WithFields(map[string]interface{}{
 		"job_id":   job.ID,
 		"filepath": job.FilePath,
-	}).Info("[TRANSCRIPT] Successfully wrote transcript to job file")
+	}).Debug("[TRANSCRIPT] Successfully wrote transcript to job file")
 
 	// Also write the formatted transcript to job.log for TUI fast-path loading
 	jobLogPath, err := GetJobLogPath(plan, job)
@@ -149,7 +149,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 				log.WithFields(map[string]interface{}{
 					"job_id":  job.ID,
 					"logpath": jobLogPath,
-				}).Info("[TRANSCRIPT] Successfully wrote formatted transcript to job.log")
+				}).Debug("[TRANSCRIPT] Successfully wrote formatted transcript to job.log")
 			}
 		}
 	}
