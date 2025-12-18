@@ -2,6 +2,7 @@ package status_tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	gtable "github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -575,4 +577,512 @@ func (m Model) renderColumnSelectView() string {
 		Render("\n\nPress space to toggle • Enter/Esc/T to close")
 	content := lipgloss.JoinVertical(lipgloss.Left, styledView, helpText)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, content)
+}
+// renderStyledFrontmatter parses raw YAML and renders it as a styled key-value list with sections.
+func renderStyledFrontmatter(rawYAML string) string {
+	var data map[string]interface{}
+	if err := yaml.Unmarshal([]byte(rawYAML), &data); err != nil {
+		return theme.DefaultTheme.Error.Render("Error parsing YAML: " + err.Error())
+	}
+
+	if len(data) == 0 {
+		return theme.DefaultTheme.Muted.Render("No properties found.")
+	}
+
+	// Define property sections
+	type section struct {
+		title      string
+		properties []string
+	}
+
+	sections := []section{
+		{title: "Identity", properties: []string{"id", "title", "filename"}},
+		{title: "Execution", properties: []string{"status", "type", "template", "model"}},
+		{title: "Context", properties: []string{"repository", "worktree", "depends_on", "prepend_dependencies", "git_changes"}},
+		{title: "Timestamps", properties: []string{"duration", "completed_at", "updated_at", "created_at"}},
+	}
+
+	// Build categorized map
+	categorized := make(map[string]bool)
+	for _, sec := range sections {
+		for _, prop := range sec.properties {
+			categorized[prop] = true
+		}
+	}
+
+	// Collect remaining properties
+	var remainingKeys []string
+	for k := range data {
+		if !categorized[k] {
+			remainingKeys = append(remainingKeys, k)
+		}
+	}
+	sort.Strings(remainingKeys)
+
+	// Define styles
+	keyStyle := theme.DefaultTheme.Muted.Copy().Italic(true)
+	dimStyle := theme.DefaultTheme.Muted
+	sectionStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Cyan)
+
+	var builder strings.Builder
+	firstSection := true
+
+	// Render sections
+	for _, sec := range sections {
+		// Check if section has properties
+		hasProps := false
+		for _, prop := range sec.properties {
+			if _, exists := data[prop]; exists {
+				hasProps = true
+				break
+			}
+		}
+		if !hasProps {
+			continue
+		}
+
+		// Section spacing and header
+		if !firstSection {
+			builder.WriteString("\n")
+		}
+		firstSection = false
+		builder.WriteString(sectionStyle.Render(sec.title) + "\n")
+
+		// Render properties in this section
+		for _, k := range sec.properties {
+			v, exists := data[k]
+			if !exists {
+				continue
+			}
+			renderProperty(&builder, k, v, keyStyle, dimStyle)
+		}
+	}
+
+	// Render remaining properties
+	if len(remainingKeys) > 0 {
+		if !firstSection {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(sectionStyle.Render("Other") + "\n")
+		for _, k := range remainingKeys {
+			renderProperty(&builder, k, data[k], keyStyle, dimStyle)
+		}
+	}
+
+	return builder.String()
+}
+
+func renderProperty(builder *strings.Builder, k string, v interface{}, keyStyle, dimStyle lipgloss.Style) {
+	bullet := dimStyle.Render("  " + theme.IconBullet + " ")
+
+	switch val := v.(type) {
+	case string:
+		var valueStr string
+		var icon string
+		var hasStyle bool
+		var valueStyle lipgloss.Style
+
+		// Add icons and colors for specific fields
+		switch k {
+		case "status":
+			switch val {
+			case "completed":
+				icon, valueStyle, hasStyle = theme.IconStatusCompleted+" ", theme.DefaultTheme.Success, true
+			case "running":
+				icon, valueStyle, hasStyle = theme.IconStatusRunning+" ", theme.DefaultTheme.Info, true
+			case "failed":
+				icon, valueStyle, hasStyle = theme.IconStatusFailed+" ", theme.DefaultTheme.Error, true
+			case "blocked":
+				icon, valueStyle, hasStyle = theme.IconStatusBlocked+" ", theme.DefaultTheme.Error, true
+			case "pending":
+				icon, valueStyle, hasStyle = theme.IconPending+" ", theme.DefaultTheme.Muted, true
+			case "todo":
+				icon, valueStyle, hasStyle = theme.IconStatusTodo+" ", theme.DefaultTheme.Muted, true
+			case "hold":
+				icon, valueStyle, hasStyle = theme.IconStatusHold+" ", theme.DefaultTheme.Warning, true
+			case "abandoned":
+				icon, valueStyle, hasStyle = theme.IconStatusAbandoned+" ", theme.DefaultTheme.Muted, true
+			case "needs_review":
+				icon, valueStyle, hasStyle = theme.IconStatusNeedsReview+" ", theme.DefaultTheme.Info, true
+			}
+		case "type":
+			switch val {
+			case "interactive_agent":
+				icon = theme.IconInteractiveAgent + " "
+			case "headless_agent":
+				icon = theme.IconHeadlessAgent + " "
+			case "chat":
+				icon = theme.IconChat + " "
+			case "oneshot":
+				icon = theme.IconOneshot + " "
+			case "shell":
+				icon = theme.IconShell + " "
+			}
+		case "git_changes":
+			if val == "true" {
+				icon = theme.IconGit + " "
+			}
+		case "worktree":
+			if val != "" {
+				icon = theme.IconWorktree + " "
+			}
+		case "repository":
+			if val != "" {
+				icon = theme.IconRepo + " "
+			}
+		}
+
+		if val == "" {
+			valueStr = dimStyle.Render("-")
+		} else if hasStyle {
+			valueStr = valueStyle.Render(icon + val)
+		} else {
+			valueStr = icon + val
+		}
+		builder.WriteString(fmt.Sprintf("%s%s%s %s\n", bullet, keyStyle.Render(k), dimStyle.Render(":"), valueStr))
+
+	case int, int64, float64:
+		builder.WriteString(fmt.Sprintf("%s%s%s %v\n", bullet, keyStyle.Render(k), dimStyle.Render(":"), val))
+
+	case bool:
+		valueStr := theme.DefaultTheme.Success.Render("✓")
+		if !val {
+			valueStr = dimStyle.Render("-")
+		}
+		builder.WriteString(fmt.Sprintf("%s%s%s %s\n", bullet, keyStyle.Render(k), dimStyle.Render(":"), valueStr))
+
+	case []interface{}:
+		if len(val) == 0 {
+			builder.WriteString(fmt.Sprintf("%s%s%s %s\n", bullet, keyStyle.Render(k), dimStyle.Render(":"), dimStyle.Render("-")))
+		} else {
+			builder.WriteString(fmt.Sprintf("%s%s%s\n", bullet, keyStyle.Render(k), dimStyle.Render(":")))
+			for i, item := range val {
+				connector := "├─"
+				if i == len(val)-1 {
+					connector = "└─"
+				}
+				builder.WriteString(fmt.Sprintf("      %s %v\n", dimStyle.Render(connector), item))
+			}
+		}
+
+	case map[string]interface{}:
+		builder.WriteString(fmt.Sprintf("%s%s%s %s\n", bullet, keyStyle.Render(k), dimStyle.Render(":"), dimStyle.Render(fmt.Sprintf("(%d items)", len(val)))))
+
+	default:
+		builder.WriteString(fmt.Sprintf("%s%s%s %v\n", bullet, keyStyle.Render(k), dimStyle.Render(":"), val))
+	}
+}
+
+// renderStyledMarkdown applies basic syntax highlighting to markdown content.
+func renderStyledMarkdown(rawContent string) string {
+	// Find frontmatter boundaries
+	if !strings.HasPrefix(rawContent, "---\n") {
+		return rawContent
+	}
+
+	secondSeparator := strings.Index(rawContent[4:], "\n---\n")
+	if secondSeparator == -1 {
+		return rawContent
+	}
+
+	frontmatterEnd := 4 + secondSeparator + 5
+	frontmatterBlock := rawContent[:frontmatterEnd]
+	bodyBlock := rawContent[frontmatterEnd:]
+
+	styledFrontmatter := theme.DefaultTheme.Muted.Italic(true).Render(frontmatterBlock)
+
+	var bodyBuilder strings.Builder
+	h1Style := theme.DefaultTheme.Header.Copy().Bold(true).Foreground(theme.DefaultColors.Cyan)
+	h2Style := theme.DefaultTheme.Header.Copy().Foreground(theme.DefaultColors.Blue)
+	h3Style := theme.DefaultTheme.Header.Copy().Foreground(theme.DefaultColors.Violet)
+
+	for _, line := range strings.Split(bodyBlock, "\n") {
+		if strings.HasPrefix(line, "### ") {
+			bodyBuilder.WriteString(h3Style.Render(line) + "\n")
+		} else if strings.HasPrefix(line, "## ") {
+			bodyBuilder.WriteString(h2Style.Render(line) + "\n")
+		} else if strings.HasPrefix(line, "# ") {
+			bodyBuilder.WriteString(h1Style.Render(line) + "\n")
+		} else {
+			styledLine := styleInlineMarkdown(line)
+			bodyBuilder.WriteString(styledLine + "\n")
+		}
+	}
+
+	return styledFrontmatter + bodyBuilder.String()
+}
+
+// styleInlineMarkdown applies styling for bold and italic markdown syntax.
+func styleInlineMarkdown(line string) string {
+	boldStyle := lipgloss.NewStyle().Bold(true)
+	italicStyle := lipgloss.NewStyle().Italic(true)
+	result := line
+
+	// Handle **bold**
+	for {
+		start := strings.Index(result, "**")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start+2:], "**")
+		if end == -1 {
+			break
+		}
+		end += start + 2
+		result = result[:start] + boldStyle.Render(result[start+2:end]) + result[end+2:]
+	}
+
+	// Handle __bold__
+	for {
+		start := strings.Index(result, "__")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(result[start+2:], "__")
+		if end == -1 {
+			break
+		}
+		end += start + 2
+		result = result[:start] + boldStyle.Render(result[start+2:end]) + result[end+2:]
+	}
+
+	// Handle *italic*
+	for {
+		start := strings.Index(result, "*")
+		if start == -1 {
+			break
+		}
+		if start > 0 && result[start-1] == '*' {
+			result = result[:start] + result[start+1:]
+			continue
+		}
+		end := strings.Index(result[start+1:], "*")
+		if end == -1 {
+			break
+		}
+		end += start + 1
+		if end+1 < len(result) && result[end+1] == '*' {
+			result = result[:start] + result[start+1:]
+			continue
+		}
+		result = result[:start] + italicStyle.Render(result[start+1:end]) + result[end+1:]
+	}
+
+	// Handle _italic_
+	for {
+		start := strings.Index(result, "_")
+		if start == -1 {
+			break
+		}
+		if start > 0 && result[start-1] == '_' {
+			result = result[:start] + result[start+1:]
+			continue
+		}
+		end := strings.Index(result[start+1:], "_")
+		if end == -1 {
+			break
+		}
+		end += start + 1
+		if end+1 < len(result) && result[end+1] == '_' {
+			result = result[:start] + result[start+1:]
+			continue
+		}
+		result = result[:start] + italicStyle.Render(result[start+1:end]) + result[end+1:]
+	}
+
+	return result
+}
+
+// renderStyledBriefing applies syntax highlighting to XML briefing content.
+func renderStyledBriefing(rawContent string) string {
+	// Check if it's XML
+	if !strings.HasPrefix(strings.TrimSpace(rawContent), "<") {
+		return rawContent
+	}
+
+	var builder strings.Builder
+	dimStyle := theme.DefaultTheme.Muted
+	tagStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue)
+	attrNameStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Cyan)
+	attrValueStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Green)
+	commentStyle := dimStyle.Copy().Italic(true)
+
+	lines := strings.Split(rawContent, "\n")
+	for _, line := range lines {
+		styledLine := styleXMLLine(line, tagStyle, attrNameStyle, attrValueStyle, commentStyle, dimStyle)
+		builder.WriteString(styledLine + "\n")
+	}
+
+	return builder.String()
+}
+
+// styleXMLLine applies styling to a single line of XML.
+func styleXMLLine(line string, tagStyle, attrNameStyle, attrValueStyle, commentStyle, dimStyle lipgloss.Style) string {
+	trimmed := strings.TrimSpace(line)
+
+	// Handle XML comments
+	if strings.HasPrefix(trimmed, "<!--") {
+		return commentStyle.Render(line)
+	}
+
+	// Simple XML styling: tags, attributes, content
+	result := line
+	var styled strings.Builder
+
+	i := 0
+	for i < len(result) {
+		char := result[i]
+
+		if char == '<' {
+			// Start of a tag
+			tagEnd := i + 1
+			
+			// Find the end of the tag
+			for tagEnd < len(result) && result[tagEnd] != '>' {
+				tagEnd++
+			}
+			if tagEnd < len(result) {
+				tagEnd++ // Include the '>'
+			}
+
+			tagContent := result[i:tagEnd]
+			styledTag := styleXMLTag(tagContent, tagStyle, attrNameStyle, attrValueStyle, dimStyle)
+			styled.WriteString(styledTag)
+			i = tagEnd
+		} else {
+			// Content outside tags
+			contentStart := i
+			for i < len(result) && result[i] != '<' {
+				i++
+			}
+			content := result[contentStart:i]
+			
+			// Only render non-whitespace content
+			if strings.TrimSpace(content) != "" {
+				styled.WriteString(content)
+			} else {
+				styled.WriteString(content)
+			}
+		}
+	}
+
+	return styled.String()
+}
+
+// styleXMLTag styles the interior of an XML tag.
+func styleXMLTag(tag string, tagStyle, attrNameStyle, attrValueStyle, dimStyle lipgloss.Style) string {
+	if len(tag) < 2 {
+		return tag
+	}
+
+	// Extract tag name and attributes
+	// Format: <tagname attr="value">
+	var result strings.Builder
+	result.WriteString(dimStyle.Render("<"))
+
+	inner := tag[1 : len(tag)-1]
+	
+	// Handle closing tags
+	if strings.HasPrefix(inner, "/") {
+		result.WriteString(dimStyle.Render("/"))
+		inner = inner[1:]
+	}
+
+	// Handle self-closing tags
+	selfClosing := strings.HasSuffix(inner, "/")
+	if selfClosing {
+		inner = strings.TrimSuffix(inner, "/")
+	}
+
+	// Split tag name from attributes
+	parts := strings.Fields(inner)
+	if len(parts) == 0 {
+		result.WriteString(dimStyle.Render(">"))
+		return result.String()
+	}
+
+	// Tag name
+	result.WriteString(tagStyle.Render(parts[0]))
+
+	// Attributes
+	if len(parts) > 1 {
+		attrString := strings.Join(parts[1:], " ")
+		styledAttrs := styleAttributes(attrString, attrNameStyle, attrValueStyle, dimStyle)
+		result.WriteString(" ")
+		result.WriteString(styledAttrs)
+	}
+
+	if selfClosing {
+		result.WriteString(dimStyle.Render("/"))
+	}
+	result.WriteString(dimStyle.Render(">"))
+
+	return result.String()
+}
+
+// styleAttributes styles XML attributes in the form name="value".
+func styleAttributes(attrString string, attrNameStyle, attrValueStyle, dimStyle lipgloss.Style) string {
+	var result strings.Builder
+	i := 0
+
+	for i < len(attrString) {
+		// Skip whitespace
+		for i < len(attrString) && attrString[i] == ' ' {
+			result.WriteString(" ")
+			i++
+		}
+		if i >= len(attrString) {
+			break
+		}
+
+		// Find attribute name (up to '=')
+		nameStart := i
+		for i < len(attrString) && attrString[i] != '=' && attrString[i] != ' ' {
+			i++
+		}
+		attrName := attrString[nameStart:i]
+		
+		if attrName != "" {
+			result.WriteString(attrNameStyle.Render(attrName))
+		}
+
+		// Skip spaces around '='
+		for i < len(attrString) && attrString[i] == ' ' {
+			result.WriteString(" ")
+			i++
+		}
+
+		// Handle '='
+		if i < len(attrString) && attrString[i] == '=' {
+			result.WriteString(dimStyle.Render("="))
+			i++
+		}
+
+		// Skip spaces after '='
+		for i < len(attrString) && attrString[i] == ' ' {
+			result.WriteString(" ")
+			i++
+		}
+
+		// Handle quoted value
+		if i < len(attrString) && (attrString[i] == '"' || attrString[i] == '\'') {
+			quote := attrString[i]
+			result.WriteString(dimStyle.Render(string(quote)))
+			i++
+
+			valueStart := i
+			for i < len(attrString) && attrString[i] != quote {
+				i++
+			}
+			value := attrString[valueStart:i]
+			result.WriteString(attrValueStyle.Render(value))
+
+			if i < len(attrString) {
+				result.WriteString(dimStyle.Render(string(quote)))
+				i++
+			}
+		}
+	}
+
+	return result.String()
 }

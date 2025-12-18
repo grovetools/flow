@@ -301,7 +301,7 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, str
 		case LogsPaneDetail:
 			paneTitle = "Logs"
 		case FrontmatterPane:
-			paneTitle = "Frontmatter"
+			paneTitle = "Job Properties"
 		case BriefingPane:
 			paneTitle = "Briefing"
 		case EditPane:

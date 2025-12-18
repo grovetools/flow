@@ -91,7 +91,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.frontmatterViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				m.frontmatterViewport.SetContent(msg.Content)
+				// Render styled frontmatter
+				styledContent := renderStyledFrontmatter(msg.Content)
+				m.frontmatterViewport.SetContent(styledContent)
 			}
 		}
 		return m, nil
@@ -101,7 +103,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.briefingViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				m.briefingViewport.SetContent(msg.Content)
+				// Render styled briefing XML
+				styledContent := renderStyledBriefing(msg.Content)
+				m.briefingViewport.SetContent(styledContent)
 			}
 		}
 		return m, nil
@@ -111,7 +115,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.editViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				m.editViewport.SetContent(msg.Content)
+				// Render styled markdown
+				styledContent := renderStyledMarkdown(msg.Content)
+				m.editViewport.SetContent(styledContent)
 			}
 		}
 		return m, nil
