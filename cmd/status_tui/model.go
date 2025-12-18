@@ -360,13 +360,14 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, str
 	}
 
 	// Render log content - the viewport handles wrapping and scrollbar
-	dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth-2))
+	dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth))
 	logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + paneContent
 
 	// Adjust padding/width based on split direction
 	var logView string
 	if m.LogSplitVertical {
-		logView = lipgloss.NewStyle().Width(m.LogViewerWidth).Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
+		// Add padding around the content
+		logView = lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
 	} else {
 		logHeader = " " + logHeader // Add left padding for horizontal view
 		paddedContent := lipgloss.NewStyle().PaddingLeft(1).Render(paneContent)
@@ -680,10 +681,13 @@ func (m *Model) updateLayoutDimensions() {
 
 	if m.ShowLogs {
 		if m.LogSplitVertical {
-			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth
+			// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
+			// So the content width is LogViewerWidth - 2
+			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2
 			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
 		} else {
-			m.LogViewerWidth = m.Width - (leftMargin + rightMargin)
+			// In horizontal split, only PaddingLeft(1) is applied
+			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
 			m.LogViewerHeight = m.calculateOptimalLogHeight()
 		}
 
