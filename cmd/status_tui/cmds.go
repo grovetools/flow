@@ -114,9 +114,9 @@ func loadFrontmatterCmd(job *orchestration.Job) tea.Cmd {
 // loadBriefingCmd finds and loads the most recent briefing file for a job.
 func loadBriefingCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
-		artifactsDir := filepath.Join(plan.Directory, ".artifacts")
-		pattern := fmt.Sprintf("briefing-%s-*.xml", job.ID)
-		files, err := filepath.Glob(filepath.Join(artifactsDir, pattern))
+		jobArtifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
+		pattern := "briefing-*.xml"
+		files, err := filepath.Glob(filepath.Join(jobArtifactDir, pattern))
 		if err != nil {
 			return BriefingContentLoadedMsg{Err: err}
 		}
@@ -314,9 +314,9 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 				// Write to log file
 				fmt.Fprintln(logFile, line)
 				logFile.Sync() // Ensure it's written immediately
-				// Send to TUI as a LogLineMsg with "Job Output" workspace to avoid [] prefix
+				// Send to TUI as a LogLineMsg with job.ID to tag the source
 				program.Send(logviewer.LogLineMsg{
-					Workspace: "Job Output",
+					Workspace: job.ID,
 					Line:      line,
 				})
 			}
@@ -410,8 +410,8 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 				return JobRunFinishedMsg{Err: fmt.Errorf("failed to open log file %s: %w", logFilePath, err)}
 			}
 
-			// 3. Create a StreamWriter for live TUI updates. Use "Job Output" to avoid prefix.
-			tuiWriter := logviewer.NewStreamWriter(program, "Job Output")
+			// 3. Create a StreamWriter for live TUI updates. Use job.ID to tag log lines.
+			tuiWriter := logviewer.NewStreamWriter(program, job.ID)
 
 			// 4. Create a MultiWriter to write to both the file and the TUI.
 			multiWriter := io.MultiWriter(logFile, tuiWriter)

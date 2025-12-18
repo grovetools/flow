@@ -396,11 +396,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logviewer.LogLineMsg:
-		// Delegate log messages to the log viewer
-		if m.ShowLogs {
+		// Delegate log messages to the log viewer only if the message
+		// belongs to the currently active job being viewed.
+		if m.ShowLogs && m.ActiveLogJob != nil && msg.Workspace == m.ActiveLogJob.ID {
 			m.LogViewer, cmd = m.LogViewer.Update(msg)
 			return m, cmd
 		}
+		// Discard the log line if it's for a different job.
 		return m, nil
 
 	case tea.KeyMsg:
