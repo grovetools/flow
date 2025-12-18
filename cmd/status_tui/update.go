@@ -385,19 +385,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil {
 					logFile, _, err := logutil.FindLogFileForWorkspace(node)
 					if err == nil {
-						m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
+						m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight-logHeaderHeight)
 						cmd = m.LogViewer.Start(map[string]string{node.Name: logFile})
 						return m, cmd
 					}
 				}
 			}
 			// If no logs found, still show the log viewer (it will show empty/waiting state)
-			m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
+			m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight-logHeaderHeight)
 		}
 
 		// Update log viewer size if active
 		if m.ShowLogs {
-			m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+			m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
 			return m, cmd
 		}
 		return m, nil
@@ -608,7 +608,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateLayoutDimensions()
 				// Update log viewer size if active
 				if m.ShowLogs {
-					m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+					m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
 					return m, cmd
 				}
 				return m, nil
@@ -728,7 +728,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateLayoutDimensions()
 
 				// Update log viewer with new dimensions
-				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
 				return m, cmd
 			}
 			return m, nil
@@ -940,10 +940,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Centralized layout calculation
 				m.updateLayoutDimensions()
 
-				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
+				m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight-logHeaderHeight)
 
 				// Initialize the log viewer with a WindowSizeMsg to set it to ready state
-				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+				m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
 
 				// Update status message
 				jobCount := len(jobsToRun)
@@ -1299,8 +1299,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 
 	// Centralized layout calculation
 	m.updateLayoutDimensions()
-	m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight)
-	m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight})
+	m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight-logHeaderHeight)
+	m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
 
 	// Update viewport sizes for all panes
 	m.frontmatterViewport.Width = m.LogViewerWidth
