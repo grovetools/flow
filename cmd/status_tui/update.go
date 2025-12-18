@@ -103,6 +103,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Store the raw, unstyled content
 				m.frontmatterRawContent = msg.Content
+				// Ensure layout dimensions are current before wrapping
+				m.updateLayoutDimensions()
+				m.frontmatterViewport.Width = m.LogViewerWidth
+				m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
 				// Render styled frontmatter and wrap to viewport width - 1 for scrollbar
 				styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
 				wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
@@ -119,6 +123,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Store the raw, unstyled content
 				m.briefingRawContent = msg.Content
+				// Ensure layout dimensions are current before wrapping
+				m.updateLayoutDimensions()
+				m.briefingViewport.Width = m.LogViewerWidth
+				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 				// Render styled briefing XML and wrap to viewport width - 1 for scrollbar
 				styledContent := renderStyledBriefing(m.briefingRawContent)
 				wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
@@ -135,6 +143,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Store the raw, unstyled content
 				m.editRawContent = msg.Content
+				// Ensure layout dimensions are current before wrapping
+				m.updateLayoutDimensions()
+				m.editViewport.Width = m.LogViewerWidth
+				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 				// Render styled markdown and wrap to viewport width - 1 for scrollbar
 				styledContent := renderStyledMarkdown(m.editRawContent)
 				wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
