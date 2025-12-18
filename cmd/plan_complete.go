@@ -72,6 +72,21 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 			return fmt.Errorf("update job status: %w", err)
 		}
 
+		// Archive session artifacts if it's an interactive agent job
+		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent {
+			if !silent {
+				fmt.Println("Archiving session artifacts...")
+			}
+			if err := orchestration.ArchiveInteractiveSession(job, plan); err != nil {
+				// Log a warning but don't fail the entire completion process.
+				if !silent {
+					fmt.Printf("Warning: failed to archive session artifacts: %v\n", err)
+				}
+			} else if !silent {
+				fmt.Println(color.GreenString("✓") + " Session artifacts archived.")
+			}
+		}
+
 		// Append transcript if it's an interactive agent job
 		if job.Type == orchestration.JobTypeInteractiveAgent {
 			if !silent {

@@ -1,7 +1,10 @@
 package scenarios
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
@@ -69,4 +72,24 @@ func setupDefaultEnvironment(ctx *harness.Context, projectName string) (projectD
 
 	err = fs.WriteGroveConfig(groveConfigDir, globalCfg)
 	return
+}
+
+// findJobByPrefix finds a job file in the given plan directory that matches the prefix.
+// This helper is needed for the session_archiving test which uses specific job filename prefixes.
+func findJobByPrefix(planPath, prefix string) (string, error) {
+	entries, err := os.ReadDir(planPath)
+	if err != nil {
+		return "", fmt.Errorf("reading plan directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), prefix) && strings.HasSuffix(entry.Name(), ".md") {
+			return filepath.Join(planPath, entry.Name()), nil
+		}
+	}
+
+	return "", fmt.Errorf("no job file found with prefix %s in %s", prefix, planPath)
 }

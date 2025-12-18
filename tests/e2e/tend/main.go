@@ -49,6 +49,7 @@ func main() {
 		scenarios.RecipeDockerComposePortRemovalScenario,
 		scenarios.HoistedCommandsScenario,
 		scenarios.HoistedCommandsWithActiveJobScenario,
+		scenarios.SessionArchivingScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
