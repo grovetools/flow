@@ -105,6 +105,9 @@ type Model struct {
 	frontmatterViewport viewport.Model
 	briefingViewport    viewport.Model
 	editViewport        viewport.Model
+	frontmatterRawContent string
+	briefingRawContent    string
+	editRawContent        string
 	Focus               ViewFocus // Track which pane is active
 	LogSplitVertical    bool      // Track log viewer layout
 	IsRunningJob        bool      // Track if a job is currently running

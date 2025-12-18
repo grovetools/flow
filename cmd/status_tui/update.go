@@ -98,10 +98,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case FrontmatterContentLoadedMsg:
 		if m.ActiveDetailPane == FrontmatterPane {
 			if msg.Err != nil {
-				m.frontmatterViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
+				m.frontmatterRawContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err))
+				m.frontmatterViewport.SetContent(m.frontmatterRawContent)
 			} else {
+				// Store the raw, unstyled content
+				m.frontmatterRawContent = msg.Content
 				// Render styled frontmatter and wrap to viewport width - 1 for scrollbar
-				styledContent := renderStyledFrontmatter(msg.Content)
+				styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
 				wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
 				m.frontmatterViewport.SetContent(wrappedContent)
 			}
@@ -111,10 +114,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case BriefingContentLoadedMsg:
 		if m.ActiveDetailPane == BriefingPane {
 			if msg.Err != nil {
-				m.briefingViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
+				m.briefingRawContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err))
+				m.briefingViewport.SetContent(m.briefingRawContent)
 			} else {
+				// Store the raw, unstyled content
+				m.briefingRawContent = msg.Content
 				// Render styled briefing XML and wrap to viewport width - 1 for scrollbar
-				styledContent := renderStyledBriefing(msg.Content)
+				styledContent := renderStyledBriefing(m.briefingRawContent)
 				wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
 				m.briefingViewport.SetContent(wrappedContent)
 			}
@@ -124,10 +130,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case EditContentLoadedMsg:
 		if m.ActiveDetailPane == EditPane {
 			if msg.Err != nil {
-				m.editViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
+				m.editRawContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err))
+				m.editViewport.SetContent(m.editRawContent)
 			} else {
+				// Store the raw, unstyled content
+				m.editRawContent = msg.Content
 				// Render styled markdown and wrap to viewport width - 1 for scrollbar
-				styledContent := renderStyledMarkdown(msg.Content)
+				styledContent := renderStyledMarkdown(m.editRawContent)
 				wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
 				m.editViewport.SetContent(wrappedContent)
 			}
@@ -374,11 +383,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Update viewport sizes
 		m.frontmatterViewport.Width = m.LogViewerWidth
-		m.frontmatterViewport.Height = m.LogViewerHeight
+		m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
 		m.briefingViewport.Width = m.LogViewerWidth
-		m.briefingViewport.Height = m.LogViewerHeight
+		m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 		m.editViewport.Width = m.LogViewerWidth
-		m.editViewport.Height = m.LogViewerHeight
+		m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
+
+		// Re-wrap content for all detail viewports to adapt to the new size
+		if m.frontmatterRawContent != "" {
+			styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
+			wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
+			m.frontmatterViewport.SetContent(wrappedContent)
+		}
+		if m.briefingRawContent != "" {
+			styledContent := renderStyledBriefing(m.briefingRawContent)
+			wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
+			m.briefingViewport.SetContent(wrappedContent)
+		}
+		if m.editRawContent != "" {
+			styledContent := renderStyledMarkdown(m.editRawContent)
+			wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
+			m.editViewport.SetContent(wrappedContent)
+		}
 
 		// Start log viewer on first window size message if we have jobs and logs are enabled
 		if m.ShowLogs && m.ActiveLogJob == nil && len(m.Jobs) > 0 {
@@ -1364,8 +1390,8 @@ func generateViewportScrollbar(vp *viewport.Model, height int) []string {
 
 	scrollbar := make([]string, height)
 
-	// Count total content lines
-	totalLines := strings.Count(vp.View(), "\n") + 1
+	// Count total content lines from the full content, not just the visible part.
+	totalLines := vp.TotalLineCount()
 	if totalLines == 0 {
 		for i := 0; i < height; i++ {
 			scrollbar[i] = theme.DefaultTheme.Muted.Render(" ")
