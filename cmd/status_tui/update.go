@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/logging"
@@ -99,9 +100,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.frontmatterViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				// Render styled frontmatter and wrap to viewport width
+				// Render styled frontmatter and wrap to viewport width - 1 for scrollbar
 				styledContent := renderStyledFrontmatter(msg.Content)
-				wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width)
+				wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
 				m.frontmatterViewport.SetContent(wrappedContent)
 			}
 		}
@@ -112,9 +113,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.briefingViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				// Render styled briefing XML and wrap to viewport width
+				// Render styled briefing XML and wrap to viewport width - 1 for scrollbar
 				styledContent := renderStyledBriefing(msg.Content)
-				wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width)
+				wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
 				m.briefingViewport.SetContent(wrappedContent)
 			}
 		}
@@ -125,9 +126,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.editViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				// Render styled markdown and wrap to viewport width
+				// Render styled markdown and wrap to viewport width - 1 for scrollbar
 				styledContent := renderStyledMarkdown(msg.Content)
-				wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width)
+				wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
 				m.editViewport.SetContent(wrappedContent)
 			}
 		}
@@ -1353,4 +1354,85 @@ func wrapContentForViewport(content string, width int) string {
 	}
 
 	return strings.Join(wrappedLines, "\n")
+}
+
+// generateViewportScrollbar creates a visual scrollbar based on viewport position.
+func generateViewportScrollbar(vp *viewport.Model, height int) []string {
+	if height <= 0 {
+		return []string{}
+	}
+
+	scrollbar := make([]string, height)
+
+	// Count total content lines
+	totalLines := strings.Count(vp.View(), "\n") + 1
+	if totalLines == 0 {
+		for i := 0; i < height; i++ {
+			scrollbar[i] = theme.DefaultTheme.Muted.Render(" ")
+		}
+		return scrollbar
+	}
+
+	// If content fits entirely in view, show all thumb
+	if totalLines <= vp.Height {
+		for i := 0; i < height; i++ {
+			scrollbar[i] = theme.DefaultTheme.Muted.Render("█")
+		}
+		return scrollbar
+	}
+
+	// Calculate scrollbar thumb size proportional to visible content
+	thumbSize := max(1, (height*vp.Height)/totalLines)
+
+	// Get scroll position
+	scrollPercent := vp.ScrollPercent()
+	if scrollPercent < 0 {
+		scrollPercent = 0
+	}
+	if scrollPercent > 1 {
+		scrollPercent = 1
+	}
+
+	// Calculate thumb position
+	maxThumbStart := height - thumbSize
+	thumbStart := int(float64(maxThumbStart)*scrollPercent + 0.5)
+
+	if thumbStart < 0 {
+		thumbStart = 0
+	}
+	if thumbStart > maxThumbStart {
+		thumbStart = maxThumbStart
+	}
+
+	// Generate scrollbar characters
+	for i := 0; i < height; i++ {
+		if i >= thumbStart && i < thumbStart+thumbSize {
+			scrollbar[i] = theme.DefaultTheme.Muted.Render("█")
+		} else {
+			scrollbar[i] = theme.DefaultTheme.Muted.Render("░")
+		}
+	}
+
+	return scrollbar
+}
+
+// addScrollbarToViewport overlays a scrollbar on viewport content.
+func addScrollbarToViewport(vp *viewport.Model) string {
+	content := vp.View()
+	lines := strings.Split(content, "\n")
+	scrollbar := generateViewportScrollbar(vp, len(lines))
+
+	var result []string
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		scrollbarChar := " "
+		if i < len(scrollbar) {
+			scrollbarChar = scrollbar[i]
+		}
+
+		result = append(result, line+scrollbarChar)
+	}
+
+	return strings.Join(result, "\n")
 }

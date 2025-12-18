@@ -468,11 +468,11 @@ func (m Model) View() string {
 		case LogsPaneDetail:
 			detailContent = m.LogViewer.View()
 		case FrontmatterPane:
-			detailContent = m.frontmatterViewport.View()
+			detailContent = addScrollbarToViewport(&m.frontmatterViewport)
 		case BriefingPane:
-			detailContent = m.briefingViewport.View()
+			detailContent = addScrollbarToViewport(&m.briefingViewport)
 		case EditPane:
-			detailContent = m.editViewport.View()
+			detailContent = addScrollbarToViewport(&m.editViewport)
 		}
 
 		// Use the existing renderLogsPane structure but pass in the dynamic content
