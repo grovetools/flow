@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/logging/logutil"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
@@ -98,9 +99,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.frontmatterViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				// Render styled frontmatter
+				// Render styled frontmatter and wrap to viewport width
 				styledContent := renderStyledFrontmatter(msg.Content)
-				m.frontmatterViewport.SetContent(styledContent)
+				wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width)
+				m.frontmatterViewport.SetContent(wrappedContent)
 			}
 		}
 		return m, nil
@@ -110,9 +112,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.briefingViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				// Render styled briefing XML
+				// Render styled briefing XML and wrap to viewport width
 				styledContent := renderStyledBriefing(msg.Content)
-				m.briefingViewport.SetContent(styledContent)
+				wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width)
+				m.briefingViewport.SetContent(wrappedContent)
 			}
 		}
 		return m, nil
@@ -122,9 +125,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.editViewport.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err)))
 			} else {
-				// Render styled markdown
+				// Render styled markdown and wrap to viewport width
 				styledContent := renderStyledMarkdown(msg.Content)
-				m.editViewport.SetContent(styledContent)
+				wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width)
+				m.editViewport.SetContent(wrappedContent)
 			}
 		}
 		return m, nil
@@ -1304,11 +1308,11 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 
 	// Update viewport sizes for all panes
 	m.frontmatterViewport.Width = m.LogViewerWidth
-	m.frontmatterViewport.Height = m.LogViewerHeight
+	m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.briefingViewport.Width = m.LogViewerWidth
-	m.briefingViewport.Height = m.LogViewerHeight
+	m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.editViewport.Width = m.LogViewerWidth
-	m.editViewport.Height = m.LogViewerHeight
+	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 
 	// Trigger content loading for the active pane
 	switch pane {
@@ -1331,4 +1335,22 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+
+// wrapContentForViewport wraps content lines to fit within the given width.
+func wrapContentForViewport(content string, width int) string {
+	if width <= 0 {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+	wrapStyle := lipgloss.NewStyle().Width(width)
+
+	var wrappedLines []string
+	for _, line := range lines {
+		wrappedLines = append(wrappedLines, wrapStyle.Render(line))
+	}
+
+	return strings.Join(wrappedLines, "\n")
 }
