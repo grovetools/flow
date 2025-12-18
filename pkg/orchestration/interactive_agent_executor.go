@@ -703,16 +703,18 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 
 // discoverAndRegisterSession discovers the Claude Code session ID and creates session files for grove-hooks
 func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, workDir, targetPane string) {
+	logger := grovelogging.NewLogger("flow-claude-session-discovery")
+
 	defer func() {
 		if r := recover(); r != nil {
-			p.log.WithFields(logrus.Fields{
+			logger.WithFields(map[string]interface{}{
 				"job_id": job.ID,
 				"panic":  r,
 			}).Error("Panic in session registration")
 		}
 	}()
 
-	p.log.WithFields(logrus.Fields{
+	logger.WithFields(map[string]interface{}{
 		"job_id":      job.ID,
 		"plan":        plan.Name,
 		"target_pane": targetPane,
@@ -722,17 +724,17 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	time.Sleep(2 * time.Second)
 
 	// Find the PID of the Claude Code process (node process running claude-code)
-	p.log.WithField("target_pane", targetPane).Debug("SESSION_DISCOVERY: Finding Claude PID for pane")
-	claudePID, err := p.findClaudePIDForPane(targetPane)
+	logger.WithField("target_pane", targetPane).Debug("Finding Claude PID for pane")
+	claudePID, err := p.findClaudePIDForPane(targetPane, logger)
 	if err != nil {
-		p.log.WithFields(logrus.Fields{
+		logger.WithFields(map[string]interface{}{
 			"error":       err,
 			"target_pane": targetPane,
-		}).Error("SESSION_DISCOVERY: Failed to find Claude Code PID - session won't be registered")
+		}).Error("Failed to find Claude Code PID - session won't be registered")
 		return
 	}
 
-	p.log.WithField("pid", claudePID).Info("SESSION_DISCOVERY: Found Claude Code PID")
+	logger.WithField("pid", claudePID).Info("Found Claude Code PID")
 
 	// Use job ID as the session ID for consistency with flow jobs
 	sessionID := job.ID
@@ -743,36 +745,36 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 
 	// Discover the Claude session ID by finding the most recent session file for this workspace
 	// Retry for up to 30 seconds since Claude takes time to create the session file and directory
-	p.log.WithFields(logrus.Fields{
+	logger.WithFields(map[string]interface{}{
 		"work_dir":       workDir,
 		"job_start_time": jobStartTime,
-	}).Debug("SESSION_DISCOVERY: Starting Claude session ID discovery")
+	}).Debug("Starting Claude session ID discovery")
 	var claudeSessionID string
 	maxRetries := 30
 	for i := 0; i < maxRetries; i++ {
-		claudeSessionID, err = p.findClaudeSessionID(workDir, jobStartTime)
+		claudeSessionID, err = p.findClaudeSessionID(workDir, jobStartTime, logger)
 		if err == nil {
-			p.log.WithFields(logrus.Fields{
+			logger.WithFields(map[string]interface{}{
 				"claude_session_id": claudeSessionID,
 				"retry_count":       i,
-			}).Info("SESSION_DISCOVERY: Found Claude session ID")
+			}).Info("Found Claude session ID")
 			break
 		}
-		p.log.WithFields(logrus.Fields{
+		logger.WithFields(map[string]interface{}{
 			"error":       err,
 			"retry_count": i,
 			"max_retries": maxRetries,
-		}).Debug("SESSION_DISCOVERY: Claude session ID not found yet, retrying...")
+		}).Debug("Claude session ID not found yet, retrying...")
 		if i < maxRetries-1 {
 			time.Sleep(1 * time.Second)
 		}
 	}
 
 	if claudeSessionID == "" {
-		p.log.WithFields(logrus.Fields{
-			"error":   err,
+		logger.WithFields(map[string]interface{}{
+			"error":    err,
 			"fallback": sessionID,
-		}).Warn("SESSION_DISCOVERY: Failed to find Claude session ID after retries - will use job ID as fallback")
+		}).Warn("Failed to find Claude session ID after retries - will use job ID as fallback")
 		claudeSessionID = sessionID
 	}
 
@@ -788,18 +790,18 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	// Build the transcript path for Claude
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to get user home directory for transcript path")
+		logger.WithError(err).Error("Failed to get user home directory for transcript path")
 		return
 	}
 	sanitizedPath := sanitizePathForClaude(workDir)
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
 
-	p.log.WithFields(logrus.Fields{
+	logger.WithFields(map[string]interface{}{
 		"home_dir":        homeDir,
 		"work_dir":        workDir,
 		"sanitized_path":  sanitizedPath,
 		"transcript_path": transcriptPath,
-	}).Info("SESSION_DISCOVERY: Built transcript path")
+	}).Info("Built transcript path")
 
 	// Create metadata
 	metadata := sessions.SessionMetadata{
@@ -819,73 +821,73 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 		TranscriptPath:   transcriptPath,
 	}
 
-	p.log.WithFields(logrus.Fields{
-		"session_id":       sessionID,
+	logger.WithFields(map[string]interface{}{
+		"session_id":        sessionID,
 		"claude_session_id": claudeSessionID,
-		"transcript_path":  transcriptPath,
-		"job_title":        job.Title,
-		"plan_name":        plan.Name,
-	}).Info("SESSION_DISCOVERY: Created session metadata")
+		"transcript_path":   transcriptPath,
+		"job_title":         job.Title,
+		"plan_name":         plan.Name,
+	}).Info("Created session metadata")
 
 	// Write session files for grove-hooks discovery
 	groveSessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
 	sessionDir := filepath.Join(groveSessionsDir, sessionID)
 
-	p.log.WithFields(logrus.Fields{
+	logger.WithFields(map[string]interface{}{
 		"sessions_dir": groveSessionsDir,
 		"session_dir":  sessionDir,
-	}).Debug("SESSION_DISCOVERY: Creating session directory")
+	}).Debug("Creating session directory")
 
 	// Create session directory
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		p.log.WithFields(logrus.Fields{
+		logger.WithFields(map[string]interface{}{
 			"error":       err,
 			"session_dir": sessionDir,
-		}).Error("SESSION_DISCOVERY: Failed to create session directory")
+		}).Error("Failed to create session directory")
 		return
 	}
 
 	// Write PID file
 	pidFile := filepath.Join(sessionDir, "pid.lock")
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", claudePID)), 0644); err != nil {
-		p.log.WithFields(logrus.Fields{
+		logger.WithFields(map[string]interface{}{
 			"error":    err,
 			"pid_file": pidFile,
 			"pid":      claudePID,
-		}).Error("SESSION_DISCOVERY: Failed to write PID file")
+		}).Error("Failed to write PID file")
 		return
 	}
-	p.log.WithFields(logrus.Fields{
+	logger.WithFields(map[string]interface{}{
 		"pid_file": pidFile,
 		"pid":      claudePID,
-	}).Debug("SESSION_DISCOVERY: Wrote PID file")
+	}).Debug("Wrote PID file")
 
 	// Write metadata file
 	metadataFile := filepath.Join(sessionDir, "metadata.json")
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
-		p.log.WithFields(logrus.Fields{
+		logger.WithFields(map[string]interface{}{
 			"error":         err,
 			"metadata_file": metadataFile,
-		}).Error("SESSION_DISCOVERY: Failed to marshal metadata")
+		}).Error("Failed to marshal metadata")
 		return
 	}
 
 	if err := os.WriteFile(metadataFile, metadataJSON, 0644); err != nil {
-		p.log.WithFields(logrus.Fields{
+		logger.WithFields(map[string]interface{}{
 			"error":         err,
 			"metadata_file": metadataFile,
-		}).Error("SESSION_DISCOVERY: Failed to write metadata file")
+		}).Error("Failed to write metadata file")
 		return
 	}
 
-	p.log.WithFields(logrus.Fields{
+	logger.WithFields(map[string]interface{}{
 		"session_id":    sessionID,
 		"session_dir":   sessionDir,
 		"pid":           claudePID,
 		"metadata_file": metadataFile,
 		"pid_file":      pidFile,
-	}).Info("SESSION_DISCOVERY: Successfully registered Claude Code session")
+	}).Info("Successfully registered Claude Code session")
 }
 
 // sanitizePathForClaude replicates Claude's path sanitization algorithm
@@ -902,12 +904,12 @@ func sanitizePathForClaude(path string) string {
 
 // findClaudeSessionID finds the Claude Code session ID by looking for the most recent session file
 // created after the specified job start time (to avoid reusing old sessions)
-func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime time.Time) (string, error) {
+func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime time.Time, logger *logrus.Entry) (string, error) {
 	// Claude stores sessions in ~/.claude/projects/<sanitized-path>/*.jsonl
 	// The directory name is the working directory with slashes replaced
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to get user home directory")
+		logger.WithError(err).Error("Failed to get user home directory")
 		return "", err
 	}
 
@@ -916,16 +918,16 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 	sanitizedPath := sanitizePathForClaude(workDir)
 	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects", sanitizedPath)
 
-	p.log.WithFields(logrus.Fields{
+	logger.WithFields(map[string]interface{}{
 		"work_dir":            workDir,
 		"sanitized_path":      sanitizedPath,
 		"claude_projects_dir": claudeProjectsDir,
 		"job_start_time":      jobStartTime,
-	}).Debug("SESSION_DISCOVERY: Looking for Claude session files")
+	}).Debug("Looking for Claude session files")
 
 	// Check if the directory exists
 	if _, err := os.Stat(claudeProjectsDir); os.IsNotExist(err) {
-		p.log.WithField("claude_projects_dir", claudeProjectsDir).Debug("SESSION_DISCOVERY: Claude projects directory not found")
+		logger.WithField("claude_projects_dir", claudeProjectsDir).Debug("Claude projects directory not found")
 		return "", fmt.Errorf("Claude projects directory not found: %s", claudeProjectsDir)
 	}
 
@@ -933,11 +935,11 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 	// Only consider files modified AFTER the job started to avoid reusing old sessions
 	entries, err := os.ReadDir(claudeProjectsDir)
 	if err != nil {
-		p.log.WithError(err).Error("SESSION_DISCOVERY: Failed to read Claude projects directory")
+		logger.WithError(err).Error("Failed to read Claude projects directory")
 		return "", fmt.Errorf("failed to read Claude projects directory: %w", err)
 	}
 
-	p.log.WithField("entry_count", len(entries)).Debug("SESSION_DISCOVERY: Found entries in Claude projects directory")
+	logger.WithField("entry_count", len(entries)).Debug("Found entries in Claude projects directory")
 
 	var latestFile string
 	var latestTime time.Time
@@ -964,11 +966,11 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 		// Only consider files modified after the job started
 		// This prevents reusing old session files from previous jobs
 		if !info.ModTime().After(jobStartTime) {
-			p.log.WithFields(logrus.Fields{
-				"file":          entry.Name(),
-				"mod_time":      info.ModTime(),
+			logger.WithFields(map[string]interface{}{
+				"file":           entry.Name(),
+				"mod_time":       info.ModTime(),
 				"job_start_time": jobStartTime,
-			}).Debug("SESSION_DISCOVERY: Skipping old session file")
+			}).Debug("Skipping old session file")
 			continue
 		}
 
@@ -979,22 +981,22 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 	}
 
 	if latestFile == "" {
-		p.log.WithField("claude_projects_dir", claudeProjectsDir).Warn("SESSION_DISCOVERY: No Claude session files found")
+		logger.WithField("claude_projects_dir", claudeProjectsDir).Warn("No Claude session files found")
 		return "", fmt.Errorf("no Claude session files found in %s", claudeProjectsDir)
 	}
 
 	// Extract session ID from filename (remove .jsonl extension)
 	sessionID := strings.TrimSuffix(latestFile, ".jsonl")
-	p.log.WithFields(logrus.Fields{
-		"latest_file":    latestFile,
-		"session_id":     sessionID,
-		"modified_time":  latestTime,
-	}).Debug("SESSION_DISCOVERY: Found latest Claude session file")
+	logger.WithFields(map[string]interface{}{
+		"latest_file":   latestFile,
+		"session_id":    sessionID,
+		"modified_time": latestTime,
+	}).Debug("Found latest Claude session file")
 	return sessionID, nil
 }
 
 // findClaudePIDForPane finds the PID of the Claude Code process running in a specific tmux pane
-func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string) (int, error) {
+func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string, logger *logrus.Entry) (int, error) {
 	// Use tmux display-message to get the pane PID
 	cmd := osexec.Command("tmux", "display-message", "-p", "-t", targetPane, "#{pane_pid}")
 	output, err := cmd.Output()
@@ -1009,10 +1011,10 @@ func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string) (int, erro
 
 	// Find the 'claude' process that is a descendant of that shell
 	// Try 'claude' first (for the binary), then 'node' (for Node.js-based versions)
-	pid, err := p.findDescendantPID(shellPID, "claude")
+	pid, err := p.findDescendantPID(shellPID, "claude", logger)
 	if err != nil {
 		// Fallback to searching for node
-		pid, err = p.findDescendantPID(shellPID, "node")
+		pid, err = p.findDescendantPID(shellPID, "node", logger)
 		if err != nil {
 			return 0, fmt.Errorf("failed to find claude or node process: %w", err)
 		}
@@ -1021,7 +1023,7 @@ func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string) (int, erro
 }
 
 // findDescendantPID recursively finds a descendant process with a given name.
-func (p *ClaudeAgentProvider) findDescendantPID(parentPID int, targetComm string) (int, error) {
+func (p *ClaudeAgentProvider) findDescendantPID(parentPID int, targetComm string, logger *logrus.Entry) (int, error) {
 	// Get all processes
 	cmd := osexec.Command("ps", "-o", "pid,ppid,comm")
 	output, err := cmd.Output()
