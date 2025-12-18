@@ -737,7 +737,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor > 0 {
 				m.Cursor--
 				m.adjustScrollOffset()
-				if m.ShowLogs && !m.IsRunningJob {
+				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
 				}
 			}
@@ -746,7 +746,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
-				if m.ShowLogs && !m.IsRunningJob {
+				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
 				}
 			}
@@ -755,6 +755,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Jobs) > 0 {
 				m.Cursor = len(m.Jobs) - 1
 				m.adjustScrollOffset()
+				if m.ShowLogs {
+					return m.reloadActiveDetailPane()
+				}
 			}
 
 		case key.Matches(msg, m.KeyMap.PageUp):
@@ -764,6 +767,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor = 0
 			}
 			m.adjustScrollOffset()
+			if m.ShowLogs {
+				return m.reloadActiveDetailPane()
+			}
 
 		case key.Matches(msg, m.KeyMap.PageDown):
 			pageSize := 10
@@ -772,6 +778,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor = len(m.Jobs) - 1
 			}
 			m.adjustScrollOffset()
+			if m.ShowLogs {
+				return m.reloadActiveDetailPane()
+			}
 
 		case key.Matches(msg, m.KeyMap.Select):
 			if m.Cursor < len(m.Jobs) {

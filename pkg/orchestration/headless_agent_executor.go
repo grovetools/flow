@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/config"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 )
@@ -164,10 +163,8 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		log.WithField("job_id", job.ID).Info("[HEADLESS] Formatted transcript appended successfully")
 	}
 
-	// Regenerate context
-	if err := e.regenerateContextInWorktree(workDir, "headless_agent", job, plan); err != nil {
-		log.WithError(err).Warn("Failed to regenerate context")
-	}
+	// Note: Context regeneration is already handled by the agent during execution,
+	// so we don't need to regenerate it here (unlike oneshot/shell executors).
 
 	return execErr
 }
@@ -291,85 +288,6 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 
 // RunAgent implements the AgentRunner interface.
 func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree string, prompt string) error {
-	return nil
-}
-
-
-// regenerateContextInWorktree regenerates the context within a worktree.
-func (e *HeadlessAgentExecutor) regenerateContextInWorktree(worktreePath string, jobType string, job *Job, plan *Plan) error {
-	log.WithField("job_type", jobType).Info("Checking context in worktree")
-	prettyLog.InfoPretty(fmt.Sprintf("Checking context in worktree for %s job...", jobType))
-
-	contextDir := ScopeToSubProject(worktreePath, job)
-	if contextDir != worktreePath {
-		log.WithField("context_dir", contextDir).Info("Scoping context generation to sub-project")
-		prettyLog.InfoPretty(fmt.Sprintf("Scoping context to sub-project: %s", job.Repository))
-	}
-
-	ctxMgr := grovecontext.NewManager(contextDir)
-
-	if job != nil && job.RulesFile != "" {
-		rulesFilePath := filepath.Join(plan.Directory, job.RulesFile)
-		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
-		prettyLog.InfoPretty(fmt.Sprintf("Using job-specific context from: %s", rulesFilePath))
-
-		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
-			return fmt.Errorf("failed to generate job-specific context: %w", err)
-		}
-		return e.displayContextInfo(contextDir)
-	}
-
-	rulesPath := filepath.Join(contextDir, ".grove", "rules")
-	if _, err := os.Stat(rulesPath); err != nil {
-		if os.IsNotExist(err) {
-			return e.displayContextInfo(contextDir)
-		}
-		return fmt.Errorf("checking .grove/rules: %w", err)
-	}
-
-	if err := ctxMgr.UpdateFromRules(); err != nil {
-		return fmt.Errorf("update context from rules: %w", err)
-	}
-
-	if err := ctxMgr.GenerateContext(true); err != nil {
-		return fmt.Errorf("generate context: %w", err)
-	}
-
-	return e.displayContextInfo(contextDir)
-}
-
-// displayContextInfo displays information about available context files
-func (e *HeadlessAgentExecutor) displayContextInfo(worktreePath string) error {
-	var contextFiles []string
-	var totalSize int64
-
-	groveContextPath := filepath.Join(worktreePath, ".grove", "context")
-	if info, err := os.Stat(groveContextPath); err == nil && !info.IsDir() {
-		contextFiles = append(contextFiles, groveContextPath)
-		totalSize += info.Size()
-	}
-
-	claudePath := filepath.Join(worktreePath, "CLAUDE.md")
-	if info, err := os.Stat(claudePath); err == nil && !info.IsDir() {
-		contextFiles = append(contextFiles, claudePath)
-		totalSize += info.Size()
-	}
-
-	if len(contextFiles) == 0 {
-		prettyLog.InfoPretty("No context files found (.grove/context or CLAUDE.md)")
-		return nil
-	}
-
-	prettyLog.Divider()
-	prettyLog.InfoPretty("Context Files Available")
-	for _, file := range contextFiles {
-		relPath, _ := filepath.Rel(worktreePath, file)
-		prettyLog.Field("File", relPath)
-	}
-	prettyLog.Blank()
-	prettyLog.Field("Total context size", grovecontext.FormatBytes(int(totalSize)))
-	prettyLog.Divider()
-
 	return nil
 }
 
