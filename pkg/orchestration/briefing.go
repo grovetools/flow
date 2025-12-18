@@ -31,24 +31,24 @@ func countLines(filePath string) (int, error) {
 }
 
 // WriteBriefingFile saves the provided content to a uniquely named .xml file
-// in the plan's .artifacts directory for auditing.
+// in the plan's .artifacts/<job.ID> directory for auditing.
 // For chat jobs, turnID should be the unique turn identifier. For other jobs, pass empty string.
 func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (string, error) {
-	artifactsDir := filepath.Join(plan.Directory, ".artifacts")
-	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
-		return "", fmt.Errorf("creating .artifacts directory: %w", err)
+	jobArtifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
+	if err := os.MkdirAll(jobArtifactDir, 0755); err != nil {
+		return "", fmt.Errorf("creating job artifact directory: %w", err)
 	}
 
 	// Generate a unique filename for the briefing with an .xml extension
 	var briefingFilename string
 	if turnID != "" {
 		// For chat jobs, use the turn UUID for deterministic naming
-		briefingFilename = fmt.Sprintf("briefing-%s-%s.xml", job.ID, turnID)
+		briefingFilename = fmt.Sprintf("briefing-%s.xml", turnID)
 	} else {
 		// For oneshot/interactive jobs, use timestamp
-		briefingFilename = fmt.Sprintf("briefing-%s-%d.xml", job.ID, time.Now().Unix())
+		briefingFilename = fmt.Sprintf("briefing-%d.xml", time.Now().Unix())
 	}
-	briefingFilePath := filepath.Join(artifactsDir, briefingFilename)
+	briefingFilePath := filepath.Join(jobArtifactDir, briefingFilename)
 
 	// Write the file
 	if err := os.WriteFile(briefingFilePath, []byte(content), 0644); err != nil {

@@ -232,14 +232,21 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify briefing file was created
-			artifactsDir := filepath.Join(planPath, ".artifacts")
-			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-specification-*.xml"))
+			// Load the spec job to get its ID
+			specJob, err := orchestration.LoadJob(specJobPath)
+			if err != nil {
+				return fmt.Errorf("loading spec job: %w", err)
+			}
+			jobID := specJob.ID
+
+			// Verify briefing file was created in job's artifact directory
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefingFiles, err := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
 			if err != nil {
 				return fmt.Errorf("checking for briefing files: %w", err)
 			}
 			if len(briefingFiles) == 0 {
-				return fmt.Errorf("expected briefing file for spec job")
+				return fmt.Errorf("expected briefing file for spec job in %s", jobArtifactDir)
 			}
 
 			// Verify briefing file has proper XML structure
@@ -293,9 +300,16 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify briefing file was created
-			artifactsDir := filepath.Join(planPath, ".artifacts")
-			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-generate-implementation-plan-*.xml"))
+			// Load the generate-plan job to get its ID
+			planJob, err := orchestration.LoadJob(planJobPath)
+			if err != nil {
+				return fmt.Errorf("loading plan job: %w", err)
+			}
+			jobID := planJob.ID
+
+			// Verify briefing file was created in job's artifact directory
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefingFiles, err := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
 			if err != nil {
 				return fmt.Errorf("checking for briefing files: %w", err)
 			}
@@ -461,16 +475,21 @@ func CheckPasswordHash(password, hash string) bool {
 				return err
 			}
 
-			// Verify briefing file was created
-			artifactsDir := filepath.Join(planPath, ".artifacts")
-			// The title is "Code Review for {{ .PlanName }}", so the briefing file will be "briefing-code-review-for-*.xml"
-			briefingPattern := filepath.Join(artifactsDir, "briefing-code-review-for-*.xml")
-			briefingFiles, err := filepath.Glob(briefingPattern)
+			// Load the review job to get its ID
+			reviewJob, err := orchestration.LoadJob(reviewJobPath)
+			if err != nil {
+				return fmt.Errorf("loading review job: %w", err)
+			}
+			jobID := reviewJob.ID
+
+			// Verify briefing file was created in job's artifact directory
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefingFiles, err := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
 			if err != nil {
 				return fmt.Errorf("checking for briefing files: %w", err)
 			}
 			if len(briefingFiles) == 0 {
-				return fmt.Errorf("expected briefing file for review job")
+				return fmt.Errorf("expected briefing file for review job in %s", jobArtifactDir)
 			}
 			briefingFile := briefingFiles[0]
 

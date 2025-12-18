@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -176,18 +177,34 @@ This is a detailed implementation plan generated from the chat.`
 
 		harness.NewStep("Verify generated plan briefing file", func(ctx *harness.Context) error {
 			planPath := ctx.GetString("plan_path")
-			artifactsDir := filepath.Join(planPath, ".artifacts")
 
-			// Look for briefing files with "generated-plan" in the name
-			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*-generated-plan*.xml"))
+			// Load plan to get job ID for "Implement Feature" job
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return fmt.Errorf("loading plan: %w", err)
+			}
+
+			// Find the job with title "Implement Feature"
+			var jobID string
+			for _, job := range plan.Jobs {
+				if job.Title == "Implement Feature" {
+					jobID = job.ID
+					break
+				}
+			}
+			if jobID == "" {
+				return fmt.Errorf("could not find job with title 'Implement Feature'")
+			}
+
+			// Look for briefing files in the job's artifact directory
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefingFiles, err := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
 			if err != nil {
 				return fmt.Errorf("error checking for briefing files: %w", err)
 			}
 
-			// Debug: list all briefing files if we didn't find the expected one
 			if len(briefingFiles) == 0 {
-				allBriefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
-				return fmt.Errorf("expected a generated-plan briefing XML file to be created. Found: %v", allBriefings)
+				return fmt.Errorf("expected a briefing XML file to be created in %s", jobArtifactDir)
 			}
 
 			// Read the briefing file content

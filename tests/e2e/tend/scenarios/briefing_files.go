@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 )
@@ -67,12 +68,30 @@ var BriefingFilesScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify briefing file (now XML format)
+			// Load plan to get job ID
 			planPath := ctx.GetString("plan_path")
-			artifactsDir := filepath.Join(planPath, ".artifacts")
-			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return err
+			}
+
+			// Find the job with title "test-oneshot-prepend"
+			var jobID string
+			for _, job := range plan.Jobs {
+				if job.Title == "test-oneshot-prepend" {
+					jobID = job.ID
+					break
+				}
+			}
+			if jobID == "" {
+				return fmt.Errorf("could not find job with title 'test-oneshot-prepend'")
+			}
+
+			// Verify briefing file in new location: .artifacts/{job-id}/briefing-*.xml
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
 			if len(briefings) == 0 {
-				return fmt.Errorf("no briefing file found for oneshot job")
+				return fmt.Errorf("no briefing file found for oneshot job in %s", jobArtifactDir)
 			}
 
 			content, err := fs.ReadString(briefings[0])
@@ -126,23 +145,35 @@ var BriefingFilesScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify briefing file (now XML format) - should have uploaded tags, not inlined content
+			// Load plan to get job ID
 			planPath := ctx.GetString("plan_path")
-			artifactsDir := filepath.Join(planPath, ".artifacts")
-			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return err
+			}
 
-			// Find the briefing file for the second job
-			var briefingContent string
-			for _, briefing := range briefings {
-				content, _ := fs.ReadString(briefing)
-				if strings.Contains(content, "Task without prepend") {
-					briefingContent = content
+			// Find the job with title "test-oneshot-no-prepend"
+			var jobID string
+			for _, job := range plan.Jobs {
+				if job.Title == "test-oneshot-no-prepend" {
+					jobID = job.ID
 					break
 				}
 			}
+			if jobID == "" {
+				return fmt.Errorf("could not find job with title 'test-oneshot-no-prepend'")
+			}
 
-			if briefingContent == "" {
-				return fmt.Errorf("no briefing file found for second oneshot job")
+			// Verify briefing file in new location: .artifacts/{job-id}/briefing-*.xml
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found for second oneshot job in %s", jobArtifactDir)
+			}
+
+			briefingContent, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
 			}
 
 			// When prepend_dependencies=false, dependencies are inlined elsewhere in the prompt
@@ -181,11 +212,19 @@ var BriefingFilesScenario = harness.NewScenario(
 		}),
 		harness.NewStep("Verify chat briefing file", func(ctx *harness.Context) error {
 			chatsDir := filepath.Join(ctx.GetString("notebooks_root"), "workspaces", "briefing-project", "chats")
-			artifactsDir := filepath.Join(chatsDir, ".artifacts")
+			chatFile := ctx.GetString("chat_file_path")
 
-			briefings, _ := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
+			// Load the chat file as a job to get its ID from frontmatter
+			job, err := orchestration.LoadJob(chatFile)
+			if err != nil {
+				return fmt.Errorf("loading chat job: %w", err)
+			}
+
+			// Verify briefing file in new location: .artifacts/{job-id}/briefing-*.xml
+			jobArtifactDir := filepath.Join(chatsDir, ".artifacts", job.ID)
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
 			if len(briefings) == 0 {
-				return fmt.Errorf("no briefing file found for chat job")
+				return fmt.Errorf("no briefing file found for chat job in %s", jobArtifactDir)
 			}
 
 			content, err := fs.ReadString(briefings[0])

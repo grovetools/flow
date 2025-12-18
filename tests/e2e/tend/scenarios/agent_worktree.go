@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/assert"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/git"
@@ -223,14 +224,32 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 				return fmt.Errorf("expected job status to be 'running', but got: %s", content)
 			}
 
-			// Verify briefing file was created with .xml extension
-			artifactsDir := filepath.Join(planPath, ".artifacts")
-			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
+			// Load plan to get job ID
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return fmt.Errorf("loading plan: %w", err)
+			}
+
+			// Find the job with title "Implement Task"
+			var jobID string
+			for _, job := range plan.Jobs {
+				if job.Title == "Implement Task" {
+					jobID = job.ID
+					break
+				}
+			}
+			if jobID == "" {
+				return fmt.Errorf("could not find job with title 'Implement Task'")
+			}
+
+			// Verify briefing file was created in new location: .artifacts/{job-id}/briefing-*.xml
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefingFiles, err := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
 			if err != nil {
 				return fmt.Errorf("error checking for briefing files: %w", err)
 			}
 			if len(briefingFiles) == 0 {
-				return fmt.Errorf("expected at least one briefing XML file to be created")
+				return fmt.Errorf("expected at least one briefing XML file to be created in %s", jobArtifactDir)
 			}
 
 			ctx.Set("job_path", jobPath)
@@ -358,53 +377,49 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 
 		harness.NewStep("Verify both briefing files exist with correct formats", func(ctx *harness.Context) error {
 			planPath := ctx.GetString("plan_path")
-			artifactsDir := filepath.Join(planPath, ".artifacts")
 
-			// Check that we now have TWO briefing files (now XML format)
-			briefingFiles, err := filepath.Glob(filepath.Join(artifactsDir, "briefing-*.xml"))
+			// Load plan to get job IDs
+			plan, err := orchestration.LoadPlan(planPath)
 			if err != nil {
-				return fmt.Errorf("error finding briefing files: %w", err)
-			}
-			if len(briefingFiles) != 2 {
-				// Debug: list what we found
-				fileList := ""
-				for _, f := range briefingFiles {
-					fileList += filepath.Base(f) + " "
-				}
-				return fmt.Errorf("expected exactly 2 briefing files, found %d: %s", len(briefingFiles), fileList)
+				return fmt.Errorf("loading plan: %w", err)
 			}
 
-			// Find which briefing belongs to which job by checking the Job ID or title in the filename
-			var job03Briefing, job04Briefing string
-			for _, briefingPath := range briefingFiles {
-				// The filename format is: briefing-{job-id}-{timestamp}.xml
-				// Job IDs follow the pattern: {sanitized-title}-{hash}
-				filename := filepath.Base(briefingPath)
-
-				// Read content to identify job
-				content, err := fs.ReadString(briefingPath)
-				if err != nil {
-					return fmt.Errorf("reading briefing file %s: %w", briefingPath, err)
-				}
-
-				// Check by content in the user_request section
-				if strings.Contains(content, "Implement a test feature based on the design and architecture") {
-					job03Briefing = briefingPath
-				} else if strings.Contains(content, "Review the implementation and ensure quality") {
-					job04Briefing = briefingPath
-				} else if strings.Contains(filename, "implement-task") {
-					job03Briefing = briefingPath
-				} else if strings.Contains(filename, "review-task") {
-					job04Briefing = briefingPath
+			// Find job IDs for "Implement Task" and "Review Task"
+			var job03ID, job04ID string
+			for _, job := range plan.Jobs {
+				if job.Title == "Implement Task" {
+					job03ID = job.ID
+				} else if job.Title == "Review Task" {
+					job04ID = job.ID
 				}
 			}
+			if job03ID == "" || job04ID == "" {
+				return fmt.Errorf("could not find both jobs (Implement Task and Review Task)")
+			}
 
-			if job03Briefing == "" {
-				return fmt.Errorf("could not find briefing file for job 03 (Implement Task)")
+			// Check that we now have briefing files in each job's artifact directory
+			job03ArtifactDir := filepath.Join(planPath, ".artifacts", job03ID)
+			job04ArtifactDir := filepath.Join(planPath, ".artifacts", job04ID)
+
+			job03Briefings, err := filepath.Glob(filepath.Join(job03ArtifactDir, "briefing-*.xml"))
+			if err != nil {
+				return fmt.Errorf("error finding job03 briefing files: %w", err)
 			}
-			if job04Briefing == "" {
-				return fmt.Errorf("could not find briefing file for job 04 (Review Task)")
+			if len(job03Briefings) == 0 {
+				return fmt.Errorf("expected at least 1 briefing file for job03 in %s", job03ArtifactDir)
 			}
+
+			job04Briefings, err := filepath.Glob(filepath.Join(job04ArtifactDir, "briefing-*.xml"))
+			if err != nil {
+				return fmt.Errorf("error finding job04 briefing files: %w", err)
+			}
+			if len(job04Briefings) == 0 {
+				return fmt.Errorf("expected at least 1 briefing file for job04 in %s", job04ArtifactDir)
+			}
+
+			// Get the briefing file paths
+			job03Briefing := job03Briefings[0]
+			job04Briefing := job04Briefings[0]
 
 			// Verify job 03's briefing (WITH prepend_dependencies: true) has INLINED content in XML format
 			job03Content, err := fs.ReadString(job03Briefing)
