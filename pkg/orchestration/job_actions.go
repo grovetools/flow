@@ -63,8 +63,8 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		}
 
 		// Only append if transcript section doesn't already exist.
-		if !strings.Contains(string(content), "## Transcript") {
-			note := "\n\n---\n\n## Transcript\n\n*This interactive agent job was never run.*"
+		if !strings.Contains(string(content), "# Agent Chat Transcript") && !strings.Contains(string(content), "## Transcript") {
+			note := "\n# Agent Chat Transcript\n\n*This interactive agent job was never run.*"
 			newContent := string(content) + note
 			if writeErr := os.WriteFile(job.FilePath, []byte(newContent), 0644); writeErr != nil {
 				return fmt.Errorf("writing note to job file %s: %w", job.FilePath, writeErr)
@@ -89,29 +89,38 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	// Use plain text for .md file
 	transcriptOutput := plainStr
 
-	if strings.Contains(string(content), "## Transcript") {
-		existingContent := string(content)
-		transcriptIdx := strings.Index(existingContent, "## Transcript")
-		if transcriptIdx == -1 {
-			transcriptHeader := "\n\n---\n\n## Transcript\n\n"
-			newContent = existingContent + transcriptHeader + transcriptOutput
+	// Check for both old and new header formats
+	existingContent := string(content)
+	transcriptIdx := strings.Index(existingContent, "# Agent Chat Transcript")
+	if transcriptIdx == -1 {
+		transcriptIdx = strings.Index(existingContent, "## Transcript")
+	}
+
+	if transcriptIdx != -1 {
+		// Transcript section exists, update it
+		existingTranscript := existingContent[transcriptIdx:]
+
+		// Try to extract existing content (handle both header formats)
+		var existingTranscriptContent string
+		if strings.HasPrefix(existingTranscript, "# Agent Chat Transcript\n\n") {
+			existingTranscriptContent = strings.TrimSpace(strings.TrimPrefix(existingTranscript, "# Agent Chat Transcript\n\n"))
 		} else {
-			existingTranscript := existingContent[transcriptIdx:]
-			existingTranscriptContent := strings.TrimSpace(strings.TrimPrefix(existingTranscript, "## Transcript\n\n"))
-			newTranscriptContent := strings.TrimSpace(transcriptOutput)
-
-			if existingTranscriptContent == newTranscriptContent {
-				fmt.Printf("Info: Transcript unchanged in %s. Skipping.\n", job.Filename)
-				return nil
-			}
-
-			fmt.Printf("Info: Updating transcript in %s (resumed session detected).\n", job.Filename)
-			beforeTranscript := existingContent[:transcriptIdx]
-			transcriptHeader := "## Transcript\n\n"
-			newContent = beforeTranscript + transcriptHeader + transcriptOutput
+			existingTranscriptContent = strings.TrimSpace(strings.TrimPrefix(existingTranscript, "## Transcript\n\n"))
 		}
+		newTranscriptContent := strings.TrimSpace(transcriptOutput)
+
+		if existingTranscriptContent == newTranscriptContent {
+			fmt.Printf("Info: Transcript unchanged in %s. Skipping.\n", job.Filename)
+			return nil
+		}
+
+		fmt.Printf("Info: Updating transcript in %s (resumed session detected).\n", job.Filename)
+		beforeTranscript := existingContent[:transcriptIdx]
+		transcriptHeader := "\n# Agent Chat Transcript\n\n"
+		newContent = beforeTranscript + transcriptHeader + transcriptOutput
 	} else {
-		transcriptHeader := "\n\n---\n\n## Transcript\n\n"
+		// No transcript section exists, append it
+		transcriptHeader := "\n# Agent Chat Transcript\n\n"
 		newContent = string(content) + transcriptHeader + transcriptOutput
 	}
 
