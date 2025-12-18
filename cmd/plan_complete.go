@@ -87,12 +87,12 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 			}
 		}
 
-		// Append transcript if it's an interactive agent job
-		if job.Type == orchestration.JobTypeInteractiveAgent {
+		// Append transcript if it's an agent job
+		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent {
 			if !silent {
-				fmt.Println("Appending interactive session transcript...")
+				fmt.Println("Appending agent session transcript...")
 			}
-			if err := orchestration.AppendInteractiveTranscript(job, plan); err != nil {
+			if err := orchestration.AppendAgentTranscript(job, plan); err != nil {
 				// Log warning but don't fail the command
 				if !silent {
 					fmt.Printf("Warning: failed to append transcript: %v\n", err)

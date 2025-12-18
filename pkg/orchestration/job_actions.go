@@ -10,21 +10,41 @@ import (
 	"strings"
 )
 
-// AppendInteractiveTranscript finds the transcript for an interactive agent job
+// AppendAgentTranscript finds the transcript for an agent job
 // and appends it to the job's markdown file.
-func AppendInteractiveTranscript(job *Job, plan *Plan) error {
-	if job.Type != JobTypeInteractiveAgent {
-		return nil // Not an interactive agent job
+func AppendAgentTranscript(job *Job, plan *Plan) error {
+	if job.Type != JobTypeInteractiveAgent && job.Type != JobTypeHeadlessAgent {
+		return nil // Not an agent job
 	}
+
+	log.WithFields(map[string]interface{}{
+		"job_id":    job.ID,
+		"job_type":  job.Type,
+		"plan_name": plan.Name,
+		"filename":  job.Filename,
+	}).Info("[TRANSCRIPT] Starting transcript append")
 
 	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
 	cmd := exec.Command("grove", "aglogs", "read", jobSpec)
+	cmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+
+	log.WithFields(map[string]interface{}{
+		"job_id":   job.ID,
+		"job_spec": jobSpec,
+	}).Info("[TRANSCRIPT] Running aglogs read")
 
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
 
 	// Check if a transcript was found. `aglogs read` returns an error if not found.
 	if err != nil || len(strings.TrimSpace(outputStr)) == 0 || strings.Contains(outputStr, "no sessions found with job") {
+		log.WithFields(map[string]interface{}{
+			"job_id":      job.ID,
+			"error":       err,
+			"output_len":  len(outputStr),
+			"has_no_sess": strings.Contains(outputStr, "no sessions found with job"),
+		}).Warn("[TRANSCRIPT] No transcript found via aglogs")
+
 		// This is the expected case for a job that was never run.
 		// Append a note to the job file instead of treating it as a failure.
 		content, readErr := os.ReadFile(job.FilePath)
@@ -43,6 +63,11 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 
 		return nil // Not an error.
 	}
+
+	log.WithFields(map[string]interface{}{
+		"job_id":     job.ID,
+		"output_len": len(outputStr),
+	}).Info("[TRANSCRIPT] Successfully retrieved transcript from aglogs")
 
 	// Transcript was found, so proceed with appending it.
 	content, err := os.ReadFile(job.FilePath)
@@ -81,6 +106,29 @@ func AppendInteractiveTranscript(job *Job, plan *Plan) error {
 
 	if err := os.WriteFile(job.FilePath, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("writing transcript to job file %s: %w", job.FilePath, err)
+	}
+
+	log.WithFields(map[string]interface{}{
+		"job_id":   job.ID,
+		"filepath": job.FilePath,
+	}).Info("[TRANSCRIPT] Successfully wrote transcript to job file")
+
+	// Also write the formatted transcript to job.log for TUI fast-path loading
+	jobLogPath, err := GetJobLogPath(plan, job)
+	if err == nil {
+		if err := os.WriteFile(jobLogPath, []byte(transcriptOutput), 0644); err != nil {
+			// Log a warning but don't fail - this is just for TUI optimization
+			log.WithFields(map[string]interface{}{
+				"job_id":  job.ID,
+				"logpath": jobLogPath,
+				"error":   err,
+			}).Warn("[TRANSCRIPT] Failed to write formatted transcript to job.log")
+		} else {
+			log.WithFields(map[string]interface{}{
+				"job_id":  job.ID,
+				"logpath": jobLogPath,
+			}).Info("[TRANSCRIPT] Successfully wrote formatted transcript to job.log")
+		}
 	}
 
 	return nil

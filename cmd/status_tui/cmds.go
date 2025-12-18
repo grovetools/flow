@@ -180,21 +180,45 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
 
 		logger.WithFields(map[string]interface{}{
-			"job_spec": jobSpec,
+			"job_spec":   jobSpec,
+			"job_id":     job.ID,
+			"job_status": job.Status,
+			"job_type":   job.Type,
 		}).Info("loadAndStreamAgentLogsCmd executing")
 
 		// Fast path: read from job.log which contains ANSI-formatted output (for both completed and running jobs)
 		jobLogPath, err := orchestration.GetJobLogPath(plan, job)
+		logger.WithFields(map[string]interface{}{
+			"job_id":       job.ID,
+			"job_log_path": jobLogPath,
+			"get_path_err": err,
+		}).Info("GetJobLogPath result")
+
 		if err == nil {
-			if _, statErr := os.Stat(jobLogPath); statErr == nil {
+			statInfo, statErr := os.Stat(jobLogPath)
+			logger.WithFields(map[string]interface{}{
+				"job_id":    job.ID,
+				"log_path":  jobLogPath,
+				"stat_err":  statErr,
+				"exists":    statErr == nil,
+				"file_size": func() int64 { if statInfo != nil { return statInfo.Size() }; return 0 }(),
+			}).Info("Fast path: checking job.log file")
+
+			if statErr == nil {
 				// Read the job.log file directly - it contains ANSI-formatted aglogs output
 				content, readErr := os.ReadFile(jobLogPath)
+				logger.WithFields(map[string]interface{}{
+					"job_id":      job.ID,
+					"read_err":    readErr,
+					"content_len": len(content),
+				}).Info("Fast path: read job.log result")
+
 				if readErr == nil && len(content) > 0 {
 					logger.WithFields(map[string]interface{}{
 						"log_path":    jobLogPath,
 						"is_running":  job.Status == orchestration.JobStatusRunning,
 						"content_len": len(content),
-					}).Debug("Fast path: read job logs from job.log")
+					}).Info("Fast path: successfully read job logs from job.log")
 
 					contentStr := string(content)
 					shouldStream := job.Status == orchestration.JobStatusRunning
@@ -233,12 +257,48 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 						StartStreaming: false,
 						JobID:          job.ID,
 					}
+				} else {
+					logger.WithFields(map[string]interface{}{
+						"job_id":      job.ID,
+						"read_err":    readErr,
+						"content_len": len(content),
+					}).Info("Fast path: job.log read failed or empty")
 				}
+			} else {
+				logger.WithFields(map[string]interface{}{
+					"job_id":   job.ID,
+					"log_path": jobLogPath,
+					"stat_err": statErr,
+				}).Info("Fast path: job.log stat failed")
 			}
+		} else {
+			logger.WithFields(map[string]interface{}{
+				"job_id": job.ID,
+				"error":  err,
+			}).Info("Fast path: GetJobLogPath failed")
 		}
 
 		// Fallback: job.log doesn't exist yet (running job just started)
-		if job.Status == orchestration.JobStatusRunning {
+		logger.WithFields(map[string]interface{}{
+			"job_id":     job.ID,
+			"job_status": job.Status,
+		}).Info("Fast path failed, checking fallback for running job")
+
+		// For agent jobs, if status is pending but we're in the TUI (indicated by being called
+		// from runJobsWithOrchestrator), the job is about to start. Treat it like a running job.
+		isPending := job.Status == orchestration.JobStatusPending
+		isRunning := job.Status == orchestration.JobStatusRunning
+		isAgentJob := job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeInteractiveAgent
+
+		logger.WithFields(map[string]interface{}{
+			"job_id":       job.ID,
+			"is_pending":   isPending,
+			"is_running":   isRunning,
+			"is_agent_job": isAgentJob,
+			"will_stream":  isRunning || (isPending && isAgentJob),
+		}).Info("Checking if job should use streaming fallback")
+
+		if isRunning || (isPending && isAgentJob) {
 			// Try to get direct transcript path from session registry
 			var logSpec string = jobSpec
 			if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
@@ -246,8 +306,13 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 					logger.WithFields(map[string]interface{}{
 						"job_id":          job.ID,
 						"transcript_path": metadata.TranscriptPath,
-					}).Debug("Fast path: found direct transcript path from session registry")
+					}).Info("Fast path: found direct transcript path from session registry")
 					logSpec = metadata.TranscriptPath
+				} else {
+					logger.WithFields(map[string]interface{}{
+						"job_id":     job.ID,
+						"find_error": findErr,
+					}).Info("Session not found in registry yet")
 				}
 			}
 
@@ -260,7 +325,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				"log_spec":   logSpec,
 				"output_len": len(readOutput),
 				"error":      readErr,
-			}).Debug("aglogs read completed")
+			}).Info("aglogs read completed for running job")
 
 			if readErr != nil {
 				// Session is still initializing, retry
@@ -289,7 +354,45 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			}
 		}
 
+		// Fallback for completed jobs: try aglogs read
+		// This handles the case where the job completed but job.log doesn't have formatted transcript yet
+		logger.WithFields(map[string]interface{}{
+			"job_id":     job.ID,
+			"job_spec":   jobSpec,
+			"job_status": job.Status,
+		}).Info("Trying aglogs read fallback for completed job")
+
+		readCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+		readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+		readOutput, readErr := readCmd.Output()
+
+		logger.WithFields(map[string]interface{}{
+			"job_id":     job.ID,
+			"job_spec":   jobSpec,
+			"output_len": len(readOutput),
+			"error":      readErr,
+		}).Info("aglogs read fallback result")
+
+		if readErr == nil && len(readOutput) > 0 {
+			logger.WithFields(map[string]interface{}{
+				"job_spec":   jobSpec,
+				"output_len": len(readOutput),
+			}).Info("Loaded completed job logs via aglogs read fallback")
+
+			return LogContentLoadedMsg{
+				Content:     string(readOutput),
+				ShouldRetry: false,
+				JobID:       job.ID,
+			}
+		}
+
 		// Completed job with no logs
+		logger.WithFields(map[string]interface{}{
+			"job_id":    job.ID,
+			"job_spec":  jobSpec,
+			"job_title": job.Title,
+		}).Warn("No agent logs found for completed job")
+
 		return LogContentLoadedMsg{
 			Content:     theme.DefaultTheme.Muted.Render(fmt.Sprintf("No agent logs found for completed job '%s'.", job.Title)),
 			ShouldRetry: false,
