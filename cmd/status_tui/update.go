@@ -771,6 +771,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Centralized layout calculation
 				m.updateLayoutDimensions()
 
+				// Update viewport sizes for all detail panes
+				m.frontmatterViewport.Width = m.LogViewerWidth
+				m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.briefingViewport.Width = m.LogViewerWidth
+				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.editViewport.Width = m.LogViewerWidth
+				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
+
+				// Re-wrap content for all detail viewports to adapt to the new layout
+				if m.frontmatterRawContent != "" {
+					styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
+					wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
+					m.frontmatterViewport.SetContent(wrappedContent)
+				}
+				if m.briefingRawContent != "" {
+					styledContent := renderStyledBriefing(m.briefingRawContent)
+					wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
+					m.briefingViewport.SetContent(wrappedContent)
+				}
+				if m.editRawContent != "" {
+					styledContent := renderStyledMarkdown(m.editRawContent)
+					wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
+					m.editViewport.SetContent(wrappedContent)
+				}
+
 				// Update log viewer with new dimensions
 				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
 				return m, cmd
