@@ -590,6 +590,11 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 			// 3. Create a StreamWriter for live TUI updates. Use job.ID to tag log lines.
 			tuiWriter := logviewer.NewStreamWriter(program, job.ID)
 
+			// For oneshot and chat jobs, the output is primary content, so we suppress the prefix.
+			if job.Type == orchestration.JobTypeOneshot || job.Type == orchestration.JobTypeChat {
+				tuiWriter.NoWorkspacePrefix = true
+			}
+
 			// 4. Create a MultiWriter to write to both the file and the TUI.
 			multiWriter := io.MultiWriter(logFile, tuiWriter)
 
