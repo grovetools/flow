@@ -362,17 +362,16 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, str
 		separator = leftHalf + rightHalf
 	}
 
+	// Render log content - the viewport handles wrapping and scrollbar
+	dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth))
+	logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + paneContent
+
 	// Adjust padding/width based on split direction
 	var logView string
 	if m.LogSplitVertical {
-		// Render log content - the viewport handles wrapping and scrollbar
-		dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", m.LogViewerWidth))
-		logViewWithHeader := dividerLine + "\n" + logHeader + "\n" + dividerLine + "\n" + paneContent
 		// Add padding around the content
 		logView = lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).PaddingLeft(1).PaddingRight(1).Render(logViewWithHeader)
 	} else {
-		// In horizontal split, divider should span full contentWidth
-		dividerLine := theme.DefaultTheme.Muted.Render(strings.Repeat("─", contentWidth))
 		logHeader = " " + logHeader // Add left padding for horizontal view
 		paddedContent := lipgloss.NewStyle().PaddingLeft(1).Render(paneContent)
 		logView = lipgloss.NewStyle().Height(m.LogViewerHeight).MaxHeight(m.LogViewerHeight).Render(logHeader + "\n" + dividerLine + "\n" + paddedContent)
@@ -683,24 +682,25 @@ func (m *Model) updateLayoutDimensions() {
 		}
 	}
 
-	// Always calculate log viewer dimensions so they're ready when detail panes open
-	if m.LogSplitVertical {
-		// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
-		// So the content width is LogViewerWidth - 2
-		m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2
-		m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
-	} else {
-		// In horizontal split, only PaddingLeft(1) is applied
-		m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
-		m.LogViewerHeight = m.calculateOptimalLogHeight()
-	}
+	if m.ShowLogs {
+		if m.LogSplitVertical {
+			// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
+			// So the content width is LogViewerWidth - 2
+			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2
+			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
+		} else {
+			// In horizontal split, only PaddingLeft(1) is applied
+			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
+			m.LogViewerHeight = m.calculateOptimalLogHeight()
+		}
 
-	// Ensure minimum dimensions
-	if m.LogViewerHeight < 8 { // Increased minimum height for usability
-		m.LogViewerHeight = 8
-	}
-	if m.LogViewerWidth < 20 {
-		m.LogViewerWidth = 20
+		// Ensure minimum dimensions
+		if m.LogViewerHeight < 8 { // Increased minimum height for usability
+			m.LogViewerHeight = 8
+		}
+		if m.LogViewerWidth < 20 {
+			m.LogViewerWidth = 20
+		}
 	}
 }
 
