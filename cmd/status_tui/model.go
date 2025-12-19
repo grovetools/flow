@@ -682,25 +682,24 @@ func (m *Model) updateLayoutDimensions() {
 		}
 	}
 
-	if m.ShowLogs {
-		if m.LogSplitVertical {
-			// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
-			// So the content width is LogViewerWidth - 2
-			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2
-			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
-		} else {
-			// In horizontal split, only PaddingLeft(1) is applied
-			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
-			m.LogViewerHeight = m.calculateOptimalLogHeight()
-		}
+	// Always calculate log viewer dimensions so they're ready when detail panes open
+	if m.LogSplitVertical {
+		// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
+		// So the content width is LogViewerWidth - 2
+		m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2
+		m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
+	} else {
+		// In horizontal split, only PaddingLeft(1) is applied
+		m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
+		m.LogViewerHeight = m.calculateOptimalLogHeight()
+	}
 
-		// Ensure minimum dimensions
-		if m.LogViewerHeight < 8 { // Increased minimum height for usability
-			m.LogViewerHeight = 8
-		}
-		if m.LogViewerWidth < 20 {
-			m.LogViewerWidth = 20
-		}
+	// Ensure minimum dimensions
+	if m.LogViewerHeight < 8 { // Increased minimum height for usability
+		m.LogViewerHeight = 8
+	}
+	if m.LogViewerWidth < 20 {
+		m.LogViewerWidth = 20
 	}
 }
 
