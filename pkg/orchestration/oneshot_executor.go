@@ -1636,7 +1636,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// Append the response to the chat file
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	newCell := fmt.Sprintf("\n---\n\n<!-- grove: {\"id\": \"%s\"} -->\n## LLM Response (%s)\n\n%s\n\n<!-- grove: {\"template\": \"chat\"} -->\n", turnID, timestamp, response)
+	newCell := fmt.Sprintf("\n<!-- grove: {\"id\": \"%s\"} -->\n## LLM Response (%s)\n\n%s\n\n<!-- grove: {\"template\": \"chat\"} -->\n", turnID, timestamp, response)
 
 	// Append atomically
 	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0o644); err != nil {
