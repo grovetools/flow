@@ -261,8 +261,8 @@ func generateJobContent(job *Job) ([]byte, error) {
 		if job.PromptBody != "" {
 			yamlContent += "\n" + job.PromptBody
 		} else {
-			// Add a blank line for the user to start typing
-			yamlContent += "\n"
+			// Add two blank lines: one after directive, one for the prompt text
+			yamlContent += "\n\n"
 		}
 	} else {
 		// For non-chat jobs, add prompt body with standard spacing
