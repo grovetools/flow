@@ -252,10 +252,20 @@ func generateJobContent(job *Job) ([]byte, error) {
 	// Create YAML
 	yamlContent := "---\n"
 	yamlContent += formatYAML(frontmatter)
-	yamlContent += "---\n\n"
-	
-	// Add the prompt body
-	yamlContent += job.PromptBody
+	yamlContent += "---\n"
+
+	// For chat-type jobs, add the template directive right after frontmatter
+	if job.Type == JobTypeChat {
+		yamlContent += "\n<!-- grove: {\"template\": \"chat\"} -->\n"
+		// Add the prompt body after the directive if present
+		if job.PromptBody != "" {
+			yamlContent += "\n" + job.PromptBody
+		}
+	} else {
+		// For non-chat jobs, add prompt body with standard spacing
+		yamlContent += "\n"
+		yamlContent += job.PromptBody
+	}
 
 	return []byte(yamlContent), nil
 }
