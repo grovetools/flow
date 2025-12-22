@@ -135,19 +135,19 @@ Captures and prints the current contents of a tmux pane.
 
 **Usage:**
 ```bash
-# Basic capture
+# Basic capture (ANSI codes stripped by default for easier parsing)
 tend sessions capture tend_my_session
 tend sessions capture tend_my_session:0  # Specific window
 tend sessions capture tend_my_session:0.1  # Specific pane
 
-# Strip ANSI codes for easier parsing
-tend sessions capture tend_my_session --strip-ansi
+# Preserve ANSI codes if you need color information
+tend sessions capture tend_my_session --with-ansi
 
 # Wait for text to appear (polls every 200ms)
 tend sessions capture tend_my_session --wait-for "Ready" --timeout 5s
 
-# Combine: wait and strip ANSI
-tend sessions capture tend_my_session --wait-for "Complete" --strip-ansi
+# Combine: wait and preserve ANSI
+tend sessions capture tend_my_session --wait-for "Complete" --with-ansi
 ```
 
 **Output Example:**
@@ -163,12 +163,13 @@ Use arrow keys to navigate.
 ```
 
 **Flags:**
-- `--strip-ansi`: Remove ANSI escape codes from output (makes parsing much easier)
+- `--with-ansi`: Preserve ANSI escape codes in output (default: strip for easier parsing)
 - `--wait-for <text>`: Poll until text appears in the pane (useful after sending keys)
 - `--timeout <duration>`: Timeout for --wait-for (default: 5s)
 
 **Notes:**
-- Returns the pane content as plain text with ANSI escape codes preserved (unless --strip-ansi)
+- **By default, ANSI codes are stripped** for easier parsing by agents
+- Returns clean plain text unless `--with-ansi` is specified
 - Perfect for checking current TUI state before/after interactions
 - Can target specific windows/panes using tmux target syntax
 - Use `--wait-for` to avoid manual sleep commands - it polls until text appears or times out
@@ -522,17 +523,18 @@ tend sessions send-keys tend_my_session -- j
 tend sessions capture tend_my_session --wait-for "main.go" --timeout 3s
 ```
 
-### 2. Strip ANSI for Parsing
-When checking output programmatically, use `--strip-ansi` for cleaner text:
+### 2. ANSI Codes Stripped by Default
+Capture strips ANSI codes by default for easier parsing. Use `--with-ansi` only if needed:
 ```bash
-# With ANSI codes (hard to parse)
+# Default: clean text (ANSI stripped)
 OUTPUT=$(tend sessions capture tend_test)
-# Output: "\x1b[1mmain\x1b[0m"
-
-# Without ANSI codes (easy to parse)
-OUTPUT=$(tend sessions capture tend_test --strip-ansi)
 # Output: "main"
 
+# With ANSI codes preserved (if you need color info)
+OUTPUT=$(tend sessions capture tend_test --with-ansi)
+# Output: "\x1b[1mmain\x1b[0m"
+
+# Easy to parse by default
 if echo "$OUTPUT" | grep -q "Ready"; then
     echo "TUI is ready"
 fi
