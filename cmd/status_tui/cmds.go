@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -567,103 +568,100 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 
 		ctx := context.Background()
 
-		for i, job := range jobs {
-			logger.WithFields(map[string]interface{}{
-				"job_id":       job.ID,
-				"job_filename": job.Filename,
-				"job_index":    i + 1,
-				"total_jobs":   len(jobs),
-			}).Info("Executing job via orchestrator")
+		// 1. Create a StreamWriter for live TUI updates. Use a generic workspace name for the stream.
+		tuiWriter := logviewer.NewStreamWriter(program, "Job Output")
 
-			// 1. Get the log file path for the job.
-			logFilePath, err := orchestration.GetJobLogPath(orchestrator.Plan, job)
-			if err != nil {
-				return JobRunFinishedMsg{Err: fmt.Errorf("failed to get log path for job %s: %w", job.ID, err)}
-			}
+		// 2. Set global logging output to the TUI writer. This captures all grove-core logs.
+		logging.SetGlobalOutput(tuiWriter)
 
-			// 2. Open the log file in append mode.
-			logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				return JobRunFinishedMsg{Err: fmt.Errorf("failed to open log file %s: %w", logFilePath, err)}
-			}
+		// 3. Redirect process-level stdout/stderr to a pipe. This is the master capture net.
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+		os.Stderr = w
 
-			// 3. Create a StreamWriter for live TUI updates. Use job.ID to tag log lines.
-			tuiWriter := logviewer.NewStreamWriter(program, job.ID)
+		// 4. Start a single reader goroutine to read from the pipe and forward to the TUI writer.
+		// This serializes all captured output for the TUI.
+		pipeReaderDone := make(chan struct{})
+		go func() {
+			defer close(pipeReaderDone)
+			// io.Copy will block until the reader (r) is closed.
+			io.Copy(tuiWriter, r)
+		}()
 
-			// For oneshot and chat jobs, the output is primary content, so we suppress the prefix.
-			if job.Type == orchestration.JobTypeOneshot || job.Type == orchestration.JobTypeChat {
-				tuiWriter.NoWorkspacePrefix = true
-			}
+		// 5. Run jobs concurrently.
+		var wg sync.WaitGroup
+		errChan := make(chan error, len(jobs))
 
-			// 4. Create a MultiWriter to write to both the file and the TUI.
-			multiWriter := io.MultiWriter(logFile, tuiWriter)
+		for _, job := range jobs {
+			wg.Add(1)
+			go func(j *orchestration.Job) {
+				defer wg.Done()
 
-			// 5. Set global logging output to the MultiWriter
-			logging.SetGlobalOutput(multiWriter)
+				logger.WithFields(map[string]interface{}{
+					"job_id":       j.ID,
+					"job_filename": j.Filename,
+				}).Info("Executing job via orchestrator")
 
-			// 6. Redirect stdout/stderr to capture all output
-			r, w, err := os.Pipe()
-			if err == nil {
-				os.Stdout = w
-				os.Stderr = w
+				// Get the log file path for this specific job.
+				logFilePath, err := orchestration.GetJobLogPath(orchestrator.Plan, j)
+				if err != nil {
+					errChan <- fmt.Errorf("failed to get log path for job %s: %w", j.ID, err)
+					return
+				}
 
-				// Start a goroutine to read from the pipe and send to MultiWriter
-				done := make(chan struct{})
-				go func() {
-					buf := make([]byte, 1024)
-					for {
-						n, err := r.Read(buf)
-						if n > 0 {
-							multiWriter.Write(buf[:n])
-						}
-						if err != nil {
-							break
-						}
-					}
-					close(done)
-				}()
+				// Open the job's log file for appending.
+				logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err != nil {
+					errChan <- fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
+					return
+				}
+				defer logFile.Close()
 
-				// 7. Execute the job, passing the MultiWriter.
-				execErr := orchestrator.ExecuteJobWithWriter(ctx, job, multiWriter)
+				// Create a MultiWriter for this job. Output goes to both:
+				// 1. The job's persistent log file.
+				// 2. The global stdout pipe, which is captured and sent to the TUI.
+				// We pass os.Stdout here because it's been redirected to our pipe.
+				multiWriter := io.MultiWriter(logFile, os.Stdout)
 
-				// 8. Restore stdout/stderr
-				w.Close()
-				<-done
-				r.Close()
-				os.Stdout = oldStdout
-				os.Stderr = oldStderr
-
-				logFile.Close()
-
-				if execErr != nil {
+				// Execute the job using the new primitive, passing the MultiWriter.
+				if execErr := orchestrator.ExecuteJobWithWriter(ctx, j, multiWriter); execErr != nil {
 					logger.WithFields(map[string]interface{}{
-						"job_id": job.ID,
+						"job_id": j.ID,
 						"error":  execErr,
 					}).Error("Job execution failed")
-					logging.SetGlobalOutput(oldGlobalOutput)
-					return JobRunFinishedMsg{Err: fmt.Errorf("job %s failed: %w", job.ID, execErr)}
-				}
-			} else {
-				// Fallback if pipe creation fails
-				execErr := orchestrator.ExecuteJobWithWriter(ctx, job, multiWriter)
-				logFile.Close()
-				if execErr != nil {
+					errChan <- fmt.Errorf("job %s failed: %w", j.ID, execErr)
+				} else {
 					logger.WithFields(map[string]interface{}{
-						"job_id": job.ID,
-						"error":  execErr,
-					}).Error("Job execution failed")
-					logging.SetGlobalOutput(oldGlobalOutput)
-					return JobRunFinishedMsg{Err: fmt.Errorf("job %s failed: %w", job.ID, execErr)}
+						"job_id": j.ID,
+					}).Info("Job execution completed successfully")
 				}
-			}
-
-			logger.WithFields(map[string]interface{}{
-				"job_id": job.ID,
-			}).Info("Job execution completed successfully")
+			}(job)
 		}
 
-		// Restore global output
-		logging.SetGlobalOutput(oldGlobalOutput)
+		// 6. Wait for all jobs to finish.
+		wg.Wait()
+
+		// 7. Clean up and restore global state.
+		w.Close()           // Close the writer end of the pipe, which unblocks the reader goroutine.
+		<-pipeReaderDone    // Wait for the reader goroutine to finish processing all pipe data.
+		os.Stdout = oldStdout // Restore original stdout.
+		os.Stderr = oldStderr // Restore original stderr.
+		logging.SetGlobalOutput(oldGlobalOutput) // Restore original global logger output.
+
+		close(errChan)
+		var execErrors []error
+		for err := range errChan {
+			execErrors = append(execErrors, err)
+		}
+
+		if len(execErrors) > 0 {
+			// Combine multiple errors into one.
+			var errStrings []string
+			for _, e := range execErrors {
+				errStrings = append(errStrings, e.Error())
+			}
+			return JobRunFinishedMsg{Err: fmt.Errorf(strings.Join(errStrings, "\n"))}
+		}
 
 		logger.Info("All jobs completed successfully")
 		return JobRunFinishedMsg{Err: nil}
