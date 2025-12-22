@@ -111,6 +111,7 @@ type Model struct {
 	Focus               ViewFocus // Track which pane is active
 	LogSplitVertical    bool      // Track log viewer layout
 	IsRunningJob        bool      // Track if a job is currently running
+	isAutorunning       bool      // True when automatically running all stages
 	RunLogFile         string    // Path to temporary log file for job output
 	Program            *tea.Program // Reference to the tea.Program for sending messages
 	LogViewerWidth     int       // Cached log viewer width

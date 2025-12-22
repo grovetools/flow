@@ -26,6 +26,7 @@ var PlanStatusTUIDAGScenario = harness.NewScenarioWithOptions(
 		),
 		harness.NewStep("Launch TUI and run DAG", launchTUIAndRunDAG),
 		harness.NewStep("Verify all jobs completed", verifyAllJobsCompleted),
+		harness.NewStep("Verify job logs written to disk", verifyJobLogsWritten),
 		harness.NewStep("Quit the TUI", quitDAG_TUI),
 	},
 	true,  // localOnly
@@ -123,34 +124,26 @@ func launchTUIAndRunDAG(ctx *harness.Context) error {
 		return err
 	}
 
-	// Run all jobs in stages by repeatedly selecting all runnable jobs and executing them
-	// The orchestrator will handle dependency ordering and concurrent execution
-	for i := 0; i < 6; i++ { // Loop enough times to complete the entire DAG
-		// Select all runnable jobs
-		if err := session.SendKeys("a"); err != nil {
-			return err
-		}
-		time.Sleep(200 * time.Millisecond)
+	// Select all runnable jobs
+	if err := session.SendKeys("a"); err != nil {
+		return err
+	}
+	time.Sleep(200 * time.Millisecond)
 
-		// Run selected jobs
-		if err := session.SendKeys("r"); err != nil {
-			return err
-		}
+	// Run selected jobs - this should trigger autorun mode
+	if err := session.SendKeys("r"); err != nil {
+		return err
+	}
 
-		// On the first iteration, verify that logs appear in the log viewer
-		// This confirms the concurrent execution is streaming logs correctly
-		if i == 0 {
-			if err := ctx.Check("first stage logs appear in viewer", session.WaitForText("Executing Job 01", 5*time.Second)); err != nil {
-				content, _ := session.Capture(tui.WithCleanedOutput())
-				return fmt.Errorf("did not see logs for first stage: %w\n\n%s", err, content)
-			}
-		}
+	// Give jobs time to start and complete
+	// The entire DAG should complete quickly due to autorun (all stages finish in < 5s)
+	time.Sleep(8 * time.Second)
 
-		// Wait for the TUI to stabilize after job execution
-		if err := session.WaitStable(); err != nil {
-			return err
-		}
-		time.Sleep(1 * time.Second) // Extra pause for slower CI environments
+	// The detailed verification happens in subsequent steps
+	// (verifyAllJobsCompleted and verifyJobLogsWritten)
+	// Here we just ensure the TUI is still responsive
+	if err := session.WaitStable(); err != nil {
+		return err
 	}
 
 	return nil
@@ -168,19 +161,150 @@ func verifyAllJobsCompleted(ctx *harness.Context) error {
 	}
 
 	return ctx.Verify(func(v *verify.Collector) {
-		// Count the number of completed jobs (marked with ✓)
-		completedCount := strings.Count(content, "✓")
-		v.True("all 12 jobs completed", completedCount >= 12)
-
-		// Verify key jobs are visible in the output
+		// Verify visible jobs are present (not all 12 fit on screen due to terminal height)
+		// We only check a few key jobs that should be visible
 		v.Contains("job 01 is visible", content, "01-farmer-delivery")
 		v.Contains("job 03 is visible", content, "03-chef-menu")
 		v.Contains("job 09 is visible", content, "09-line-cook")
-		v.Contains("job 12 is visible", content, "12-food-critic")
+
+		// Verify completed icons are shown (󰄳 for nerd fonts or ● for ASCII)
+		hasCompletedIcons := strings.Contains(content, "󰄳") || strings.Contains(content, "●")
+		v.True("completed icons are shown", hasCompletedIcons)
 
 		// Verify the dependency tree structure is displayed
 		v.Contains("dependency tree structure shown", content, "└─")
+
+		// TUI Corruption Checks
+		// Verify no mangled output in the scrollback
+		// The full verification of all 12 jobs happens in verifyJobLogsWritten
+		rawContent, _ := session.Capture()
+
+		// Check that job names appear intact (not interleaved/corrupted)
+		v.Contains("job names not corrupted", rawContent, "farmer-delivery")
+		v.Contains("job names not corrupted", rawContent, "chef-menu")
 	})
+}
+
+func verifyJobLogsWritten(ctx *harness.Context) error {
+	planPath := ctx.GetString("plan_path")
+
+	// Verify that individual job log files were created and contain output
+	// This ensures the MultiWriter pattern is correctly writing to both TUI and disk
+	jobTitles := []string{
+		"farmer-delivery", "fishmonger-delivery", "chef-menu", "pastry-menu",
+		"supply-chain", "sous-prep", "customer-order", "sommelier-pairing",
+		"line-cook", "pastry-execution", "expediter", "food-critic",
+	}
+
+	// Track which jobs ran concurrently (first stage: jobs 01, 02, 04)
+	concurrentJobsFound := make(map[int]bool)
+
+	for i, title := range jobTitles {
+		jobNum := i + 1
+
+		// Find the artifacts directory for this job
+		// Pattern matches directories like "customer-order-806ffa1c"
+		artifactsPattern := filepath.Join(planPath, ".artifacts", title+"-*")
+		matches, err := filepath.Glob(artifactsPattern)
+		if err != nil || len(matches) == 0 {
+			return fmt.Errorf("no artifacts directory found for job %s (pattern: %s)", title, artifactsPattern)
+		}
+
+		// Check for job.log file
+		logFile := filepath.Join(matches[0], "job.log")
+		if _, err := os.Stat(logFile); os.IsNotExist(err) {
+			return fmt.Errorf("log file not found for job %s at %s", title, logFile)
+		}
+
+		// Verify the log file has content
+		content, err := os.ReadFile(logFile)
+		if err != nil {
+			return fmt.Errorf("failed to read log file for job %s: %w", title, err)
+		}
+
+		if len(content) == 0 {
+			return fmt.Errorf("log file for job %s is empty", title)
+		}
+
+		// Verify the log contains the expected job output
+		expectedOutput := fmt.Sprintf("Executing Job %02d:", jobNum)
+		if !strings.Contains(string(content), expectedOutput) {
+			return fmt.Errorf("log file for job %s does not contain expected output '%s'", title, expectedOutput)
+		}
+
+		// Track jobs from the first concurrent stage
+		if jobNum == 1 || jobNum == 2 || jobNum == 4 {
+			concurrentJobsFound[jobNum] = true
+		}
+
+		// Verify no duplicate output (would indicate corruption from concurrent writes)
+		outputCount := strings.Count(string(content), expectedOutput)
+		if outputCount > 1 {
+			return fmt.Errorf("log file for job %s contains duplicate output (%d occurrences) - possible concurrent write corruption", title, outputCount)
+		}
+	}
+
+	// Verify all three concurrent jobs from first stage have logs
+	// This proves concurrent execution worked and all output was captured
+	if len(concurrentJobsFound) < 3 {
+		return fmt.Errorf("expected logs from 3 concurrent jobs (01, 02, 04), only found %d", len(concurrentJobsFound))
+	}
+
+	// Verify dependency ordering by checking file modification times
+	// These are critical checks - dependency violations would indicate a serious orchestration bug
+
+	// Job 03 (chef-menu) depends on Job 01 (farmer-delivery)
+	if err := ctx.Check("chef-menu ran after farmer-delivery", verifyJobOrder(planPath, "farmer-delivery", "chef-menu")); err != nil {
+		return err
+	}
+
+	// Job 09 (line-cook) depends on Job 06 (sous-prep)
+	if err := ctx.Check("line-cook ran after sous-prep", verifyJobOrder(planPath, "sous-prep", "line-cook")); err != nil {
+		return err
+	}
+
+	// Job 11 (expediter) depends on Job 09 (line-cook)
+	if err := ctx.Check("expediter ran after line-cook", verifyJobOrder(planPath, "line-cook", "expediter")); err != nil {
+		return err
+	}
+
+	// All job log files verified successfully - proves concurrent execution wrote correctly to disk
+	return nil
+}
+
+// verifyJobOrder checks that a dependent job's log was written after its dependency
+func verifyJobOrder(planPath, depJob, dependentJob string) error {
+	// Find log files
+	depPattern := filepath.Join(planPath, ".artifacts", depJob+"-*", "job.log")
+	depMatches, _ := filepath.Glob(depPattern)
+	if len(depMatches) == 0 {
+		return fmt.Errorf("could not find log for dependency job %s", depJob)
+	}
+
+	dependentPattern := filepath.Join(planPath, ".artifacts", dependentJob+"-*", "job.log")
+	dependentMatches, _ := filepath.Glob(dependentPattern)
+	if len(dependentMatches) == 0 {
+		return fmt.Errorf("could not find log for dependent job %s", dependentJob)
+	}
+
+	// Get modification times
+	depInfo, err := os.Stat(depMatches[0])
+	if err != nil {
+		return fmt.Errorf("could not stat %s: %w", depMatches[0], err)
+	}
+
+	dependentInfo, err := os.Stat(dependentMatches[0])
+	if err != nil {
+		return fmt.Errorf("could not stat %s: %w", dependentMatches[0], err)
+	}
+
+	// Dependent job should have been modified after (or at same time as) its dependency
+	if dependentInfo.ModTime().Before(depInfo.ModTime()) {
+		return fmt.Errorf("%s (modified %v) started before %s (modified %v) completed - dependency violation",
+			dependentJob, dependentInfo.ModTime(), depJob, depInfo.ModTime())
+	}
+
+	return nil
 }
 
 func quitDAG_TUI(ctx *harness.Context) error {

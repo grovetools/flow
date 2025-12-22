@@ -367,6 +367,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Selected = newSelected
 
+		// Autorun logic: if autorunning, check for next runnable jobs
+		// Only trigger autorun if no jobs are currently running
+		if m.isAutorunning && !m.IsRunningJob {
+			// Get the next set of runnable jobs
+			newRunnable := m.Graph.GetRunnableJobs()
+
+			if len(newRunnable) > 0 {
+				m.StatusSummary = theme.DefaultTheme.Info.Render("Starting next stage...")
+				// Select all new runnable jobs
+				for _, job := range newRunnable {
+					m.Selected[job.ID] = true
+				}
+				// Trigger the run by sending a 'r' key message
+				return m, func() tea.Msg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}} }
+			} else {
+				// No more runnable jobs, autorun is complete
+				m.isAutorunning = false
+				m.StatusSummary = theme.DefaultTheme.Success.Render("All jobs completed successfully.")
+			}
+		}
+
 		return m, nil
 
 	case ArchiveConfirmedMsg:
@@ -992,6 +1013,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// Check if this is an autorun trigger (running all runnable jobs)
+			allRunnable := m.Graph.GetRunnableJobs()
+			m.isAutorunning = len(jobsToRun) == len(allRunnable)
+
 			if len(jobsToRun) > 0 {
 				// Clear the log viewer to prepare for new live output
 				m.LogViewer.Clear()
@@ -1016,7 +1041,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Update status message
 				jobCount := len(jobsToRun)
-				if jobCount == 1 {
+				if m.isAutorunning {
+					m.StatusSummary = theme.DefaultTheme.Info.Render("Autorunning all stages...")
+				} else if jobCount == 1 {
 					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Running %s...", jobsToRun[0].Title))
 				} else {
 					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Running %d job(s)...", jobCount))
