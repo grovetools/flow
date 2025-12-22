@@ -94,30 +94,27 @@ tend sessions send-keys <session>:term -- "find . -name grove.yml" Enter
 ```bash
 # 1. Run test in debug mode
 tend run notebook-tui-comprehensive --debug-session
+# Output: "Debug session 'tend_notebook-tui-comprehensive' created"
 
-# Output shows:
-# Debug session 'tend_notebook-tui-comprehensive' created
-# To attach: tmux attach -t tend_notebook-tui-comprehensive
-
-# 2. In a separate terminal, use tend sessions commands to explore
+# 2. List sessions to confirm
 tend sessions list
 # tend_notebook-tui-comprehensive
 
-# 3. Use the term window to run the TUI being tested
+# 3. Find where the project is located
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- "find . -name grove.yml" Enter
+tend sessions capture tend_notebook-tui-comprehensive:term --wait-for "grove.yml"
+
+# 4. Launch the TUI being tested
 tend sessions send-keys tend_notebook-tui-comprehensive:term -- "nb tui" Enter
-sleep 1
 
-# 4. Capture the TUI state
-tend sessions capture tend_notebook-tui-comprehensive:term
+# 5. Wait for TUI to load and capture state
+tend sessions capture tend_notebook-tui-comprehensive:term --wait-for "Notebook Browser"
 
-# 5. Send keystrokes to interact
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- j j Enter
-sleep 0.3
+# 6. Interact and observe (using --wait-for instead of sleep)
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- j j
+tend sessions capture tend_notebook-tui-comprehensive:term --wait-for "main.go"
 
-# 6. Capture again to see changes
-tend sessions capture tend_notebook-tui-comprehensive:term
-
-# 7. When done exploring, kill the session
+# 7. Clean up when done
 tend sessions kill tend_notebook-tui-comprehensive
 ```
 
@@ -263,82 +260,6 @@ tend sessions attach tend_my_session
 
 ---
 
-## Complete End-to-End Example for LLM Agents
-
-Here's a complete workflow showing how an LLM agent should explore and test a TUI:
-
-```bash
-# STEP 1: Start the test in debug mode
-tend run notebook-tui-comprehensive --debug-session
-
-# The test will create a session and pause. Note the session name from output.
-# Example output: "Debug session 'tend_notebook-tui-comprehensive' created"
-
-# STEP 2: Verify the session exists
-tend sessions list
-# Output: tend_notebook-tui-comprehensive
-
-# STEP 3: Explore the test environment
-# First, check what directory and files exist
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- "pwd" Enter
-sleep 0.3
-tend sessions capture tend_notebook-tui-comprehensive:term
-# Shows: /var/folders/.../tend-debug-XXXXXXXX
-
-# Check the structure
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- "tree home/.grove" Enter
-sleep 0.5
-tend sessions capture tend_notebook-tui-comprehensive:term | tail -30
-# Shows the notebook structure with test data
-
-# STEP 4: Launch the TUI being tested
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- "nb tui" Enter
-sleep 1.5  # Give TUI time to initialize and load data
-
-# STEP 5: Capture initial state
-tend sessions capture tend_notebook-tui-comprehensive:term
-# Shows: Notebook Browser with workspaces, notes, etc.
-
-# STEP 6: Explore by sending keys and observing changes
-# Navigate down
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- j j j
-sleep 0.3
-tend sessions capture tend_notebook-tui-comprehensive:term
-
-# Open help
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- "?"
-sleep 0.5
-tend sessions capture tend_notebook-tui-comprehensive:term
-# Shows all keyboard shortcuts
-
-# Exit help
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- Escape
-sleep 0.3
-
-# Try expanding/collapsing sections
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- Enter
-sleep 0.3
-OUTPUT=$(tend sessions capture tend_notebook-tui-comprehensive:term)
-echo "$OUTPUT" | grep "▶" || echo "Section collapsed"
-
-# STEP 7: Document findings
-# After exploring, you now understand:
-# - What keys work (j/k for navigation, Enter to expand/collapse)
-# - What the UI shows (workspaces, notes organized by status)
-# - How state changes (cursor moves, sections toggle)
-
-# STEP 8: Quit the TUI and clean up
-tend sessions send-keys tend_notebook-tui-comprehensive:term -- q
-sleep 0.3
-
-# Kill the debug session
-tend sessions kill tend_notebook-tui-comprehensive
-
-# STEP 9: Use your findings to write or improve tests
-# Now you can write proper Go tests using ctx.StartTUI() API
-# based on what you learned from exploration
-```
-
 ## Advanced: Recording TUI Interactions with `tend record`
 
 For more comprehensive documentation of TUI interactions, combine `tend sessions` with `tend record`:
@@ -442,91 +363,6 @@ sleep 0.5
 # - Frame 5: After 'y' (item removed from list)
 
 # Use this to write tests!
-```
-
-## Workflow Examples
-
-### Example 1: Exploring a TUI Application
-
-```bash
-# 1. Start the TUI in a tmux session
-tmux new-session -d -s tend_explorer "my-tui-app"
-sleep 0.5  # Give it time to initialize
-
-# 2. See what's on screen
-tend sessions capture tend_explorer
-
-# 3. Navigate down
-tend sessions send-keys tend_explorer -- j
-sleep 0.2
-
-# 4. Check what changed
-tend sessions capture tend_explorer
-
-# 5. Select an item
-tend sessions send-keys tend_explorer -- Enter
-sleep 0.3
-
-# 6. Verify the result
-tend sessions capture tend_explorer
-
-# 7. Clean up
-tend sessions kill tend_explorer
-```
-
-### Example 2: Testing a File Browser TUI
-
-```bash
-# Start the TUI
-tmux new-session -d -s tend_filebrowser_test "filebrowser"
-sleep 0.5
-
-# Initial state - cursor should be on first item
-OUTPUT=$(tend sessions capture tend_filebrowser_test)
-echo "$OUTPUT" | grep "> README.md" || echo "FAIL: Initial cursor not on README"
-
-# Move down twice
-tend sessions send-keys tend_filebrowser_test -- j j
-sleep 0.2
-
-# Cursor should now be on third item
-OUTPUT=$(tend sessions capture tend_filebrowser_test)
-echo "$OUTPUT" | grep "> docs/guide.md" || echo "FAIL: Cursor not on third item"
-
-# Select it
-tend sessions send-keys tend_filebrowser_test -- Enter
-sleep 0.2
-
-# Verify selection
-OUTPUT=$(tend sessions capture tend_filebrowser_test)
-echo "$OUTPUT" | grep "Selected: docs/guide.md" || echo "FAIL: Item not selected"
-
-# Cleanup
-tend sessions kill tend_filebrowser_test
-```
-
-### Example 3: Multi-State TUI Testing
-
-```bash
-# Start task manager TUI
-tmux new-session -d -s tend_taskmgr "task-manager"
-sleep 0.5
-
-# Verify menu is displayed
-OUTPUT=$(tend sessions capture tend_taskmgr)
-echo "$OUTPUT" | grep "Select action:" || echo "FAIL: Menu not shown"
-
-# Choose option 1 (Process files)
-tend sessions send-keys tend_taskmgr -- 1
-sleep 0.5  # Wait for processing
-
-# Verify success message
-OUTPUT=$(tend sessions capture tend_taskmgr)
-echo "$OUTPUT" | grep "✓ Success" || echo "FAIL: Success message not shown"
-echo "$OUTPUT" | grep "15 files modified" || echo "FAIL: File count not shown"
-
-# Cleanup
-tend sessions kill tend_taskmgr
 ```
 
 ## Best Practices
