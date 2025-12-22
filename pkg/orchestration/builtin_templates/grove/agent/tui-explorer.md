@@ -31,10 +31,31 @@ tend run my-tui-test --debug-session
 This creates a tmux session named `tend_<scenario-name>` with these windows:
 
 1. **runner** - Shows the test execution, paused at interactive steps
+   - Press `Enter` to advance to the next step
+   - Press `a` to attach and see the full test output
+   - Press `q` to quit the test
 2. **editor_test_dir** - Neovim editor for the test directory
 3. **editor_test_steps** - Neovim editor for the test steps/scenario file
-4. **term** - Shell with the sandboxed test environment (USE THIS!)
+4. **term** - Shell with the sandboxed test environment (⭐ **USE THIS FOR EXPLORATION!**)
 5. **logs** - Log viewer (core logs --tui)
+
+### Understanding the Runner Window
+
+The **runner** window shows test progress and **pauses at each step** when using `--debug-session`. This is intentional - it lets you explore the test state in the `term` window before moving on.
+
+**Important**: The test won't advance until you press Enter in the runner window. This means:
+- ✅ You can take your time exploring in the `term` window
+- ✅ The test environment stays stable while you investigate
+- ⚠️ If you send commands but nothing happens, check if the runner is waiting for you
+
+**Pro tip**: You can monitor both windows:
+```bash
+# Check if runner is waiting
+tend sessions capture <session>:runner | tail -5
+
+# If you see "Press ENTER to continue", advance the test:
+tend sessions send-keys <session>:runner -- Enter
+```
 
 ### The `term` Window - Your Exploration Playground
 
@@ -654,6 +675,37 @@ Use `tend sessions` commands to learn about a TUI, then write proper Go tests us
 
 ## Troubleshooting
 
+### Commands Not Working / Nothing Happens
+
+**Symptom**: You send commands to the `term` window but nothing seems to happen.
+
+**Likely cause**: The test is paused waiting for you to advance in the `runner` window.
+
+**Solution**:
+```bash
+# Check if runner is waiting
+tend sessions capture <session>:runner | tail -10
+
+# Look for: "▶ Press ENTER to continue, 'a' to attach, 'q' to quit:"
+
+# If waiting, advance the test:
+tend sessions send-keys <session>:runner -- Enter
+```
+
+### "Where is my project?"
+
+**Symptom**: You're in `/var/folders/.../tend-debug-XXX` but can't find the project files.
+
+**Solution**: Projects are typically in subdirectories like `home/code/`. Find them with:
+```bash
+tend sessions send-keys <session>:term -- "find . -name grove.yml" Enter
+sleep 0.5
+tend sessions capture <session>:term
+
+# Or look in common locations:
+tend sessions send-keys <session>:term -- "ls -la home/code/" Enter
+```
+
 ### Session Not Found
 ```bash
 # List all sessions to verify it exists
@@ -692,14 +744,73 @@ tend sessions attach tend_my_session
 # Use Ctrl+B, D to detach after inspecting
 ```
 
+## Quick Reference: Common Patterns
+
+### Starting a Debug Session and Finding Your Project
+```bash
+# 1. Start the test
+tend run my-test --debug-session
+
+# 2. Find the project location
+tend sessions send-keys <session>:term -- "find . -name grove.yml" Enter
+sleep 0.5
+tend sessions capture <session>:term
+
+# 3. Navigate to the project (example)
+tend sessions send-keys <session>:term -- "cd home/code/my-project" Enter
+```
+
+### Advancing Through Test Steps While Exploring
+```bash
+# Check if runner is waiting
+tend sessions capture <session>:runner | grep -q "Press ENTER" && echo "Waiting for you!"
+
+# Advance one step
+tend sessions send-keys <session>:runner -- Enter
+
+# Continue exploring in term window
+tend sessions send-keys <session>:term -- "pwd" Enter
+tend sessions capture <session>:term
+```
+
+### Interactive TUI Exploration Pattern
+```bash
+# Launch TUI
+tend sessions send-keys <session>:term -- "my-tui" Enter
+
+# Wait for it to be ready
+tend sessions capture <session>:term --wait-for "Ready" --timeout 5s
+
+# Interact and observe
+tend sessions send-keys <session>:term -- j j
+tend sessions capture <session>:term --wait-for "selected item"
+
+# Quit
+tend sessions send-keys <session>:term -- q
+```
+
+### Checking Both Runner and Term Status
+```bash
+# See where test is
+echo "=== Runner Status ==="
+tend sessions capture <session>:runner | tail -5
+
+# See what's in term
+echo "=== Term Status ==="
+tend sessions capture <session>:term | head -20
+```
+
 ## Summary
 
 With `tend sessions` commands, you can programmatically drive any TUI application:
 
-1. **Start** a TUI in a tmux session (prefixed with `tend_`)
-2. **Capture** its current state to see what's on screen
-3. **Send keys** to navigate and interact
-4. **Verify** the results by capturing again
-5. **Clean up** by killing the session
+1. **Start** a debug session with `--debug-session`
+2. **Locate** your project with `find . -name grove.yml`
+3. **Advance** the runner window with Enter as needed
+4. **Explore** in the `term` window with full environment
+5. **Capture** state to see what's on screen (ANSI stripped by default)
+6. **Send keys** to navigate and interact
+7. **Verify** results by capturing again
+8. **Clean up** by killing the session
 
 This gives you full control to explore, test, and debug TUI applications without manual intervention!
