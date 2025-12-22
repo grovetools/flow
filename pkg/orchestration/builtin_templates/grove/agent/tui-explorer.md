@@ -40,10 +40,33 @@ This creates a tmux session named `tend_<scenario-name>` with these windows:
 
 The `term` window is where you should do your TUI exploration. It has:
 
-- **Working directory**: The test's temporary root directory
-- **Sandboxed HOME**: A fake HOME directory with test data
+- **Working directory**: The test's temporary root directory (e.g., `/var/folders/.../tend-debug-XXXXXXXX`)
+- **Sandboxed HOME**: A fake HOME directory with test data at `home/`
 - **Environment variables**: XDG_CONFIG_HOME, XDG_DATA_HOME, etc. all point to the test environment
 - **Test context**: Whatever the test scenario set up is available here
+
+### Understanding the Directory Structure
+
+When you start a debug session, the directory structure looks like:
+
+```
+/var/folders/.../tend-debug-XXXXXXXX/    ← You are here (test root)
+├── home/                                 ← Sandboxed HOME directory
+│   ├── .config/                         ← XDG_CONFIG_HOME
+│   ├── .local/share/                    ← XDG_DATA_HOME
+│   ├── .cache/                          ← XDG_CACHE_HOME
+│   └── code/                            ← Projects might be here
+│       └── my-project/                  ← The actual project being tested
+└── .grove/                              ← Test metadata
+```
+
+**Key insight**: The test root is NOT where your project is. Your project is typically at `home/code/<project-name>` or similar, depending on what the test set up.
+
+**Pro tip**: First command to run:
+```bash
+tend sessions send-keys <session>:term -- "find . -name grove.yml" Enter
+# This shows you where projects are located
+```
 
 **Example workflow:**
 
@@ -112,9 +135,19 @@ Captures and prints the current contents of a tmux pane.
 
 **Usage:**
 ```bash
+# Basic capture
 tend sessions capture tend_my_session
 tend sessions capture tend_my_session:0  # Specific window
 tend sessions capture tend_my_session:0.1  # Specific pane
+
+# Strip ANSI codes for easier parsing
+tend sessions capture tend_my_session --strip-ansi
+
+# Wait for text to appear (polls every 200ms)
+tend sessions capture tend_my_session --wait-for "Ready" --timeout 5s
+
+# Combine: wait and strip ANSI
+tend sessions capture tend_my_session --wait-for "Complete" --strip-ansi
 ```
 
 **Output Example:**
@@ -129,10 +162,16 @@ File Browser
 Use arrow keys to navigate.
 ```
 
+**Flags:**
+- `--strip-ansi`: Remove ANSI escape codes from output (makes parsing much easier)
+- `--wait-for <text>`: Poll until text appears in the pane (useful after sending keys)
+- `--timeout <duration>`: Timeout for --wait-for (default: 5s)
+
 **Notes:**
-- Returns the pane content as plain text with ANSI escape codes preserved
+- Returns the pane content as plain text with ANSI escape codes preserved (unless --strip-ansi)
 - Perfect for checking current TUI state before/after interactions
 - Can target specific windows/panes using tmux target syntax
+- Use `--wait-for` to avoid manual sleep commands - it polls until text appears or times out
 
 ---
 
@@ -470,16 +509,36 @@ tend sessions kill tend_taskmgr
 
 ## Best Practices
 
-### 1. Always Wait After Sending Keys
-TUIs need time to process input and re-render. Add `sleep` between commands:
+### 1. Use --wait-for Instead of sleep
+Instead of guessing how long to wait, use `--wait-for` to poll until the TUI is ready:
 ```bash
+# Old way (guessing timing)
 tend sessions send-keys tend_my_session -- j
-sleep 0.2  # Short wait for simple navigation
-tend sessions send-keys tend_my_session -- Enter
-sleep 0.5  # Longer wait for complex operations
+sleep 0.5  # Hope this is enough?
+tend sessions capture tend_my_session
+
+# Better way (wait for expected state)
+tend sessions send-keys tend_my_session -- j
+tend sessions capture tend_my_session --wait-for "main.go" --timeout 3s
 ```
 
-### 2. Use Descriptive Session Names
+### 2. Strip ANSI for Parsing
+When checking output programmatically, use `--strip-ansi` for cleaner text:
+```bash
+# With ANSI codes (hard to parse)
+OUTPUT=$(tend sessions capture tend_test)
+# Output: "\x1b[1mmain\x1b[0m"
+
+# Without ANSI codes (easy to parse)
+OUTPUT=$(tend sessions capture tend_test --strip-ansi)
+# Output: "main"
+
+if echo "$OUTPUT" | grep -q "Ready"; then
+    echo "TUI is ready"
+fi
+```
+
+### 3. Use Descriptive Session Names
 ```bash
 # Good
 tmux new-session -d -s tend_test_navigation "my-app"
@@ -489,7 +548,7 @@ tmux new-session -d -s tend_debug_menu_crash "my-app"
 tmux new-session -d -s my_test "my-app"  # Won't be listed by tend sessions
 ```
 
-### 3. Always Clean Up Sessions
+### 4. Always Clean Up Sessions
 ```bash
 # At the end of your exploration/testing
 tend sessions kill tend_my_test_session
@@ -498,7 +557,7 @@ tend sessions kill tend_my_test_session
 tend sessions kill --all
 ```
 
-### 4. Capture Before and After
+### 5. Capture Before and After
 Always capture state before and after interactions to verify changes:
 ```bash
 BEFORE=$(tend sessions capture tend_test)
@@ -510,7 +569,7 @@ AFTER=$(tend sessions capture tend_test)
 diff <(echo "$BEFORE") <(echo "$AFTER")
 ```
 
-### 5. Test Error Conditions
+### 6. Test Error Conditions
 Don't just test happy paths:
 ```bash
 # Try navigating past the end of a list
