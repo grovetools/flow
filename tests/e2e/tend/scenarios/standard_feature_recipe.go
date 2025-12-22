@@ -104,21 +104,27 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 					jobType:   orchestration.JobTypeHeadlessAgent,
 					dependsOn: []string{"03-generate-plan.md"},
 				},
-				"05-impl-tests.md": {
+				"05-spec-tests.md": {
+					jobType:    orchestration.JobTypeOneshot,
+					dependsOn:  []string{"02-spec.md", "03-generate-plan.md", "04-implement.md"},
+					prependDep: true,
+				},
+				"06-impl-tests.md": {
 					jobType:    orchestration.JobTypeInteractiveAgent,
 					template:   "tend-tester",
-					dependsOn:  []string{"04-implement.md"},
-					gitChanges: true,
-				},
-				"06-review.md": {
-					jobType:    orchestration.JobTypeOneshot,
-					dependsOn:  []string{"05-impl-tests.md"},
+					dependsOn:  []string{"05-spec-tests.md"},
 					prependDep: true,
 					gitChanges: true,
 				},
-				"07-follow-up.md": {
+				"07-review.md": {
+					jobType:    orchestration.JobTypeOneshot,
+					dependsOn:  []string{"06-impl-tests.md"},
+					prependDep: true,
+					gitChanges: true,
+				},
+				"08-follow-up.md": {
 					jobType:   orchestration.JobTypeInteractiveAgent,
-					dependsOn: []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "05-impl-tests.md", "06-review.md"},
+					dependsOn: []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "05-spec-tests.md", "06-impl-tests.md", "07-review.md"},
 				},
 			}
 
@@ -181,9 +187,10 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				{"02-spec.md", []string{"01-cx.md"}},
 				{"03-generate-plan.md", []string{"02-spec.md"}},
 				{"04-implement.md", []string{"03-generate-plan.md"}},
-				{"05-impl-tests.md", []string{"04-implement.md"}},
-				{"06-review.md", []string{"05-impl-tests.md"}},
-				{"07-follow-up.md", []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "05-impl-tests.md", "06-review.md"}},
+				{"05-spec-tests.md", []string{"02-spec.md", "03-generate-plan.md", "04-implement.md"}},
+				{"06-impl-tests.md", []string{"05-spec-tests.md"}},
+				{"07-review.md", []string{"06-impl-tests.md"}},
+				{"08-follow-up.md", []string{"02-spec.md", "03-generate-plan.md", "04-implement.md", "05-spec-tests.md", "06-impl-tests.md", "07-review.md"}},
 			}
 
 			for _, tc := range testCases {
@@ -207,13 +214,11 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			return nil
 		}),
 
-		harness.NewStep("Run spec job and verify briefing file", func(ctx *harness.Context) error {
-			projectDir := ctx.GetString("project_dir")
+		harness.NewStep("Mark cx job as completed", func(ctx *harness.Context) error {
 			planPath := ctx.GetString("plan_path")
-			specJobPath := filepath.Join(planPath, "02-spec.md")
 			cxJobPath := filepath.Join(planPath, "01-cx.md")
 
-			// Mark the cx job as completed so spec can run
+			// Mark cx job as completed (interactive_agent jobs don't create briefing files with --model mock)
 			content, err := fs.ReadString(cxJobPath)
 			if err != nil {
 				return fmt.Errorf("reading cx job: %w", err)
@@ -223,7 +228,15 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				return fmt.Errorf("updating cx job: %w", err)
 			}
 
-			// Run the spec job with mock model
+			return nil
+		}),
+
+		harness.NewStep("Run spec job and verify briefing file", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			specJobPath := filepath.Join(planPath, "02-spec.md")
+
+			// Run the spec job with mock model (cx job already completed from previous step)
 			cmd := ctx.Bin("plan", "run", specJobPath, "--model", "mock", "-y")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
@@ -342,6 +355,101 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			return nil
 		}),
 
+		harness.NewStep("Run implement job and verify briefing file", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			implementJobPath := filepath.Join(planPath, "04-implement.md")
+
+			// Run the implement job with mock model (dependencies already completed)
+			cmd := ctx.Bin("plan", "run", implementJobPath, "--model", "mock", "-y")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return err
+			}
+
+			// Load the implement job to get its ID
+			implementJob, err := orchestration.LoadJob(implementJobPath)
+			if err != nil {
+				return fmt.Errorf("loading implement job: %w", err)
+			}
+			jobID := implementJob.ID
+
+			// Verify briefing file was created
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefingFiles, err := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if err != nil {
+				return fmt.Errorf("checking for briefing files: %w", err)
+			}
+			if len(briefingFiles) == 0 {
+				return fmt.Errorf("expected briefing file for implement job")
+			}
+
+			// Verify briefing file has proper structure
+			briefingContent, err := fs.ReadString(briefingFiles[0])
+			if err != nil {
+				return fmt.Errorf("reading briefing file: %w", err)
+			}
+
+			if !strings.Contains(briefingContent, "<prompt>") {
+				return fmt.Errorf("briefing file missing <prompt> tag")
+			}
+			// Headless agent should have context
+			if !strings.Contains(briefingContent, "<context>") {
+				return fmt.Errorf("briefing file missing <context> tag")
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Run spec-tests job and verify briefing file", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			specTestsJobPath := filepath.Join(planPath, "05-spec-tests.md")
+
+			// Run the spec-tests job with mock model (dependencies already completed)
+			cmd := ctx.Bin("plan", "run", specTestsJobPath, "--model", "mock", "-y")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return err
+			}
+
+			// Load the spec-tests job to get its ID
+			specTestsJob, err := orchestration.LoadJob(specTestsJobPath)
+			if err != nil {
+				return fmt.Errorf("loading spec-tests job: %w", err)
+			}
+			jobID := specTestsJob.ID
+
+			// Verify briefing file was created
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefingFiles, err := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if err != nil {
+				return fmt.Errorf("checking for briefing files: %w", err)
+			}
+			if len(briefingFiles) == 0 {
+				return fmt.Errorf("expected briefing file for spec-tests job")
+			}
+
+			// Verify briefing file has prepended dependencies
+			briefingContent, err := fs.ReadString(briefingFiles[0])
+			if err != nil {
+				return fmt.Errorf("reading briefing file: %w", err)
+			}
+
+			if !strings.Contains(briefingContent, "<prepended_dependency") {
+				return fmt.Errorf("briefing file missing <prepended_dependency> tag")
+			}
+			if !strings.Contains(briefingContent, "02-spec.md") {
+				return fmt.Errorf("briefing file missing reference to spec dependency")
+			}
+
+			return nil
+		}),
+
 		harness.NewStep("Simulate implementation by creating code changes in worktree", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "add-user-auth")
@@ -444,29 +552,30 @@ func CheckPasswordHash(password, hash string) bool {
 			return nil
 		}),
 
+		harness.NewStep("Mark impl-tests job as completed", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+			implTestsJobPath := filepath.Join(planPath, "06-impl-tests.md")
+
+			// Mark impl-tests job as completed (interactive_agent jobs don't create briefing files with --model mock)
+			content, err := fs.ReadString(implTestsJobPath)
+			if err != nil {
+				return fmt.Errorf("reading impl-tests job: %w", err)
+			}
+			content = strings.Replace(content, "status: pending", "status: completed", 1)
+			if err := fs.WriteString(implTestsJobPath, content); err != nil {
+				return fmt.Errorf("updating impl-tests job: %w", err)
+			}
+
+			return nil
+		}),
+
 		harness.NewStep("Run review job and verify briefing contains git changes", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "add-user-auth")
-			reviewJobPath := filepath.Join(planPath, "06-review.md")
+			reviewJobPath := filepath.Join(planPath, "07-review.md")
 
-			// Mark the generate-plan, implement, and impl-tests jobs as completed so review can run
-			planJobPath := filepath.Join(planPath, "03-generate-plan.md")
-			implementJobPath := filepath.Join(planPath, "04-implement.md")
-			implTestsJobPath := filepath.Join(planPath, "05-impl-tests.md")
-
-			for _, jobPath := range []string{planJobPath, implementJobPath, implTestsJobPath} {
-				content, err := fs.ReadString(jobPath)
-				if err != nil {
-					return fmt.Errorf("reading job %s: %w", jobPath, err)
-				}
-				content = strings.Replace(content, "status: pending", "status: completed", 1)
-				if err := fs.WriteString(jobPath, content); err != nil {
-					return fmt.Errorf("updating job %s: %w", jobPath, err)
-				}
-			}
-
-			// Run the review job from the worktree directory
+			// Run the review job from the worktree directory (all dependencies already completed)
 			cmd := ctx.Bin("plan", "run", reviewJobPath, "-y", "--model", "mock")
 			cmd.Dir(worktreePath)
 			result := cmd.Run()
@@ -534,6 +643,23 @@ func CheckPasswordHash(password, hash string) bool {
 			}
 			if !strings.Contains(briefingContent, "HashPassword") {
 				return fmt.Errorf("briefing file missing untracked file content for auth.go")
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Mark follow-up job as completed", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+			followUpJobPath := filepath.Join(planPath, "08-follow-up.md")
+
+			// Mark follow-up job as completed (interactive_agent jobs don't create briefing files with --model mock)
+			content, err := fs.ReadString(followUpJobPath)
+			if err != nil {
+				return fmt.Errorf("reading follow-up job: %w", err)
+			}
+			content = strings.Replace(content, "status: pending", "status: completed", 1)
+			if err := fs.WriteString(followUpJobPath, content); err != nil {
+				return fmt.Errorf("updating follow-up job: %w", err)
 			}
 
 			return nil
