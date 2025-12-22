@@ -278,6 +278,111 @@ tend sessions kill tend_notebook-tui-comprehensive
 # based on what you learned from exploration
 ```
 
+## Advanced: Recording TUI Interactions with `tend record`
+
+For more comprehensive documentation of TUI interactions, combine `tend sessions` with `tend record`:
+
+```bash
+# STEP 1: Start the test in debug mode
+tend run notebook-tui-comprehensive --debug-session
+
+# STEP 2: Launch tend record via the term window
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- "tend record -- nb tui" Enter
+sleep 2  # Wait for TUI to initialize
+
+# STEP 3: Perform interactions via tend sessions commands
+# Navigate down
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- j j j
+sleep 0.5
+
+# Open help menu
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- "?"
+sleep 0.5
+
+# Close help
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- Escape
+sleep 0.3
+
+# Collapse a section
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- Enter
+sleep 0.3
+
+# Navigate more
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- j j
+sleep 0.3
+
+# STEP 4: Quit to save recording
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- q
+sleep 0.5
+
+# STEP 5: Examine the recordings
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- "ls -la tend-recording.*" Enter
+sleep 0.3
+tend sessions capture tend_notebook-tui-comprehensive:term
+
+# View the markdown recording
+tend sessions send-keys tend_notebook-tui-comprehensive:term -- "cat tend-recording.md" Enter
+sleep 0.5
+tend sessions capture tend_notebook-tui-comprehensive:term
+```
+
+### What `tend record` Generates:
+
+When you use `tend record -- <tui-command>`, it creates multiple output formats:
+
+- **`tend-recording.md`** - Markdown with frames showing input and terminal state (clean text)
+- **`tend-recording.ansi.md`** - Markdown preserving ANSI color codes
+- **`tend-recording.xml`** - XML format optimized for LLM consumption
+- **`tend-recording.ansi.xml`** - XML with ANSI codes preserved
+- **`tend-recording.html`** - HTML playback for visual review
+
+Each frame in the recording shows:
+- **Input**: The keystroke(s) that were sent
+- **Terminal State**: What the screen looked like after that input
+- **Timestamp**: When the input occurred
+
+### Why Use `tend record` with `tend sessions`?
+
+1. **Automatic documentation** - Creates a complete record of your exploration
+2. **Multiple formats** - Choose the best format for your use case (XML for parsing, MD for reading, HTML for playback)
+3. **Frame-by-frame analysis** - See exactly what changed after each keystroke
+4. **Test case generation** - Use recorded frames as the basis for assertions in tests
+5. **Bug reports** - Attach recordings to show exactly what happened
+
+### Example Use Case:
+
+```bash
+# You're exploring a new TUI feature and want to document it
+tend run my-feature-test --debug-session
+
+# Record the exploration
+tend sessions send-keys tend_my-feature-test:term -- "tend record -- my-app tui" Enter
+sleep 2
+
+# Perform a sequence of actions
+tend sessions send-keys tend_my-feature-test:term -- "n" "e" "w" Enter  # Create new item
+sleep 0.5
+tend sessions send-keys tend_my-feature-test:term -- "test-item" Enter  # Name it
+sleep 0.5
+tend sessions send-keys tend_my-feature-test:term -- "d" "d"  # Delete it
+sleep 0.5
+tend sessions send-keys tend_my-feature-test:term -- "y"  # Confirm
+sleep 0.5
+
+# Quit and save
+tend sessions send-keys tend_my-feature-test:term -- "q"
+sleep 0.5
+
+# Now you have a complete recording showing:
+# - Frame 1: Initial state
+# - Frame 2: After pressing 'n' (new item dialog appears)
+# - Frame 3: After entering name (item appears in list)
+# - Frame 4: After 'dd' (delete confirmation)
+# - Frame 5: After 'y' (item removed from list)
+
+# Use this to write tests!
+```
+
 ## Workflow Examples
 
 ### Example 1: Exploring a TUI Application
