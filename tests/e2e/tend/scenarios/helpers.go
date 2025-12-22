@@ -58,13 +58,14 @@ func setupDefaultEnvironment(ctx *harness.Context, projectName string) (projectD
 	}
 
 	// 4. Create global config with BOTH groves and notebooks, correctly linked.
+	enabled := true
 	globalCfg := &config.Config{
 		Version:   "1.0",
 		Notebooks: notebookConfig,
 		Groves: map[string]config.GroveSourceConfig{
 			"code": {
 				Path:     "~/code", // Use ~ to test home directory expansion
-				Enabled:  true,
+				Enabled:  &enabled,
 				Notebook: "default", // This correctly links projects in ~/code to the 'default' notebook.
 			},
 		},
