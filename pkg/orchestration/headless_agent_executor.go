@@ -178,12 +178,10 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		gitRoot = plan.Directory
 	}
 
-	// Check if we're already in the target worktree
+	// Check if the worktree directory already exists. If so, skip preparation.
+	// This prevents errors when multiple jobs in a plan share the same worktree.
 	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
-	currentDir, err := os.Getwd()
-	if err == nil && strings.HasPrefix(currentDir, worktreePath) {
-		// Already in the target worktree, just return the path
-		fmt.Printf("Already in worktree '%s', skipping preparation\n", job.Worktree)
+	if _, err := os.Stat(worktreePath); err == nil {
 		return worktreePath, nil
 	}
 

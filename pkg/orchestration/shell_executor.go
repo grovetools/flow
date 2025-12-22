@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	grovelogging "github.com/mattsolo1/grove-core/logging"
@@ -184,6 +185,12 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 	if err != nil {
 		// Fallback to plan directory if not in a git repo
 		gitRoot = plan.Directory
+	}
+
+	// Check if the worktree directory already exists. If so, skip preparation.
+	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
+	if _, err := os.Stat(worktreePath); err == nil {
+		return worktreePath, nil
 	}
 
 	// The new logic:

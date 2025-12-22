@@ -238,20 +238,25 @@ func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Jo
 			}
 
 			// Prepare the worktree
-			opts := workspace.PrepareOptions{
-				GitRoot:      actualGitRoot,
-				WorktreeName: job.Worktree,
-				BranchName:   job.Worktree,
-				PlanName:     plan.Name,
-			}
+			worktreePath := filepath.Join(actualGitRoot, ".grove-worktrees", job.Worktree)
+			if _, err := os.Stat(worktreePath); err == nil {
+				// Worktree already exists, skip preparation.
+			} else {
+				opts := workspace.PrepareOptions{
+					GitRoot:      actualGitRoot,
+					WorktreeName: job.Worktree,
+					BranchName:   job.Worktree,
+					PlanName:     plan.Name,
+				}
 
-			if plan.Config != nil && len(plan.Config.Repos) > 0 {
-				opts.Repos = plan.Config.Repos
-			}
+				if plan.Config != nil && len(plan.Config.Repos) > 0 {
+					opts.Repos = plan.Config.Repos
+				}
 
-			_, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
-			if err != nil {
-				return "", fmt.Errorf("failed to prepare host worktree: %w", err)
+				_, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
+				if err != nil {
+					return "", fmt.Errorf("failed to prepare host worktree: %w", err)
+				}
 			}
 		}
 	}
