@@ -596,3 +596,130 @@ func getNotebookRecipesDir() (string, error) {
 	locator := workspace.NewNotebookLocator(cfg)
 	return locator.GetRecipesDir(node)
 }
+
+// AddJobsFromRecipe adds jobs from a recipe into an existing plan.
+// It handles re-numbering and dependency re-mapping in three passes:
+// 1. In-memory creation & renaming
+// 2. Dependency remapping
+// 3. Writing to disk
+func AddJobsFromRecipe(plan *Plan, recipe *Recipe, externalDeps []string, templateData interface{}) (newFiles []string, err error) {
+	// 1. Initialization
+	nextNum, err := GetNextJobNumber(plan.Directory)
+	if err != nil {
+		return nil, fmt.Errorf("getting next job number: %w", err)
+	}
+
+	// Get list of job filenames from recipe and sort alphabetically
+	var recipeJobFilenames []string
+	for filename := range recipe.Jobs {
+		recipeJobFilenames = append(recipeJobFilenames, filename)
+	}
+	sort.Strings(recipeJobFilenames)
+
+	// 2. First Pass: In-Memory Creation & Renaming
+	oldFilenameToNewJob := make(map[string]*Job)
+	oldFilenameToNewFilename := make(map[string]string)
+
+	for _, oldFilename := range recipeJobFilenames {
+		// Render the job content
+		renderedContent, err := recipe.RenderJob(oldFilename, templateData)
+		if err != nil {
+			return nil, fmt.Errorf("rendering job %s: %w", oldFilename, err)
+		}
+
+		// Parse frontmatter from the rendered job
+		frontmatter, body, err := ParseFrontmatter(renderedContent)
+		if err != nil {
+			return nil, fmt.Errorf("parsing frontmatter for job %s: %w", oldFilename, err)
+		}
+
+		// Convert frontmatter map to Job struct
+		job := &Job{
+			PromptBody: string(body),
+		}
+
+		// Marshal frontmatter to YAML and unmarshal to Job struct
+		yamlBytes, err := yaml.Marshal(frontmatter)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling frontmatter for job %s: %w", oldFilename, err)
+		}
+
+		if err := yaml.Unmarshal(yamlBytes, job); err != nil {
+			return nil, fmt.Errorf("unmarshaling to job struct for %s: %w", oldFilename, err)
+		}
+
+		// Generate unique ID for the job
+		job.ID = GenerateUniqueJobID(plan, job.Title)
+
+		// Set default values if not present
+		if job.Status == "" {
+			job.Status = JobStatusPending
+		}
+		if job.Type == "" {
+			job.Type = JobTypeOneshot
+		}
+
+		// Generate new unique filename
+		newFilename := GenerateJobFilename(nextNum, job.Title)
+		newFilePath := filepath.Join(plan.Directory, newFilename)
+
+		// Update the in-memory Job object
+		job.Filename = newFilename
+		job.FilePath = newFilePath
+
+		// Store in tracking maps
+		oldFilenameToNewJob[oldFilename] = job
+		oldFilenameToNewFilename[oldFilename] = newFilename
+
+		nextNum++
+	}
+
+	// 3. Second Pass: Dependency Remapping
+	for oldFilename, newJob := range oldFilenameToNewJob {
+		if len(newJob.DependsOn) == 0 {
+			// This is a root job in the recipe, set external dependencies
+			newJob.DependsOn = externalDeps
+		} else {
+			// Remap internal dependencies
+			var remappedDeps []string
+			for _, oldDep := range newJob.DependsOn {
+				if newFilename, exists := oldFilenameToNewFilename[oldDep]; exists {
+					// This dependency is within the recipe, use the new filename
+					remappedDeps = append(remappedDeps, newFilename)
+				} else {
+					// This dependency might be external, keep as is
+					remappedDeps = append(remappedDeps, oldDep)
+				}
+			}
+			newJob.DependsOn = remappedDeps
+		}
+
+		// Store back in map
+		oldFilenameToNewJob[oldFilename] = newJob
+	}
+
+	// 4. Third Pass: Writing to Disk
+	for _, oldFilename := range recipeJobFilenames {
+		newJob := oldFilenameToNewJob[oldFilename]
+
+		// Generate the full file content
+		var content []byte
+		if newJob.Type == JobTypeAgent || newJob.Type == JobTypeInteractiveAgent || newJob.Type == JobTypeHeadlessAgent {
+			content, err = generateAgentJobContent(newJob)
+		} else {
+			content, err = generateJobContent(newJob)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("generating content for job %s: %w", newJob.Filename, err)
+		}
+
+		// Write to disk
+		if err := os.WriteFile(newJob.FilePath, content, 0644); err != nil {
+			return nil, fmt.Errorf("writing job file %s: %w", newJob.FilePath, err)
+		}
+
+		newFiles = append(newFiles, newJob.Filename)
+	}
+
+	return newFiles, nil
+}
