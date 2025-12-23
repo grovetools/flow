@@ -17,6 +17,7 @@ type KeyMap struct {
 	SetCompleted    key.Binding
 	SetStatus       key.Binding
 	AddJob          key.Binding
+	AddFromRecipe   key.Binding
 	Implement       key.Binding
 	AgentFromChat   key.Binding
 	Rename          key.Binding
@@ -81,6 +82,10 @@ func NewKeyMap() KeyMap {
 		AddJob: key.NewBinding(
 			key.WithKeys("A"),
 			key.WithHelp("A", "add job"),
+		),
+		AddFromRecipe: key.NewBinding(
+			key.WithKeys("P"),
+			key.WithHelp("P", "add from recipe"),
 		),
 		Implement: key.NewBinding(
 			key.WithKeys("i"),
@@ -208,6 +213,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			k.SetCompleted,
 			k.SetStatus,
 			k.AddJob,
+			k.AddFromRecipe,
 			k.AddXmlPlan,
 			k.Implement,
 			k.Rename,

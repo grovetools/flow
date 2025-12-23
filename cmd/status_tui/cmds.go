@@ -34,6 +34,7 @@ type RefreshTickMsg time.Time
 type RenameCompleteMsg struct{ Err error }
 type UpdateDepsCompleteMsg struct{ Err error }
 type CreateJobCompleteMsg struct{ Err error }
+type recipeAddedMsg struct{ err error }
 type JobRunFinishedMsg struct{ Err error }
 type RetryLoadAgentLogsMsg struct{}
 
@@ -1206,5 +1207,27 @@ func createAgentFromChatJobWithTitle(plan *orchestration.Plan, selectedJobs []*o
 		}
 
 		return CreateJobCompleteMsg{Err: nil}
+	}
+}
+
+// addJobsFromRecipeCmd creates a command to add jobs from a recipe to the plan
+func addJobsFromRecipeCmd(plan *orchestration.Plan, recipeName string, externalDeps []string) tea.Cmd {
+	return func() tea.Msg {
+		recipe, err := orchestration.GetRecipe(recipeName, "")
+		if err != nil {
+			return recipeAddedMsg{err: err}
+		}
+
+		// For now, we will use empty template data in the TUI
+		templateData := struct {
+			PlanName string
+			Vars     map[string]string
+		}{
+			PlanName: plan.Name,
+			Vars:     make(map[string]string),
+		}
+
+		_, err = orchestration.AddJobsFromRecipe(plan, recipe, externalDeps, templateData)
+		return recipeAddedMsg{err: err}
 	}
 }

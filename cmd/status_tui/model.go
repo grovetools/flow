@@ -85,6 +85,8 @@ type Model struct {
 	Renaming           bool
 	RenameInput        textinput.Model
 	RenameJobIndex     int
+	selectingRecipe    bool
+	recipeList         list.Model
 	EditingDeps        bool
 	EditDepsJobIndex   int
 	EditDepsSelected   map[string]bool // Track which jobs are selected as dependencies
@@ -419,6 +421,11 @@ func (m Model) View() string {
 	// If editing dependencies, show the edit deps view
 	if m.EditingDeps {
 		return m.renderEditDepsView()
+	}
+
+	// If selecting a recipe, render the selector and return
+	if m.selectingRecipe {
+		return m.renderRecipeSelector()
 	}
 
 	// Show status picker if active
@@ -840,6 +847,38 @@ func findAllDependentsHelper(job *orchestration.Job, plan *orchestration.Plan) [
 func formatStatusSummaryHelper(plan *orchestration.Plan) string {
 	// Status summary is no longer used in TUI-only mode
 	return ""
+}
+
+// recipeItem represents a recipe in the selection list
+type recipeItem struct {
+	name        string
+	description string
+}
+
+func (i recipeItem) FilterValue() string { return i.name }
+func (i recipeItem) Title() string       { return i.name }
+func (i recipeItem) Description() string { return i.description }
+
+// recipeDelegate renders items in the recipe selection list
+type recipeDelegate struct{}
+
+func (d recipeDelegate) Height() int                             { return 1 }
+func (d recipeDelegate) Spacing() int                            { return 0 }
+func (d recipeDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d recipeDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(recipeItem)
+	if !ok {
+		return
+	}
+
+	var str string
+	if index == m.Index() {
+		str = fmt.Sprintf("%s %s", theme.DefaultTheme.Highlight.Render("▶"), i.Title())
+	} else {
+		str = fmt.Sprintf("  %s", i.Title())
+	}
+
+	fmt.Fprint(w, str)
 }
 
 // columnSelectItem represents an item in the column visibility list

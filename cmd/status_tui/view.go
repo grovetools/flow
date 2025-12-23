@@ -578,6 +578,24 @@ func (m Model) renderColumnSelectView() string {
 	content := lipgloss.JoinVertical(lipgloss.Left, styledView, helpText)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, content)
 }
+
+// renderRecipeSelector renders the UI for choosing a recipe.
+func (m Model) renderRecipeSelector() string {
+	listView := m.recipeList.View()
+	styledView := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultTheme.Colors.Cyan).
+		Padding(1, 2).
+		Render(listView)
+	helpText := lipgloss.NewStyle().
+		Faint(true).
+		Width(lipgloss.Width(styledView)).
+		Align(lipgloss.Center).
+		Render("\n\nPress Enter to select • Esc to cancel")
+	content := lipgloss.JoinVertical(lipgloss.Left, styledView, helpText)
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, content)
+}
+
 // renderStyledFrontmatter parses raw YAML and renders it as a styled key-value list with sections.
 func renderStyledFrontmatter(rawYAML string) string {
 	var data map[string]interface{}

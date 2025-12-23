@@ -28,6 +28,8 @@ type PlanAddStepCmd struct {
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`
 	PrependDependencies bool     `flag:"" help:"Inline dependency content into prompt body instead of uploading as separate files"`
+	Recipe              string   `flag:"" help:"Name of a recipe to add to the plan"`
+	RecipeVars          []string `flag:"" help:"Variables for the recipe templates (e.g., key=value)"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -57,6 +59,52 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	plan, err := orchestration.LoadPlan(planPath)
 	if err != nil {
 		return fmt.Errorf("failed to load plan: %w", err)
+	}
+
+	// Handle adding jobs from a recipe
+	if cmd.Recipe != "" {
+		// 1. Load the recipe
+		// We don't have a recipe command here, so we pass an empty string
+		recipe, err := orchestration.GetRecipe(cmd.Recipe, "")
+		if err != nil {
+			return err
+		}
+
+		// 2. Parse recipe variables from CLI flags
+		recipeVars := make(map[string]string)
+		for _, v := range cmd.RecipeVars {
+			pairs := strings.Split(v, ",")
+			for _, pair := range pairs {
+				pair = strings.TrimSpace(pair)
+				if pair == "" {
+					continue
+				}
+				parts := strings.SplitN(pair, "=", 2)
+				if len(parts) == 2 {
+					recipeVars[parts[0]] = parts[1]
+				}
+			}
+		}
+		templateData := struct {
+			PlanName string
+			Vars     map[string]string
+		}{
+			PlanName: plan.Name,
+			Vars:     recipeVars,
+		}
+
+		// 3. Call the core orchestration function
+		newFiles, err := orchestration.AddJobsFromRecipe(plan, recipe, cmd.DependsOn, templateData)
+		if err != nil {
+			return fmt.Errorf("failed to add jobs from recipe: %w", err)
+		}
+
+		// 4. Print success message
+		fmt.Println(theme.DefaultTheme.Success.Render("✓") + " Added " + fmt.Sprintf("%d jobs from recipe '%s':", len(newFiles), cmd.Recipe))
+		for _, file := range newFiles {
+			fmt.Println("  - " + file)
+		}
+		return nil
 	}
 
 	// Use explicit worktree from command line flag only

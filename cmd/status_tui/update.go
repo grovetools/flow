@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -220,6 +221,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error creating job: %v", msg.Err))
 		} else {
 			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job created successfully.")
+		}
+		return m, refreshPlan(m.PlanDir)
+
+	case recipeAddedMsg:
+		if msg.err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error adding recipe: %v", msg.err))
+		} else {
+			m.StatusSummary = theme.DefaultTheme.Success.Render("✓ Recipe jobs added successfully.")
 		}
 		return m, refreshPlan(m.PlanDir)
 
@@ -689,6 +698,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.columnList, cmd = m.columnList.Update(msg)
 				return m, cmd
 			}
+		}
+
+		// Handle recipe selection mode
+		if m.selectingRecipe {
+			switch msg.String() {
+			case "enter":
+				if i, ok := m.recipeList.SelectedItem().(recipeItem); ok {
+					m.selectingRecipe = false
+					// Get selected jobs as external dependencies
+					var externalDeps []string
+					for id := range m.Selected {
+						for _, job := range m.Jobs {
+							if job.ID == id {
+								externalDeps = append(externalDeps, job.Filename)
+								break
+							}
+						}
+					}
+					// Trigger the command to add the recipe
+					m.StatusSummary = "Adding jobs from recipe..."
+					return m, addJobsFromRecipeCmd(m.Plan, i.name, externalDeps)
+				}
+			case "esc", "q":
+				m.selectingRecipe = false
+				m.StatusSummary = ""
+				return m, nil
+			}
+			m.recipeList, cmd = m.recipeList.Update(msg)
+			return m, cmd
 		}
 
 		// If help is showing, let it handle key messages (for scrolling and closing)
@@ -1175,6 +1213,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				return m, addJobWithDependencies(m.Plan.Directory, nil)
 			}
+
+		case key.Matches(msg, m.KeyMap.AddFromRecipe):
+			m.selectingRecipe = true
+			// Load recipes and populate the list model
+			// For now, we'll do this synchronously as the list is small.
+			recipes, err := orchestration.ListAllRecipes("") // No dynamic command in TUI context yet
+			if err != nil {
+				m.StatusSummary = theme.DefaultTheme.Error.Render("Error loading recipes: " + err.Error())
+				m.selectingRecipe = false
+				return m, nil
+			}
+			var items []list.Item
+			for _, r := range recipes {
+				items = append(items, recipeItem{name: r.Name, description: r.Description})
+			}
+			m.recipeList = list.New(items, recipeDelegate{}, 40, 10)
+			m.recipeList.Title = "Select a Recipe to Add"
+			m.recipeList.SetShowHelp(false)
+			return m, nil
 
 		case key.Matches(msg, m.KeyMap.Implement):
 			if len(m.Selected) > 0 {

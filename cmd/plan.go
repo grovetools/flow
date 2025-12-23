@@ -130,6 +130,8 @@ var (
 	planAddSourceFiles       []string
 	planAddWorktree          string
 	planAddPrependDependencies bool
+	planAddRecipe          string
+	planAddRecipeVars      []string
 
 	// Graph flags
 	planGraphFormat string
@@ -179,6 +181,8 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringSliceVar(&planAddSourceFiles, "source-files", nil, "Comma-separated list of source files for reference-based prompts")
 	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "Inline dependency content into prompt body instead of uploading as separate files")
+	planAddCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
+	planAddCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
 
 	// Graph command flags
 	planGraphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
@@ -293,6 +297,8 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		SourceFiles:          planAddSourceFiles,
 		Worktree:             planAddWorktree,
 		PrependDependencies:  planAddPrependDependencies,
+		Recipe:               planAddRecipe,
+		RecipeVars:           planAddRecipeVars,
 	}
 	return RunPlanAddStep(addStepCmd)
 }
