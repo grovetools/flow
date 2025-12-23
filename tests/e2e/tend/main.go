@@ -34,6 +34,7 @@ func main() {
 		scenarios.PlanStatusTUIColumnToggleScenario,
 		scenarios.PlanStatusTUIColumnPersistenceScenario,
 		scenarios.PlanStatusTUIDAGScenario,
+		scenarios.PlanStatusTUILayoutLongNamesScenario,
 		scenarios.PlanStatusTUILayoutPersistenceScenario,
 		scenarios.PlanFromNoteScenario,
 		scenarios.PlanMergeUpdateWorktreeScenario,

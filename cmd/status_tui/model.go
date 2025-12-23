@@ -611,20 +611,12 @@ func (m *Model) calculateJobsPaneWidth() int {
 			}
 			// statusIcon (1 visual char, but may have ANSI codes) + space (1) + filename
 			jobColWidth := treePrefixWidth + 2 + lipgloss.Width(job.Filename)
-			// Cap at maxJobColumnWidth to match truncation in view.go
-			if jobColWidth > maxJobColumnWidth {
-				jobColWidth = maxJobColumnWidth
-			}
 			if jobColWidth > columnWidths["JOB"] {
 				columnWidths["JOB"] = jobColWidth
 			}
 		}
 		if m.columnVisibility["TITLE"] {
 			titleWidth := lipgloss.Width(job.Title)
-			// Cap at maxTitleColumnWidth to match truncation in view.go
-			if titleWidth > maxTitleColumnWidth {
-				titleWidth = maxTitleColumnWidth
-			}
 			if titleWidth > columnWidths["TITLE"] {
 				columnWidths["TITLE"] = titleWidth
 			}
