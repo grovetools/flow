@@ -210,7 +210,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 				"plan_dir": plan.Directory,
 				"fallback": true,
 			}).Warn("Not a git repository, using plan directory")
-			prettyLog.WarnPretty(fmt.Sprintf("Not a git repository. Using plan directory as working directory: %s", workDir))
+			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Not a git repository. Using plan directory as working directory: %s", workDir))
 		}
 	}
 
@@ -218,7 +218,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	if err := e.regenerateContextInWorktree(ctx, workDir, "oneshot", job, plan); err != nil {
 		// Log warning but don't fail the job
 		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to regenerate context")
-		prettyLog.WarnPretty(fmt.Sprintf("Failed to regenerate context: %v", err))
+		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to regenerate context: %v", err))
 	}
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
@@ -256,7 +256,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	briefingFilePath, err := WriteBriefingFile(plan, job, prompt, "")
 	if err != nil {
 		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to write briefing file")
-		prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
+		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to write briefing file: %w", err)
@@ -386,7 +386,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	if err := updateJobFile(job); err != nil {
 		// Log but don't fail - the job executed successfully
 		log.WithError(err).Warn("Failed to update job file status")
-		prettyLog.WarnPretty(fmt.Sprintf("Failed to update job file status: %v", err))
+		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to update job file status: %v", err))
 	}
 
 	return nil
@@ -761,7 +761,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		// Log a warning but don't fail the job, as this is a convenience feature.
 		log.WithError(err).Warn("Failed to create .grove directory in worktree")
-		prettyLog.WarnPretty(fmt.Sprintf("Failed to create .grove directory in worktree: %v", err))
+		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to create .grove directory in worktree: %v", err))
 	} else {
 		planName := filepath.Base(plan.Directory)
 		// Use a flat map with the key "flow.active_plan" to match how state.Set works.

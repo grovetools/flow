@@ -106,7 +106,7 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		if err != nil {
 			workDir = plan.Directory
 			log.Warn("Not a git repository, using plan directory as working directory")
-			prettyLog.WarnPretty(fmt.Sprintf("Not a git repository. Using plan directory: %s", workDir))
+			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Not a git repository. Using plan directory: %s", workDir))
 		}
 	}
 

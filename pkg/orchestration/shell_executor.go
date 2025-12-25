@@ -94,7 +94,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan); err != nil {
 			// Warn but do not fail the job for a context error
 			e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to generate job-specific context for shell job")
-			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
+			e.prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
 		}
 	}
 
@@ -161,7 +161,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 			"status": finalStatus,
 			"error":  statusUpdateErr,
 		}).Warn("Failed to update job status")
-		e.prettyLog.WarnPretty(fmt.Sprintf("Warning: failed to update job status to %s: %v", finalStatus, statusUpdateErr))
+		e.prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: failed to update job status to %s: %v", finalStatus, statusUpdateErr))
 	}
 	
 	if execErr != nil {
