@@ -272,8 +272,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			"prompt_chars":       len(prompt),
 		}).Info("Briefing file created")
 		if isTUIMode() {
-			fmt.Fprintf(output, "%s Briefing file created at: %s\n\n", theme.IconCode, briefingFilePath)
+			fmt.Fprintf(output, "\n%s Briefing file created at: %s\n\n", theme.IconCode, briefingFilePath)
 		} else {
+			fmt.Fprintln(output)
 			prettyLog.InfoPretty(fmt.Sprintf("%s Briefing file created at: %s", theme.IconCode, briefingFilePath))
 			fmt.Fprintln(output)
 		}
@@ -1027,8 +1028,8 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			"total_size":   stats.TotalSize,
 		}).Info("Context summary generated")
 
-		// Display summary statistics using prettyLog
-		prettyLog.InfoPrettyCtx(ctx, theme.IconFileTree+" Context Summary")
+		// Display summary statistics
+		fmt.Fprintf(writer, "%s Context Summary\n", theme.IconFileTree)
 		prettyLog.FieldCtx(ctx, "Total Files", stats.TotalFiles)
 		prettyLog.FieldCtx(ctx, "Total Tokens", grovecontext.FormatTokenCount(stats.TotalTokens))
 		prettyLog.FieldCtx(ctx, "Total Size", grovecontext.FormatBytes(int(stats.TotalSize)))
@@ -1038,7 +1039,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		// Show language distribution if there are files
 		if stats.TotalFiles > 0 {
 			prettyLog.BlankCtx(ctx)
-			prettyLog.InfoPrettyCtx(ctx, theme.IconProject+" Language Distribution:")
+			fmt.Fprintf(writer, "%s Language Distribution:\n", theme.IconProject)
 
 			// Sort languages by token count
 			var languages []grovecontext.LanguageStats

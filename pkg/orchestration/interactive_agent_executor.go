@@ -145,6 +145,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			"prompt_chars":       len(promptXML),
 		}).Info("Interactive agent briefing file created")
 
+		fmt.Println()
 		e.prettyLog.InfoPretty(fmt.Sprintf("%s Briefing file created at: %s\n", theme.IconCode, briefingFilePath))
 	}
 
