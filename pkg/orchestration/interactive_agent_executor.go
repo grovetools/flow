@@ -146,7 +146,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}).Info("Interactive agent briefing file created")
 
 		fmt.Println()
-		e.prettyLog.InfoPretty(fmt.Sprintf("%s Briefing file created at: %s\n", theme.IconCode, briefingFilePath))
+		e.prettyLog.InfoPretty(fmt.Sprintf("%s  Briefing file created at: %s\n", theme.IconCode, briefingFilePath))
 	}
 
 	// Note: SkipInteractive flag controls whether to prompt for user input during execution,

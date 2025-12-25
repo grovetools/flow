@@ -272,10 +272,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			"prompt_chars":       len(prompt),
 		}).Info("Briefing file created")
 		if isTUIMode() {
-			fmt.Fprintf(output, "\n%s Briefing file created at: %s\n\n", theme.IconCode, briefingFilePath)
+			fmt.Fprintf(output, "\n%s  Briefing file created at: %s\n\n", theme.IconCode, briefingFilePath)
 		} else {
 			fmt.Fprintln(output)
-			prettyLog.InfoPretty(fmt.Sprintf("%s Briefing file created at: %s", theme.IconCode, briefingFilePath))
+			prettyLog.InfoPretty(fmt.Sprintf("%s  Briefing file created at: %s", theme.IconCode, briefingFilePath))
 			fmt.Fprintln(output)
 		}
 	}
