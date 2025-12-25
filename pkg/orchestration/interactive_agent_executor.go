@@ -20,6 +20,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	flowexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
@@ -144,7 +145,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			"prompt_chars":       len(promptXML),
 		}).Info("Interactive agent briefing file created")
 
-		e.prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s\n", briefingFilePath))
+		e.prettyLog.InfoPretty(fmt.Sprintf("%s Briefing file created at: %s\n", theme.IconCode, briefingFilePath))
 	}
 
 	// Note: SkipInteractive flag controls whether to prompt for user input during execution,

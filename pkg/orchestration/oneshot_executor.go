@@ -19,6 +19,7 @@ import (
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -271,9 +272,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			"prompt_chars":       len(prompt),
 		}).Info("Briefing file created")
 		if isTUIMode() {
-			fmt.Fprintf(output, "Briefing file created at: %s\n\n", briefingFilePath)
+			fmt.Fprintf(output, "%s Briefing file created at: %s\n\n", theme.IconCode, briefingFilePath)
 		} else {
-			prettyLog.InfoPretty(fmt.Sprintf("Briefing file created at: %s", briefingFilePath))
+			prettyLog.InfoPretty(fmt.Sprintf("%s Briefing file created at: %s", theme.IconCode, briefingFilePath))
 			fmt.Fprintln(output)
 		}
 	}
@@ -784,7 +785,6 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath string, jobType string, job *Job, plan *Plan) error {
 	writer := grovelogging.GetWriter(ctx)
 	log.WithField("job_type", jobType).Info("Checking context in worktree")
-	fmt.Fprintf(writer, "Checking context in worktree for %s job...\n", jobType)
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
@@ -1028,7 +1028,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		}).Info("Context summary generated")
 
 		// Display summary statistics using prettyLog
-		prettyLog.InfoPrettyCtx(ctx, "Context Summary")
+		prettyLog.InfoPrettyCtx(ctx, theme.IconFileTree+" Context Summary")
 		prettyLog.FieldCtx(ctx, "Total Files", stats.TotalFiles)
 		prettyLog.FieldCtx(ctx, "Total Tokens", grovecontext.FormatTokenCount(stats.TotalTokens))
 		prettyLog.FieldCtx(ctx, "Total Size", grovecontext.FormatBytes(int(stats.TotalSize)))
@@ -1038,7 +1038,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		// Show language distribution if there are files
 		if stats.TotalFiles > 0 {
 			prettyLog.BlankCtx(ctx)
-			prettyLog.InfoPrettyCtx(ctx, "Language Distribution:")
+			prettyLog.InfoPrettyCtx(ctx, theme.IconProject+" Language Distribution:")
 
 			// Sort languages by token count
 			var languages []grovecontext.LanguageStats
@@ -1072,9 +1072,6 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 				shown++
 			}
 
-			prettyLog.BlankCtx(ctx)
-			prettyLog.SuccessCtx(ctx, fmt.Sprintf("Context available for %s job.", jobType))
-			prettyLog.DividerCtx(ctx)
 		}
 	}
 
