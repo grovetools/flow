@@ -569,8 +569,24 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 
 		ctx := context.Background()
 
-		// 1. Create a StreamWriter for live TUI updates. Use a generic workspace name for the stream.
-		tuiWriter := logviewer.NewStreamWriter(program, "Job Output")
+		// 1. Create a StreamWriter for live TUI updates with smart tagging.
+		// If running a single job, tag with that job's ID so the log viewer can filter correctly.
+		// If running multiple jobs, use a generic tag so all logs are shown.
+		var writerTag string
+		if len(jobs) == 1 {
+			// Single job: tag with the specific job ID
+			writerTag = jobs[0].ID
+		} else {
+			// Multiple jobs: use generic tag
+			writerTag = "Job Output"
+		}
+		tuiWriter := logviewer.NewStreamWriter(program, writerTag)
+
+		// If running a single job, the log viewer is already focused on it,
+		// so the job ID prefix on each line is redundant. Disable it.
+		if len(jobs) == 1 {
+			tuiWriter.NoWorkspacePrefix = true
+		}
 
 		// 2. Set global logging output to the TUI writer. This captures all grove-core logs.
 		logging.SetGlobalOutput(tuiWriter)
