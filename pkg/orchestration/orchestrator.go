@@ -390,6 +390,9 @@ func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, outpu
 	requestID := "req-" + uuid.New().String()[:8]
 	ctx = context.WithValue(ctx, "request_id", requestID)
 
+	// Attach the job-specific output writer to the context for thread-safe logging.
+	ctx = WithJobWriter(ctx, output)
+
 	// Log job execution with full frontmatter details
 	logFields := map[string]interface{}{
 		"request_id": requestID,

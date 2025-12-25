@@ -1,0 +1,287 @@
+package scenarios
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/mattsolo1/grove-tend/pkg/fs"
+	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/mattsolo1/grove-tend/pkg/verify"
+)
+
+var JobLogCaptureScenario = harness.NewScenario(
+	"job-log-capture",
+	"Verifies that all logging output including context summaries is captured in job.log files",
+	[]string{"core", "logging", "oneshot", "chat"},
+	[]harness.Step{
+		harness.NewStep("Setup sandboxed environment", func(ctx *harness.Context) error {
+			projectDir, _, err := setupDefaultEnvironment(ctx, "log-capture-project")
+			if err != nil {
+				return err
+			}
+
+			// Create a simple Go project to trigger context generation
+			if err := fs.WriteString(filepath.Join(projectDir, "go.mod"), "module log-capture-project\n\ngo 1.22\n"); err != nil {
+				return err
+			}
+			if err := fs.WriteString(filepath.Join(projectDir, "main.go"), "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}\n"); err != nil {
+				return err
+			}
+
+			// Create context rules file to trigger context generation
+			rulesDir := filepath.Join(projectDir, ".grove")
+			if err := fs.CreateDir(rulesDir); err != nil {
+				return err
+			}
+			if err := fs.WriteString(filepath.Join(rulesDir, "rules"), "*.go\n"); err != nil {
+				return err
+			}
+
+			return nil
+		}),
+
+		harness.SetupMocks(
+			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "cx"},
+		),
+
+		harness.NewStep("Create mock LLM response", func(ctx *harness.Context) error {
+			responseContent := "This is the mock LLM response for testing."
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+			if err := fs.WriteString(responseFile, responseContent); err != nil {
+				return err
+			}
+			ctx.Set("llm_response_file", responseFile)
+			return nil
+		}),
+
+		harness.NewStep("Initialize plan and add oneshot job", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			notebooksRoot := ctx.GetString("notebooks_root")
+			projectName := "log-capture-project"
+			planPath := filepath.Join(notebooksRoot, "workspaces", projectName, "plans", "log-test-plan")
+			ctx.Set("plan_path", planPath)
+
+			// Init plan inside the project
+			initCmd := ctx.Bin("plan", "init", "log-test-plan")
+			initCmd.Dir(projectDir)
+			if result := initCmd.Run(); result.Error != nil {
+				return fmt.Errorf("plan init failed: %w\nStderr: %s", result.Error, result.Stderr)
+			}
+
+			// Add oneshot job that references a source file
+			addCmd := ctx.Bin("plan", "add", "log-test-plan",
+				"--type", "oneshot",
+				"--title", "test-oneshot-logging",
+				"--source-files", "main.go",
+				"-p", "Review the code in main.go")
+			addCmd.Dir(projectDir)
+
+			result := addCmd.Run()
+			if err := result.AssertSuccess(); err != nil {
+				return err
+			}
+
+			// Edit the job file to use gemini model (which the mock supports)
+			// We need to add model to the frontmatter since plan add doesn't set it
+			jobPath := filepath.Join(planPath, "01-test-oneshot-logging.md")
+			content, err := fs.ReadString(jobPath)
+			if err != nil {
+				return fmt.Errorf("reading job file: %w", err)
+			}
+			// Add model field after the first line (---)
+			lines := strings.Split(content, "\n")
+			if len(lines) > 1 {
+				// Insert model after opening ---
+				newLines := append([]string{lines[0], "model: gemini-2.0-flash"}, lines[1:]...)
+				updatedContent := strings.Join(newLines, "\n")
+				if err := fs.WriteString(jobPath, updatedContent); err != nil {
+					return fmt.Errorf("updating job file: %w", err)
+				}
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Run oneshot job with custom output writer", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+			llmResponseFile := ctx.GetString("llm_response_file")
+			jobPath := filepath.Join(planPath, "01-test-oneshot-logging.md")
+
+			// Load the job and plan
+			job, err := orchestration.LoadJob(jobPath)
+			if err != nil {
+				return fmt.Errorf("loading job file: %w", err)
+			}
+			job.FilePath = jobPath // Set FilePath manually since LoadJob doesn't do it
+
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return fmt.Errorf("loading plan: %w", err)
+			}
+
+			// Create job.log file (like TUI does)
+			jobLogPath, err := orchestration.GetJobLogPath(plan, job)
+			if err != nil {
+				return fmt.Errorf("getting job log path: %w", err)
+			}
+			ctx.Set("oneshot_job_log_path", jobLogPath)
+
+			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return fmt.Errorf("creating job log file: %w", err)
+			}
+			defer logFile.Close()
+
+			// Create a MultiWriter like the TUI does - write to both log file and a buffer
+			var buffer bytes.Buffer
+			multiWriter := io.MultiWriter(logFile, &buffer)
+
+			// Create orchestrator
+			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{})
+			if err != nil {
+				return fmt.Errorf("creating orchestrator: %w", err)
+			}
+
+			// Set environment for mock LLM
+			os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", llmResponseFile)
+			defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
+
+			// Execute the job with the custom writer
+			if err := orch.ExecuteJobWithWriter(context.Background(), job, multiWriter); err != nil {
+				return fmt.Errorf("executing job: %w\nBuffer: %s", err, buffer.String())
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Verify oneshot job.log contains context summary", func(ctx *harness.Context) error {
+			jobLogPath := ctx.GetString("oneshot_job_log_path")
+
+			// Verify job.log exists
+			if err := ctx.Check("job.log file exists", fs.AssertExists(jobLogPath)); err != nil {
+				return err
+			}
+
+			// Verify job.log contains context generation output
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Equal("job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
+				v.Equal("job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
+				v.Equal("job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
+				v.Equal("job.log contains context available message", nil, fs.AssertContains(jobLogPath, "Context available for oneshot job"))
+			})
+		}),
+
+		harness.NewStep("Add chat job to the same plan", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Add chat job
+			addCmd := ctx.Bin("plan", "add", "log-test-plan",
+				"--type", "chat",
+				"--title", "test-chat-logging",
+				"-p", "Discuss the main.go implementation")
+			addCmd.Dir(projectDir)
+
+			result := addCmd.Run()
+			if err := result.AssertSuccess(); err != nil {
+				return err
+			}
+
+			// Edit the job file to use gemini model (which the mock supports)
+			// We need to add model to the frontmatter since plan add doesn't set it
+			jobPath := filepath.Join(planPath, "02-test-chat-logging.md")
+			content, err := fs.ReadString(jobPath)
+			if err != nil {
+				return fmt.Errorf("reading job file: %w", err)
+			}
+			// Add model field after the first line (---)
+			lines := strings.Split(content, "\n")
+			if len(lines) > 1 {
+				// Insert model after opening ---
+				newLines := append([]string{lines[0], "model: gemini-2.0-flash"}, lines[1:]...)
+				updatedContent := strings.Join(newLines, "\n")
+				if err := fs.WriteString(jobPath, updatedContent); err != nil {
+					return fmt.Errorf("updating job file: %w", err)
+				}
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Run chat job with custom output writer", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+			llmResponseFile := ctx.GetString("llm_response_file")
+			jobPath := filepath.Join(planPath, "02-test-chat-logging.md")
+
+			// Load the job and plan
+			job, err := orchestration.LoadJob(jobPath)
+			if err != nil {
+				return fmt.Errorf("loading job file: %w", err)
+			}
+			job.FilePath = jobPath // Set FilePath manually since LoadJob doesn't do it
+
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return fmt.Errorf("loading plan: %w", err)
+			}
+
+			// Create job.log file (like TUI does)
+			jobLogPath, err := orchestration.GetJobLogPath(plan, job)
+			if err != nil {
+				return fmt.Errorf("getting job log path: %w", err)
+			}
+			ctx.Set("chat_job_log_path", jobLogPath)
+
+			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return fmt.Errorf("creating job log file: %w", err)
+			}
+			defer logFile.Close()
+
+			// Create a MultiWriter like the TUI does - write to both log file and a buffer
+			var buffer bytes.Buffer
+			multiWriter := io.MultiWriter(logFile, &buffer)
+
+			// Create orchestrator
+			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{})
+			if err != nil {
+				return fmt.Errorf("creating orchestrator: %w", err)
+			}
+
+			// Set environment for mock LLM
+			os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", llmResponseFile)
+			defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
+
+			// Execute the job with the custom writer
+			if err := orch.ExecuteJobWithWriter(context.Background(), job, multiWriter); err != nil {
+				return fmt.Errorf("executing chat job: %w\nBuffer: %s", err, buffer.String())
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Verify chat job.log contains context summary", func(ctx *harness.Context) error {
+			jobLogPath := ctx.GetString("chat_job_log_path")
+
+			// Verify job.log exists
+			if err := ctx.Check("chat job.log file exists", fs.AssertExists(jobLogPath)); err != nil {
+				return err
+			}
+
+			// Verify job.log contains context generation output
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Equal("chat job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
+				v.Equal("chat job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
+				v.Equal("chat job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
+				v.Equal("chat job.log contains context available message", nil, fs.AssertContains(jobLogPath, "Context available for chat job"))
+			})
+		}),
+	},
+)

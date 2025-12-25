@@ -199,7 +199,8 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		c.log.WithError(err).Warn("Could not create LLM log file")
 	} else {
 		defer logFile.Close()
-		grovelogging.NewPrettyLogger().InfoPretty(fmt.Sprintf("LLM output is being logged to: %s", logFilePath))
+		writer := GetJobWriter(ctx)
+		fmt.Fprintf(writer, "LLM output is being logged to: %s\n", logFilePath)
 	}
 
 	// Capture output and stream to the provided writer

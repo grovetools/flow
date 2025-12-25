@@ -778,14 +778,15 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 
 // regenerateContextInWorktree regenerates the context within a worktree.
 func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath string, jobType string, job *Job, plan *Plan) error {
+	writer := GetJobWriter(ctx)
 	log.WithField("job_type", jobType).Info("Checking context in worktree")
-	prettyLog.InfoPretty(fmt.Sprintf("Checking context in worktree for %s job...", jobType))
+	fmt.Fprintf(writer, "Checking context in worktree for %s job...\n", jobType)
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
 	if contextDir != worktreePath {
 		log.WithField("context_dir", contextDir).Info("Scoping context generation to sub-project")
-		prettyLog.InfoPretty(fmt.Sprintf("Scoping context to sub-project: %s", job.Repository))
+		fmt.Fprintf(writer, "Scoping context to sub-project: %s\n", job.Repository)
 	}
 
 	// Create context manager for the worktree (or sub-project)
@@ -847,14 +848,14 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		}
 		
 		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
-		prettyLog.InfoPretty(fmt.Sprintf("Using job-specific context from: %s", rulesFilePath))
+		fmt.Fprintf(writer, "Using job-specific context from: %s\n", rulesFilePath)
 
 		// Generate context using the custom rules file
 		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
 			return fmt.Errorf("failed to generate job-specific context: %w", err)
 		}
 
-		return e.displayContextInfo(contextDir)
+		return e.displayContextInfo(ctx, contextDir)
 	}
 
 	// Check if .grove/rules exists for default context generation
@@ -862,7 +863,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
 			// Try to create default rules file using cx reset
-			prettyLog.InfoPretty("No .grove/rules file found. Creating default rules file...")
+			fmt.Fprintf(writer, "No .grove/rules file found. Creating default rules file...\n")
 			
 			// Try cx reset to create default rules
 			var resetCmd *exec.Cmd
@@ -887,7 +888,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			// Check if cx reset succeeded in creating the rules file
 			if resetErr == nil {
 				if _, err := os.Stat(rulesPath); err == nil {
-					prettyLog.Success("Created default .grove/rules file")
+					fmt.Fprintf(writer, "✓ Created default .grove/rules file\n")
 					// Continue with the normal flow - the rules file now exists
 					// Fall through to the code below that handles existing rules files
 				} else {
@@ -901,31 +902,31 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			if resetErr != nil {
 				// Check if we should skip interactive prompts
 				if e.config.SkipInteractive {
-					prettyLog.WarnPretty("Could not create .grove/rules file.")
-					prettyLog.InfoPretty(fmt.Sprintf("Skipping interactive prompt and proceeding without context for %s job", jobType))
+					fmt.Fprintf(writer, "Warning: Could not create .grove/rules file.\n")
+					fmt.Fprintf(writer, "Skipping interactive prompt and proceeding without context for %s job\n", jobType)
 					log.WithField("job_type", jobType).Info(fmt.Sprintf("Skipping interactive prompt and proceeding without context for %s job", jobType))
-					return e.displayContextInfo(contextDir)
+					return e.displayContextInfo(ctx, contextDir)
 				}
 
 				// Check if we have a TTY before prompting
 				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
-					prettyLog.WarnPretty("Could not create .grove/rules file.")
+					fmt.Fprintf(writer, "Warning: Could not create .grove/rules file.\n")
 					log.WithField("job_type", jobType).Info("No TTY available, proceeding without context")
-					return e.displayContextInfo(contextDir)
+					return e.displayContextInfo(ctx, contextDir)
 				}
 
 				// Prompt user when rules file is missing
-				prettyLog.WarnPretty("Could not create .grove/rules file.")
-				prettyLog.WarnPretty(fmt.Sprintf("Without a rules file, context cannot be generated for this %s job.", jobType))
+				fmt.Fprintf(writer, "Warning: Could not create .grove/rules file.\n")
+				fmt.Fprintf(writer, "Without a rules file, context cannot be generated for this %s job.\n", jobType)
 
 				// Interactive prompt loop
 				for {
-					prettyLog.Blank()
-					prettyLog.InfoPretty("Options:")
-					prettyLog.InfoPretty("  [E]dit - Create and edit a rules file (default)")
-					prettyLog.InfoPretty("  [P]roceed - Continue without context")
-					prettyLog.InfoPretty("  [C]ancel - Cancel the job")
-					prettyLog.InfoPretty("Your choice [E/p/c]: ")
+					fmt.Fprintf(writer, "\n")
+					fmt.Fprintf(writer, "Options:\n")
+					fmt.Fprintf(writer, "  [E]dit - Create and edit a rules file (default)\n")
+					fmt.Fprintf(writer, "  [P]roceed - Continue without context\n")
+					fmt.Fprintf(writer, "  [C]ancel - Cancel the job\n")
+					fmt.Fprintf(writer, "Your choice [E/p/c]: ")
 
 					reader := bufio.NewReader(os.Stdin)
 					input, _ := reader.ReadString('\n')
@@ -940,13 +941,13 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 						} else if _, err := exec.LookPath("grove-context"); err == nil {
 							cxBinary = "grove-context"
 						} else {
-							prettyLog.ErrorPretty("Neither 'cx' nor 'grove-context' found in PATH.", nil)
-							prettyLog.ErrorPretty("Please install grove-context to use this feature.", nil)
+							fmt.Fprintf(writer, "Error: Neither 'cx' nor 'grove-context' found in PATH.\n")
+							fmt.Fprintf(writer, "Please install grove-context to use this feature.\n")
 							continue
 						}
 
 						// Run cx edit in the context directory
-						prettyLog.InfoPretty(fmt.Sprintf("Opening rules editor with '%s edit'...", cxBinary))
+						fmt.Fprintf(writer, "Opening rules editor with '%s edit'...\n", cxBinary)
 						cmd := exec.Command("grove", "cx", "edit")
 						cmd.Dir = contextDir
 						cmd.Stdin = os.Stdin
@@ -954,31 +955,31 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 						cmd.Stderr = os.Stderr
 
 						if err := cmd.Run(); err != nil {
-							prettyLog.ErrorPretty(fmt.Sprintf("Error running %s edit", cxBinary), err)
-							prettyLog.ErrorPretty("Please try again or choose a different option.", nil)
+							fmt.Fprintf(writer, "Error running %s edit: %v\n", cxBinary, err)
+							fmt.Fprintf(writer, "Please try again or choose a different option.\n")
 							continue
 						}
 
 						// After edit completes, check if rules file now exists
 						if _, err := os.Stat(rulesPath); err == nil {
-							prettyLog.Success("Rules file created successfully.")
+							fmt.Fprintf(writer, "✓ Rules file created successfully.\n")
 							// Break out of the prompt loop and continue with regeneration
 							break
 						} else {
-							prettyLog.WarnPretty("Rules file still not found. Please try again.")
+							fmt.Fprintf(writer, "Warning: Rules file still not found. Please try again.\n")
 							continue
 						}
 
 					case "p", "proceed":
-						prettyLog.WarnPretty("Proceeding without context from rules.")
-						prettyLog.InfoPretty("💡 To add context for future runs, open a new terminal, navigate to the context directory, and run 'cx edit'.")
-						return e.displayContextInfo(contextDir)
+						fmt.Fprintf(writer, "Warning: Proceeding without context from rules.\n")
+						fmt.Fprintf(writer, "💡 To add context for future runs, open a new terminal, navigate to the context directory, and run 'cx edit'.\n")
+						return e.displayContextInfo(ctx, contextDir)
 
 					case "c", "cancel":
 						return fmt.Errorf("job canceled by user: .grove/rules file not found")
 
 					default:
-						prettyLog.ErrorPretty(fmt.Sprintf("Invalid choice '%s'. Please choose E, P, or C.", choice), nil)
+						fmt.Fprintf(writer, "Error: Invalid choice '%s'. Please choose E, P, or C.\n", choice)
 						continue
 					}
 
@@ -1022,19 +1023,19 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			"total_size":   stats.TotalSize,
 		}).Info("Context summary generated")
 
-		// Display summary statistics for pretty console
-		prettyLog.Divider()
-		prettyLog.InfoPretty("Context Summary")
-		prettyLog.Field("Total Files", fmt.Sprintf("%d", stats.TotalFiles))
-		prettyLog.Field("Total Tokens", grovecontext.FormatTokenCount(stats.TotalTokens))
-		prettyLog.Field("Total Size", grovecontext.FormatBytes(int(stats.TotalSize)))
+		// Display summary statistics
+		fmt.Fprintln(writer, strings.Repeat("─", 60))
+		fmt.Fprintln(writer, "Context Summary")
+		fmt.Fprintf(writer, "Total Files: %d\n", stats.TotalFiles)
+		fmt.Fprintf(writer, "Total Tokens: %s\n", grovecontext.FormatTokenCount(stats.TotalTokens))
+		fmt.Fprintf(writer, "Total Size: %s\n", grovecontext.FormatBytes(int(stats.TotalSize)))
 
 		// Token limit check removed - no longer enforcing limits
 
 		// Show language distribution if there are files
 		if stats.TotalFiles > 0 {
-			prettyLog.Blank()
-			prettyLog.InfoPretty("Language Distribution:")
+			fmt.Fprintln(writer)
+			fmt.Fprintln(writer, "Language Distribution:")
 
 			// Sort languages by token count
 			var languages []grovecontext.LanguageStats
@@ -1059,20 +1060,18 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 				}).Debug("Language stats")
 				
 				// Display for pretty console
-				prettyLog.Field(
+				fmt.Fprintf(writer, "%s: %5.1f%% (%s tokens, %d files)\n",
 					lang.Name,
-					fmt.Sprintf("%5.1f%% (%s tokens, %d files)",
-						lang.Percentage,
-						grovecontext.FormatTokenCount(lang.TotalTokens),
-						lang.FileCount,
-					),
+					lang.Percentage,
+					grovecontext.FormatTokenCount(lang.TotalTokens),
+					lang.FileCount,
 				)
 				shown++
 			}
 
-			prettyLog.Blank()
-			prettyLog.Success(fmt.Sprintf("Context available for %s job.", jobType))
-			prettyLog.Divider()
+			fmt.Fprintln(writer)
+			fmt.Fprintf(writer, "✓ Context available for %s job.\n", jobType)
+			fmt.Fprintln(writer, strings.Repeat("─", 60))
 		}
 	}
 
@@ -1080,7 +1079,8 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 }
 
 // displayContextInfo displays information about available context files
-func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
+func (e *OneShotExecutor) displayContextInfo(ctx context.Context, worktreePath string) error {
+	writer := GetJobWriter(ctx)
 	var contextFiles []string
 	var totalSize int64
 
@@ -1099,19 +1099,19 @@ func (e *OneShotExecutor) displayContextInfo(worktreePath string) error {
 	}
 
 	if len(contextFiles) == 0 {
-		prettyLog.InfoPretty("No context files found (.grove/context or CLAUDE.md)")
+		fmt.Fprintln(writer, "No context files found (.grove/context or CLAUDE.md)")
 		return nil
 	}
 
-	prettyLog.Divider()
-	prettyLog.InfoPretty("Context Files Available")
+	fmt.Fprintln(writer, strings.Repeat("─", 60))
+	fmt.Fprintln(writer, "Context Files Available")
 	for _, file := range contextFiles {
 		relPath, _ := filepath.Rel(worktreePath, file)
-		prettyLog.Field("File", relPath)
+		fmt.Fprintf(writer, "File: %s\n", relPath)
 	}
-	prettyLog.Blank()
-	prettyLog.Field("Total context size", grovecontext.FormatBytes(int(totalSize)))
-	prettyLog.Divider()
+	fmt.Fprintln(writer)
+	fmt.Fprintf(writer, "Total context size: %s\n", grovecontext.FormatBytes(int(totalSize)))
+	fmt.Fprintln(writer, strings.Repeat("─", 60))
 
 	return nil
 }
