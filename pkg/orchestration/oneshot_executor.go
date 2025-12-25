@@ -1027,19 +1027,18 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			"total_size":   stats.TotalSize,
 		}).Info("Context summary generated")
 
-		// Display summary statistics
-		fmt.Fprintln(writer, strings.Repeat("─", 60))
-		fmt.Fprintln(writer, "Context Summary")
-		fmt.Fprintf(writer, "Total Files: %d\n", stats.TotalFiles)
-		fmt.Fprintf(writer, "Total Tokens: %s\n", grovecontext.FormatTokenCount(stats.TotalTokens))
-		fmt.Fprintf(writer, "Total Size: %s\n", grovecontext.FormatBytes(int(stats.TotalSize)))
+		// Display summary statistics using prettyLog
+		prettyLog.InfoPrettyCtx(ctx, "Context Summary")
+		prettyLog.FieldCtx(ctx, "Total Files", stats.TotalFiles)
+		prettyLog.FieldCtx(ctx, "Total Tokens", grovecontext.FormatTokenCount(stats.TotalTokens))
+		prettyLog.FieldCtx(ctx, "Total Size", grovecontext.FormatBytes(int(stats.TotalSize)))
 
 		// Token limit check removed - no longer enforcing limits
 
 		// Show language distribution if there are files
 		if stats.TotalFiles > 0 {
-			fmt.Fprintln(writer)
-			fmt.Fprintln(writer, "Language Distribution:")
+			prettyLog.BlankCtx(ctx)
+			prettyLog.InfoPrettyCtx(ctx, "Language Distribution:")
 
 			// Sort languages by token count
 			var languages []grovecontext.LanguageStats
@@ -1073,9 +1072,9 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 				shown++
 			}
 
-			fmt.Fprintln(writer)
-			fmt.Fprintf(writer, "✓ Context available for %s job.\n", jobType)
-			fmt.Fprintln(writer, strings.Repeat("─", 60))
+			prettyLog.BlankCtx(ctx)
+			prettyLog.SuccessCtx(ctx, fmt.Sprintf("Context available for %s job.", jobType))
+			prettyLog.DividerCtx(ctx)
 		}
 	}
 
