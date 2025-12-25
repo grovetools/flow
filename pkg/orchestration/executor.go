@@ -3,13 +3,14 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
+
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 )
 
 // Executor is the interface for job executors.
 type Executor interface {
-	Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error
+	Execute(ctx context.Context, job *Job, plan *Plan) error
 	Name() string
 }
 
@@ -46,6 +47,7 @@ func (r *ExecutorRegistry) ExecuteJob(ctx context.Context, job *Job, plan *Plan)
 		return err
 	}
 
-	// Use os.Stdout as the default writer for non-TUI contexts
-	return executor.Execute(ctx, job, plan, os.Stdout)
+	// Attach os.Stdout to the context for CLI execution
+	ctx = grovelogging.WithWriter(ctx, os.Stdout)
+	return executor.Execute(ctx, job, plan)
 }

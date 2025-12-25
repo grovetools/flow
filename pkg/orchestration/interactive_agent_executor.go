@@ -59,7 +59,7 @@ func (e *InteractiveAgentExecutor) Name() string {
 
 // Execute runs an interactive agent job in a tmux session and blocks until completion.
 // The output writer is ignored for interactive agents as they run in a separate tmux session.
-func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
+func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
 	// Determine workDir first, as it's needed for briefing file generation
 	workDir, err := e.determineWorkDir(ctx, job, plan)
 	if err != nil {

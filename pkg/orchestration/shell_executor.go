@@ -3,7 +3,6 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +33,10 @@ func (e *ShellExecutor) Name() string {
 }
 
 // Execute runs a shell job.
-func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
+func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Get the output writer from context
+	output := grovelogging.GetWriter(ctx)
+
 	// Generate a unique request ID for tracing
 	requestID, _ := ctx.Value("request_id").(string)
 

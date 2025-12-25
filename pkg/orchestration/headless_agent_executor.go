@@ -55,7 +55,7 @@ func (e *HeadlessAgentExecutor) Name() string {
 }
 
 // Execute runs an agent job in a worktree.
-func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
+func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
 	log.WithFields(map[string]interface{}{
 		"job_id":    job.ID,
 		"job_title": job.Title,

@@ -199,7 +199,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		c.log.WithError(err).Warn("Could not create LLM log file")
 	} else {
 		defer logFile.Close()
-		writer := GetJobWriter(ctx)
+		writer := grovelogging.GetWriter(ctx)
 		fmt.Fprintf(writer, "LLM output is being logged to: %s\n", logFilePath)
 	}
 

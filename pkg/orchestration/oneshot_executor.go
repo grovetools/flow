@@ -92,7 +92,10 @@ func (e *OneShotExecutor) Name() string {
 }
 
 // Execute runs a oneshot job.
-func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
+func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Get the output writer from context
+	output := grovelogging.GetWriter(ctx)
+
 	// Get request ID from context
 	requestID, _ := ctx.Value("request_id").(string)
 
@@ -778,7 +781,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 
 // regenerateContextInWorktree regenerates the context within a worktree.
 func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath string, jobType string, job *Job, plan *Plan) error {
-	writer := GetJobWriter(ctx)
+	writer := grovelogging.GetWriter(ctx)
 	log.WithField("job_type", jobType).Info("Checking context in worktree")
 	fmt.Fprintf(writer, "Checking context in worktree for %s job...\n", jobType)
 
@@ -1080,7 +1083,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 // displayContextInfo displays information about available context files
 func (e *OneShotExecutor) displayContextInfo(ctx context.Context, worktreePath string) error {
-	writer := GetJobWriter(ctx)
+	writer := grovelogging.GetWriter(ctx)
 	var contextFiles []string
 	var totalSize int64
 

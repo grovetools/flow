@@ -89,6 +89,7 @@ github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh
 github.com/mattsolo1/grove-context v0.5.0 h1:laQuLrg22GP9HyRGiOKlI6rmcsXtQ5hjUyfL4SPRmMo=
 github.com/mattsolo1/grove-context v0.5.0/go.mod h1:HMVUOpANNFE9ADG01JMyUcD5CvD4SSmID0ojzpf+AXM=
 github.com/mattsolo1/grove-core v0.4.0 h1:3Ggg/njGye9QFhf0j3F7oMMf/naaYKBV8zwfwvDxJz8=
+github.com/mattsolo1/grove-core v0.4.0/go.mod h1:+densY71b+POikhRVYwOY3tt+MAeu2OXs3/KQzQfuq8=
 github.com/mattsolo1/grove-gemini v0.2.0 h1:4jGgZdMRWJfcJ1IcUkKM0yNSMJS9eWViwvhUscLmsTA=
 github.com/mattsolo1/grove-gemini v0.2.0/go.mod h1:ZrZnVs2OhYhdhcP7dpGjhtiqmSbBeA2XvP0e4Yv36pQ=
 github.com/mattsolo1/grove-tend v0.4.0 h1:tdOBOrSUfAoze952YspWDyV7RkGVNHvRk9tF8m3QXsk=

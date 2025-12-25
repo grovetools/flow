@@ -3,16 +3,15 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
-	"sort"
-
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/git"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 )
 
 // GenerateRecipeExecutor handles generate-recipe jobs
@@ -53,7 +52,10 @@ func (e *GenerateRecipeExecutor) Name() string {
 }
 
 // Execute runs a generate-recipe job
-func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
+func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Get the output writer from context
+	output := grovelogging.GetWriter(ctx)
+
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
 		return fmt.Errorf("failed to create lock file: %w", err)

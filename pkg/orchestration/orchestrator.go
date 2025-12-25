@@ -391,7 +391,7 @@ func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, outpu
 	ctx = context.WithValue(ctx, "request_id", requestID)
 
 	// Attach the job-specific output writer to the context for thread-safe logging.
-	ctx = WithJobWriter(ctx, output)
+	ctx = grovelogging.WithWriter(ctx, output)
 
 	// Log job execution with full frontmatter details
 	logFields := map[string]interface{}{
@@ -453,8 +453,8 @@ func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, outpu
 		return fmt.Errorf("no executor for job type: %s", job.Type)
 	}
 
-	// Execute job, passing the writer
-	execErr := executor.Execute(ctx, job, o.Plan, output)
+	// Execute job. The writer is already attached to the context.
+	execErr := executor.Execute(ctx, job, o.Plan)
 
 	// Update final status (skip for chat and interactive agent jobs - they manage their own status)
 	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
