@@ -10,7 +10,7 @@ You are debugging a grove ecosystem application and need to add logging to under
 Grove-core provides a structured logging system built on top of logrus with:
 - **Component-based filtering**: Show/hide logs by component name
 - **JSON and pretty formats**: Machine-parseable or human-readable output
-- **File and console output**: Logs go to both `.grove/logs/` files and console
+- **File-based logging**: All logs written to `.grove/logs/workspace-YYYY-MM-DD.log`
 - **Runtime configuration**: Control logging via environment variables or config files
 
 ## Quick Start: Adding Logs to Your Code
@@ -156,26 +156,35 @@ log.WithFields(logrus.Fields{
 
 ## Viewing Logs
 
-### Console Output (Pretty Format)
+**Important**: Logs are ALWAYS written to `.grove/logs/workspace-YYYY-MM-DD.log` files regardless of how you run the app.
 
-When running applications interactively, logs appear in the console:
+### CLI Apps: stderr output
+
+For command-line apps (like `nb list`), logs are also written to stderr:
 
 ```bash
-# Run with default logging
+# Run with debug logging (logs appear on stderr)
+GROVE_LOG_LEVEL=debug nb list
+
+# Example stderr output:
+# 2025-12-30 10:15:23 [DEBUG] [nb.service] Loading configuration
+# TYPE     DATE        TITLE
+# -------  ----------  -------------
+```
+
+### TUI Apps: Use `core logs` instead
+
+For TUI apps (like `nb tui`), logs do NOT go to stderr (to avoid interfering with the display). **Always use `core logs` to view TUI app logs**:
+
+```bash
+# Terminal 1: Run the TUI
 nb tui
 
-# Increase verbosity
-nb tui -v
+# Terminal 2: Follow logs in real-time
+core logs -f
 
-# Enable debug level globally
-GROVE_LOG_LEVEL=debug nb tui
-```
-
-**Example console output**:
-```
-2025-12-30 10:15:23 [INFO] [nb.service] Starting notebook service
-2025-12-30 10:15:23 [DEBUG] [nb.service] Loading configuration path=/home/user/.config/nb
-2025-12-30 10:15:24 [INFO] [tui.browser] TUI initialized successfully
+# Or filter to specific components
+core logs --component tui.browser -f
 ```
 
 ### Using `core logs` for Live Filtering
