@@ -158,34 +158,40 @@ log.WithFields(logrus.Fields{
 
 **Important**: Logs are ALWAYS written to `.grove/logs/workspace-YYYY-MM-DD.log` files regardless of how you run the app.
 
-### CLI Apps: stderr output
+### Debug Mode: logs also go to stderr
 
-For command-line apps (like `nb list`), logs are also written to stderr:
+When debug logging is enabled (`GROVE_LOG_LEVEL=debug` or `GROVE_DEBUG=1`), logs are ALSO written to stderr:
 
 ```bash
-# Run with debug logging (logs appear on stderr)
+# Run with debug logging (logs appear on stderr AND file)
 GROVE_LOG_LEVEL=debug nb list
 
-# Example stderr output:
+# Example stderr output mixed with command output:
 # 2025-12-30 10:15:23 [DEBUG] [nb.service] Loading configuration
 # TYPE     DATE        TITLE
 # -------  ----------  -------------
 ```
 
-### TUI Apps: Use `core logs` instead
+**Note**: This can mix logs with your command output. For cleaner output, use `core logs` in a separate terminal instead.
 
-For TUI apps (like `nb tui`), logs do NOT go to stderr (to avoid interfering with the display). **Always use `core logs` to view TUI app logs**:
+### Recommended: Use `core logs` for debugging
+
+Instead of enabling stderr output, use `core logs` to view logs in a separate terminal:
 
 ```bash
-# Terminal 1: Run the TUI
+# Terminal 1: Run your app normally
 nb tui
+# or
+nb list
 
 # Terminal 2: Follow logs in real-time
 core logs -f
 
 # Or filter to specific components
-core logs --component tui.browser -f
+core logs --component nb.service -f
 ```
+
+This keeps logs separate from your app output and provides better filtering.
 
 ### Using `core logs` for Live Filtering
 
