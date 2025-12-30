@@ -222,21 +222,11 @@ core logs --component tui.browser.linking --tail 20
 
 ### File Output (JSON Format)
 
-Logs are automatically written to `.grove/logs/workspace-YYYY-MM-DD.log` in JSON format:
+Logs are automatically written to `.grove/logs/workspace-YYYY-MM-DD.log` in JSON format.
 
-```bash
-# View recent logs
-tail -f .grove/logs/workspace-2025-12-30.log
+**Recommendation**: Use `core logs` instead of reading files directly - it handles filtering, formatting, and following automatically.
 
-# Pretty-print JSON logs
-tail -100 .grove/logs/workspace-2025-12-30.log | jq -r '"\(.time) [\(.level | ascii_upcase)] [\(.component)] \(.msg)"'
-
-# Filter by component
-tail -100 .grove/logs/workspace-2025-12-30.log | jq 'select(.component == "tui.browser.linking")'
-
-# Filter by level
-tail -100 .grove/logs/workspace-2025-12-30.log | jq 'select(.level == "error")'
-```
+**When to access files directly**: Only when you need to process logs with custom scripts or grep across multiple days.
 
 **Example JSON log entry**:
 ```json
@@ -549,13 +539,14 @@ log.Debug("Code path executed")
 ### Workflow 1: Find Why Feature Isn't Working
 
 ```bash
-# 1. Enable debug logs for the component
-GROVE_LOG_LEVEL=debug GROVE_LOG_INCLUDE=myapp.feature myapp run
+# 1. Run your app with debug logging
+GROVE_LOG_LEVEL=debug myapp run
 
-# 2. Look for your feature's logs in the output
+# 2. In another terminal, follow logs for your component
+core logs --component myapp.feature -f
 
-# 3. If not seeing logs, check the log file
-tail -f .grove/logs/workspace-$(date +%Y-%m-%d).log | jq 'select(.component | startswith("myapp"))'
+# 3. If not seeing logs, check all components
+core logs --show-all -f
 
 # 4. Add more granular logs and rebuild
 ```
@@ -614,44 +605,44 @@ log.WithFields(logrus.Fields{
 # Force debug level and show all components
 GROVE_LOG_LEVEL=debug myapp run
 
-# Check if logs are in the file
-tail -f .grove/logs/workspace-$(date +%Y-%m-%d).log
+# In another terminal, follow logs
+core logs --show-all -f
 ```
 
 ### "Logs are too noisy"
 
-**Solution**: Filter by component
+**Solution**: Filter by component with `core logs`
 ```bash
 # Show only your component
-GROVE_LOG_INCLUDE=myapp myapp run
+core logs --component myapp -f
 
-# Hide noisy components
-GROVE_LOG_EXCLUDE=cache,verbose.component myapp run
+# Show multiple specific components
+core logs --component myapp,service -f
 ```
 
 ### "Need to see logs from multiple runs"
 
-**Solution**: Each day gets its own log file
+**Solution**: Use `core logs --tail` or access files directly
 ```bash
-# View yesterday's logs
-tail -100 .grove/logs/workspace-2025-12-29.log | jq
+# View last 100 entries
+core logs --tail 100
 
-# Search across all log files
+# Search across all log files (when core logs isn't enough)
 grep -h "error_pattern" .grove/logs/*.log | jq 'select(.component == "myapp")'
 ```
 
-### "JSON logs are hard to read"
+### "Logs are hard to read in the terminal"
 
-**Solution**: Use jq for pretty formatting
+**Solution**: Use `core logs` pretty format or `--tui` mode
 ```bash
-# Custom format
-tail -100 .grove/logs/workspace-*.log | jq -r '"\(.time) [\(.level | ascii_upcase)] \(.msg)"'
+# Pretty format (default)
+core logs -f
 
-# With component
-tail -100 .grove/logs/workspace-*.log | jq -r '"\(.time) [\(.component)] \(.msg)"'
+# Interactive TUI
+core logs --tui
 
-# Full pretty print
-tail -100 .grove/logs/workspace-*.log | jq '.'
+# JSON for scripting
+core logs --json --tail 50
 ```
 
 ## Quick Reference
@@ -705,16 +696,13 @@ GROVE_LOG_CALLER=true         # Show file:line
 GROVE_LOG_INCLUDE=component   # Filter components
 ```
 
-### View Raw Log Files
+### Advanced: Direct File Access
 ```bash
-# File (JSON)
-tail -f .grove/logs/workspace-$(date +%Y-%m-%d).log
+# When core logs isn't enough (rare cases)
+tail -f .grove/logs/workspace-$(date +%Y-%m-%d).log | jq -r '"\(.time) [\(.component)] \(.msg)"'
 
-# Pretty print with jq
-tail -100 .grove/logs/workspace-*.log | jq -r '"\(.time) [\(.level | ascii_upcase)] [\(.component)] \(.msg)"'
-
-# Filter by component
-tail -100 .grove/logs/workspace-*.log | jq 'select(.component == "mycomponent")'
+# Search across multiple days
+grep "error_pattern" .grove/logs/*.log | jq 'select(.component == "mycomponent")'
 ```
 
 ## Summary
@@ -724,9 +712,11 @@ When debugging grove ecosystem applications:
 1. **Add a logger**: `log := logging.NewLogger("myapp.feature")`
 2. **Log with context**: Use `WithFields()` for structured data
 3. **Choose appropriate levels**: Debug for details, Info for events, Error for failures
-4. **Filter as needed**: Use `GROVE_LOG_INCLUDE` to focus on specific components
-5. **Check both console and files**: Console for interactive use, files for analysis
-6. **Use jq for analysis**: Parse and filter JSON logs efficiently
+4. **View logs with core logs**: `core logs --component myapp.feature -f`
+5. **Filter effectively**: Use `--component`, `--show-all`, or `--also-show` flags
+6. **Use TUI mode**: `core logs --tui` for interactive browsing
 7. **Clean up**: Remove temporary debug logs after fixing issues
+
+**Remember**: `core logs` is your primary tool - it handles filtering, formatting, and following automatically. Only use direct file access for advanced cases like searching across multiple days.
 
 Happy debugging!
