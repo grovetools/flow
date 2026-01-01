@@ -104,6 +104,12 @@
     "git_changes": {
       "type": "boolean"
     },
+    "gather_concept_notes": {
+      "type": "boolean"
+    },
+    "gather_concept_plans": {
+      "type": "boolean"
+    },
     "rules_file": {
       "type": "string"
     },

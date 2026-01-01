@@ -56,6 +56,8 @@ func main() {
 		scenarios.HoistedCommandsScenario,
 		scenarios.HoistedCommandsWithActiveJobScenario,
 		scenarios.SessionArchivingScenario,
+		scenarios.RecipeConceptUpdateScenario,
+		scenarios.RecipeConceptUpdateWithPlansScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

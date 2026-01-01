@@ -59,6 +59,8 @@ type Job struct {
 	RecipeName           string       `yaml:"recipe_name,omitempty" json:"recipe_name,omitempty"`
 	GeneratePlanFrom     bool         `yaml:"generate_plan_from,omitempty" json:"generate_plan_from,omitempty"`
 	GitChanges           bool         `yaml:"git_changes,omitempty" json:"git_changes,omitempty"`
+	GatherConceptNotes   bool         `yaml:"gather_concept_notes,omitempty" json:"gather_concept_notes,omitempty"`
+	GatherConceptPlans   bool         `yaml:"gather_concept_plans,omitempty" json:"gather_concept_plans,omitempty"`
 	RulesFile            string       `yaml:"rules_file,omitempty" json:"rules_file,omitempty"`
 	NoteRef              string       `yaml:"note_ref,omitempty" json:"note_ref,omitempty"`
 
