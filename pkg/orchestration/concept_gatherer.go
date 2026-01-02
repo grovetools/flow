@@ -25,8 +25,6 @@ type ConceptInfo struct {
 
 // gatherConcepts aggregates all project concepts and their linked notes/plans into a single context file.
 func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (string, error) {
-	fmt.Fprintf(os.Stderr, "[DEBUG] gatherConcepts called! GatherConceptNotes=%v, GatherConceptPlans=%v\n",
-		job.GatherConceptNotes, job.GatherConceptPlans)
 	requestID, _ := ctx.Value("request_id").(string)
 	logger := logging.NewLogger("concept-gatherer")
 
@@ -113,29 +111,28 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 		}
 		yaml.Unmarshal(manifestContent, &manifestData)
 
-		fmt.Fprintf(os.Stderr, "[DEBUG] Concept %s: GatherConceptNotes=%v, RelatedNotes=%v\n",
-			concept.ID, job.GatherConceptNotes, manifestData.RelatedNotes)
-
 		if job.GatherConceptNotes && len(manifestData.RelatedNotes) > 0 {
 			conceptBuilder.WriteString("    <linked_notes>\n")
 			for _, noteAlias := range manifestData.RelatedNotes {
-				fmt.Fprintf(os.Stderr, "[DEBUG] Attempting to resolve note alias: %s (workDir: %s)\n", noteAlias, workDir)
-
 				notePath, err := aliasResolver.Resolve(noteAlias)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "[DEBUG] Failed to resolve note alias %s: %v\n", noteAlias, err)
+					logger.WithError(err).WithFields(logrus.Fields{
+						"note_alias": noteAlias,
+						"concept_id": concept.ID,
+					}).Warn("Failed to resolve note alias")
 					continue
 				}
-
-				fmt.Fprintf(os.Stderr, "[DEBUG] Successfully resolved %s -> %s\n", noteAlias, notePath)
 
 				noteContent, err := os.ReadFile(notePath)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "[DEBUG] Failed to read note file %s: %v\n", notePath, err)
+					logger.WithError(err).WithFields(logrus.Fields{
+						"note_alias": noteAlias,
+						"note_path":  notePath,
+						"concept_id": concept.ID,
+					}).Warn("Failed to read note file")
 					continue
 				}
 
-				fmt.Fprintf(os.Stderr, "[DEBUG] Successfully read note file, length: %d\n", len(noteContent))
 				conceptBuilder.WriteString(fmt.Sprintf("      <note alias=\"%s\"><![CDATA[\n", noteAlias))
 				conceptBuilder.Write(noteContent)
 				conceptBuilder.WriteString("\n      ]]></note>\n")
