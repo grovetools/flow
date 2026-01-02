@@ -1711,8 +1711,8 @@ func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 			}
 			return nil
 		},
-		// Run status TUI directly - delegation through grove breaks interactive TUI
-		tea.ExecProcess(exec.Command("flow", "plan", "status", "--tui"),
+		// Run status TUI through grove delegator
+		tea.ExecProcess(exec.Command("grove", "flow", "plan", "status", "--tui"),
 			func(err error) tea.Msg {
 				// When in Neovim, quit the parent when child exits (for edit action)
 				if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {

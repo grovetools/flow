@@ -55,7 +55,7 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. Retrieve Agent Session ID via aglogs
-	aglogsCmd := exec.Command("aglogs", "get-session-info", job.FilePath)
+	aglogsCmd := exec.Command("grove", "aglogs", "get-session-info", job.FilePath)
 	output, err := aglogsCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to get session info from aglogs: %w\nOutput: %s", err, string(output))

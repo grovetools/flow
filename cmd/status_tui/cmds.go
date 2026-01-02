@@ -890,7 +890,7 @@ func editJob(job *orchestration.Job) tea.Cmd {
 }
 
 func executePlanResume(job *orchestration.Job) tea.Cmd {
-	return tea.ExecProcess(exec.Command("flow", "plan", "resume", job.FilePath),
+	return tea.ExecProcess(exec.Command("grove", "flow", "plan", "resume", job.FilePath),
 		func(err error) tea.Msg {
 			if err != nil {
 				return err // Propagate error to be displayed in the TUI
@@ -1049,8 +1049,9 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 		args = append(args, "-d", dep)
 	}
 
-	// Run flow directly - delegation through grove breaks interactive TUI
-	return tea.ExecProcess(exec.Command("flow", args...), func(err error) tea.Msg {
+	// Run flow through grove delegator
+	cmdArgs := append([]string{"flow"}, args...)
+	return tea.ExecProcess(exec.Command("grove", cmdArgs...), func(err error) tea.Msg {
 		if err != nil {
 			return err
 		}
