@@ -57,8 +57,10 @@ var CoreOrchestrationScenario = harness.NewScenario(
 				"02-spec.md",
 				"03-generate-plan.md",
 				"04-implement.md",
-				"06-review.md",
-				"07-follow-up.md",
+				"05-spec-tests.md",
+				"06-impl-tests.md",
+				"07-review.md",
+				"08-follow-up.md",
 			}
 
 			for _, jobFile := range expectedJobs {
