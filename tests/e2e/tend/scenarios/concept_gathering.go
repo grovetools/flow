@@ -257,7 +257,7 @@ status: active
 related_concepts: []
 related_plans: []
 related_notes:
-  - gather-notes-project:inbox/impl-details.md
+  - nb:gather-notes-project:inbox/impl-details.md
 `
 			if err := fs.WriteString(filepath.Join(conceptDir, "concept-manifest.yml"), manifestContent); err != nil {
 				return err
@@ -409,7 +409,7 @@ Analyze concepts with their related notes.
 			if err := fs.AssertContains(aggregatedFile, "<linked_notes>"); err != nil {
 				return fmt.Errorf("missing linked_notes section: %w", err)
 			}
-			if err := fs.AssertContains(aggregatedFile, "gather-notes-project:inbox/impl-details.md"); err != nil {
+			if err := fs.AssertContains(aggregatedFile, "nb:gather-notes-project:inbox/impl-details.md"); err != nil {
 				return fmt.Errorf("missing note alias: %w", err)
 			}
 
