@@ -226,6 +226,18 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to regenerate context: %v", err))
 	}
 
+	// --- Concept Gathering Logic ---
+	if job.GatherConceptNotes || job.GatherConceptPlans {
+		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
+		if err != nil {
+			log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
+			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
+		} else if conceptContextFile != "" {
+			// Add the aggregated concepts file to the list of files to upload
+			// We handle this here before building the prompt.
+		}
+	}
+
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	// This ensures buildPrompt uses the correct context files
 	workDir = ScopeToSubProject(workDir, job)
@@ -1303,6 +1315,17 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		if err := e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
 			log.WithError(err).Warn("Failed to regenerate context")
+		}
+	}
+
+	// --- Concept Gathering Logic ---
+	if job.GatherConceptNotes || job.GatherConceptPlans {
+		conceptContextFile, err := gatherConcepts(ctx, job, plan, worktreePath)
+		if err != nil {
+			log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
+			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
+		} else if conceptContextFile != "" {
+			// The file will be picked up by the context gathering logic below
 		}
 	}
 

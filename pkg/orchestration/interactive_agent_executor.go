@@ -149,6 +149,18 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		e.prettyLog.InfoPretty(fmt.Sprintf("%s  Briefing file created at: %s\n", theme.IconCode, briefingFilePath))
 	}
 
+	// --- Concept Gathering Logic ---
+	if job.GatherConceptNotes || job.GatherConceptPlans {
+		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
+		if err != nil {
+			requestID, _ := ctx.Value("request_id").(string)
+			e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
+			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
+		} else if conceptContextFile != "" {
+			e.prettyLog.InfoPretty(fmt.Sprintf("Aggregated concepts context created at: %s", conceptContextFile))
+		}
+	}
+
 	// Note: SkipInteractive flag controls whether to prompt for user input during execution,
 	// not whether to run interactive_agent jobs. Interactive agents launch in tmux regardless.
 

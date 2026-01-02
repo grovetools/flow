@@ -58,6 +58,8 @@ func main() {
 		scenarios.SessionArchivingScenario,
 		scenarios.RecipeConceptUpdateScenario,
 		scenarios.RecipeConceptUpdateWithPlansScenario,
+		scenarios.ConceptGatheringScenario,
+		scenarios.ConceptGatheringWithNotesScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
