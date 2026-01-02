@@ -88,14 +88,12 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		"work_dir":   workDir,
 	}).Info("Executing shell job")
 
-	// Generate context if a rules file is specified
-	if job.RulesFile != "" {
-		oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil) // Use for helper method
-		if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan); err != nil {
-			// Warn but do not fail the job for a context error
-			e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to generate job-specific context for shell job")
-			e.prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to generate job-specific context: %v", err))
-		}
+	// Always regenerate context to ensure shell job has latest view, similar to oneshot executor
+	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(), nil) // Use for its helper method
+	if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan); err != nil {
+		// Warn but do not fail the job for a context error
+		e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to generate context for shell job")
+		e.prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to generate context: %v", err))
 	}
 
 	// The PromptBody contains the shell command to run

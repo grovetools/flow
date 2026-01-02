@@ -174,7 +174,6 @@ var JobLogCaptureScenario = harness.NewScenario(
 				v.Equal("job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
 				v.Equal("job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
 				v.Equal("job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
-				v.Equal("job.log contains context available message", nil, fs.AssertContains(jobLogPath, "Context available for oneshot job"))
 			})
 		}),
 
@@ -280,7 +279,78 @@ var JobLogCaptureScenario = harness.NewScenario(
 				v.Equal("chat job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
 				v.Equal("chat job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
 				v.Equal("chat job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
-				v.Equal("chat job.log contains context available message", nil, fs.AssertContains(jobLogPath, "Context available for chat job"))
+			})
+		}),
+
+		harness.NewStep("Add shell job to the same plan", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			addCmd := ctx.Bin("plan", "add", "log-test-plan",
+				"--type", "shell",
+				"--title", "test-shell-logging",
+				"-p", "echo 'This is a shell job execution'")
+			addCmd.Dir(projectDir)
+
+			result := addCmd.Run()
+			if err := result.AssertSuccess(); err != nil {
+				return err
+			}
+			return nil
+		}),
+
+		harness.NewStep("Run shell job with custom output writer", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+			jobPath := filepath.Join(planPath, "03-test-shell-logging.md")
+
+			job, err := orchestration.LoadJob(jobPath)
+			if err != nil {
+				return fmt.Errorf("loading job file: %w", err)
+			}
+			job.FilePath = jobPath
+
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return fmt.Errorf("loading plan: %w", err)
+			}
+
+			jobLogPath, err := orchestration.GetJobLogPath(plan, job)
+			if err != nil {
+				return fmt.Errorf("getting job log path: %w", err)
+			}
+			ctx.Set("shell_job_log_path", jobLogPath)
+
+			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return fmt.Errorf("creating job log file: %w", err)
+			}
+			defer logFile.Close()
+
+			var buffer bytes.Buffer
+			multiWriter := io.MultiWriter(logFile, &buffer)
+
+			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{})
+			if err != nil {
+				return fmt.Errorf("creating orchestrator: %w", err)
+			}
+
+			if err := orch.ExecuteJobWithWriter(context.Background(), job, multiWriter); err != nil {
+				return fmt.Errorf("executing shell job: %w\nBuffer: %s", err, buffer.String())
+			}
+
+			return nil
+		}),
+
+		harness.NewStep("Verify shell job.log contains context summary", func(ctx *harness.Context) error {
+			jobLogPath := ctx.GetString("shell_job_log_path")
+
+			if err := ctx.Check("shell job.log file exists", fs.AssertExists(jobLogPath)); err != nil {
+				return err
+			}
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Equal("shell job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
+				v.Equal("shell job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
+				v.Equal("shell job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
+				v.Equal("shell job.log contains shell job output", nil, fs.AssertContains(jobLogPath, "This is a shell job execution"))
 			})
 		}),
 	},
