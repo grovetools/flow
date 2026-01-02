@@ -65,11 +65,13 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 		"workspace":     wsNode.Name,
 	}).Info("Gathering concepts")
 
-	// 4. Build XML content
+	// 4. Build XML content and create alias resolver for workspace resolution
 	var conceptBuilder strings.Builder
 	conceptBuilder.WriteString("<concepts_context>\n")
 
-	aliasResolver := alias.NewAliasResolverWithWorkDir(workDir)
+	// Create an alias resolver to resolve workspace names
+	wsResolver := alias.NewAliasResolverWithWorkDir(workDir)
+	wsResolver.InitProvider() // Initialize to use the same provider we already have
 
 	for _, concept := range concepts {
 		conceptBuilder.WriteString(fmt.Sprintf("  <concept id=\"%s\">\n", concept.ID))
@@ -114,20 +116,76 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 		if job.GatherConceptNotes && len(manifestData.RelatedNotes) > 0 {
 			conceptBuilder.WriteString("    <linked_notes>\n")
 			for _, noteAlias := range manifestData.RelatedNotes {
-				notePath, err := aliasResolver.Resolve(noteAlias)
-				if err != nil {
-					logger.WithError(err).WithFields(logrus.Fields{
+				// Parse workspace:noteType/filename format (e.g., "test-project:inbox/note.md")
+				// This follows the same pattern as grove-context
+				parts := strings.SplitN(noteAlias, ":", 2)
+				if len(parts) != 2 {
+					logger.WithFields(logrus.Fields{
 						"note_alias": noteAlias,
 						"concept_id": concept.ID,
-					}).Warn("Failed to resolve note alias")
+					}).Warn("Invalid note alias format, expected workspace:noteType/filename")
+					continue
+				}
+				workspaceName := parts[0]
+				notePath := parts[1] // e.g., "inbox/note.md"
+
+				// Split the note path into noteType and filename
+				notePathParts := strings.SplitN(notePath, "/", 2)
+				if len(notePathParts) != 2 {
+					logger.WithFields(logrus.Fields{
+						"note_alias": noteAlias,
+						"note_path":  notePath,
+						"concept_id": concept.ID,
+					}).Warn("Invalid note path format, expected noteType/filename")
+					continue
+				}
+				noteType := notePathParts[0] // e.g., "inbox"
+				filename := notePathParts[1]  // e.g., "note.md"
+
+				// Resolve the workspace name to a path using alias resolver
+				workspacePath, err := wsResolver.Resolve(workspaceName)
+				if err != nil {
+					logger.WithError(err).WithFields(logrus.Fields{
+						"workspace_name": workspaceName,
+						"note_alias":     noteAlias,
+						"concept_id":     concept.ID,
+					}).Warn("Could not resolve workspace for note alias")
 					continue
 				}
 
-				noteContent, err := os.ReadFile(notePath)
+				// Get the workspace node from the provider
+				targetWorkspace := provider.FindByPath(workspacePath)
+				if targetWorkspace == nil {
+					logger.WithFields(logrus.Fields{
+						"workspace_name": workspaceName,
+						"workspace_path": workspacePath,
+						"note_alias":     noteAlias,
+						"concept_id":     concept.ID,
+					}).Warn("Could not find workspace node for note alias")
+					continue
+				}
+
+				// Use NotebookLocator to get the note directory
+				noteDir, err := locator.GetNotesDir(targetWorkspace, noteType)
+				if err != nil {
+					logger.WithError(err).WithFields(logrus.Fields{
+						"workspace_name": workspaceName,
+						"note_type":      noteType,
+						"note_alias":     noteAlias,
+						"concept_id":     concept.ID,
+					}).Warn("Failed to get note directory")
+					continue
+				}
+
+				// Construct the full path to the note
+				fullNotePath := filepath.Join(noteDir, filename)
+
+				// Read the note content
+				noteContent, err := os.ReadFile(fullNotePath)
 				if err != nil {
 					logger.WithError(err).WithFields(logrus.Fields{
 						"note_alias": noteAlias,
-						"note_path":  notePath,
+						"note_path":  fullNotePath,
 						"concept_id": concept.ID,
 					}).Warn("Failed to read note file")
 					continue
@@ -143,23 +201,81 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 		if job.GatherConceptPlans && len(manifestData.RelatedPlans) > 0 {
 			conceptBuilder.WriteString("    <linked_plans>\n")
 			for _, planAlias := range manifestData.RelatedPlans {
-				planPath, err := aliasResolver.Resolve(planAlias)
-				if err == nil {
-					conceptBuilder.WriteString(fmt.Sprintf("      <plan alias=\"%s\">\n", planAlias))
-					filepath.Walk(planPath, func(path string, info os.FileInfo, err error) error {
-						if err == nil && !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
-							planContent, err := os.ReadFile(path)
-							if err == nil {
-								relPath, _ := filepath.Rel(planPath, path)
-								conceptBuilder.WriteString(fmt.Sprintf("        <document path=\"%s\"><![CDATA[\n", relPath))
-								conceptBuilder.Write(planContent)
-								conceptBuilder.WriteString("\n        ]]></document>\n")
-							}
-						}
-						return nil
-					})
-					conceptBuilder.WriteString("      </plan>\n")
+				// Parse workspace:plans/plan-name format
+				parts := strings.SplitN(planAlias, ":", 2)
+				if len(parts) != 2 {
+					logger.WithFields(logrus.Fields{
+						"plan_alias": planAlias,
+						"concept_id": concept.ID,
+					}).Warn("Invalid plan alias format, expected workspace:plans/plan-name")
+					continue
 				}
+				workspaceName := parts[0]
+				planPath := parts[1] // e.g., "plans/my-plan"
+
+				// Extract plan name from the path (e.g., "plans/my-plan" -> "my-plan")
+				planPathParts := strings.SplitN(planPath, "/", 2)
+				if len(planPathParts) != 2 {
+					logger.WithFields(logrus.Fields{
+						"plan_alias": planAlias,
+						"plan_path":  planPath,
+						"concept_id": concept.ID,
+					}).Warn("Invalid plan path format, expected plans/plan-name")
+					continue
+				}
+				planName := planPathParts[1]
+
+				// Resolve the workspace name to a path using alias resolver
+				workspacePath, err := wsResolver.Resolve(workspaceName)
+				if err != nil {
+					logger.WithError(err).WithFields(logrus.Fields{
+						"workspace_name": workspaceName,
+						"plan_alias":     planAlias,
+						"concept_id":     concept.ID,
+					}).Warn("Could not resolve workspace for plan alias")
+					continue
+				}
+
+				// Get the workspace node from the provider
+				targetWorkspace := provider.FindByPath(workspacePath)
+				if targetWorkspace == nil {
+					logger.WithFields(logrus.Fields{
+						"workspace_name": workspaceName,
+						"workspace_path": workspacePath,
+						"plan_alias":     planAlias,
+						"concept_id":     concept.ID,
+					}).Warn("Could not find workspace node for plan alias")
+					continue
+				}
+
+				// Use NotebookLocator to get the plans directory
+				plansBaseDir, err := locator.GetNotesDir(targetWorkspace, "plans")
+				if err != nil {
+					logger.WithError(err).WithFields(logrus.Fields{
+						"workspace_name": workspaceName,
+						"plan_alias":     planAlias,
+						"concept_id":     concept.ID,
+					}).Warn("Failed to get plans directory")
+					continue
+				}
+
+				// Construct full path to the plan directory
+				fullPlanPath := filepath.Join(plansBaseDir, planName)
+
+				conceptBuilder.WriteString(fmt.Sprintf("      <plan alias=\"%s\">\n", planAlias))
+				filepath.Walk(fullPlanPath, func(path string, info os.FileInfo, err error) error {
+					if err == nil && !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
+						planContent, err := os.ReadFile(path)
+						if err == nil {
+							relPath, _ := filepath.Rel(fullPlanPath, path)
+							conceptBuilder.WriteString(fmt.Sprintf("        <document path=\"%s\"><![CDATA[\n", relPath))
+							conceptBuilder.Write(planContent)
+							conceptBuilder.WriteString("\n        ]]></document>\n")
+						}
+					}
+					return nil
+				})
+				conceptBuilder.WriteString("      </plan>\n")
 			}
 			conceptBuilder.WriteString("    </linked_plans>\n")
 		}
