@@ -16,16 +16,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattn/go-isatty"
-	"github.com/mattsolo1/grove-core/pkg/alias"
-	coreconfig "github.com/mattsolo1/grove-core/config"
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
-	"github.com/mattsolo1/grove-notebook/pkg/service"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
@@ -281,7 +277,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// --- Concept Gathering Logic ---
 	if job.GatherConceptNotes || job.GatherConceptPlans {
-		conceptContextFile, err := e.gatherConcepts(ctx, job, plan, workDir)
+		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
 		if err != nil {
 			log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
 			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
@@ -1702,168 +1698,4 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	updateJobFile(job)
 
 	return nil
-}
-
-// gatherConcepts aggregates all project concepts and their linked notes/plans into a single context file.
-func (e *OneShotExecutor) gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (string, error) {
-	// Get request ID from context
-	requestID, _ := ctx.Value("request_id").(string)
-
-	// Instantiate the grove-notebook service to access its functionality.
-	baseLogger := logrus.New()
-	baseLogger.SetLevel(logrus.WarnLevel)
-	discoveryService := workspace.NewDiscoveryService(baseLogger)
-	result, err := discoveryService.DiscoverAll()
-	if err != nil {
-		return "", fmt.Errorf("failed to discover workspaces for concept gathering: %w", err)
-	}
-	provider := workspace.NewProvider(result)
-	coreCfg, _ := coreconfig.LoadDefault()
-	conceptLogger := grovelogging.NewLogger("concept-gatherer")
-	svc, err := service.New(&service.Config{}, provider, coreCfg, conceptLogger)
-	if err != nil {
-		return "", fmt.Errorf("failed to create notebook service: %w", err)
-	}
-
-	// Get the current workspace context from the job's working directory.
-	wsCtx, err := svc.GetWorkspaceContext(workDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to get workspace context: %w", err)
-	}
-
-	// List all concepts within that context.
-	concepts, err := svc.ListConcepts(wsCtx)
-	if err != nil {
-		return "", fmt.Errorf("failed to list concepts: %w", err)
-	}
-
-	wsName := "unknown"
-	if wsCtx.CurrentWorkspace != nil {
-		wsName = wsCtx.CurrentWorkspace.Name
-	}
-
-	log.WithFields(logrus.Fields{
-		"job_id":        job.ID,
-		"request_id":    requestID,
-		"concept_count": len(concepts),
-		"workspace":     wsName,
-	}).Info("Gathering concepts")
-
-	// Concatenate all concept data into a single string.
-	var conceptBuilder strings.Builder
-	aliasResolver := alias.NewAliasResolverWithWorkDir(workDir)
-
-	for _, concept := range concepts {
-		conceptBuilder.WriteString(fmt.Sprintf("\n\n---\n\n# Concept: %s\n\n", concept.Title))
-
-		// Read and append manifest
-		manifestPath := filepath.Join(concept.Path, "concept-manifest.yml")
-		manifestContent, err := os.ReadFile(manifestPath)
-		if err == nil {
-			conceptBuilder.WriteString("## Manifest\n\n```yaml\n")
-			conceptBuilder.Write(manifestContent)
-			conceptBuilder.WriteString("\n```\n\n")
-
-			// Parse manifest to find linked notes/plans
-			var manifestData struct {
-				RelatedNotes []string `yaml:"related_notes"`
-				RelatedPlans []string `yaml:"related_plans"`
-			}
-			yaml.Unmarshal(manifestContent, &manifestData)
-
-			// Conditionally read and append linked notes
-			if job.GatherConceptNotes && len(manifestData.RelatedNotes) > 0 {
-				conceptBuilder.WriteString("### Linked Notes Content\n\n")
-				for _, noteAlias := range manifestData.RelatedNotes {
-					notePath, err := aliasResolver.Resolve(noteAlias)
-					if err == nil {
-						noteContent, err := os.ReadFile(notePath)
-						if err == nil {
-							conceptBuilder.WriteString(fmt.Sprintf("#### From: `%s`\n\n", noteAlias))
-							conceptBuilder.Write(noteContent)
-							conceptBuilder.WriteString("\n\n")
-						} else {
-							log.WithError(err).WithFields(logrus.Fields{
-								"note_alias": noteAlias,
-								"note_path":  notePath,
-							}).Warn("Failed to read linked note")
-						}
-					} else {
-						log.WithError(err).WithFields(logrus.Fields{
-							"note_alias": noteAlias,
-						}).Warn("Failed to resolve note alias")
-					}
-				}
-			}
-
-			// Conditionally read and append linked plans
-			if job.GatherConceptPlans && len(manifestData.RelatedPlans) > 0 {
-				conceptBuilder.WriteString("### Linked Plans Content\n\n")
-				for _, planAlias := range manifestData.RelatedPlans {
-					planPath, err := aliasResolver.Resolve(planAlias)
-					if err == nil {
-						// Read all .md files in the plan directory
-						filepath.Walk(planPath, func(path string, info os.FileInfo, err error) error {
-							if err != nil {
-								return err
-							}
-							if !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
-								planContent, err := os.ReadFile(path)
-								if err == nil {
-									relPath, _ := filepath.Rel(planPath, path)
-									conceptBuilder.WriteString(fmt.Sprintf("#### From: `%s/%s`\n\n", planAlias, relPath))
-									conceptBuilder.Write(planContent)
-									conceptBuilder.WriteString("\n\n")
-								} else {
-									log.WithError(err).WithFields(logrus.Fields{
-										"plan_alias": planAlias,
-										"file_path":  path,
-									}).Warn("Failed to read plan file")
-								}
-							}
-							return nil
-						})
-					} else {
-						log.WithError(err).WithFields(logrus.Fields{
-							"plan_alias": planAlias,
-						}).Warn("Failed to resolve plan alias")
-					}
-				}
-			}
-		} else {
-			log.WithError(err).WithFields(logrus.Fields{
-				"concept_id":    concept.ID,
-				"manifest_path": manifestPath,
-			}).Warn("Failed to read concept manifest")
-		}
-
-		// Read and append overview
-		overviewPath := filepath.Join(concept.Path, "overview.md")
-		overviewContent, err := os.ReadFile(overviewPath)
-		if err == nil {
-			conceptBuilder.WriteString("## Overview\n\n")
-			conceptBuilder.Write(overviewContent)
-			conceptBuilder.WriteString("\n")
-		}
-	}
-
-	// Write the aggregated content to a file in the plan's .artifacts directory.
-	artifactsDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
-	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create artifacts directory: %w", err)
-	}
-
-	conceptContextFile := filepath.Join(artifactsDir, "aggregated-concepts.md")
-	if err := os.WriteFile(conceptContextFile, []byte(conceptBuilder.String()), 0644); err != nil {
-		return "", fmt.Errorf("failed to write aggregated concepts file: %w", err)
-	}
-
-	log.WithFields(logrus.Fields{
-		"job_id":               job.ID,
-		"request_id":           requestID,
-		"concept_context_file": conceptContextFile,
-		"file_size":            len(conceptBuilder.String()),
-	}).Info("Successfully wrote aggregated concepts file")
-
-	return conceptContextFile, nil
 }
