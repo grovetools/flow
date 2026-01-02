@@ -503,7 +503,7 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			}
 
 			// Verify job 03 has transcript
-			if err := fs.AssertContains(job03Path, "## Transcript"); err != nil {
+			if err := fs.AssertContains(job03Path, "# Agent Chat Transcript"); err != nil {
 				return err
 			}
 
@@ -518,7 +518,7 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 			}
 
 			// Verify job 04 has transcript
-			return fs.AssertContains(reviewJobPath, "## Transcript")
+			return fs.AssertContains(reviewJobPath, "# Agent Chat Transcript")
 		}),
 	},
 )
