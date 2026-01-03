@@ -82,12 +82,12 @@ func NewKeyMap() KeyMap {
 			key.WithHelp("S", "set status"),
 		),
 		SetType: key.NewBinding(
-			key.WithKeys("ctrl+t"),
-			key.WithHelp("ctrl+t", "set type"),
+			key.WithKeys("Y"),
+			key.WithHelp("Y", "set type"),
 		),
 		SetTemplate: key.NewBinding(
-			key.WithKeys("ctrl+e"),
-			key.WithHelp("ctrl+e", "set template"),
+			key.WithKeys("E"),
+			key.WithHelp("E", "set template"),
 		),
 		AddJob: key.NewBinding(
 			key.WithKeys("A"),

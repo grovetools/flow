@@ -142,13 +142,13 @@ var PlanStatusTUISingleJobSetStatusScenario = harness.NewScenarioWithOptions(
 // PlanStatusTUIBatchChangeTypeScenario tests changing job type on selected jobs.
 var PlanStatusTUIBatchChangeTypeScenario = harness.NewScenarioWithOptions(
 	"plan-status-tui-batch-change-type",
-	"Verifies changing job type on multiple selected jobs with 'ctrl+t' key.",
+	"Verifies changing job type on multiple selected jobs with 'Y' key.",
 	[]string{"tui", "plan", "status", "multi-select", "type"},
 	[]harness.Step{
 		harness.NewStep("Setup plan with multiple jobs", setupMultiSelectPlan),
 		harness.NewStep("Launch status TUI", launchMultiSelectTUI),
 		harness.NewStep("Select two jobs", selectTwoJobs),
-		harness.NewStep("Change type to 'oneshot' with 'ctrl+t'", changeTypeToOneshot),
+		harness.NewStep("Change type to 'oneshot' with 'Y'", changeTypeToOneshot),
 		harness.NewStep("Verify type updated for both jobs", verifyTypeUpdatedToOneshot),
 		harness.NewStep("Quit the TUI", quitStatusTUI),
 	},
@@ -159,13 +159,13 @@ var PlanStatusTUIBatchChangeTypeScenario = harness.NewScenarioWithOptions(
 // PlanStatusTUIBatchChangeTemplateScenario tests changing job template on selected jobs.
 var PlanStatusTUIBatchChangeTemplateScenario = harness.NewScenarioWithOptions(
 	"plan-status-tui-batch-change-template",
-	"Verifies changing job template on multiple selected jobs with 'ctrl+e' key.",
+	"Verifies changing job template on multiple selected jobs with 'E' key.",
 	[]string{"tui", "plan", "status", "multi-select", "template"},
 	[]harness.Step{
 		harness.NewStep("Setup plan with multiple jobs", setupMultiSelectPlan),
 		harness.NewStep("Launch status TUI", launchMultiSelectTUI),
 		harness.NewStep("Select two jobs", selectTwoJobs),
-		harness.NewStep("Change template to 'agent-xml' with 'ctrl+e'", changeTemplateToAgentXml),
+		harness.NewStep("Change template to 'agent-xml' with 'E'", changeTemplateToAgentXml),
 		harness.NewStep("Verify template updated for both jobs", verifyTemplateUpdatedToAgentXml),
 		harness.NewStep("Quit the TUI", quitStatusTUI),
 	},
@@ -838,15 +838,15 @@ func verifySingleJobStatusUpdated(ctx *harness.Context) error {
 	})
 }
 
-// changeTypeToOneshot presses 'ctrl+t' and selects 'oneshot' type.
+// changeTypeToOneshot presses 'Y' and selects 'oneshot' type.
 func changeTypeToOneshot(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Press 'ctrl+t' to open type picker
-	if err := session.SendKeys("C-t"); err != nil {
-		return fmt.Errorf("failed to send 'ctrl+t' key: %w", err)
+	// Press 'Y' to open type picker
+	if err := session.SendKeys("Y"); err != nil {
+		return fmt.Errorf("failed to send 'Y' key: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
 
@@ -893,15 +893,15 @@ func verifyTypeUpdatedToOneshot(ctx *harness.Context) error {
 	})
 }
 
-// changeTemplateToAgentXml presses 'ctrl+e' and selects 'agent-xml' template.
+// changeTemplateToAgentXml presses 'E' and selects 'agent-xml' template.
 func changeTemplateToAgentXml(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Press 'ctrl+e' to open template picker
-	if err := session.SendKeys("C-e"); err != nil {
-		return fmt.Errorf("failed to send 'ctrl+e' key: %w", err)
+	// Press 'E' to open template picker
+	if err := session.SendKeys("E"); err != nil {
+		return fmt.Errorf("failed to send 'E' key: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
 
