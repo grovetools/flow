@@ -39,6 +39,7 @@ func main() {
 		scenarios.PlanStatusTUIDAGScenario,
 		scenarios.PlanStatusTUILayoutLongNamesScenario,
 		scenarios.PlanStatusTUILayoutPersistenceScenario,
+		scenarios.PlanStatusTUIJobExecutionScenario,
 		scenarios.PlanFromNoteScenario,
 		scenarios.PlanMergeUpdateWorktreeScenario,
 		scenarios.StandardFeatureRecipeScenario,

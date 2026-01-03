@@ -376,23 +376,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Selected = newSelected
 
-		// Autorun logic: if autorunning, check for next runnable jobs
+		// Autorun logic: if autorunning, check for next runnable jobs from the original selection
 		// Only trigger autorun if no jobs are currently running
-		if m.isAutorunning && !m.IsRunningJob {
-			// Get the next set of runnable jobs
-			newRunnable := m.Graph.GetRunnableJobs()
+		if m.isAutorunning && !m.IsRunningJob && m.originalSelection != nil {
+			// Get the next set of runnable jobs that were in the original selection
+			allRunnable := m.Graph.GetRunnableJobs()
+			var selectedRunnable []*orchestration.Job
+			for _, job := range allRunnable {
+				if m.originalSelection[job.ID] {
+					selectedRunnable = append(selectedRunnable, job)
+				}
+			}
 
-			if len(newRunnable) > 0 {
+			if len(selectedRunnable) > 0 {
 				m.StatusSummary = theme.DefaultTheme.Info.Render("Starting next stage...")
-				// Select all new runnable jobs
-				for _, job := range newRunnable {
+				// Select only the runnable jobs that were in the original selection
+				for _, job := range selectedRunnable {
 					m.Selected[job.ID] = true
 				}
 				// Trigger the run by sending a 'r' key message
 				return m, func() tea.Msg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}} }
 			} else {
-				// No more runnable jobs, autorun is complete
+				// No more runnable jobs from the selection, autorun is complete
 				m.isAutorunning = false
+				m.originalSelection = nil
 				m.StatusSummary = theme.DefaultTheme.Success.Render("All jobs completed successfully.")
 			}
 		}
@@ -1188,9 +1195,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			// Check if this is an autorun trigger (running all runnable jobs)
-			allRunnable := m.Graph.GetRunnableJobs()
-			m.isAutorunning = len(jobsToRun) == len(allRunnable)
+			// Check if this is an autorun trigger (user selected multiple jobs)
+			// Store the original selection so we only run jobs that were selected
+			if len(candidateJobs) > 1 {
+				m.isAutorunning = true
+				m.originalSelection = make(map[string]bool)
+				for _, job := range candidateJobs {
+					m.originalSelection[job.ID] = true
+				}
+			} else {
+				m.isAutorunning = false
+				m.originalSelection = nil
+			}
 
 			if len(jobsToRun) > 0 {
 				// Clear the log viewer to prepare for new live output

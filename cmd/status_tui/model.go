@@ -118,6 +118,7 @@ type Model struct {
 	LogSplitVertical    bool      // Track log viewer layout
 	IsRunningJob        bool      // Track if a job is currently running
 	isAutorunning       bool      // True when automatically running all stages
+	originalSelection   map[string]bool // Track the original user selection for autorun
 	RunLogFile         string    // Path to temporary log file for job output
 	Program            *tea.Program // Reference to the tea.Program for sending messages
 	LogViewerWidth     int       // Cached log viewer width
