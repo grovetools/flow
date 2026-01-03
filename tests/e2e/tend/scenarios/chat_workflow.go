@@ -122,6 +122,52 @@ Let's discuss a feature.`
 				return fmt.Errorf("expected job status 'pending_user', got '%s'", job.Status)
 			}
 
+			// Store job ID for next step
+			ctx.Set("chat_job_id", job.ID)
+
+			return nil
+		}),
+
+		harness.NewStep("Verify standalone chat creates artifacts (logs and briefings)", func(ctx *harness.Context) error {
+			chatFilePath := ctx.GetString("chat_file_path")
+			jobID := ctx.GetString("chat_job_id")
+
+			// Standalone chats create .artifacts/ in the same directory as the chat file
+			chatDir := filepath.Dir(chatFilePath)
+			artifactsDir := filepath.Join(chatDir, ".artifacts", jobID)
+
+			// Verify artifacts directory was created
+			if err := fs.AssertExists(artifactsDir); err != nil {
+				return fmt.Errorf("artifacts directory not created for standalone chat: %w", err)
+			}
+
+			// Verify job.log was created and has content
+			jobLogPath := filepath.Join(artifactsDir, "job.log")
+			if err := fs.AssertExists(jobLogPath); err != nil {
+				return fmt.Errorf("job.log not created for standalone chat: %w", err)
+			}
+
+			// Verify log contains output (either context info or warning about missing context)
+			// Both indicate logging is working
+			if err := fs.AssertContains(jobLogPath, "context"); err != nil {
+				return fmt.Errorf("job.log appears empty or missing expected content: %w", err)
+			}
+
+			// Verify at least one briefing file was created
+			briefingPattern := filepath.Join(artifactsDir, "briefing-*.xml")
+			briefingFiles, err := filepath.Glob(briefingPattern)
+			if err != nil {
+				return fmt.Errorf("error searching for briefing files: %w", err)
+			}
+			if len(briefingFiles) == 0 {
+				return fmt.Errorf("no briefing files found in %s", artifactsDir)
+			}
+
+			// Verify briefing file contains expected XML structure
+			if err := fs.AssertContains(briefingFiles[0], "<prompt>"); err != nil {
+				return fmt.Errorf("briefing file missing <prompt> tag: %w", err)
+			}
+
 			return nil
 		}),
 
