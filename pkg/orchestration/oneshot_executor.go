@@ -1172,6 +1172,40 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		"plan_name":  plan.Name,
 	}).Info("Executing chat turn")
 
+	// --- Pre-flight Check ---
+	// Read the job file content to check state before creating locks or changing status.
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("reading chat file: %w", err)
+	}
+
+	// Parse the chat file to determine runnability
+	turns, err := ParseChatFile(content)
+	if err != nil {
+		return fmt.Errorf("parsing chat file: %w", err)
+	}
+
+	if len(turns) == 0 {
+		return fmt.Errorf("chat file has no turns")
+	}
+
+	lastTurn := turns[len(turns)-1]
+
+	// If the last turn is from the LLM, or if it's an empty prompt from the user,
+	// the job is not ready to run. Return successfully without changing state.
+	if lastTurn.Speaker != "user" || strings.TrimSpace(lastTurn.Content) == "" {
+		log.WithField("job", job.Title).Info("Chat job is waiting for user input, skipping execution.")
+		prettyLog.InfoPretty(fmt.Sprintf("Chat job '%s' is waiting for user input.", job.Title))
+		// Ensure status is correctly set to pending_user and return.
+		if job.Status != JobStatusPendingUser {
+			job.Status = JobStatusPendingUser
+			updateJobFile(job)
+		}
+		return nil
+	}
+
+	// --- Execution ---
+	// Pre-flight check passed, proceed with execution.
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {
 		return fmt.Errorf("failed to create lock file: %w", err)
@@ -1179,7 +1213,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Ensure lock file is removed when execution finishes.
 	defer RemoveLockFile(job.FilePath)
 
-	// Update job status to running FIRST
+	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
 	if err := updateJobFile(job); err != nil {
@@ -1187,13 +1221,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 
 	var execErr error
-
-	// Read the job file content
-	content, err := os.ReadFile(job.FilePath)
-	if err != nil {
-		execErr = fmt.Errorf("reading chat file: %w", err)
-		return execErr
-	}
 
 	// Check if job has a template, if not, add template: chat to frontmatter
 	if job.Template == "" {
@@ -1223,45 +1250,9 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		prettyLog.Success("Added 'template: chat' to job frontmatter")
 	}
 
-	// Parse the chat file
-	turns, err := ParseChatFile(content)
-	if err != nil {
-		execErr = fmt.Errorf("parsing chat file: %w", err)
-		return execErr
-	}
-
-	// Determine if the job is runnable
-	if len(turns) == 0 {
-		execErr = fmt.Errorf("chat file has no turns")
-		return execErr
-	}
-
-	lastTurn := turns[len(turns)-1]
-	if lastTurn.Speaker == "llm" {
-		// Job is waiting for user input
-		log.WithField("job", job.Title).Info("Chat job is waiting for user input")
-		prettyLog.WarnPretty(fmt.Sprintf("Chat job '%s' is waiting for your response - edit the file to continue", job.Title))
-		job.Status = JobStatusPendingUser
-		updateJobFile(job)
-		log.Debug("Early return: job waiting for user input")
-		return nil
-	}
-
-	if lastTurn.Speaker != "user" {
-		execErr = fmt.Errorf("unexpected last speaker: %s", lastTurn.Speaker)
-		return execErr
-	}
-
-	// Check if the last user turn has empty content
-	if strings.TrimSpace(lastTurn.Content) == "" {
-		log.WithField("job", job.Title).Info("Chat job has empty user prompt, skipping execution")
-		prettyLog.WarnPretty(fmt.Sprintf("Chat job '%s' has no content - add your prompt to the file", job.Title))
-		job.Status = JobStatusPendingUser
-		updateJobFile(job)
-		return nil
-	}
-
 	// Process the active directive
+	// Note: We already parsed and validated turns in the pre-flight check
+	lastTurn = turns[len(turns)-1]
 	var directive *ChatDirective
 	if lastTurn.Directive != nil {
 		directive = lastTurn.Directive

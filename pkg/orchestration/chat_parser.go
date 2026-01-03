@@ -91,7 +91,7 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 		content := groveDirectiveRegex.ReplaceAllString(fullContent, "")
 		content = strings.TrimSpace(content)
 		
-		if content != "" {
+		if content != "" || speaker == "user" {
 			turns = append(turns, &ChatTurn{
 				Speaker:   speaker,
 				Content:   content,
