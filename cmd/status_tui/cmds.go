@@ -932,6 +932,18 @@ func setJobStatus(job *orchestration.Job, plan *orchestration.Plan, status orche
 	}
 }
 
+func setMultipleJobStatus(jobs []*orchestration.Job, plan *orchestration.Plan, status orchestration.JobStatus) tea.Cmd {
+	return func() tea.Msg {
+		sp := orchestration.NewStatePersister()
+		for _, job := range jobs {
+			if err := sp.UpdateJobStatus(job, status); err != nil {
+				return err
+			}
+		}
+		return RefreshMsg{} // Refresh to show the status change
+	}
+}
+
 func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 	// Build the command
 	args := []string{"plan", "add", planDir, "-i"}

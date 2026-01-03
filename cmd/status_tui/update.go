@@ -615,21 +615,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "enter":
 				m.ShowStatusPicker = false
-				if m.Cursor < len(m.Jobs) {
-					job := m.Jobs[m.Cursor]
-					statuses := []orchestration.JobStatus{
-						orchestration.JobStatusPending,
-						orchestration.JobStatusTodo,
-						orchestration.JobStatusHold,
-						orchestration.JobStatusRunning,
-						orchestration.JobStatusCompleted,
-						orchestration.JobStatusFailed,
-						orchestration.JobStatusBlocked,
-						orchestration.JobStatusNeedsReview,
-						orchestration.JobStatusAbandoned,
+				statuses := []orchestration.JobStatus{
+					orchestration.JobStatusPending,
+					orchestration.JobStatusTodo,
+					orchestration.JobStatusHold,
+					orchestration.JobStatusRunning,
+					orchestration.JobStatusCompleted,
+					orchestration.JobStatusFailed,
+					orchestration.JobStatusBlocked,
+					orchestration.JobStatusNeedsReview,
+					orchestration.JobStatusAbandoned,
+				}
+				selectedStatus := statuses[m.StatusPickerCursor]
+
+				// Set status for selected jobs or current job if none selected
+				if len(m.Selected) > 0 {
+					// Set status for all selected jobs
+					var jobsToUpdate []*orchestration.Job
+					for id := range m.Selected {
+						for _, job := range m.Jobs {
+							if job.ID == id {
+								jobsToUpdate = append(jobsToUpdate, job)
+								break
+							}
+						}
 					}
 					return m, tea.Sequence(
-						setJobStatus(job, m.Plan, statuses[m.StatusPickerCursor]),
+						setMultipleJobStatus(jobsToUpdate, m.Plan, selectedStatus),
+						refreshPlan(m.PlanDir),
+					)
+				} else if m.Cursor < len(m.Jobs) {
+					// Set status for cursor job only
+					job := m.Jobs[m.Cursor]
+					return m, tea.Sequence(
+						setJobStatus(job, m.Plan, selectedStatus),
 						refreshPlan(m.PlanDir),
 					)
 				}
