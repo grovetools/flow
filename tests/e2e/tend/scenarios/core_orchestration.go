@@ -20,7 +20,7 @@ var CoreOrchestrationScenario = harness.NewScenario(
 		}),
 
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
 			harness.Mock{CommandName: "cx"},
 		),
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
+	"github.com/mattsolo1/grove-tend/pkg/git"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
 	"github.com/mattsolo1/grove-tend/pkg/verify"
 )
@@ -21,8 +22,18 @@ var JobLogCaptureScenario = harness.NewScenario(
 	[]string{"core", "logging", "oneshot", "chat"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment", func(ctx *harness.Context) error {
-			projectDir, _, err := setupDefaultEnvironment(ctx, "log-capture-project")
+			projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "log-capture-project")
 			if err != nil {
+				return err
+			}
+
+			// Initialize git repository in notebooks workspace to prevent context generation
+			// from escaping the sandbox when searching upward from plan directory
+			workspaceDir := filepath.Join(notebooksRoot, "workspaces", "log-capture-project")
+			if err := fs.CreateDir(workspaceDir); err != nil {
+				return err
+			}
+			if _, err := git.SetupTestRepo(workspaceDir); err != nil {
 				return err
 			}
 
@@ -47,8 +58,8 @@ var JobLogCaptureScenario = harness.NewScenario(
 		}),
 
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
-			harness.Mock{CommandName: "cx"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
+			// Use real cx binary instead of mock to generate context properly
 		),
 
 		harness.NewStep("Create mock LLM response", func(ctx *harness.Context) error {
@@ -143,17 +154,18 @@ var JobLogCaptureScenario = harness.NewScenario(
 			var buffer bytes.Buffer
 			multiWriter := io.MultiWriter(logFile, &buffer)
 
-			// Create orchestrator with SkipInteractive to avoid prompts in tests
+			// Set environment for mock LLM
+			os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", llmResponseFile)
+			defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
+
+			// Create orchestrator with test-aware executor and SkipInteractive to avoid prompts in tests
 			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{
 				SkipInteractive: true,
+				CommandExecutor: ctx.CommandExecutor(),
 			})
 			if err != nil {
 				return fmt.Errorf("creating orchestrator: %w", err)
 			}
-
-			// Set environment for mock LLM
-			os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", llmResponseFile)
-			defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 			// Execute the job with the custom writer
 			if err := orch.ExecuteJobWithWriter(context.Background(), job, multiWriter); err != nil {
@@ -250,17 +262,18 @@ var JobLogCaptureScenario = harness.NewScenario(
 			var buffer bytes.Buffer
 			multiWriter := io.MultiWriter(logFile, &buffer)
 
-			// Create orchestrator with SkipInteractive to avoid prompts in tests
+			// Set environment for mock LLM
+			os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", llmResponseFile)
+			defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
+
+			// Create orchestrator with test-aware executor and SkipInteractive to avoid prompts in tests
 			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{
 				SkipInteractive: true,
+				CommandExecutor: ctx.CommandExecutor(),
 			})
 			if err != nil {
 				return fmt.Errorf("creating orchestrator: %w", err)
 			}
-
-			// Set environment for mock LLM
-			os.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", llmResponseFile)
-			defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 			// Execute the job with the custom writer
 			if err := orch.ExecuteJobWithWriter(context.Background(), job, multiWriter); err != nil {
@@ -331,9 +344,10 @@ var JobLogCaptureScenario = harness.NewScenario(
 			var buffer bytes.Buffer
 			multiWriter := io.MultiWriter(logFile, &buffer)
 
-			// Create orchestrator with SkipInteractive to avoid prompts in tests
+			// Create orchestrator with test-aware executor and SkipInteractive to avoid prompts in tests
 			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{
 				SkipInteractive: true,
+				CommandExecutor: ctx.CommandExecutor(),
 			})
 			if err != nil {
 				return fmt.Errorf("creating orchestrator: %w", err)

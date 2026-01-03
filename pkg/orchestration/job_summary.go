@@ -63,7 +63,7 @@ func SummarizeJobContent(ctx context.Context, job *Job, plan *Plan, cfg SummaryC
 	finalPrompt := fmt.Sprintf(prompt, maxChars, contentToSummarize)
 
 	// Call LLM
-	llmClient := NewCommandLLMClient()
+	llmClient := NewCommandLLMClient(nil)
 	opts := LLMOptions{
 		Model:      cfg.Model,
 		WorkingDir: plan.Directory,

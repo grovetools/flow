@@ -89,7 +89,7 @@ This note contains details about the architecture that need to be reflected in c
 		}),
 
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
 			harness.Mock{CommandName: "cx"},
 		),
 
@@ -309,7 +309,7 @@ This is a test plan linked to the concept.
 		}),
 
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
 			harness.Mock{CommandName: "cx"},
 		),
 

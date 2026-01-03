@@ -27,7 +27,7 @@ func NewGenerateRecipeExecutor(config *ExecutorConfig) *GenerateRecipeExecutor {
 	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
 		llmClient = NewMockLLMClient()
 	} else {
-		llmClient = NewCommandLLMClient()
+		llmClient = NewCommandLLMClient(nil)
 	}
 
 	if config == nil {

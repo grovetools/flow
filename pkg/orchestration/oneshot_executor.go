@@ -365,6 +365,16 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		// Use mock response for testing
 		response = "This is a mock LLM response for testing purposes."
 		err = nil
+	} else if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
+		// Check if mocking is enabled - if so, always use llmClient regardless of model
+		// Use traditional llm command which is mocked
+		llmOpts := LLMOptions{
+			Model:             effectiveModel,
+			WorkingDir:        workDir,
+			ContextFiles:      contextFiles,
+			PromptSourceFiles: promptSourceFiles,
+		}
+		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Resolve API key here where we have the correct execution context
 		apiKey, geminiErr := geminiconfig.ResolveAPIKey()
@@ -1633,7 +1643,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	var response string
 	var apiKey string
 	var geminiErr error
-	if strings.HasPrefix(effectiveModel, "gemini") {
+	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
+		// Check if mocking is enabled - if so, always use llmClient regardless of model
+		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
+	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Resolve API key here where we have the correct execution context
 		apiKey, geminiErr = geminiconfig.ResolveAPIKey()
 		if geminiErr != nil {

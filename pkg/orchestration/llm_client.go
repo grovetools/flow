@@ -37,14 +37,20 @@ type CommandLLMClient struct {
 }
 
 // NewCommandLLMClient creates a new LLM client that executes the llm command.
-func NewCommandLLMClient() *CommandLLMClient {
+func NewCommandLLMClient(executor command.Executor) *CommandLLMClient {
 	log := grovelogging.NewLogger("grove-flow")
 	// Check if 'llm' command exists in PATH
 	if _, err := exec.LookPath("llm"); err != nil {
 		log.WithError(err).Warn("llm command not found in PATH")
 	}
+
+	// Use provided executor or default
+	if executor == nil {
+		executor = &command.RealExecutor{}
+	}
+
 	return &CommandLLMClient{
-		cmdBuilder: command.NewSafeBuilder(),
+		cmdBuilder: command.NewSafeBuilderWithExecutor(executor),
 		log:        log,
 	}
 }

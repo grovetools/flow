@@ -113,7 +113,7 @@ This concept covers database design principles.
 		}),
 
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
 			harness.Mock{CommandName: "cx"},
 		),
 
@@ -301,7 +301,7 @@ High-level architecture overview.
 		}),
 
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
 			harness.Mock{CommandName: "cx"},
 		),
 

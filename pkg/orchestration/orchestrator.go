@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mattsolo1/grove-core/command"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -28,10 +29,11 @@ type OrchestratorConfig struct {
 	MaxParallelJobs     int
 	CheckInterval       time.Duration
 	StateFile           string
-	ModelOverride       string // Override model for all jobs
-	MaxConsecutiveSteps int    // Maximum consecutive steps before halting
-	SkipInteractive     bool   // Skip interactive agent jobs
-	SummaryConfig       *SummaryConfig // Configuration for job summarization
+	ModelOverride       string           // Override model for all jobs
+	MaxConsecutiveSteps int              // Maximum consecutive steps before halting
+	SkipInteractive     bool             // Skip interactive agent jobs
+	SummaryConfig       *SummaryConfig   // Configuration for job summarization
+	CommandExecutor     command.Executor // For dependency injection
 }
 
 // Orchestrator coordinates job execution and manages state.
@@ -64,6 +66,11 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig) (*Orchestrator, err
 			CheckInterval:   5 * time.Second,
 			StateFile:       "orchestrator.state",
 		}
+	}
+
+	// Use injected executor or default
+	if config.CommandExecutor == nil {
+		config.CommandExecutor = &command.RealExecutor{}
 	}
 
 	// Build dependency graph
@@ -118,7 +125,7 @@ func (o *Orchestrator) registerExecutors() {
 	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
 		llmClient = NewMockLLMClient()
 	} else {
-		llmClient = NewCommandLLMClient()
+		llmClient = NewCommandLLMClient(o.config.CommandExecutor)
 	}
 	geminiRunner := gemini.NewRequestRunner()
 

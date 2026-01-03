@@ -20,7 +20,7 @@ var HoistedCommandsScenario = harness.NewScenario(
 	[]harness.Step{
 		// Setup mocks for LLM operations
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
 			harness.Mock{CommandName: "cx"},
 			harness.Mock{CommandName: "git"},
 		),
@@ -560,7 +560,7 @@ var HoistedCommandsWithActiveJobScenario = harness.NewScenario(
 	[]string{"core", "plan", "hoisted", "active-job"},
 	[]harness.Step{
 		harness.SetupMocks(
-			harness.Mock{CommandName: "llm"},
+			harness.Mock{CommandName: "grove"}, // Mocks `grove llm request`
 			harness.Mock{CommandName: "cx"},
 		),
 
