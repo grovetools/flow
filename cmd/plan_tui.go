@@ -389,6 +389,16 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.repoGitLogError = msg.err
 		return m, nil
 
+	case reviewCompleteMsg:
+		// Review command completed, show status and reload the plans list
+		if msg.err != nil {
+			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Review failed: %s", msg.err.Error()))
+		} else if msg.output != "" {
+			// Show success message from the review command
+			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s Plan marked for review", theme.IconSuccess))
+		}
+		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold)
+
 	case planListLoadCompleteMsg:
 		m.loading = false
 		if msg.error != nil {
@@ -572,10 +582,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// R key - review plan changes
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				plan := m.plans[m.cursor]
-				if plan.Worktree != "" {
-					return m, executePlanReview(plan.Plan)
-				}
-				m.statusMessage = "No worktree to review for this plan."
+				return m, executePlanReview(plan.Plan)
 			}
 
 		case key.Matches(msg, m.keys.EditNotes):
@@ -982,7 +989,7 @@ func (m planListTUIModel) renderPlanTable() string {
 	}
 
 	// Prepare headers like grove ws plans list
-	headers := []string{"PLAN", "STATUS", "WORKTREE", "GIT", "MERGE", "REVIEW", "NOTES", "UPDATED"}
+	headers := []string{"PLAN", "STATUS", "WORKTREE", "GIT", "MERGE", "REVIEWED", "NOTES", "UPDATED"}
 
 	// Prepare rows with emoji status indicators and formatting
 	rows := make([][]string, len(m.plans))
@@ -1058,17 +1065,18 @@ func (m planListTUIModel) renderPlanTable() string {
 			mergeText = theme.DefaultTheme.Muted.Render(plan.MergeStatus)
 		}
 
-		// Format review status text
-		var reviewText string
+		// Format reviewed status (based on plan config status)
+		var reviewedText string
 		switch plan.ReviewStatus {
-		case "Pending":
-			reviewText = theme.DefaultTheme.Info.Render("Pending")
-		case "In Progress":
-			reviewText = theme.DefaultTheme.Warning.Render("In Progress")
-		case "Not Started":
-			reviewText = theme.DefaultTheme.Muted.Render("Not Started")
+		case "Review":
+			// Show checkmark for reviewed plans
+			reviewedText = theme.DefaultTheme.Success.Render(theme.IconSuccess)
+		case "Hold":
+			reviewedText = theme.DefaultTheme.Warning.Render("Hold")
+		case "Finished":
+			reviewedText = theme.DefaultTheme.Success.Render("Finished")
 		default:
-			reviewText = theme.DefaultTheme.Muted.Render("-")
+			reviewedText = theme.DefaultTheme.Muted.Render("-")
 		}
 
 		rows[i] = []string{
@@ -1077,7 +1085,7 @@ func (m planListTUIModel) renderPlanTable() string {
 			worktreeText,
 			gitText,
 			mergeText,
-			reviewText,
+			reviewedText,
 			notesText,
 			updatedText,
 		}
@@ -1251,13 +1259,14 @@ func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([
 					}
 
 					item := PlanListItem{
-						Plan:        plan,
-						Name:        plan.Name,
-						JobCount:    len(plan.Jobs),
-						LastUpdated: lastUpdated,
-						Worktree:    worktree,
-						Notes:       notes,
-						MergeStatus: "-", // Default value
+						Plan:         plan,
+						Name:         plan.Name,
+						JobCount:     len(plan.Jobs),
+						LastUpdated:  lastUpdated,
+						Worktree:     worktree,
+						Notes:        notes,
+						MergeStatus:  "-", // Default value
+						ReviewStatus: formatConfigStatus(plan.Config),
 					}
 
 					// Fetch git status if this plan has a worktree
@@ -1300,8 +1309,6 @@ func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([
 									gitStatus.AheadCount = getCommitCount(worktreePath, "main..HEAD")
 									gitStatus.BehindCount = getCommitCount(worktreePath, "HEAD..main")
 									item.GitStatus = gitStatus
-									// Populate review status and merge status
-									item.ReviewStatus = getReviewStatus(gitStatus, worktreePath)
 
 									// Use ecosystem-aware merge status for ecosystem plans
 									if plan.Config != nil && len(plan.Config.Repos) > 0 {
@@ -1386,7 +1393,33 @@ func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([
 
 type childExitedMsg struct{}
 
+type reviewCompleteMsg struct {
+	output string
+	err    error
+}
+
+// formatConfigStatus formats the plan's config status for display in the REVIEW column
+func formatConfigStatus(config *orchestration.PlanConfig) string {
+	if config == nil || config.Status == "" {
+		return "-"
+	}
+
+	// Return capitalized version of the status
+	switch config.Status {
+	case "review":
+		return "Review"
+	case "hold":
+		return "Hold"
+	case "finished":
+		return "Finished"
+	default:
+		return config.Status // Return as-is if unknown
+	}
+}
+
 // getReviewStatus determines the review status based on Git state
+// NOTE: This function is no longer used - we now use formatConfigStatus instead
+// Kept for potential future use or removal in cleanup
 func getReviewStatus(gitStatus *git.StatusInfo, worktreePath string) string {
 	if gitStatus == nil {
 		return "-" // No worktree associated
@@ -1714,21 +1747,21 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 }
 
 func executePlanReview(plan *orchestration.Plan) tea.Cmd {
-	return tea.Sequence(
+	return func() tea.Msg {
 		// Set active plan for context
-		func() tea.Msg {
-			if err := state.Set("flow.active_plan", plan.Name); err != nil {
-				return err
-			}
-			return nil
-		},
-		// Execute the review command
-		tea.ExecProcess(exec.Command("grove", "flow", "plan", "review"),
-			func(err error) tea.Msg {
-				// After the command exits, the TUI will redraw.
-				return nil
-			}),
-	)
+		if err := state.Set("flow.active_plan", plan.Name); err != nil {
+			return reviewCompleteMsg{err: err}
+		}
+
+		// Execute the review command and capture output
+		cmd := exec.Command("grove", "flow", "plan", "review")
+		output, err := cmd.CombinedOutput()
+
+		return reviewCompleteMsg{
+			output: string(output),
+			err:    err,
+		}
+	}
 }
 
 // rebaseWorktreeBranch rebases a worktree's branch on the default branch.
