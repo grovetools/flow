@@ -60,6 +60,7 @@ func main() {
 		scenarios.RecipeConceptUpdateWithPlansScenario,
 		scenarios.ConceptGatheringScenario,
 		scenarios.ConceptGatheringWithNotesScenario,
+		scenarios.ZombieWorktreeLogRecreationScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
