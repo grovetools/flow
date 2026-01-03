@@ -61,6 +61,10 @@ func main() {
 		scenarios.ConceptGatheringScenario,
 		scenarios.ConceptGatheringWithNotesScenario,
 		scenarios.ZombieWorktreeLogRecreationScenario,
+		scenarios.PlanRecipeInheritsDefaultsScenario,
+		scenarios.RecipeTemplateOverridesDefaultsScenario,
+		scenarios.HoistedAddRecipeInheritsDefaultsScenario,
+		scenarios.RecipeInheritsAllPropertiesScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

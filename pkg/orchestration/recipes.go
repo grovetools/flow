@@ -659,6 +659,22 @@ func AddJobsFromRecipe(plan *Plan, recipe *Recipe, externalDeps []string, templa
 			job.Type = JobTypeOneshot
 		}
 
+		// Apply plan-level defaults if they are not set in the recipe's frontmatter.
+		if plan.Config != nil {
+			if job.Model == "" && plan.Config.Model != "" {
+				job.Model = plan.Config.Model
+			}
+			if job.Worktree == "" && plan.Config.Worktree != "" {
+				job.Worktree = plan.Config.Worktree
+			}
+			if job.TargetAgentContainer == "" && plan.Config.TargetAgentContainer != "" {
+				job.TargetAgentContainer = plan.Config.TargetAgentContainer
+			}
+			if !job.PrependDependencies && plan.Config.PrependDependencies {
+				job.PrependDependencies = plan.Config.PrependDependencies
+			}
+		}
+
 		// Generate new unique filename
 		newFilename := GenerateJobFilename(nextNum, job.Title)
 		newFilePath := filepath.Join(plan.Directory, newFilename)
