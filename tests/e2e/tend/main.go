@@ -65,6 +65,13 @@ func main() {
 		scenarios.RecipeTemplateOverridesDefaultsScenario,
 		scenarios.HoistedAddRecipeInheritsDefaultsScenario,
 		scenarios.RecipeInheritsAllPropertiesScenario,
+		scenarios.PlanStatusTUIMultiSelectScenario,
+		scenarios.PlanStatusTUIBatchArchiveScenario,
+		scenarios.PlanStatusTUIBatchSetStatusScenario,
+		scenarios.PlanStatusTUIBatchXMLDepsScenario,
+		scenarios.PlanStatusTUIBatchImplementDepsScenario,
+		scenarios.PlanStatusTUISingleJobArchiveScenario,
+		scenarios.PlanStatusTUISingleJobSetStatusScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
