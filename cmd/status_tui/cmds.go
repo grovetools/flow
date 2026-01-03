@@ -944,6 +944,50 @@ func setMultipleJobStatus(jobs []*orchestration.Job, plan *orchestration.Plan, s
 	}
 }
 
+func setJobType(job *orchestration.Job, plan *orchestration.Plan, jobType orchestration.JobType) tea.Cmd {
+	return func() tea.Msg {
+		sp := orchestration.NewStatePersister()
+		if err := sp.UpdateJobType(job, jobType); err != nil {
+			return err
+		}
+		return RefreshMsg{} // Refresh to show the type change
+	}
+}
+
+func setMultipleJobType(jobs []*orchestration.Job, plan *orchestration.Plan, jobType orchestration.JobType) tea.Cmd {
+	return func() tea.Msg {
+		sp := orchestration.NewStatePersister()
+		for _, job := range jobs {
+			if err := sp.UpdateJobType(job, jobType); err != nil {
+				return err
+			}
+		}
+		return RefreshMsg{} // Refresh to show the type change
+	}
+}
+
+func setJobTemplate(job *orchestration.Job, plan *orchestration.Plan, template string) tea.Cmd {
+	return func() tea.Msg {
+		sp := orchestration.NewStatePersister()
+		if err := sp.UpdateJobTemplate(job, template); err != nil {
+			return err
+		}
+		return RefreshMsg{} // Refresh to show the template change
+	}
+}
+
+func setMultipleJobTemplate(jobs []*orchestration.Job, plan *orchestration.Plan, template string) tea.Cmd {
+	return func() tea.Msg {
+		sp := orchestration.NewStatePersister()
+		for _, job := range jobs {
+			if err := sp.UpdateJobTemplate(job, template); err != nil {
+				return err
+			}
+		}
+		return RefreshMsg{} // Refresh to show the template change
+	}
+}
+
 func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 	// Build the command
 	args := []string{"plan", "add", planDir, "-i"}

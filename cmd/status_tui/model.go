@@ -77,6 +77,10 @@ type Model struct {
 	ConfirmArchive     bool // Show archive confirmation
 	ShowStatusPicker   bool // Show status picker
 	StatusPickerCursor int  // Cursor position in status picker
+	ShowTypePicker     bool // Show type picker
+	TypePickerCursor   int  // Cursor position in type picker
+	ShowTemplatePicker bool // Show template picker
+	TemplatePickerCursor int  // Cursor position in template picker
 	PlanDir            string // Store plan directory for refresh
 	KeyMap             KeyMap
 	Help               help.Model
@@ -431,6 +435,16 @@ func (m Model) View() string {
 	// Show status picker if active
 	if m.ShowStatusPicker {
 		return m.renderStatusPicker()
+	}
+
+	// Show type picker if active
+	if m.ShowTypePicker {
+		return m.renderTypePicker()
+	}
+
+	// Show template picker if active
+	if m.ShowTemplatePicker {
+		return m.renderTemplatePicker()
 	}
 
 	// Show help if active

@@ -143,6 +143,88 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 	return nil
 }
 
+// UpdateJobType updates the type of a job in its markdown file.
+func (sp *StatePersister) UpdateJobType(job *Job, newType JobType) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+
+	// Create file lock
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer lock.Unlock()
+
+	// Read current file
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("read job file: %w", err)
+	}
+
+	// Update type in frontmatter
+	updates := map[string]interface{}{
+		"type":       string(newType),
+		"updated_at": time.Now().Format(time.RFC3339),
+	}
+
+	// Apply update
+	newContent, err := sp.updateFrontmatter(content, updates)
+	if err != nil {
+		return fmt.Errorf("update frontmatter: %w", err)
+	}
+
+	// Write atomically
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	// Update in-memory state
+	job.Type = newType
+
+	return nil
+}
+
+// UpdateJobTemplate updates the template of a job in its markdown file.
+func (sp *StatePersister) UpdateJobTemplate(job *Job, newTemplate string) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+
+	// Create file lock
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer lock.Unlock()
+
+	// Read current file
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("read job file: %w", err)
+	}
+
+	// Update template in frontmatter
+	updates := map[string]interface{}{
+		"template":   newTemplate,
+		"updated_at": time.Now().Format(time.RFC3339),
+	}
+
+	// Apply update
+	newContent, err := sp.updateFrontmatter(content, updates)
+	if err != nil {
+		return fmt.Errorf("update frontmatter: %w", err)
+	}
+
+	// Write atomically
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	// Update in-memory state
+	job.Template = newTemplate
+
+	return nil
+}
+
 // UpdateJobMetadata updates metadata fields for a job.
 func (sp *StatePersister) UpdateJobMetadata(job *Job, meta JobMetadata) error {
 	sp.mu.Lock()

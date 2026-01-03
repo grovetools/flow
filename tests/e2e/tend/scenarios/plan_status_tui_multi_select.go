@@ -139,6 +139,40 @@ var PlanStatusTUISingleJobSetStatusScenario = harness.NewScenarioWithOptions(
 	false, // explicitOnly = false
 )
 
+// PlanStatusTUIBatchChangeTypeScenario tests changing job type on selected jobs.
+var PlanStatusTUIBatchChangeTypeScenario = harness.NewScenarioWithOptions(
+	"plan-status-tui-batch-change-type",
+	"Verifies changing job type on multiple selected jobs with 'ctrl+t' key.",
+	[]string{"tui", "plan", "status", "multi-select", "type"},
+	[]harness.Step{
+		harness.NewStep("Setup plan with multiple jobs", setupMultiSelectPlan),
+		harness.NewStep("Launch status TUI", launchMultiSelectTUI),
+		harness.NewStep("Select two jobs", selectTwoJobs),
+		harness.NewStep("Change type to 'oneshot' with 'ctrl+t'", changeTypeToOneshot),
+		harness.NewStep("Verify type updated for both jobs", verifyTypeUpdatedToOneshot),
+		harness.NewStep("Quit the TUI", quitStatusTUI),
+	},
+	true,  // localOnly = true, requires tmux
+	false, // explicitOnly = false
+)
+
+// PlanStatusTUIBatchChangeTemplateScenario tests changing job template on selected jobs.
+var PlanStatusTUIBatchChangeTemplateScenario = harness.NewScenarioWithOptions(
+	"plan-status-tui-batch-change-template",
+	"Verifies changing job template on multiple selected jobs with 'ctrl+e' key.",
+	[]string{"tui", "plan", "status", "multi-select", "template"},
+	[]harness.Step{
+		harness.NewStep("Setup plan with multiple jobs", setupMultiSelectPlan),
+		harness.NewStep("Launch status TUI", launchMultiSelectTUI),
+		harness.NewStep("Select two jobs", selectTwoJobs),
+		harness.NewStep("Change template to 'agent-xml' with 'ctrl+e'", changeTemplateToAgentXml),
+		harness.NewStep("Verify template updated for both jobs", verifyTemplateUpdatedToAgentXml),
+		harness.NewStep("Quit the TUI", quitStatusTUI),
+	},
+	true,  // localOnly = true, requires tmux
+	false, // explicitOnly = false
+)
+
 // Helper functions
 
 // setupMultiSelectPlan creates a plan with four jobs for testing multi-selection.
@@ -801,5 +835,117 @@ func verifySingleJobStatusUpdated(ctx *harness.Context) error {
 	return ctx.Verify(func(v *verify.Collector) {
 		v.Equal(fmt.Sprintf("%s has status 'hold'", cursorJob), "hold", job.Status)
 		v.Equal("01-cx.md still has status 'pending'", "pending", otherJob.Status)
+	})
+}
+
+// changeTypeToOneshot presses 'ctrl+t' and selects 'oneshot' type.
+func changeTypeToOneshot(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Press 'ctrl+t' to open type picker
+	if err := session.SendKeys("C-t"); err != nil {
+		return fmt.Errorf("failed to send 'ctrl+t' key: %w", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// Wait for type picker to appear
+	if err := session.WaitForText("oneshot", 5*time.Second); err != nil {
+		return fmt.Errorf("oneshot type not found in picker: %w", err)
+	}
+
+	// Navigate to 'oneshot' type (assuming it's the second option after shell)
+	if err := session.SendKeys("Down"); err != nil {
+		return fmt.Errorf("failed to navigate in type picker: %w", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Select oneshot with Enter
+	if err := session.SendKeys("Enter"); err != nil {
+		return fmt.Errorf("failed to select oneshot type: %w", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	return nil
+}
+
+// verifyTypeUpdatedToOneshot verifies both selected jobs have type 'oneshot'.
+func verifyTypeUpdatedToOneshot(ctx *harness.Context) error {
+	planPath := ctx.GetString("plan_path")
+	selectedJobs := ctx.Get("selected_jobs").([]string)
+
+	// Load jobs first to handle errors properly
+	jobs := make(map[string]*orchestration.Job)
+	for _, jobName := range selectedJobs {
+		jobPath := filepath.Join(planPath, jobName)
+		job, err := orchestration.LoadJob(jobPath)
+		if err != nil {
+			return fmt.Errorf("failed to load %s: %w", jobName, err)
+		}
+		jobs[jobName] = job
+	}
+
+	return ctx.Verify(func(v *verify.Collector) {
+		for jobName, job := range jobs {
+			v.Equal(fmt.Sprintf("%s has type 'oneshot'", jobName), orchestration.JobTypeOneshot, job.Type)
+		}
+	})
+}
+
+// changeTemplateToAgentXml presses 'ctrl+e' and selects 'agent-xml' template.
+func changeTemplateToAgentXml(ctx *harness.Context) error {
+	session := ctx.Get("tui_session").(*tui.Session)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Press 'ctrl+e' to open template picker
+	if err := session.SendKeys("C-e"); err != nil {
+		return fmt.Errorf("failed to send 'ctrl+e' key: %w", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// Wait for template picker to appear
+	if err := session.WaitForText("agent-xml", 5*time.Second); err != nil {
+		return fmt.Errorf("agent-xml template not found in picker: %w", err)
+	}
+
+	// Navigate to 'agent-xml' template
+	for i := 0; i < 3; i++ {
+		if err := session.SendKeys("Down"); err != nil {
+			return fmt.Errorf("failed to navigate in template picker: %w", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Select agent-xml with Enter
+	if err := session.SendKeys("Enter"); err != nil {
+		return fmt.Errorf("failed to select agent-xml template: %w", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	return nil
+}
+
+// verifyTemplateUpdatedToAgentXml verifies both selected jobs have template 'agent-xml'.
+func verifyTemplateUpdatedToAgentXml(ctx *harness.Context) error {
+	planPath := ctx.GetString("plan_path")
+	selectedJobs := ctx.Get("selected_jobs").([]string)
+
+	// Load jobs first to handle errors properly
+	jobs := make(map[string]*orchestration.Job)
+	for _, jobName := range selectedJobs {
+		jobPath := filepath.Join(planPath, jobName)
+		job, err := orchestration.LoadJob(jobPath)
+		if err != nil {
+			return fmt.Errorf("failed to load %s: %w", jobName, err)
+		}
+		jobs[jobName] = job
+	}
+
+	return ctx.Verify(func(v *verify.Collector) {
+		for jobName, job := range jobs {
+			v.Equal(fmt.Sprintf("%s has template 'agent-xml'", jobName), "agent-xml", job.Template)
+		}
 	})
 }

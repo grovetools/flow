@@ -72,6 +72,8 @@ func main() {
 		scenarios.PlanStatusTUIBatchImplementDepsScenario,
 		scenarios.PlanStatusTUISingleJobArchiveScenario,
 		scenarios.PlanStatusTUISingleJobSetStatusScenario,
+		scenarios.PlanStatusTUIBatchChangeTypeScenario,
+		scenarios.PlanStatusTUIBatchChangeTemplateScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

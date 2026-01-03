@@ -399,6 +399,154 @@ func (m Model) renderStatusPicker() string {
 		Render(box)
 }
 
+func (m Model) renderTypePicker() string {
+	t := theme.DefaultTheme
+
+	typeOptions := []struct {
+		jobType orchestration.JobType
+		label   string
+	}{
+		{orchestration.JobTypeShell, "Shell"},
+		{orchestration.JobTypeOneshot, "Oneshot"},
+		{orchestration.JobTypeChat, "Chat"},
+		{orchestration.JobTypeAgent, "Agent"},
+		{orchestration.JobTypeInteractiveAgent, "Interactive Agent"},
+		{orchestration.JobTypeHeadlessAgent, "Headless Agent"},
+		{orchestration.JobTypeGenerateRecipe, "Generate Recipe"},
+	}
+
+	var lines []string
+
+	// Add title
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Render("Set Job Type")
+	lines = append(lines, title)
+
+	if len(m.Selected) > 0 {
+		count := lipgloss.NewStyle().
+			Render(fmt.Sprintf("(%d jobs selected)", len(m.Selected)))
+		lines = append(lines, count)
+	} else if m.Cursor < len(m.Jobs) {
+		job := m.Jobs[m.Cursor]
+		filename := lipgloss.NewStyle().
+			Render(fmt.Sprintf("for: %s", job.Filename))
+		lines = append(lines, filename)
+	}
+	lines = append(lines, "")
+
+	// Add type options
+	for i, opt := range typeOptions {
+		prefix := "  "
+		var style lipgloss.Style
+
+		if i == m.TypePickerCursor {
+			prefix = theme.IconSelect + " "
+			style = lipgloss.NewStyle().
+				Bold(true).
+				Background(theme.DefaultColors.SubtleBackground)
+		} else {
+			style = t.Muted
+		}
+
+		line := fmt.Sprintf("%s%s", prefix, opt.label)
+		lines = append(lines, style.Render(line))
+	}
+
+	lines = append(lines, "")
+
+	// Add help text at bottom
+	help := t.Muted.Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
+	lines = append(lines, help)
+
+	content := strings.Join(lines, "\n")
+
+	// Wrap in a box with border
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Border).
+		Padding(1, 2).
+		Render(content)
+
+	// Add margin to position it slightly from the edge
+	return lipgloss.NewStyle().
+		Margin(1, 2).
+		Render(box)
+}
+
+func (m Model) renderTemplatePicker() string {
+	t := theme.DefaultTheme
+
+	templateOptions := []struct {
+		template string
+		label    string
+	}{
+		{"", "(No Template / Clear)"},
+		{"agent-xml", "Agent XML"},
+		{"agent-run", "Agent Run"},
+		{"agent-from-chat", "Agent from Chat"},
+		{"chat", "Chat"},
+	}
+
+	var lines []string
+
+	// Add title
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Render("Set Job Template")
+	lines = append(lines, title)
+
+	if len(m.Selected) > 0 {
+		count := lipgloss.NewStyle().
+			Render(fmt.Sprintf("(%d jobs selected)", len(m.Selected)))
+		lines = append(lines, count)
+	} else if m.Cursor < len(m.Jobs) {
+		job := m.Jobs[m.Cursor]
+		filename := lipgloss.NewStyle().
+			Render(fmt.Sprintf("for: %s", job.Filename))
+		lines = append(lines, filename)
+	}
+	lines = append(lines, "")
+
+	// Add template options
+	for i, opt := range templateOptions {
+		prefix := "  "
+		var style lipgloss.Style
+
+		if i == m.TemplatePickerCursor {
+			prefix = theme.IconSelect + " "
+			style = lipgloss.NewStyle().
+				Bold(true).
+				Background(theme.DefaultColors.SubtleBackground)
+		} else {
+			style = t.Muted
+		}
+
+		line := fmt.Sprintf("%s%s", prefix, opt.label)
+		lines = append(lines, style.Render(line))
+	}
+
+	lines = append(lines, "")
+
+	// Add help text at bottom
+	help := t.Muted.Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
+	lines = append(lines, help)
+
+	content := strings.Join(lines, "\n")
+
+	// Wrap in a box with border
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Border).
+		Padding(1, 2).
+		Render(content)
+
+	// Add margin to position it slightly from the edge
+	return lipgloss.NewStyle().
+		Margin(1, 2).
+		Render(box)
+}
+
 func (m Model) renderRenameDialog() string {
 	if m.RenameJobIndex < 0 || m.RenameJobIndex >= len(m.Jobs) {
 		return "Error: Invalid job selected for renaming."

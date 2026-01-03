@@ -662,6 +662,124 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Handle type picker
+		if m.ShowTypePicker {
+			switch msg.String() {
+			case "up", "k":
+				if m.TypePickerCursor > 0 {
+					m.TypePickerCursor--
+				}
+				return m, nil
+			case "down", "j":
+				if m.TypePickerCursor < 6 { // 7 type options (0-6)
+					m.TypePickerCursor++
+				}
+				return m, nil
+			case "enter":
+				m.ShowTypePicker = false
+				types := []orchestration.JobType{
+					orchestration.JobTypeShell,
+					orchestration.JobTypeOneshot,
+					orchestration.JobTypeChat,
+					orchestration.JobTypeAgent,
+					orchestration.JobTypeInteractiveAgent,
+					orchestration.JobTypeHeadlessAgent,
+					orchestration.JobTypeGenerateRecipe,
+				}
+				selectedType := types[m.TypePickerCursor]
+
+				// Set type for selected jobs or current job if none selected
+				if len(m.Selected) > 0 {
+					// Set type for all selected jobs
+					var jobsToUpdate []*orchestration.Job
+					for id := range m.Selected {
+						for _, job := range m.Jobs {
+							if job.ID == id {
+								jobsToUpdate = append(jobsToUpdate, job)
+								break
+							}
+						}
+					}
+					return m, tea.Sequence(
+						setMultipleJobType(jobsToUpdate, m.Plan, selectedType),
+						refreshPlan(m.PlanDir),
+					)
+				} else if m.Cursor < len(m.Jobs) {
+					// Set type for cursor job only
+					job := m.Jobs[m.Cursor]
+					return m, tea.Sequence(
+						setJobType(job, m.Plan, selectedType),
+						refreshPlan(m.PlanDir),
+					)
+				}
+				return m, nil
+			case "esc", "ctrl+c", "q", "b":
+				m.ShowTypePicker = false
+				return m, nil
+			default:
+				// Any other key while type picker is open - just consume it
+				return m, nil
+			}
+		}
+
+		// Handle template picker
+		if m.ShowTemplatePicker {
+			switch msg.String() {
+			case "up", "k":
+				if m.TemplatePickerCursor > 0 {
+					m.TemplatePickerCursor--
+				}
+				return m, nil
+			case "down", "j":
+				if m.TemplatePickerCursor < 4 { // 5 common templates (0-4)
+					m.TemplatePickerCursor++
+				}
+				return m, nil
+			case "enter":
+				m.ShowTemplatePicker = false
+				templates := []string{
+					"",              // No template (clear)
+					"agent-xml",
+					"agent-run",
+					"agent-from-chat",
+					"chat",
+				}
+				selectedTemplate := templates[m.TemplatePickerCursor]
+
+				// Set template for selected jobs or current job if none selected
+				if len(m.Selected) > 0 {
+					// Set template for all selected jobs
+					var jobsToUpdate []*orchestration.Job
+					for id := range m.Selected {
+						for _, job := range m.Jobs {
+							if job.ID == id {
+								jobsToUpdate = append(jobsToUpdate, job)
+								break
+							}
+						}
+					}
+					return m, tea.Sequence(
+						setMultipleJobTemplate(jobsToUpdate, m.Plan, selectedTemplate),
+						refreshPlan(m.PlanDir),
+					)
+				} else if m.Cursor < len(m.Jobs) {
+					// Set template for cursor job only
+					job := m.Jobs[m.Cursor]
+					return m, tea.Sequence(
+						setJobTemplate(job, m.Plan, selectedTemplate),
+						refreshPlan(m.PlanDir),
+					)
+				}
+				return m, nil
+			case "esc", "ctrl+c", "q", "b":
+				m.ShowTemplatePicker = false
+				return m, nil
+			default:
+				// Any other key while template picker is open - just consume it
+				return m, nil
+			}
+		}
+
 		// Handle confirmation dialog
 		if m.ConfirmArchive {
 			switch msg.String() {
@@ -1170,6 +1288,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs) {
 				m.ShowStatusPicker = true
 				m.StatusPickerCursor = 0
+			}
+
+		case key.Matches(msg, m.KeyMap.SetType):
+			if m.Cursor < len(m.Jobs) || len(m.Selected) > 0 {
+				m.ShowTypePicker = true
+				m.TypePickerCursor = 0
+			}
+
+		case key.Matches(msg, m.KeyMap.SetTemplate):
+			if m.Cursor < len(m.Jobs) || len(m.Selected) > 0 {
+				m.ShowTemplatePicker = true
+				m.TemplatePickerCursor = 0
 			}
 
 		case key.Matches(msg, m.KeyMap.AddXmlPlan):
