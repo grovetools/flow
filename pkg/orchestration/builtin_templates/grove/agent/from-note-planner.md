@@ -41,6 +41,54 @@ Run `nb list --json` in the current directory to see available notes. The JSON o
 
 Filter notes based on user criteria if specified (tags, titles, dates, etc.).
 
+**Finding Notes - Practical Tips:**
+
+When the user references a note by name or partial name:
+
+1. **Search by content or title:**
+   ```bash
+   nb search "partial-note-name" --json
+   ```
+   This returns matching notes with their paths. The output includes the full path needed for `--from-note`.
+
+2. **Filter by note type:**
+   ```bash
+   nb list --json | jq -r '.[] | select(.type == "issues") | {title: .title, path: .path}'
+   ```
+   Common types: `issues`, `inbox`, `in_progress`, `quick`
+
+3. **List recent notes:**
+   ```bash
+   nb list --json | jq -r '.[] | {title: .title, path: .path}' | head -10
+   ```
+
+4. **Extract the path from search results:**
+   When `nb search` finds a note, it shows:
+   ```
+   1. note-title.md
+      /full/path/to/note.md
+      Workspace: workspace-name (branch: main)
+   ```
+   Use the second line (the full path) for the `--from-note` flag.
+
+5. **User provides full path:**
+   If the user gives you a direct path like `/Users/.../note.md`, use it as-is - no need to search.
+
+**Creating New Notes:**
+
+When the user asks you to create a note (e.g., documenting a bug or issue):
+
+```bash
+echo "Note content here" | nb new -t issues --no-edit --stdin --name descriptive-note-name
+```
+
+- `-t issues` - Note type (directory): `issues`, `inbox`, `in_progress`, etc.
+- `--no-edit` - Don't open editor (we're providing content via stdin)
+- `--stdin` - Read content from pipe
+- `--name` - The note filename/title
+
+The command will output the created note's path, which you can then use for `--from-note`.
+
 ### 2. Parse User Arguments
 
 The user may specify:
@@ -63,7 +111,7 @@ Before creating the plan, construct the `flow plan init` command and present it 
 
 **Command Structure:**
 ```bash
-flow plan init <note-title> --from-note <path-to-note> --worktree --recipe <recipe-name> --note-target-file 02-spec.md
+flow plan init <note-title> --from-note <path-to-note> --worktree --recipe <recipe-name> --note-target-file 02-spec.md [--model <model-name>]
 ```
 
 **For standard-feature recipe specifically:**
@@ -105,6 +153,7 @@ flow plan init <note-title> --from-note <path-to-note> --worktree --recipe <reci
 - `--worktree` - Create isolated git worktree for this plan
 - `--recipe standard-feature` - Use the full feature development workflow
 - `--note-target-file 02-spec.md` - Put note content in spec job (not the first job)
+- `--model <model-name>` - Optional: Override the default model for all jobs (e.g., `gemini-2.5-pro`, `claude-3-5-sonnet-20240620`)
 
 **What this creates:**
 - Plan directory at `/path/to/notebooks/workspace/plans/<note-title>`
