@@ -110,13 +110,14 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 				return nil
 			}
 
-			// Skip interactive prompts if configured to do so
-			if e.config.SkipInteractive {
+			// Skip interactive prompts if configured to do so or if not in a TTY
+			isTTY := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
+			if e.config.SkipInteractive || !isTTY {
 				log.WithFields(logrus.Fields{
-					"job_id": job.ID,
-					"job_title": job.Title,
-					"job_type": job.Type,
-					"skip_reason": "configured",
+					"job_id":      job.ID,
+					"job_title":   job.Title,
+					"job_type":    job.Type,
+					"skip_reason": "configured or no TTY",
 				}).Info("Skipping interactive chat job")
 				prettyLog.InfoPretty(fmt.Sprintf("Skipping interactive chat job '%s' (running automatically)", job.Title))
 				return e.executeChatJob(ctx, job, plan, output)

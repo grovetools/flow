@@ -143,8 +143,10 @@ var JobLogCaptureScenario = harness.NewScenario(
 			var buffer bytes.Buffer
 			multiWriter := io.MultiWriter(logFile, &buffer)
 
-			// Create orchestrator
-			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{})
+			// Create orchestrator with SkipInteractive to avoid prompts in tests
+			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{
+				SkipInteractive: true,
+			})
 			if err != nil {
 				return fmt.Errorf("creating orchestrator: %w", err)
 			}
@@ -248,8 +250,10 @@ var JobLogCaptureScenario = harness.NewScenario(
 			var buffer bytes.Buffer
 			multiWriter := io.MultiWriter(logFile, &buffer)
 
-			// Create orchestrator
-			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{})
+			// Create orchestrator with SkipInteractive to avoid prompts in tests
+			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{
+				SkipInteractive: true,
+			})
 			if err != nil {
 				return fmt.Errorf("creating orchestrator: %w", err)
 			}
@@ -327,7 +331,10 @@ var JobLogCaptureScenario = harness.NewScenario(
 			var buffer bytes.Buffer
 			multiWriter := io.MultiWriter(logFile, &buffer)
 
-			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{})
+			// Create orchestrator with SkipInteractive to avoid prompts in tests
+			orch, err := orchestration.NewOrchestrator(plan, &orchestration.OrchestratorConfig{
+				SkipInteractive: true,
+			})
 			if err != nil {
 				return fmt.Errorf("creating orchestrator: %w", err)
 			}
