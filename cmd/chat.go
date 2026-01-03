@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
@@ -484,11 +486,30 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Use the orchestrator to run the specific job
-		ctx := context.Background()
-		if err := orch.RunJob(ctx, job.FilePath); err != nil {
-			errorMsg := fmt.Sprintf("✗ Error running chat '%s': %v\n", job.Title, err)
+		// Create a job-specific logger
+		logFilePath, err := orchestration.GetJobLogPath(plan, job)
+		if err != nil {
+			errorMsg := fmt.Sprintf("✗ Error getting log path for chat '%s': %v\n", job.Title, err)
 			fmt.Print(errorMsg)
+			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
+			continue
+		}
+		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			errorMsg := fmt.Sprintf("✗ Error opening log file for chat '%s': %v\n", job.Title, err)
+			fmt.Print(errorMsg)
+			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
+			continue
+		}
+		defer logFile.Close()
+
+		multiWriter := io.MultiWriter(os.Stdout, logFile)
+		jobCtx := grovelogging.WithWriter(context.Background(), multiWriter)
+
+		// Use the orchestrator to run the specific job with the custom writer
+		if err := orch.ExecuteJobWithWriter(jobCtx, job, multiWriter); err != nil {
+			errorMsg := fmt.Sprintf("✗ Error running chat '%s': %v\n", job.Title, err)
+			fmt.Fprint(multiWriter, errorMsg) // Log error to both console and file
 			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
 		}
 		fmt.Printf("--- Finished Chat: %s ---\n\n", job.Title)

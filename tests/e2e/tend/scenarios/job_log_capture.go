@@ -374,5 +374,108 @@ var JobLogCaptureScenario = harness.NewScenario(
 				v.Equal("shell job.log contains shell job output", nil, fs.AssertContains(jobLogPath, "This is a shell job execution"))
 			})
 		}),
+
+		harness.NewStep("Run shell job via 'flow plan run' and verify log capture", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			shellJobPath := filepath.Join(planPath, "03-test-shell-logging.md")
+
+			// First, reset the job status to pending so we can run it again
+			content, err := os.ReadFile(shellJobPath)
+			if err != nil {
+				return fmt.Errorf("failed to read job file: %w", err)
+			}
+
+			updates := map[string]interface{}{
+				"status": "pending",
+			}
+			newContent, err := orchestration.UpdateFrontmatter(content, updates)
+			if err != nil {
+				return fmt.Errorf("failed to update frontmatter: %w", err)
+			}
+
+			if err := os.WriteFile(shellJobPath, newContent, 0644); err != nil {
+				return fmt.Errorf("failed to write job file: %w", err)
+			}
+
+			// Clear the existing log file to verify new content
+			jobLogPath := ctx.GetString("shell_job_log_path")
+			if err := os.Remove(jobLogPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to clear log file: %w", err)
+			}
+
+			// Run the shell job using the CLI command
+			runCmd := ctx.Bin("plan", "run", shellJobPath, "--yes")
+			runCmd.Dir(projectDir)
+			result := runCmd.Run()
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("CLI 'plan run' failed: %w\nOutput: %s", err, result.Stdout+result.Stderr)
+			}
+
+			// Verify its log file was created and has content
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Equal("CLI shell job.log contains context summary", nil, fs.AssertContains(jobLogPath, "Context Summary"))
+				v.Equal("CLI shell job.log contains shell output", nil, fs.AssertContains(jobLogPath, "This is a shell job execution"))
+			})
+		}),
+
+		harness.NewStep("Run chat job via 'flow chat run' and verify log capture", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			chatJobPath := filepath.Join(planPath, "02-test-chat-logging.md")
+			llmResponseFile := ctx.GetString("llm_response_file")
+
+			// Reset the chat job to pending_user status and remove LLM responses
+			content, err := os.ReadFile(chatJobPath)
+			if err != nil {
+				return fmt.Errorf("failed to read job file: %w", err)
+			}
+
+			// Parse to get frontmatter and body
+			frontmatter, body, err := orchestration.ParseFrontmatter(content)
+			if err != nil {
+				return fmt.Errorf("failed to parse frontmatter: %w", err)
+			}
+
+			// Update status
+			frontmatter["status"] = "pending_user"
+
+			// Rebuild the file with just the initial user prompt (before any LLM responses)
+			// Find the first "<!-- grove:" directive which marks the LLM turn
+			bodyStr := string(body)
+			llmTurnIndex := strings.Index(bodyStr, "<!-- grove: {\"id\":")
+			if llmTurnIndex > 0 {
+				// Truncate at the LLM turn
+				bodyStr = bodyStr[:llmTurnIndex]
+			}
+
+			// Rebuild
+			newContent, err := orchestration.RebuildMarkdownWithFrontmatter(frontmatter, []byte(bodyStr))
+			if err != nil {
+				return fmt.Errorf("failed to rebuild markdown: %w", err)
+			}
+
+			if err := os.WriteFile(chatJobPath, newContent, 0644); err != nil {
+				return fmt.Errorf("failed to write job file: %w", err)
+			}
+
+			// Clear the existing log file to verify new content
+			jobLogPath := ctx.GetString("chat_job_log_path")
+			if err := os.Remove(jobLogPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to clear log file: %w", err)
+			}
+
+			// Run the chat job using the CLI command
+			runCmd := ctx.Bin("chat", "run", chatJobPath)
+			runCmd.Dir(projectDir).Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
+			result := runCmd.Run()
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("CLI 'chat run' failed: %w\nOutput: %s", err, result.Stdout+result.Stderr)
+			}
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Equal("CLI chat job.log contains context summary", nil, fs.AssertContains(jobLogPath, "Context Summary"))
+			})
+		}),
 	},
 )

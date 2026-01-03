@@ -348,36 +348,36 @@ func (o *Orchestrator) GetStatus() *PlanStatus {
 func (o *Orchestrator) runJobsConcurrently(ctx context.Context, jobs []*Job) error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(jobs))
-	
+
 	sem := make(chan struct{}, o.config.MaxParallelJobs)
-	
+
 	for _, job := range jobs {
 		wg.Add(1)
 		go func(j *Job) {
 			defer wg.Done()
-			
+
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			
+
 			if err := o.executeJob(ctx, j); err != nil {
 				errChan <- fmt.Errorf("job %s: %w", j.ID, err)
 			}
 		}(job)
 	}
-	
+
 	wg.Wait()
 	close(errChan)
-	
+
 	// Collect errors
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
-	
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
-	
+
 	return nil
 }
 
@@ -487,8 +487,24 @@ func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, outpu
 
 // executeJob runs a single job with the appropriate executor.
 func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
-	// This internal method now defaults to using os.Stdout, preserving CLI behavior.
-	return o.ExecuteJobWithWriter(ctx, job, os.Stdout)
+	// Set up logging for this job
+	logFilePath, err := GetJobLogPath(o.Plan, job)
+	if err != nil {
+		return fmt.Errorf("failed to get log path: %w", err)
+	}
+
+	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer logFile.Close()
+
+	// Create a MultiWriter to output to both stdout and the log file
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	jobCtx := grovelogging.WithWriter(ctx, multiWriter)
+
+	// Execute job with writer
+	return o.ExecuteJobWithWriter(jobCtx, job, multiWriter)
 }
 
 // UpdateJobStatus updates a job's status with proper synchronization.
