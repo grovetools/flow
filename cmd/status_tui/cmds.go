@@ -301,15 +301,27 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		}).Info("Checking if job should use streaming fallback")
 
 		if isRunning || (isPending && isAgentJob) {
-			// Try to get direct transcript path from session registry
+			// Try to get session ID from session registry for aglogs
 			var logSpec string = jobSpec
 			if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
-				if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata.TranscriptPath != "" {
-					logger.WithFields(map[string]interface{}{
-						"job_id":          job.ID,
-						"transcript_path": metadata.TranscriptPath,
-					}).Info("Fast path: found direct transcript path from session registry")
-					logSpec = metadata.TranscriptPath
+				if metadata, findErr := registry.Find(job.ID); findErr == nil {
+					// Use ClaudeSessionID for aglogs - this is the native session ID
+					// (e.g., ses_xxx for opencode, UUID for claude)
+					if metadata.ClaudeSessionID != "" {
+						logger.WithFields(map[string]interface{}{
+							"job_id":           job.ID,
+							"claude_session_id": metadata.ClaudeSessionID,
+							"provider":         metadata.Provider,
+						}).Info("Fast path: found session ID from registry")
+						logSpec = metadata.ClaudeSessionID
+					} else if metadata.TranscriptPath != "" {
+						// Fallback to transcript path for legacy sessions
+						logger.WithFields(map[string]interface{}{
+							"job_id":          job.ID,
+							"transcript_path": metadata.TranscriptPath,
+						}).Info("Fast path: using transcript path (no session ID)")
+						logSpec = metadata.TranscriptPath
+					}
 				} else {
 					logger.WithFields(map[string]interface{}{
 						"job_id":     job.ID,

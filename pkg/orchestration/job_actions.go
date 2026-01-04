@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/mattsolo1/grove-core/pkg/sessions"
 )
 
 // AppendAgentTranscript finds the transcript for an agent job
@@ -24,22 +26,39 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		"filename":  job.Filename,
 	}).Debug("[TRANSCRIPT] Starting transcript append")
 
-	jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+	// Try to get session ID from registry for aglogs (works for opencode, claude, etc.)
+	// Fall back to job spec if session not found in registry
+	aglogsSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+	if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
+		if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata.ClaudeSessionID != "" {
+			log.WithFields(map[string]interface{}{
+				"job_id":            job.ID,
+				"claude_session_id": metadata.ClaudeSessionID,
+				"provider":          metadata.Provider,
+			}).Debug("[TRANSCRIPT] Using session ID from registry")
+			aglogsSpec = metadata.ClaudeSessionID
+		} else {
+			log.WithFields(map[string]interface{}{
+				"job_id":     job.ID,
+				"find_error": findErr,
+			}).Debug("[TRANSCRIPT] Session not found in registry, using job spec")
+		}
+	}
 
 	// Get formatted transcript for job.log (with ANSI colors)
-	formattedCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+	formattedCmd := exec.Command("grove", "aglogs", "read", aglogsSpec)
 	formattedCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 	formattedOutput, formattedErr := formattedCmd.CombinedOutput()
 	formattedStr := string(formattedOutput)
 
 	// Get plain text transcript for .md file (without ANSI colors)
-	plainCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+	plainCmd := exec.Command("grove", "aglogs", "read", aglogsSpec)
 	plainOutput, plainErr := plainCmd.CombinedOutput()
 	plainStr := string(plainOutput)
 
 	log.WithFields(map[string]interface{}{
-		"job_id":   job.ID,
-		"job_spec": jobSpec,
+		"job_id":      job.ID,
+		"aglogs_spec": aglogsSpec,
 	}).Debug("[TRANSCRIPT] Running aglogs read")
 
 	// Use plain text for error checking and .md file writing
