@@ -78,6 +78,14 @@ func main() {
 		scenarios.PlanStatusTUIBatchChangeTypeScenario,
 		scenarios.PlanStatusTUIBatchChangeTemplateScenario,
 
+		// Claude provider tests
+		scenarios.ClaudeProviderLifecycleScenario,
+		scenarios.ClaudeProviderArgsScenario,
+
+		// Codex provider tests
+		scenarios.CodexProviderLifecycleScenario,
+		scenarios.CodexProviderArgsScenario,
+
 		// Opencode provider tests
 		scenarios.OpencodeProviderLifecycleScenario,
 		scenarios.OpencodeProviderArgsScenario,
