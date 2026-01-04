@@ -138,19 +138,19 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 		}
 	}
 
-	// If this was an interactive agent, try to kill its associated Claude process and tmux session.
+	// If this was an interactive agent, try to kill its associated agent process and tmux session.
 	if job.Type == orchestration.JobTypeInteractiveAgent {
 		if !silent {
-			fmt.Println("Attempting to clean up associated Claude session...")
+			fmt.Println("Attempting to clean up associated agent session...")
 		}
 
-		// Kill the Claude process by reading the PID from grove-hooks session metadata
-		if err := killClaudeSession(job.ID); err != nil {
+		// Kill the agent process by reading the PID from grove-hooks session metadata
+		if err := killAgentSession(job.ID); err != nil {
 			if !silent {
-				fmt.Printf("  Note: could not kill Claude session: %v\n", err)
+				fmt.Printf("  Note: could not kill agent session: %v\n", err)
 			}
 		} else if !silent {
-			fmt.Println("  ✓ Claude process killed.")
+			fmt.Println("  ✓ Agent process killed.")
 		}
 
 		// Also kill the tmux window for any interactive_agent job
@@ -291,8 +291,8 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 	return completeJob(job, plan, false)
 }
 
-// findClaudeSessionInfo finds the PID and session directory for a Claude session associated with a job ID.
-func findClaudeSessionInfo(jobID string) (pid int, sessionDir string, err error) {
+// findAgentSessionInfo finds the PID and session directory for an agent session associated with a job ID.
+func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return 0, "", fmt.Errorf("get home directory: %w", err)
@@ -350,7 +350,7 @@ func findClaudeSessionInfo(jobID string) (pid int, sessionDir string, err error)
 
 // getWorktreePathFromSession reads the working_directory from the session metadata.
 func getWorktreePathFromSession(jobID string) (string, error) {
-	_, sessionDir, err := findClaudeSessionInfo(jobID)
+	_, sessionDir, err := findAgentSessionInfo(jobID)
 	if err != nil {
 		return "", err
 	}
@@ -371,12 +371,12 @@ func getWorktreePathFromSession(jobID string) (string, error) {
 	return metadata.WorkingDirectory, nil
 }
 
-// killClaudeSession kills the Claude process associated with the given job ID
+// killAgentSession kills the agent process associated with the given job ID
 // by reading the PID from grove-hooks session metadata.
-func killClaudeSession(jobID string) error {
-	pid, _, err := findClaudeSessionInfo(jobID)
+func killAgentSession(jobID string) error {
+	pid, _, err := findAgentSessionInfo(jobID)
 	if err != nil {
-		return err // The error from findClaudeSessionInfo is already descriptive
+		return err // The error from findAgentSessionInfo is already descriptive
 	}
 
 	// Check if process exists

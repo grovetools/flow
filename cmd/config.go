@@ -26,12 +26,18 @@ type RecipeConfig struct {
 	Vars map[string]string `yaml:"vars"`
 }
 
+// ProviderConfig holds settings for a specific agent provider.
+type ProviderConfig struct {
+	Args []string `yaml:"args"`
+}
+
 // AgentConfig defines the structure for the 'agent' section in grove.yml.
 type AgentConfig struct {
-	Args                      []string `yaml:"args"`
-	MountWorkspaceAtHostPath  bool     `yaml:"mount_workspace_at_host_path"`
-	UseSuperprojectRoot       bool     `yaml:"use_superproject_root"`
-	InteractiveProvider       string   `yaml:"interactive_provider,omitempty"` // "claude" or "codex"
+	Args                      []string                   `yaml:"args"`
+	MountWorkspaceAtHostPath  bool                       `yaml:"mount_workspace_at_host_path"`
+	UseSuperprojectRoot       bool                       `yaml:"use_superproject_root"`
+	InteractiveProvider       string                     `yaml:"interactive_provider,omitempty"` // "claude", "codex", or "opencode"
+	Providers                 map[string]ProviderConfig  `yaml:"providers"`
 }
 
 // AppConfig wraps the core config with flow-specific extensions.

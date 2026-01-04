@@ -102,7 +102,7 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 
 		// Special handling for interactive agent jobs
 		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent {
-			pid, _, err := findClaudeSessionInfo(job.ID)
+			pid, _, err := findAgentSessionInfo(job.ID)
 			if err != nil {
 				// Give agent jobs a grace period to register with grove-hooks
 				// Agents don't register until their first hook call, which can take 5-30 seconds

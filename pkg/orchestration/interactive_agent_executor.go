@@ -171,9 +171,12 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	}
 
 	// Unmarshal agent configuration
+	type agentProviderConfig struct {
+		Args []string `yaml:"args"`
+	}
 	type agentConfig struct {
-		Args                string   `yaml:"args"`
-		InteractiveProvider string   `yaml:"interactive_provider,omitempty"`
+		InteractiveProvider string                           `yaml:"interactive_provider,omitempty"`
+		Providers           map[string]agentProviderConfig   `yaml:"providers"`
 	}
 	var agentCfg agentConfig
 	coreCfg.UnmarshalExtension("agent", &agentCfg)
@@ -190,19 +193,18 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		provider = NewCodexAgentProvider()
 	case "claude":
 		provider = NewClaudeAgentProvider()
+	case "opencode":
+		provider = NewOpencodeAgentProvider()
 	default:
 		return fmt.Errorf("unknown interactive_agent provider: '%s'", providerName)
 	}
 
-	// Get agent args
+	// Get agent args for the selected provider
 	var agentArgs []string
-	if coreCfg != nil {
-		type argsConfig struct {
-			Args []string `yaml:"args"`
+	if agentCfg.Providers != nil {
+		if providerCfg, ok := agentCfg.Providers[providerName]; ok {
+			agentArgs = providerCfg.Args
 		}
-		var argsCfg argsConfig
-		coreCfg.UnmarshalExtension("agent", &argsCfg)
-		agentArgs = argsCfg.Args
 	}
 
 	// Handle source_block reference if present
