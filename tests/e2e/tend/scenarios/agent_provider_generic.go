@@ -301,9 +301,8 @@ func createProviderArgsScenario(p ProviderConfig) *harness.Scenario {
 	)
 }
 
-// Generated scenarios for claude and codex providers.
-// Note: Opencode has dedicated tests in agent_provider_opencode.go with more
-// detailed coverage (session discovery, env vars, etc.)
+// Generated scenarios for all providers using parameterized tests.
+// This ensures consistent behavior across claude, codex, and opencode.
 var (
 	// Claude provider tests
 	ClaudeProviderLifecycleScenario = createProviderLifecycleScenario(AllProviders()[0])
@@ -312,4 +311,8 @@ var (
 	// Codex provider tests
 	CodexProviderLifecycleScenario = createProviderLifecycleScenario(AllProviders()[1])
 	CodexProviderArgsScenario      = createProviderArgsScenario(AllProviders()[1])
+
+	// Opencode provider tests
+	OpencodeProviderLifecycleScenario = createProviderLifecycleScenario(AllProviders()[2])
+	OpencodeProviderArgsScenario      = createProviderArgsScenario(AllProviders()[2])
 )

@@ -78,31 +78,13 @@ func main() {
 		scenarios.PlanStatusTUIBatchChangeTypeScenario,
 		scenarios.PlanStatusTUIBatchChangeTemplateScenario,
 
-		// Claude provider tests
+		// Provider tests (parameterized for claude, codex, opencode)
 		scenarios.ClaudeProviderLifecycleScenario,
 		scenarios.ClaudeProviderArgsScenario,
-
-		// Codex provider tests
 		scenarios.CodexProviderLifecycleScenario,
 		scenarios.CodexProviderArgsScenario,
-
-		// Opencode provider tests
 		scenarios.OpencodeProviderLifecycleScenario,
 		scenarios.OpencodeProviderArgsScenario,
-		scenarios.OpencodeEnvironmentVariablesScenario,
-		scenarios.OpencodeSessionDiscoveryScenario,
-
-		// Multi-provider configuration tests
-		scenarios.MultiProviderConfigScenario,
-		scenarios.ProviderDefaultFallbackScenario,
-		scenarios.InvalidProviderErrorScenario,
-		scenarios.ProviderSpecificArgsScenario,
-
-		// Provider error handling tests
-		scenarios.OpencodeMissingBinaryScenario,
-		scenarios.AgentProviderCleanupScenario,
-		scenarios.StatusVerificationWithMissingMetadataScenario,
-		scenarios.JobFailureOnLaunchErrorScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
