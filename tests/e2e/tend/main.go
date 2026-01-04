@@ -77,6 +77,24 @@ func main() {
 		scenarios.PlanStatusTUISingleJobSetStatusScenario,
 		scenarios.PlanStatusTUIBatchChangeTypeScenario,
 		scenarios.PlanStatusTUIBatchChangeTemplateScenario,
+
+		// Opencode provider tests
+		scenarios.OpencodeProviderLifecycleScenario,
+		scenarios.OpencodeProviderArgsScenario,
+		scenarios.OpencodeEnvironmentVariablesScenario,
+		scenarios.OpencodeSessionDiscoveryScenario,
+
+		// Multi-provider configuration tests
+		scenarios.MultiProviderConfigScenario,
+		scenarios.ProviderDefaultFallbackScenario,
+		scenarios.InvalidProviderErrorScenario,
+		scenarios.ProviderSpecificArgsScenario,
+
+		// Provider error handling tests
+		scenarios.OpencodeMissingBinaryScenario,
+		scenarios.AgentProviderCleanupScenario,
+		scenarios.StatusVerificationWithMissingMetadataScenario,
+		scenarios.JobFailureOnLaunchErrorScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
