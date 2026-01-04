@@ -170,23 +170,49 @@ func (p *OpencodeAgentProvider) generateSessionName(workDir string) (string, err
 }
 
 func (p *OpencodeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, workDir, targetPane string) {
+	log := grovelogging.NewLogger("flow.opencode.session")
+	log.WithFields(logrus.Fields{
+		"job_id":      job.ID,
+		"job_title":   job.Title,
+		"target_pane": targetPane,
+		"work_dir":    workDir,
+	}).Debug("Starting opencode session discovery")
+
 	time.Sleep(2 * time.Second) // Wait for agent to start
 
-	pid, err := findDescendantPID(getPanePID(targetPane), "opencode")
+	panePID := getPanePID(targetPane)
+	log.WithFields(logrus.Fields{
+		"target_pane": targetPane,
+		"pane_pid":    panePID,
+	}).Debug("Got pane PID, searching for opencode descendant process")
+
+	pid, err := findDescendantPID(panePID, "opencode")
 	if err != nil {
-		p.log.WithError(err).Error("Failed to find opencode PID")
+		log.WithError(err).WithFields(logrus.Fields{
+			"pane_pid": panePID,
+		}).Error("Failed to find opencode PID - descendant process not found")
 		return
 	}
+	log.WithFields(logrus.Fields{
+		"opencode_pid": pid,
+		"pane_pid":     panePID,
+	}).Debug("Found opencode process PID")
 
-	// Assuming opencode stores sessions similarly to codex, in ~/.config/opencode/sessions
+	// Opencode stores sessions in ~/.local/share/opencode/storage/session/{project_hash}/ses_*.json
 	homeDir, _ := os.UserHomeDir()
-	opencodeSessionsDir := filepath.Join(homeDir, ".config", "opencode", "sessions")
+	opencodeSessionsDir := filepath.Join(homeDir, ".local", "share", "opencode", "storage", "session")
+	log.WithField("sessions_dir", opencodeSessionsDir).Debug("Searching for opencode session file")
+
 	latestFile, err := findMostRecentOpencodeFile(opencodeSessionsDir)
 	if err != nil {
-		p.log.WithError(err).Error("Failed to find opencode session file")
+		log.WithError(err).WithField("sessions_dir", opencodeSessionsDir).Error("Failed to find opencode session file")
 		return
 	}
 	opencodeSessionID := strings.TrimSuffix(filepath.Base(latestFile), filepath.Ext(latestFile))
+	log.WithFields(logrus.Fields{
+		"session_file":       latestFile,
+		"opencode_session_id": opencodeSessionID,
+	}).Debug("Found opencode session file")
 
 	// Get git info
 	repo, branch := getGitInfo(workDir)
@@ -208,15 +234,41 @@ func (p *OpencodeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan,
 		TranscriptPath:   latestFile,
 	}
 
+	// Log all metadata fields before registration
+	log.WithFields(logrus.Fields{
+		"session_id":         metadata.SessionID,
+		"claude_session_id":  metadata.ClaudeSessionID,
+		"provider":           metadata.Provider,
+		"pid":                metadata.PID,
+		"working_directory":  metadata.WorkingDirectory,
+		"user":               metadata.User,
+		"repo":               metadata.Repo,
+		"branch":             metadata.Branch,
+		"started_at":         metadata.StartedAt,
+		"job_title":          metadata.JobTitle,
+		"plan_name":          metadata.PlanName,
+		"job_file_path":      metadata.JobFilePath,
+		"type":               metadata.Type,
+		"transcript_path":    metadata.TranscriptPath,
+	}).Info("Registering opencode session with grove-hooks registry")
+
 	registry, err := sessions.NewFileSystemRegistry()
 	if err != nil {
-		p.log.WithError(err).Error("Failed to create session registry")
+		log.WithError(err).Error("Failed to create session registry")
 		return
 	}
 	if err := registry.Register(metadata); err != nil {
-		p.log.WithError(err).Error("Failed to register opencode session")
+		log.WithError(err).WithFields(logrus.Fields{
+			"session_id": metadata.SessionID,
+			"provider":   metadata.Provider,
+		}).Error("Failed to register opencode session")
 	} else {
-		p.log.WithFields(logrus.Fields{"session_id": opencodeSessionID, "pid": pid}).Info("Successfully registered opencode session")
+		log.WithFields(logrus.Fields{
+			"session_id":         job.ID,
+			"opencode_session_id": opencodeSessionID,
+			"pid":                pid,
+			"provider":           "opencode",
+		}).Info("Successfully registered opencode session")
 	}
 }
 

@@ -11,10 +11,12 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/git"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/process"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -91,6 +93,7 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 // VerifyRunningJobStatus checks the PID liveness for jobs marked as running.
 // If a job's process is dead, its status is updated in-memory to "interrupted".
 func VerifyRunningJobStatus(plan *orchestration.Plan) {
+	log := grovelogging.NewLogger("flow.status.verify")
 	// We use a custom "interrupted" status string for display purposes.
 	// This is not persisted to disk - it's only updated in memory.
 	const JobStatusInterrupted = orchestration.JobStatus("interrupted")
@@ -100,32 +103,81 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 			continue
 		}
 
+		log.WithFields(logrus.Fields{
+			"job_id":     job.ID,
+			"job_title":  job.Title,
+			"job_type":   job.Type,
+			"updated_at": job.UpdatedAt,
+		}).Debug("Verifying running job status")
+
 		// Special handling for interactive agent jobs
 		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent {
-			pid, _, err := findAgentSessionInfo(job.ID)
+			log.WithField("job_id", job.ID).Debug("Job is interactive/agent type, looking up session info")
+
+			pid, sessionDir, err := findAgentSessionInfo(job.ID)
 			if err != nil {
 				// Give agent jobs a grace period to register with grove-hooks
 				// Agents don't register until their first hook call, which can take 5-30 seconds
 				gracePeriod := 30 * time.Second
 				timeSinceUpdate := time.Since(job.UpdatedAt)
 
+				log.WithFields(logrus.Fields{
+					"job_id":             job.ID,
+					"error":              err.Error(),
+					"time_since_update":  timeSinceUpdate.String(),
+					"grace_period":       gracePeriod.String(),
+					"within_grace_period": timeSinceUpdate < gracePeriod,
+				}).Debug("Session lookup failed for job")
+
 				if timeSinceUpdate < gracePeriod {
 					// Job just started, give it time to register
+					log.WithFields(logrus.Fields{
+						"job_id":            job.ID,
+						"time_remaining":    (gracePeriod - timeSinceUpdate).String(),
+					}).Debug("Job within grace period, skipping status check")
 					continue
 				}
 				// Grace period expired, mark as interrupted
+				log.WithFields(logrus.Fields{
+					"job_id":            job.ID,
+					"reason":            "session_not_found_grace_expired",
+					"time_since_update": timeSinceUpdate.String(),
+				}).Info("Marking job as interrupted - session not found after grace period")
 				job.Status = JobStatusInterrupted
 				continue
 			}
+
+			log.WithFields(logrus.Fields{
+				"job_id":      job.ID,
+				"pid":         pid,
+				"session_dir": sessionDir,
+			}).Debug("Found session info for job")
+
 			if !process.IsProcessAlive(pid) {
 				// Associated Claude process is dead
+				log.WithFields(logrus.Fields{
+					"job_id": job.ID,
+					"pid":    pid,
+					"reason": "process_not_alive",
+				}).Info("Marking job as interrupted - process is dead")
 				job.Status = JobStatusInterrupted
+			} else {
+				log.WithFields(logrus.Fields{
+					"job_id": job.ID,
+					"pid":    pid,
+				}).Debug("Job process is alive, status remains running")
 			}
 		} else {
 			// Original logic for other job types
 			pid, err := orchestration.ReadLockFile(job.FilePath)
 			if err != nil || !process.IsProcessAlive(pid) {
 				// Lock file missing or process is dead, mark as interrupted.
+				log.WithFields(logrus.Fields{
+					"job_id":         job.ID,
+					"pid":            pid,
+					"lock_file_err":  err != nil,
+					"reason":         "lock_file_or_process_dead",
+				}).Debug("Marking non-agent job as interrupted")
 				job.Status = JobStatusInterrupted
 			}
 		}

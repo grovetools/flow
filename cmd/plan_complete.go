@@ -12,9 +12,11 @@ import (
 	"syscall"
 
 	"github.com/fatih/color"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -293,19 +295,32 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 
 // findAgentSessionInfo finds the PID and session directory for an agent session associated with a job ID.
 func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) {
+	log := grovelogging.NewLogger("flow.session.lookup")
+	log.WithField("job_id", jobID).Debug("Starting session lookup for job")
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		log.WithError(err).Error("Failed to get home directory")
 		return 0, "", fmt.Errorf("get home directory: %w", err)
 	}
 
 	sessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
+	log.WithField("sessions_dir", sessionsDir).Debug("Scanning sessions directory")
+
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			log.WithField("sessions_dir", sessionsDir).Warn("Sessions directory does not exist")
 			return 0, "", fmt.Errorf("sessions directory not found: %s", sessionsDir)
 		}
+		log.WithError(err).WithField("sessions_dir", sessionsDir).Error("Failed to read sessions directory")
 		return 0, "", fmt.Errorf("read sessions directory: %w", err)
 	}
+
+	log.WithFields(logrus.Fields{
+		"sessions_dir":   sessionsDir,
+		"entry_count":    len(entries),
+	}).Debug("Found session entries")
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -317,33 +332,87 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 
 		metadataBytes, err := os.ReadFile(metadataFile)
 		if err != nil {
+			log.WithFields(logrus.Fields{
+				"session_dir":   entry.Name(),
+				"metadata_file": metadataFile,
+				"error":         err.Error(),
+			}).Debug("Could not read metadata file, skipping")
 			continue
 		}
 
-		var metadata struct {
-			SessionID string `json:"session_id"`
+		// Parse full metadata for debugging
+		var fullMetadata struct {
+			SessionID       string `json:"session_id"`
+			ClaudeSessionID string `json:"claude_session_id"`
+			Provider        string `json:"provider"`
+			PID             int    `json:"pid"`
+			JobTitle        string `json:"job_title"`
+			PlanName        string `json:"plan_name"`
 		}
-		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		if err := json.Unmarshal(metadataBytes, &fullMetadata); err != nil {
+			log.WithFields(logrus.Fields{
+				"session_dir": entry.Name(),
+				"error":       err.Error(),
+			}).Debug("Could not parse metadata, skipping")
 			continue
 		}
 
-		if metadata.SessionID == jobID {
+		log.WithFields(logrus.Fields{
+			"session_dir":       entry.Name(),
+			"metadata_session_id": fullMetadata.SessionID,
+			"provider":          fullMetadata.Provider,
+			"job_title":         fullMetadata.JobTitle,
+			"plan_name":         fullMetadata.PlanName,
+			"searching_for":     jobID,
+			"match":             fullMetadata.SessionID == jobID,
+		}).Debug("Checking session metadata against job ID")
+
+		if fullMetadata.SessionID == jobID {
 			// Found the session, now get the PID
+			log.WithFields(logrus.Fields{
+				"job_id":      jobID,
+				"session_dir": currentSessionDir,
+				"provider":    fullMetadata.Provider,
+			}).Debug("Found matching session")
+
 			pidFile := filepath.Join(currentSessionDir, "pid.lock")
 			pidBytes, err := os.ReadFile(pidFile)
 			if err != nil {
+				log.WithFields(logrus.Fields{
+					"job_id":   jobID,
+					"pid_file": pidFile,
+					"error":    err.Error(),
+				}).Error("Failed to read PID file for found session")
 				return 0, "", fmt.Errorf("read pid file for session %s: %w", jobID, err)
 			}
 
 			pidStr := strings.TrimSpace(string(pidBytes))
 			pid, err := strconv.Atoi(pidStr)
 			if err != nil {
+				log.WithFields(logrus.Fields{
+					"job_id":   jobID,
+					"pid_str":  pidStr,
+					"error":    err.Error(),
+				}).Error("Failed to parse PID from lock file")
 				return 0, "", fmt.Errorf("parse pid for session %s: %w", jobID, err)
 			}
+
+			log.WithFields(logrus.Fields{
+				"job_id":      jobID,
+				"pid":         pid,
+				"session_dir": currentSessionDir,
+				"provider":    fullMetadata.Provider,
+			}).Info("Successfully found session info for job")
 
 			return pid, currentSessionDir, nil
 		}
 	}
+
+	log.WithFields(logrus.Fields{
+		"job_id":        jobID,
+		"sessions_dir":  sessionsDir,
+		"entries_checked": len(entries),
+	}).Warn("No session found for job ID after checking all entries")
 
 	return 0, "", fmt.Errorf("no session found for job ID: %s", jobID)
 }
