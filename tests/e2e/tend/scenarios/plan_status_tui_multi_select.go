@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/mattsolo1/grove-tend/pkg/fs"
 	"github.com/mattsolo1/grove-tend/pkg/harness"
@@ -315,7 +316,8 @@ func verifySingleSelection(ctx *harness.Context) error {
 
 	return ctx.Verify(func(v *verify.Collector) {
 		v.Contains("SEL column visible", content, "SEL")
-		v.Contains("checkbox present", content, "[x]")
+		// Use theme.IconSelect which is the nerd font checkbox icon
+		v.Contains("checkbox present", content, theme.IconSelect)
 	})
 }
 
@@ -383,8 +385,8 @@ func verifyAllJobsSelected(ctx *harness.Context) error {
 
 	return ctx.Verify(func(v *verify.Collector) {
 		v.Contains("SEL column visible", content, "SEL")
-		// Count the number of [x] checkboxes - should have 4
-		checkboxCount := strings.Count(content, "[x]")
+		// Count the number of selected checkbox icons - should have 4
+		checkboxCount := strings.Count(content, theme.IconSelect)
 		v.Equal("four jobs selected", 4, checkboxCount)
 	})
 }
@@ -430,7 +432,16 @@ func selectTwoJobs(ctx *harness.Context) error {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Select first job
+	// Cursor starts at bottom (04-implement.md), navigate to first job
+	// Go up 3 times: 04 -> 03 -> 02 -> 01
+	for i := 0; i < 3; i++ {
+		if err := session.SendKeys("Up"); err != nil {
+			return fmt.Errorf("failed to navigate up: %w", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Select first job (01-cx.md)
 	if err := session.SendKeys("Space"); err != nil {
 		return fmt.Errorf("failed to send Space key for first job: %w", err)
 	}
@@ -442,7 +453,7 @@ func selectTwoJobs(ctx *harness.Context) error {
 	}
 	time.Sleep(300 * time.Millisecond)
 
-	// Select second job
+	// Select second job (02-spec.md)
 	if err := session.SendKeys("Space"); err != nil {
 		return fmt.Errorf("failed to send Space key for second job: %w", err)
 	}
@@ -466,8 +477,8 @@ func archiveSelectedJobs(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Confirm the archive action (assuming 'y' or Enter confirms)
-	if err := session.SendKeys("Enter"); err != nil {
+	// Confirm the archive action with 'y'
+	if err := session.SendKeys("y"); err != nil {
 		return fmt.Errorf("failed to confirm archive: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
@@ -515,14 +526,13 @@ func setStatusToHold(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Navigate to 'hold' status (assuming it's in the list)
-	// We may need to press Down to find it, but let's assume it's selectable
-	if err := session.WaitForText("hold", 5*time.Second); err != nil {
-		return fmt.Errorf("hold status not found in picker: %w", err)
+	// Wait for status picker to appear (status is displayed as "On Hold")
+	if err := session.WaitForText("On Hold", 5*time.Second); err != nil {
+		return fmt.Errorf("On Hold status not found in picker: %w", err)
 	}
 
-	// Send Down keys to navigate to 'hold' option
-	for i := 0; i < 3; i++ {
+	// Navigate to 'On Hold' status (index 2 in the list: Pending, Todo, On Hold, ...)
+	for i := 0; i < 2; i++ {
 		if err := session.SendKeys("Down"); err != nil {
 			return fmt.Errorf("failed to navigate in status picker: %w", err)
 		}
@@ -556,7 +566,7 @@ func verifyStatusUpdatedToHold(ctx *harness.Context) error {
 
 	return ctx.Verify(func(v *verify.Collector) {
 		for jobName, job := range jobs {
-			v.Equal(fmt.Sprintf("%s has status 'hold'", jobName), "hold", job.Status)
+			v.Equal(fmt.Sprintf("%s has status 'hold'", jobName), orchestration.JobStatusHold, job.Status)
 		}
 	})
 }
@@ -648,8 +658,16 @@ func verifyXMLJobDependencies(ctx *harness.Context) error {
 	return ctx.Verify(func(v *verify.Collector) {
 		v.Equal("XML job has agent-xml template", "agent-xml", xmlJob.Template)
 		v.Equal("XML job has correct dependency count", len(selectedJobs), len(xmlJob.DependsOn))
-		for _, expectedDep := range selectedJobs {
-			v.Contains(fmt.Sprintf("XML job depends on %s", expectedDep), strings.Join(xmlJob.DependsOn, ","), expectedDep)
+		// Dependencies use job IDs (like "cx-abc123") not filenames (like "01-cx.md")
+		// Extract job name prefix from filename (e.g., "cx" from "01-cx.md")
+		for _, selectedFile := range selectedJobs {
+			// Extract name by removing numeric prefix and .md suffix
+			// "01-cx.md" -> "cx", "02-spec.md" -> "spec"
+			name := strings.TrimSuffix(selectedFile, ".md")
+			if idx := strings.Index(name, "-"); idx != -1 {
+				name = name[idx+1:]
+			}
+			v.Contains(fmt.Sprintf("XML job depends on %s", name), strings.Join(xmlJob.DependsOn, ","), name+"-")
 		}
 	})
 }
@@ -706,25 +724,35 @@ func verifyImplementJobDependencies(ctx *harness.Context) error {
 	}
 
 	return ctx.Verify(func(v *verify.Collector) {
-		v.Equal("implement job has interactive_agent template", "interactive_agent", implementJob.Template)
+		v.Equal("implement job has interactive_agent type", orchestration.JobTypeInteractiveAgent, implementJob.Type)
 		v.Equal("implement job has correct dependency count", len(selectedJobs), len(implementJob.DependsOn))
-		for _, expectedDep := range selectedJobs {
-			v.Contains(fmt.Sprintf("implement job depends on %s", expectedDep), strings.Join(implementJob.DependsOn, ","), expectedDep)
+		// Dependencies use job IDs (like "cx-abc123") not filenames (like "01-cx.md")
+		for _, selectedFile := range selectedJobs {
+			// Extract job name prefix from filename
+			name := strings.TrimSuffix(selectedFile, ".md")
+			if idx := strings.Index(name, "-"); idx != -1 {
+				name = name[idx+1:]
+			}
+			v.Contains(fmt.Sprintf("implement job depends on %s", name), strings.Join(implementJob.DependsOn, ","), name+"-")
 		}
 	})
 }
 
-// navigateToSecondJob moves cursor to the second job.
+// navigateToSecondJob moves cursor to the second job (02-spec.md).
+// Note: Cursor starts at the bottom-most job (04-implement.md), so we need to go Up twice.
 func navigateToSecondJob(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Move down once to second job
-	if err := session.SendKeys("Down"); err != nil {
-		return fmt.Errorf("failed to navigate to second job: %w", err)
+	// Cursor starts at bottom (04-implement.md), go up twice to reach 02-spec.md
+	// 04 → 03 → 02
+	for i := 0; i < 2; i++ {
+		if err := session.SendKeys("Up"); err != nil {
+			return fmt.Errorf("failed to navigate up: %w", err)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
-	time.Sleep(300 * time.Millisecond)
 
 	ctx.Set("cursor_job", "02-spec.md")
 	return nil
@@ -742,8 +770,8 @@ func archiveCursorJob(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Confirm the archive action
-	if err := session.SendKeys("Enter"); err != nil {
+	// Confirm the archive action with 'y' (not Enter)
+	if err := session.SendKeys("y"); err != nil {
 		return fmt.Errorf("failed to confirm archive: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
@@ -792,13 +820,13 @@ func setStatusToHoldCursor(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Wait for status picker to appear
-	if err := session.WaitForText("hold", 5*time.Second); err != nil {
-		return fmt.Errorf("hold status not found in picker: %w", err)
+	// Wait for status picker to appear (status is displayed as "On Hold")
+	if err := session.WaitForText("On Hold", 5*time.Second); err != nil {
+		return fmt.Errorf("On Hold status not found in picker: %w", err)
 	}
 
-	// Navigate to 'hold' status
-	for i := 0; i < 3; i++ {
+	// Navigate to 'On Hold' status (index 2 in the list: Pending, Todo, On Hold, ...)
+	for i := 0; i < 2; i++ {
 		if err := session.SendKeys("Down"); err != nil {
 			return fmt.Errorf("failed to navigate in status picker: %w", err)
 		}
@@ -833,8 +861,8 @@ func verifySingleJobStatusUpdated(ctx *harness.Context) error {
 	}
 
 	return ctx.Verify(func(v *verify.Collector) {
-		v.Equal(fmt.Sprintf("%s has status 'hold'", cursorJob), "hold", job.Status)
-		v.Equal("01-cx.md still has status 'pending'", "pending", otherJob.Status)
+		v.Equal(fmt.Sprintf("%s has status 'hold'", cursorJob), orchestration.JobStatusHold, job.Status)
+		v.Equal("01-cx.md still has status 'pending'", orchestration.JobStatusPending, otherJob.Status)
 	})
 }
 
@@ -850,9 +878,9 @@ func changeTypeToOneshot(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Wait for type picker to appear
-	if err := session.WaitForText("oneshot", 5*time.Second); err != nil {
-		return fmt.Errorf("oneshot type not found in picker: %w", err)
+	// Wait for type picker to appear (types are capitalized)
+	if err := session.WaitForText("Oneshot", 5*time.Second); err != nil {
+		return fmt.Errorf("Oneshot type not found in picker: %w", err)
 	}
 
 	// Navigate to 'oneshot' type (assuming it's the second option after shell)
@@ -905,18 +933,16 @@ func changeTemplateToAgentXml(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Wait for template picker to appear
-	if err := session.WaitForText("agent-xml", 5*time.Second); err != nil {
-		return fmt.Errorf("agent-xml template not found in picker: %w", err)
+	// Wait for template picker to appear (template is displayed as "Agent XML")
+	if err := session.WaitForText("Agent XML", 5*time.Second); err != nil {
+		return fmt.Errorf("Agent XML template not found in picker: %w", err)
 	}
 
-	// Navigate to 'agent-xml' template
-	for i := 0; i < 3; i++ {
-		if err := session.SendKeys("Down"); err != nil {
-			return fmt.Errorf("failed to navigate in template picker: %w", err)
-		}
-		time.Sleep(200 * time.Millisecond)
+	// Navigate to 'Agent XML' template (index 1 in list: No Template, Agent XML, ...)
+	if err := session.SendKeys("Down"); err != nil {
+		return fmt.Errorf("failed to navigate in template picker: %w", err)
 	}
+	time.Sleep(200 * time.Millisecond)
 
 	// Select agent-xml with Enter
 	if err := session.SendKeys("Enter"); err != nil {

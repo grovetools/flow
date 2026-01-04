@@ -17,13 +17,15 @@ import (
 type ShellExecutor struct {
 	log       *logrus.Entry
 	prettyLog *grovelogging.PrettyLogger
+	config    *ExecutorConfig
 }
 
 // NewShellExecutor creates a new shell executor.
-func NewShellExecutor() *ShellExecutor {
+func NewShellExecutor(config *ExecutorConfig) *ShellExecutor {
 	return &ShellExecutor{
 		log:       grovelogging.NewLogger("grove-flow"),
 		prettyLog: grovelogging.NewPrettyLogger(),
+		config:    config,
 	}
 }
 
@@ -89,7 +91,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	}).Info("Executing shell job")
 
 	// Always regenerate context to ensure shell job has latest view, similar to oneshot executor
-	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(nil), nil) // Use for its helper method
+	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(nil), e.config) // Pass config for SkipInteractive
 	if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan); err != nil {
 		// Warn but do not fail the job for a context error
 		e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to generate context for shell job")

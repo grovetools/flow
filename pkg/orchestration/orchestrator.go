@@ -143,7 +143,7 @@ func (o *Orchestrator) registerExecutors() {
 	o.executors[JobTypeInteractiveAgent] = interactiveExecutor
 
 	// Register shell executor
-	o.executors[JobTypeShell] = NewShellExecutor()
+	o.executors[JobTypeShell] = NewShellExecutor(execConfig)
 
 	// Register generate-recipe executor
 	o.executors[JobTypeGenerateRecipe] = NewGenerateRecipeExecutor(execConfig)

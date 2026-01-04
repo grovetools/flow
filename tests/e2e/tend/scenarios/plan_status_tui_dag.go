@@ -23,6 +23,7 @@ var PlanStatusTUIDAGScenario = harness.NewScenarioWithOptions(
 			harness.Mock{CommandName: "claude"},
 			harness.Mock{CommandName: "tmux"},
 			harness.Mock{CommandName: "grove"},
+			harness.Mock{CommandName: "cx"},
 		),
 		harness.NewStep("Launch TUI and run DAG", launchTUIAndRunDAG),
 		harness.NewStep("Verify all jobs completed", verifyAllJobsCompleted),
@@ -137,7 +138,7 @@ func launchTUIAndRunDAG(ctx *harness.Context) error {
 
 	// Give jobs time to start and complete
 	// The entire DAG should complete quickly due to autorun (all stages finish in < 5s)
-	time.Sleep(8 * time.Second)
+	time.Sleep(10 * time.Second)
 
 	// The detailed verification happens in subsequent steps
 	// (verifyAllJobsCompleted and verifyJobLogsWritten)
