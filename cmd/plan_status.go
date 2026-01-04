@@ -153,8 +153,50 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 				"session_dir": sessionDir,
 			}).Debug("Found session info for job")
 
-			if !process.IsProcessAlive(pid) {
-				// Associated Claude process is dead
+			// Read provider from session metadata to handle opencode specially
+			provider := ""
+			sessionStatus := ""
+			metadataPath := filepath.Join(sessionDir, "metadata.json")
+			if metadataBytes, err := os.ReadFile(metadataPath); err == nil {
+				var metadata struct {
+					Provider string `json:"provider"`
+					Status   string `json:"status"`
+				}
+				if err := json.Unmarshal(metadataBytes, &metadata); err == nil {
+					provider = metadata.Provider
+					sessionStatus = metadata.Status
+				}
+			}
+
+			log.WithFields(logrus.Fields{
+				"job_id":         job.ID,
+				"pid":            pid,
+				"provider":       provider,
+				"session_status": sessionStatus,
+			}).Debug("Session metadata read")
+
+			// For opencode, don't use PID liveness - opencode exits after each turn
+			// Instead, check session status
+			if provider == "opencode" {
+				// Opencode exits after each turn, so PID being dead is normal
+				// Only mark as interrupted if session status explicitly indicates failure
+				if sessionStatus == "failed" || sessionStatus == "error" {
+					log.WithFields(logrus.Fields{
+						"job_id":         job.ID,
+						"session_status": sessionStatus,
+						"reason":         "session_status_failed",
+					}).Info("Marking opencode job as interrupted - session failed")
+					job.Status = JobStatusInterrupted
+				} else {
+					// Session is idle or running - keep job as running
+					log.WithFields(logrus.Fields{
+						"job_id":         job.ID,
+						"session_status": sessionStatus,
+						"provider":       provider,
+					}).Debug("Opencode job remains running - session is idle/active")
+				}
+			} else if !process.IsProcessAlive(pid) {
+				// For other providers (claude, codex), use PID liveness
 				log.WithFields(logrus.Fields{
 					"job_id": job.ID,
 					"pid":    pid,

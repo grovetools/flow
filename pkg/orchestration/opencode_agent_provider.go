@@ -156,9 +156,21 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 
 func (p *OpencodeAgentProvider) buildAgentCommand(job *Job, briefingFilePath string, agentArgs []string) (string, error) {
 	escapedPath := "'" + strings.ReplaceAll(briefingFilePath, "'", "'\\''") + "'"
+	prompt := fmt.Sprintf("Read the briefing file at %s and execute the task.", escapedPath)
+
+	// For interactive_agent jobs, use --prompt to keep opencode running for continued interaction
+	// For headless/agent jobs, use run subcommand which exits after completing the task
+	if job.Type == JobTypeInteractiveAgent {
+		cmdParts := []string{"opencode"}
+		cmdParts = append(cmdParts, agentArgs...)
+		cmdParts = append(cmdParts, "--prompt", fmt.Sprintf("\"%s\"", prompt))
+		return strings.Join(cmdParts, " "), nil
+	}
+
+	// Headless mode - use 'run' subcommand
 	cmdParts := []string{"opencode", "run"}
 	cmdParts = append(cmdParts, agentArgs...)
-	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
+	return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), prompt), nil
 }
 
 func (p *OpencodeAgentProvider) generateSessionName(workDir string) (string, error) {
