@@ -413,6 +413,51 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
+	// --- Synchronous Session Registration ---
+	// Register the session BEFORE launching the agent to avoid race conditions.
+	// The discoverAndRegisterSession goroutine will enrich this with Claude session details.
+	registry, err := sessions.NewFileSystemRegistry()
+	if err != nil {
+		p.log.WithError(err).Error("Failed to create session registry")
+		// Continue anyway - session tracking is not critical for launching
+	} else {
+		user := os.Getenv("USER")
+		if user == "" {
+			user = "unknown"
+		}
+		repo, branch := getGitInfo(workDir)
+
+		metadata := sessions.SessionMetadata{
+			SessionID:        job.ID,
+			ClaudeSessionID:  "", // Empty - will be enriched by discoverAndRegisterSession
+			Provider:         "claude",
+			PID:              0, // Will be updated when Claude process is discovered
+			WorkingDirectory: workDir,
+			User:             user,
+			Repo:             repo,
+			Branch:           branch,
+			StartedAt:        time.Now(),
+			JobTitle:         job.Title,
+			PlanName:         plan.Name,
+			JobFilePath:      job.FilePath,
+			Type:             "interactive_agent",
+		}
+
+		p.log.WithFields(logrus.Fields{
+			"session_id": job.ID,
+			"provider":   "claude",
+			"work_dir":   workDir,
+		}).Info("Registering claude session with grove-hooks registry (synchronous)")
+
+		if err := registry.Register(metadata); err != nil {
+			p.log.WithError(err).Error("Failed to register session")
+			// Continue anyway - session tracking is not critical for launching
+		} else {
+			p.log.Info("Successfully registered claude session")
+		}
+	}
+	// --- End Synchronous Session Registration ---
+
 	// Create tmux client
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {

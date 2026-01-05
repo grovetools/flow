@@ -41,6 +41,49 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
+	// --- Synchronous Session Registration ---
+	// Register the session BEFORE launching the agent to avoid race conditions.
+	// The opencode plugin will enrich this session later with the native session ID.
+	registry, err := sessions.NewFileSystemRegistry()
+	if err != nil {
+		p.log.WithError(err).Error("Failed to create session registry")
+	} else {
+		user := os.Getenv("USER")
+		if user == "" {
+			user = "unknown"
+		}
+		repo, branch := getGitInfo(workDir)
+
+		metadata := sessions.SessionMetadata{
+			SessionID:        job.ID,
+			ClaudeSessionID:  "", // Empty - plugin will fill this with native opencode session ID
+			Provider:         "opencode",
+			PID:              0, // Will be updated by plugin
+			WorkingDirectory: workDir,
+			User:             user,
+			Repo:             repo,
+			Branch:           branch,
+			StartedAt:        time.Now(),
+			JobTitle:         job.Title,
+			PlanName:         plan.Name,
+			JobFilePath:      job.FilePath,
+			Type:             "interactive_agent",
+		}
+
+		p.log.WithFields(logrus.Fields{
+			"session_id": job.ID,
+			"provider":   "opencode",
+			"work_dir":   workDir,
+		}).Info("Registering opencode session synchronously")
+
+		if err := registry.Register(metadata); err != nil {
+			p.log.WithError(err).Error("Failed to register session")
+		} else {
+			p.log.Info("Successfully registered opencode session")
+		}
+	}
+	// --- End Synchronous Session Registration ---
+
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {
 		job.Status = JobStatusFailed
@@ -123,7 +166,9 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		return fmt.Errorf("failed to send agent command: %w", err)
 	}
 
-	go p.discoverAndRegisterSession(job, plan, workDir, targetPane)
+	// NOTE: Session was registered synchronously above. The opencode plugin will
+	// enrich the session with the native session ID when it starts.
+	// We no longer need the async discoverAndRegisterSession call.
 
 	if os.Getenv("TMUX") != "" && !isTUIMode {
 		currentSessionCmd := osexec.Command("tmux", "display-message", "-p", "#S")

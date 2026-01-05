@@ -166,7 +166,7 @@ func LoadJob(filepath string) (*Job, error) {
 	switch job.Status {
 	case JobStatusPending, JobStatusRunning, JobStatusCompleted,
 		JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview, JobStatusPendingUser,
-		JobStatusPendingLLM, JobStatusHold, JobStatusTodo, JobStatusAbandoned:
+		JobStatusPendingLLM, JobStatusHold, JobStatusTodo, JobStatusAbandoned, JobStatusIdle:
 		// Valid status
 	default:
 		return nil, fmt.Errorf("invalid job status: %s", job.Status)

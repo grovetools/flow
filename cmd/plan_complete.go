@@ -56,6 +56,15 @@ Examples:
 // It can be called from both the CLI and TUI
 // Set silent=true to suppress output (useful for TUI)
 func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) error {
+	// Log entry to trace who is calling completeJob
+	logger := grovelogging.NewLogger("flow.complete")
+	logger.WithFields(logrus.Fields{
+		"job_id":     job.ID,
+		"job_title":  job.Title,
+		"job_status": job.Status,
+		"silent":     silent,
+	}).Info("completeJob called - tracing caller")
+
 	// Check current status
 	alreadyCompleted := job.Status == orchestration.JobStatusCompleted
 	if alreadyCompleted && !silent {

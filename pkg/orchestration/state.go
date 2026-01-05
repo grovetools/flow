@@ -517,7 +517,8 @@ func isValidStatus(status JobStatus) bool {
 	switch status {
 	case JobStatusPending, JobStatusRunning, JobStatusCompleted,
 		JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview,
-		JobStatusPendingUser, JobStatusPendingLLM, JobStatusAbandoned:
+		JobStatusPendingUser, JobStatusPendingLLM, JobStatusAbandoned,
+		JobStatusHold, JobStatusTodo, JobStatusIdle:
 		return true
 	}
 	return false

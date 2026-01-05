@@ -1294,6 +1294,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.SetCompleted):
 			if m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
+				logger := logging.NewLogger("flow-tui")
+				logger.WithFields(map[string]interface{}{
+					"job_id":     job.ID,
+					"job_title":  job.Title,
+					"job_status": job.Status,
+				}).Info("'c' key pressed - SetCompleted triggered")
+
+				// Safety check: warn if trying to complete a running job that just started
+				if job.Status == orchestration.JobStatusRunning {
+					timeSinceStart := time.Since(job.StartTime)
+					if timeSinceStart < 5*time.Second {
+						logger.WithFields(map[string]interface{}{
+							"job_id":           job.ID,
+							"time_since_start": timeSinceStart,
+						}).Warn("Blocked: attempted to complete job that just started (< 5 seconds)")
+						m.StatusSummary = theme.DefaultTheme.Warning.Render(
+							fmt.Sprintf("Job '%s' just started %s ago. Wait a moment before completing.", job.Title, timeSinceStart.Round(time.Second)))
+						return m, nil
+					}
+				}
+
 				return m, tea.Sequence(
 					setJobCompleted(job, m.Plan, completeJobHelper),
 					refreshPlan(m.PlanDir),

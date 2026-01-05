@@ -17,6 +17,7 @@ const (
 	JobStatusHold        JobStatus = "hold"
 	JobStatusTodo        JobStatus = "todo"
 	JobStatusAbandoned   JobStatus = "abandoned"
+	JobStatusIdle        JobStatus = "idle" // Agent finished responding, waiting for next input
 )
 
 // JobType represents the type of job execution.

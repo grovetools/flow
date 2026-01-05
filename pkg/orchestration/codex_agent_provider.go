@@ -39,6 +39,50 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
+	// --- Synchronous Session Registration ---
+	// Register the session BEFORE launching the agent to avoid race conditions.
+	registry, err := sessions.NewFileSystemRegistry()
+	if err != nil {
+		p.log.WithError(err).Error("Failed to create session registry")
+		// Continue anyway - session tracking is not critical for launching
+	} else {
+		user := os.Getenv("USER")
+		if user == "" {
+			user = "unknown"
+		}
+		repo, branch := getGitInfo(workDir)
+
+		metadata := sessions.SessionMetadata{
+			SessionID:        job.ID,
+			ClaudeSessionID:  "", // Empty - will be enriched later if possible
+			Provider:         "codex",
+			PID:              0, // Will be updated when discovered
+			WorkingDirectory: workDir,
+			User:             user,
+			Repo:             repo,
+			Branch:           branch,
+			StartedAt:        time.Now(),
+			JobTitle:         job.Title,
+			PlanName:         plan.Name,
+			JobFilePath:      job.FilePath,
+			Type:             "interactive_agent",
+		}
+
+		p.log.WithFields(logrus.Fields{
+			"session_id": job.ID,
+			"provider":   "codex",
+			"work_dir":   workDir,
+		}).Info("Registering codex session with grove-hooks registry (synchronous)")
+
+		if err := registry.Register(metadata); err != nil {
+			p.log.WithError(err).Error("Failed to register session")
+			// Continue anyway - session tracking is not critical for launching
+		} else {
+			p.log.Info("Successfully registered codex session")
+		}
+	}
+	// --- End Synchronous Session Registration ---
+
 	// Create tmux client
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {
@@ -144,23 +188,8 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		return fmt.Errorf("failed to send agent command: %w", err)
 	}
 
-	// Launch session registration in a detached background process
-	// This process will survive after the flow command exits
-	go func() {
-		// Detach from parent by forking a new process
-		cmd := osexec.Command("/bin/sh", "-c", fmt.Sprintf(
-			"(sleep 3 && %s register-session-codex %s %s %s %s '%s' '%s' > /tmp/codex-reg-%s.log 2>&1) &",
-			"/Users/solom4/Code/grove-ecosystem/.grove-worktrees/codex-support/grove-flow/bin/flow",
-			job.ID,
-			plan.Name,
-			targetPane,
-			workDir,
-			job.Title,
-			job.FilePath,
-			job.ID,
-		))
-		cmd.Start()  // Fire and forget
-	}()
+	// Note: Session registration now happens synchronously at the start of Launch().
+	// No need for the background registration process anymore.
 
 	// Conditionally switch to the agent window (but not when running from TUI)
 	// Note: isTUIMode already declared above when building new-window args

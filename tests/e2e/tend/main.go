@@ -85,6 +85,11 @@ func main() {
 		scenarios.CodexProviderArgsScenario,
 		scenarios.OpencodeProviderLifecycleScenario,
 		scenarios.OpencodeProviderArgsScenario,
+
+		// Session registration tests (verify synchronous registration for all providers)
+		scenarios.ClaudeSessionRegistrationScenario,
+		scenarios.CodexSessionRegistrationScenario,
+		scenarios.OpencodeSessionRegistrationScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
