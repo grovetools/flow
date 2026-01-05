@@ -202,29 +202,34 @@ func (p *OpencodeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan,
 	if err != nil {
 		log.WithError(err).WithFields(logrus.Fields{
 			"pane_pid": panePID,
-		}).Error("Failed to find opencode PID - descendant process not found")
-		return
+		}).Warn("Failed to find opencode PID - will register session without PID")
+		// Still register the session with provider=opencode so TUI shows correct provider
+		// Use pane PID as fallback
+		pid = panePID
 	}
 	log.WithFields(logrus.Fields{
 		"opencode_pid": pid,
 		"pane_pid":     panePID,
-	}).Debug("Found opencode process PID")
+	}).Info("Using PID for session registration")
 
 	// Opencode stores sessions in ~/.local/share/opencode/storage/session/{project_hash}/ses_*.json
 	homeDir, _ := os.UserHomeDir()
 	opencodeSessionsDir := filepath.Join(homeDir, ".local", "share", "opencode", "storage", "session")
-	log.WithField("sessions_dir", opencodeSessionsDir).Debug("Searching for opencode session file")
+	log.WithField("sessions_dir", opencodeSessionsDir).Info("Searching for opencode session file")
 
 	latestFile, err := findMostRecentOpencodeFile(opencodeSessionsDir)
+	var opencodeSessionID string
 	if err != nil {
-		log.WithError(err).WithField("sessions_dir", opencodeSessionsDir).Error("Failed to find opencode session file")
-		return
+		log.WithError(err).WithField("sessions_dir", opencodeSessionsDir).Warn("Failed to find opencode session file - will register session without transcript path")
+		opencodeSessionID = job.ID // Use job ID as fallback
+		latestFile = ""
+	} else {
+		opencodeSessionID = strings.TrimSuffix(filepath.Base(latestFile), filepath.Ext(latestFile))
 	}
-	opencodeSessionID := strings.TrimSuffix(filepath.Base(latestFile), filepath.Ext(latestFile))
 	log.WithFields(logrus.Fields{
-		"session_file":       latestFile,
+		"session_file":        latestFile,
 		"opencode_session_id": opencodeSessionID,
-	}).Debug("Found opencode session file")
+	}).Info("Session file discovery complete")
 
 	// Get git info
 	repo, branch := getGitInfo(workDir)
