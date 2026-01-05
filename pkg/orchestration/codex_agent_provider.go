@@ -39,49 +39,9 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// --- Synchronous Session Registration ---
-	// Register the session BEFORE launching the agent to avoid race conditions.
-	registry, err := sessions.NewFileSystemRegistry()
-	if err != nil {
-		p.log.WithError(err).Error("Failed to create session registry")
-		// Continue anyway - session tracking is not critical for launching
-	} else {
-		user := os.Getenv("USER")
-		if user == "" {
-			user = "unknown"
-		}
-		repo, branch := getGitInfo(workDir)
-
-		metadata := sessions.SessionMetadata{
-			SessionID:        job.ID,
-			ClaudeSessionID:  "", // Empty - will be enriched later if possible
-			Provider:         "codex",
-			PID:              0, // Will be updated when discovered
-			WorkingDirectory: workDir,
-			User:             user,
-			Repo:             repo,
-			Branch:           branch,
-			StartedAt:        time.Now(),
-			JobTitle:         job.Title,
-			PlanName:         plan.Name,
-			JobFilePath:      job.FilePath,
-			Type:             "interactive_agent",
-		}
-
-		p.log.WithFields(logrus.Fields{
-			"session_id": job.ID,
-			"provider":   "codex",
-			"work_dir":   workDir,
-		}).Info("Registering codex session with grove-hooks registry (synchronous)")
-
-		if err := registry.Register(metadata); err != nil {
-			p.log.WithError(err).Error("Failed to register session")
-			// Continue anyway - session tracking is not critical for launching
-		} else {
-			p.log.Info("Successfully registered codex session")
-		}
-	}
-	// --- End Synchronous Session Registration ---
+	// NOTE: Session registration now happens AFTER the agent is launched and PID is discovered
+	// to avoid the race condition where PID 0 is registered before the actual process starts.
+	// See the synchronous PID discovery below after tmux window creation.
 
 	// Create tmux client
 	tmuxClient, err := tmux.NewClient()
@@ -188,8 +148,94 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		return fmt.Errorf("failed to send agent command: %w", err)
 	}
 
-	// Note: Session registration now happens synchronously at the start of Launch().
-	// No need for the background registration process anymore.
+	// --- Synchronous PID Discovery and Session Registration ---
+	// Wait for Codex process to start and discover its PID before registering
+	// This prevents the race condition where PID 0 was registered before the actual process starts
+	p.log.WithField("target_pane", targetPane).Info("Starting synchronous Codex PID discovery...")
+
+	// Wait a brief moment for the Codex process to start
+	time.Sleep(500 * time.Millisecond)
+
+	var codexPID int
+	var pidErr error
+	maxPIDRetries := 30
+	for i := 0; i < maxPIDRetries; i++ {
+		codexPID, pidErr = FindCodexPIDForPane(targetPane)
+		if pidErr == nil && codexPID > 0 {
+			p.log.WithFields(logrus.Fields{
+				"pid":         codexPID,
+				"retry_count": i,
+			}).Info("Successfully discovered Codex PID")
+			break
+		}
+		p.log.WithFields(logrus.Fields{
+			"error":       pidErr,
+			"retry_count": i,
+			"max_retries": maxPIDRetries,
+		}).Debug("Codex PID not found yet, retrying...")
+		time.Sleep(1 * time.Second)
+	}
+
+	if codexPID == 0 {
+		p.log.WithError(pidErr).Error("Failed to find Codex PID after retries - session registration will be skipped")
+		// Don't fail the launch - the agent may still be starting
+	} else {
+		// Now register the session with the discovered PID
+		registry, err := sessions.NewFileSystemRegistry()
+		if err != nil {
+			p.log.WithError(err).Error("Failed to create session registry")
+		} else {
+			user := os.Getenv("USER")
+			if user == "" {
+				user = "unknown"
+			}
+			repo, branch := getGitInfo(workDir)
+
+			// Find latest codex log to get native session ID
+			codexSessionsDir := filepath.Join(os.Getenv("HOME"), ".codex", "sessions")
+			latestFile, _ := findMostRecentFile(codexSessionsDir, nil)
+			codexSessionID := job.ID // Fallback
+			transcriptPath := ""
+			if latestFile != "" {
+				transcriptPath = latestFile
+				base := filepath.Base(latestFile)
+				parts := strings.Split(strings.TrimSuffix(base, ".jsonl"), "-")
+				if len(parts) >= 6 {
+					codexSessionID = strings.Join(parts[len(parts)-5:], "-")
+				}
+			}
+
+			metadata := sessions.SessionMetadata{
+				SessionID:        job.ID,
+				ClaudeSessionID:  codexSessionID,
+				Provider:         "codex",
+				PID:              codexPID,
+				WorkingDirectory: workDir,
+				User:             user,
+				Repo:             repo,
+				Branch:           branch,
+				StartedAt:        time.Now(),
+				JobTitle:         job.Title,
+				PlanName:         plan.Name,
+				JobFilePath:      job.FilePath,
+				Type:             "interactive_agent",
+				TranscriptPath:   transcriptPath,
+			}
+
+			p.log.WithFields(logrus.Fields{
+				"session_id": job.ID,
+				"pid":        codexPID,
+				"provider":   "codex",
+			}).Info("Registering codex session with valid PID")
+
+			if err := registry.Register(metadata); err != nil {
+				p.log.WithError(err).Error("Failed to register session")
+			} else {
+				p.log.Info("Successfully registered codex session with valid PID")
+			}
+		}
+	}
+	// --- End Synchronous PID Discovery and Session Registration ---
 
 	// Conditionally switch to the agent window (but not when running from TUI)
 	// Note: isTUIMode already declared above when building new-window args

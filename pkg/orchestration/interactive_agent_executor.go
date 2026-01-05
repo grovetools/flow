@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -413,50 +412,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// --- Synchronous Session Registration ---
-	// Register the session BEFORE launching the agent to avoid race conditions.
-	// The discoverAndRegisterSession goroutine will enrich this with Claude session details.
-	registry, err := sessions.NewFileSystemRegistry()
-	if err != nil {
-		p.log.WithError(err).Error("Failed to create session registry")
-		// Continue anyway - session tracking is not critical for launching
-	} else {
-		user := os.Getenv("USER")
-		if user == "" {
-			user = "unknown"
-		}
-		repo, branch := getGitInfo(workDir)
-
-		metadata := sessions.SessionMetadata{
-			SessionID:        job.ID,
-			ClaudeSessionID:  "", // Empty - will be enriched by discoverAndRegisterSession
-			Provider:         "claude",
-			PID:              0, // Will be updated when Claude process is discovered
-			WorkingDirectory: workDir,
-			User:             user,
-			Repo:             repo,
-			Branch:           branch,
-			StartedAt:        time.Now(),
-			JobTitle:         job.Title,
-			PlanName:         plan.Name,
-			JobFilePath:      job.FilePath,
-			Type:             "interactive_agent",
-		}
-
-		p.log.WithFields(logrus.Fields{
-			"session_id": job.ID,
-			"provider":   "claude",
-			"work_dir":   workDir,
-		}).Info("Registering claude session with grove-hooks registry (synchronous)")
-
-		if err := registry.Register(metadata); err != nil {
-			p.log.WithError(err).Error("Failed to register session")
-			// Continue anyway - session tracking is not critical for launching
-		} else {
-			p.log.Info("Successfully registered claude session")
-		}
-	}
-	// --- End Synchronous Session Registration ---
+	// NOTE: Session registration now happens AFTER the agent is launched and PID is discovered
+	// to avoid the race condition where PID 0 is registered before the actual process starts.
+	// See discoverAndRegisterSessionSync() called after tmux window creation.
 
 	// Create tmux client
 	tmuxClient, err := tmux.NewClient()
@@ -564,9 +522,12 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			return fmt.Errorf("failed to send agent command: %w", err)
 		}
 
-		// Launch session registration in a detached background process
-		// This will discover the Claude Code session ID and register it with the job
-		go p.discoverAndRegisterSession(job, plan, workDir, targetPane)
+		// Synchronously discover PID and register session to avoid race conditions
+		// where monitoring tools see PID 0 before the actual process starts
+		if err := p.discoverAndRegisterSessionSync(job, plan, workDir, targetPane); err != nil {
+			p.log.WithError(err).Error("Failed to register session with valid PID")
+			// Continue anyway - the agent is running, just tracking may be impaired
+		}
 
 		// Conditionally switch to the agent window (but not when running from TUI)
 		// Note: isTUIMode already declared above when building new-window args
@@ -716,9 +677,12 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
 	}
 
-	// Launch session registration in a detached background process
-	// This will discover the Claude Code session ID and register it with the job
-	go p.discoverAndRegisterSession(job, plan, workDir, targetPane)
+	// Synchronously discover PID and register session to avoid race conditions
+	// where monitoring tools see PID 0 before the actual process starts
+	if err := p.discoverAndRegisterSessionSync(job, plan, workDir, targetPane); err != nil {
+		p.log.WithError(err).Error("Failed to register session with valid PID")
+		// Continue anyway - the agent is running, just tracking may be impaired
+	}
 
 	p.log.WithField("window", windowName).Info("Interactive host session launched")
 	p.prettyLog.InfoPretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName))
@@ -760,81 +724,51 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 	return projInfo.Identifier(), nil
 }
 
-// discoverAndRegisterSession discovers the Claude Code session ID and creates session files for grove-hooks
-func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, workDir, targetPane string) {
+// discoverAndRegisterSessionSync synchronously discovers the Claude Code PID and registers the session.
+// This is called after the agent command is sent to tmux, and blocks until a valid PID is found
+// or the timeout is reached. This prevents the race condition where PID 0 was registered before
+// the actual Claude process started.
+func (p *ClaudeAgentProvider) discoverAndRegisterSessionSync(job *Job, plan *Plan, workDir, targetPane string) error {
 	logger := grovelogging.NewLogger("flow-claude-session-discovery")
-
-	defer func() {
-		if r := recover(); r != nil {
-			logger.WithFields(map[string]interface{}{
-				"job_id": job.ID,
-				"panic":  r,
-			}).Error("Panic in session registration")
-		}
-	}()
 
 	logger.WithFields(map[string]interface{}{
 		"job_id":      job.ID,
 		"plan":        plan.Name,
 		"target_pane": targetPane,
-	}).Info("Starting Claude Code session discovery and registration")
+	}).Info("Starting synchronous Claude Code PID discovery and registration")
 
-	// Wait for the Claude Code process to start
-	time.Sleep(2 * time.Second)
-
-	// Find the PID of the Claude Code process (node process running claude-code)
-	logger.WithField("target_pane", targetPane).Debug("Finding Claude PID for pane")
-	claudePID, err := p.findClaudePIDForPane(targetPane, logger)
-	if err != nil {
-		logger.WithFields(map[string]interface{}{
-			"error":       err,
-			"target_pane": targetPane,
-		}).Error("Failed to find Claude Code PID - session won't be registered")
-		return
+	// Record the job start time for session file discovery
+	jobStartTime := job.StartTime
+	if jobStartTime.IsZero() {
+		jobStartTime = time.Now()
 	}
 
-	logger.WithField("pid", claudePID).Info("Found Claude Code PID")
+	// Wait a brief moment for the Claude process to start
+	time.Sleep(500 * time.Millisecond)
 
-	// Use job ID as the session ID for consistency with flow jobs
-	sessionID := job.ID
-
-	// Record the job start time - we'll only consider session files created after this time
-	// This prevents reusing old session files from previous jobs
-	jobStartTime := time.Now()
-
-	// Discover the Claude session ID by finding the most recent session file for this workspace
-	// Retry for up to 30 seconds since Claude takes time to create the session file and directory
-	logger.WithFields(map[string]interface{}{
-		"work_dir":       workDir,
-		"job_start_time": jobStartTime,
-	}).Debug("Starting Claude session ID discovery")
-	var claudeSessionID string
-	maxRetries := 30
-	for i := 0; i < maxRetries; i++ {
-		claudeSessionID, err = p.findClaudeSessionID(workDir, jobStartTime, logger)
-		if err == nil {
-			logger.WithFields(map[string]interface{}{
-				"claude_session_id": claudeSessionID,
-				"retry_count":       i,
-			}).Info("Found Claude session ID")
+	// Synchronous PID discovery with retry loop (up to 30 seconds)
+	var claudePID int
+	var pidErr error
+	maxPIDRetries := 30
+	for i := 0; i < maxPIDRetries; i++ {
+		claudePID, pidErr = p.findClaudePIDForPane(targetPane, logger)
+		if pidErr == nil && claudePID > 0 {
+			logger.WithFields(logrus.Fields{
+				"pid":         claudePID,
+				"retry_count": i,
+			}).Info("Successfully discovered Claude Code PID")
 			break
 		}
-		logger.WithFields(map[string]interface{}{
-			"error":       err,
+		logger.WithFields(logrus.Fields{
+			"error":       pidErr,
 			"retry_count": i,
-			"max_retries": maxRetries,
-		}).Debug("Claude session ID not found yet, retrying...")
-		if i < maxRetries-1 {
-			time.Sleep(1 * time.Second)
-		}
+			"max_retries": maxPIDRetries,
+		}).Debug("Claude PID not found yet, retrying...")
+		time.Sleep(1 * time.Second)
 	}
 
-	if claudeSessionID == "" {
-		logger.WithFields(map[string]interface{}{
-			"error":    err,
-			"fallback": sessionID,
-		}).Warn("Failed to find Claude session ID after retries - will use job ID as fallback")
-		claudeSessionID = sessionID
+	if claudePID == 0 {
+		return fmt.Errorf("failed to find Claude Code PID after %d seconds: %w", maxPIDRetries, pidErr)
 	}
 
 	// Get user info
@@ -849,22 +783,27 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 	// Build the transcript path for Claude
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logger.WithError(err).Error("Failed to get user home directory for transcript path")
-		return
+		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
 	sanitizedPath := sanitizePathForClaude(workDir)
+
+	// Try to find Claude session ID (non-blocking, use job ID as fallback)
+	claudeSessionID := job.ID // Default fallback
+	if foundSessionID, err := p.findClaudeSessionID(workDir, jobStartTime, logger); err == nil {
+		claudeSessionID = foundSessionID
+		logger.WithField("claude_session_id", claudeSessionID).Info("Found Claude session ID")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"error":    err,
+			"fallback": job.ID,
+		}).Debug("Claude session ID not found yet, using job ID as fallback (will be enriched later)")
+	}
+
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
 
-	logger.WithFields(map[string]interface{}{
-		"home_dir":        homeDir,
-		"work_dir":        workDir,
-		"sanitized_path":  sanitizedPath,
-		"transcript_path": transcriptPath,
-	}).Info("Built transcript path")
-
-	// Create metadata
+	// Create metadata with the discovered PID
 	metadata := sessions.SessionMetadata{
-		SessionID:        sessionID,
+		SessionID:        job.ID,
 		ClaudeSessionID:  claudeSessionID,
 		Provider:         "claude",
 		PID:              claudePID,
@@ -880,73 +819,28 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, w
 		TranscriptPath:   transcriptPath,
 	}
 
-	logger.WithFields(map[string]interface{}{
-		"session_id":        sessionID,
-		"claude_session_id": claudeSessionID,
-		"transcript_path":   transcriptPath,
-		"job_title":         job.Title,
-		"plan_name":         plan.Name,
-	}).Info("Created session metadata")
-
-	// Write session files for grove-hooks discovery
-	groveSessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
-	sessionDir := filepath.Join(groveSessionsDir, sessionID)
-
-	logger.WithFields(map[string]interface{}{
-		"sessions_dir": groveSessionsDir,
-		"session_dir":  sessionDir,
-	}).Debug("Creating session directory")
-
-	// Create session directory
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
-		logger.WithFields(map[string]interface{}{
-			"error":       err,
-			"session_dir": sessionDir,
-		}).Error("Failed to create session directory")
-		return
-	}
-
-	// Write PID file
-	pidFile := filepath.Join(sessionDir, "pid.lock")
-	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", claudePID)), 0644); err != nil {
-		logger.WithFields(map[string]interface{}{
-			"error":    err,
-			"pid_file": pidFile,
-			"pid":      claudePID,
-		}).Error("Failed to write PID file")
-		return
-	}
-	logger.WithFields(map[string]interface{}{
-		"pid_file": pidFile,
-		"pid":      claudePID,
-	}).Debug("Wrote PID file")
-
-	// Write metadata file
-	metadataFile := filepath.Join(sessionDir, "metadata.json")
-	metadataJSON, err := json.Marshal(metadata)
+	// Register using the FileSystemRegistry
+	registry, err := sessions.NewFileSystemRegistry()
 	if err != nil {
-		logger.WithFields(map[string]interface{}{
-			"error":         err,
-			"metadata_file": metadataFile,
-		}).Error("Failed to marshal metadata")
-		return
+		return fmt.Errorf("failed to create session registry: %w", err)
 	}
 
-	if err := os.WriteFile(metadataFile, metadataJSON, 0644); err != nil {
-		logger.WithFields(map[string]interface{}{
-			"error":         err,
-			"metadata_file": metadataFile,
-		}).Error("Failed to write metadata file")
-		return
+	logger.WithFields(logrus.Fields{
+		"session_id": job.ID,
+		"pid":        claudePID,
+		"provider":   "claude",
+	}).Info("Registering Claude session with valid PID")
+
+	if err := registry.Register(metadata); err != nil {
+		return fmt.Errorf("failed to register session: %w", err)
 	}
 
-	logger.WithFields(map[string]interface{}{
-		"session_id":    sessionID,
-		"session_dir":   sessionDir,
-		"pid":           claudePID,
-		"metadata_file": metadataFile,
-		"pid_file":      pidFile,
-	}).Info("Successfully registered Claude Code session")
+	logger.WithFields(logrus.Fields{
+		"session_id": job.ID,
+		"pid":        claudePID,
+	}).Info("Successfully registered Claude Code session with valid PID")
+
+	return nil
 }
 
 // sanitizePathForClaude replicates Claude's path sanitization algorithm
