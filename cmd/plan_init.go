@@ -1101,6 +1101,12 @@ func executeInitActions(actions []orchestration.InitAction, worktreeOverride, fi
 		if err != nil {
 			return fmt.Errorf("failed to find git root: %w", err)
 		}
+
+		// Defensive check: prevent creating worktrees in notebook repos
+		if workspace.IsNotebookRepo(gitRoot) {
+			return fmt.Errorf("cannot create worktree: running from within a notebook git repository at %s. Please run this command from your project directory", gitRoot)
+		}
+
 		opts := workspace.PrepareOptions{
 			GitRoot:      gitRoot,
 			WorktreeName: finalWorktree,
@@ -1439,6 +1445,11 @@ func createWorktreeIfRequested(worktreeName string, repos []string, workspacePat
 	gitRoot, err := orchestration.GetGitRootSafe(searchPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to find git root: %w", err)
+	}
+
+	// Defensive check: prevent creating worktrees in notebook repos
+	if workspace.IsNotebookRepo(gitRoot) {
+		return "", fmt.Errorf("cannot create worktree: running from within a notebook git repository at %s. Please run this command from your project directory", gitRoot)
 	}
 
 	opts := workspace.PrepareOptions{

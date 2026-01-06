@@ -162,6 +162,11 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			gitRoot = ""
 		}
 
+		// Defensive check: prevent creating worktrees in notebook repos
+		if gitRoot != "" && workspace.IsNotebookRepo(gitRoot) {
+			return fmt.Errorf("cannot run plan with worktree: the plan is located in a notebook git repository at %s. Please run this command from your project directory", gitRoot)
+		}
+
 		// If gitRoot is itself a worktree, resolve to the parent repository
 		if gitRoot != "" {
 			gitRootInfo, err := workspace.GetProjectByPath(gitRoot)

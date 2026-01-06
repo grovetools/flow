@@ -173,6 +173,14 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 			// Determine worktree path from the plan's git root
 			gitRoot, gitErr := orchestration.GetGitRootSafe(plan.Directory)
 			if gitErr == nil {
+				// Skip worktree operations if this is a notebook repo
+				if workspace.IsNotebookRepo(gitRoot) {
+					// Don't error here - just skip the worktree resolution
+					gitRoot = ""
+					gitErr = fmt.Errorf("skipping notebook repo")
+				}
+			}
+			if gitErr == nil {
 				// If gitRoot is itself a worktree, find the actual main repository root
 				gitRootInfo, gitRootErr := workspace.GetProjectByPath(gitRoot)
 				if gitRootErr == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {

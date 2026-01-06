@@ -36,6 +36,11 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		return fmt.Errorf("could not find git root: %w", err)
 	}
 
+	// Defensive check: prevent creating worktrees in notebook repos
+	if workspace.IsNotebookRepo(gitRoot) {
+		return fmt.Errorf("cannot create worktree session: the plan is located in a notebook git repository at %s. Please run this command from your project directory", gitRoot)
+	}
+
 	// If gitRoot is itself a worktree, use the centralized logic to find the actual main repository root
 	gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
 	if err == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
