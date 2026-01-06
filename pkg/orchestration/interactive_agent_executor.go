@@ -522,12 +522,14 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			return fmt.Errorf("failed to send agent command: %w", err)
 		}
 
-		// Synchronously discover PID and register session to avoid race conditions
-		// where monitoring tools see PID 0 before the actual process starts
-		if err := p.discoverAndRegisterSessionSync(job, plan, workDir, targetPane); err != nil {
-			p.log.WithError(err).Error("Failed to register session with valid PID")
-			// Continue anyway - the agent is running, just tracking may be impaired
-		}
+		// Asynchronously discover PID and register session in background
+		// This prevents blocking the TUI when launching interactive agents
+		go func() {
+			if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane); err != nil {
+				p.log.WithError(err).Error("Failed to register session with valid PID")
+				// Continue anyway - the agent is running, just tracking may be impaired
+			}
+		}()
 
 		// Conditionally switch to the agent window (but not when running from TUI)
 		// Note: isTUIMode already declared above when building new-window args
@@ -677,12 +679,14 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
 	}
 
-	// Synchronously discover PID and register session to avoid race conditions
-	// where monitoring tools see PID 0 before the actual process starts
-	if err := p.discoverAndRegisterSessionSync(job, plan, workDir, targetPane); err != nil {
-		p.log.WithError(err).Error("Failed to register session with valid PID")
-		// Continue anyway - the agent is running, just tracking may be impaired
-	}
+	// Asynchronously discover PID and register session in background
+	// This prevents blocking the TUI when launching interactive agents
+	go func() {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane); err != nil {
+			p.log.WithError(err).Error("Failed to register session with valid PID")
+			// Continue anyway - the agent is running, just tracking may be impaired
+		}
+	}()
 
 	p.log.WithField("window", windowName).Info("Interactive host session launched")
 	p.prettyLog.InfoPretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName))
@@ -724,18 +728,19 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 	return projInfo.Identifier(), nil
 }
 
-// discoverAndRegisterSessionSync synchronously discovers the Claude Code PID and registers the session.
-// This is called after the agent command is sent to tmux, and blocks until a valid PID is found
-// or the timeout is reached. This prevents the race condition where PID 0 was registered before
-// the actual Claude process started.
-func (p *ClaudeAgentProvider) discoverAndRegisterSessionSync(job *Job, plan *Plan, workDir, targetPane string) error {
+// discoverAndRegisterSessionAsync discovers the Claude Code PID and registers the session.
+// This function is designed to be called from a goroutine - it blocks internally but
+// does not block the caller. It waits until a valid PID is found or the timeout is reached.
+// This prevents the race condition where PID 0 was registered before the actual Claude process started,
+// while also not blocking the TUI during agent launch.
+func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane string) error {
 	logger := grovelogging.NewLogger("flow-claude-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
 		"job_id":      job.ID,
 		"plan":        plan.Name,
 		"target_pane": targetPane,
-	}).Info("Starting synchronous Claude Code PID discovery and registration")
+	}).Debug("Starting async Claude Code PID discovery and registration")
 
 	// Record the job start time for session file discovery
 	jobStartTime := job.StartTime
@@ -756,7 +761,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionSync(job *Job, plan *Pla
 			logger.WithFields(logrus.Fields{
 				"pid":         claudePID,
 				"retry_count": i,
-			}).Info("Successfully discovered Claude Code PID")
+			}).Debug("Discovered Claude Code PID")
 			break
 		}
 		logger.WithFields(logrus.Fields{
@@ -791,12 +796,12 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionSync(job *Job, plan *Pla
 	claudeSessionID := job.ID // Default fallback
 	if foundSessionID, err := p.findClaudeSessionID(workDir, jobStartTime, logger); err == nil {
 		claudeSessionID = foundSessionID
-		logger.WithField("claude_session_id", claudeSessionID).Info("Found Claude session ID")
+		logger.WithField("claude_session_id", claudeSessionID).Debug("Found Claude session ID")
 	} else {
 		logger.WithFields(logrus.Fields{
 			"error":    err,
 			"fallback": job.ID,
-		}).Debug("Claude session ID not found yet, using job ID as fallback (will be enriched later)")
+		}).Debug("Claude session ID not found, using job ID as fallback")
 	}
 
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
@@ -825,12 +830,6 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionSync(job *Job, plan *Pla
 		return fmt.Errorf("failed to create session registry: %w", err)
 	}
 
-	logger.WithFields(logrus.Fields{
-		"session_id": job.ID,
-		"pid":        claudePID,
-		"provider":   "claude",
-	}).Info("Registering Claude session with valid PID")
-
 	if err := registry.Register(metadata); err != nil {
 		return fmt.Errorf("failed to register session: %w", err)
 	}
@@ -838,7 +837,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionSync(job *Job, plan *Pla
 	logger.WithFields(logrus.Fields{
 		"session_id": job.ID,
 		"pid":        claudePID,
-	}).Info("Successfully registered Claude Code session with valid PID")
+	}).Info("Registered Claude session")
 
 	return nil
 }
