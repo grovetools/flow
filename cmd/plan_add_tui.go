@@ -11,9 +11,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	anthropicmodels "github.com/mattsolo1/grove-anthropic/pkg/models"
 	"github.com/mattsolo1/grove-core/tui/components/help"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	geminimodels "github.com/mattsolo1/grove-gemini/pkg/models"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 )
 
@@ -913,15 +915,32 @@ func (m modelItem) FilterValue() string { return m.ID }
 func (m modelItem) Title() string       { return m.ID }
 func (m modelItem) Description() string { return fmt.Sprintf("%s - %s", m.Provider, m.Note) }
 
-// getAvailableModels returns the list of available LLM models
+// getAvailableModels returns the list of available LLM models (current, non-legacy only)
 func getAvailableModels() []Model {
-	return []Model{
-		{"gemini-2.5-pro", "Google", "Latest Gemini Pro model"},
-		{"gemini-2.5-flash", "Google", "Fast, efficient model"},
-		{"gemini-2.0-flash", "Google", "Previous generation flash model"},
-		{"claude-4-sonnet", "Anthropic", "Claude 4 Sonnet"},
-		{"claude-4-opus", "Anthropic", "Claude 4 Opus - most capable"},
-		{"claude-3-haiku", "Anthropic", "Fast, lightweight model"},
+	var models []Model
+
+	// Add current Gemini models
+	for _, m := range geminimodels.CurrentModels() {
+		models = append(models, Model{
+			ID:       m.ID,
+			Provider: m.Provider,
+			Note:     m.Note,
+		})
 	}
+
+	// Add current Anthropic models (use alias if available for shorter display)
+	for _, m := range anthropicmodels.CurrentModels() {
+		id := m.ID
+		if m.Alias != "" {
+			id = m.Alias // Use shorter alias in TUI
+		}
+		models = append(models, Model{
+			ID:       id,
+			Provider: m.Provider,
+			Note:     m.Note,
+		})
+	}
+
+	return models
 }
 

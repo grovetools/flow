@@ -6,6 +6,8 @@ import (
 	"os"
 	"text/tabwriter"
 
+	anthropicmodels "github.com/mattsolo1/grove-anthropic/pkg/models"
+	geminimodels "github.com/mattsolo1/grove-gemini/pkg/models"
 	"github.com/spf13/cobra"
 )
 
@@ -23,17 +25,34 @@ While other models supported by the 'llm' tool may work, these are the primary m
 }
 
 func runModelsList(cmd *cobra.Command, args []string) error {
-	models := []struct {
+	// Build combined model list from provider packages
+	type displayModel struct {
 		ID       string `json:"id"`
+		Alias    string `json:"alias,omitempty"`
 		Provider string `json:"provider"`
 		Note     string `json:"note"`
-	}{
-		{"gemini-2.5-pro", "Google", "Latest Gemini Pro model"},
-		{"gemini-2.5-flash", "Google", "Fast, efficient model"},
-		{"gemini-2.0-flash", "Google", "Previous generation flash model"},
-		{"claude-4-sonnet", "Anthropic", "Claude 4 Sonnet"},
-		{"claude-4-opus", "Anthropic", "Claude 4 Opus - most capable"},
-		{"claude-3-haiku", "Anthropic", "Fast, lightweight model"},
+	}
+
+	var models []displayModel
+
+	// Add Gemini models (no aliases - IDs are already short)
+	for _, m := range geminimodels.Models() {
+		models = append(models, displayModel{
+			ID:       m.ID,
+			Alias:    m.Alias,
+			Provider: m.Provider,
+			Note:     m.Note,
+		})
+	}
+
+	// Add Anthropic models
+	for _, m := range anthropicmodels.Models() {
+		models = append(models, displayModel{
+			ID:       m.ID,
+			Alias:    m.Alias,
+			Provider: m.Provider,
+			Note:     m.Note,
+		})
 	}
 
 	// Check if JSON output is requested via global flag
@@ -42,11 +61,7 @@ func runModelsList(cmd *cobra.Command, args []string) error {
 	if jsonOutput {
 		// JSON output
 		output := struct {
-			Models []struct {
-				ID       string `json:"id"`
-				Provider string `json:"provider"`
-				Note     string `json:"note"`
-			} `json:"models"`
+			Models []displayModel `json:"models"`
 		}{
 			Models: models,
 		}
@@ -57,15 +72,20 @@ func runModelsList(cmd *cobra.Command, args []string) error {
 
 	// Table output
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "MODEL ID\tPROVIDER\tNOTE")
-	fmt.Fprintln(w, "--------\t--------\t----")
+	fmt.Fprintln(w, "ALIAS\tMODEL ID\tPROVIDER\tNOTE")
+	fmt.Fprintln(w, "-----\t--------\t--------\t----")
 	for _, model := range models {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", model.ID, model.Provider, model.Note)
+		alias := model.Alias
+		if alias == "" {
+			alias = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", alias, model.ID, model.Provider, model.Note)
 	}
 	w.Flush()
 
 	fmt.Println("\nUsage: Specify the model in your job or chat frontmatter:")
-	fmt.Println("  model: gemini-2.5-pro")
+	fmt.Println("  model: claude-sonnet-4-5    # uses alias")
+	fmt.Println("  model: gemini-2.5-pro       # full ID")
 
 	return nil
 }

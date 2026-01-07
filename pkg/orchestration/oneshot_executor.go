@@ -17,6 +17,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/mattn/go-isatty"
 	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
+	"github.com/mattsolo1/grove-anthropic/pkg/anthropic"
+	anthropicconfig "github.com/mattsolo1/grove-anthropic/pkg/config"
+	anthropicmodels "github.com/mattsolo1/grove-anthropic/pkg/models"
 	"github.com/mattsolo1/grove-core/git"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -30,6 +33,17 @@ var (
 	log       = grovelogging.NewLogger("grove-flow")
 	prettyLog = grovelogging.NewPrettyLogger()
 )
+
+// resolveModelAlias expands a model alias to its full API ID, or returns the input unchanged.
+// Checks Anthropic aliases first, then could be extended for other providers.
+func resolveModelAlias(model string) string {
+	// Try Anthropic aliases
+	if resolved := anthropicmodels.ResolveAlias(model); resolved != model {
+		return resolved
+	}
+	// Gemini models don't have aliases (IDs are already short)
+	return model
+}
 
 // isTUIMode checks if we're running in TUI mode
 func isTUIMode() bool {
@@ -66,6 +80,7 @@ type OneShotExecutor struct {
 	config          *ExecutorConfig
 	worktreeManager *git.WorktreeManager
 	geminiRunner    *gemini.RequestRunner
+	anthropicRunner *anthropic.RequestRunner
 }
 
 // NewOneShotExecutor creates a new oneshot executor.
@@ -84,6 +99,7 @@ func NewOneShotExecutor(llmClient LLMClient, config *ExecutorConfig) *OneShotExe
 		config:          config,
 		worktreeManager: git.NewWorktreeManager(),
 		geminiRunner:    gemini.NewRequestRunner(),
+		anthropicRunner: anthropic.NewRequestRunner(),
 	}
 }
 
@@ -348,10 +364,13 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		effectiveModel = plan.Orchestration.OneshotModel
 		modelSource = "global config"
 	} else {
-		// 5. Hardcoded fallback
-		effectiveModel = "claude-3-5-sonnet-20241022"
-		modelSource = "hardcoded fallback"
+		// 5. Hardcoded fallback - use Anthropic default
+		effectiveModel = anthropicmodels.DefaultModel
+		modelSource = "default fallback"
 	}
+
+	// Resolve model aliases (e.g., "claude-sonnet-4-5" -> "claude-sonnet-4-5-20250929")
+	effectiveModel = resolveModelAlias(effectiveModel)
 
 	logrus.WithFields(logrus.Fields{
 		"job_id":       job.ID,
@@ -396,6 +415,29 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			PlanName: plan.Name,
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
+	} else if strings.HasPrefix(effectiveModel, "claude") {
+		// Resolve API key here where we have the correct execution context
+		apiKey, anthropicErr := anthropicconfig.ResolveAPIKey()
+		if anthropicErr != nil {
+			err = fmt.Errorf("resolving Anthropic API key: %w", anthropicErr)
+		} else {
+			// Use grove-anthropic package for Claude models
+			opts := anthropic.RequestOptions{
+				Model:        effectiveModel,
+				Prompt:       prompt,
+				ContextFiles: append(promptSourceFiles, contextFiles...),
+				WorkDir:      workDir,
+				APIKey:       apiKey,
+				MaxTokens:    64000,
+				Caller:       "grove-flow-oneshot",
+				JobID:        job.ID,
+				PlanName:     plan.Name,
+			}
+			if isTUIMode() {
+				fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
+			}
+			response, err = e.anthropicRunner.Run(ctx, opts)
+		}
 	} else {
 		// Use traditional llm command for other models
 		llmOpts := LLMOptions{
@@ -1553,10 +1595,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		effectiveModel = plan.Orchestration.OneshotModel
 		modelSource = "global config"
 	} else {
-		// 6. Hardcoded fallback
-		effectiveModel = "claude-3-5-sonnet-20241022"
-		modelSource = "hardcoded fallback"
+		// 6. Hardcoded fallback - use Anthropic default
+		effectiveModel = anthropicmodels.DefaultModel
+		modelSource = "default fallback"
 	}
+
+	// Resolve model aliases (e.g., "claude-sonnet-4-5" -> "claude-sonnet-4-5-20250929")
+	effectiveModel = resolveModelAlias(effectiveModel)
 
 	logrus.WithFields(logrus.Fields{
 		"job_id":       job.ID,
@@ -1666,9 +1711,37 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			execErr = fmt.Errorf("Gemini API completion: %w", err)
 			return execErr
 		}
+	} else if strings.HasPrefix(effectiveModel, "claude") {
+		// Resolve API key here where we have the correct execution context
+		apiKey, anthropicErr := anthropicconfig.ResolveAPIKey()
+		if anthropicErr != nil {
+			err = fmt.Errorf("resolving Anthropic API key: %w", anthropicErr)
+		} else {
+			// Use grove-anthropic package for Claude models
+			opts := anthropic.RequestOptions{
+				Model:        effectiveModel,
+				Prompt:       fullPrompt,
+				ContextFiles: append(dependencyFilePaths, validContextPaths...),
+				WorkDir:      contextDir,
+				APIKey:       apiKey,
+				MaxTokens:    64000,
+				Caller:       "grove-flow-chat",
+				JobID:        job.ID,
+				PlanName:     plan.Name,
+			}
+			if isTUIMode() {
+				fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
+			}
+			response, err = e.anthropicRunner.Run(ctx, opts)
+		}
+		if err != nil {
+			printfUnlessTUI("[DEBUG] Anthropic API call failed with error: %v\n", err)
+			execErr = fmt.Errorf("Anthropic API completion: %w", err)
+			return execErr
+		}
 	} else {
 		if isTUIMode() {
-			fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
+			fmt.Fprintf(output, "\n󰚩 Calling LLM API with model: %s\n\n", effectiveModel)
 		}
 		// Use traditional llm command
 		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
