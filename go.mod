@@ -88,11 +88,3 @@ require (
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
-
-replace (
-	github.com/mattsolo1/grove-anthropic => ../../../grove-anthropic
-	github.com/mattsolo1/grove-context => ../../../grove-context
-	github.com/mattsolo1/grove-core => ../../../grove-core
-	github.com/mattsolo1/grove-gemini => ../../../grove-gemini
-	github.com/mattsolo1/grove-tend => ../../../grove-tend
-)
