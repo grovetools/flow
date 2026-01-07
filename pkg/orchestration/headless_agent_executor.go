@@ -173,9 +173,18 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	gitRoot, err := GetGitRootSafe(plan.Directory)
-	if err != nil {
-		gitRoot = plan.Directory
+	// First check if the plan directory is inside a notebook - if so, use the project's git root
+	var gitRoot string
+	if project, notebookRoot, _ := workspace.GetProjectFromNotebookPath(plan.Directory); notebookRoot != "" && project != nil {
+		// Plan is in a notebook - use the associated project's path
+		gitRoot = project.Path
+	} else {
+		// Normal case - get git root from plan directory
+		var err error
+		gitRoot, err = GetGitRootSafe(plan.Directory)
+		if err != nil {
+			gitRoot = plan.Directory
+		}
 	}
 
 	// Check if the worktree directory already exists. If so, skip preparation.

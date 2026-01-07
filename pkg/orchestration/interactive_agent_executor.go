@@ -235,9 +235,18 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Job, plan *Plan) (string, error) {
 	// For jobs with worktrees, we need to prepare the worktree if it doesn't exist yet
 	if job.Worktree != "" {
-		gitRoot, err := GetGitRootSafe(plan.Directory)
-		if err != nil {
-			return "", fmt.Errorf("could not find git root: %w", err)
+		// First check if the plan directory is inside a notebook - if so, use the project's git root
+		var gitRoot string
+		if project, notebookRoot, _ := workspace.GetProjectFromNotebookPath(plan.Directory); notebookRoot != "" && project != nil {
+			// Plan is in a notebook - use the associated project's path
+			gitRoot = project.Path
+		} else {
+			// Normal case - get git root from plan directory
+			var err error
+			gitRoot, err = GetGitRootSafe(plan.Directory)
+			if err != nil {
+				return "", fmt.Errorf("could not find git root: %w", err)
+			}
 		}
 
 		// Check if we're already in the requested worktree to avoid duplicate paths
