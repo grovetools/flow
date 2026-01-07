@@ -119,20 +119,34 @@ func GetGitRootSafe(planDir string) (string, error) {
 	if gitRoot, err := git.GetGitRoot(planDir); err == nil {
 		return gitRoot, nil
 	}
-	
+
 	// Strategy 2: Try from current working directory
 	if cwd, err := os.Getwd(); err == nil {
 		if gitRoot, err := git.GetGitRoot(cwd); err == nil {
 			return gitRoot, nil
 		}
 	}
-	
+
 	// Strategy 3: If plan directory is in a known structure (e.g., nb repos),
 	// try to find git root by looking for grove.yml
 	// This handles cases like ~/Documents/nb/repos/myrepo/main/plans
 	// where the git root might be at ~/Code/myrepo
-	
+
 	return "", fmt.Errorf("could not find git root from plan directory or current directory")
+}
+
+// GetProjectGitRoot returns the git root for the project associated with a plan.
+// If the plan is inside a notebook, it returns the associated project's path.
+// Otherwise, it falls back to GetGitRootSafe.
+func GetProjectGitRoot(planDir string) (string, error) {
+	// First check if the plan directory is inside a notebook
+	if project, notebookRoot, _ := workspace.GetProjectFromNotebookPath(planDir); notebookRoot != "" && project != nil {
+		// Plan is in a notebook - use the associated project's path
+		return project.Path, nil
+	}
+
+	// Normal case - get git root from plan directory
+	return GetGitRootSafe(planDir)
 }
 
 // ResolveWorkingDirectory determines the appropriate working directory for command execution
