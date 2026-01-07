@@ -705,12 +705,25 @@ func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.C
 	return func() tea.Msg {
 		// This command runs in a goroutine managed by the Bubble Tea runtime.
 
-		// Truncate the log file for the new run.
-		f, err := os.Create(logFile)
-		if err != nil {
-			return JobRunFinishedMsg{Err: fmt.Errorf("failed to create log file: %w", err)}
+		// Use the log file if provided, otherwise use a discard writer
+		var f io.Writer
+		var closer func()
+		var sync func()
+		if logFile != "" {
+			file, err := os.Create(logFile)
+			if err != nil {
+				return JobRunFinishedMsg{Err: fmt.Errorf("failed to create log file: %w", err)}
+			}
+			f = file
+			closer = func() { file.Close() }
+			sync = func() { file.Sync() }
+		} else {
+			// No log file - use a no-op writer
+			f = io.Discard
+			closer = func() {}
+			sync = func() {}
 		}
-		defer f.Close()
+		defer closer()
 
 		// Write initial status to log
 		fmt.Fprintf(f, "Starting job execution...\n")
@@ -720,7 +733,7 @@ func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.C
 			fmt.Fprintf(f, "  - %s (%s)\n", job.Title, job.Filename)
 		}
 		fmt.Fprintf(f, "\n")
-		f.Sync() // Ensure it's written immediately
+		sync() // Ensure it's written immediately
 
 		// Build the command arguments
 		// Run from the plan directory and pass just the filenames
@@ -738,7 +751,7 @@ func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.C
 		}
 		fmt.Fprintf(f, "\n")
 		fmt.Fprintf(f, "================================================================================\n\n")
-		f.Sync()
+		sync()
 
 		// Use 'grove flow' to ensure proper environment setup for worktrees
 		cmd := exec.Command("grove", args...)
@@ -758,7 +771,7 @@ func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.C
 		} else {
 			fmt.Fprintf(f, "Job execution completed successfully.\n")
 		}
-		f.Sync()
+		sync()
 
 		// After completion, return a message with the result.
 		return JobRunFinishedMsg{Err: runErr}

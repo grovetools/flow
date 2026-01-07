@@ -280,6 +280,19 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("TUI mode requires an interactive terminal")
 	}
 
+	// Check if we're in a notebook directory - if so, redirect user to project
+	cwd, _ := os.Getwd()
+	if project, notebookRoot, _ := workspace.GetProjectFromNotebookPath(cwd); notebookRoot != "" {
+		workspaceName := workspace.ExtractWorkspaceNameFromNotebookPath(cwd, notebookRoot)
+		if project != nil {
+			return fmt.Errorf("you are in the notebook directory for '%s'.\n"+
+				"Run this command from the project directory instead:\n\n"+
+				"  cd %s", workspaceName, project.Path)
+		}
+		return fmt.Errorf("you are in a notebook directory for '%s'.\n"+
+			"Run this command from the associated project directory instead.", workspaceName)
+	}
+
 	// Get plans directory using NotebookLocator
 	node, err := workspace.GetProjectByPath(".")
 	if err != nil {
@@ -359,7 +372,7 @@ func newPlanListTUIModel(plansDirectory string, cwdGitRoot string) planListTUIMo
 func (m planListTUIModel) Init() tea.Cmd {
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
-		fetchGitLogCmd(m.plansDirectory),
+		fetchGitLogCmd(m.cwdGitRoot),
 		refreshTick(),
 	)
 }
@@ -421,7 +434,7 @@ func (m planListTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshTickMsg:
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
-			fetchGitLogCmd(m.plansDirectory),
+			fetchGitLogCmd(m.cwdGitRoot),
 			refreshTick(),
 		)
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -190,16 +189,6 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	columnList.SetShowStatusBar(false)
 	columnList.SetShowPagination(false)
 
-	// Create a temporary log file in the project's .grove/logs directory (kept for compatibility)
-	logsDir := filepath.Join(plan.Directory, ".grove", "logs")
-	os.MkdirAll(logsDir, 0755)
-	logFile, err2 := os.CreateTemp(logsDir, "flow-tui-run-*.log")
-	var runLogPath string
-	if err2 == nil {
-		runLogPath = logFile.Name()
-		logFile.Close() // Close it for now, it will be truncated on each run
-	}
-
 	// Start cursor at the bottom-most row
 	initialCursor := 0
 	if len(jobs) > 0 {
@@ -233,7 +222,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		Focus:            JobsPane,
 		LogSplitVertical: state.LogSplitVertical, // Apply loaded state
 		IsRunningJob:        false,
-		RunLogFile:          runLogPath,
+		RunLogFile:          "", // No longer creating TUI-specific log files
 		Program:             nil, // Will be set by SetProgram after creating the program
 		frontmatterViewport: frontmatterVp,
 		briefingViewport:    briefingVp,
