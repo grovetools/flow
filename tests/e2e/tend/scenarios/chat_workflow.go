@@ -167,6 +167,10 @@ Let's discuss a feature.`
 			if err := fs.AssertContains(briefingFiles[0], "<prompt>"); err != nil {
 				return fmt.Errorf("briefing file missing <prompt> tag: %w", err)
 			}
+			// Verify new conversation structure
+			if err := fs.AssertContains(briefingFiles[0], "<conversation>"); err != nil {
+				return fmt.Errorf("briefing file missing <conversation> tag: %w", err)
+			}
 
 			return nil
 		}),

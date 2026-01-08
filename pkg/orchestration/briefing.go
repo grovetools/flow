@@ -126,8 +126,8 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 						b.WriteString(fmt.Sprintf("        <local_dependency file=\"%s\" path=\"%s\" n_lines=\"%d\" description=\"%s\"/>\n", dep.Filename, dep.FilePath, lineCount, description))
 					}
 				} else {
-					// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
-					b.WriteString(fmt.Sprintf("        <inlined_dependency file=\"%s\" description=\"This file's content is provided elsewhere in the prompt context.\"/>\n", dep.Filename))
+					// Oneshot jobs: files are uploaded as separate attachments
+					b.WriteString(fmt.Sprintf("        <uploaded_context_file file=\"%s\" type=\"dependency\" importance=\"high\" description=\"Context from upstream jobs in this LLM pipeline.\"/>\n", dep.Filename))
 				}
 				filesToUpload = append(filesToUpload, dep.FilePath)
 			}
@@ -136,7 +136,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 
 	// 4. Handle prompt_source files.
 	// For interactive_agent jobs, use local_source_file tags since files are always read locally.
-	// For oneshot jobs, use inlined_source_file tags since files are provided elsewhere in the prompt.
+	// For oneshot jobs, files are uploaded as separate attachments.
 	for _, source := range job.PromptSource {
 		sourcePath, err := ResolvePromptSource(source, plan)
 		if err != nil {
@@ -147,8 +147,8 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 			// Interactive and headless agents read files directly from the local filesystem
 			b.WriteString(fmt.Sprintf("        <local_source_file file=\"%s\" path=\"%s\" description=\"This file was provided as a source for your task.\"/>\n", source, sourcePath))
 		} else {
-			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
-			b.WriteString(fmt.Sprintf("        <inlined_source_file file=\"%s\" description=\"This file's content is provided elsewhere in the prompt context.\"/>\n", source))
+			// Oneshot jobs: files are uploaded as separate attachments
+			b.WriteString(fmt.Sprintf("        <uploaded_context_file file=\"%s\" type=\"source\" importance=\"high\" description=\"Source file explicitly provided for this task.\"/>\n", source))
 		}
 		filesToUpload = append(filesToUpload, sourcePath)
 	}
@@ -173,7 +173,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 
 	// 6. Handle context files (.grove/context, CLAUDE.md, etc.)
 	// For interactive_agent and headless_agent jobs, use local_context_file tags since files are read locally.
-	// For oneshot jobs, use inlined_context_file tags since files are provided elsewhere in the prompt.
+	// For oneshot jobs, files are uploaded as separate attachments.
 	for _, contextFile := range contextFiles {
 		if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
 			// Interactive and headless agents read files directly from the local filesystem
@@ -189,8 +189,8 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 				b.WriteString(fmt.Sprintf("        <local_context_file file=\"%s\" path=\"%s\" n_lines=\"%d\" description=\"%s\"/>\n", filepath.Base(contextFile), contextFile, lineCount, description))
 			}
 		} else {
-			// Oneshot jobs: files are inlined elsewhere in the prompt by grove llm, or uploaded by Gemini
-			b.WriteString(fmt.Sprintf("        <inlined_context_file file=\"%s\" description=\"Project context file provided elsewhere in the prompt.\"/>\n", filepath.Base(contextFile)))
+			// Oneshot jobs: files are uploaded as separate attachments
+			b.WriteString(fmt.Sprintf("        <uploaded_context_file file=\"%s\" type=\"repository\" importance=\"medium\" description=\"Concatenated project/source code files from the current repository.\"/>\n", filepath.Base(contextFile)))
 		}
 		filesToUpload = append(filesToUpload, contextFile)
 	}

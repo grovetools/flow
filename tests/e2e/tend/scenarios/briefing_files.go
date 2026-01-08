@@ -98,7 +98,7 @@ var BriefingFilesScenario = harness.NewScenario(
 			if err != nil {
 				return err
 			}
-			// When prepend_dependencies=true, dependencies are inlined in <inlined_dependency> tags
+			// When prepend_dependencies=true, dependencies are inlined in <prepended_dependency> tags
 			if !strings.Contains(content, "<prompt>") {
 				return fmt.Errorf("briefing missing root <prompt> tag")
 			}
@@ -108,8 +108,8 @@ var BriefingFilesScenario = harness.NewScenario(
 			if !strings.Contains(content, "Dependency Content") {
 				return fmt.Errorf("briefing missing dependency content")
 			}
-			if !strings.Contains(content, "<inlined_source_file") {
-				return fmt.Errorf("briefing missing <inlined_source_file> tag for source file")
+			if !strings.Contains(content, `<uploaded_context_file`) || !strings.Contains(content, `type="source"`) {
+				return fmt.Errorf("briefing missing <uploaded_context_file type=\"source\"> tag for source file")
 			}
 			if !strings.Contains(content, "Main task prompt") {
 				return fmt.Errorf("briefing missing main prompt")
@@ -176,9 +176,9 @@ var BriefingFilesScenario = harness.NewScenario(
 				return err
 			}
 
-			// When prepend_dependencies=false, dependencies are inlined elsewhere in the prompt
-			if !strings.Contains(briefingContent, "<inlined_dependency") {
-				return fmt.Errorf("briefing missing <inlined_dependency> tag (prepend_dependencies=false)")
+			// When prepend_dependencies=false, dependencies are listed as uploaded_context_file with type="dependency"
+			if !strings.Contains(briefingContent, `<uploaded_context_file`) || !strings.Contains(briefingContent, `type="dependency"`) {
+				return fmt.Errorf("briefing missing <uploaded_context_file type=\"dependency\"> tag (prepend_dependencies=false)")
 			}
 			if !strings.Contains(briefingContent, "03-dep2.md") {
 				return fmt.Errorf("briefing missing dependency file reference")
@@ -231,8 +231,15 @@ var BriefingFilesScenario = harness.NewScenario(
 			if err != nil {
 				return err
 			}
+			// Verify new XML conversation structure
+			if !strings.Contains(content, "<conversation>") {
+				return fmt.Errorf("chat briefing missing <conversation> tag")
+			}
+			if !strings.Contains(content, `<turn role="user"`) {
+				return fmt.Errorf("chat briefing missing user turn")
+			}
 			if !strings.Contains(content, "Initial user message.") {
-				return fmt.Errorf("chat briefing missing initial user message")
+				return fmt.Errorf("chat briefing missing initial user message content")
 			}
 			return nil
 		}),
@@ -305,14 +312,19 @@ User message that depends on the dependency file.
 				return err
 			}
 
-			// Verify the briefing contains the user message
+			// Verify the briefing has the structured conversation format
+			if !strings.Contains(content, "<conversation>") {
+				return fmt.Errorf("chat briefing missing <conversation> tag")
+			}
+
+			// Verify the briefing contains the user message in a turn element
 			if !strings.Contains(content, "User message that depends on the dependency file") {
 				return fmt.Errorf("chat briefing missing user message")
 			}
 
-			// Verify the briefing references the dependency (either inlined or as reference)
-			// With the fix, dependencies should be included in the context section
-			if !strings.Contains(content, "05-chat-dep.md") && !strings.Contains(content, "inlined_dependency") {
+			// Verify the briefing references the dependency in the context section
+			// With the new XML format, dependencies are listed as uploaded_context_file with type="dependency"
+			if !strings.Contains(content, "05-chat-dep.md") && !strings.Contains(content, `type="dependency"`) {
 				return fmt.Errorf("chat briefing missing dependency reference - dependencies not being resolved for chat jobs")
 			}
 
@@ -372,6 +384,88 @@ Test message for custom template.
 			agentXmlCount := strings.Count(content, `"template": "agent-xml"`)
 			if agentXmlCount < 2 {
 				return fmt.Errorf("expected at least 2 occurrences of 'agent-xml' template (original + response), found %d", agentXmlCount)
+			}
+
+			return nil
+		}),
+
+		// Test Case 5: Chat Job with prepend_dependencies=true
+		harness.NewStep("Create chat job with prepend_dependencies", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+
+			// Create a dependency job in the plan
+			depContent := "---\nid: chat-prepend-dep\ntitle: Chat Prepend Dependency\nstatus: completed\ntype: shell\n---\nThis is PREPENDED dependency content for chat."
+			if err := fs.WriteString(filepath.Join(planPath, "08-chat-prepend-dep.md"), depContent); err != nil {
+				return err
+			}
+
+			// Create a chat job with prepend_dependencies=true
+			chatContent := `---
+id: chat-with-prepend-deps
+title: Chat With Prepend Dependencies
+type: chat
+template: chat
+model: claude-3-5-sonnet-20241022
+status: pending_user
+prepend_dependencies: true
+depends_on:
+  - 08-chat-prepend-dep.md
+---
+
+<!-- grove: {"template": "chat"} -->
+
+User message with prepended dependency.
+`
+			chatFile := filepath.Join(planPath, "09-chat-with-prepend-deps.md")
+			if err := fs.WriteString(chatFile, chatContent); err != nil {
+				return err
+			}
+			ctx.Set("chat_prepend_deps_file", chatFile)
+			return nil
+		}),
+		harness.NewStep("Run chat with prepend_dependencies and verify briefing inlines content", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			chatFile := ctx.GetString("chat_prepend_deps_file")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			// Run the chat job
+			runCmd := ctx.Bin("chat", "run", chatFile)
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			if err := runCmd.Run().AssertSuccess(); err != nil {
+				return fmt.Errorf("chat run failed: %w", err)
+			}
+
+			// Verify briefing file exists and contains inlined dependency content
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "chat-with-prepend-deps")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found for chat-with-prepend-deps job in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			// Verify the briefing has the structured conversation format
+			if !strings.Contains(content, "<conversation>") {
+				return fmt.Errorf("chat briefing missing <conversation> tag")
+			}
+
+			// Verify the briefing contains the prepended_dependency tag (not uploaded_context_file)
+			if !strings.Contains(content, "<prepended_dependency") {
+				return fmt.Errorf("chat briefing missing <prepended_dependency> tag (prepend_dependencies=true)")
+			}
+
+			// Verify the dependency content is actually inlined
+			if !strings.Contains(content, "This is PREPENDED dependency content for chat") {
+				return fmt.Errorf("chat briefing missing inlined dependency content")
+			}
+
+			// Verify the user message is present
+			if !strings.Contains(content, "User message with prepended dependency") {
+				return fmt.Errorf("chat briefing missing user message")
 			}
 
 			return nil
