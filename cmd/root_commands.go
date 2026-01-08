@@ -33,7 +33,7 @@ Examples:
 	addCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
 	addCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
 	addCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
-	addCmd.Flags().StringSliceVar(&planAddSourceFiles, "source-files", nil, "Comma-separated list of source files for reference-based prompts")
+	addCmd.Flags().StringSliceVar(&planAddIncludeFiles, "include", nil, "Comma-separated list of files to include as context")
 	addCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 	addCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "Inline dependency content into prompt body instead of uploading as separate files")
 	addCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")

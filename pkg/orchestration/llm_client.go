@@ -22,7 +22,7 @@ type LLMOptions struct {
 	SchemaPath        string   // Path to JSON schema file for structured output
 	WorkingDir        string   // Working directory for the LLM command
 	ContextFiles      []string // Paths to context files (.grove/context, CLAUDE.md)
-	PromptSourceFiles []string // Paths to prompt source files from job configuration
+	IncludeFiles      []string // Paths to include files from job configuration
 }
 
 // LLMClient defines the interface for LLM interactions.
@@ -77,7 +77,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		"job_id":        job.ID,
 		"model":         opts.Model,
 		"context_files": len(opts.ContextFiles),
-		"prompt_source_files": len(opts.PromptSourceFiles),
+		"include_files": len(opts.IncludeFiles),
 		"prompt_length": len(prompt),
 		"schema_path":   opts.SchemaPath,
 	}).Info("Starting LLM request")
@@ -86,21 +86,21 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	// Note: This is for non-Gemini models that don't support file attachments
 	var fullPrompt strings.Builder
 	
-	// First add prompt source files if any
-	if len(opts.PromptSourceFiles) > 0 {
-		c.log.WithField("count", len(opts.PromptSourceFiles)).Debug("Adding prompt source files")
-		
-		for i, sourceFile := range opts.PromptSourceFiles {
-			c.log.WithField("file", sourceFile).Debug("Adding prompt source")
+	// First add include files if any
+	if len(opts.IncludeFiles) > 0 {
+		c.log.WithField("count", len(opts.IncludeFiles)).Debug("Adding include files")
+
+		for i, sourceFile := range opts.IncludeFiles {
+			c.log.WithField("file", sourceFile).Debug("Adding include file")
 			
 			if i > 0 {
 				fullPrompt.WriteString("\n\n")
 			}
-			fullPrompt.WriteString(fmt.Sprintf("=== Source: %s ===\n", filepath.Base(sourceFile)))
-			
+			fullPrompt.WriteString(fmt.Sprintf("=== Include: %s ===\n", filepath.Base(sourceFile)))
+
 			content, err := os.ReadFile(sourceFile)
 			if err != nil {
-				return "", fmt.Errorf("reading prompt source file %s: %w", sourceFile, err)
+				return "", fmt.Errorf("reading include file %s: %w", sourceFile, err)
 			}
 			fullPrompt.Write(content)
 		}
@@ -114,7 +114,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		for i, contextFile := range opts.ContextFiles {
 			c.log.WithField("file", contextFile).Debug("Adding context from file")
 			
-			if i > 0 || opts.PromptSourceFiles != nil {
+			if i > 0 || opts.IncludeFiles != nil {
 				fullPrompt.WriteString("\n\n")
 			}
 			fullPrompt.WriteString(fmt.Sprintf("=== Context from %s ===\n", filepath.Base(contextFile)))

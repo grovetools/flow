@@ -208,7 +208,7 @@ func RenameJob(plan *Plan, jobToRename *Job, newTitle string) error {
 		return fmt.Errorf("writing new job file %s: %w", newFilename, err)
 	}
 
-	// 5. Update dependent jobs and prompt_source references
+	// 5. Update dependent jobs and include file references
 	for _, job := range plan.Jobs {
 		if job.ID == jobToRename.ID {
 			continue // Skip the job being renamed
@@ -231,19 +231,19 @@ func RenameJob(plan *Plan, jobToRename *Job, newTitle string) error {
 			updates["depends_on"] = newDeps
 		}
 
-		// Check and update prompt_source
-		var newPromptSource []string
-		var promptSourceUpdated bool
-		for _, source := range job.PromptSource {
+		// Check and update include files
+		var newInclude []string
+		var includeUpdated bool
+		for _, source := range job.Include {
 			if source == jobToRename.Filename {
-				newPromptSource = append(newPromptSource, newFilename)
-				promptSourceUpdated = true
+				newInclude = append(newInclude, newFilename)
+				includeUpdated = true
 			} else {
-				newPromptSource = append(newPromptSource, source)
+				newInclude = append(newInclude, source)
 			}
 		}
-		if promptSourceUpdated {
-			updates["prompt_source"] = newPromptSource
+		if includeUpdated {
+			updates["include"] = newInclude
 		}
 
 		// Only write if there are updates to make

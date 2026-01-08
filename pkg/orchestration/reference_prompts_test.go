@@ -30,8 +30,8 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 	// Test traditional prompt assembly (backward compatibility)
 	t.Run("traditional_prompt", func(t *testing.T) {
 		job := &Job{
-			PromptSource: []string{"file1.go", "file2.go"},
-			PromptBody:   "Do something with these files",
+			Include:    []string{"file1.go", "file2.go"},
+			PromptBody: "Do something with these files",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
@@ -59,9 +59,9 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		
 		// We'll test the structure even if template loading fails
 		job := &Job{
-			Template:     "test-template",
-			PromptSource: []string{"file1.go", "file2.go"},
-			PromptBody:   "<!-- This step uses template 'test-template' with source files -->\n<!-- Template will be resolved at execution time -->\n\n## Additional Instructions\n\nRefactor these files",
+			Template:   "test-template",
+			Include:    []string{"file1.go", "file2.go"},
+			PromptBody: "<!-- This step uses template 'test-template' with include files -->\n<!-- Template will be resolved at execution time -->\n\n## Additional Instructions\n\nRefactor these files",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
@@ -89,55 +89,55 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 	})
 
-	// Test empty source files list
-	t.Run("empty_source_files", func(t *testing.T) {
+	// Test empty include files list
+	t.Run("empty_include_files", func(t *testing.T) {
 		job := &Job{
-			Template:     "test-template",
-			PromptSource: []string{},
-			PromptBody:   "Do something",
+			Template:   "test-template",
+			Include:    []string{},
+			PromptBody: "Do something",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		_, _, _, err := executor.buildPrompt(job, plan, "")
-		
-		// Should handle empty source files gracefully
+
+		// Should handle empty include files gracefully
 		if err != nil && !strings.Contains(err.Error(), "template") {
-			t.Errorf("Unexpected error for empty source files: %v", err)
+			t.Errorf("Unexpected error for empty include files: %v", err)
 		}
 	})
 
-	// Test non-existent source file
-	t.Run("missing_source_file", func(t *testing.T) {
+	// Test non-existent include file
+	t.Run("missing_include_file", func(t *testing.T) {
 		job := &Job{
-			PromptSource: []string{"nonexistent.go"},
-			PromptBody:   "Process this file",
+			Include:    []string{"nonexistent.go"},
+			PromptBody: "Process this file",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		_, _, _, err := executor.buildPrompt(job, plan, "")
 		
 		if err == nil {
-			t.Errorf("Expected error for missing source file")
+			t.Errorf("Expected error for missing include file")
 		}
 		if !strings.Contains(err.Error(), "nonexistent.go") {
 			t.Errorf("Error should mention missing file: %v", err)
 		}
 	})
 
-	// Test large number of source files
-	t.Run("multiple_source_files", func(t *testing.T) {
+	// Test large number of include files
+	t.Run("multiple_include_files", func(t *testing.T) {
 		// Create multiple test files
-		var sourceFiles []string
+		var includeFiles []string
 		for i := 0; i < 5; i++ {
 			filename := filepath.Join(tmpDir, strings.ReplaceAll("file_{{i}}.go", "{{i}}", string(rune('0'+i))))
 			content := strings.ReplaceAll("package main\n\n// File {{i}}", "{{i}}", string(rune('0'+i)))
 			os.WriteFile(filename, []byte(content), 0644)
-			sourceFiles = append(sourceFiles, filepath.Base(filename))
+			includeFiles = append(includeFiles, filepath.Base(filename))
 		}
 
 		job := &Job{
-			PromptSource: sourceFiles,
-			PromptBody:   "Process all these files",
+			Include:    includeFiles,
+			PromptBody: "Process all these files",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
@@ -147,7 +147,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		// Verify all files are included
-		for i, file := range sourceFiles {
+		for i, file := range includeFiles {
 			if !strings.Contains(prompt, file) {
 				t.Errorf("Prompt missing file %d: %s", i, file)
 			}
@@ -189,15 +189,15 @@ You are a test template. Your role is to process the provided files according to
 	// }
 
 	t.Run("load_custom_template", func(t *testing.T) {
-		// Create source file
+		// Create include file
 		os.WriteFile("test.go", []byte("package test"), 0644)
 
 		job := &Job{
-			ID:           "test-job",
-			Template:     "test-template",
-			PromptSource: []string{"test.go"},
-			PromptBody:   "Additional instructions",
-			FilePath:     filepath.Join(tmpDir, "job.md"),
+			ID:         "test-job",
+			Template:   "test-template",
+			Include:    []string{"test.go"},
+			PromptBody: "Additional instructions",
+			FilePath:   filepath.Join(tmpDir, "job.md"),
 		}
 
 		// This test would require the actual template loading logic to work
@@ -205,8 +205,8 @@ You are a test template. Your role is to process the provided files according to
 		if job.Template != "test-template" {
 			t.Errorf("Template not set correctly")
 		}
-		if len(job.PromptSource) != 1 {
-			t.Errorf("Source files not set correctly")
+		if len(job.Include) != 1 {
+			t.Errorf("Include files not set correctly")
 		}
 	})
 }
@@ -215,39 +215,39 @@ You are a test template. Your role is to process the provided files according to
 func TestCLIIntegration(t *testing.T) {
 	// Test that JobsAddStepCmd has the correct fields
 	type JobsAddStepCmd struct {
-		Dir         string
-		Template    string
-		Type        string
-		Title       string
-		DependsOn   []string
-		SourceFiles []string
-		Prompt      string
-		Interactive bool
-		PromptFile  string
-		OutputType  string
+		Dir          string
+		Template     string
+		Type         string
+		Title        string
+		DependsOn    []string
+		IncludeFiles []string
+		Prompt       string
+		Interactive  bool
+		PromptFile   string
+		OutputType   string
 	}
 	cmd := &JobsAddStepCmd{
-		Dir:         "test-dir",
-		Template:    "test-template",
-		Type:        "agent",
-		Title:       "Test Job",
-		DependsOn:   []string{"dep1", "dep2"},
-		PromptFile:  "",
-		Prompt:      "",
-		OutputType:  "file",
-		Interactive: false,
-		SourceFiles: []string{"file1.go", "file2.go"},
+		Dir:          "test-dir",
+		Template:     "test-template",
+		Type:         "agent",
+		Title:        "Test Job",
+		DependsOn:    []string{"dep1", "dep2"},
+		PromptFile:   "",
+		Prompt:       "",
+		OutputType:   "file",
+		Interactive:  false,
+		IncludeFiles: []string{"file1.go", "file2.go"},
 	}
 
 	// Verify all fields are accessible
 	if cmd.Template != "test-template" {
 		t.Errorf("Template field not set correctly")
 	}
-	if len(cmd.SourceFiles) != 2 {
-		t.Errorf("SourceFiles field not set correctly: got %d files", len(cmd.SourceFiles))
+	if len(cmd.IncludeFiles) != 2 {
+		t.Errorf("IncludeFiles field not set correctly: got %d files", len(cmd.IncludeFiles))
 	}
-	if cmd.SourceFiles[0] != "file1.go" || cmd.SourceFiles[1] != "file2.go" {
-		t.Errorf("SourceFiles content not correct: %v", cmd.SourceFiles)
+	if cmd.IncludeFiles[0] != "file1.go" || cmd.IncludeFiles[1] != "file2.go" {
+		t.Errorf("IncludeFiles content not correct: %v", cmd.IncludeFiles)
 	}
 }
 
@@ -269,8 +269,8 @@ func TestEdgeCases(t *testing.T) {
 		os.WriteFile(binaryFile, binaryContent, 0644)
 
 		job := &Job{
-			PromptSource: []string{"binary.dat"},
-			PromptBody:   "Process binary file",
+			Include:    []string{"binary.dat"},
+			PromptBody: "Process binary file",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
@@ -288,13 +288,13 @@ func TestEdgeCases(t *testing.T) {
 		// Create a file and a symlink to it
 		realFile := filepath.Join(tmpDir, "real.go")
 		os.WriteFile(realFile, []byte("package real"), 0644)
-		
+
 		symlinkFile := filepath.Join(tmpDir, "link.go")
 		os.Symlink(realFile, symlinkFile)
 
 		job := &Job{
-			PromptSource: []string{"link.go"},
-			PromptBody:   "Process symlink",
+			Include:    []string{"link.go"},
+			PromptBody: "Process symlink",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
@@ -314,8 +314,8 @@ func TestEdgeCases(t *testing.T) {
 		os.WriteFile(longFile, []byte("package long"), 0644)
 
 		job := &Job{
-			PromptSource: []string{longName},
-			PromptBody:   "Process long filename",
+			Include:    []string{longName},
+			PromptBody: "Process long filename",
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)

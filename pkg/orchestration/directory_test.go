@@ -268,10 +268,10 @@ func TestCreateJobFromTemplate(t *testing.T) {
 			jobType: JobTypeAgent,
 			title:   "Complex Job",
 			opts: JobOptions{
-				DependsOn:    []string{"01-first.md", "02-second.md"},
-				PromptSource: []string{"spec.md", "context.md"},
-				Worktree:     "feature-xyz",
-				Prompt:       "Do complex stuff",
+				DependsOn: []string{"01-first.md", "02-second.md"},
+				Include:   []string{"spec.md", "context.md"},
+				Worktree:  "feature-xyz",
+				Prompt:    "Do complex stuff",
 			},
 			validate: func(t *testing.T, job *Job) {
 				if len(job.DependsOn) != 2 {

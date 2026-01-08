@@ -49,7 +49,7 @@ func TestNewOrchestrator(t *testing.T) {
 	}
 
 	// Verify orchestrator is properly initialized
-	if orch.plan != plan {
+	if orch.Plan != plan {
 		t.Errorf("Plan not set correctly")
 	}
 

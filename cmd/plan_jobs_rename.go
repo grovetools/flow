@@ -94,8 +94,8 @@ func runPlanJobsRename(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Check if prompt_source was updated
-		for _, source := range otherJob.PromptSource {
+		// Check if include was updated
+		for _, source := range otherJob.Include {
 			if source == job.Filename {
 				info.updatedPrompt = true
 				break
@@ -115,7 +115,7 @@ func runPlanJobsRename(cmd *cobra.Command, args []string) error {
 				fields = append(fields, "depends_on")
 			}
 			if info.updatedPrompt {
-				fields = append(fields, "prompt_source")
+				fields = append(fields, "include")
 			}
 			fmt.Printf("  - %s (%s)\n", info.filename, strings.Join(fields, ", "))
 		}

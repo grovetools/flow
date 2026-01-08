@@ -71,11 +71,11 @@ var OneshotWithContextScenario = harness.NewScenario(
 				return fmt.Errorf("plan init failed: %w\nStderr: %s", result.Error, result.Stderr)
 			}
 
-			// Add job that references a source file
+			// Add job that references an include file
 			addCmd := ctx.Bin("plan", "add", "context-test-plan",
 				"--type", "oneshot",
 				"--title", "review-code",
-				"--source-files", "main.go",
+				"--include", "main.go",
 				"-p", "Review the code in main.go")
 			addCmd.Dir(projectDir)
 

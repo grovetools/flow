@@ -391,7 +391,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Model:             effectiveModel,
 			WorkingDir:        workDir,
 			ContextFiles:      contextFiles,
-			PromptSourceFiles: promptSourceFiles,
+			IncludeFiles: promptSourceFiles,
 		}
 		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
@@ -444,7 +444,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Model:             effectiveModel,
 			WorkingDir:        workDir,
 			ContextFiles:      contextFiles,
-			PromptSourceFiles: promptSourceFiles,
+			IncludeFiles: promptSourceFiles,
 		}
 		if isTUIMode() {
 			fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
@@ -591,8 +591,8 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			projectRoot = GetProjectRootSafe(".")
 		}
 
-		// Resolve prompt source file paths (without reading content)
-		for _, source := range job.PromptSource {
+		// Resolve include file paths (without reading content)
+		for _, source := range job.Include {
 			// Resolve the source file path
 			var sourcePath string
 
@@ -663,8 +663,8 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			parts = append(parts, fmt.Sprintf("=== Working Directory ===\nYou are working in the directory: %s\n", worktreePath))
 		}
 
-		// Resolve prompt source paths (without reading content)
-		for _, source := range job.PromptSource {
+		// Resolve include file paths (without reading content)
+		for _, source := range job.Include {
 			// First try to resolve relative to worktree if specified
 			var sourcePath string
 			var err error
@@ -1433,6 +1433,25 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	}
 
+	// Resolve include files (new feature for chat jobs)
+	var includeFilePaths []string
+	if len(job.Include) > 0 {
+		printfUnlessTUI("📎 Collecting %d include file%s for upload:\n", len(job.Include), func() string {
+			if len(job.Include) == 1 {
+				return ""
+			}
+			return "s"
+		}())
+		for _, source := range job.Include {
+			sourcePath, err := ResolvePromptSource(source, plan)
+			if err != nil {
+				return fmt.Errorf("could not find include file %s: %w", source, err)
+			}
+			includeFilePaths = append(includeFilePaths, sourcePath)
+			printfUnlessTUI("     • %s (will be uploaded as file attachment)\n", source)
+		}
+	}
+
 	// Load the template using TemplateManager
 	templateManager := NewTemplateManager()
 	template, err := templateManager.FindTemplate(directive.Template)
@@ -1516,8 +1535,8 @@ interpret and continue through YOUR current system instructions.
 </conversation_note>
 `)
 
-	// Add context section if we have dependencies or context files
-	if len(prependedDependencies) > 0 || len(dependencyFilePaths) > 0 || len(validContextPaths) > 0 {
+	// Add context section if we have dependencies, include files, or context files
+	if len(prependedDependencies) > 0 || len(dependencyFilePaths) > 0 || len(includeFilePaths) > 0 || len(validContextPaths) > 0 {
 		promptBuilder.WriteString("\n<context>\n")
 
 		// Add prepended dependencies (inlined content from upstream jobs)
@@ -1530,6 +1549,11 @@ interpret and continue through YOUR current system instructions.
 		// Add uploaded dependencies (references to files uploaded separately)
 		for _, depPath := range dependencyFilePaths {
 			promptBuilder.WriteString(fmt.Sprintf("    <uploaded_context_file file=\"%s\" type=\"dependency\" importance=\"high\" description=\"Context from upstream jobs in this LLM pipeline.\"/>\n", filepath.Base(depPath)))
+		}
+
+		// Add include files (explicitly included files for this task)
+		for _, includePath := range includeFilePaths {
+			promptBuilder.WriteString(fmt.Sprintf("    <uploaded_context_file file=\"%s\" type=\"include\" importance=\"high\" description=\"File explicitly included for this task.\"/>\n", filepath.Base(includePath)))
 		}
 
 		// Add context files (concatenated project/source code)
@@ -1622,11 +1646,13 @@ interpret and continue through YOUR current system instructions.
 	}).Debug("Resolved model for chat job execution")
 
 	// Create LLM options with determined model
+	// Combine dependency and include files for upload
+	allIncludeFiles := append(dependencyFilePaths, includeFilePaths...)
 	llmOpts := LLMOptions{
-		Model:             effectiveModel,
-		WorkingDir:        contextDir,
-		ContextFiles:      validContextPaths,      // Pass context file paths
-		PromptSourceFiles: dependencyFilePaths,    // Pass dependency file paths
+		Model:        effectiveModel,
+		WorkingDir:   contextDir,
+		ContextFiles: validContextPaths, // Pass context file paths
+		IncludeFiles: allIncludeFiles,   // Pass dependency + include file paths
 	}
 
 	// Log memory usage before LLM call
@@ -1702,12 +1728,12 @@ interpret and continue through YOUR current system instructions.
 			apiKey = ""
 		}
 		// Use grove-gemini package for Gemini models
-		allFilesToUpload := append(dependencyFilePaths, validContextPaths...)
+		allFilesToUpload := append(allIncludeFiles, validContextPaths...)
 		opts := gemini.RequestOptions{
 			Model:            llmOpts.Model,
 			Prompt:           fullPrompt,
 			APIKey:           apiKey, // Pass the resolved API key
-			PromptFiles:      allFilesToUpload, // Pass all dependency and context files to be uploaded
+			PromptFiles:      allFilesToUpload, // Pass all dependency, include, and context files to be uploaded
 			WorkDir:          contextDir,
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 			// Pass context for better logging
@@ -1734,7 +1760,7 @@ interpret and continue through YOUR current system instructions.
 			opts := anthropic.RequestOptions{
 				Model:        effectiveModel,
 				Prompt:       fullPrompt,
-				ContextFiles: append(dependencyFilePaths, validContextPaths...),
+				ContextFiles: append(allIncludeFiles, validContextPaths...),
 				WorkDir:      contextDir,
 				APIKey:       apiKey,
 				MaxTokens:    64000,

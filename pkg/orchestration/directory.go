@@ -189,7 +189,7 @@ func CreateJobFromTemplate(jobType JobType, title string, opts JobOptions) *Job 
 		Status:              JobStatusPending,
 		Type:                jobType,
 		DependsOn:           opts.DependsOn,
-		PromptSource:        opts.PromptSource,
+		Include:             opts.Include,
 		Worktree:            opts.Worktree,
 		PromptBody:          opts.Prompt,
 		PrependDependencies: opts.PrependDependencies,
@@ -218,8 +218,8 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if len(job.DependsOn) > 0 {
 		frontmatter["depends_on"] = job.DependsOn
 	}
-	if len(job.PromptSource) > 0 {
-		frontmatter["prompt_source"] = job.PromptSource
+	if len(job.Include) > 0 {
+		frontmatter["include"] = job.Include
 	}
 	if job.SourceBlock != "" {
 		frontmatter["source_block"] = job.SourceBlock
@@ -291,7 +291,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Title               string
 		Type                string
 		DependsOn           []string
-		PromptSource        []string
+		Include             []string
 		Repository          string
 		Branch              string
 		Worktree            string
@@ -303,7 +303,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Title:               job.Title,
 		Type:                string(job.Type),
 		DependsOn:           job.DependsOn,
-		PromptSource:        job.PromptSource,
+		Include:             job.Include,
 		Repository:          job.Repository,
 		Branch:              job.Branch,
 		Worktree:            job.Worktree,

@@ -28,7 +28,7 @@ id: initial-plan-123
 title: initial-plan
 status: pending
 type: oneshot
-prompt_source:
+include:
   - spec.md
 ---
 Create the initial plan.`,

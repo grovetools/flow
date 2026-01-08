@@ -42,7 +42,7 @@ type Job struct {
 	Type                 JobType      `yaml:"type" json:"type"`
 	Model                string       `yaml:"model,omitempty" json:"model,omitempty"`
 	DependsOn            []string     `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
-	PromptSource         []string     `yaml:"prompt_source,omitempty" json:"prompt_source,omitempty"`
+	Include              []string     `yaml:"include,omitempty" json:"include,omitempty"`
 	SourceBlock          string       `yaml:"source_block,omitempty" json:"source_block,omitempty"`
 	Template             string       `yaml:"template,omitempty" json:"template,omitempty"`
 	Repository           string       `yaml:"repository,omitempty" json:"repository,omitempty"`
@@ -85,7 +85,7 @@ type JobMetadata struct {
 // JobOptions contains options for creating a new job.
 type JobOptions struct {
 	DependsOn           []string
-	PromptSource        []string
+	Include             []string
 	Worktree            string
 	Prompt              string
 	PrependDependencies bool

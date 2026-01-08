@@ -21,8 +21,8 @@ type PlanAddStepCmd struct {
 	Type                string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, chat, interactive_agent, headless_agent, or shell"`
 	Title               string   `flag:"" help:"Job title"`
 	DependsOn           []string `flag:"d" help:"Dependencies (job filenames)"`
-	PromptFile          string   `flag:"f" help:"File containing the prompt (DEPRECATED: use --source-files)"`
-	SourceFiles         []string `flag:"" sep:"," help:"Comma-separated list of source files for reference-based prompts"`
+	PromptFile          string   `flag:"f" help:"File containing the prompt"`
+	IncludeFiles        []string `flag:"" sep:"," help:"Comma-separated list of files to include as context"`
 	Prompt              string   `flag:"p" help:"Inline prompt text"`
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
@@ -195,27 +195,27 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		}
 	}
 
-	// Check if we should use reference-based prompts (even without a template)
-	if len(cmd.SourceFiles) > 0 {
-		// Reference-based prompt handling
+	// Check if we should use include files (even without a template)
+	if len(cmd.IncludeFiles) > 0 {
+		// Include file handling
 		projectRoot, err := orchestration.GetProjectRoot()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get project root: %w", err)
 		}
 
 		// Convert to relative paths
-		var relativeSourceFiles []string
-		for _, file := range cmd.SourceFiles {
+		var relativeIncludeFiles []string
+		for _, file := range cmd.IncludeFiles {
 			// Resolve the file path
 			resolvedPath, err := orchestration.ResolvePromptSource(file, plan)
 			if err != nil {
-				return nil, fmt.Errorf("failed to resolve source file %s: %w", file, err)
+				return nil, fmt.Errorf("failed to resolve include file %s: %w", file, err)
 			}
 
 			// If the file is in the plan directory, use just the relative path from plan
 			if strings.HasPrefix(resolvedPath, plan.Directory+string(filepath.Separator)) {
 				relPath, _ := filepath.Rel(plan.Directory, resolvedPath)
-				relativeSourceFiles = append(relativeSourceFiles, relPath)
+				relativeIncludeFiles = append(relativeIncludeFiles, relPath)
 			} else {
 				// Otherwise, make it relative to project root
 				relPath, err := filepath.Rel(projectRoot, resolvedPath)
@@ -223,7 +223,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 					// If we can't make it relative, use the absolute path
 					relPath = resolvedPath
 				}
-				relativeSourceFiles = append(relativeSourceFiles, relPath)
+				relativeIncludeFiles = append(relativeIncludeFiles, relPath)
 			}
 		}
 
@@ -241,7 +241,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			Type:                orchestration.JobType(cmd.Type),
 			Status:              status,
 			DependsOn:           cmd.DependsOn,
-			PromptSource:        relativeSourceFiles,
+			Include:             relativeIncludeFiles,
 			Model:               cmd.Model,
 			PrependDependencies: cmd.PrependDependencies,
 		}
@@ -503,10 +503,10 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if worktree, ok := template.Frontmatter["worktree"].(string); ok {
 		job.Worktree = worktree
 	}
-	if promptSource, ok := template.Frontmatter["prompt_source"].([]interface{}); ok {
-		for _, src := range promptSource {
+	if include, ok := template.Frontmatter["include"].([]interface{}); ok {
+		for _, src := range include {
 			if srcStr, ok := src.(string); ok {
-				job.PromptSource = append(job.PromptSource, srcStr)
+				job.Include = append(job.Include, srcStr)
 			}
 		}
 	}
@@ -554,12 +554,12 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 
 	// When using a template, ALWAYS use reference-based approach
-	if true { // Always use reference-based prompts with templates
-		// Reference-based prompt handling
-		var sourceFiles []string
+	if true { // Always use include files with templates
+		// Include file handling
+		var includeFiles []string
 
-		// Only use source files, not prompt files
-		sourceFiles = cmd.SourceFiles
+		// Only use include files, not prompt files
+		includeFiles = cmd.IncludeFiles
 
 		// Get project root
 		projectRoot, err := orchestration.GetProjectRoot()
@@ -568,18 +568,18 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		}
 
 		// Convert to relative paths
-		var relativeSourceFiles []string
-		for _, file := range sourceFiles {
+		var relativeIncludeFiles []string
+		for _, file := range includeFiles {
 			// Resolve the file path
 			resolvedPath, err := orchestration.ResolvePromptSource(file, plan)
 			if err != nil {
-				return nil, fmt.Errorf("failed to resolve source file %s: %w", file, err)
+				return nil, fmt.Errorf("failed to resolve include file %s: %w", file, err)
 			}
 
 			// If the file is in the plan directory, use just the relative path from plan
 			if strings.HasPrefix(resolvedPath, plan.Directory+string(filepath.Separator)) {
 				relPath, _ := filepath.Rel(plan.Directory, resolvedPath)
-				relativeSourceFiles = append(relativeSourceFiles, relPath)
+				relativeIncludeFiles = append(relativeIncludeFiles, relPath)
 			} else {
 				// Otherwise, make it relative to project root
 				relPath, err := filepath.Rel(projectRoot, resolvedPath)
@@ -587,13 +587,13 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 					// If we can't make it relative, use the absolute path
 					relPath = resolvedPath
 				}
-				relativeSourceFiles = append(relativeSourceFiles, relPath)
+				relativeIncludeFiles = append(relativeIncludeFiles, relPath)
 			}
 		}
 
-		// Store template name and source files as metadata
-		if len(relativeSourceFiles) > 0 {
-			job.PromptSource = relativeSourceFiles
+		// Store template name and include files as metadata
+		if len(relativeIncludeFiles) > 0 {
+			job.Include = relativeIncludeFiles
 		}
 		job.Template = template.Name
 

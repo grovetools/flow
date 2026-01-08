@@ -53,7 +53,7 @@ var BriefingFilesScenario = harness.NewScenario(
 			// Add oneshot job with prepend_dependencies
 			addCmd := ctx.Bin("plan", "add", "briefing-plan",
 				"--type", "oneshot", "--title", "test-oneshot-prepend",
-				"-d", "01-dep.md", "--source-files", "source.txt",
+				"-d", "01-dep.md", "--include", "source.txt",
 				"--prepend-dependencies", "-p", "Main task prompt")
 			addCmd.Dir(projectDir)
 			return addCmd.Run().AssertSuccess()
@@ -108,8 +108,8 @@ var BriefingFilesScenario = harness.NewScenario(
 			if !strings.Contains(content, "Dependency Content") {
 				return fmt.Errorf("briefing missing dependency content")
 			}
-			if !strings.Contains(content, `<uploaded_context_file`) || !strings.Contains(content, `type="source"`) {
-				return fmt.Errorf("briefing missing <uploaded_context_file type=\"source\"> tag for source file")
+			if !strings.Contains(content, `<uploaded_context_file`) || !strings.Contains(content, `type="include"`) {
+				return fmt.Errorf("briefing missing <uploaded_context_file type=\"include\"> tag for include file")
 			}
 			if !strings.Contains(content, "Main task prompt") {
 				return fmt.Errorf("briefing missing main prompt")

@@ -134,21 +134,21 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 		}
 	}
 
-	// 4. Handle prompt_source files.
-	// For interactive_agent jobs, use local_source_file tags since files are always read locally.
+	// 4. Handle include files.
+	// For interactive_agent jobs, use local_include_file tags since files are always read locally.
 	// For oneshot jobs, files are uploaded as separate attachments.
-	for _, source := range job.PromptSource {
+	for _, source := range job.Include {
 		sourcePath, err := ResolvePromptSource(source, plan)
 		if err != nil {
-			return "", nil, fmt.Errorf("resolving prompt source %s: %w", source, err)
+			return "", nil, fmt.Errorf("resolving include file %s: %w", source, err)
 		}
 		// Use different tags based on job type
 		if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
 			// Interactive and headless agents read files directly from the local filesystem
-			b.WriteString(fmt.Sprintf("        <local_source_file file=\"%s\" path=\"%s\" description=\"This file was provided as a source for your task.\"/>\n", source, sourcePath))
+			b.WriteString(fmt.Sprintf("        <local_include_file file=\"%s\" path=\"%s\" description=\"This file was explicitly included for your task.\"/>\n", source, sourcePath))
 		} else {
 			// Oneshot jobs: files are uploaded as separate attachments
-			b.WriteString(fmt.Sprintf("        <uploaded_context_file file=\"%s\" type=\"source\" importance=\"high\" description=\"Source file explicitly provided for this task.\"/>\n", source))
+			b.WriteString(fmt.Sprintf("        <uploaded_context_file file=\"%s\" type=\"include\" importance=\"high\" description=\"File explicitly included for this task.\"/>\n", source))
 		}
 		filesToUpload = append(filesToUpload, sourcePath)
 	}

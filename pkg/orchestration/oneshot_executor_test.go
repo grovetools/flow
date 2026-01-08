@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ id: test-job-123
 title: Test Job
 status: pending
 type: oneshot
-prompt_source:
+include:
   - spec.md
 output:
   type: file
@@ -97,8 +98,8 @@ func TestOneShotExecutor_BuildPrompt(t *testing.T) {
 	}
 
 	job := &Job{
-		PromptSource: []string{"spec1.md", "spec2.md"},
-		PromptBody:   "Do something with these specs",
+		Include:    []string{"spec1.md", "spec2.md"},
+		PromptBody: "Do something with these specs",
 	}
 
 	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
@@ -135,9 +136,9 @@ func TestOneShotExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
 
 	// Test reference-based job with template
 	job := &Job{
-		Template:     "agent-run",
-		PromptSource: []string{"file1.go", "file2.go"},
-		PromptBody:   "<!-- This step uses template 'agent-run' with source files -->\n<!-- Template will be resolved at execution time -->\n\n## Additional Instructions\n\nRefactor these files",
+		Template:   "agent-run",
+		Include:    []string{"file1.go", "file2.go"},
+		PromptBody: "<!-- This step uses template 'agent-run' with include files -->\n<!-- Template will be resolved at execution time -->\n\n## Additional Instructions\n\nRefactor these files",
 	}
 
 	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
@@ -185,7 +186,7 @@ func TestMockLLMClientFile(t *testing.T) {
 	defer os.Unsetenv("GROVE_MOCK_LLM_RESPONSE_FILE")
 
 	client := NewMockLLMClient()
-	response, err := client.Complete(context.Background(), &Job{}, &Plan{}, "test prompt", LLMOptions{})
+	response, err := client.Complete(context.Background(), &Job{}, &Plan{}, "test prompt", LLMOptions{}, io.Discard)
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
@@ -236,7 +237,7 @@ Implement the second part.`
 	}()
 
 	client := NewMockLLMClient()
-	response, err := client.Complete(context.Background(), &Job{}, &Plan{}, "test prompt", LLMOptions{})
+	response, err := client.Complete(context.Background(), &Job{}, &Plan{}, "test prompt", LLMOptions{}, io.Discard)
 	if err != nil {
 		t.Fatalf("Complete() error = %v", err)
 	}
@@ -274,7 +275,7 @@ func TestOneShotExecutor_ErrorHandling(t *testing.T) {
 		wantStatus JobStatus
 	}{
 		{
-			name: "missing prompt source",
+			name: "missing include file",
 			setup: func() (*Job, *Plan) {
 				jobPath := filepath.Join(tmpDir, "job1.md")
 				jobContent := `---
@@ -282,7 +283,7 @@ id: test1
 title: Test
 status: pending
 type: oneshot
-prompt_source:
+include:
   - missing.md
 ---
 Body`
@@ -292,7 +293,7 @@ Body`
 				plan := &Plan{Directory: tmpDir}
 				return job, plan
 			},
-			wantErr:    "reading prompt source",
+			wantErr:    "reading include file",
 			wantStatus: JobStatusFailed,
 		},
 		{

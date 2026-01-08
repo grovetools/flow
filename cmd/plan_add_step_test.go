@@ -173,10 +173,10 @@ func TestRunPlanAddStep(t *testing.T) {
 				os.WriteFile(filepath.Join(dir, "source2.txt"), []byte("Source 2 content"), 0644)
 			},
 			cmd: &PlanAddStepCmd{
-				Type:        "oneshot",
-				Title:       "Reference-based Step",
-				Template:    "agent-run", // Assuming this built-in template exists
-				SourceFiles: []string{"source1.txt", "source2.txt"},
+				Type:         "oneshot",
+				Title:        "Reference-based Step",
+				Template:     "agent-run", // Assuming this built-in template exists
+				IncludeFiles: []string{"source1.txt", "source2.txt"},
 			},
 			wantErr: false,
 			checkJob: func(t *testing.T, dir string) {
@@ -199,13 +199,13 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal("Created job not found")
 				}
 
-				// Verify job has template and prompt sources
+				// Verify job has template and include files
 				if job.Template != "agent-run" {
 					t.Errorf("Expected template 'agent-run', got '%s'", job.Template)
 				}
 
-				if len(job.PromptSource) != 2 {
-					t.Errorf("Expected 2 prompt sources, got %d", len(job.PromptSource))
+				if len(job.Include) != 2 {
+					t.Errorf("Expected 2 include files, got %d", len(job.Include))
 				}
 
 				// Check that prompt body contains template content

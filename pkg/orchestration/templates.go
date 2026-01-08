@@ -8,8 +8,8 @@ status: pending
 type: {{ .Type }}
 {{- if .DependsOn }}
 depends_on:{{ range .DependsOn }}
-  - {{ . }}{{ end }}{{ end }}{{ if .PromptSource }}
-prompt_source:{{ range .PromptSource }}
+  - {{ . }}{{ end }}{{ end }}{{ if .Include }}
+include:{{ range .Include }}
   - {{ . }}{{ end }}{{ end }}{{ if .Repository }}
 repository: {{ .Repository }}{{ end }}{{ if .Branch }}
 branch: {{ .Branch }}{{ end }}{{ if .Worktree }}

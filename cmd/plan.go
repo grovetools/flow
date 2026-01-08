@@ -127,7 +127,7 @@ var (
 	planAddPromptFile    string
 	planAddPrompt        string
 	planAddInteractive       bool
-	planAddSourceFiles       []string
+	planAddIncludeFiles      []string
 	planAddWorktree          string
 	planAddPrependDependencies bool
 	planAddRecipe          string
@@ -178,7 +178,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
 	planAddCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
-	planAddCmd.Flags().StringSliceVar(&planAddSourceFiles, "source-files", nil, "Comma-separated list of source files for reference-based prompts")
+	planAddCmd.Flags().StringSliceVar(&planAddIncludeFiles, "include", nil, "Comma-separated list of files to include as context")
 	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "Inline dependency content into prompt body instead of uploading as separate files")
 	planAddCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
@@ -294,7 +294,7 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		PromptFile:           planAddPromptFile,
 		Prompt:               planAddPrompt,
 		Interactive:          planAddInteractive,
-		SourceFiles:          planAddSourceFiles,
+		IncludeFiles:         planAddIncludeFiles,
 		Worktree:             planAddWorktree,
 		PrependDependencies:  planAddPrependDependencies,
 		Recipe:               planAddRecipe,
