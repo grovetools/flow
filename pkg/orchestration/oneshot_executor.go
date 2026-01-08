@@ -217,9 +217,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		}
 		workDir = path
 	} else {
-		// No worktree specified, default to the git repository root.
+		// No worktree specified, default to the project git repository root (notebook-aware).
 		var err error
-		workDir, err = GetGitRootSafe(plan.Directory)
+		workDir, err = GetProjectGitRoot(plan.Directory)
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			workDir = plan.Directory
@@ -817,8 +817,8 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// Get git root for worktree creation
-	gitRoot, err := GetGitRootSafe(plan.Directory)
+	// Get project git root for worktree creation (notebook-aware)
+	gitRoot, err := GetProjectGitRoot(plan.Directory)
 	if err != nil {
 		// Fallback to plan directory if not in a git repo
 		gitRoot = plan.Directory
@@ -912,9 +912,9 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			}
 		}
 		
-		// 3. Try relative to git root
+		// 3. Try relative to project git root (notebook-aware)
 		if !foundPath {
-			gitRoot, err := GetGitRootSafe(plan.Directory)
+			gitRoot, err := GetProjectGitRoot(plan.Directory)
 			if err == nil {
 				candidatePath = filepath.Join(gitRoot, job.RulesFile)
 				if _, err := os.Stat(candidatePath); err == nil {
@@ -1342,9 +1342,9 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			log.WithError(err).Warn("Failed to regenerate context in worktree")
 		}
 	} else {
-		// No worktree specified, default to the git repository root.
+		// No worktree specified, default to the project git repository root (notebook-aware).
 		var err error
-		worktreePath, err = GetGitRootSafe(plan.Directory)
+		worktreePath, err = GetProjectGitRoot(plan.Directory)
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			worktreePath = plan.Directory

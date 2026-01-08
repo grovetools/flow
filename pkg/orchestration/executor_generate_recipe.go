@@ -66,22 +66,22 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 	// Determine the working directory for the job
 	var workDir string
 	if job.Worktree != "" {
-		// Prepare git worktree
-		gitRoot, err := GetGitRootSafe(plan.Directory)
+		// Prepare git worktree (notebook-aware)
+		gitRoot, err := GetProjectGitRoot(plan.Directory)
 		if err != nil {
 			// Fallback to plan directory if not in a git repo
 			gitRoot = plan.Directory
 		}
-		
+
 		worktreeDir, _, err := e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "main")
 		if err != nil {
 			return fmt.Errorf("getting worktree: %w", err)
 		}
 		workDir = worktreeDir
 	} else {
-		// No worktree specified, use git root or plan directory
+		// No worktree specified, use project git root or plan directory (notebook-aware)
 		var err error
-		workDir, err = GetGitRootSafe(plan.Directory)
+		workDir, err = GetProjectGitRoot(plan.Directory)
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			workDir = plan.Directory

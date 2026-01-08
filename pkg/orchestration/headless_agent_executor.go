@@ -102,7 +102,7 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 	} else {
 		var err error
-		workDir, err = GetGitRootSafe(plan.Directory)
+		workDir, err = GetProjectGitRoot(plan.Directory)
 		if err != nil {
 			workDir = plan.Directory
 			log.Warn("Not a git repository, using plan directory as working directory")

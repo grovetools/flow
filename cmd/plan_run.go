@@ -156,8 +156,8 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 				break
 			}
 
-			// Get git root to check if we're already in the worktree
-		gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
+			// Get project git root to check if we're already in the worktree (notebook-aware)
+		gitRoot, err := orchestration.GetProjectGitRoot(plan.Directory)
 		if err != nil {
 			gitRoot = ""
 		}
@@ -191,11 +191,11 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Use the same session naming logic as the rest of the system
+		// Use the same session naming logic as the rest of the system (notebook-aware)
 		var expectedSessionName string
 		if gitRoot != "" {
 			worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-			if projInfo, err := workspace.GetProjectByPath(worktreePath); err == nil {
+			if projInfo, err := orchestration.ResolveProjectForSessionNaming(worktreePath); err == nil {
 				expectedSessionName = projInfo.Identifier()
 			} else {
 				// Fallback to old logic if we can't get project info

@@ -571,9 +571,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	// Original behavior for jobs without worktrees
-	gitRoot, err := GetGitRootSafe(plan.Directory)
+	gitRoot, err := GetProjectGitRoot(plan.Directory)
 	if err != nil {
-		return fmt.Errorf("could not find git root: %w", err)
+		return fmt.Errorf("could not find project git root: %w", err)
 	}
 
 	sessionName, err := p.generateSessionName(gitRoot)
@@ -719,9 +719,9 @@ func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFi
 	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
 }
 
-// generateSessionName creates a unique session name for the interactive job.
+// generateSessionName creates a unique session name for the interactive job (notebook-aware).
 func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error) {
-	projInfo, err := workspace.GetProjectByPath(workDir)
+	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}

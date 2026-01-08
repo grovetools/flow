@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	groveexec "github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -133,8 +132,8 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
-	// Get workspace info for session naming
-	projInfo, err := workspace.GetProjectByPath(workingDir)
+	// Get workspace info for session naming (notebook-aware)
+	projInfo, err := orchestration.ResolveProjectForSessionNaming(workingDir)
 	if err != nil {
 		return fmt.Errorf("failed to get workspace info for %s: %w", workingDir, err)
 	}

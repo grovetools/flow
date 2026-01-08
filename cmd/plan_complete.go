@@ -170,8 +170,8 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 
 		// If we can't find the session (e.g., resumed job), fall back to using the job's worktree
 		if err != nil && job.Worktree != "" {
-			// Determine worktree path from the plan's git root
-			gitRoot, gitErr := orchestration.GetGitRootSafe(plan.Directory)
+			// Determine worktree path from the plan's project git root (notebook-aware)
+			gitRoot, gitErr := orchestration.GetProjectGitRoot(plan.Directory)
 			if gitErr == nil {
 				// Skip worktree operations if this is a notebook repo
 				if workspace.IsNotebookRepo(gitRoot) {
@@ -196,7 +196,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 				fmt.Printf("  Note: could not determine working directory: %v\n", err)
 			}
 		} else {
-			projInfo, err := workspace.GetProjectByPath(worktreePath)
+			projInfo, err := orchestration.ResolveProjectForSessionNaming(worktreePath)
 			if err != nil {
 				if !silent {
 					fmt.Printf("  Note: could not get project info to determine session name: %v\n", err)

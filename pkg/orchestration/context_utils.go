@@ -14,9 +14,9 @@ import (
 // its worktree and repository configuration. This is the canonical logic used by
 // both interactive agent execution and resume operations.
 func DetermineWorkingDirectory(plan *Plan, job *Job) (string, error) {
-	gitRoot, err := GetGitRootSafe(plan.Directory)
+	gitRoot, err := GetProjectGitRoot(plan.Directory)
 	if err != nil {
-		return "", fmt.Errorf("could not find git root: %w", err)
+		return "", fmt.Errorf("could not find project git root: %w", err)
 	}
 
 	var workDir string
@@ -149,10 +149,22 @@ func GetProjectGitRoot(planDir string) (string, error) {
 	return GetGitRootSafe(planDir)
 }
 
+// ResolveProjectForSessionNaming resolves the appropriate project for tmux session naming.
+// If workDir is inside a notebook, it returns the associated project.
+// Otherwise, it returns the project at workDir.
+func ResolveProjectForSessionNaming(workDir string) (*workspace.WorkspaceNode, error) {
+	// First check if we're in a notebook
+	if project, notebookRoot, _ := workspace.GetProjectFromNotebookPath(workDir); notebookRoot != "" && project != nil {
+		return project, nil
+	}
+	// Normal case - get project at workDir
+	return workspace.GetProjectByPath(workDir)
+}
+
 // ResolveWorkingDirectory determines the appropriate working directory for command execution
 func ResolveWorkingDirectory(plan *Plan) string {
-	// If we're in a git repository, use its root
-	if gitRoot, err := GetGitRootSafe(plan.Directory); err == nil {
+	// If we're in a git repository, use its root (notebook-aware)
+	if gitRoot, err := GetProjectGitRoot(plan.Directory); err == nil {
 		return gitRoot
 	}
 	

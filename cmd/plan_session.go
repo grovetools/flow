@@ -30,10 +30,10 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		return fmt.Errorf("tmux not available: %w", err)
 	}
 
-	// Get the git root for the plan
-	gitRoot, err := orchestration.GetGitRootSafe(plan.Directory)
+	// Get the project git root for the plan (notebook-aware)
+	gitRoot, err := orchestration.GetProjectGitRoot(plan.Directory)
 	if err != nil {
-		return fmt.Errorf("could not find git root: %w", err)
+		return fmt.Errorf("could not find project git root: %w", err)
 	}
 
 	// Defensive check: prevent creating worktrees in notebook repos
@@ -74,8 +74,8 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		}
 	}
 
-	// Session name is derived from the project identifier
-	projInfo, err := workspace.GetProjectByPath(worktreePath)
+	// Session name is derived from the project identifier (notebook-aware)
+	projInfo, err := orchestration.ResolveProjectForSessionNaming(worktreePath)
 	if err != nil {
 		return fmt.Errorf("failed to get project info for session naming: %w", err)
 	}

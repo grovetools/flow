@@ -13,7 +13,6 @@ import (
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/sirupsen/logrus"
@@ -291,9 +290,9 @@ func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFil
 	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
 }
 
-// generateSessionName creates a unique session name for the interactive job.
+// generateSessionName creates a unique session name for the interactive job (notebook-aware).
 func (p *CodexAgentProvider) generateSessionName(workDir string) (string, error) {
-	projInfo, err := workspace.GetProjectByPath(workDir)
+	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}

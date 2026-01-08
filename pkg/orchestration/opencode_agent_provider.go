@@ -13,7 +13,6 @@ import (
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/sirupsen/logrus"
@@ -218,8 +217,9 @@ func (p *OpencodeAgentProvider) buildAgentCommand(job *Job, briefingFilePath str
 	return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), prompt), nil
 }
 
+// generateSessionName creates a unique session name for the interactive job (notebook-aware).
 func (p *OpencodeAgentProvider) generateSessionName(workDir string) (string, error) {
-	projInfo, err := workspace.GetProjectByPath(workDir)
+	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to get project info: %w", err)
 	}
