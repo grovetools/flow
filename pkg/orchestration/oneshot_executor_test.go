@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -262,6 +263,242 @@ Implement the second part.`
 	job1Content, _ := os.ReadFile(job1Path)
 	if !strings.Contains(string(job1Content), "id: step-1") {
 		t.Errorf("First job missing expected ID")
+	}
+}
+
+func TestJob_ShouldInline(t *testing.T) {
+	tests := []struct {
+		name     string
+		job      *Job
+		category InlineCategory
+		want     bool
+	}{
+		{
+			name: "inline dependencies via new field",
+			job: &Job{
+				Inline: InlineConfig{
+					Categories: []InlineCategory{InlineDependencies},
+				},
+			},
+			category: InlineDependencies,
+			want:     true,
+		},
+		{
+			name: "inline include via new field",
+			job: &Job{
+				Inline: InlineConfig{
+					Categories: []InlineCategory{InlineInclude},
+				},
+			},
+			category: InlineInclude,
+			want:     true,
+		},
+		{
+			name: "inline context via new field",
+			job: &Job{
+				Inline: InlineConfig{
+					Categories: []InlineCategory{InlineContext},
+				},
+			},
+			category: InlineContext,
+			want:     true,
+		},
+		{
+			name: "inline all categories",
+			job: &Job{
+				Inline: InlineConfig{
+					Categories: []InlineCategory{InlineDependencies, InlineInclude, InlineContext},
+				},
+			},
+			category: InlineDependencies,
+			want:     true,
+		},
+		{
+			name: "backwards compat - prepend_dependencies true",
+			job: &Job{
+				PrependDependencies: true,
+			},
+			category: InlineDependencies,
+			want:     true,
+		},
+		{
+			name: "backwards compat - prepend_dependencies false for include",
+			job: &Job{
+				PrependDependencies: true, // Only affects dependencies
+			},
+			category: InlineInclude,
+			want:     false,
+		},
+		{
+			name: "no inline config - should return false",
+			job: &Job{},
+			category: InlineDependencies,
+			want:     false,
+		},
+		{
+			name: "inline dependencies but asking for context",
+			job: &Job{
+				Inline: InlineConfig{
+					Categories: []InlineCategory{InlineDependencies},
+				},
+			},
+			category: InlineContext,
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.job.ShouldInline(tt.category)
+			if got != tt.want {
+				t.Errorf("ShouldInline(%v) = %v, want %v", tt.category, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInlineConfig_UnmarshalYAML_Strings(t *testing.T) {
+	tests := []struct {
+		name      string
+		yamlInput string
+		wantCats  []InlineCategory
+		wantEmpty bool
+	}{
+		{
+			name:      "shorthand all",
+			yamlInput: "all",
+			wantCats:  []InlineCategory{InlineDependencies, InlineInclude, InlineContext},
+		},
+		{
+			name:      "shorthand none",
+			yamlInput: "none",
+			wantCats:  nil,
+			wantEmpty: true,
+		},
+		{
+			name:      "shorthand files (dependencies + include)",
+			yamlInput: "files",
+			wantCats:  []InlineCategory{InlineDependencies, InlineInclude},
+		},
+		{
+			name:      "empty string",
+			yamlInput: "",
+			wantCats:  nil,
+			wantEmpty: true,
+		},
+		{
+			name:      "single category: dependencies",
+			yamlInput: "dependencies",
+			wantCats:  []InlineCategory{InlineDependencies},
+		},
+		{
+			name:      "single category: include",
+			yamlInput: "include",
+			wantCats:  []InlineCategory{InlineInclude},
+		},
+		{
+			name:      "single category: context",
+			yamlInput: "context",
+			wantCats:  []InlineCategory{InlineContext},
+		},
+		{
+			name:      "case insensitive: ALL",
+			yamlInput: "ALL",
+			wantCats:  []InlineCategory{InlineDependencies, InlineInclude, InlineContext},
+		},
+		{
+			name:      "case insensitive: Files",
+			yamlInput: "Files",
+			wantCats:  []InlineCategory{InlineDependencies, InlineInclude},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ic InlineConfig
+			err := ic.UnmarshalYAML(func(out interface{}) error {
+				*(out.(*string)) = tt.yamlInput
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("UnmarshalYAML() error = %v", err)
+			}
+
+			if tt.wantEmpty && !ic.IsEmpty() {
+				t.Errorf("Expected empty InlineConfig, got %v", ic.Categories)
+			}
+			if !tt.wantEmpty && len(ic.Categories) != len(tt.wantCats) {
+				t.Errorf("Got %d categories, want %d", len(ic.Categories), len(tt.wantCats))
+			}
+			for i, cat := range tt.wantCats {
+				if i < len(ic.Categories) && ic.Categories[i] != cat {
+					t.Errorf("Category[%d] = %v, want %v", i, ic.Categories[i], cat)
+				}
+			}
+		})
+	}
+}
+
+func TestInlineConfig_UnmarshalYAML_Arrays(t *testing.T) {
+	tests := []struct {
+		name      string
+		yamlInput []string
+		wantCats  []InlineCategory
+	}{
+		{
+			name:      "array: dependencies only",
+			yamlInput: []string{"dependencies"},
+			wantCats:  []InlineCategory{InlineDependencies},
+		},
+		{
+			name:      "array: dependencies and include",
+			yamlInput: []string{"dependencies", "include"},
+			wantCats:  []InlineCategory{InlineDependencies, InlineInclude},
+		},
+		{
+			name:      "array: all three categories",
+			yamlInput: []string{"dependencies", "include", "context"},
+			wantCats:  []InlineCategory{InlineDependencies, InlineInclude, InlineContext},
+		},
+		{
+			name:      "array: include and context only",
+			yamlInput: []string{"include", "context"},
+			wantCats:  []InlineCategory{InlineInclude, InlineContext},
+		},
+		{
+			name:      "empty array",
+			yamlInput: []string{},
+			wantCats:  []InlineCategory{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ic InlineConfig
+			// Simulate array unmarshal - first attempt string fails, then array succeeds
+			err := ic.UnmarshalYAML(func(out interface{}) error {
+				switch v := out.(type) {
+				case *string:
+					return fmt.Errorf("not a string")
+				case *[]string:
+					*v = tt.yamlInput
+					return nil
+				}
+				return fmt.Errorf("unexpected type")
+			})
+			if err != nil {
+				t.Fatalf("UnmarshalYAML() error = %v", err)
+			}
+
+			if len(ic.Categories) != len(tt.wantCats) {
+				t.Errorf("Got %d categories, want %d", len(ic.Categories), len(tt.wantCats))
+			}
+			for i, cat := range tt.wantCats {
+				if i < len(ic.Categories) && ic.Categories[i] != cat {
+					t.Errorf("Category[%d] = %v, want %v", i, ic.Categories[i], cat)
+				}
+			}
+		})
 	}
 }
 

@@ -1,6 +1,76 @@
 package orchestration
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// InlineCategory represents a category of files that can be inlined.
+type InlineCategory string
+
+const (
+	InlineDependencies InlineCategory = "dependencies" // Output from upstream jobs in the pipeline
+	InlineInclude      InlineCategory = "include"      // Files specified in include: frontmatter
+	InlineContext      InlineCategory = "context"      // cx-generated context file (.grove/context)
+)
+
+// InlineConfig controls which file types are embedded directly in the prompt vs uploaded as attachments.
+// It can be specified as:
+// - An array of categories: ["dependencies", "include", "context"]
+// - A shorthand string: "none" (default), "all", or a single category like "dependencies"
+type InlineConfig struct {
+	Categories []InlineCategory
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling to support both array and string syntax.
+func (ic *InlineConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// First try to unmarshal as a string (shorthand syntax)
+	var shorthand string
+	if err := unmarshal(&shorthand); err == nil {
+		switch strings.ToLower(shorthand) {
+		case "none", "":
+			ic.Categories = nil
+		case "all":
+			ic.Categories = []InlineCategory{InlineDependencies, InlineInclude, InlineContext}
+		case "files":
+			// Shorthand for dependencies + include (excludes context)
+			ic.Categories = []InlineCategory{InlineDependencies, InlineInclude}
+		default:
+			// Single category specified as string
+			ic.Categories = []InlineCategory{InlineCategory(shorthand)}
+		}
+		return nil
+	}
+
+	// Otherwise try to unmarshal as an array
+	var categories []string
+	if err := unmarshal(&categories); err != nil {
+		return err
+	}
+	ic.Categories = make([]InlineCategory, len(categories))
+	for i, cat := range categories {
+		ic.Categories[i] = InlineCategory(cat)
+	}
+	return nil
+}
+
+// MarshalYAML implements custom YAML marshaling.
+func (ic InlineConfig) MarshalYAML() (interface{}, error) {
+	if len(ic.Categories) == 0 {
+		return nil, nil // Omit empty
+	}
+	// Convert to string array for output
+	categories := make([]string, len(ic.Categories))
+	for i, cat := range ic.Categories {
+		categories[i] = string(cat)
+	}
+	return categories, nil
+}
+
+// IsEmpty returns true if no categories are configured.
+func (ic InlineConfig) IsEmpty() bool {
+	return len(ic.Categories) == 0
+}
 
 // JobStatus represents the current state of a job.
 type JobStatus string
@@ -49,7 +119,8 @@ type Job struct {
 	Branch               string       `yaml:"branch,omitempty" json:"branch,omitempty"`
 	Worktree             string       `yaml:"worktree" json:"worktree,omitempty"`
 	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
-	PrependDependencies  bool         `yaml:"prepend_dependencies,omitempty" json:"prepend_dependencies,omitempty"`
+	Inline               InlineConfig `yaml:"inline,omitempty" json:"inline,omitempty"`               // New field: controls which file types are inlined vs uploaded
+	PrependDependencies  bool         `yaml:"prepend_dependencies,omitempty" json:"prepend_dependencies,omitempty"` // Deprecated: use inline: [dependencies] instead
 	OnCompleteStatus     string       `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty"`
 	CreatedAt            time.Time     `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	UpdatedAt            time.Time     `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
@@ -88,7 +159,24 @@ type JobOptions struct {
 	Include             []string
 	Worktree            string
 	Prompt              string
-	PrependDependencies bool
+	Inline              InlineConfig // New field: controls which file types are inlined
+	PrependDependencies bool         // Deprecated: use Inline instead
+}
+
+// ShouldInline checks if a specific category should be inlined in the prompt.
+// It first checks the new Inline field, then falls back to PrependDependencies for backwards compatibility.
+func (j *Job) ShouldInline(category InlineCategory) bool {
+	// Check new inline field first
+	for _, v := range j.Inline.Categories {
+		if v == category {
+			return true
+		}
+	}
+	// Backwards compat: prepend_dependencies maps to inline: [dependencies]
+	if category == InlineDependencies && j.PrependDependencies {
+		return true
+	}
+	return false
 }
 
 // IsRunnable checks if a job can be executed.

@@ -27,13 +27,55 @@ type PlanAddStepCmd struct {
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`
-	PrependDependencies bool     `flag:"" help:"Inline dependency content into prompt body instead of uploading as separate files"`
+	Inline              []string `flag:"" sep:"," help:"File types to inline in prompt: dependencies, include, context, all, files, none (comma-separated)"`
+	PrependDependencies bool     `flag:"" help:"[DEPRECATED] Use --inline=dependencies instead. Inline dependency content into prompt body."`
 	Recipe              string   `flag:"" help:"Name of a recipe to add to the plan"`
 	RecipeVars          []string `flag:"" help:"Variables for the recipe templates (e.g., key=value)"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
 	return RunPlanAddStep(c)
+}
+
+// parseInlineFlag converts CLI --inline flag values to an InlineConfig.
+func parseInlineFlag(values []string) orchestration.InlineConfig {
+	if len(values) == 0 {
+		return orchestration.InlineConfig{}
+	}
+
+	// Check for shorthand values
+	if len(values) == 1 {
+		switch strings.ToLower(values[0]) {
+		case "none", "":
+			return orchestration.InlineConfig{}
+		case "all":
+			return orchestration.InlineConfig{
+				Categories: []orchestration.InlineCategory{
+					orchestration.InlineDependencies,
+					orchestration.InlineInclude,
+					orchestration.InlineContext,
+				},
+			}
+		case "files":
+			// Shorthand for dependencies + include (excludes context)
+			return orchestration.InlineConfig{
+				Categories: []orchestration.InlineCategory{
+					orchestration.InlineDependencies,
+					orchestration.InlineInclude,
+				},
+			}
+		}
+	}
+
+	// Parse as array of categories
+	var categories []orchestration.InlineCategory
+	for _, v := range values {
+		v = strings.TrimSpace(strings.ToLower(v))
+		if v != "" && v != "none" {
+			categories = append(categories, orchestration.InlineCategory(v))
+		}
+	}
+	return orchestration.InlineConfig{Categories: categories}
 }
 
 func RunPlanAddStep(cmd *PlanAddStepCmd) error {
@@ -235,6 +277,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		if cmd.Type == "chat" {
 			status = orchestration.JobStatusPendingUser
 		}
+
+		// Parse inline config from CLI flags
+		inlineConfig := parseInlineFlag(cmd.Inline)
+
 		job := &orchestration.Job{
 			ID:                  jobID,
 			Title:               cmd.Title,
@@ -243,7 +289,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			DependsOn:           cmd.DependsOn,
 			Include:             relativeIncludeFiles,
 			Model:               cmd.Model,
-			PrependDependencies: cmd.PrependDependencies,
+			Inline:              inlineConfig,
+			PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 		}
 
 		// Initialize empty prompt body - no comments needed since info is in frontmatter
@@ -293,8 +340,12 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 			job.Worktree = plan.Config.Worktree
 		}
-		// Apply prepend_dependencies default if not explicitly set via flag
-		if !cmd.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+		// Apply inline defaults from plan config if not explicitly set via flag
+		if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
+			job.Inline = plan.Config.Inline
+		}
+		// Backwards compat: apply prepend_dependencies default if not explicitly set
+		if !cmd.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
 			job.PrependDependencies = true
 		}
 
@@ -344,6 +395,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	if cmd.Type == "chat" {
 		status = orchestration.JobStatusPendingUser
 	}
+
+	// Parse inline config from CLI flags
+	inlineConfig := parseInlineFlag(cmd.Inline)
+
 	job := &orchestration.Job{
 		ID:                  jobID,
 		Title:               cmd.Title,
@@ -352,7 +407,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		DependsOn:           cmd.DependsOn,
 		PromptBody:          strings.TrimSpace(prompt),
 		Model:               cmd.Model,
-		PrependDependencies: cmd.PrependDependencies,
+		Inline:              inlineConfig,
+		PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 	}
 
 	// Set worktree only if explicitly provided
@@ -367,8 +423,12 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
 	}
-	// Apply prepend_dependencies default if not explicitly set via flag
-	if !cmd.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+	// Apply inline defaults from plan config if not explicitly set via flag
+	if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
+		job.Inline = plan.Config.Inline
+	}
+	// Backwards compat: apply prepend_dependencies default if not explicitly set
+	if !cmd.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
 		job.PrependDependencies = true
 	}
 
@@ -410,8 +470,12 @@ func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orc
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
 	}
-	// Apply prepend_dependencies default from plan config
-	if !job.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+	// Apply inline defaults from plan config
+	if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
+		job.Inline = plan.Config.Inline
+	}
+	// Backwards compat: apply prepend_dependencies default from plan config
+	if !job.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
 		job.PrependDependencies = true
 	}
 
@@ -519,6 +583,29 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if prependDeps, ok := template.Frontmatter["prepend_dependencies"].(bool); ok {
 		job.PrependDependencies = prependDeps
 	}
+	// Handle inline field from template (can be string or array)
+	if inlineVal, ok := template.Frontmatter["inline"]; ok {
+		switch v := inlineVal.(type) {
+		case string:
+			// Single value like "all", "none", or "dependencies"
+			ic := orchestration.InlineConfig{}
+			if err := ic.UnmarshalYAML(func(out interface{}) error {
+				*(out.(*string)) = v
+				return nil
+			}); err == nil {
+				job.Inline = ic
+			}
+		case []interface{}:
+			// Array of categories
+			var categories []orchestration.InlineCategory
+			for _, cat := range v {
+				if catStr, ok := cat.(string); ok {
+					categories = append(categories, orchestration.InlineCategory(catStr))
+				}
+			}
+			job.Inline = orchestration.InlineConfig{Categories: categories}
+		}
+	}
 
 	// CLI flags override template defaults
 	if cmd.Type != "" && cmd.Type != "agent" { // "agent" is the default, so only override if explicitly set
@@ -530,6 +617,11 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if cmd.Model != "" {
 		job.Model = cmd.Model
 	}
+	// New inline flag overrides template and plan defaults
+	if len(cmd.Inline) > 0 {
+		job.Inline = parseInlineFlag(cmd.Inline)
+	}
+	// Backwards compat: prepend_dependencies flag
 	if cmd.PrependDependencies {
 		job.PrependDependencies = true
 	}
@@ -670,8 +762,12 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
 		job.Worktree = plan.Config.Worktree
 	}
-	// Apply prepend_dependencies default if not explicitly set via flag
-	if !cmd.PrependDependencies && plan.Config != nil && plan.Config.PrependDependencies {
+	// Apply inline defaults from plan config if not explicitly set via flag or template
+	if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
+		job.Inline = plan.Config.Inline
+	}
+	// Backwards compat: apply prepend_dependencies default if not explicitly set via flag
+	if !cmd.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
 		job.PrependDependencies = true
 	}
 

@@ -2,6 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mattsolo1/grove-flow/pkg/orchestration/job",
   "$defs": {
+    "InlineConfig": {
+      "properties": {
+        "Categories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "required": [
+        "Categories"
+      ]
+    },
     "JobMetadata": {
       "properties": {
         "execution_time": {
@@ -67,6 +81,9 @@
     },
     "target_agent_container": {
       "type": "string"
+    },
+    "inline": {
+      "$ref": "#/$defs/InlineConfig"
     },
     "prepend_dependencies": {
       "type": "boolean"

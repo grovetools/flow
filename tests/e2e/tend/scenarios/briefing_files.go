@@ -12,8 +12,8 @@ import (
 
 var BriefingFilesScenario = harness.NewScenario(
 	"briefing-files-for-all-jobs",
-	"Verifies briefing files are generated for oneshot (with/without prepend_dependencies) and chat jobs.",
-	[]string{"core", "briefing", "oneshot", "chat", "dependencies"},
+	"Verifies briefing files are generated for oneshot (with/without inline/prepend_dependencies) and chat jobs.",
+	[]string{"core", "briefing", "oneshot", "chat", "dependencies", "inline"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment and mocks", func(ctx *harness.Context) error {
 			_, _, err := setupDefaultEnvironment(ctx, "briefing-project")
@@ -389,17 +389,239 @@ Test message for custom template.
 			return nil
 		}),
 
-		// Test Case 5: Chat Job with prepend_dependencies=true
+		// Test Case 5: Oneshot Job with inline: files shorthand
+		harness.NewStep("Create oneshot job with inline: files", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Create dependency file
+			depContent := "---\nid: dep-inline-files\ntitle: Dependency for inline files\nstatus: completed\ntype: shell\n---\nDependency content for inline files test."
+			if err := fs.WriteString(filepath.Join(planPath, "08-dep-inline-files.md"), depContent); err != nil {
+				return err
+			}
+
+			// Add oneshot job with inline: files (shorthand for dependencies + include)
+			addCmd := ctx.Bin("plan", "add", "briefing-plan",
+				"--type", "oneshot", "--title", "test-oneshot-inline-files",
+				"-d", "08-dep-inline-files.md",
+				"--inline", "files",
+				"-p", "Task with inline files shorthand")
+			addCmd.Dir(projectDir)
+			return addCmd.Run().AssertSuccess()
+		}),
+		harness.NewStep("Run oneshot with inline: files and verify briefing", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			// Run only the specific oneshot job, not all jobs (avoid chat job loops)
+			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "09-test-oneshot-inline-files.md"), "--yes")
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			if err := runCmd.Run().AssertSuccess(); err != nil {
+				return err
+			}
+
+			// Load plan to get job ID
+			plan, err := orchestration.LoadPlan(planPath)
+			if err != nil {
+				return err
+			}
+
+			// Find the job with title "test-oneshot-inline-files"
+			var jobID string
+			for _, job := range plan.Jobs {
+				if job.Title == "test-oneshot-inline-files" {
+					jobID = job.ID
+					break
+				}
+			}
+			if jobID == "" {
+				return fmt.Errorf("could not find job with title 'test-oneshot-inline-files'")
+			}
+
+			// Verify briefing file
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", jobID)
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found for oneshot job in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			// When inline: files, dependencies should be inlined
+			if !strings.Contains(content, "<prepended_dependency") {
+				return fmt.Errorf("briefing missing <prepended_dependency> tag (inline: files)")
+			}
+			if !strings.Contains(content, "Dependency content for inline files test") {
+				return fmt.Errorf("briefing missing dependency content")
+			}
+			return nil
+		}),
+
+		// Test Case 6: Chat Job with inline: dependencies (string shorthand)
+		harness.NewStep("Create chat job with inline: dependencies (string)", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+
+			// Create a dependency job
+			depContent := "---\nid: chat-inline-str-dep\ntitle: Chat Inline String Dep\nstatus: completed\ntype: shell\n---\nInlined via string shorthand."
+			if err := fs.WriteString(filepath.Join(planPath, "10-chat-inline-str-dep.md"), depContent); err != nil {
+				return err
+			}
+
+			// Create a chat job with inline: dependencies (string, not array)
+			chatContent := `---
+id: chat-with-inline-str
+title: Chat With Inline String
+type: chat
+template: chat
+model: claude-3-5-sonnet-20241022
+status: pending_user
+inline: dependencies
+depends_on:
+  - 10-chat-inline-str-dep.md
+---
+
+<!-- grove: {"template": "chat"} -->
+
+User message with string shorthand inline.
+`
+			chatFile := filepath.Join(planPath, "11-chat-with-inline-str.md")
+			if err := fs.WriteString(chatFile, chatContent); err != nil {
+				return err
+			}
+			ctx.Set("chat_inline_str_file", chatFile)
+			return nil
+		}),
+		harness.NewStep("Run chat with inline: dependencies (string) and verify", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			chatFile := ctx.GetString("chat_inline_str_file")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			runCmd := ctx.Bin("chat", "run", chatFile)
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			if err := runCmd.Run().AssertSuccess(); err != nil {
+				return fmt.Errorf("chat run failed: %w", err)
+			}
+
+			// Verify briefing
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "chat-with-inline-str")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			if !strings.Contains(content, "<prepended_dependency") {
+				return fmt.Errorf("briefing missing <prepended_dependency> tag (inline: dependencies string)")
+			}
+			if !strings.Contains(content, "Inlined via string shorthand") {
+				return fmt.Errorf("briefing missing inlined dependency content")
+			}
+			return nil
+		}),
+
+		// Test Case 7: Chat Job with inline: [dependencies] array syntax
+		harness.NewStep("Create chat job with inline: [dependencies]", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+
+			// Create a dependency job in the plan
+			depContent := "---\nid: chat-inline-dep\ntitle: Chat Inline Dependency\nstatus: completed\ntype: shell\n---\nThis is INLINED dependency content using array syntax."
+			if err := fs.WriteString(filepath.Join(planPath, "12-chat-inline-dep.md"), depContent); err != nil {
+				return err
+			}
+
+			// Create a chat job with inline: [dependencies] (array syntax)
+			chatContent := `---
+id: chat-with-inline-deps
+title: Chat With Inline Dependencies
+type: chat
+template: chat
+model: claude-3-5-sonnet-20241022
+status: pending_user
+inline:
+  - dependencies
+depends_on:
+  - 12-chat-inline-dep.md
+---
+
+<!-- grove: {"template": "chat"} -->
+
+User message with inlined dependency using array syntax.
+`
+			chatFile := filepath.Join(planPath, "13-chat-with-inline-deps.md")
+			if err := fs.WriteString(chatFile, chatContent); err != nil {
+				return err
+			}
+			ctx.Set("chat_inline_deps_file", chatFile)
+			return nil
+		}),
+		harness.NewStep("Run chat with inline: [dependencies] and verify briefing inlines content", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			chatFile := ctx.GetString("chat_inline_deps_file")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			// Run the chat job
+			runCmd := ctx.Bin("chat", "run", chatFile)
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			if err := runCmd.Run().AssertSuccess(); err != nil {
+				return fmt.Errorf("chat run failed: %w", err)
+			}
+
+			// Verify briefing file exists and contains inlined dependency content
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "chat-with-inline-deps")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found for chat-with-inline-deps job in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			// Verify the briefing has the structured conversation format
+			if !strings.Contains(content, "<conversation>") {
+				return fmt.Errorf("chat briefing missing <conversation> tag")
+			}
+
+			// Verify the briefing contains the prepended_dependency tag (from inline: [dependencies])
+			if !strings.Contains(content, "<prepended_dependency") {
+				return fmt.Errorf("chat briefing missing <prepended_dependency> tag (inline: [dependencies])")
+			}
+
+			// Verify the dependency content is actually inlined
+			if !strings.Contains(content, "This is INLINED dependency content using array syntax") {
+				return fmt.Errorf("chat briefing missing inlined dependency content")
+			}
+
+			// Verify the user message is present
+			if !strings.Contains(content, "User message with inlined dependency using array syntax") {
+				return fmt.Errorf("chat briefing missing user message")
+			}
+
+			return nil
+		}),
+
+		// Test Case 8: Chat Job with prepend_dependencies=true (backwards compatibility)
 		harness.NewStep("Create chat job with prepend_dependencies", func(ctx *harness.Context) error {
 			planPath := ctx.GetString("plan_path")
 
 			// Create a dependency job in the plan
 			depContent := "---\nid: chat-prepend-dep\ntitle: Chat Prepend Dependency\nstatus: completed\ntype: shell\n---\nThis is PREPENDED dependency content for chat."
-			if err := fs.WriteString(filepath.Join(planPath, "08-chat-prepend-dep.md"), depContent); err != nil {
+			if err := fs.WriteString(filepath.Join(planPath, "14-chat-prepend-dep.md"), depContent); err != nil {
 				return err
 			}
 
-			// Create a chat job with prepend_dependencies=true
+			// Create a chat job with prepend_dependencies=true (backwards compat)
 			chatContent := `---
 id: chat-with-prepend-deps
 title: Chat With Prepend Dependencies
@@ -409,14 +631,14 @@ model: claude-3-5-sonnet-20241022
 status: pending_user
 prepend_dependencies: true
 depends_on:
-  - 08-chat-prepend-dep.md
+  - 14-chat-prepend-dep.md
 ---
 
 <!-- grove: {"template": "chat"} -->
 
 User message with prepended dependency.
 `
-			chatFile := filepath.Join(planPath, "09-chat-with-prepend-deps.md")
+			chatFile := filepath.Join(planPath, "15-chat-with-prepend-deps.md")
 			if err := fs.WriteString(chatFile, chatContent); err != nil {
 				return err
 			}

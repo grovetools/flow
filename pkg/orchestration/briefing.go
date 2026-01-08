@@ -93,6 +93,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 	}
 
 	// 3. Handle dependencies: inline or reference.
+	// Uses ShouldInline to support both new inline field and legacy prepend_dependencies.
 	// For interactive_agent jobs, use local_dependency tags since files are always read locally.
 	// For oneshot jobs, use inlined_dependency tags since files are provided elsewhere in the prompt.
 	if len(job.Dependencies) > 0 {
@@ -100,8 +101,8 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 			if dep == nil {
 				continue
 			}
-			if job.PrependDependencies {
-				// Inline dependency content directly in the XML (prepend mode)
+			if job.ShouldInline(InlineDependencies) {
+				// Inline dependency content directly in the XML
 				depContent, err := os.ReadFile(dep.FilePath)
 				if err != nil {
 					return "", nil, fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)

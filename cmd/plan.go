@@ -120,18 +120,19 @@ var (
 	planRunModel           string
 
 	// Add flags
-	planAddTemplate      string
-	planAddType          string
-	planAddTitle         string
-	planAddDependsOn     []string
-	planAddPromptFile    string
-	planAddPrompt        string
-	planAddInteractive       bool
-	planAddIncludeFiles      []string
-	planAddWorktree          string
+	planAddTemplate            string
+	planAddType                string
+	planAddTitle               string
+	planAddDependsOn           []string
+	planAddPromptFile          string
+	planAddPrompt              string
+	planAddInteractive         bool
+	planAddIncludeFiles        []string
+	planAddWorktree            string
+	planAddInline              []string
 	planAddPrependDependencies bool
-	planAddRecipe          string
-	planAddRecipeVars      []string
+	planAddRecipe              string
+	planAddRecipeVars          []string
 
 	// Graph flags
 	planGraphFormat string
@@ -180,7 +181,8 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
 	planAddCmd.Flags().StringSliceVar(&planAddIncludeFiles, "include", nil, "Comma-separated list of files to include as context")
 	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
-	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "Inline dependency content into prompt body instead of uploading as separate files")
+	planAddCmd.Flags().StringSliceVar(&planAddInline, "inline", nil, "File types to inline in prompt: dependencies, include, context, all, files, none")
+	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "[DEPRECATED] Use --inline=dependencies. Inline dependency content into prompt body")
 	planAddCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
 	planAddCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
 
@@ -286,19 +288,20 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		dir = args[0]
 	}
 	addStepCmd := &PlanAddStepCmd{
-		Dir:                  dir,
-		Template:             planAddTemplate,
-		Type:                 planAddType,
-		Title:                planAddTitle,
-		DependsOn:            planAddDependsOn,
-		PromptFile:           planAddPromptFile,
-		Prompt:               planAddPrompt,
-		Interactive:          planAddInteractive,
-		IncludeFiles:         planAddIncludeFiles,
-		Worktree:             planAddWorktree,
-		PrependDependencies:  planAddPrependDependencies,
-		Recipe:               planAddRecipe,
-		RecipeVars:           planAddRecipeVars,
+		Dir:                 dir,
+		Template:            planAddTemplate,
+		Type:                planAddType,
+		Title:               planAddTitle,
+		DependsOn:           planAddDependsOn,
+		PromptFile:          planAddPromptFile,
+		Prompt:              planAddPrompt,
+		Interactive:         planAddInteractive,
+		IncludeFiles:        planAddIncludeFiles,
+		Worktree:            planAddWorktree,
+		Inline:              planAddInline,
+		PrependDependencies: planAddPrependDependencies,
+		Recipe:              planAddRecipe,
+		RecipeVars:          planAddRecipeVars,
 	}
 	return RunPlanAddStep(addStepCmd)
 }

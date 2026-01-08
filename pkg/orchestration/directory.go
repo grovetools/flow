@@ -227,6 +227,14 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if job.Template != "" {
 		frontmatter["template"] = job.Template
 	}
+	if !job.Inline.IsEmpty() {
+		// Convert InlineConfig to string array for YAML output
+		inlineStrings := make([]string, len(job.Inline.Categories))
+		for i, cat := range job.Inline.Categories {
+			inlineStrings[i] = string(cat)
+		}
+		frontmatter["inline"] = inlineStrings
+	}
 	if job.PrependDependencies {
 		frontmatter["prepend_dependencies"] = job.PrependDependencies
 	}
@@ -286,6 +294,12 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		return nil, fmt.Errorf("parsing agent job template: %w", err)
 	}
 
+	// Convert InlineConfig categories to string slice for template
+	var inlineCategories []string
+	for _, cat := range job.Inline.Categories {
+		inlineCategories = append(inlineCategories, string(cat))
+	}
+
 	data := struct {
 		ID                  string
 		Title               string
@@ -297,6 +311,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Worktree            string
 		NoteRef             string
 		Prompt              string
+		Inline              []string
 		PrependDependencies bool
 	}{
 		ID:                  job.ID,
@@ -309,6 +324,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Worktree:            job.Worktree,
 		NoteRef:             job.NoteRef,
 		Prompt:              job.PromptBody,
+		Inline:              inlineCategories,
 		PrependDependencies: job.PrependDependencies,
 	}
 

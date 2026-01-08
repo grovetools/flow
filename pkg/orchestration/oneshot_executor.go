@@ -489,10 +489,10 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 	var contextFiles []string      // Context files (.grove/context, CLAUDE.md)
 	var finalPromptBody string
 
-	// Handle dependencies based on prepend_dependencies flag
-	if job.PrependDependencies {
-		// Prepend dependency content directly to the prompt body
-		printlnUnlessTUI("🔗 prepend_dependencies enabled - inlining dependency content into prompt body")
+	// Handle dependencies based on ShouldInline (supports both new inline field and legacy prepend_dependencies)
+	if job.ShouldInline(InlineDependencies) {
+		// Inline dependency content directly into the prompt body
+		printlnUnlessTUI("🔗 inline: [dependencies] enabled - inlining dependency content into prompt body")
 		var dependencyContentBuilder strings.Builder
 		if len(job.Dependencies) > 0 {
 			// Sort dependencies by filename for consistent order
@@ -505,7 +505,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				return sortedDeps[i].Filename < sortedDeps[j].Filename
 			})
 
-			printfUnlessTUI("   Prepending %d dependenc%s to prompt:\n", len(sortedDeps), func() string {
+			printfUnlessTUI("   Inlining %d dependenc%s into prompt:\n", len(sortedDeps), func() string {
 				if len(sortedDeps) == 1 {
 					return "y"
 				}
@@ -527,7 +527,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 		}
 		finalPromptBody = dependencyContentBuilder.String() + job.PromptBody
 	} else {
-		// Original logic: add dependencies to promptSourceFiles
+		// Upload dependencies as separate file attachments
 		if len(job.Dependencies) > 0 {
 			printfUnlessTUI("📎 Adding %d dependenc%s as separate file%s:\n", len(job.Dependencies), func() string {
 				if len(job.Dependencies) == 1 {
@@ -1377,15 +1377,16 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Format conversation history as structured XML using parsed turns
 	formattedConversation := FormatConversationXML(turns)
 
-	// Handle dependencies - either prepend to prompt or collect for upload
+	// Handle dependencies - either inline into prompt or collect for upload
+	// Uses ShouldInline to support both new inline field and legacy prepend_dependencies
 	var dependencyFilePaths []string
 	var prependedDependencies []struct {
 		Filename string
 		Content  string
 	}
-	if job.PrependDependencies && len(job.Dependencies) > 0 {
-		// Prepend mode: read dependency content for inlining
-		printlnUnlessTUI("🔗 prepend_dependencies enabled - inlining dependency content into prompt")
+	if job.ShouldInline(InlineDependencies) && len(job.Dependencies) > 0 {
+		// Inline mode: read dependency content for embedding in prompt
+		printlnUnlessTUI("🔗 inline: [dependencies] enabled - inlining dependency content into prompt")
 		// Sort dependencies by filename for consistent order
 		sortedDeps := make([]*Job, len(job.Dependencies))
 		copy(sortedDeps, job.Dependencies)
@@ -1396,7 +1397,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			return sortedDeps[i].Filename < sortedDeps[j].Filename
 		})
 
-		printfUnlessTUI("   Prepending %d dependenc%s to prompt:\n", len(sortedDeps), func() string {
+		printfUnlessTUI("   Inlining %d dependenc%s into prompt:\n", len(sortedDeps), func() string {
 			if len(sortedDeps) == 1 {
 				return "y"
 			}

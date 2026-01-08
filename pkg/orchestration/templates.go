@@ -14,7 +14,9 @@ include:{{ range .Include }}
 repository: {{ .Repository }}{{ end }}{{ if .Branch }}
 branch: {{ .Branch }}{{ end }}{{ if .Worktree }}
 worktree: {{ .Worktree }}{{ end }}{{ if .NoteRef }}
-note_ref: {{ .NoteRef }}{{ end }}{{ if .PrependDependencies }}
+note_ref: {{ .NoteRef }}{{ end }}{{ if .Inline }}
+inline:{{ range .Inline }}
+  - {{ . }}{{ end }}{{ end }}{{ if .PrependDependencies }}
 prepend_dependencies: true{{ end }}
 ---
 
