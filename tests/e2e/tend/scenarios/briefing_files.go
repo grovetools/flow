@@ -318,5 +318,63 @@ User message that depends on the dependency file.
 
 			return nil
 		}),
+
+		// Test Case 4: Chat Job with custom template in frontmatter
+		harness.NewStep("Create chat job with custom template in frontmatter", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+
+			// Create a chat job with a custom template in frontmatter
+			chatContent := `---
+id: chat-custom-template
+title: Chat With Custom Template
+type: chat
+template: agent-xml
+model: claude-3-5-sonnet-20241022
+status: pending_user
+---
+
+<!-- grove: {"template": "agent-xml"} -->
+
+Test message for custom template.
+`
+			chatFile := filepath.Join(planPath, "07-chat-custom-template.md")
+			if err := fs.WriteString(chatFile, chatContent); err != nil {
+				return err
+			}
+			ctx.Set("chat_custom_template_file", chatFile)
+			return nil
+		}),
+		harness.NewStep("Run chat and verify response uses frontmatter template", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			chatFile := ctx.GetString("chat_custom_template_file")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			// Run the chat job
+			runCmd := ctx.Bin("chat", "run", chatFile)
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			if err := runCmd.Run().AssertSuccess(); err != nil {
+				return fmt.Errorf("chat run failed: %w", err)
+			}
+
+			// Read the updated chat file
+			content, err := fs.ReadString(chatFile)
+			if err != nil {
+				return fmt.Errorf("reading chat file: %w", err)
+			}
+
+			// Verify the LLM response directive uses the frontmatter template, not hardcoded "chat"
+			if !strings.Contains(content, `"template": "agent-xml"`) {
+				return fmt.Errorf("LLM response should use frontmatter template 'agent-xml', but found hardcoded template")
+			}
+
+			// Make sure it doesn't have the old hardcoded "chat" after the response
+			// Count occurrences - should have 2 (one in original directive, one after response)
+			agentXmlCount := strings.Count(content, `"template": "agent-xml"`)
+			if agentXmlCount < 2 {
+				return fmt.Errorf("expected at least 2 occurrences of 'agent-xml' template (original + response), found %d", agentXmlCount)
+			}
+
+			return nil
+		}),
 	},
 )
