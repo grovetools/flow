@@ -236,5 +236,87 @@ var BriefingFilesScenario = harness.NewScenario(
 			}
 			return nil
 		}),
+
+		// Test Case 3: Chat Job with Dependencies (via flow chat run)
+		harness.NewStep("Create chat job with dependencies", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Create a dependency job in the plan
+			depContent := "---\nid: chat-dep-1\ntitle: Chat Dependency\nstatus: completed\ntype: shell\n---\nThis is dependency content for chat."
+			if err := fs.WriteString(filepath.Join(planPath, "05-chat-dep.md"), depContent); err != nil {
+				return err
+			}
+
+			// Create a chat job with depends_on in the plan directory
+			chatContent := `---
+id: chat-with-deps
+title: Chat With Dependencies
+type: chat
+template: chat
+model: claude-3-5-sonnet-20241022
+status: pending_user
+depends_on:
+  - 05-chat-dep.md
+---
+
+<!-- grove: {"template": "chat"} -->
+
+User message that depends on the dependency file.
+`
+			chatFile := filepath.Join(planPath, "06-chat-with-deps.md")
+			if err := fs.WriteString(chatFile, chatContent); err != nil {
+				return err
+			}
+			ctx.Set("chat_with_deps_file", chatFile)
+			ctx.Set("chat_with_deps_plan_path", planPath)
+
+			// Verify the file was created
+			_, err := fs.ReadString(chatFile)
+			if err != nil {
+				return fmt.Errorf("failed to read created chat file: %w", err)
+			}
+
+			_ = projectDir // Used for context
+			return nil
+		}),
+		harness.NewStep("Run chat with dependencies and verify briefing includes dependency", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			chatFile := ctx.GetString("chat_with_deps_file")
+			planPath := ctx.GetString("chat_with_deps_plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			// Run the chat job via flow chat run (this tests the dependency resolution fix)
+			runCmd := ctx.Bin("chat", "run", chatFile)
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			if err := runCmd.Run().AssertSuccess(); err != nil {
+				return fmt.Errorf("chat run failed: %w", err)
+			}
+
+			// Verify briefing file exists and contains dependency reference
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "chat-with-deps")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found for chat-with-deps job in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			// Verify the briefing contains the user message
+			if !strings.Contains(content, "User message that depends on the dependency file") {
+				return fmt.Errorf("chat briefing missing user message")
+			}
+
+			// Verify the briefing references the dependency (either inlined or as reference)
+			// With the fix, dependencies should be included in the context section
+			if !strings.Contains(content, "05-chat-dep.md") && !strings.Contains(content, "inlined_dependency") {
+				return fmt.Errorf("chat briefing missing dependency reference - dependencies not being resolved for chat jobs")
+			}
+
+			return nil
+		}),
 	},
 )

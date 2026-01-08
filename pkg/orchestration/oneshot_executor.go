@@ -1690,11 +1690,12 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			apiKey = ""
 		}
 		// Use grove-gemini package for Gemini models
+		allFilesToUpload := append(dependencyFilePaths, validContextPaths...)
 		opts := gemini.RequestOptions{
 			Model:            llmOpts.Model,
 			Prompt:           fullPrompt,
 			APIKey:           apiKey, // Pass the resolved API key
-			PromptFiles:      []string{}, // Don't include the chat file as it's already in the prompt
+			PromptFiles:      allFilesToUpload, // Pass all dependency and context files to be uploaded
 			WorkDir:          contextDir,
 			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 			// Pass context for better logging

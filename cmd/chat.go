@@ -465,16 +465,39 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 	for _, job := range runnableChats {
 		fmt.Printf("--- Running Chat: %s ---\n", job.Title)
 
-		// Create a minimal plan for this chat job
-		plan := &orchestration.Plan{
-			Directory: filepath.Dir(job.FilePath),
-			Jobs:      []*orchestration.Job{job},
-			Orchestration: &orchestration.Config{
+		// Try to load the full plan to properly resolve dependencies
+		// This ensures depends_on references are resolved to actual Job objects
+		var plan *orchestration.Plan
+		planDir := filepath.Dir(job.FilePath)
+		fullPlan, loadErr := orchestration.LoadPlan(planDir)
+		if loadErr == nil && fullPlan != nil {
+			// Find the current job in the loaded plan (which has dependencies resolved)
+			for _, planJob := range fullPlan.Jobs {
+				if planJob.FilePath == job.FilePath || planJob.ID == job.ID {
+					job = planJob // Use the job from the full plan with resolved dependencies
+					break
+				}
+			}
+			plan = fullPlan
+			plan.Orchestration = &orchestration.Config{
 				OneshotModel:         flowCfg.OneshotModel,
 				TargetAgentContainer: flowCfg.TargetAgentContainer,
 				PlansDirectory:       flowCfg.PlansDirectory,
 				MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
-			},
+			}
+		} else {
+			// Fallback: Create a minimal plan for this chat job
+			// Dependencies won't be resolved in this case
+			plan = &orchestration.Plan{
+				Directory: planDir,
+				Jobs:      []*orchestration.Job{job},
+				Orchestration: &orchestration.Config{
+					OneshotModel:         flowCfg.OneshotModel,
+					TargetAgentContainer: flowCfg.TargetAgentContainer,
+					PlansDirectory:       flowCfg.PlansDirectory,
+					MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
+				},
+			}
 		}
 
 		// Create orchestrator
