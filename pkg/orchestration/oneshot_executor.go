@@ -51,20 +51,6 @@ func isTUIMode() bool {
 	return os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 }
 
-// printfUnlessTUI prints to stdout unless in TUI mode
-func printfUnlessTUI(format string, args ...interface{}) {
-	if !isTUIMode() {
-		fmt.Printf(format, args...)
-	}
-}
-
-// printlnUnlessTUI prints to stdout unless in TUI mode
-func printlnUnlessTUI(args ...interface{}) {
-	if !isTUIMode() {
-		fmt.Println(args...)
-	}
-}
-
 // ExecutorConfig holds configuration for executors.
 type ExecutorConfig struct {
 	MaxPromptLength int
@@ -162,12 +148,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			workDir = plan.Directory
-			log.WithFields(logrus.Fields{
-				"workdir": workDir,
-				"plan_dir": plan.Directory,
-				"fallback": true,
-			}).Warn("Not a git repository, using plan directory")
-			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Not a git repository. Using plan directory as working directory: %s", workDir))
+			ulog.Warn("Not a git repository, using plan directory").
+				Field("workdir", workDir).
+				Field("plan_dir", plan.Directory).
+				Field("fallback", true).
+				Log(ctx)
 		}
 	}
 
@@ -185,8 +170,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	if job.GatherConceptNotes || job.GatherConceptPlans {
 		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
 		if err != nil {
-			log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
-			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
+			ulog.Warn("Failed to gather concepts").
+				Err(err).
+				Field("request_id", requestID).
+				Field("job_id", job.ID).
+				Log(ctx)
 		} else if conceptContextFile != "" {
 			// Add the aggregated concepts file to the list of files to upload
 			// We handle this here before building the prompt.
@@ -215,20 +203,23 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	}
 
 	// Log the prompt content for debugging
-	log.WithFields(logrus.Fields{
-		"job_id":       job.ID,
-		"request_id":   requestID,
-		"plan_name":    plan.Name,
-		"job_file":     job.FilePath,
-		"prompt":       prompt,
-		"prompt_chars": len(prompt),
-	}).Debug("Built prompt for job")
+	ulog.Debug("Built prompt for job").
+		Field("job_id", job.ID).
+		Field("request_id", requestID).
+		Field("plan_name", plan.Name).
+		Field("job_file", job.FilePath).
+		Field("prompt", prompt).
+		Field("prompt_chars", len(prompt)).
+		Log(ctx)
 
 	// Write the briefing file for auditing (no turnID for oneshot jobs)
 	briefingFilePath, err := WriteBriefingFile(plan, job, prompt, "")
 	if err != nil {
-		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to write briefing file")
-		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
+		ulog.Error("Failed to write briefing file").
+			Err(err).
+			Field("request_id", requestID).
+			Field("job_id", job.ID).
+			Log(ctx)
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to write briefing file: %w", err)
@@ -238,8 +229,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	if job.GatherConceptNotes || job.GatherConceptPlans {
 		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
 		if err != nil {
-			log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
-			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
+			ulog.Warn("Failed to gather concepts").
+				Err(err).
+				Field("request_id", requestID).
+				Field("job_id", job.ID).
+				Log(ctx)
 			// Don't fail the job, just log warning
 		} else if conceptContextFile != "" {
 			// Add the aggregated concepts file to the list of files to upload
@@ -254,22 +248,15 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	}
 
 	if briefingFilePath != "" {
-		log.WithFields(logrus.Fields{
-			"job_id":             job.ID,
-			"request_id":         requestID,
-			"plan_name":          plan.Name,
-			"job_file":           job.FilePath,
-			"briefing_file_path": briefingFilePath,
-			"prompt":             prompt,
-			"prompt_chars":       len(prompt),
-		}).Info("Briefing file created")
-		if isTUIMode() {
-			fmt.Fprintf(output, "\n%s  Briefing file created at: %s\n\n", theme.IconCode, briefingFilePath)
-		} else {
-			fmt.Fprintln(output)
-			prettyLog.InfoPretty(fmt.Sprintf("%s  Briefing file created at: %s", theme.IconCode, briefingFilePath))
-			fmt.Fprintln(output)
-		}
+		ulog.Success("Briefing file created").
+			Field("job_id", job.ID).
+			Field("request_id", requestID).
+			Field("plan_name", plan.Name).
+			Field("job_file", job.FilePath).
+			Field("briefing_file_path", briefingFilePath).
+			Field("prompt_chars", len(prompt)).
+			Pretty(theme.IconCode + "  Briefing file created at: " + theme.DefaultTheme.Accent.Render(briefingFilePath)).
+			Log(ctx)
 	}
 
 	// Set environment for mock testing
@@ -397,7 +384,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		updateJobFile(job)
-		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("LLM completion failed")
+		ulog.Error("LLM completion failed").
+			Err(err).
+			Field("request_id", requestID).
+			Field("job_id", job.ID).
+			Log(ctx)
 		execErr = fmt.Errorf("LLM completion: %w", err)
 		return execErr
 	}
@@ -416,8 +407,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	job.EndTime = time.Now()
 	if err := updateJobFile(job); err != nil {
 		// Log but don't fail - the job executed successfully
-		log.WithError(err).Warn("Failed to update job file status")
-		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to update job file status: %v", err))
+		ulog.Warn("Failed to update job file status").
+			Err(err).
+			Log(ctx)
 	}
 
 	return nil
@@ -434,7 +426,7 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 	// Handle dependencies based on ShouldInline (supports both new inline field and legacy prepend_dependencies)
 	if job.ShouldInline(InlineDependencies) {
 		// Inline dependency content directly into the prompt body
-		printlnUnlessTUI("🔗 inline: [dependencies] enabled - inlining dependency content into prompt body")
+		log.Debug("inline: [dependencies] enabled - inlining dependency content into prompt body")
 		var dependencyContentBuilder strings.Builder
 		if len(job.Dependencies) > 0 {
 			// Sort dependencies by filename for consistent order
@@ -447,19 +439,14 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				return sortedDeps[i].Filename < sortedDeps[j].Filename
 			})
 
-			printfUnlessTUI("   Inlining %d dependenc%s into prompt:\n", len(sortedDeps), func() string {
-				if len(sortedDeps) == 1 {
-					return "y"
-				}
-				return "ies"
-			}())
+			log.WithField("count", len(sortedDeps)).Debug("Inlining dependencies into prompt")
 			for _, dep := range sortedDeps {
 				if dep != nil && dep.FilePath != "" {
 					depContent, err := os.ReadFile(dep.FilePath)
 					if err != nil {
 						return "", nil, nil, fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
 					}
-					printfUnlessTUI("     • %s (inlined, not uploaded as file)\n", dep.Filename)
+					log.WithField("file", dep.Filename).Debug("Inlined dependency")
 					dependencyContentBuilder.WriteString(fmt.Sprintf("\n\n---\n## Context from %s\n\n", dep.Filename))
 					_, depBody, _ := ParseFrontmatter(depContent)
 					dependencyContentBuilder.Write(depBody)
@@ -471,20 +458,10 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 	} else {
 		// Upload dependencies as separate file attachments
 		if len(job.Dependencies) > 0 {
-			printfUnlessTUI("📎 Adding %d dependenc%s as separate file%s:\n", len(job.Dependencies), func() string {
-				if len(job.Dependencies) == 1 {
-					return "y"
-				}
-				return "ies"
-			}(), func() string {
-				if len(job.Dependencies) == 1 {
-					return ""
-				}
-				return "s"
-			}())
+			log.WithField("count", len(job.Dependencies)).Debug("Adding dependencies as file attachments")
 			for _, dep := range job.Dependencies {
 				if dep != nil && dep.FilePath != "" {
-					printfUnlessTUI("     • %s (uploaded as file attachment)\n", dep.Filename)
+					log.WithField("file", dep.Filename).Debug("Uploading dependency as file attachment")
 					promptSourceFiles = append(promptSourceFiles, dep.FilePath)
 				}
 			}
@@ -791,8 +768,9 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 	groveDir := filepath.Join(worktreePath, ".grove")
 	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		// Log a warning but don't fail the job, as this is a convenience feature.
-		log.WithError(err).Warn("Failed to create .grove directory in worktree")
-		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to create .grove directory in worktree: %v", err))
+		ulog.Warn("Failed to create .grove directory in worktree").
+			Err(err).
+			Log(ctx)
 	} else {
 		planName := filepath.Base(plan.Directory)
 		// Use a flat map with the key "flow.active_plan" to match how state.Set works.
@@ -1044,31 +1022,27 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 	files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
 	stats, err := ctxMgr.GetStats("oneshot", files, 10) // Show top 10 files
 	if err != nil {
-		log.WithError(err).Warn("Failed to get context stats")
+		ulog.Warn("Failed to get context stats").Err(err).Log(ctx)
 	} else {
-		// Display summary statistics for structured logs
-		requestID, _ := ctx.Value("request_id").(string)
-		log.WithFields(logrus.Fields{
-			"request_id":   requestID,
-			"job_id":       job.ID,
-			"total_files":  stats.TotalFiles,
-			"total_tokens": stats.TotalTokens,
-			"total_size":   stats.TotalSize,
-		}).Info("Context summary generated")
-
 		// Display summary statistics
-		fmt.Fprintf(writer, "%s Context Summary\n", theme.IconFileTree)
-		prettyLog.FieldCtx(ctx, "Total Files", stats.TotalFiles)
-		prettyLog.FieldCtx(ctx, "Total Tokens", grovecontext.FormatTokenCount(stats.TotalTokens))
-		prettyLog.FieldCtx(ctx, "Total Size", grovecontext.FormatBytes(int(stats.TotalSize)))
+		requestID, _ := ctx.Value("request_id").(string)
+		ulog.Info("Context summary generated").
+			Field("request_id", requestID).
+			Field("job_id", job.ID).
+			Field("total_files", stats.TotalFiles).
+			Field("total_tokens", stats.TotalTokens).
+			Field("total_size", stats.TotalSize).
+			Pretty(fmt.Sprintf("%s Context Summary: %d files, %s tokens, %s",
+				theme.IconFileTree,
+				stats.TotalFiles,
+				grovecontext.FormatTokenCount(stats.TotalTokens),
+				grovecontext.FormatBytes(int(stats.TotalSize)))).
+			Log(ctx)
 
 		// Token limit check removed - no longer enforcing limits
 
 		// Show language distribution if there are files
 		if stats.TotalFiles > 0 {
-			prettyLog.BlankCtx(ctx)
-			fmt.Fprintf(writer, "%s Language Distribution:\n", theme.IconProject)
-
 			// Sort languages by token count
 			var languages []grovecontext.LanguageStats
 			for _, lang := range stats.Languages {
@@ -1078,29 +1052,24 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 				return languages[i].TotalTokens > languages[j].TotalTokens
 			})
 
-			// Show top 5 languages
+			// Build language distribution string for pretty output
+			var langDistParts []string
 			shown := 0
 			for _, lang := range languages {
 				if shown >= 5 {
 					break
 				}
-				// Add to structured logs
-				log.WithFields(logrus.Fields{
-					fmt.Sprintf("lang_%s_tokens", lang.Name): lang.TotalTokens,
-					fmt.Sprintf("lang_%s_files", lang.Name):  lang.FileCount,
-					fmt.Sprintf("lang_%s_pct", lang.Name):    lang.Percentage,
-				}).Debug("Language stats")
-				
-				// Display for pretty console
-				fmt.Fprintf(writer, "%s: %5.1f%% (%s tokens, %d files)\n",
-					lang.Name,
-					lang.Percentage,
-					grovecontext.FormatTokenCount(lang.TotalTokens),
-					lang.FileCount,
-				)
+				langDistParts = append(langDistParts,
+					fmt.Sprintf("%s: %.1f%%", lang.Name, lang.Percentage))
 				shown++
 			}
 
+			ulog.Info("Language distribution").
+				Field("languages", langDistParts).
+				Pretty(fmt.Sprintf("%s Language Distribution: %s",
+					theme.IconProject,
+					strings.Join(langDistParts, ", "))).
+				Log(ctx)
 		}
 	}
 
@@ -1178,8 +1147,9 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// If the last turn is from the LLM, or if it's an empty prompt from the user,
 	// the job is not ready to run. Return successfully without changing state.
 	if lastTurn.Speaker != "user" || strings.TrimSpace(lastTurn.Content) == "" {
-		log.WithField("job", job.Title).Info("Chat job is waiting for user input, skipping execution.")
-		prettyLog.InfoPretty(fmt.Sprintf("Chat job '%s' is waiting for user input.", job.Title))
+		ulog.Info("Chat job is waiting for user input, skipping execution").
+			Field("job", job.Title).
+			Log(ctx)
 		// Ensure status is correctly set to pending_user and return.
 		if job.Status != JobStatusPendingUser {
 			job.Status = JobStatusPendingUser
@@ -1230,8 +1200,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Update the content variable for subsequent processing
 		content = newContent
 
-		log.Info("Added 'template: chat' to job frontmatter")
-		prettyLog.Success("Added 'template: chat' to job frontmatter")
+		ulog.Success("Added 'template: chat' to job frontmatter").Log(ctx)
 	}
 
 	// Process the active directive
@@ -1260,7 +1229,9 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Check for special actions
 	if directive.Action == "complete" {
 		// Mark the chat as completed
-		log.WithField("job", job.Title).Info("Completing chat job")
+		ulog.Info("Completing chat job").
+			Field("job", job.Title).
+			Log(ctx)
 		job.Status = JobStatusCompleted
 		job.EndTime = time.Now()
 		updateJobFile(job)
@@ -1281,7 +1252,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Regenerate context in the worktree to ensure chat has latest view
 		if err := e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
-			log.WithError(err).Warn("Failed to regenerate context in worktree")
+			ulog.Warn("Failed to regenerate context in worktree").Err(err).Log(ctx)
 		}
 	} else {
 		// No worktree specified, default to the project git repository root (notebook-aware).
@@ -1290,13 +1261,15 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		if err != nil {
 			// Fallback to the plan's directory if not in a git repo
 			worktreePath = plan.Directory
-			log.WithField("workdir", worktreePath).Warn("Not a git repository, using plan directory as working directory")
+			ulog.Warn("Not a git repository, using plan directory as working directory").
+				Field("workdir", worktreePath).
+				Log(ctx)
 		}
 
 		// Also regenerate context for non-worktree case if .grove/rules exists
 		if err := e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan); err != nil {
 			// Log warning but don't fail the job
-			log.WithError(err).Warn("Failed to regenerate context")
+			ulog.Warn("Failed to regenerate context").Err(err).Log(ctx)
 		}
 	}
 
@@ -1304,8 +1277,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	if job.GatherConceptNotes || job.GatherConceptPlans {
 		conceptContextFile, err := gatherConcepts(ctx, job, plan, worktreePath)
 		if err != nil {
-			log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
-			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
+			ulog.Warn("Failed to gather concepts").
+				Err(err).
+				Field("request_id", requestID).
+				Field("job_id", job.ID).
+				Log(ctx)
 		} else if conceptContextFile != "" {
 			// The file will be picked up by the context gathering logic below
 		}
@@ -1328,7 +1304,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 	if job.ShouldInline(InlineDependencies) && len(job.Dependencies) > 0 {
 		// Inline mode: read dependency content for embedding in prompt
-		printlnUnlessTUI("🔗 inline: [dependencies] enabled - inlining dependency content into prompt")
+		log.Debug("inline: [dependencies] enabled - inlining dependency content into prompt")
 		// Sort dependencies by filename for consistent order
 		sortedDeps := make([]*Job, len(job.Dependencies))
 		copy(sortedDeps, job.Dependencies)
@@ -1339,12 +1315,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			return sortedDeps[i].Filename < sortedDeps[j].Filename
 		})
 
-		printfUnlessTUI("   Inlining %d dependenc%s into prompt:\n", len(sortedDeps), func() string {
-			if len(sortedDeps) == 1 {
-				return "y"
-			}
-			return "ies"
-		}())
+		log.WithField("count", len(sortedDeps)).Debug("Inlining dependencies into prompt")
 		for _, dep := range sortedDeps {
 			if dep != nil && dep.FilePath != "" {
 				depContent, err := os.ReadFile(dep.FilePath)
@@ -1352,7 +1323,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 					execErr = fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
 					return execErr
 				}
-				printfUnlessTUI("     • %s (inlined, not uploaded as file)\n", dep.Filename)
+				log.WithField("file", dep.Filename).Debug("Inlined dependency")
 				_, depBody, _ := ParseFrontmatter(depContent)
 				prependedDependencies = append(prependedDependencies, struct {
 					Filename string
@@ -1362,16 +1333,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	} else if len(job.Dependencies) > 0 {
 		// Upload mode: collect dependency file paths for upload/attachment to LLM
-		printfUnlessTUI("📎 Collecting %d dependenc%s for upload:\n", len(job.Dependencies), func() string {
-			if len(job.Dependencies) == 1 {
-				return "y"
-			}
-			return "ies"
-		}())
+		log.WithField("count", len(job.Dependencies)).Debug("Collecting dependencies for upload")
 		for _, dep := range job.Dependencies {
 			if dep != nil && dep.FilePath != "" {
 				dependencyFilePaths = append(dependencyFilePaths, dep.FilePath)
-				printfUnlessTUI("     • %s (will be uploaded as file attachment)\n", dep.Filename)
+				log.WithField("file", dep.Filename).Debug("Uploading dependency as file attachment")
 			}
 		}
 	}
@@ -1379,19 +1345,14 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Resolve include files (new feature for chat jobs)
 	var includeFilePaths []string
 	if len(job.Include) > 0 {
-		printfUnlessTUI("📎 Collecting %d include file%s for upload:\n", len(job.Include), func() string {
-			if len(job.Include) == 1 {
-				return ""
-			}
-			return "s"
-		}())
+		log.WithField("count", len(job.Include)).Debug("Collecting include files for upload")
 		for _, source := range job.Include {
 			sourcePath, err := ResolvePromptSource(source, plan)
 			if err != nil {
 				return fmt.Errorf("could not find include file %s: %w", source, err)
 			}
 			includeFilePaths = append(includeFilePaths, sourcePath)
-			printfUnlessTUI("     • %s (will be uploaded as file attachment)\n", source)
+			log.WithField("file", source).Debug("Uploading include file as attachment")
 		}
 	}
 
@@ -1649,12 +1610,13 @@ interpret and continue through YOUR current system instructions.
 				cxCmd.Stderr = os.Stderr
 			}
 			if err := cxCmd.Run(); err != nil {
-				prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to run cx generate: %v", err))
+				ulog.Warn("Failed to run cx generate").Err(err).Log(ctx)
 			}
 		}
 	} else {
-		log.WithField("rules_file", job.RulesFile).Info("Skipping cx generate (using custom rules file)")
-		prettyLog.InfoPrettyCtx(ctx, fmt.Sprintf("Skipping cx generate (using custom rules file: %s)", job.RulesFile))
+		ulog.Info("Skipping cx generate (using custom rules file)").
+			Field("rules_file", job.RulesFile).
+			Log(ctx)
 	}
 
 	// Call LLM based on model type
@@ -1691,7 +1653,7 @@ interpret and continue through YOUR current system instructions.
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
 		if err != nil {
-			printfUnlessTUI("[DEBUG] Gemini API call failed with error: %v\n", err)
+			ulog.Debug("Gemini API call failed").Err(err).Log(ctx)
 			execErr = fmt.Errorf("Gemini API completion: %w", err)
 			return execErr
 		}
@@ -1719,7 +1681,7 @@ interpret and continue through YOUR current system instructions.
 			response, err = e.anthropicRunner.Run(ctx, opts)
 		}
 		if err != nil {
-			printfUnlessTUI("[DEBUG] Anthropic API call failed with error: %v\n", err)
+			ulog.Debug("Anthropic API call failed").Err(err).Log(ctx)
 			execErr = fmt.Errorf("Anthropic API completion: %w", err)
 			return execErr
 		}

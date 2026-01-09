@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/mattsolo1/grove-core/command"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
-	"github.com/sirupsen/logrus"
 )
 
 // Logger defines the logging interface.
@@ -585,63 +583,45 @@ func (o *Orchestrator) SetLogger(logger Logger) {
 	o.logger = logger
 }
 
-// defaultLogger provides a simple logger implementation using grove-core logging.
+// defaultLogger provides a simple logger implementation using grove-core unified logging.
 type defaultLogger struct{
-	prettyLog *grovelogging.PrettyLogger
-	structuredLog *logrus.Entry
+	ulog *grovelogging.UnifiedLogger
 }
 
 func NewDefaultLogger() Logger {
 	return &defaultLogger{
-		prettyLog: grovelogging.NewPrettyLogger(),
-		structuredLog: grovelogging.NewLogger("grove-flow"),
+		ulog: grovelogging.NewUnifiedLogger("grove-flow"),
 	}
 }
 
 func (l *defaultLogger) Info(msg string, keysAndValues ...interface{}) {
-	// Log to structured logger
-	if len(keysAndValues) > 0 {
-		fields := make(logrus.Fields)
-		for i := 0; i < len(keysAndValues); i += 2 {
-			if i+1 < len(keysAndValues) {
-				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
-			}
+	entry := l.ulog.Info(msg)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		if i+1 < len(keysAndValues) {
+			entry = entry.Field(fmt.Sprint(keysAndValues[i]), keysAndValues[i+1])
 		}
-		l.structuredLog.WithFields(fields).Info(msg)
-
-		// Also log to pretty logger
-		var parts []string
-		for k, v := range fields {
-			parts = append(parts, fmt.Sprintf("%v=%v", k, v))
-		}
-		l.prettyLog.InfoPretty(fmt.Sprintf("%s [%s]", msg, strings.Join(parts, " ")))
-	} else {
-		l.structuredLog.Info(msg)
-		l.prettyLog.InfoPretty(msg)
 	}
+	entry.Log(context.Background())
 }
 
 func (l *defaultLogger) Error(msg string, keysAndValues ...interface{}) {
-	if len(keysAndValues) > 0 {
-		l.prettyLog.ErrorPretty(fmt.Sprintf("%s %v", msg, keysAndValues), nil)
-	} else {
-		l.prettyLog.ErrorPretty(msg, nil)
+	entry := l.ulog.Error(msg)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		if i+1 < len(keysAndValues) {
+			entry = entry.Field(fmt.Sprint(keysAndValues[i]), keysAndValues[i+1])
+		}
 	}
+	entry.Log(context.Background())
 }
 
 func (l *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {
-	// Use structured logger for debug messages
-	if len(keysAndValues) > 0 {
-		fields := make(map[string]interface{})
-		for i := 0; i < len(keysAndValues); i += 2 {
-			if i+1 < len(keysAndValues) {
-				fields[fmt.Sprint(keysAndValues[i])] = keysAndValues[i+1]
-			}
+	entry := l.ulog.Debug(msg)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		if i+1 < len(keysAndValues) {
+			entry = entry.Field(fmt.Sprint(keysAndValues[i]), keysAndValues[i+1])
 		}
-		l.structuredLog.WithFields(fields).Debug(msg)
-	} else {
-		l.structuredLog.Debug(msg)
 	}
+	entry.Log(context.Background())
 }
 
 // StateManager handles persistence of job states.

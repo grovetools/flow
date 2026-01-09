@@ -19,14 +19,14 @@ import (
 )
 
 type CodexAgentProvider struct {
-	log       *logrus.Entry
-	prettyLog *grovelogging.PrettyLogger
+	log  *logrus.Entry
+	ulog *grovelogging.UnifiedLogger
 }
 
 func NewCodexAgentProvider() *CodexAgentProvider {
 	return &CodexAgentProvider{
-		log:       grovelogging.NewLogger("grove-flow"),
-		prettyLog: grovelogging.NewPrettyLogger(),
+		log:  grovelogging.NewLogger("grove-flow"),
+		ulog: grovelogging.NewUnifiedLogger("grove-flow"),
 	}
 }
 
@@ -104,8 +104,9 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// Create a new window for this specific agent job in the session
 	agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
-	p.log.WithField("window", agentWindowName).Info("Creating window for agent")
-	p.prettyLog.InfoPretty(fmt.Sprintf("Creating window '%s' for agent...", agentWindowName))
+	p.ulog.Info("Creating window for agent").
+		Field("window", agentWindowName).
+		Log(ctx)
 
 	// Build new-window command args - add -d flag if in TUI mode to prevent auto-select
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
@@ -251,24 +252,39 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 				}
 			} else {
 				// In a different session, print instructions
-				p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+				p.ulog.Info("Agent started in session").
+					Field("session", sessionName).
+					Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+					Log(ctx)
 			}
 		} else {
 			// Couldn't determine current session, print instructions
 			p.log.WithError(err).Warn("Could not get current tmux session")
-			p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+			p.ulog.Info("Agent started in session").
+				Field("session", sessionName).
+				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+				Log(ctx)
 		}
 	} else if !isTUIMode {
 		// Not in tmux, print instructions (unless in TUI mode where it's shown in logs)
-		p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
+		p.ulog.Info("Agent session ready").
+			Field("session", sessionName).
+			Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
+			Log(ctx)
 	}
 
 	if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
-		p.prettyLog.Blank()
-		p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
-		p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
-		p.prettyLog.Blank()
-		p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+		p.ulog.Info("").Pretty("").Log(ctx) // blank line
+		p.ulog.Info("Task completion instructions").
+			Pretty("👉 When your task is complete, run the following in any terminal:").
+			Log(ctx)
+		p.ulog.Info("").
+			Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).
+			Log(ctx)
+		p.ulog.Info("").Pretty("").Log(ctx) // blank line
+		p.ulog.Info("").
+			Pretty("   The session can remain open - the plan will continue automatically.").
+			Log(ctx)
 	}
 
 	// Return immediately. The lock file indicates the running state.
@@ -382,16 +398,19 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 	p.log.WithField("codex_session_id", codexSessionID).Info("Parsed codex session ID")
 
 	// Find the PID of the codex process.
-	fmt.Printf("🔍 Looking for Codex PID in pane: %s\n", targetPane)
-	p.log.WithField("target_pane", targetPane).Debug("Finding codex PID for pane")
+	p.ulog.Debug("Looking for Codex PID in pane").
+		Field("target_pane", targetPane).
+		Log(context.Background())
 	pid, err := FindCodexPIDForPane(targetPane)
 	if err != nil {
-		fmt.Printf("❌ Failed to find Codex PID: %v\n", err)
-		p.log.WithError(err).Error("Failed to find codex PID")
+		p.ulog.Error("Failed to find Codex PID").
+			Err(err).
+			Log(context.Background())
 		return
 	}
-	fmt.Printf("✓ Found Codex PID: %d\n", pid)
-	p.log.WithField("pid", pid).Info("Found codex PID")
+	p.ulog.Debug("Found Codex PID").
+		Field("pid", pid).
+		Log(context.Background())
 
 	// Register the session using the core registry.
 	registry, err := sessions.NewFileSystemRegistry()
@@ -425,16 +444,19 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 		TranscriptPath:   latestFile,
 	}
 
-	fmt.Printf("📝 Registering session %s (PID %d) with registry...\n", codexSessionID, pid)
+	p.ulog.Debug("Registering session with registry").
+		Field("session_id", codexSessionID).
+		Field("pid", pid).
+		Log(context.Background())
 	if err := registry.Register(metadata); err != nil {
-		fmt.Printf("❌ Failed to register session: %v\n", err)
-		p.log.WithError(err).Error("Failed to register codex session")
+		p.ulog.Error("Failed to register session").
+			Err(err).
+			Log(context.Background())
 	} else {
-		fmt.Printf("✅ Successfully registered Codex session %s\n", codexSessionID)
-		p.log.WithFields(logrus.Fields{
-			"session_id": codexSessionID,
-			"pid":        pid,
-		}).Info("Successfully registered codex session")
+		p.ulog.Success("Successfully registered Codex session").
+			Field("session_id", codexSessionID).
+			Field("pid", pid).
+			Log(context.Background())
 	}
 }
 

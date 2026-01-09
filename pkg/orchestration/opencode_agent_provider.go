@@ -20,14 +20,14 @@ import (
 
 // OpencodeAgentProvider implements InteractiveAgentProvider for the opencode agent.
 type OpencodeAgentProvider struct {
-	log       *logrus.Entry
-	prettyLog *grovelogging.PrettyLogger
+	log  *logrus.Entry
+	ulog *grovelogging.UnifiedLogger
 }
 
 func NewOpencodeAgentProvider() *OpencodeAgentProvider {
 	return &OpencodeAgentProvider{
-		log:       grovelogging.NewLogger("grove-flow"),
-		prettyLog: grovelogging.NewPrettyLogger(),
+		log:  grovelogging.NewLogger("grove-flow"),
+		ulog: grovelogging.NewUnifiedLogger("grove-flow"),
 	}
 }
 
@@ -133,8 +133,9 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	}
 
 	agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
-	p.log.WithField("window", agentWindowName).Info("Creating window for opencode agent")
-	p.prettyLog.InfoPretty(fmt.Sprintf("Creating window '%s' for opencode agent...", agentWindowName))
+	p.ulog.Info("Creating window for opencode agent").
+		Field("window", agentWindowName).
+		Log(ctx)
 
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 	newWindowArgs := []string{"new-window"}
@@ -179,20 +180,33 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 					p.log.WithError(err).Warn("Failed to switch to agent window")
 				}
 			} else {
-				p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+				p.ulog.Info("Agent started in session").
+					Field("session", sessionName).
+					Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+					Log(ctx)
 			}
 		} else {
 			p.log.WithError(err).Warn("Could not get current tmux session")
-			p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+			p.ulog.Info("Agent started in session").
+				Field("session", sessionName).
+				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+				Log(ctx)
 		}
 	} else if !isTUIMode {
-		p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
+		p.ulog.Info("Agent session ready").
+			Field("session", sessionName).
+			Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
+			Log(ctx)
 	}
 
 	if !isTUIMode {
-		p.prettyLog.Blank()
-		p.prettyLog.InfoPretty("👉 When your task is complete, run the following:")
-		p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
+		p.ulog.Info("").Pretty("").Log(ctx) // blank line
+		p.ulog.Info("Task completion instructions").
+			Pretty("👉 When your task is complete, run the following:").
+			Log(ctx)
+		p.ulog.Info("").
+			Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).
+			Log(ctx)
 	}
 
 	return nil

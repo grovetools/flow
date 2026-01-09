@@ -36,7 +36,7 @@ type InteractiveAgentProvider interface {
 type InteractiveAgentExecutor struct {
 	skipInteractive bool
 	log             *logrus.Entry
-	prettyLog       *grovelogging.PrettyLogger
+	ulog            *grovelogging.UnifiedLogger
 	llmClient       LLMClient
 	geminiRunner    *gemini.RequestRunner
 }
@@ -46,7 +46,7 @@ func NewInteractiveAgentExecutor(llmClient LLMClient, geminiRunner *gemini.Reque
 	return &InteractiveAgentExecutor{
 		skipInteractive: skipInteractive,
 		log:             grovelogging.NewLogger("grove-flow"),
-		prettyLog:       grovelogging.NewPrettyLogger(),
+		ulog:            grovelogging.NewUnifiedLogger("grove-flow"),
 		llmClient:       llmClient,
 		geminiRunner:    geminiRunner,
 	}
@@ -72,7 +72,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 
 	// If generate_plan_from is true, we first call an LLM to generate a plan from the chat.
 	if job.GeneratePlanFrom {
-		e.prettyLog.InfoPretty("Generating implementation plan from chat dependency...")
+		e.ulog.Info("Generating implementation plan from chat dependency").Log(ctx)
 		generatedPlanContent, err := e.generatePlanFromDependencies(ctx, job, plan)
 		if err != nil {
 			job.Status = JobStatusFailed
@@ -97,18 +97,16 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 
 		// Log briefing file creation with structured logging
 		requestID, _ := ctx.Value("request_id").(string)
-		e.log.WithFields(logrus.Fields{
-			"job_id":             job.ID,
-			"request_id":         requestID,
-			"plan_name":          plan.Name,
-			"job_file":           job.FilePath,
-			"turn_id":            turnID,
-			"briefing_file_path": briefingFilePath,
-			"prompt":             generatedPlanContent,
-			"prompt_chars":       len(generatedPlanContent),
-		}).Info("Generated plan briefing file created")
-
-		e.prettyLog.InfoPretty(fmt.Sprintf("Generated plan briefing file created at: %s", briefingFilePath))
+		e.ulog.Success("Generated plan briefing file created").
+			Field("job_id", job.ID).
+			Field("request_id", requestID).
+			Field("plan_name", plan.Name).
+			Field("job_file", job.FilePath).
+			Field("turn_id", turnID).
+			Field("briefing_file_path", briefingFilePath).
+			Field("prompt_chars", len(generatedPlanContent)).
+			Pretty(theme.IconSuccess + " Generated plan briefing: " + theme.DefaultTheme.Accent.Render(briefingFilePath)).
+			Log(ctx)
 	} else {
 		// Gather context files (.grove/context, CLAUDE.md, etc.)
 		contextFiles := e.gatherContextFiles(job, plan, workDir)
@@ -125,8 +123,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		// Write the briefing file for auditing (no turnID for interactive_agent jobs).
 		briefingFilePath, err = WriteBriefingFile(plan, job, promptXML, "")
 		if err != nil {
-			e.log.WithError(err).Warn("Failed to write briefing file")
-			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to write briefing file: %v", err))
+			e.ulog.Warn("Failed to write briefing file").Err(err).Log(ctx)
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			return fmt.Errorf("failed to write briefing file: %w", err)
@@ -134,18 +131,15 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 
 		// Log briefing file creation with structured logging
 		requestID, _ := ctx.Value("request_id").(string)
-		e.log.WithFields(logrus.Fields{
-			"job_id":             job.ID,
-			"request_id":         requestID,
-			"plan_name":          plan.Name,
-			"job_file":           job.FilePath,
-			"briefing_file_path": briefingFilePath,
-			"prompt":             promptXML,
-			"prompt_chars":       len(promptXML),
-		}).Info("Interactive agent briefing file created")
-
-		fmt.Println()
-		e.prettyLog.InfoPretty(fmt.Sprintf("%s  Briefing file created at: %s\n", theme.IconCode, briefingFilePath))
+		e.ulog.Success("Interactive agent briefing file created").
+			Field("job_id", job.ID).
+			Field("request_id", requestID).
+			Field("plan_name", plan.Name).
+			Field("job_file", job.FilePath).
+			Field("briefing_file_path", briefingFilePath).
+			Field("prompt_chars", len(promptXML)).
+			Pretty(theme.IconCode + "  Briefing file created at: " + theme.DefaultTheme.Accent.Render(briefingFilePath)).
+			Log(ctx)
 	}
 
 	// --- Concept Gathering Logic ---
@@ -153,10 +147,16 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
 		if err != nil {
 			requestID, _ := ctx.Value("request_id").(string)
-			e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Error("Failed to gather concepts")
-			e.prettyLog.WarnPretty(fmt.Sprintf("Warning: Failed to gather concepts: %v", err))
+			e.ulog.Warn("Failed to gather concepts").
+				Err(err).
+				Field("request_id", requestID).
+				Field("job_id", job.ID).
+				Log(ctx)
 		} else if conceptContextFile != "" {
-			e.prettyLog.InfoPretty(fmt.Sprintf("Aggregated concepts context created at: %s", conceptContextFile))
+			e.ulog.Success("Aggregated concepts context created").
+				Field("concept_context_file", conceptContextFile).
+				Pretty(theme.IconSuccess + " Aggregated concepts context: " + theme.DefaultTheme.Accent.Render(conceptContextFile)).
+				Log(ctx)
 		}
 	}
 
@@ -362,13 +362,17 @@ func (e *InteractiveAgentExecutor) waitForWindowClose(ctx context.Context, clien
 
 // promptForJobStatus prompts the user to select the job status after tmux session ends
 func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string) string {
-	e.prettyLog.Blank()
-	e.prettyLog.InfoPretty(fmt.Sprintf("💭 Session '%s' has ended. What's the job status?", sessionOrWindowName))
-	e.prettyLog.InfoPretty("   c - Mark as completed")
-	e.prettyLog.InfoPretty("   f - Mark as failed")
-	e.prettyLog.InfoPretty("   q - No status change (keep as running)")
-	e.prettyLog.Blank()
-	e.prettyLog.InfoPretty("Choice [c/f/q]: ")
+	ctx := context.Background()
+	e.ulog.Info("").Pretty("").Log(ctx) // blank line
+	e.ulog.Info("Session has ended. What's the job status?").
+		Field("session", sessionOrWindowName).
+		Pretty(fmt.Sprintf("💭 Session '%s' has ended. What's the job status?", sessionOrWindowName)).
+		Log(ctx)
+	e.ulog.Info("").Pretty("   c - Mark as completed").Log(ctx)
+	e.ulog.Info("").Pretty("   f - Mark as failed").Log(ctx)
+	e.ulog.Info("").Pretty("   q - No status change (keep as running)").Log(ctx)
+	e.ulog.Info("").Pretty("").Log(ctx) // blank line
+	e.ulog.Info("").Pretty("Choice [c/f/q]: ").Log(ctx)
 
 	var response string
 	fmt.Scanln(&response)
@@ -381,8 +385,9 @@ func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string
 
 	// Validate response
 	if response != "c" && response != "f" && response != "q" {
-		e.log.WithField("choice", response).Warn("Invalid choice. Defaulting to completed")
-		e.prettyLog.WarnPretty(fmt.Sprintf("Invalid choice '%s'. Defaulting to completed.", response))
+		e.ulog.Warn("Invalid choice. Defaulting to completed").
+			Field("choice", response).
+			Log(ctx)
 		response = "c"
 	}
 
@@ -391,14 +396,14 @@ func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string
 
 // ClaudeAgentProvider implements InteractiveAgentProvider for Claude Code.
 type ClaudeAgentProvider struct {
-	log       *logrus.Entry
-	prettyLog *grovelogging.PrettyLogger
+	log  *logrus.Entry
+	ulog *grovelogging.UnifiedLogger
 }
 
 func NewClaudeAgentProvider() *ClaudeAgentProvider {
 	return &ClaudeAgentProvider{
-		log:       grovelogging.NewLogger("grove-flow"),
-		prettyLog: grovelogging.NewPrettyLogger(),
+		log:  grovelogging.NewLogger("grove-flow"),
+		ulog: grovelogging.NewUnifiedLogger("grove-flow"),
 	}
 }
 
@@ -480,8 +485,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Create a new window for this specific agent job in the session
 		agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
-		p.log.WithField("window", agentWindowName).Info("Creating window for agent")
-		p.prettyLog.InfoPretty(fmt.Sprintf("Creating window '%s' for agent...", agentWindowName))
+		p.ulog.Info("Creating window for agent").
+			Field("window", agentWindowName).
+			Log(ctx)
 
 		// Build new-window command args - add -d flag if in TUI mode to prevent auto-select
 		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
@@ -546,25 +552,40 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 					}
 				} else {
 					// In a different session, print instructions
-					p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+					p.ulog.Info("Agent started in session").
+						Field("session", sessionName).
+						Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+						Log(ctx)
 				}
 			} else {
 				// Couldn't determine current session, print instructions
 				p.log.WithError(err).Warn("Could not get current tmux session")
-				p.prettyLog.InfoPretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName))
+				p.ulog.Info("Agent started in session").
+					Field("session", sessionName).
+					Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+					Log(ctx)
 			}
 		} else if !isTUIMode {
 			// Not in tmux, print instructions (unless in TUI mode where it's shown in logs)
-			p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
+			p.ulog.Info("Agent session ready").
+				Field("session", sessionName).
+				Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
+				Log(ctx)
 		}
 
 		// Only show completion instructions if not running from the TUI
 		if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
-			p.prettyLog.Blank()
-			p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
-			p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
-			p.prettyLog.Blank()
-			p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+			p.ulog.Info("").Pretty("").Log(ctx) // blank line
+			p.ulog.Info("Task completion instructions").
+				Pretty("👉 When your task is complete, run the following in any terminal:").
+				Log(ctx)
+			p.ulog.Info("").
+				Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).
+				Log(ctx)
+			p.ulog.Info("").Pretty("").Log(ctx) // blank line
+			p.ulog.Info("").
+				Pretty("   The session can remain open - the plan will continue automatically.").
+				Log(ctx)
 		}
 
 		return nil
@@ -587,8 +608,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Ensure session exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
 	if !sessionExists {
-		p.log.WithField("session", sessionName).Info("Tmux session not found, creating it")
-		p.prettyLog.Success(fmt.Sprintf("Tmux session '%s' not found, creating it...", sessionName))
+		p.ulog.Info("Tmux session not found, creating it").
+			Field("session", sessionName).
+			Pretty(fmt.Sprintf("Tmux session '%s' not found, creating it...", sessionName)).
+			Log(ctx)
 		opts := tmux.LaunchOptions{
 			SessionName:      sessionName,
 			WorkingDirectory: gitRoot,
@@ -609,12 +632,11 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	// Create new window
-	p.log.WithFields(logrus.Fields{
-		"session": sessionName,
-		"window":  windowName,
-		"workdir": workDir,
-	}).Info("Creating tmux window")
-	p.prettyLog.InfoPretty(fmt.Sprintf("Creating tmux window: session=%s, window=%s, workdir=%s", sessionName, windowName, workDir))
+	p.ulog.Info("Creating tmux window").
+		Field("session", sessionName).
+		Field("window", windowName).
+		Field("workdir", workDir).
+		Log(ctx)
 
 	executor := &flowexec.RealCommandExecutor{}
 
@@ -628,8 +650,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	if err := executor.Execute("tmux", newWindowArgsNonWorktree...); err != nil {
 		if strings.Contains(err.Error(), "duplicate window") {
-			p.log.WithField("window", windowName).Info("Window already exists, attempting to kill it first")
-			p.prettyLog.InfoPretty(fmt.Sprintf("Window '%s' already exists, attempting to kill it first", windowName))
+			p.ulog.Info("Window already exists, attempting to kill it first").
+				Field("window", windowName).
+				Log(ctx)
 			executor.Execute("tmux", "kill-window", "-t", fmt.Sprintf("%s:%s", sessionName, windowName))
 			time.Sleep(100 * time.Millisecond)
 
@@ -671,8 +694,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	time.Sleep(100 * time.Millisecond)
 
-	p.log.WithField("pane", targetPane).Info("Sending command to tmux pane")
-	p.prettyLog.InfoPretty(fmt.Sprintf("Sending command to tmux pane: %s", targetPane))
+	p.ulog.Info("Sending command to tmux pane").
+		Field("pane", targetPane).
+		Log(ctx)
 	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -688,17 +712,27 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		}
 	}()
 
-	p.log.WithField("window", windowName).Info("Interactive host session launched")
-	p.prettyLog.InfoPretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName))
-	p.prettyLog.InfoPretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName))
+	p.ulog.Success("Interactive host session launched").
+		Field("window", windowName).
+		Pretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName)).
+		Log(ctx)
+	p.ulog.Info("").
+		Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
+		Log(ctx)
 
 	// Only show completion instructions if not running from the TUI
 	if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
-		p.prettyLog.Blank()
-		p.prettyLog.InfoPretty("👉 When your task is complete, run the following in any terminal:")
-		p.prettyLog.InfoPretty(fmt.Sprintf("   flow plan complete %s", job.FilePath))
-		p.prettyLog.Blank()
-		p.prettyLog.InfoPretty("   The session can remain open - the plan will continue automatically.")
+		p.ulog.Info("").Pretty("").Log(ctx) // blank line
+		p.ulog.Info("Task completion instructions").
+			Pretty("👉 When your task is complete, run the following in any terminal:").
+			Log(ctx)
+		p.ulog.Info("").
+			Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).
+			Log(ctx)
+		p.ulog.Info("").Pretty("").Log(ctx) // blank line
+		p.ulog.Info("").
+			Pretty("   The session can remain open - the plan will continue automatically.").
+			Log(ctx)
 	}
 
 	return nil
