@@ -388,6 +388,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Err(err).
 			Field("request_id", requestID).
 			Field("job_id", job.ID).
+			Pretty(fmt.Sprintf("%s LLM completion failed: %v", theme.IconError, err)).
 			Log(ctx)
 		execErr = fmt.Errorf("LLM completion: %w", err)
 		return execErr
