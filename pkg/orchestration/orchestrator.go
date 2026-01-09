@@ -601,7 +601,7 @@ func (l *defaultLogger) Info(msg string, keysAndValues ...interface{}) {
 			entry = entry.Field(fmt.Sprint(keysAndValues[i]), keysAndValues[i+1])
 		}
 	}
-	entry.Log(context.Background())
+	entry.Emit()
 }
 
 func (l *defaultLogger) Error(msg string, keysAndValues ...interface{}) {
@@ -611,7 +611,7 @@ func (l *defaultLogger) Error(msg string, keysAndValues ...interface{}) {
 			entry = entry.Field(fmt.Sprint(keysAndValues[i]), keysAndValues[i+1])
 		}
 	}
-	entry.Log(context.Background())
+	entry.Emit()
 }
 
 func (l *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {
@@ -621,7 +621,7 @@ func (l *defaultLogger) Debug(msg string, keysAndValues ...interface{}) {
 			entry = entry.Field(fmt.Sprint(keysAndValues[i]), keysAndValues[i+1])
 		}
 	}
-	entry.Log(context.Background())
+	entry.Emit()
 }
 
 // StateManager handles persistence of job states.
