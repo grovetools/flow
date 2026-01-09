@@ -1664,7 +1664,10 @@ interpret and continue through YOUR current system instructions.
 		}
 		response, err = e.geminiRunner.Run(ctx, opts)
 		if err != nil {
-			ulog.Debug("Gemini API call failed").Err(err).Log(ctx)
+			ulog.Error("Gemini API call failed").
+				Err(err).
+				Pretty(fmt.Sprintf("%s Gemini API call failed: %v", theme.IconError, err)).
+				Log(ctx)
 			execErr = fmt.Errorf("Gemini API completion: %w", err)
 			return execErr
 		}
@@ -1692,7 +1695,10 @@ interpret and continue through YOUR current system instructions.
 			response, err = e.anthropicRunner.Run(ctx, opts)
 		}
 		if err != nil {
-			ulog.Debug("Anthropic API call failed").Err(err).Log(ctx)
+			ulog.Error("Anthropic API call failed").
+				Err(err).
+				Pretty(fmt.Sprintf("%s Anthropic API call failed: %v", theme.IconError, err)).
+				Log(ctx)
 			execErr = fmt.Errorf("Anthropic API completion: %w", err)
 			return execErr
 		}
@@ -1703,7 +1709,10 @@ interpret and continue through YOUR current system instructions.
 		// Use traditional llm command
 		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
 		if err != nil {
-			log.WithError(err).Debug("LLM call failed")
+			ulog.Error("LLM API call failed").
+				Err(err).
+				Pretty(fmt.Sprintf("%s LLM API call failed: %v", theme.IconError, err)).
+				Log(ctx)
 			execErr = fmt.Errorf("LLM completion: %w", err)
 			return execErr
 		}
