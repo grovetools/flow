@@ -419,7 +419,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 			})
 		}),
 
-		harness.NewStep("Run chat job via 'flow chat run' and verify log capture", func(ctx *harness.Context) error {
+		harness.NewStep("Run chat job via 'flow run' and verify log capture", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 			chatJobPath := filepath.Join(planPath, "02-test-chat-logging.md")
@@ -465,12 +465,12 @@ var JobLogCaptureScenario = harness.NewScenario(
 				return fmt.Errorf("failed to clear log file: %w", err)
 			}
 
-			// Run the chat job using the CLI command
-			runCmd := ctx.Bin("chat", "run", chatJobPath)
+			// Run the chat job using the unified 'flow run' command
+			runCmd := ctx.Bin("run", chatJobPath)
 			runCmd.Dir(projectDir).Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 			result := runCmd.Run()
 			if err := result.AssertSuccess(); err != nil {
-				return fmt.Errorf("CLI 'chat run' failed: %w\nOutput: %s", err, result.Stdout+result.Stderr)
+				return fmt.Errorf("CLI 'run' failed: %w\nOutput: %s", err, result.Stdout+result.Stderr)
 			}
 
 			return ctx.Verify(func(v *verify.Collector) {

@@ -88,7 +88,7 @@ Let's discuss a feature.`
 			chatFilePath := ctx.GetString("chat_file_path")
 
 			// Run the chat by passing the file path explicitly
-			cmd := ctx.Bin("chat", "run", chatFilePath)
+			cmd := ctx.Bin("run", chatFilePath)
 			cmd.Dir(projectDir)
 			cmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 			result := cmd.Run()

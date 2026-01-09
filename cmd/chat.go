@@ -13,8 +13,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/cli"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -296,6 +297,9 @@ func runChatList(cmd *cobra.Command, args []string) error {
 }
 
 func runChatRun(cmd *cobra.Command, args []string) error {
+	// Emit deprecation warning
+	fmt.Fprintf(os.Stderr, "%s  'flow chat run' is deprecated. Use 'flow run <file-or-title>' instead.\n", theme.IconWarning)
+
 	var runnableChats []*orchestration.Job // Store job objects
 	var titleFilter map[string]bool
 

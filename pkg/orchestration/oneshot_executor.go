@@ -116,74 +116,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Get request ID from context
 	requestID, _ := ctx.Value("request_id").(string)
 
-	// Handle chat jobs differently
+	// Handle chat jobs - execute directly without confirmation
+	// Plan-level confirmations already guard against unintended execution
 	if job.Type == JobTypeChat {
-		// If a chat job is part of a multi-job plan, it's an interactive step.
-		if len(plan.Jobs) > 1 {
-			// An already completed job wouldn't be passed here by the orchestrator,
-			// but we check status to be safe.
-			if job.Status == JobStatusCompleted {
-				return nil
-			}
-
-			// Skip interactive prompts if configured to do so or if not in a TTY
-			isTTY := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
-			if e.config.SkipInteractive || !isTTY {
-				log.WithFields(logrus.Fields{
-					"job_id":      job.ID,
-					"job_title":   job.Title,
-					"job_type":    job.Type,
-					"skip_reason": "configured or no TTY",
-				}).Info("Skipping interactive chat job")
-				prettyLog.InfoPretty(fmt.Sprintf("Skipping interactive chat job '%s' (running automatically)", job.Title))
-				return e.executeChatJob(ctx, job, plan, output)
-			}
-
-			// Loop until user chooses to run or complete
-			for {
-				prettyLog.Blank()
-				prettyLog.InfoPretty(fmt.Sprintf("Chat job '%s' is pending... Would you like to:", job.Title))
-				prettyLog.InfoPretty("  (r)un it?")
-				prettyLog.InfoPretty("  (c) label it completed?")
-				prettyLog.InfoPretty("  (e)dit it with $EDITOR?")
-				prettyLog.InfoPretty("Action (r/c/e): ")
-
-				reader := bufio.NewReader(os.Stdin)
-				input, _ := reader.ReadString('\n')
-				choice := strings.TrimSpace(strings.ToLower(input))
-
-				switch choice {
-				case "r", "run", "": // Default to run
-					prettyLog.InfoPretty("Running one turn of the chat...")
-					return e.executeChatJob(ctx, job, plan, output)
-				case "c", "complete":
-					prettyLog.InfoPretty("Marking chat as complete.")
-					job.Status = JobStatusCompleted
-					job.EndTime = time.Now()
-					return updateJobFile(job)
-				case "e", "edit":
-					editor := os.Getenv("EDITOR")
-					if editor == "" {
-						editor = "vim" // A common default
-					}
-					prettyLog.InfoPretty(fmt.Sprintf("Opening %s with %s...", job.FilePath, editor))
-					cmd := exec.Command(editor, job.FilePath)
-					cmd.Stdin = os.Stdin
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
-					if err := cmd.Run(); err != nil {
-						return fmt.Errorf("failed to open editor: %w", err)
-					}
-					prettyLog.Success("Editing finished.")
-					// Continue the loop to show the prompt again
-					continue
-				default:
-					prettyLog.ErrorPretty(fmt.Sprintf("Invalid choice '%s'. Please choose 'r', 'c', or 'e'.", choice), nil)
-					continue
-				}
-			}
+		if job.Status == JobStatusCompleted {
+			return nil
 		}
-		// This is a single-job plan (e.g. from `flow chat run`), so execute directly.
 		return e.executeChatJob(ctx, job, plan, output)
 	}
 
