@@ -388,7 +388,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Err(err).
 			Field("request_id", requestID).
 			Field("job_id", job.ID).
-			Pretty(fmt.Sprintf("%s LLM completion failed: %v", theme.IconError, err)).
+			Pretty(theme.DefaultTheme.Error.Render(fmt.Sprintf("%s LLM completion failed: %v", theme.IconError, err))).
 			Log(ctx)
 		execErr = fmt.Errorf("LLM completion: %w", err)
 		return execErr
@@ -1666,7 +1666,7 @@ interpret and continue through YOUR current system instructions.
 		if err != nil {
 			ulog.Error("Gemini API call failed").
 				Err(err).
-				Pretty(fmt.Sprintf("%s Gemini API call failed: %v", theme.IconError, err)).
+				Pretty(theme.DefaultTheme.Error.Render(fmt.Sprintf("%s Gemini API call failed: %v", theme.IconError, err))).
 				Log(ctx)
 			execErr = fmt.Errorf("Gemini API completion: %w", err)
 			return execErr
@@ -1697,7 +1697,7 @@ interpret and continue through YOUR current system instructions.
 		if err != nil {
 			ulog.Error("Anthropic API call failed").
 				Err(err).
-				Pretty(fmt.Sprintf("%s Anthropic API call failed: %v", theme.IconError, err)).
+				Pretty(theme.DefaultTheme.Error.Render(fmt.Sprintf("%s Anthropic API call failed: %v", theme.IconError, err))).
 				Log(ctx)
 			execErr = fmt.Errorf("Anthropic API completion: %w", err)
 			return execErr
@@ -1711,7 +1711,7 @@ interpret and continue through YOUR current system instructions.
 		if err != nil {
 			ulog.Error("LLM API call failed").
 				Err(err).
-				Pretty(fmt.Sprintf("%s LLM API call failed: %v", theme.IconError, err)).
+				Pretty(theme.DefaultTheme.Error.Render(fmt.Sprintf("%s LLM API call failed: %v", theme.IconError, err))).
 				Log(ctx)
 			execErr = fmt.Errorf("LLM completion: %w", err)
 			return execErr
