@@ -653,16 +653,10 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 				multiWriter := io.MultiWriter(logFile, os.Stdout)
 
 				// Execute the job using the new primitive, passing the MultiWriter.
+				// Note: The orchestrator already logs errors internally, so we don't
+				// duplicate the error log here - just send to the error channel.
 				if execErr := orchestrator.ExecuteJobWithWriter(ctx, j, multiWriter); execErr != nil {
-					logger.WithFields(map[string]interface{}{
-						"job_id": j.ID,
-						"error":  execErr,
-					}).Error("Job execution failed")
 					errChan <- fmt.Errorf("job %s failed: %w", j.ID, execErr)
-				} else {
-					logger.WithFields(map[string]interface{}{
-						"job_id": j.ID,
-					}).Info("Job execution completed successfully")
 				}
 			}(job)
 		}
