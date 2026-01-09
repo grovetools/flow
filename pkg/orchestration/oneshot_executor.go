@@ -791,13 +791,19 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 // regenerateContextInWorktree regenerates the context within a worktree.
 func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath string, jobType string, job *Job, plan *Plan) error {
 	writer := grovelogging.GetWriter(ctx)
-	log.WithField("job_type", jobType).Info("Checking context in worktree")
+	ulog.Info("Checking context in worktree").
+		Field("job_type", jobType).
+		Icon(theme.IconFolder).
+		Log(ctx)
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
 	if contextDir != worktreePath {
-		log.WithField("context_dir", contextDir).Info("Scoping context generation to sub-project")
-		fmt.Fprintf(writer, "Scoping context to sub-project: %s\n", job.Repository)
+		ulog.Info("Scoping context generation to sub-project").
+			Field("context_dir", contextDir).
+			Field("repository", job.Repository).
+			Pretty(fmt.Sprintf("Scoping context to sub-project: %s", job.Repository)).
+			Log(ctx)
 	}
 
 	// Create context manager for the worktree (or sub-project)
@@ -1005,7 +1011,10 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 	// Display absolute path of rules file being used
 	absRulesPath, _ := filepath.Abs(rulesPath)
-	log.WithField("rules_file", absRulesPath).Info("Found context rules file, regenerating context")
+	ulog.Info("Found context rules file, regenerating context").
+		Field("rules_file", absRulesPath).
+		Icon(theme.IconChecklist).
+		Log(ctx)
 
 	// Update context from rules
 	if err := ctxMgr.UpdateFromRules(); err != nil {
@@ -1119,11 +1128,12 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Generate a unique request ID for tracing this turn
 	requestID := "req-" + uuid.New().String()[:8]
 	ctx = context.WithValue(ctx, "request_id", requestID)
-	log.WithFields(logrus.Fields{
-		"job_id":     job.ID,
-		"request_id": requestID,
-		"plan_name":  plan.Name,
-	}).Info("Executing chat turn")
+	ulog.Info("Executing chat turn").
+		Field("job_id", job.ID).
+		Field("request_id", requestID).
+		Field("plan_name", plan.Name).
+		Icon(theme.IconChat).
+		Log(ctx)
 
 	// --- Pre-flight Check ---
 	// Read the job file content to check state before creating locks or changing status.

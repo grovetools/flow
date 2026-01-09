@@ -13,6 +13,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-core/tui/theme"
@@ -20,6 +21,8 @@ import (
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
+
+var ulog = grovelogging.NewUnifiedLogger("grove-flow")
 
 // runPlanRun implements the run command.
 func runPlanRun(cmd *cobra.Command, args []string) error {
@@ -518,18 +521,26 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 	}
 
 	// Execute the job
-	fmt.Printf("%s Running job %s...\n",
-		color.YellowString(theme.IconRunning), jobFile)
+	ulog.Progress("Running job").
+		Field("job", jobFile).
+		Pretty(fmt.Sprintf("%s Running job %s...", color.YellowString(theme.IconRunning), jobFile)).
+		Log(ctx)
 
 	jobPath := filepath.Join(plan.Directory, jobFile)
 	err := orch.RunJob(ctx, jobPath)
 
 	if err != nil {
-		fmt.Printf("%s Job failed: %v\n", color.RedString(theme.IconError), err)
+		ulog.Error("Job failed").
+			Field("job", job.Title).
+			Err(err).
+			Log(ctx)
 		return err
 	}
 
-	fmt.Printf("%s Job completed: %s\n", color.GreenString(theme.IconSuccess), job.Title)
+	ulog.Success("Job completed").
+		Field("job", job.Title).
+		Pretty(fmt.Sprintf("%s Job completed: %s", color.GreenString(theme.IconSuccess), job.Title)).
+		Log(ctx)
 	return nil
 }
 
