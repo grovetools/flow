@@ -56,11 +56,11 @@ func (e *HeadlessAgentExecutor) Name() string {
 
 // Execute runs an agent job in a worktree.
 func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
-	log.WithFields(map[string]interface{}{
-		"job_id":    job.ID,
-		"job_title": job.Title,
-		"plan_name": plan.Name,
-	}).Debug("[HEADLESS] Starting execution")
+	ulog.Debug("[HEADLESS] Starting execution").
+		Field("job_id", job.ID).
+		Field("job_title", job.Title).
+		Field("plan_name", plan.Name).
+		Log(ctx)
 
 	persister := NewStatePersister()
 
@@ -77,7 +77,9 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	log.WithField("job_id", job.ID).Debug("[HEADLESS] Job status updated to running")
+	ulog.Debug("[HEADLESS] Job status updated to running").
+		Field("job_id", job.ID).
+		Log(ctx)
 
 	var execErr error
 
@@ -105,8 +107,9 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		workDir, err = GetProjectGitRoot(plan.Directory)
 		if err != nil {
 			workDir = plan.Directory
-			log.Warn("Not a git repository, using plan directory as working directory")
-			prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Not a git repository. Using plan directory: %s", workDir))
+			ulog.Warn("Not a git repository, using plan directory as working directory").
+				Field("work_dir", workDir).
+				Log(ctx)
 		}
 	}
 
@@ -126,7 +129,9 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	// Write the briefing file for auditing
 	briefingFilePath, err := WriteBriefingFile(plan, job, promptXML, "")
 	if err != nil {
-		log.WithError(err).Warn("Failed to write briefing file")
+		ulog.Warn("Failed to write briefing file").
+			Err(err).
+			Log(ctx)
 		execErr = fmt.Errorf("writing briefing file: %w", err)
 		return execErr
 	}
@@ -135,32 +140,48 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	instructionPrompt := fmt.Sprintf("Read the briefing file at '%s' and execute the task.", briefingFilePath)
 
 	// Execute agent with the instruction to read the briefing file
-	log.WithField("job_id", job.ID).Debug("[HEADLESS] Starting agent execution")
+	ulog.Debug("[HEADLESS] Starting agent execution").
+		Field("job_id", job.ID).
+		Log(ctx)
 	err = e.runAgentInWorktree(ctx, workDir, instructionPrompt, job, plan)
 	if err != nil {
 		execErr = fmt.Errorf("run agent: %w", err)
-		log.WithFields(map[string]interface{}{
-			"job_id": job.ID,
-			"error":  err,
-		}).Error("[HEADLESS] Agent execution failed")
+		ulog.Error("[HEADLESS] Agent execution failed").
+			Field("job_id", job.ID).
+			Err(err).
+			Log(ctx)
 	} else {
-		log.WithField("job_id", job.ID).Debug("[HEADLESS] Agent execution completed successfully")
+		ulog.Debug("[HEADLESS] Agent execution completed successfully").
+			Field("job_id", job.ID).
+			Log(ctx)
 	}
 
 	// After agent completes, archive its session artifacts
-	log.WithField("job_id", job.ID).Debug("[HEADLESS] Archiving session artifacts")
+	ulog.Debug("[HEADLESS] Archiving session artifacts").
+		Field("job_id", job.ID).
+		Log(ctx)
 	if err := ArchiveInteractiveSession(job, plan); err != nil {
-		log.WithError(err).Warn("[HEADLESS] Failed to archive session artifacts for headless agent job")
+		ulog.Warn("[HEADLESS] Failed to archive session artifacts for headless agent job").
+			Err(err).
+			Log(ctx)
 	} else {
-		log.WithField("job_id", job.ID).Debug("[HEADLESS] Session artifacts archived successfully")
+		ulog.Debug("[HEADLESS] Session artifacts archived successfully").
+			Field("job_id", job.ID).
+			Log(ctx)
 	}
 
 	// Append the formatted transcript using the generalized function
-	log.WithField("job_id", job.ID).Debug("[HEADLESS] Appending formatted transcript")
+	ulog.Debug("[HEADLESS] Appending formatted transcript").
+		Field("job_id", job.ID).
+		Log(ctx)
 	if err := AppendAgentTranscript(job, plan); err != nil {
-		log.WithError(err).Warn("[HEADLESS] Failed to append transcript to job file")
+		ulog.Warn("[HEADLESS] Failed to append transcript to job file").
+			Err(err).
+			Log(ctx)
 	} else {
-		log.WithField("job_id", job.ID).Debug("[HEADLESS] Formatted transcript appended successfully")
+		ulog.Debug("[HEADLESS] Formatted transcript appended successfully").
+			Field("job_id", job.ID).
+			Log(ctx)
 	}
 
 	return execErr
@@ -219,11 +240,11 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 
 // runOnHost executes the agent directly on the host machine.
 func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, agentArgs []string) error {
-	log.WithFields(map[string]interface{}{
-		"job_id":     job.ID,
-		"worktree":   worktreePath,
-		"agent_args": agentArgs,
-	}).Debug("[HEADLESS] Running agent on host")
+	ulog.Debug("[HEADLESS] Running agent on host").
+		Field("job_id", job.ID).
+		Field("worktree", worktreePath).
+		Field("agent_args", agentArgs).
+		Log(ctx)
 
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -253,15 +274,13 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
 	)
 
-	log.WithFields(map[string]interface{}{
-		"job_id": job.ID,
-		"env": map[string]string{
-			"GROVE_FLOW_JOB_ID":    job.ID,
-			"GROVE_FLOW_JOB_PATH":  job.FilePath,
-			"GROVE_FLOW_PLAN_NAME": plan.Name,
-			"GROVE_FLOW_JOB_TITLE": escapedTitle,
-		},
-	}).Debug("[HEADLESS] Starting Claude CLI with environment variables")
+	ulog.Debug("[HEADLESS] Starting Claude CLI with environment variables").
+		Field("job_id", job.ID).
+		Field("GROVE_FLOW_JOB_ID", job.ID).
+		Field("GROVE_FLOW_JOB_PATH", job.FilePath).
+		Field("GROVE_FLOW_PLAN_NAME", plan.Name).
+		Field("GROVE_FLOW_JOB_TITLE", escapedTitle).
+		Log(ctx)
 
 	// We use cmd.Run() and don't capture output. The agent process itself handles logging.
 	// We also redirect stdout/stderr to /dev/null to prevent cluttering the main process output.
@@ -270,14 +289,16 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 	cmd.Stderr = io.Discard
 
 	if err := cmd.Run(); err != nil {
-		log.WithFields(map[string]interface{}{
-			"job_id": job.ID,
-			"error":  err,
-		}).Error("[HEADLESS] Claude CLI execution failed")
+		ulog.Error("[HEADLESS] Claude CLI execution failed").
+			Field("job_id", job.ID).
+			Err(err).
+			Log(ctx)
 		return fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	log.WithField("job_id", job.ID).Debug("[HEADLESS] Claude CLI execution completed")
+	ulog.Debug("[HEADLESS] Claude CLI execution completed").
+		Field("job_id", job.ID).
+		Log(ctx)
 	return nil
 }
 
@@ -315,4 +336,3 @@ func (e *HeadlessAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 
 	return contextFiles
 }
-

@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,33 +16,35 @@ import (
 // AppendAgentTranscript finds the transcript for an agent job
 // and appends it to the job's markdown file.
 func AppendAgentTranscript(job *Job, plan *Plan) error {
+	ctx := context.Background()
+
 	if job.Type != JobTypeInteractiveAgent && job.Type != JobTypeHeadlessAgent {
 		return nil // Not an agent job
 	}
 
-	log.WithFields(map[string]interface{}{
-		"job_id":    job.ID,
-		"job_type":  job.Type,
-		"plan_name": plan.Name,
-		"filename":  job.Filename,
-	}).Debug("[TRANSCRIPT] Starting transcript append")
+	ulog.Debug("[TRANSCRIPT] Starting transcript append").
+		Field("job_id", job.ID).
+		Field("job_type", job.Type).
+		Field("plan_name", plan.Name).
+		Field("filename", job.Filename).
+		Log(ctx)
 
 	// Try to get session ID from registry for aglogs (works for opencode, claude, etc.)
 	// Fall back to job spec if session not found in registry
 	aglogsSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
 	if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
 		if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata.ClaudeSessionID != "" {
-			log.WithFields(map[string]interface{}{
-				"job_id":            job.ID,
-				"claude_session_id": metadata.ClaudeSessionID,
-				"provider":          metadata.Provider,
-			}).Debug("[TRANSCRIPT] Using session ID from registry")
+			ulog.Debug("[TRANSCRIPT] Using session ID from registry").
+				Field("job_id", job.ID).
+				Field("claude_session_id", metadata.ClaudeSessionID).
+				Field("provider", metadata.Provider).
+				Log(ctx)
 			aglogsSpec = metadata.ClaudeSessionID
 		} else {
-			log.WithFields(map[string]interface{}{
-				"job_id":     job.ID,
-				"find_error": findErr,
-			}).Debug("[TRANSCRIPT] Session not found in registry, using job spec")
+			ulog.Debug("[TRANSCRIPT] Session not found in registry, using job spec").
+				Field("job_id", job.ID).
+				Field("find_error", findErr).
+				Log(ctx)
 		}
 	}
 
@@ -56,10 +59,10 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	plainOutput, plainErr := plainCmd.CombinedOutput()
 	plainStr := string(plainOutput)
 
-	log.WithFields(map[string]interface{}{
-		"job_id":      job.ID,
-		"aglogs_spec": aglogsSpec,
-	}).Debug("[TRANSCRIPT] Running aglogs read")
+	ulog.Debug("[TRANSCRIPT] Running aglogs read").
+		Field("job_id", job.ID).
+		Field("aglogs_spec", aglogsSpec).
+		Log(ctx)
 
 	// Use plain text for error checking and .md file writing
 	err := plainErr
@@ -67,12 +70,12 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 
 	// Check if a transcript was found. `aglogs read` returns an error if not found.
 	if err != nil || len(strings.TrimSpace(outputStr)) == 0 || strings.Contains(outputStr, "no sessions found with job") {
-		log.WithFields(map[string]interface{}{
-			"job_id":      job.ID,
-			"error":       err,
-			"output_len":  len(outputStr),
-			"has_no_sess": strings.Contains(outputStr, "no sessions found with job"),
-		}).Warn("[TRANSCRIPT] No transcript found via aglogs")
+		ulog.Warn("[TRANSCRIPT] No transcript found via aglogs").
+			Field("job_id", job.ID).
+			Err(err).
+			Field("output_len", len(outputStr)).
+			Field("has_no_sess", strings.Contains(outputStr, "no sessions found with job")).
+			Log(ctx)
 
 		// This is the expected case for a job that was never run.
 		// Append a note to the job file instead of treating it as a failure.
@@ -93,10 +96,10 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		return nil // Not an error.
 	}
 
-	log.WithFields(map[string]interface{}{
-		"job_id":     job.ID,
-		"output_len": len(outputStr),
-	}).Debug("[TRANSCRIPT] Successfully retrieved transcript from aglogs")
+	ulog.Debug("[TRANSCRIPT] Successfully retrieved transcript from aglogs").
+		Field("job_id", job.ID).
+		Field("output_len", len(outputStr)).
+		Log(ctx)
 
 	// Transcript was found, so proceed with appending it.
 	content, err := os.ReadFile(job.FilePath)
@@ -129,11 +132,15 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		newTranscriptContent := strings.TrimSpace(transcriptOutput)
 
 		if existingTranscriptContent == newTranscriptContent {
-			fmt.Printf("Info: Transcript unchanged in %s. Skipping.\n", job.Filename)
+			ulog.Info("Transcript unchanged, skipping").
+				Field("filename", job.Filename).
+				Log(ctx)
 			return nil
 		}
 
-		fmt.Printf("Info: Updating transcript in %s (resumed session detected).\n", job.Filename)
+		ulog.Info("Updating transcript (resumed session detected)").
+			Field("filename", job.Filename).
+			Log(ctx)
 		beforeTranscript := existingContent[:transcriptIdx]
 		transcriptHeader := "\n# Agent Chat Transcript\n\n"
 		newContent = beforeTranscript + transcriptHeader + transcriptOutput
@@ -147,10 +154,10 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		return fmt.Errorf("writing transcript to job file %s: %w", job.FilePath, err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"job_id":   job.ID,
-		"filepath": job.FilePath,
-	}).Debug("[TRANSCRIPT] Successfully wrote transcript to job file")
+	ulog.Debug("[TRANSCRIPT] Successfully wrote transcript to job file").
+		Field("job_id", job.ID).
+		Field("filepath", job.FilePath).
+		Log(ctx)
 
 	// Also write the formatted transcript to job.log for TUI fast-path loading
 	jobLogPath, err := GetJobLogPath(plan, job)
@@ -159,16 +166,16 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		if formattedErr == nil && len(formattedStr) > 0 {
 			if err := os.WriteFile(jobLogPath, []byte(formattedStr), 0644); err != nil {
 				// Log a warning but don't fail - this is just for TUI optimization
-				log.WithFields(map[string]interface{}{
-					"job_id":  job.ID,
-					"logpath": jobLogPath,
-					"error":   err,
-				}).Warn("[TRANSCRIPT] Failed to write formatted transcript to job.log")
+				ulog.Warn("[TRANSCRIPT] Failed to write formatted transcript to job.log").
+					Field("job_id", job.ID).
+					Field("logpath", jobLogPath).
+					Err(err).
+					Log(ctx)
 			} else {
-				log.WithFields(map[string]interface{}{
-					"job_id":  job.ID,
-					"logpath": jobLogPath,
-				}).Debug("[TRANSCRIPT] Successfully wrote formatted transcript to job.log")
+				ulog.Debug("[TRANSCRIPT] Successfully wrote formatted transcript to job.log").
+					Field("job_id", job.ID).
+					Field("logpath", jobLogPath).
+					Log(ctx)
 			}
 		}
 	}
@@ -265,7 +272,10 @@ func RenameJob(plan *Plan, jobToRename *Job, newTitle string) error {
 	// 6. Delete the old job file
 	if err := os.Remove(jobToRename.FilePath); err != nil {
 		// Log a warning but don't fail the whole operation if we can't delete the old file
-		fmt.Printf("Warning: failed to remove old job file %s: %v\n", jobToRename.FilePath, err)
+		ulog.Warn("Failed to remove old job file").
+			Field("filepath", jobToRename.FilePath).
+			Err(err).
+			Log(context.Background())
 	}
 
 	// 7. Update in-memory plan object for immediate TUI feedback before full refresh

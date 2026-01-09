@@ -13,7 +13,6 @@ import (
 
 	"github.com/mattsolo1/grove-core/command"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/sirupsen/logrus"
 )
 
 // LLMOptions defines configuration for an LLM completion request.
@@ -33,15 +32,15 @@ type LLMClient interface {
 // CommandLLMClient implements LLMClient using the llm command-line tool.
 type CommandLLMClient struct {
 	cmdBuilder *command.SafeBuilder
-	log        *logrus.Entry
 }
 
 // NewCommandLLMClient creates a new LLM client that executes the llm command.
 func NewCommandLLMClient(executor command.Executor) *CommandLLMClient {
-	log := grovelogging.NewLogger("grove-flow")
 	// Check if 'llm' command exists in PATH
 	if _, err := exec.LookPath("llm"); err != nil {
-		log.WithError(err).Warn("llm command not found in PATH")
+		ulog.Warn("llm command not found in PATH").
+			Err(err).
+			Log(context.Background())
 	}
 
 	// Use provided executor or default
@@ -51,7 +50,6 @@ func NewCommandLLMClient(executor command.Executor) *CommandLLMClient {
 
 	return &CommandLLMClient{
 		cmdBuilder: command.NewSafeBuilderWithExecutor(executor),
-		log:        log,
 	}
 }
 
@@ -72,27 +70,31 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	if requestID == "" {
 		requestID = os.Getenv("GROVE_REQUEST_ID")
 	}
-	c.log.WithFields(logrus.Fields{
-		"request_id":    requestID,
-		"job_id":        job.ID,
-		"model":         opts.Model,
-		"context_files": len(opts.ContextFiles),
-		"include_files": len(opts.IncludeFiles),
-		"prompt_length": len(prompt),
-		"schema_path":   opts.SchemaPath,
-	}).Info("Starting LLM request")
-	
+	ulog.Info("Starting LLM request").
+		Field("request_id", requestID).
+		Field("job_id", job.ID).
+		Field("model", opts.Model).
+		Field("context_files", len(opts.ContextFiles)).
+		Field("include_files", len(opts.IncludeFiles)).
+		Field("prompt_length", len(prompt)).
+		Field("schema_path", opts.SchemaPath).
+		Log(ctx)
+
 	// Build full prompt with all file contents
 	// Note: This is for non-Gemini models that don't support file attachments
 	var fullPrompt strings.Builder
-	
+
 	// First add include files if any
 	if len(opts.IncludeFiles) > 0 {
-		c.log.WithField("count", len(opts.IncludeFiles)).Debug("Adding include files")
+		ulog.Debug("Adding include files").
+			Field("count", len(opts.IncludeFiles)).
+			Log(ctx)
 
 		for i, sourceFile := range opts.IncludeFiles {
-			c.log.WithField("file", sourceFile).Debug("Adding include file")
-			
+			ulog.Debug("Adding include file").
+				Field("file", sourceFile).
+				Log(ctx)
+
 			if i > 0 {
 				fullPrompt.WriteString("\n\n")
 			}
@@ -106,19 +108,23 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		}
 		fullPrompt.WriteString("\n\n")
 	}
-	
+
 	// Then add context files
 	if len(opts.ContextFiles) > 0 {
-		c.log.WithField("count", len(opts.ContextFiles)).Debug("Adding context files")
-		
+		ulog.Debug("Adding context files").
+			Field("count", len(opts.ContextFiles)).
+			Log(ctx)
+
 		for i, contextFile := range opts.ContextFiles {
-			c.log.WithField("file", contextFile).Debug("Adding context from file")
-			
+			ulog.Debug("Adding context from file").
+				Field("file", contextFile).
+				Log(ctx)
+
 			if i > 0 || opts.IncludeFiles != nil {
 				fullPrompt.WriteString("\n\n")
 			}
 			fullPrompt.WriteString(fmt.Sprintf("=== Context from %s ===\n", filepath.Base(contextFile)))
-			
+
 			content, err := os.ReadFile(contextFile)
 			if err != nil {
 				return "", fmt.Errorf("reading context file %s: %w", contextFile, err)
@@ -127,41 +133,51 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 		}
 		fullPrompt.WriteString("\n\n")
 	}
-	
+
 	// Finally add the actual prompt
 	if fullPrompt.Len() > 0 {
 		fullPrompt.WriteString("=== User Request ===\n\n")
 	}
 	fullPrompt.WriteString(prompt)
-	
-	c.log.WithField("full_prompt_length", fullPrompt.Len()).Debug("Full prompt assembled")
-		
-		// Save prompt to debug log file
-		if job != nil && plan != nil {
-			logDir := ResolveLogDirectory(plan, job)
-			promptLogDir := filepath.Join(logDir, "prompts")
-			if err := os.MkdirAll(promptLogDir, 0755); err != nil {
-				c.log.WithError(err).Warn("Could not create prompt log directory")
+
+	ulog.Debug("Full prompt assembled").
+		Field("full_prompt_length", fullPrompt.Len()).
+		Log(ctx)
+
+	// Save prompt to debug log file
+	if job != nil && plan != nil {
+		logDir := ResolveLogDirectory(plan, job)
+		promptLogDir := filepath.Join(logDir, "prompts")
+		if err := os.MkdirAll(promptLogDir, 0755); err != nil {
+			ulog.Warn("Could not create prompt log directory").
+				Err(err).
+				Log(ctx)
+		} else {
+			// Use a timestamp to make each log unique for a given job
+			timestamp := time.Now().Format("20060102150405")
+			logFileName := fmt.Sprintf("%s-%s-prompt.txt", job.ID, timestamp)
+			logFilePath := filepath.Join(promptLogDir, logFileName)
+
+			// Write the full prompt to the file
+			if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0644); err != nil {
+				ulog.Warn("Could not write prompt log file").
+					Err(err).
+					Field("request_id", requestID).
+					Field("job_id", job.ID).
+					Log(ctx)
 			} else {
-				// Use a timestamp to make each log unique for a given job
-				timestamp := time.Now().Format("20060102150405")
-				logFileName := fmt.Sprintf("%s-%s-prompt.txt", job.ID, timestamp)
-				logFilePath := filepath.Join(promptLogDir, logFileName)
-				
-				// Write the full prompt to the file
-				if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0644); err != nil {
-					c.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Could not write prompt log file")
-				} else {
-					c.log.WithFields(logrus.Fields{
-						"job_id": job.ID,
-						"file":   logFilePath,
-					}).Debug("Prompt saved to file")
-				}
+				ulog.Debug("Prompt saved to file").
+					Field("job_id", job.ID).
+					Field("file", logFilePath).
+					Log(ctx)
 			}
 		}
-	
+	}
+
 	// Log full command being executed
-	c.log.WithField("args", strings.Join(args, " ")).Debug("Building grove llm command")
+	ulog.Debug("Building grove llm command").
+		Field("args", strings.Join(args, " ")).
+		Log(ctx)
 
 	// Grove llm request expects prompt as stdin when no positional args are given
 	// We need to add "-" as the prompt argument to tell it to read from stdin
@@ -173,15 +189,17 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	execCmd := cmd.Exec()
 
 	// Log the actual command that will be executed
-	c.log.WithFields(logrus.Fields{
-		"path": execCmd.Path,
-		"args": strings.Join(execCmd.Args[1:], " "),
-	}).Debug("Actual exec command")
+	ulog.Debug("Actual exec command").
+		Field("path", execCmd.Path).
+		Field("args", strings.Join(execCmd.Args[1:], " ")).
+		Log(ctx)
 
 	// Set working directory if specified
 	if opts.WorkingDir != "" {
 		execCmd.Dir = opts.WorkingDir
-		c.log.WithField("workdir", opts.WorkingDir).Debug("Working directory set")
+		ulog.Debug("Working directory set").
+			Field("workdir", opts.WorkingDir).
+			Log(ctx)
 	}
 
 	// Propagate request ID to child process via environment
@@ -191,8 +209,8 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 
 	// Pipe full prompt (with all file contents) to stdin
 	execCmd.Stdin = strings.NewReader(fullPrompt.String())
-	c.log.Debug("Starting LLM command execution")
-	
+	ulog.Debug("Starting LLM command execution").Log(ctx)
+
 	// Log start time
 	startTime := time.Now()
 
@@ -202,7 +220,9 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	logFilePath := filepath.Join(logDir, logFileName)
 	logFile, err := os.Create(logFilePath)
 	if err != nil {
-		c.log.WithError(err).Warn("Could not create LLM log file")
+		ulog.Warn("Could not create LLM log file").
+			Err(err).
+			Log(ctx)
 	} else {
 		defer logFile.Close()
 		writer := grovelogging.GetWriter(ctx)
@@ -223,31 +243,31 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 
 	if err := execCmd.Run(); err != nil {
 		duration := time.Since(startTime)
-		c.log.WithFields(logrus.Fields{
-			"request_id":    requestID,
-			"duration_ms":   duration.Milliseconds(),
-			"error":         err.Error(),
-			"stderr":        stderr.String(),
-			"model":         opts.Model,
-		}).Error("LLM request failed")
+		ulog.Error("LLM request failed").
+			Field("request_id", requestID).
+			Field("duration_ms", duration.Milliseconds()).
+			Err(err).
+			Field("stderr", stderr.String()).
+			Field("model", opts.Model).
+			Log(ctx)
 		return "", fmt.Errorf("llm command failed: %s: %w", stderr.String(), err)
 	}
 
 	duration := time.Since(startTime)
 	responseLength := stdout.Len()
-	
+
 	// Calculate approximate token count (rough estimate: 1 token ≈ 4 chars)
 	approxInputTokens := fullPrompt.Len() / 4
 	approxOutputTokens := responseLength / 4
-	
-	c.log.WithFields(logrus.Fields{
-		"request_id":      requestID,
-		"duration_ms":     duration.Milliseconds(),
-		"response_length": responseLength,
-		"input_tokens_est": approxInputTokens,
-		"output_tokens_est": approxOutputTokens,
-		"model":          opts.Model,
-	}).Info("LLM request completed")
-	
+
+	ulog.Info("LLM request completed").
+		Field("request_id", requestID).
+		Field("duration_ms", duration.Milliseconds()).
+		Field("response_length", responseLength).
+		Field("input_tokens_est", approxInputTokens).
+		Field("output_tokens_est", approxOutputTokens).
+		Field("model", opts.Model).
+		Log(ctx)
+
 	return stdout.String(), nil
 }

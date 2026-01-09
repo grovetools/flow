@@ -10,22 +10,17 @@ import (
 
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/sirupsen/logrus"
 )
 
 // ShellExecutor executes shell commands as orchestration jobs.
 type ShellExecutor struct {
-	log       *logrus.Entry
-	prettyLog *grovelogging.PrettyLogger
-	config    *ExecutorConfig
+	config *ExecutorConfig
 }
 
 // NewShellExecutor creates a new shell executor.
 func NewShellExecutor(config *ExecutorConfig) *ShellExecutor {
 	return &ShellExecutor{
-		log:       grovelogging.NewLogger("grove-flow"),
-		prettyLog: grovelogging.NewPrettyLogger(),
-		config:    config,
+		config: config,
 	}
 }
 
@@ -57,11 +52,11 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	}
 
 	// Log execution details for debugging
-	e.log.WithFields(logrus.Fields{
-		"request_id": requestID,
-		"job_id":  job.ID,
-		"command": job.PromptBody,
-	}).Debug("Executing shell job")
+	ulog.Debug("Executing shell job").
+		Field("request_id", requestID).
+		Field("job_id", job.ID).
+		Field("command", job.PromptBody).
+		Log(ctx)
 
 	// Determine the working directory
 	var workDir string
@@ -82,20 +77,23 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	workDir = ScopeToSubProject(workDir, job)
 
-	e.log.WithFields(logrus.Fields{
-		"job_id":     job.ID,
-		"request_id": requestID,
-		"plan_name":  plan.Name,
-		"command":    job.PromptBody,
-		"work_dir":   workDir,
-	}).Info("Executing shell job")
+	ulog.Info("Executing shell job").
+		Field("job_id", job.ID).
+		Field("request_id", requestID).
+		Field("plan_name", plan.Name).
+		Field("command", job.PromptBody).
+		Field("work_dir", workDir).
+		Log(ctx)
 
 	// Always regenerate context to ensure shell job has latest view, similar to oneshot executor
 	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(nil), e.config) // Pass config for SkipInteractive
 	if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan); err != nil {
 		// Warn but do not fail the job for a context error
-		e.log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to generate context for shell job")
-		e.prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: Failed to generate context: %v", err))
+		ulog.Warn("Failed to generate context for shell job").
+			Err(err).
+			Field("request_id", requestID).
+			Field("job_id", job.ID).
+			Log(ctx)
 	}
 
 	// The PromptBody contains the shell command to run
@@ -132,13 +130,13 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		}
 	}
 
-	e.log.WithFields(logrus.Fields{
-		"job_id":      job.ID,
-		"request_id":  requestID,
-		"exit_code":   exitCode,
-		"duration_ms": duration.Milliseconds(),
-		"success":     execErr == nil,
-	}).Info("Shell job execution completed")
+	ulog.Info("Shell job execution completed").
+		Field("job_id", job.ID).
+		Field("request_id", requestID).
+		Field("exit_code", exitCode).
+		Field("duration_ms", duration.Milliseconds()).
+		Field("success", execErr == nil).
+		Log(ctx)
 
 	// Output is streamed directly, so we don't need to persist it separately
 	// The TUI or other consumers will handle the output via the io.Writer
@@ -157,13 +155,12 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 			return execErr
 		}
 		// Otherwise, log the status update error and return the original execution error
-		e.log.WithFields(logrus.Fields{
-			"status": finalStatus,
-			"error":  statusUpdateErr,
-		}).Warn("Failed to update job status")
-		e.prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Warning: failed to update job status to %s: %v", finalStatus, statusUpdateErr))
+		ulog.Warn("Failed to update job status").
+			Field("status", finalStatus).
+			Err(statusUpdateErr).
+			Log(ctx)
 	}
-	
+
 	if execErr != nil {
 		exitCode := -1
 		if cmd.ProcessState != nil {
@@ -209,4 +206,3 @@ func (e *ShellExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Pla
 
 	return workspace.Prepare(ctx, opts)
 }
-
