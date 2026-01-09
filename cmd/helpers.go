@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-context/pkg/context"
+	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
 	"github.com/mattsolo1/grove-core/git"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/tui/theme"
 )
+
+var helpersUlog = grovelogging.NewUnifiedLogger("grove-flow.helpers")
 
 // configureGroveHooks copies the Claude hook settings to a worktree
 func configureGroveHooks(worktreePath string) error {
@@ -23,8 +28,11 @@ func configureGroveHooks(worktreePath string) error {
 	ecosystemRoot, err := findGroveEcosystemRoot()
 	if err != nil {
 		// Log warning but don't fail - hooks are optional
-		fmt.Printf("⚠️  Warning: Could not find grove ecosystem root: %v\n", err)
-		fmt.Printf("   Grove hooks will not be configured.\n")
+		ctx := context.Background()
+		helpersUlog.Warn("Could not find grove ecosystem root").
+			Err(err).
+			Pretty(theme.IconWarning + "  Warning: Could not find grove ecosystem root: " + err.Error() + "\n   Grove hooks will not be configured.").
+			Log(ctx)
 		return nil
 	}
 
@@ -34,8 +42,11 @@ func configureGroveHooks(worktreePath string) error {
 	// Check if source file exists
 	if _, err := os.Stat(sourceHookSettings); err != nil {
 		if os.IsNotExist(err) {
-			fmt.Printf("⚠️  Warning: Hook settings file not found at %s\n", sourceHookSettings)
-			fmt.Printf("   Grove hooks will not be configured.\n")
+			ctx := context.Background()
+			helpersUlog.Warn("Hook settings file not found").
+				Field("settings_path", sourceHookSettings).
+				Pretty(theme.IconWarning + "  Warning: Hook settings file not found at " + sourceHookSettings + "\n   Grove hooks will not be configured.").
+				Log(ctx)
 			return nil
 		}
 		return fmt.Errorf("failed to check hook settings file: %w", err)
@@ -51,7 +62,11 @@ func configureGroveHooks(worktreePath string) error {
 		return fmt.Errorf("failed to write hook settings to %s: %w", destHookSettings, err)
 	}
 
-	fmt.Printf("✓ Configured grove hooks in worktree.\n")
+	ctx := context.Background()
+	helpersUlog.Success("Configured grove hooks in worktree").
+		Field("worktree_path", worktreePath).
+		Pretty(theme.IconSuccess + " Configured grove hooks in worktree.").
+		Log(ctx)
 	return nil
 }
 
@@ -59,7 +74,7 @@ func configureGroveHooks(worktreePath string) error {
 func configureDefaultContextRules(repoPath string) error {
 	// Create a context manager scoped to the repository path. This is crucial
 	// for it to find the correct grove.yml for that specific repository.
-	mgr := context.NewManager(repoPath)
+	mgr := grovecontext.NewManager(repoPath)
 
 	// Load only the default rules content as defined by the repo's grove.yml.
 	// This function doesn't read any existing .grove/rules file.
@@ -81,7 +96,12 @@ func configureDefaultContextRules(repoPath string) error {
 		return fmt.Errorf("failed to write default rules to %s: %w", rulesDestPath, err)
 	}
 
-	fmt.Printf("✓ Applied default context rules to: %s\n", repoPath)
+	ctx := context.Background()
+	helpersUlog.Success("Applied default context rules").
+		Field("repo_path", repoPath).
+		Field("rules_path", rulesDestPath).
+		Pretty(theme.IconSuccess + " Applied default context rules to: " + repoPath).
+		Log(ctx)
 	return nil
 }
 
@@ -178,7 +198,13 @@ func configureGoWorkspace(worktreePath string, repos []string, provider *workspa
 		if err := os.WriteFile(filepath.Join(worktreePath, "go.work"), []byte(content.String()), 0644); err != nil {
 			return fmt.Errorf("failed to write go.work for ecosystem worktree: %w", err)
 		}
-		fmt.Printf("✓ Configured go.work in ecosystem worktree with %d Go modules.\n", len(goRepos))
+		ctx := context.Background()
+		helpersUlog.Success("Configured go.work in ecosystem worktree").
+			Field("worktree_path", worktreePath).
+			Field("go_modules_count", len(goRepos)).
+			Field("go_modules", goRepos).
+			Pretty(fmt.Sprintf(theme.IconSuccess+" Configured go.work in ecosystem worktree with %d Go modules.", len(goRepos))).
+			Log(ctx)
 	} else {
 		// Case 2: Single-repo worktree.
 		// Use the SetupGoWorkspaceForWorktree function which parses go.mod
@@ -201,7 +227,11 @@ func configureGoWorkspace(worktreePath string, repos []string, provider *workspa
 			// Read the file to count dependencies (optional, for better messaging)
 			config, _ := workspace.FindRootGoWorkspace(gitRoot)
 			if config != nil {
-				fmt.Printf("✓ Configured go.work with workspace dependencies.\n")
+				ctx := context.Background()
+				helpersUlog.Success("Configured go.work with workspace dependencies").
+					Field("worktree_path", worktreePath).
+					Pretty(theme.IconSuccess + " Configured go.work with workspace dependencies.").
+					Log(ctx)
 			}
 		}
 	}

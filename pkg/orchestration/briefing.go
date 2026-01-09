@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,7 +87,11 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 		gitChangesXML, err := GenerateGitChangesXML(workDir)
 		if err != nil {
 			// Log a warning but don't fail the job. The agent can still proceed.
-			fmt.Fprintf(os.Stderr, "Warning: failed to generate git changes for job %s: %v\n", job.ID, err)
+			ctx := context.Background()
+			ulog.Warn("Failed to generate git changes for job").
+				Field("job_id", job.ID).
+				Err(err).
+				Log(ctx)
 		} else if gitChangesXML != "" {
 			b.WriteString(gitChangesXML)
 		}

@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,7 +9,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 )
+
+var worktreeMgrUlog = grovelogging.NewUnifiedLogger("grove-flow.worktree-manager")
 
 // WorktreeManager handles git worktree lifecycle for job execution.
 type WorktreeManager struct {
@@ -254,7 +259,13 @@ func (wm *WorktreeManager) CleanupJobWorktree(job *Job) error {
 	}
 
 	if wm.config.CleanupPrompt {
-		fmt.Printf("Remove worktree '%s' for completed job? [y/N]: ", job.Worktree)
+		ctx := context.Background()
+		worktreeMgrUlog.Info("User prompt for worktree cleanup").
+			Field("worktree", job.Worktree).
+			Field("job_id", job.ID).
+			Pretty(fmt.Sprintf("Remove worktree '%s' for completed job? [y/N]: ", job.Worktree)).
+			PrettyOnly().
+			Log(ctx)
 		var response string
 		fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {

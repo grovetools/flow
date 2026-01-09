@@ -1,12 +1,16 @@
 package orchestration
 
 import (
-	"fmt"
+	"context"
 	"os"
 	"path/filepath"
 
 	"github.com/mattsolo1/grove-core/fs"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 )
+
+var worktreeUlog = grovelogging.NewUnifiedLogger("grove-flow.worktree")
 
 // CopyProjectFilesToWorktree is a setup handler for workspace.Prepare that copies
 // key project-level configuration files (like grove.yml and .cx) into a new worktree.
@@ -24,7 +28,10 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 		".cx.work",
 	}
 
-	fmt.Println("› Copying project configuration to new worktree...")
+	ctx := context.Background()
+	worktreeUlog.Progress("Copying project configuration to new worktree").
+		Pretty("› Copying project configuration to new worktree...").
+		Log(ctx)
 
 	// Copy files
 	for _, file := range filesToCopy {
@@ -34,9 +41,16 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 		if _, err := os.Stat(srcPath); err == nil {
 			if err := fs.CopyFile(srcPath, destPath); err != nil {
 				// Log a warning but don't fail the entire operation
-				fmt.Printf("  ⚠️  Warning: failed to copy %s: %v\n", file, err)
+				worktreeUlog.Warn("Failed to copy file").
+					Field("file", file).
+					Err(err).
+					Pretty("  " + theme.IconWarning + "  Warning: failed to copy " + file + ": " + err.Error()).
+					Log(ctx)
 			} else {
-				fmt.Printf("  ✓ Copied %s\n", file)
+				worktreeUlog.Success("Copied file").
+					Field("file", file).
+					Pretty("  " + theme.IconSuccess + " Copied " + file).
+					Log(ctx)
 			}
 		}
 	}
@@ -48,9 +62,16 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 
 		if _, err := os.Stat(srcPath); err == nil {
 			if err := fs.CopyDir(srcPath, destPath); err != nil {
-				fmt.Printf("  ⚠️  Warning: failed to copy directory %s: %v\n", dir, err)
+				worktreeUlog.Warn("Failed to copy directory").
+					Field("directory", dir).
+					Err(err).
+					Pretty("  " + theme.IconWarning + "  Warning: failed to copy directory " + dir + ": " + err.Error()).
+					Log(ctx)
 			} else {
-				fmt.Printf("  ✓ Copied directory %s/\n", dir)
+				worktreeUlog.Success("Copied directory").
+					Field("directory", dir).
+					Pretty("  " + theme.IconSuccess + " Copied directory " + dir + "/").
+					Log(ctx)
 			}
 		}
 	}

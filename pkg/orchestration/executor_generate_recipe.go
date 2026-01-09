@@ -12,7 +12,10 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/mattsolo1/grove-core/git"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/tui/theme"
 )
+
+var recipeUlog = grovelogging.NewUnifiedLogger("grove-flow.recipe")
 
 // GenerateRecipeExecutor handles generate-recipe jobs
 type GenerateRecipeExecutor struct {
@@ -188,9 +191,13 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 
 	// Print success message if interactive
 	if isatty.IsTerminal(os.Stdout.Fd()) {
-		fmt.Printf("\n✓ Recipe '%s' generated successfully\n", job.RecipeName)
-		fmt.Printf("  Location: %s\n", recipePath)
-		fmt.Printf("  Use with: flow plan init <name> --recipe %s\n", job.RecipeName)
+		recipeUlog.Success("Recipe generated successfully").
+			Field("recipe_name", job.RecipeName).
+			Field("recipe_path", recipePath).
+			Pretty("\n" + theme.IconSuccess + " Recipe '" + job.RecipeName + "' generated successfully\n" +
+				"  Location: " + recipePath + "\n" +
+				"  Use with: flow plan init <name> --recipe " + job.RecipeName).
+			Log(ctx)
 	}
 
 	return nil

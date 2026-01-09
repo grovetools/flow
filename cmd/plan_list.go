@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,11 +12,14 @@ import (
 
 	"github.com/mattsolo1/grove-core/cli"
 	"github.com/mattsolo1/grove-core/config"
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
+
+var planListUlog = grovelogging.NewUnifiedLogger("grove-flow.plan-list")
 
 var (
 	planListVerbose         bool
@@ -89,7 +93,10 @@ func runPlanList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(summaries) == 0 {
-		fmt.Println("No plans found.")
+		ctx := context.Background()
+		planListUlog.Info("No plans found").
+			PrettyOnly().
+			Log(ctx)
 		return nil
 	}
 

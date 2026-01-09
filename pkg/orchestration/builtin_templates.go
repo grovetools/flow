@@ -1,14 +1,18 @@
 package orchestration
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
 
+	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 )
+
+var templateUlog = grovelogging.NewUnifiedLogger("grove-flow.templates")
 
 //go:embed all:builtin_templates
 var builtinTemplateFS embed.FS
@@ -34,13 +38,23 @@ func init() {
 		// Read content
 		content, err := builtinTemplateFS.ReadFile(path)
 		if err != nil {
-			fmt.Printf("Warning: failed to load template %s: %v\n", templateName, err)
+			ctx := context.Background()
+			templateUlog.Warn("Failed to load builtin template").
+				Field("template_name", templateName).
+				Field("path", path).
+				Err(err).
+				Log(ctx)
 			return nil
 		}
 
 		fm, body, err := ParseFrontmatter(content)
 		if err != nil {
-			fmt.Printf("Warning: failed to parse template %s: %v\n", templateName, err)
+			ctx := context.Background()
+			templateUlog.Warn("Failed to parse builtin template").
+				Field("template_name", templateName).
+				Field("path", path).
+				Err(err).
+				Log(ctx)
 			return nil
 		}
 
