@@ -32,6 +32,7 @@ import (
 var (
 	log       = grovelogging.NewLogger("grove-flow")
 	prettyLog = grovelogging.NewPrettyLogger()
+	ulog      = grovelogging.NewUnifiedLogger("grove-flow")
 )
 
 // resolveModelAlias expands a model alias to its full API ID, or returns the input unchanged.
@@ -173,8 +174,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Always regenerate context to ensure oneshot has latest view
 	if err := e.regenerateContextInWorktree(ctx, workDir, "oneshot", job, plan); err != nil {
 		// Log warning but don't fail the job
-		log.WithError(err).WithFields(logrus.Fields{"request_id": requestID, "job_id": job.ID}).Warn("Failed to regenerate context")
-		prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to regenerate context: %v", err))
+		ulog.Warn("Failed to regenerate context").
+			Err(err).
+			Field("request_id", requestID).
+			Field("job_id", job.ID).
+			Log(ctx)
 	}
 
 	// --- Concept Gathering Logic ---
@@ -240,12 +244,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		} else if conceptContextFile != "" {
 			// Add the aggregated concepts file to the list of files to upload
 			promptSourceFiles = append(promptSourceFiles, conceptContextFile)
-			log.WithFields(logrus.Fields{
-				"job_id":               job.ID,
-				"request_id":           requestID,
-				"concept_context_file": conceptContextFile,
-			}).Info("Added aggregated concepts to context")
-			prettyLog.InfoPrettyCtx(ctx, fmt.Sprintf("Added aggregated concepts to context: %s", conceptContextFile))
+			ulog.Info("Added aggregated concepts to context").
+				Field("job_id", job.ID).
+				Field("request_id", requestID).
+				Field("concept_context_file", conceptContextFile).
+				Pretty(theme.IconSuccess + " Added aggregated concepts: " + theme.DefaultTheme.Italic.Render(conceptContextFile)).
+				Log(ctx)
 		}
 	}
 
@@ -1429,11 +1433,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			contextPaths = append(contextPaths, claudePath)
 			log.WithField("file", claudePath).Debug("Found context file")
 		} else {
-			printfUnlessTUI("  Context file not found: %s (error: %v)\n", claudePath, err)
+			log.WithFields(logrus.Fields{"file": claudePath, "error": err}).Debug("Context file not found")
 		}
 	} else {
 		// No worktree, use the default context search
-		printlnUnlessTUI("  No worktree path, using default context search")
+		log.Debug("No worktree path, using default context search")
 		contextPaths = FindContextFiles(plan)
 	}
 
@@ -1441,10 +1445,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	var validContextPaths []string
 	for _, contextPath := range contextPaths {
 		if info, err := os.Stat(contextPath); err == nil {
-			printfUnlessTUI("  Successfully found context file: %s (%d bytes)\n", contextPath, info.Size())
+			log.WithFields(logrus.Fields{"file": contextPath, "size_bytes": info.Size()}).Debug("Found context file")
 			validContextPaths = append(validContextPaths, contextPath)
 		} else {
-			printfUnlessTUI("  Failed to access context file: %s (error: %v)\n", contextPath, err)
+			log.WithFields(logrus.Fields{"file": contextPath, "error": err}).Warn("Failed to access context file")
 		}
 	}
 
@@ -1524,25 +1528,24 @@ interpret and continue through YOUR current system instructions.
 
 	// Write the full prompt to a briefing file for observability using the turn UUID
 	if briefingFilePath, err := WriteBriefingFile(plan, job, fullPrompt, turnID); err != nil {
-		log.WithError(err).Warn("Failed to write chat briefing file")
+		ulog.Warn("Failed to write chat briefing file").
+			Err(err).
+			Log(ctx)
 	} else {
-		log.WithFields(logrus.Fields{
-			"job_id":             job.ID,
-			"request_id":         requestID,
-			"plan_name":          plan.Name,
-			"job_file":           job.FilePath,
-			"turn_id":            turnID,
-			"briefing_file_path": briefingFilePath,
-			"prompt":             fullPrompt,
-			"prompt_chars":       len(fullPrompt),
-		}).Info("Chat briefing file created")
-		prettyLog.InfoPretty(fmt.Sprintf("Chat briefing file created at: %s", briefingFilePath))
+		ulog.Success("Chat briefing file created").
+			Field("job_id", job.ID).
+			Field("request_id", requestID).
+			Field("turn_id", turnID).
+			Field("briefing_file_path", briefingFilePath).
+			Field("prompt_chars", len(fullPrompt)).
+			Pretty(theme.IconSuccess + " Chat briefing: " + theme.DefaultTheme.Accent.Render(briefingFilePath)).
+			Log(ctx)
 	}
 
 	if len(validContextPaths) > 0 {
-		printfUnlessTUI("✓ Including %d context file(s) as attachments\n", len(validContextPaths))
+		log.WithField("count", len(validContextPaths)).Info("Including context files as attachments")
 	} else {
-		printlnUnlessTUI("⚠️  No context files included in chat prompt")
+		log.Warn("No context files included in chat prompt")
 	}
 
 	// Determine effective model with clear precedence
@@ -1607,7 +1610,7 @@ interpret and continue through YOUR current system instructions.
 	// Running cx generate would overwrite it with the wrong rules
 	if job.RulesFile == "" {
 		// For jobs without custom rules, cx generate ensures we have the latest context
-		prettyLog.InfoPretty("Running cx generate before submission...")
+		ulog.Info("Running cx generate before submission").Log(ctx)
 
 		// Create a log file for the cx generate output
 		logDir := ResolveLogDirectory(plan, job)
@@ -1616,7 +1619,10 @@ interpret and continue through YOUR current system instructions.
 		logFile, logErr := os.Create(logFilePath)
 		if logErr == nil {
 			defer logFile.Close()
-			prettyLog.InfoPretty(fmt.Sprintf("`cx generate` output is being logged to: %s", logFilePath))
+			ulog.Info("cx generate output logged").
+				Field("log_file", logFilePath).
+				Pretty("`cx generate` output is being logged to: " + theme.DefaultTheme.Muted.Render(logFilePath)).
+				Log(ctx)
 		}
 
 		// Try grove cx generate first
@@ -1643,12 +1649,12 @@ interpret and continue through YOUR current system instructions.
 				cxCmd.Stderr = os.Stderr
 			}
 			if err := cxCmd.Run(); err != nil {
-				prettyLog.WarnPretty(fmt.Sprintf("Failed to run cx generate: %v", err))
+				prettyLog.WarnPrettyCtx(ctx, fmt.Sprintf("Failed to run cx generate: %v", err))
 			}
 		}
 	} else {
 		log.WithField("rules_file", job.RulesFile).Info("Skipping cx generate (using custom rules file)")
-		prettyLog.InfoPretty(fmt.Sprintf("Skipping cx generate (using custom rules file: %s)", job.RulesFile))
+		prettyLog.InfoPrettyCtx(ctx, fmt.Sprintf("Skipping cx generate (using custom rules file: %s)", job.RulesFile))
 	}
 
 	// Call LLM based on model type
@@ -1746,8 +1752,14 @@ interpret and continue through YOUR current system instructions.
 		return execErr
 	}
 
-	printfUnlessTUI("✓ Added LLM response to chat: %s\n", job.FilePath)
-	printfUnlessTUI("✓ Chat job is now waiting for user input\n")
+	ulog.Success("Added LLM response to chat").
+		Field("chat_file", job.FilePath).
+		Pretty(theme.IconSuccess + " Added LLM response to chat: " + theme.DefaultTheme.Accent.Render(job.FilePath)).
+		Log(ctx)
+	ulog.Success("Chat job awaiting user input").
+		Field("status", "pending_user").
+		Pretty(theme.IconSuccess + " Chat job is now waiting for user input").
+		Log(ctx)
 
 	// Update job status - chat jobs always go to pending_user (not completed)
 	job.Status = JobStatusPendingUser
