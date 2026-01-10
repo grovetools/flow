@@ -485,6 +485,17 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 			logger := logging.NewLogger("flow-tui")
 			defer logFile.Close()
 			defer stdout.Close()
+
+			// Recover from any panics in the streaming goroutine
+			// This can happen if program.Send() is called after the TUI is shutting down
+			defer func() {
+				if r := recover(); r != nil {
+					logger.WithFields(map[string]interface{}{
+						"panic": r,
+					}).Warn("Recovered from panic in agent log streaming goroutine")
+				}
+			}()
+
 			scanner := bufio.NewScanner(stdout)
 			lineCount := 0
 			for scanner.Scan() {
@@ -505,11 +516,22 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 
 				// Send to TUI as a LogLineMsg with job.ID to tag the source
 				// NoPrefix=true prevents the logviewer from adding [job-id] prefix
-				program.Send(logviewer.LogLineMsg{
-					Workspace: job.ID,
-					Line:      displayLine,
-					NoPrefix:  true,
-				})
+				// Wrapped in a func to allow recover() to catch any panics from program.Send()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.WithFields(map[string]interface{}{
+								"panic":      r,
+								"line_count": lineCount,
+							}).Warn("Recovered from panic when sending log line to TUI")
+						}
+					}()
+					program.Send(logviewer.LogLineMsg{
+						Workspace: job.ID,
+						Line:      displayLine,
+						NoPrefix:  true,
+					})
+				}()
 			}
 			if err := scanner.Err(); err != nil {
 				logger.WithFields(map[string]interface{}{
@@ -564,130 +586,120 @@ func refreshTick() tea.Cmd {
 }
 
 // runJobsWithOrchestrator executes jobs using the orchestrator and streams output to the TUI.
+// IMPORTANT: This function spawns a background goroutine and returns immediately to avoid
+// blocking the bubbletea event loop. The goroutine sends JobRunFinishedMsg when done.
 func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program) tea.Cmd {
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
 			"num_jobs": len(jobs),
-		}).Info("runJobsWithOrchestrator started")
+		}).Info("runJobsWithOrchestrator started - spawning background goroutine")
 
 		// TUI mode is already set in newStatusTUIModel, but ensure it's set here too
 		os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
-		// Save original stdout/stderr
-		oldStdout := os.Stdout
-		oldStderr := os.Stderr
-		oldGlobalOutput := logging.GetGlobalOutput()
-
-		ctx := context.Background()
-
-		// 1. Create a StreamWriter for live TUI updates with smart tagging.
-		// If running a single job, tag with that job's ID so the log viewer can filter correctly.
-		// If running multiple jobs, use a generic tag so all logs are shown.
-		var writerTag string
-		if len(jobs) == 1 {
-			// Single job: tag with the specific job ID
-			writerTag = jobs[0].ID
-		} else {
-			// Multiple jobs: use generic tag
-			writerTag = "Job Output"
-		}
-		tuiWriter := logviewer.NewStreamWriter(program, writerTag)
-
-		// If running a single job, the log viewer is already focused on it,
-		// so the job ID prefix on each line is redundant. Disable it.
-		if len(jobs) == 1 {
-			tuiWriter.NoWorkspacePrefix = true
-		}
-
-		// 2. Set global logging output to the TUI writer. This captures all grove-core logs.
-		logging.SetGlobalOutput(tuiWriter)
-
-		// 3. Redirect process-level stdout/stderr to a pipe. This is the master capture net.
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-		os.Stderr = w
-
-		// 4. Start a single reader goroutine to read from the pipe and forward to the TUI writer.
-		// This serializes all captured output for the TUI.
-		pipeReaderDone := make(chan struct{})
+		// Spawn background goroutine to run jobs - DO NOT block the tea.Cmd
+		// This is critical to avoid deadlocks with bubbletea's event loop
 		go func() {
-			defer close(pipeReaderDone)
-			// io.Copy will block until the reader (r) is closed.
-			io.Copy(tuiWriter, r)
+			// Recover from any panics in the background goroutine
+			defer func() {
+				if r := recover(); r != nil {
+					logger.WithFields(map[string]interface{}{
+						"panic": r,
+					}).Error("Panic recovered in runJobsWithOrchestrator background goroutine")
+					program.Send(JobRunFinishedMsg{Err: fmt.Errorf("panic during job execution: %v", r)})
+				}
+			}()
+
+			ctx := context.Background()
+
+			// Create a StreamWriter for live TUI updates with smart tagging.
+			var writerTag string
+			if len(jobs) == 1 {
+				writerTag = jobs[0].ID
+			} else {
+				writerTag = "Job Output"
+			}
+			tuiWriter := logviewer.NewStreamWriter(program, writerTag)
+
+			if len(jobs) == 1 {
+				tuiWriter.NoWorkspacePrefix = true
+			}
+
+			// Run jobs concurrently
+			var wg sync.WaitGroup
+			errChan := make(chan error, len(jobs))
+
+			for _, job := range jobs {
+				wg.Add(1)
+				go func(j *orchestration.Job) {
+					defer wg.Done()
+					// Recover from panics in individual job goroutines
+					defer func() {
+						if r := recover(); r != nil {
+							logger.WithFields(map[string]interface{}{
+								"job_id": j.ID,
+								"panic":  r,
+							}).Error("Panic recovered in job execution goroutine")
+							errChan <- fmt.Errorf("job %s panicked: %v", j.ID, r)
+						}
+					}()
+
+					logger.WithFields(map[string]interface{}{
+						"job_id":       j.ID,
+						"job_filename": j.Filename,
+					}).Info("Executing job via orchestrator")
+
+					// Get the log file path for this specific job
+					logFilePath, err := orchestration.GetJobLogPath(orchestrator.Plan, j)
+					if err != nil {
+						errChan <- fmt.Errorf("failed to get log path for job %s: %w", j.ID, err)
+						return
+					}
+
+					// Open the job's log file for appending
+					logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					if err != nil {
+						errChan <- fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
+						return
+					}
+					defer logFile.Close()
+
+					// Create a MultiWriter for this job - output goes to both log file and TUI
+					// DO NOT redirect os.Stdout - that breaks bubbletea!
+					multiWriter := io.MultiWriter(logFile, tuiWriter)
+
+					// Execute the job
+					if execErr := orchestrator.ExecuteJobWithWriter(ctx, j, multiWriter); execErr != nil {
+						errChan <- fmt.Errorf("job %s failed: %w", j.ID, execErr)
+					}
+				}(job)
+			}
+
+			// Wait for all jobs to finish
+			wg.Wait()
+
+			close(errChan)
+			var execErrors []error
+			for err := range errChan {
+				execErrors = append(execErrors, err)
+			}
+
+			// Send completion message to TUI
+			if len(execErrors) > 0 {
+				var errStrings []string
+				for _, e := range execErrors {
+					errStrings = append(errStrings, e.Error())
+				}
+				program.Send(JobRunFinishedMsg{Err: fmt.Errorf(strings.Join(errStrings, "\n"))})
+			} else {
+				logger.Info("All jobs completed successfully")
+				program.Send(JobRunFinishedMsg{Err: nil})
+			}
 		}()
 
-		// 5. Run jobs concurrently.
-		var wg sync.WaitGroup
-		errChan := make(chan error, len(jobs))
-
-		for _, job := range jobs {
-			wg.Add(1)
-			go func(j *orchestration.Job) {
-				defer wg.Done()
-
-				logger.WithFields(map[string]interface{}{
-					"job_id":       j.ID,
-					"job_filename": j.Filename,
-				}).Info("Executing job via orchestrator")
-
-				// Get the log file path for this specific job.
-				logFilePath, err := orchestration.GetJobLogPath(orchestrator.Plan, j)
-				if err != nil {
-					errChan <- fmt.Errorf("failed to get log path for job %s: %w", j.ID, err)
-					return
-				}
-
-				// Open the job's log file for appending.
-				logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-				if err != nil {
-					errChan <- fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
-					return
-				}
-				defer logFile.Close()
-
-				// Create a MultiWriter for this job. Output goes to both:
-				// 1. The job's persistent log file.
-				// 2. The global stdout pipe, which is captured and sent to the TUI.
-				// We pass os.Stdout here because it's been redirected to our pipe.
-				multiWriter := io.MultiWriter(logFile, os.Stdout)
-
-				// Execute the job using the new primitive, passing the MultiWriter.
-				// Note: The orchestrator already logs errors internally, so we don't
-				// duplicate the error log here - just send to the error channel.
-				if execErr := orchestrator.ExecuteJobWithWriter(ctx, j, multiWriter); execErr != nil {
-					errChan <- fmt.Errorf("job %s failed: %w", j.ID, execErr)
-				}
-			}(job)
-		}
-
-		// 6. Wait for all jobs to finish.
-		wg.Wait()
-
-		// 7. Clean up and restore global state.
-		w.Close()           // Close the writer end of the pipe, which unblocks the reader goroutine.
-		<-pipeReaderDone    // Wait for the reader goroutine to finish processing all pipe data.
-		os.Stdout = oldStdout // Restore original stdout.
-		os.Stderr = oldStderr // Restore original stderr.
-		logging.SetGlobalOutput(oldGlobalOutput) // Restore original global logger output.
-
-		close(errChan)
-		var execErrors []error
-		for err := range errChan {
-			execErrors = append(execErrors, err)
-		}
-
-		if len(execErrors) > 0 {
-			// Combine multiple errors into one.
-			var errStrings []string
-			for _, e := range execErrors {
-				errStrings = append(errStrings, e.Error())
-			}
-			return JobRunFinishedMsg{Err: fmt.Errorf(strings.Join(errStrings, "\n"))}
-		}
-
-		logger.Info("All jobs completed successfully")
-		return JobRunFinishedMsg{Err: nil}
+		// Return nil immediately - the goroutine will send JobRunFinishedMsg when done
+		return nil
 	}
 }
 
@@ -931,13 +943,26 @@ func viewLogsCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	}
 }
 
+// JobCompletedMsg is sent when a job completion attempt finishes
+type JobCompletedMsg struct {
+	Err error
+}
+
 func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan, completeJobFunc func(*orchestration.Job, *orchestration.Plan, bool) error) tea.Cmd {
 	return func() tea.Msg {
 		// Use the shared completion function (silent mode for TUI)
-		if err := completeJobFunc(job, plan, true); err != nil {
-			return err
-		}
-		return RefreshMsg{} // Refresh to show the status change
+		// Wrap in defer/recover to catch any panics from exec.Command calls
+		var err error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic during job completion: %v", r)
+				}
+			}()
+			err = completeJobFunc(job, plan, true)
+		}()
+
+		return JobCompletedMsg{Err: err}
 	}
 }
 

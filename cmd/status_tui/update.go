@@ -232,6 +232,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, refreshPlan(m.PlanDir)
 
+	case JobCompletedMsg:
+		// Job completion finished (from 'c' key)
+		if msg.Err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error completing job: %v", msg.Err))
+		} else {
+			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job marked as completed.")
+		}
+		// Refresh the plan to show the updated status
+		return m, refreshPlan(m.PlanDir)
+
 	case JobRunFinishedMsg:
 		// Job run completed
 		m.IsRunningJob = false
