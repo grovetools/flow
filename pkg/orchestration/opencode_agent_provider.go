@@ -13,6 +13,7 @@ import (
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/sirupsen/logrus"
@@ -133,8 +134,10 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	}
 
 	agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
-	p.ulog.Info("Creating window for opencode agent").
+	p.ulog.Info("Launching OpenCode agent in worktree session").
 		Field("window", agentWindowName).
+		Field("session", sessionName).
+		Pretty(theme.IconWorktree + " Launching OpenCode agent in worktree session").
 		Log(ctx)
 
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
@@ -202,7 +205,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	if !isTUIMode {
 		p.ulog.Info("").Pretty("").Log(ctx) // blank line
 		p.ulog.Info("Task completion instructions").
-			Pretty("👉 When your task is complete, run the following:").
+			Pretty(theme.IconArrow + " When your task is complete, run the following:").
 			Log(ctx)
 		p.ulog.Info("").
 			Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).

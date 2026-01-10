@@ -485,8 +485,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Create a new window for this specific agent job in the session
 		agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
-		p.ulog.Info("Creating window for agent").
+		p.ulog.Info("Launching agent in worktree session").
 			Field("window", agentWindowName).
+			Field("session", sessionName).
+			Pretty(theme.IconWorktree + " Launching agent in worktree session").
 			Log(ctx)
 
 		// Build new-window command args - add -d flag if in TUI mode to prevent auto-select
@@ -577,7 +579,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
 			p.ulog.Info("").Pretty("").Log(ctx) // blank line
 			p.ulog.Info("Task completion instructions").
-				Pretty("👉 When your task is complete, run the following in any terminal:").
+				Pretty(theme.IconArrow + " When your task is complete, run the following in any terminal:").
 				Log(ctx)
 			p.ulog.Info("").
 				Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).
@@ -632,10 +634,11 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	// Create new window
-	p.ulog.Info("Creating tmux window").
+	p.ulog.Info("Launching agent in project session").
 		Field("session", sessionName).
 		Field("window", windowName).
 		Field("workdir", workDir).
+		Pretty(theme.IconRepo + " Launching agent in project session").
 		Log(ctx)
 
 	executor := &flowexec.RealCommandExecutor{}
@@ -694,7 +697,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	time.Sleep(100 * time.Millisecond)
 
-	p.ulog.Info("Sending command to tmux pane").
+	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)
 	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
@@ -712,9 +715,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		}
 	}()
 
-	p.ulog.Success("Interactive host session launched").
+	p.ulog.Success("Interactive session launched").
 		Field("window", windowName).
-		Pretty(fmt.Sprintf("🚀 Interactive host session launched in window '%s'.", windowName)).
+		Pretty(theme.IconSuccess + " Interactive session launched in window '" + windowName + "'").
 		Log(ctx)
 	p.ulog.Info("").
 		Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
@@ -724,7 +727,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
 		p.ulog.Info("").Pretty("").Log(ctx) // blank line
 		p.ulog.Info("Task completion instructions").
-			Pretty("👉 When your task is complete, run the following in any terminal:").
+			Pretty(theme.IconArrow + " When your task is complete, run the following in any terminal:").
 			Log(ctx)
 		p.ulog.Info("").
 			Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).

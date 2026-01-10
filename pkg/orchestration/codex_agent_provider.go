@@ -13,6 +13,7 @@ import (
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/pkg/sessions"
 	"github.com/mattsolo1/grove-core/pkg/tmux"
+	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-core/util/sanitize"
 	"github.com/mattsolo1/grove-flow/pkg/exec"
 	"github.com/sirupsen/logrus"
@@ -104,8 +105,10 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// Create a new window for this specific agent job in the session
 	agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
-	p.ulog.Info("Creating window for agent").
+	p.ulog.Info("Launching Codex agent in worktree session").
 		Field("window", agentWindowName).
+		Field("session", sessionName).
+		Pretty(theme.IconWorktree + " Launching Codex agent in worktree session").
 		Log(ctx)
 
 	// Build new-window command args - add -d flag if in TUI mode to prevent auto-select
@@ -276,7 +279,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
 		p.ulog.Info("").Pretty("").Log(ctx) // blank line
 		p.ulog.Info("Task completion instructions").
-			Pretty("👉 When your task is complete, run the following in any terminal:").
+			Pretty(theme.IconArrow + " When your task is complete, run the following in any terminal:").
 			Log(ctx)
 		p.ulog.Info("").
 			Pretty(fmt.Sprintf("   flow plan complete %s", job.FilePath)).
