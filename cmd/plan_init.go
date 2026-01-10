@@ -161,6 +161,10 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			fmt.Printf("%s  Warning: could not apply default context rules: %v\n", theme.IconWarning, err)
 		}
 
+		// Note: Skills are NOT synced to worktrees because Claude Code traverses
+		// up the directory tree to find .claude/skills/. Skills should be installed
+		// once at the ecosystem root using: grove-skills sync --here
+
 		// Configure go.work file for the worktree.
 		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {
 			// This is not a fatal error, but the user should be aware of it.
@@ -535,6 +539,10 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
 			fmt.Printf("%s  Warning: could not apply default context rules: %v\n", theme.IconWarning, err)
 		}
+
+		// Note: Skills are NOT synced to worktrees because Claude Code traverses
+		// up the directory tree to find .claude/skills/. Skills should be installed
+		// once at the ecosystem root using: grove-skills sync --here
 
 		// Configure go.work file for the worktree.
 		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {

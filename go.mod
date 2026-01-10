@@ -14,6 +14,7 @@ require (
 	github.com/mattsolo1/grove-context v0.5.0
 	github.com/mattsolo1/grove-core v0.4.0
 	github.com/mattsolo1/grove-gemini v0.2.0
+	github.com/mattsolo1/grove-skills v0.2.0
 	github.com/mattsolo1/grove-tend v0.4.0
 	github.com/muesli/termenv v0.16.0
 	github.com/sirupsen/logrus v1.9.3

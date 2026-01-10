@@ -7,7 +7,9 @@ import (
 
 	"github.com/mattsolo1/grove-core/fs"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-skills/pkg/skills"
 )
 
 var worktreeUlog = grovelogging.NewUnifiedLogger("grove-flow.worktree")
@@ -74,6 +76,53 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 					Log(ctx)
 			}
 		}
+	}
+
+	return nil
+}
+
+// SyncSkillsToWorktree copies skills from all sources to a new worktree.
+// Skills are collected from multiple sources with the following precedence (higher wins):
+//   1. User skills from ~/.config/grove/skills
+//   2. Ecosystem skills from the notebook (if project is part of an ecosystem)
+//   3. Project skills from the notebook
+//
+// This delegates to grove-skills for the actual discovery and sync logic.
+func SyncSkillsToWorktree(worktreePath string, node *workspace.WorkspaceNode) error {
+	ctx := context.Background()
+
+	// Create a minimal service for skill operations
+	svc, err := skills.NewServiceForNode(node)
+	if err != nil {
+		worktreeUlog.Debug("Could not create skill service").
+			Err(err).
+			Log(ctx)
+		return nil // Non-fatal: skills sync is optional
+	}
+
+	// Get the destination directory for skills
+	destDir := skills.GetSkillsDirectoryForWorktree(worktreePath, "claude")
+
+	worktreeUlog.Progress("Syncing skills to worktree").
+		Pretty("› Syncing skills to worktree...").
+		Log(ctx)
+
+	// Use grove-skills to sync all discoverable skills
+	syncedCount, err := skills.SyncSkillsToDirectory(svc, node, destDir)
+	if err != nil {
+		worktreeUlog.Warn("Some skills failed to sync").
+			Err(err).
+			Pretty("  " + theme.IconWarning + " Warning: some skills failed to sync: " + err.Error()).
+			Log(ctx)
+	}
+
+	if syncedCount > 0 {
+		worktreeUlog.Success("Skills sync complete").
+			Field("count", syncedCount).
+			Pretty("  " + theme.IconSuccess + " Synced " + string(rune('0'+syncedCount)) + " skills").
+			Log(ctx)
+	} else {
+		worktreeUlog.Debug("No skills found to sync").Log(ctx)
 	}
 
 	return nil
