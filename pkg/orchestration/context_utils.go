@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattsolo1/grove-core/git"
 	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/mattsolo1/grove-core/util/pathutil"
 )
 
 // DetermineWorkingDirectory determines the working directory for a job based on
@@ -45,6 +46,13 @@ func DetermineWorkingDirectory(plan *Plan, job *Job) (string, error) {
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	workDir = ScopeToSubProject(workDir, job)
+
+	// Normalize the path to get canonical case (important on macOS)
+	// This ensures paths like /users/solom4/code become /Users/solom4/Code
+	// which is required for matching Claude's project directory paths.
+	if canonical, err := pathutil.CanonicalPath(workDir); err == nil {
+		workDir = canonical
+	}
 
 	return workDir, nil
 }

@@ -829,16 +829,32 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	}
 	sanitizedPath := sanitizePathForClaude(workDir)
 
-	// Try to find Claude session ID (non-blocking, use job ID as fallback)
+	// Try to find Claude session ID with retries (Claude may take a few seconds to create its session file)
 	claudeSessionID := job.ID // Default fallback
-	if foundSessionID, err := p.findClaudeSessionID(workDir, jobStartTime, logger); err == nil {
-		claudeSessionID = foundSessionID
-		logger.WithField("claude_session_id", claudeSessionID).Debug("Found Claude session ID")
-	} else {
-		logger.WithFields(logrus.Fields{
-			"error":    err,
-			"fallback": job.ID,
-		}).Debug("Claude session ID not found, using job ID as fallback")
+	maxSessionRetries := 10
+	for i := 0; i < maxSessionRetries; i++ {
+		if foundSessionID, err := p.findClaudeSessionID(workDir, jobStartTime, logger); err == nil {
+			claudeSessionID = foundSessionID
+			logger.WithFields(logrus.Fields{
+				"claude_session_id": claudeSessionID,
+				"retry_count":       i,
+			}).Debug("Found Claude session ID")
+			break
+		} else {
+			if i == maxSessionRetries-1 {
+				logger.WithFields(logrus.Fields{
+					"error":       err,
+					"fallback":    job.ID,
+					"retry_count": i,
+				}).Warn("Claude session ID not found after retries, using job ID as fallback")
+			} else {
+				logger.WithFields(logrus.Fields{
+					"error":       err,
+					"retry_count": i,
+				}).Debug("Claude session ID not found yet, retrying...")
+				time.Sleep(1 * time.Second)
+			}
+		}
 	}
 
 	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
