@@ -830,23 +830,27 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	sanitizedPath := sanitizePathForClaude(workDir)
 
 	// Try to find Claude session ID with retries (Claude may take a few seconds to create its session file)
-	claudeSessionID := job.ID // Default fallback
+	var claudeSessionID string
+	var transcriptPath string
 	maxSessionRetries := 10
 	for i := 0; i < maxSessionRetries; i++ {
 		if foundSessionID, err := p.findClaudeSessionID(workDir, jobStartTime, logger); err == nil {
 			claudeSessionID = foundSessionID
+			transcriptPath = filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
 			logger.WithFields(logrus.Fields{
 				"claude_session_id": claudeSessionID,
+				"transcript_path":   transcriptPath,
 				"retry_count":       i,
 			}).Debug("Found Claude session ID")
 			break
 		} else {
 			if i == maxSessionRetries-1 {
+				// Don't use job ID as fallback for claude_session_id since it creates
+				// a non-existent transcript path. Leave empty and let aglogs scan for it.
 				logger.WithFields(logrus.Fields{
 					"error":       err,
-					"fallback":    job.ID,
 					"retry_count": i,
-				}).Warn("Claude session ID not found after retries, using job ID as fallback")
+				}).Warn("Claude session ID not found after retries, transcript path will be empty")
 			} else {
 				logger.WithFields(logrus.Fields{
 					"error":       err,
@@ -856,8 +860,6 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 			}
 		}
 	}
-
-	transcriptPath := filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
 
 	// Create metadata with the discovered PID
 	metadata := sessions.SessionMetadata{

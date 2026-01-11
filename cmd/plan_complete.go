@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 
 	"github.com/fatih/color"
@@ -21,12 +20,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// loggedSessionLookups tracks job IDs we've already logged "found session" for,
-// to avoid spamming logs when the function is called repeatedly by the TUI.
-var (
-	loggedSessionLookups   = make(map[string]bool)
-	loggedSessionLookupsMu sync.Mutex
-)
 
 var planCompleteCmd = &cobra.Command{
 	Use:   "complete <job-file>",
@@ -422,18 +415,14 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 				return 0, "", fmt.Errorf("parse pid for session %s: %w", jobID, err)
 			}
 
-			// Only log "found session" once per job to avoid log spam from repeated TUI polling
-			loggedSessionLookupsMu.Lock()
-			if !loggedSessionLookups[jobID] {
-				loggedSessionLookups[jobID] = true
-				log.WithFields(logrus.Fields{
-					"job_id":      jobID,
-					"pid":         pid,
-					"session_dir": currentSessionDir,
-					"provider":    fullMetadata.Provider,
-				}).Info("Successfully found session info for job")
-			}
-			loggedSessionLookupsMu.Unlock()
+			// Log at Debug level to avoid log spam from repeated TUI polling
+			// (the in-memory deduplication map doesn't work across process boundaries)
+			log.WithFields(logrus.Fields{
+				"job_id":      jobID,
+				"pid":         pid,
+				"session_dir": currentSessionDir,
+				"provider":    fullMetadata.Provider,
+			}).Debug("Found session info for job")
 
 			return pid, currentSessionDir, nil
 		}
