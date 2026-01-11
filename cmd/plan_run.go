@@ -343,85 +343,64 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// Handle different run modes
 	var runErr error
 	if len(targetJobs) > 0 {
-		// Run one or more specific jobs
+		// Run one or more specific jobs - build a valid sub-plan with dependencies
+		subPlan := &orchestration.Plan{
+			Name:          plan.Name,
+			Directory:     plan.Directory,
+			Jobs:          []*orchestration.Job{},
+			JobsByID:      make(map[string]*orchestration.Job),
+			Config:        plan.Config,
+			Orchestration: plan.Orchestration,
+		}
+
+		// Collect selected jobs and all their transitive dependencies
+		jobMap := make(map[string]*orchestration.Job)
+		var collectDeps func(job *orchestration.Job)
+		collectDeps = func(job *orchestration.Job) {
+			if _, exists := jobMap[job.ID]; exists {
+				return // Already added
+			}
+			jobMap[job.ID] = job
+
+			// Recursively add dependencies
+			for _, depID := range job.DependsOn {
+				if depJob, found := plan.GetJobByID(depID); found {
+					collectDeps(depJob)
+				} else if depJob, found := plan.GetJobByFilename(depID); found {
+					collectDeps(depJob)
+				}
+			}
+		}
+
+		// Start with the selected jobs
+		for _, jobFile := range targetJobs {
+			job, found := plan.GetJobByFilename(jobFile)
+			if found {
+				collectDeps(job)
+			}
+		}
+
+		// Build the jobs list from the map
+		for _, job := range jobMap {
+			subPlan.Jobs = append(subPlan.Jobs, job)
+		}
+		subPlan.JobsByID = jobMap
+
+		if err := subPlan.ResolveDependencies(); err != nil {
+			return fmt.Errorf("resolving dependencies for job subset: %w", err)
+		}
+
+		// Create a new orchestrator for the sub-plan
+		subOrch, err := orchestration.NewOrchestrator(subPlan, orchConfig)
+		if err != nil {
+			return fmt.Errorf("create orchestrator for subset: %w", err)
+		}
+
 		if len(targetJobs) == 1 {
 			// For single job execution, create a single-job sub-plan
 			// This ensures chat jobs execute directly without confirmation dialogs
-			job, found := plan.GetJobByFilename(targetJobs[0])
-			if !found {
-				return fmt.Errorf("job not found: %s", targetJobs[0])
-			}
-
-			singleJobPlan := &orchestration.Plan{
-				Name:          plan.Name,
-				Directory:     plan.Directory,
-				Jobs:          []*orchestration.Job{job},
-				JobsByID:      map[string]*orchestration.Job{job.ID: job},
-				Config:        plan.Config,
-				Orchestration: plan.Orchestration,
-			}
-
-			// Create orchestrator with single-job plan
-			singleOrch, err := orchestration.NewOrchestrator(singleJobPlan, orchConfig)
-			if err != nil {
-				return fmt.Errorf("create orchestrator: %w", err)
-			}
-
-			runErr = runSingleJob(ctx, singleOrch, singleJobPlan, targetJobs[0])
+			runErr = runSingleJob(ctx, subOrch, subPlan, targetJobs[0], true)
 		} else {
-			// Create a sub-plan with selected jobs and their dependencies
-			subPlan := &orchestration.Plan{
-				Name:          plan.Name,
-				Directory:     plan.Directory,
-				Jobs:          []*orchestration.Job{},
-				JobsByID:      make(map[string]*orchestration.Job),
-				Config:        plan.Config,
-				Orchestration: plan.Orchestration,
-			}
-
-			// Collect selected jobs and all their transitive dependencies
-			jobMap := make(map[string]*orchestration.Job)
-			var collectDeps func(job *orchestration.Job)
-			collectDeps = func(job *orchestration.Job) {
-				if _, exists := jobMap[job.ID]; exists {
-					return // Already added
-				}
-				jobMap[job.ID] = job
-
-				// Recursively add dependencies
-				for _, depID := range job.DependsOn {
-					if depJob, found := plan.GetJobByID(depID); found {
-						collectDeps(depJob)
-					} else if depJob, found := plan.GetJobByFilename(depID); found {
-						collectDeps(depJob)
-					}
-				}
-			}
-
-			// Start with the selected jobs
-			for _, jobFile := range targetJobs {
-				job, found := plan.GetJobByFilename(jobFile)
-				if found {
-					collectDeps(job)
-				}
-			}
-
-			// Build the jobs list from the map
-			for _, job := range jobMap {
-				subPlan.Jobs = append(subPlan.Jobs, job)
-			}
-			subPlan.JobsByID = jobMap
-
-			if err := subPlan.ResolveDependencies(); err != nil {
-				return fmt.Errorf("resolving dependencies for job subset: %w", err)
-			}
-
-			// Create a new orchestrator for the sub-plan
-			subOrch, err := orchestration.NewOrchestrator(subPlan, orchConfig)
-			if err != nil {
-				return fmt.Errorf("create orchestrator for subset: %w", err)
-			}
-
 			// Count how many jobs were originally selected vs dependencies
 			selectedCount := len(targetJobs)
 			depCount := len(subPlan.Jobs) - selectedCount
@@ -468,7 +447,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 }
 
 // runSingleJob executes a specific job.
-func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *orchestration.Plan, jobFile string) error {
+func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *orchestration.Plan, jobFile string, skipConfirm bool) error {
 	// Find the job
 	job, found := plan.GetJobByFilename(jobFile)
 	if !found {
@@ -497,11 +476,7 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 			jobFile, strings.Join(unmetDeps, ", "))
 	}
 
-	// For single-job direct execution (len(plan.Jobs) == 1), skip confirmation
-	// The user's intent is clear when they run `flow run <specific-file>`
-	isSingleJobExecution := len(plan.Jobs) == 1
-
-	if !isSingleJobExecution {
+	if !skipConfirm {
 		// Show job details for plan-based execution
 		fmt.Printf("Job: %s\n", color.CyanString(job.Title))
 		fmt.Printf("Status: %s → %s\n", job.Status, orchestration.JobStatusRunning)
