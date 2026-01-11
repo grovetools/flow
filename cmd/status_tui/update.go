@@ -43,12 +43,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
-			"has_error":        msg.Err != nil,
-			"should_retry":     msg.ShouldRetry,
-			"start_streaming":  msg.StartStreaming,
-			"content_length":   len(msg.Content),
-			"show_logs":        m.ShowLogs,
-			"active_log_job":   m.ActiveLogJob != nil,
+			"has_error":       msg.Err != nil,
+			"should_retry":    msg.ShouldRetry,
+			"start_streaming": msg.StartStreaming,
+			"content_length":  len(msg.Content),
+			"show_logs":       m.ShowLogs,
+			"active_log_job":  m.ActiveLogJob != nil,
 		}).Info("Received LogContentLoadedMsg")
 
 		if msg.Err != nil {
@@ -75,9 +75,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Only start streaming if we're not already streaming for this job
 			if m.StreamingJobID != m.ActiveLogJob.ID {
 				logger.WithFields(map[string]interface{}{
-					"job_id":         m.ActiveLogJob.ID,
-					"log_file_path":  msg.LogFilePath,
-					"was_streaming":  m.StreamingJobID,
+					"job_id":        m.ActiveLogJob.ID,
+					"log_file_path": msg.LogFilePath,
+					"was_streaming": m.StreamingJobID,
 				}).Info("Starting agent log streaming")
 				m.StreamingJobID = m.ActiveLogJob.ID
 				cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
@@ -246,6 +246,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Job run completed
 		m.IsRunningJob = false
 
+		// Check if any of the completed jobs were interactive agents.
+		// Their "run" phase is just the launch, so we don't want to stop the log stream.
+		containsInteractiveAgent := false
+		if msg.Jobs != nil {
+			for _, job := range msg.Jobs {
+				// IMPORTANT: This check should only be for JobTypeInteractiveAgent.
+				// Headless agents are blocking and their completion is final.
+				if job.Type == orchestration.JobTypeInteractiveAgent {
+					containsInteractiveAgent = true
+					break
+				}
+			}
+		}
+
 		if msg.Err != nil {
 			// Only show error if it's not just "exit status 1" which is generic
 			errStr := msg.Err.Error()
@@ -256,17 +270,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Job run failed: %v", msg.Err))
 			}
 		} else {
-			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job run completed successfully.")
+			if containsInteractiveAgent {
+				m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Interactive agent launched successfully.")
+			} else {
+				m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job run completed successfully.")
+			}
 		}
 
-		// Stop following the log file
-		m.LogViewer.Stop()
+		// Only stop the log viewer and return focus to the jobs pane if no interactive agents were launched.
+		// Interactive agents continue running in tmux, so we want to keep streaming their logs.
+		if !containsInteractiveAgent {
+			// Stop following the log file
+			m.LogViewer.Stop()
 
-		// Keep the log viewer open so the user can review the output
-		// They can press 'v' to close it when ready
+			// Keep the log viewer open so the user can review the output
+			// They can press 'v' to close it when ready
 
-		// Return focus to jobs pane
-		m.Focus = JobsPane
+			// Return focus to jobs pane
+			m.Focus = JobsPane
+		}
 
 		// Refresh the plan to show updated statuses
 		return m, refreshPlan(m.PlanDir)
@@ -755,7 +777,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				m.ShowTemplatePicker = false
 				templates := []string{
-					"",              // No template (clear)
+					"", // No template (clear)
 					"agent-xml",
 					"agent-run",
 					"agent-from-chat",
@@ -1261,10 +1283,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					runCmd = runJobsWithOrchestrator(m.Orchestrator, jobsToRun, m.Program)
 				} else {
 					logger.WithFields(map[string]interface{}{
-						"num_jobs":          len(jobsToRun),
-						"use_method":        "subprocess",
-						"orchestrator_nil":  m.Orchestrator == nil,
-						"program_nil":       m.Program == nil,
+						"num_jobs":         len(jobsToRun),
+						"use_method":       "subprocess",
+						"orchestrator_nil": m.Orchestrator == nil,
+						"program_nil":      m.Program == nil,
 					}).Warn("Falling back to subprocess job execution")
 					// Fallback to old method if orchestrator is not available
 					runCmd = runJobsCmd(m.RunLogFile, m.PlanDir, jobsToRun)
@@ -1681,7 +1703,6 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 
 	return m, nil
 }
-
 
 // wrapContentForViewport wraps content lines to fit within the given width.
 func wrapContentForViewport(content string, width int) string {

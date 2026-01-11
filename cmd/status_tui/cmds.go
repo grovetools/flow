@@ -35,7 +35,10 @@ type RenameCompleteMsg struct{ Err error }
 type UpdateDepsCompleteMsg struct{ Err error }
 type CreateJobCompleteMsg struct{ Err error }
 type recipeAddedMsg struct{ err error }
-type JobRunFinishedMsg struct{ Err error }
+type JobRunFinishedMsg struct {
+	Jobs []*orchestration.Job // The jobs that were executed
+	Err  error
+}
 type RetryLoadAgentLogsMsg struct{}
 
 type FrontmatterContentLoadedMsg struct {
@@ -199,11 +202,16 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		if err == nil {
 			statInfo, statErr := os.Stat(jobLogPath)
 			logger.WithFields(map[string]interface{}{
-				"job_id":    job.ID,
-				"log_path":  jobLogPath,
-				"stat_err":  statErr,
-				"exists":    statErr == nil,
-				"file_size": func() int64 { if statInfo != nil { return statInfo.Size() }; return 0 }(),
+				"job_id":   job.ID,
+				"log_path": jobLogPath,
+				"stat_err": statErr,
+				"exists":   statErr == nil,
+				"file_size": func() int64 {
+					if statInfo != nil {
+						return statInfo.Size()
+					}
+					return 0
+				}(),
 			}).Info("Fast path: checking job.log file")
 
 			if statErr == nil {
@@ -309,9 +317,9 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 					// (e.g., ses_xxx for opencode, UUID for claude)
 					if metadata.ClaudeSessionID != "" {
 						logger.WithFields(map[string]interface{}{
-							"job_id":           job.ID,
+							"job_id":            job.ID,
 							"claude_session_id": metadata.ClaudeSessionID,
-							"provider":         metadata.Provider,
+							"provider":          metadata.Provider,
 						}).Info("Fast path: found session ID from registry")
 						logSpec = metadata.ClaudeSessionID
 					} else if metadata.TranscriptPath != "" {
@@ -607,7 +615,7 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 					logger.WithFields(map[string]interface{}{
 						"panic": r,
 					}).Error("Panic recovered in runJobsWithOrchestrator background goroutine")
-					program.Send(JobRunFinishedMsg{Err: fmt.Errorf("panic during job execution: %v", r)})
+					program.Send(JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf("panic during job execution: %v", r)})
 				}
 			}()
 
@@ -691,10 +699,10 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 				for _, e := range execErrors {
 					errStrings = append(errStrings, e.Error())
 				}
-				program.Send(JobRunFinishedMsg{Err: fmt.Errorf(strings.Join(errStrings, "\n"))})
+				program.Send(JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf(strings.Join(errStrings, "\n"))})
 			} else {
 				logger.Info("All jobs completed successfully")
-				program.Send(JobRunFinishedMsg{Err: nil})
+				program.Send(JobRunFinishedMsg{Jobs: jobs, Err: nil})
 			}
 		}()
 
@@ -780,7 +788,7 @@ func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.C
 		sync()
 
 		// After completion, return a message with the result.
-		return JobRunFinishedMsg{Err: runErr}
+		return JobRunFinishedMsg{Jobs: jobs, Err: runErr}
 	}
 }
 
