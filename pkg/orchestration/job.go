@@ -101,6 +101,7 @@ const (
 	JobTypeChat             JobType = "chat"
 	JobTypeInteractiveAgent JobType = "interactive_agent"
 	JobTypeGenerateRecipe   JobType = "generate-recipe"
+	JobTypeFile             JobType = "file" // Non-executable job for storing context/reference content
 )
 
 // Job represents a single orchestration job.
@@ -181,6 +182,11 @@ func (j *Job) ShouldInline(category InlineCategory) bool {
 
 // IsRunnable checks if a job can be executed.
 func (j *Job) IsRunnable() bool {
+	// File jobs are never runnable - they're just for context/reference
+	if j.Type == JobTypeFile {
+		return false
+	}
+
 	// A job is runnable if its own status is valid for starting...
 	isReadyToStart := (j.Status == JobStatusPending) ||
 		(j.Type == JobTypeChat && j.Status == JobStatusPendingUser)

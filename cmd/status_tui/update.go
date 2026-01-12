@@ -710,7 +710,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "down", "j":
-				if m.TypePickerCursor < 6 { // 7 type options (0-6)
+				if m.TypePickerCursor < 7 { // 8 type options (0-7)
 					m.TypePickerCursor++
 				}
 				return m, nil
@@ -724,6 +724,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					orchestration.JobTypeInteractiveAgent,
 					orchestration.JobTypeHeadlessAgent,
 					orchestration.JobTypeGenerateRecipe,
+					orchestration.JobTypeFile,
 				}
 				selectedType := types[m.TypePickerCursor]
 

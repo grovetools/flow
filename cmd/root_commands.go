@@ -27,7 +27,7 @@ Examples:
 	}
 	// Add flags from plan_add_step.go
 	addCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
-	addCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, chat, shell, headless_agent, or interactive_agent (agent is an alias for interactive_agent)")
+	addCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, chat, shell, headless_agent, interactive_agent, or file (agent is an alias for interactive_agent)")
 	addCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	addCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	addCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")

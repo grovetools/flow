@@ -70,6 +70,10 @@ func runPlanJobsList(cmd *cobra.Command, args []string) error {
 			Type:        string(orchestration.JobTypeGenerateRecipe),
 			Description: "Recipe generation job for automation",
 		},
+		{
+			Type:        string(orchestration.JobTypeFile),
+			Description: "Static file for context/reference only, not executed",
+		},
 	}
 
 	// Check if JSON output is requested

@@ -292,6 +292,25 @@ func TestJobIsRunnable(t *testing.T) {
 			job:  job3,
 			want: false,
 		},
+		{
+			name: "file job is never runnable even with pending status",
+			job: &Job{
+				ID:     "file-job",
+				Type:   JobTypeFile,
+				Status: JobStatusPending,
+			},
+			want: false,
+		},
+		{
+			name: "file job is never runnable even with completed dependencies",
+			job: &Job{
+				ID:           "file-job-with-deps",
+				Type:         JobTypeFile,
+				Status:       JobStatusPending,
+				Dependencies: []*Job{job1}, // job1 is completed
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -337,6 +356,131 @@ func TestGetRunnableJobs(t *testing.T) {
 	}
 	if runnable[0].ID != "runnable" {
 		t.Errorf("GetRunnableJobs() returned job %s, want runnable", runnable[0].ID)
+	}
+}
+
+func TestLoadFileJobType(t *testing.T) {
+	// Create temporary test directory
+	tmpDir := t.TempDir()
+
+	// Create a file job
+	content := `---
+id: context-file-123
+title: Context for Feature
+status: completed
+type: file
+---
+This is reference content that provides context for downstream jobs.
+It is not executed but can be referenced as a dependency.`
+
+	path := filepath.Join(tmpDir, "01-context.md")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Test loading the plan
+	plan, err := LoadPlan(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadPlan() error = %v", err)
+	}
+
+	// Verify job was loaded
+	if len(plan.Jobs) != 1 {
+		t.Errorf("Plan has %d jobs, want 1", len(plan.Jobs))
+	}
+
+	job := plan.Jobs[0]
+	if job.Type != JobTypeFile {
+		t.Errorf("Job Type = %v, want file", job.Type)
+	}
+	if job.ID != "context-file-123" {
+		t.Errorf("Job ID = %v, want context-file-123", job.ID)
+	}
+	if job.Status != JobStatusCompleted {
+		t.Errorf("Job Status = %v, want completed", job.Status)
+	}
+
+	// File jobs should never be runnable
+	if job.IsRunnable() {
+		t.Error("File job should not be runnable")
+	}
+}
+
+func TestFileJobAsDependency(t *testing.T) {
+	// Create temporary test directory
+	tmpDir := t.TempDir()
+
+	// Create a file job and an agent job that depends on it
+	tests := []struct {
+		filename string
+		content  string
+	}{
+		{
+			filename: "01-context.md",
+			content: `---
+id: context-123
+title: Context File
+status: completed
+type: file
+---
+Reference content.`,
+		},
+		{
+			filename: "02-impl.md",
+			content: `---
+id: impl-123
+title: Implementation
+status: pending
+type: agent
+depends_on:
+  - 01-context.md
+---
+Use the context file to implement.`,
+		},
+	}
+
+	// Write test files
+	for _, tt := range tests {
+		path := filepath.Join(tmpDir, tt.filename)
+		if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
+			t.Fatalf("Failed to write test file %s: %v", tt.filename, err)
+		}
+	}
+
+	// Load the plan
+	plan, err := LoadPlan(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadPlan() error = %v", err)
+	}
+
+	// Verify both jobs loaded
+	if len(plan.Jobs) != 2 {
+		t.Errorf("Plan has %d jobs, want 2", len(plan.Jobs))
+	}
+
+	// Find the implementation job
+	var implJob *Job
+	for _, j := range plan.Jobs {
+		if j.ID == "impl-123" {
+			implJob = j
+			break
+		}
+	}
+	if implJob == nil {
+		t.Fatal("Implementation job not found")
+	}
+
+	// Verify it has the file job as a dependency
+	if len(implJob.Dependencies) != 1 {
+		t.Errorf("Implementation job has %d dependencies, want 1", len(implJob.Dependencies))
+	}
+	if implJob.Dependencies[0].Type != JobTypeFile {
+		t.Errorf("Dependency Type = %v, want file", implJob.Dependencies[0].Type)
+	}
+
+	// The implementation job should be runnable since the file job is completed
+	if !implJob.IsRunnable() {
+		t.Error("Implementation job should be runnable since file dependency is completed")
 	}
 }
 
