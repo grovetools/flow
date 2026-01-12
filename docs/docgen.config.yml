@@ -1,59 +1,58 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/mattsolo1/grove-docgen/main/schema/docgen.config.schema.json
+enabled: true
 title: Grove Flow
 description: LLM job orchestration in Markdown for complex development workflows.
-category: "Developer Tools"
-enabled: true
+category: Developer Tools
 settings:
-  output_dir: docs
-  rules_file: ../.cx/dev-no-tests.rules
-  structured_output_file: pkg/docs/docs.json
-  system_prompt: default
-  model: gemini-2.5-pro
-  regeneration_mode: reference
-readme:
-  generate_toc: true
-  template: docs/README.md.tpl
-  output: README.md
-  source_section: overview
-  strip_lines: 2
+    model: gemini-2.5-pro
+    regeneration_mode: reference
+    rules_file: ../.cx/dev-no-tests.rules
+    structured_output_file: pkg/docs/docs.json
+    system_prompt: default
+    output_dir: docs
 sections:
-  - name: overview
-    order: 1
-    output: 01-overview.md
-    prompt: prompts/01-overview.md
-    title: Overview
-  - name: examples
-    order: 2
-    output: 02-examples.md
-    prompt: prompts/02-examples.md
-    title: Examples
-  - name: managing-plans
-    order: 3
-    output: 03-managing-plans.md
-    prompt: prompts/03-managing-plans.md
-    title: Managing Plans
-  - name: working-with-jobs
-    order: 4
-    output: 04-working-with-jobs.md
-    prompt: prompts/04-working-with-jobs.md
-    title: Working with Jobs
-  - name: chats
-    order: 5
-    output: 05-chats.md
-    prompt: prompts/05-chats.md
-    title: Chats
-  - name: recipes-and-templates
-    order: 6
-    output: 06-recipes-and-templates.md
-    prompt: prompts/06-recipes-and-templates.md
-    title: Recipes and Templates
-  - name: configuration
-    order: 7
-    output: 07-configuration.md
-    prompt: prompts/07-configuration.md
-    title: Configuration
-  - name: command-reference
-    order: 8
-    output: 08-command-reference.md
-    prompt: prompts/08-command-reference.md
-    title: Command Reference
+    - name: overview
+      title: Overview
+      order: 1
+      prompt: 01-overview.md
+      output: 01-overview.md
+    - name: examples
+      title: Examples
+      order: 2
+      prompt: 02-examples.md
+      output: 02-examples.md
+    - name: managing-plans
+      title: Managing Plans
+      order: 3
+      prompt: 03-managing-plans.md
+      output: 03-managing-plans.md
+    - name: working-with-jobs
+      title: Working with Jobs
+      order: 4
+      prompt: 04-working-with-jobs.md
+      output: 04-working-with-jobs.md
+    - name: chats
+      title: Chats
+      order: 5
+      prompt: 05-chats.md
+      output: 05-chats.md
+    - name: recipes-and-templates
+      title: Recipes and Templates
+      order: 6
+      prompt: 06-recipes-and-templates.md
+      output: 06-recipes-and-templates.md
+    - name: configuration
+      title: Configuration
+      order: 7
+      prompt: 07-configuration.md
+      output: 07-configuration.md
+    - name: command-reference
+      title: Command Reference
+      order: 8
+      prompt: 08-command-reference.md
+      output: 08-command-reference.md
+readme:
+    template: docs/README.md.tpl
+    output: README.md
+    source_section: overview
+    strip_lines: 2
+    generate_toc: true
