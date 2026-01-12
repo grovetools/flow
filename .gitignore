@@ -20,5 +20,3 @@ pkg/docs/docs.json
 go.work
 go.work.sum
 
-# Don't ignore CLAUDE.md
-!CLAUDE.md
