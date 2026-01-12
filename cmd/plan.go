@@ -133,6 +133,7 @@ var (
 	planAddPrependDependencies bool
 	planAddRecipe              string
 	planAddRecipeVars          []string
+	planAddSourceFile          string
 
 	// Graph flags
 	planGraphFormat string
@@ -185,6 +186,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "[DEPRECATED] Use --inline=dependencies. Inline dependency content into prompt body")
 	planAddCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
 	planAddCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
+	planAddCmd.Flags().StringVar(&planAddSourceFile, "source-file", "", "Origin file path for tracking job provenance (e.g., Claude plan file)")
 
 	// Graph command flags
 	planGraphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
@@ -302,6 +304,7 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		PrependDependencies: planAddPrependDependencies,
 		Recipe:              planAddRecipe,
 		RecipeVars:          planAddRecipeVars,
+		SourceFile:          planAddSourceFile,
 	}
 	return RunPlanAddStep(addStepCmd)
 }

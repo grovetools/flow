@@ -136,6 +136,7 @@ type Job struct {
 	GatherConceptPlans   bool         `yaml:"gather_concept_plans,omitempty" json:"gather_concept_plans,omitempty"`
 	RulesFile            string       `yaml:"rules_file,omitempty" json:"rules_file,omitempty"`
 	NoteRef              string       `yaml:"note_ref,omitempty" json:"note_ref,omitempty"`
+	SourceFile           string       `yaml:"source_file,omitempty" json:"source_file,omitempty"` // Origin file path (e.g., Claude plan file)
 
 	// Derived fields
 	Filename     string      `json:"filename,omitempty"`     // The markdown filename

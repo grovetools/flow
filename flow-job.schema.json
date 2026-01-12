@@ -133,6 +133,9 @@
     "note_ref": {
       "type": "string"
     },
+    "source_file": {
+      "type": "string"
+    },
     "Filename": {
       "type": "string"
     },

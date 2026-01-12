@@ -256,6 +256,9 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if job.NoteRef != "" {
 		frontmatter["note_ref"] = job.NoteRef
 	}
+	if job.SourceFile != "" {
+		frontmatter["source_file"] = job.SourceFile
+	}
 
 	// Create YAML
 	yamlContent := "---\n"
@@ -310,6 +313,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Branch              string
 		Worktree            string
 		NoteRef             string
+		SourceFile          string
 		Prompt              string
 		Inline              []string
 		PrependDependencies bool
@@ -323,6 +327,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 		Branch:              job.Branch,
 		Worktree:            job.Worktree,
 		NoteRef:             job.NoteRef,
+		SourceFile:          job.SourceFile,
 		Prompt:              job.PromptBody,
 		Inline:              inlineCategories,
 		PrependDependencies: job.PrependDependencies,

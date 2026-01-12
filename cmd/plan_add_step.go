@@ -31,6 +31,7 @@ type PlanAddStepCmd struct {
 	PrependDependencies bool     `flag:"" help:"[DEPRECATED] Use --inline=dependencies instead. Inline dependency content into prompt body."`
 	Recipe              string   `flag:"" help:"Name of a recipe to add to the plan"`
 	RecipeVars          []string `flag:"" help:"Variables for the recipe templates (e.g., key=value)"`
+	SourceFile          string   `flag:"" help:"Origin file path for tracking job provenance (e.g., Claude plan file)"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -293,6 +294,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			Model:               cmd.Model,
 			Inline:              inlineConfig,
 			PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
+			SourceFile:          cmd.SourceFile,
 		}
 
 		// Initialize empty prompt body - no comments needed since info is in frontmatter
@@ -413,6 +415,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		Model:               cmd.Model,
 		Inline:              inlineConfig,
 		PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
+		SourceFile:          cmd.SourceFile,
 	}
 
 	// Set worktree only if explicitly provided
@@ -552,8 +555,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 
 	// Apply template defaults
 	job := &orchestration.Job{
-		Title:  cmd.Title,
-		Status: orchestration.JobStatusPending,
+		Title:      cmd.Title,
+		Status:     orchestration.JobStatusPending,
+		SourceFile: cmd.SourceFile,
 	}
 
 	// Use reflection or a helper to merge template.Frontmatter into the job struct
