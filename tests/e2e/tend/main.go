@@ -79,6 +79,10 @@ func main() {
 		scenarios.PlanStatusTUIBatchChangeTypeScenario,
 		scenarios.PlanStatusTUIBatchChangeTemplateScenario,
 
+		// File job type tests
+		scenarios.FileJobTypeScenario,
+		scenarios.FileJobTypeTUIScenario,
+
 		// Provider tests (parameterized for claude, codex, opencode)
 		scenarios.ClaudeProviderLifecycleScenario,
 		scenarios.ClaudeProviderArgsScenario,
