@@ -1,51 +1,35 @@
-# Grove Flow
-
-Grove Flow is a command-line tool for executing multi-step development workflows defined in Markdown files. It features interactive terminal interfaces (TUIs) for plan management and execution, and integrates with the Grove ecosystem for a complete development workflow.
-
-<!-- placeholder for animated gif -->
+Grove Flow is a command-line tool for managing local, Markdown-based development workflows. All state is stored in plain text files: plans are directories of `.md` files, and job status is defined by YAML frontmatter. The tool is designed for terminal-native use, with text-based interfaces for management and `tmux` for execution environments. It does not use a database or a cloud service, and all workflow definitions are git-diffable.
 
 ## Key Features
 
-*   **Job Orchestration**: Execute workflows as dependency graphs of jobs defined in Markdown files. Jobs can be chat conversations, oneshot LLM calls, interactive coding agents, or shell commands. Dependencies are managed automatically.
+*   **Job Types**: Defines several job types, each with a specific execution model:
+    *   `chat`: An interactive, multi-turn conversation with an LLM, stored in a single Markdown file.
+    *   `oneshot`: A single-turn request to an LLM for tasks like code generation or summarization.
+    *   `interactive_agent`: An interactive coding agent session that runs in a dedicated `tmux` window.
+    *   `headless_agent`: An interactive coding agent that carries out a job, then exits.
+    *   `shell`: A command executed in the system's default shell.
+    *   `file`: A non-executable job used to store reference content.
 
-*   **Interactive Interfaces**: Terminal UIs provide visual feedback and keyboard-driven workflows for browsing plans, managing jobs, and monitoring execution across your entire workspace.
+*   **Worktree Isolation**: Creates git worktrees in a `.grove-worktrees/` directory at the repository root. This provides filesystem isolation for parallel development tasks associated with different plans.
 
-*   **Git Worktree Integration**: Plans can create isolated git worktrees, providing complete filesystem isolation for development work. Each plan can have a dedicated tmux session in its own worktree.
+*   **Dependency Orchestration**: Jobs declare dependencies on other jobs via the `depends_on` field in their frontmatter. The orchestrator reads these declarations to build a dependency graph and execute jobs in the correct order.
 
-*   **Plan Lifecycle Management**: Track plans from creation through review to completion, with automatic git status tracking, merge state visualization, and guided cleanup workflows.
-
-*   **Chat-Driven Development**: Start with conversational exploration using chat jobs, then extract structured implementation plans using keyboard shortcuts.
-
-*   **Notebook Integration**: Optionally integrates with grove-notebook for idea management. Plans can be created by promoting notes, maintaining bidirectional links between ideas and implementations.
+*   **Lifecycle Management**: Provides commands to manage a plan's lifecycle from creation (`flow init`), through review (`flow review`), to cleanup (`flow finish`). The `finish` command guides the user through merging work and safely removing the associated worktree and git branches.
 
 ## How It Works
 
-### The Complete Workflow
+A "plan" is a directory containing numbered Markdown files (e.g., `01-setup.md`, `02-implement.md`). Each file represents a "job" and contains YAML frontmatter that defines its properties, including `type`, `status`, and `depends_on`.
 
-1. **Initialize a Plan**: Create a plan directory and define your initial approach
-2. **Explore with Chat**: Discuss the problem with an LLM using chat jobs to get a detailed implementation plan
-3. **Structure Work**: Extract chat content into structured jobs with dependencies
-4. **Execute**: Run jobs in dependency order, with interactive agents launching in isolated environments
-5. **Monitor**: Track running work across plans using interactive interfaces
-6. **Review and Finish**: Review work, merge changes, and clean up resources with guided workflows
-
-### Technical Architecture
-
-A "Plan" is a directory containing Markdown files, where each file is a "Job" with YAML frontmatter defining its type, status, and dependencies. The orchestrator builds a dependency graph and executes jobs when their dependencies are complete. Interactive agent jobs launch in isolated git worktrees within tmux sessions for a clean development environment.
+When a command like `flow run` is executed, an orchestrator reads all job files in the plan directory, builds an in-memory dependency graph, and identifies jobs whose dependencies are met. It then executes these runnable jobs using the appropriate executor for their type. Agent jobs can be launched as subprocesses within a `tmux` session, scoped to the plan's associated git worktree.
 
 ## Ecosystem Integration
 
-Grove Flow integrates deeply with the Grove ecosystem:
+Grove Flow executes other command-line tools as part of its operation:
 
-*   **Grove Notebook**: Optional integration for idea management. Notes can be promoted to plans with automatic linking, maintaining traceability from idea to implementation.
-
-*   **Grove Context**: Automatically generates file context based on rules files in worktrees. This context is provided to LLMs for all job types, ensuring the AI has relevant codebase information.
-
-*   **Grove Hooks**: Manages all interactive agent sessions across the ecosystem, showing a unified view of all running jobs. Also provides lifecycle management, triggering actions on plan events like review or completion.
-
-*   **Agent Tools**: For interactive agent jobs, grove-flow launches agent CLIs in isolated tmux windows with worktree context. These agents have full access to the codebase and can make changes interactively.
-
-*   **Grove Meta**: The meta-tool manages binary installation and provides ecosystem-wide commands for all Grove tools.
+*   **`nb`**: Plan initialization hooks can execute `nb` commands to move notes between directories, linking a note to a plan.
+*   **`grove cx`**: Before executing `oneshot` or `shell` jobs, `grove cx generate` is run to create a context file based on `.grove/rules`.
+*   **`grove-hooks`**: Running agent sessions are registered with the `grove-hooks` session registry, which tracks PID and other metadata in `~/.grove/hooks/sessions/`.
+*   **Agent CLIs**: Interactive agent jobs launch `claude`, `codex`, or `opencode` as subprocesses within a `tmux` window.
 
 ## Installation
 
@@ -59,4 +43,4 @@ Verify installation:
 flow version
 ```
 
-Requires the `grove` meta-CLI. See the [Grove Installation Guide](https://github.com/mattsolo1/grove-meta/blob/main/docs/02-installation.md) if you don't have it installed.
+This requires the `grove` meta-CLI. See the Grove installation guide if it is not installed.
