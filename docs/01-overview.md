@@ -1,4 +1,4 @@
-Grove Flow is a command-line tool for managing local, Markdown-based development workflows, designed for developers who use terminal-native tools like tmux and Neovim. It provides a structure for LLM-assisted development that moves beyond a single chat window, enabling deliberate planning, context management, and reproducible execution. The workflow centers on the interplay between `flow` for orchestration, Git for observing agent-driven changes, tmux for process isolation in worktrees, and a text editor for authoring plans and reviewing results. The overarching design goal is to creates a sustainable practice where specifications, context, and outcomes are captured in version-controlled files, forming a clear audit trail of development that is indepdendent of cloud services.
+Grove Flow is a command-line tool for managing local, Markdown-based development workflows. It is designed for developers who use terminal-native tools, combining `tmux` for process isolation, `git` for observing changes, a text editor for authoring plans, and `flow` for orchestration. This approach provides a structure for LLM-assisted development that moves beyond a single chat window, enabling deliberate planning and context management. The goal is to create a sustainable practice where specifications, context, and outcomes are captured in version-controlled files, forming a git-diffable audit trail that does not rely on a database or a cloud service.
 
 ## Key Features
 
@@ -21,12 +21,26 @@ When a command like `flow run` is executed, an orchestrator reads all job files 
 *   Specifications and context definitions are captured in plain text.
 *   Outputs, such as LLM responses and agent transcripts (from Claude Code, Codex, and OpenCode), are appended back to the corresponding `.md` job file. This creates a persistent, reviewable record of development history.
 
+## Templates and Recipes
+
+*   **Job Templates**: Reusable job definitions stored in `.md` files that can be applied when creating new jobs. They provide a way to standardize frontmatter and prompt instructions for common tasks. Templates are discoverable from project, user, and notebook directories.
+*   **Plan Recipes**: Scaffolding for entire plans. A recipe is a directory containing a set of job templates and a `recipe.yml` file defining metadata. The `flow plan init --recipe <name>` command uses a recipe to generate a new plan with a pre-defined structure and jobs.
+
+## Terminal & Editor Integration
+
+*   **Terminal User Interfaces (TUIs)**: `flow` includes several TUIs for managing plans:
+    *   `flow status`: The primary interface for monitoring a plan. It displays a dependency tree of all jobs, allows inspection of job files (markdown content, frontmatter), and streams live logs from running agents.
+    *   `flow plan init --tui`: An interactive form for creating a new plan, including options for worktrees and recipes.
+    *   `flow plan tui`: A TUI for browsing plans, merging worktrees, and managing plan lifecycle.
+*   **Starship**: Includes a prompt module (`flow starship`) that displays the active `flow` plan and a summary of job statuses (e.g., `my-plan [✓3 ●1 ○2]`) in the shell prompt.
+*   **Neovim**: Chat jobs can be executed from within Neovim, facilitating interactive sessions with large context models.
+
 ## LLM Provider & Context Support
 
 Grove Flow integrates with `grove-anthropic` and `grove-gemini` to support models from both providers.
 
 *   **File Uploads**: Instead of inlining large amounts of context into the prompt, the tool uses provider-native file upload APIs (Anthropic's Beta Files API and Google's Files API). This allows jobs to use large context windows by attaching files such as repository context (`.grove/context`), the outputs of dependency jobs, and other curated contexts.
-*   **Model Configuration**: The `model` can be configured at multiple levels with the following precedence: job frontmatter, plan configuration (`.grove-plan.yml`), and global user settings (`grove.yml`). 
+*   **Model Configuration**: The `model` can be configured at multiple levels with the following precedence: job frontmatter, plan configuration (`.grove-plan.yml`), and global user settings (`grove.yml`).
 
 ## Ecosystem Integration
 
@@ -41,12 +55,6 @@ Grove Flow executes other command-line tools and uses library code from other pa
     *   `gmux history`: A TUI listing recently accessed sessions for quick navigation.
     *   `gmux windows`: A TUI for managing multiple agent windows within a plan's session.
 *   **Agent CLIs**: Interactive agent jobs launch `claude`, `codex`, or `opencode` as subprocesses in named `tmux` windows. Transcripts are standardized and streamed via the `grove-agent-logs` (`aglogs`) package.
-
-## Terminal & Editor Integration
-
-*   **`flow status` TUI**: The primary interface for monitoring a plan. It displays a dependency tree of all jobs, allows inspection of job files (markdown content, frontmatter), and streams live logs from running agents.
-*   **Starship**: Includes a prompt module (`flow starship`) that displays the active `flow` plan and a summary of job statuses (e.g., `my-plan [✓3 ●1 ○2]`) in the shell prompt.
-*   **Neovim**: Chat jobs can be executed from within Neovim, facilitating interactive sessions with large context models.
 
 ## Advanced Usage & Automation
 
