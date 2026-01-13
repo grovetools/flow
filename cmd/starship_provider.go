@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattsolo1/grove-core/git"
+	"github.com/mattsolo1/grove-core/pkg/workspace"
 	"github.com/mattsolo1/grove-core/state"
 	"github.com/mattsolo1/grove-core/tui/theme"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
@@ -110,11 +112,20 @@ func FlowStatusProvider(s state.State) (string, error) {
 		displayName = strings.TrimPrefix(displayName, ".grove")
 	}
 
+	// Get current git branch to avoid redundant display
+	// If plan name equals branch name, skip showing the plan name since starship already shows the branch
+	cwd, _ := os.Getwd()
+	_, currentBranch, _ := git.GetRepoInfo(cwd)
+	showPlanName := displayName != currentBranch
+
 	// Force color output for shell prompts
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
-	// Color the plan name with Info style
-	output := theme.DefaultTheme.Info.Render(displayName)
+	var output string
+	if showPlanName {
+		// Color the plan name with Info style
+		output = theme.DefaultTheme.Info.Render(displayName)
+	}
 
 	// Load the plan to get job statistics
 	plan, err := orchestration.LoadPlan(planPath)
@@ -144,18 +155,25 @@ func FlowStatusProvider(s state.State) (string, error) {
 			statsParts = append(statsParts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("%s %d", theme.IconStatusAbandoned, stats.Abandoned)))
 		}
 
-		// Add WT indicator if in worktree
+		// Add worktree icon if in worktree
 		if config.Worktree != "" {
-			statsParts = append(statsParts, theme.DefaultTheme.Accent.Render("WT"))
+			statsParts = append(statsParts, theme.DefaultTheme.Accent.Render(theme.IconWorktree))
 		}
 
 		if len(statsParts) > 0 {
-			output += fmt.Sprintf(" (%s)", strings.Join(statsParts, " "))
+			if output != "" {
+				output += " "
+			}
+			// Determine the appropriate icon based on workspace type
+			// Use ecosystem icon if within an ecosystem, otherwise repo icon
+			icon := theme.IconRepo
+			if wsNode, err := workspace.GetProjectByPath(cwd); err == nil && wsNode != nil {
+				if wsNode.IsEcosystem() || wsNode.RootEcosystemPath != "" {
+					icon = theme.IconEcosystem
+				}
+			}
+			output += fmt.Sprintf("%s %s", icon, strings.Join(statsParts, " "))
 		}
-	}
-
-	if config.Model != "" {
-		output += fmt.Sprintf(" %s %s", theme.IconHeadlessAgent, config.Model)
 	}
 
 	return output, nil
