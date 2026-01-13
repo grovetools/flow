@@ -1,0 +1,52 @@
+*.go
+Makefile
+go.mod
+grove.yml
+
+# Exclude test files
+!tests
+!*_test.go
+
+# ============================================================
+# Cross-repo integration points
+# ============================================================
+
+# Grove-Notebook integration
+@a:grove-notebook/cmd/tui.go
+@a:grove-notebook/cmd/list.go
+
+# Grove-Context integration
+@a:grove-context/pkg/context/manager.go
+@a:grove-context/pkg/context/generate.go
+
+# Grove-Hooks integration
+@a:grove-hooks/commands/sessions.go
+@a:grove-hooks/commands/browse.go
+
+# Grove-Tmux integration
+@a:grove-tmux/cmd/gmux/tui.go
+@a:grove-tmux/cmd/gmux/sessionize.go
+@a:grove-tmux/cmd/gmux/key_manage.go
+@a:grove-tmux/cmd/gmux/windows.go
+@a:grove-tmux/cmd/gmux/History.go
+
+# Grove-Nvim integration
+@a:grove-nvim/cmd/text.go
+@a:grove-nvim/cmd/chat.go
+
+# Grove-Core (starship, workspace, tmux)
+@a:grove-core/starship/
+@a:grove-core/pkg/workspace/discover.go
+@a:grove-core/pkg/workspace/provider.go
+@a:grove-core/pkg/tmux/client.go
+
+# Grove-Gemini integration (LLM API)
+@a:grove-gemini/pkg/gemini/client.go
+@a:grove-gemini/pkg/gemini/request.go
+@a:grove-gemini/pkg/config/
+
+# Grove-Anthropic integration (Claude API)
+@a:grove-anthropic/pkg/anthropic/client.go
+@a:grove-anthropic/pkg/anthropic/request.go
+@a:grove-anthropic/pkg/config/
+@a:grove-anthropic/pkg/models/
