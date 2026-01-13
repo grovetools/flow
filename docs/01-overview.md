@@ -10,7 +10,7 @@ Grove Flow is a command-line tool for managing local, Markdown-based development
     *   `shell`: A command executed in the system's default shell.
     *   `file`: A non-executable job used to store reference content.
 *   **Worktree Isolation**: Creates git worktrees in a `.grove-worktrees/` directory at the repository root for filesystem isolation. It can also create multi-repo worktrees to enable isolated changes across interdependent repositories.
-*   **Dependency Orchestration**: Jobs declare dependencies on other jobs via the `depends_on` field in their frontmatter. The orchestrator reads these declarations to build a dependency graph and execute jobs in the correct order, which enables controlled context sharing between steps.
+*   **Dependency Orchestration**: Jobs declare dependencies on other jobs via the `depends_on` field in their frontmatter. The orchestrator reads these declarations to build a dependency graph and execute jobs in the correct order. This enables controlled context sharing between steps.
 *   **Lifecycle Management**: Provides commands to manage a plan's lifecycle from creation (`flow init`), through review (`flow review`), to cleanup (`flow finish`).
 
 ## How It Works
@@ -19,7 +19,7 @@ A "plan" is a directory containing numbered Markdown files (e.g., `01-setup.md`,
 
 When a command like `flow run` is executed, an orchestrator reads all job files in the plan directory, builds an in-memory dependency graph, and identifies runnable jobs. It then executes these jobs using the appropriate executor for their type. This process creates an audit trail for a plan's execution:
 *   Specifications and context definitions can be captured in version control.
-*   Outputs, such as LLM responses and agent transcripts (from Claude Code, Codex, and OpenCode), are appended back to the corresponding `.md` job file, creating a persistent, reviewable record of development history.
+*   Outputs, such as LLM responses and agent transcripts (from Claude Code, Codex, and OpenCode), are appended back to the corresponding `.md` job file. This creates a persistent, reviewable record of development history.
 
 ## Ecosystem Integration
 
@@ -30,6 +30,11 @@ Grove Flow executes other command-line tools and uses library code from other pa
 *   **`grove-hooks`**: Running agent sessions are registered with the `grove-hooks` session registry, which independently tracks the process ID and agent status (e.g., `idle`, `running`).
 *   **`grove-tmux`**: Worktrees created by `flow` can be navigated using `grove-tmux`, which can dynamically bind workspaces to `tmux` hotkeys. Agents are launched in new, named windows within a `tmux` session.
 *   **Agent CLIs**: Interactive agent jobs launch `claude`, `codex`, or `opencode` as subprocesses.
+
+## Terminal & Editor Integration
+
+*   **Starship**: Includes a prompt module that displays the active `flow` plan and a summary of job statuses (e.g., completed, pending, running) in the shell prompt.
+*   **Neovim**: Chat jobs can be executed from within Neovim, facilitating interactive sessions with large context models like Gemini 2.5 Pro, Sonnet, etc.
 
 ## Advanced Usage & Automation
 
