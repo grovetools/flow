@@ -158,10 +158,13 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		cursor = theme.DefaultTheme.Highlight.Render(theme.IconArrow + " ")
 	}
 
-	switch item := listItem.(type) {
+	switch i := listItem.(type) {
 	case item:
 		// Regular items
-		str = fmt.Sprintf("%s%s", cursor, item)
+		str = fmt.Sprintf("%s%s", cursor, i)
+	case modelItem:
+		// Model items
+		str = fmt.Sprintf("%s%s", cursor, i.ID)
 	default:
 		return
 	}

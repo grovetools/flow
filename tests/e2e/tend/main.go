@@ -27,6 +27,7 @@ func main() {
 		scenarios.PlanFinishEcosystemScenario,
 		scenarios.JobManagementScenario,
 		scenarios.PlanListTUIScenario,
+		scenarios.PlanInitTUIScenario,
 		scenarios.PlanReviewNoWorktreeScenario,
 		scenarios.PlanReviewTUIActionScenario,
 		scenarios.PlanStatusTUIScenario,

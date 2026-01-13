@@ -21,6 +21,14 @@ import (
 
 var ErrTUIQuit = errors.New("quit")
 
+// planInitScreen represents the current screen in the plan init TUI
+type planInitScreen int
+
+const (
+	MainScreen planInitScreen = iota
+	AdvancedScreen
+)
+
 // runPlanInitTUI is the main entry point to launch the plan initialization TUI.
 // It returns a fully configured PlanInitCmd or an error if the user quits.
 func runPlanInitTUI(plansDir string, initialCmd *PlanInitCmd) (*PlanInitCmd, error) {
@@ -68,6 +76,7 @@ type planInitTUIKeyMap struct {
 	Back           key.Binding
 	Escape         key.Binding
 	Insert         key.Binding
+	Help           key.Binding
 }
 
 func newPlanInitTUIKeyMap() planInitTUIKeyMap {
@@ -105,15 +114,40 @@ func newPlanInitTUIKeyMap() planInitTUIKeyMap {
 			key.WithKeys("i"),
 			key.WithHelp("i", "insert mode"),
 		),
+		Help: key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "show help"),
+		),
 	}
 }
 
 func (k planInitTUIKeyMap) ShortHelp() []key.Binding {
-	return k.Base.ShortHelp()
+	return []key.Binding{k.Help, k.Base.Quit}
 }
 
 func (k planInitTUIKeyMap) FullHelp() [][]key.Binding {
-	return k.Base.FullHelp()
+	return [][]key.Binding{
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Navigation")),
+			k.NextField,
+			k.PrevField,
+			key.NewBinding(key.WithKeys("j/k, ↑/↓"), key.WithHelp("j/k, ↑/↓", "navigate list items")),
+		},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
+			k.Toggle,
+			k.Submit,
+			k.ToggleAdvanced,
+			k.Insert,
+			k.Escape,
+		},
+		{
+			key.NewBinding(key.WithKeys(""), key.WithHelp("", "General")),
+			k.Help,
+			k.Back,
+			k.Base.Quit,
+		},
+	}
 }
 
 // getDefaultNoteTargetFile returns the appropriate default note target file for a given recipe.
@@ -167,8 +201,10 @@ type planInitTUIModel struct {
 	modelList           list.Model
 	openSession         bool
 
+	// Screen navigation
+	currentScreen       planInitScreen
+
 	// Advanced options
-	showAdvanced        bool
 	withWorktree        bool
 	worktreeInput       textinput.Model
 	extractFromInput    textinput.Model
@@ -203,10 +239,16 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 			defaultRecipeIndex = i + 1
 		}
 	}
-	m.recipeList = list.New(recipeItems, itemDelegate{}, 20, 7)
+	m.recipeList = list.New(recipeItems, itemDelegate{}, 35, 6)
 	m.recipeList.Title = ""
 	m.recipeList.SetShowTitle(false)
 	m.recipeList.SetShowStatusBar(false)
+	m.recipeList.SetFilteringEnabled(true)
+	m.recipeList.SetShowHelp(false)
+	m.recipeList.SetShowPagination(true)
+	m.recipeList.FilterInput.Prompt = "🔍 "
+	m.recipeList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	m.recipeList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 	m.recipeList.Select(defaultRecipeIndex) // Default to standard-feature
 
 	// Models List
@@ -220,10 +262,16 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 			defaultModelIndex = i + 1
 		}
 	}
-	m.modelList = list.New(modelItems, itemDelegate{}, 20, 6)
+	m.modelList = list.New(modelItems, itemDelegate{}, 35, 6)
 	m.modelList.Title = ""
 	m.modelList.SetShowTitle(false)
 	m.modelList.SetShowStatusBar(false)
+	m.modelList.SetFilteringEnabled(true)
+	m.modelList.SetShowHelp(false)
+	m.modelList.SetShowPagination(true)
+	m.modelList.FilterInput.Prompt = "🔍 "
+	m.modelList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	m.modelList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 	m.modelList.Select(defaultModelIndex)
 
 	m.worktreeInput = textinput.New()
@@ -249,12 +297,15 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	m.withWorktree = true
 	m.openSession = false // Changed default to false since it's now in advanced
 
-	// Advanced section starts hidden by default
-	m.showAdvanced = false
+	// Start on main screen
+	m.currentScreen = MainScreen
 
 	// Initialize keymap and help
 	m.keyMap = newPlanInitTUIKeyMap()
-	m.help = help.New(newPlanInitTUIKeyMap())
+	m.help = help.NewBuilder().
+		WithKeys(m.keyMap).
+		WithTitle("󰠡 Create New Plan - Help").
+		Build()
 
 	// Apply pre-populated values from CLI flags (this may override defaults)
 	m.prePopulate(initialCmd)
@@ -331,9 +382,9 @@ func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
 		hasAdvancedOptions = true
 	}
 
-	// Show advanced section if any advanced options were pre-populated
+	// Navigate to advanced screen if any advanced options were pre-populated
 	if hasAdvancedOptions {
-		m.showAdvanced = true
+		m.currentScreen = AdvancedScreen
 	}
 }
 
@@ -350,6 +401,8 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// Forward to help model so it knows the viewport size
+		m.help, _ = m.help.Update(msg)
 
 	case tea.KeyMsg:
 		// Let help model handle its own keys first
@@ -360,14 +413,29 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if we're in a text input field that should capture all keys
-		// Basic field: 0=name, Advanced fields: 5=worktree, 6=extractFrom, 7=noteTargetFile
-		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 5 || m.focusIndex == 6 || m.focusIndex == 7)
+		// MainScreen: 0=name
+		// AdvancedScreen: 0=worktree, 1=extractFrom, 2=noteTargetFile
+		inTextInput := false
+		if !m.unfocused {
+			if m.currentScreen == MainScreen && m.focusIndex == 0 {
+				inTextInput = true
+			} else if m.currentScreen == AdvancedScreen {
+				inTextInput = true // All advanced fields are text inputs
+			}
+		}
 		// Check if we're in a list that needs arrow keys
-		// Basic lists: 1=recipe, 2=model
-		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 2)
+		// MainScreen: 1=recipe, 2=model
+		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2)
 
 		switch msg.String() {
 		case "esc", "escape":
+			if m.currentScreen == AdvancedScreen {
+				// Return to main screen from advanced
+				m.currentScreen = MainScreen
+				m.focusIndex = 0
+				m.unfocused = false
+				return m.updateFocus(), nil
+			}
 			// ESC unfocuses any focused field (enters normal mode)
 			m.unfocused = true
 			m.nameInput.Blur()
@@ -384,20 +452,30 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "?":
-			// Toggle help
-			m.help.ShowAll = !m.help.ShowAll
+			// Toggle help - must call Toggle() to trigger setViewportContent()
+			m.help.Toggle()
 			return m, nil
 
 		case "a":
-			// Toggle advanced options (only when not in text input or in normal mode)
-			if !inTextInput || m.unfocused {
-				m.showAdvanced = !m.showAdvanced
-				return m, nil
+			// Navigate to advanced screen (only from main screen and when not in text input or in normal mode)
+			if m.currentScreen == MainScreen && (!inTextInput || m.unfocused) {
+				m.currentScreen = AdvancedScreen
+				m.focusIndex = 0 // Reset focus to first field on advanced screen
+				m.unfocused = false
+				return m.updateFocus(), nil
 			}
 
 		case "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+
+		case "b":
+			// Back to main screen from advanced (when unfocused)
+			if m.currentScreen == AdvancedScreen && m.unfocused {
+				m.currentScreen = MainScreen
+				m.focusIndex = 0
+				return m.updateFocus(), nil
+			}
 
 		case "q":
 			// Only quit on 'q' if not in text input or if in normal mode
@@ -411,15 +489,12 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			// Tab always moves to next field
 			m.focusIndex++
-			maxIndex := 4 // Basic fields: 0-4
-			if m.showAdvanced {
-				maxIndex = 7 // Include advanced fields: 5-7
-			}
+			maxIndex := m.getMaxFocusIndex()
 			if m.focusIndex > maxIndex {
 				m.focusIndex = 0
 			}
-			// Update highest focus index for progress tracking
-			if m.focusIndex > m.highestFocusIndex {
+			// Update highest focus index for progress tracking (only on main screen)
+			if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
 				m.highestFocusIndex = m.focusIndex
 			}
 			return m.updateFocus(), nil
@@ -428,66 +503,22 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Shift+tab always moves to previous field
 			m.focusIndex--
 			if m.focusIndex < 0 {
-				maxIndex := 4 // Basic fields: 0-4
-				if m.showAdvanced {
-					maxIndex = 7 // Include advanced fields: 5-7
-				}
-				m.focusIndex = maxIndex
+				m.focusIndex = m.getMaxFocusIndex()
 			}
-			// Update highest focus index for progress tracking
-			if m.focusIndex > m.highestFocusIndex {
+			// Update highest focus index for progress tracking (only on main screen)
+			if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
 				m.highestFocusIndex = m.focusIndex
 			}
 			return m.updateFocus(), nil
-
-		case "j":
-			// j moves to next field only when not in text input or when unfocused
-			if !inTextInput || m.unfocused {
-				m.focusIndex++
-				maxIndex := 4 // Basic fields: 0-4
-				if m.showAdvanced {
-					maxIndex = 7 // Include advanced fields: 5-7
-				}
-				if m.focusIndex > maxIndex {
-					m.focusIndex = 0
-				}
-				// Update highest focus index for progress tracking
-				if m.focusIndex > m.highestFocusIndex {
-					m.highestFocusIndex = m.focusIndex
-				}
-				return m.updateFocus(), nil
-			}
-
-		case "k":
-			// k moves to previous field only when not in text input or when unfocused
-			if !inTextInput || m.unfocused {
-				m.focusIndex--
-				if m.focusIndex < 0 {
-					maxIndex := 4 // Basic fields: 0-4
-					if m.showAdvanced {
-						maxIndex = 7 // Include advanced fields: 5-7
-					}
-					m.focusIndex = maxIndex
-				}
-				// Update highest focus index for progress tracking
-				if m.focusIndex > m.highestFocusIndex {
-					m.highestFocusIndex = m.focusIndex
-				}
-				return m.updateFocus(), nil
-			}
 
 		case "h":
 			// h moves to previous field when in normal mode
 			if m.unfocused && !inTextInput {
 				m.focusIndex--
 				if m.focusIndex < 0 {
-					maxIndex := 4 // Basic fields: 0-4
-					if m.showAdvanced {
-						maxIndex = 7 // Include advanced fields: 5-7
-					}
-					m.focusIndex = maxIndex
+					m.focusIndex = m.getMaxFocusIndex()
 				}
-				if m.focusIndex > m.highestFocusIndex {
+				if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
 					m.highestFocusIndex = m.focusIndex
 				}
 				return m.updateFocus(), nil
@@ -497,31 +528,29 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// l moves to next field when in normal mode
 			if m.unfocused && !inTextInput {
 				m.focusIndex++
-				maxIndex := 4 // Basic fields: 0-4
-				if m.showAdvanced {
-					maxIndex = 7 // Include advanced fields: 5-7
-				}
-				if m.focusIndex > maxIndex {
+				if m.focusIndex > m.getMaxFocusIndex() {
 					m.focusIndex = 0
 				}
-				if m.focusIndex > m.highestFocusIndex {
+				if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
 					m.highestFocusIndex = m.focusIndex
 				}
 				return m.updateFocus(), nil
 			}
 
 		case " ":
-			// Space toggles checkboxes
-			switch m.focusIndex {
-			case 3: // Auto-create Worktree
-				m.withWorktree = !m.withWorktree
-				if m.withWorktree {
-					m.worktreeInput.SetValue("")
+			// Space toggles checkboxes (only on main screen)
+			if m.currentScreen == MainScreen {
+				switch m.focusIndex {
+				case 3: // Auto-create Worktree
+					m.withWorktree = !m.withWorktree
+					if m.withWorktree {
+						m.worktreeInput.SetValue("")
+					}
+					return m, nil
+				case 4: // Open Session on Create
+					m.openSession = !m.openSession
+					return m, nil
 				}
-				return m, nil
-			case 4: // Open Session on Create
-				m.openSession = !m.openSession
-				return m, nil
 			}
 
 		case "enter":
@@ -530,10 +559,10 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// For lists, enter confirms selection and moves to next field
 				m.unfocused = false
 				m.focusIndex++
-				if m.focusIndex > 7 {
+				if m.focusIndex > m.getMaxFocusIndex() {
 					m.focusIndex = 0
 				}
-				if m.focusIndex > m.highestFocusIndex {
+				if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
 					m.highestFocusIndex = m.focusIndex
 				}
 				return m.updateFocus(), nil
@@ -555,39 +584,56 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Delegate to the focused component only if in insert mode
 	if !m.unfocused {
-		switch m.focusIndex {
-		case 0:
-			m.nameInput, cmd = m.nameInput.Update(msg)
-		case 1: // Recipe list
-			prevSelection := m.recipeList.SelectedItem()
-			m.recipeList, cmd = m.recipeList.Update(msg)
-			newSelection := m.recipeList.SelectedItem()
+		switch m.currentScreen {
+		case MainScreen:
+			switch m.focusIndex {
+			case 0:
+				m.nameInput, cmd = m.nameInput.Update(msg)
+			case 1: // Recipe list
+				prevSelection := m.recipeList.SelectedItem()
+				m.recipeList, cmd = m.recipeList.Update(msg)
+				newSelection := m.recipeList.SelectedItem()
 
-			if prevSelection != newSelection && newSelection != nil {
-				selectedRecipeName := string(newSelection.(item))
-				defaultTarget := getDefaultNoteTargetFile(selectedRecipeName)
-				m.noteTargetFileInput.SetValue(defaultTarget)
+				if prevSelection != newSelection && newSelection != nil {
+					selectedRecipeName := string(newSelection.(item))
+					defaultTarget := getDefaultNoteTargetFile(selectedRecipeName)
+					m.noteTargetFileInput.SetValue(defaultTarget)
 
-				if defaultTarget != "" {
-					m.noteTargetFileInput.Placeholder = defaultTarget
-				} else {
-					m.noteTargetFileInput.Placeholder = "job-filename.md"
+					if defaultTarget != "" {
+						m.noteTargetFileInput.Placeholder = defaultTarget
+					} else {
+						m.noteTargetFileInput.Placeholder = "job-filename.md"
+					}
 				}
+			case 2:
+				m.modelList, cmd = m.modelList.Update(msg)
 			}
-		case 2:
-			m.modelList, cmd = m.modelList.Update(msg)
-		case 5:
-			if !m.withWorktree {
-				m.worktreeInput, cmd = m.worktreeInput.Update(msg)
+		case AdvancedScreen:
+			switch m.focusIndex {
+			case 0:
+				if !m.withWorktree {
+					m.worktreeInput, cmd = m.worktreeInput.Update(msg)
+				}
+			case 1:
+				m.extractFromInput, cmd = m.extractFromInput.Update(msg)
+			case 2:
+				m.noteTargetFileInput, cmd = m.noteTargetFileInput.Update(msg)
 			}
-		case 6:
-			m.extractFromInput, cmd = m.extractFromInput.Update(msg)
-		case 7:
-			m.noteTargetFileInput, cmd = m.noteTargetFileInput.Update(msg)
 		}
 	}
 
 	return m, cmd
+}
+
+// getMaxFocusIndex returns the maximum focus index for the current screen
+func (m planInitTUIModel) getMaxFocusIndex() int {
+	switch m.currentScreen {
+	case MainScreen:
+		return 4 // 0-4: name, recipe, model, worktree checkbox, session checkbox
+	case AdvancedScreen:
+		return 2 // 0-2: worktree name, extract-from, note-target
+	}
+	return 4
 }
 
 // updateFocus updates focus state for all components
@@ -600,17 +646,25 @@ func (m planInitTUIModel) updateFocus() planInitTUIModel {
 
 	// Only focus if not in unfocused state
 	if !m.unfocused {
-		switch m.focusIndex {
-		case 0:
-			m.nameInput.Focus()
-		case 5:
-			if !m.withWorktree {
-				m.worktreeInput.Focus()
+		switch m.currentScreen {
+		case MainScreen:
+			switch m.focusIndex {
+			case 0:
+				m.nameInput.Focus()
+			// cases 1, 2 are lists (recipe, model) - no text focus needed
+			// cases 3, 4 are checkboxes - no text focus needed
 			}
-		case 6:
-			m.extractFromInput.Focus()
-		case 7:
-			m.noteTargetFileInput.Focus()
+		case AdvancedScreen:
+			switch m.focusIndex {
+			case 0:
+				if !m.withWorktree {
+					m.worktreeInput.Focus()
+				}
+			case 1:
+				m.extractFromInput.Focus()
+			case 2:
+				m.noteTargetFileInput.Focus()
+			}
 		}
 	}
 	return m
@@ -618,17 +672,52 @@ func (m planInitTUIModel) updateFocus() planInitTUIModel {
 
 func (m planInitTUIModel) View() string {
 	if m.help.ShowAll {
-		container := lipgloss.NewStyle().PaddingLeft(2)
-		return container.Render(lipgloss.JoinVertical(lipgloss.Left,
-			theme.DefaultTheme.Header.Render("󰠡 Create New Plan - Help"),
-			m.help.View(),
-		))
+		return m.help.View()
 	}
 
 	var b strings.Builder
 
+	// Render based on current screen
+	switch m.currentScreen {
+	case MainScreen:
+		b.WriteString(m.renderMainScreen())
+	case AdvancedScreen:
+		b.WriteString(m.renderAdvancedScreen())
+	}
+
+	// Error message
+	if m.err != nil {
+		b.WriteString("\n")
+		b.WriteString(theme.DefaultTheme.Error.Render(m.err.Error()))
+		b.WriteString("\n")
+	}
+
+	// Footer with mode indicator and default help
+	b.WriteString("\n")
+	if m.unfocused {
+		b.WriteString(theme.DefaultTheme.Muted.Render("[NORMAL]"))
+	} else {
+		b.WriteString(theme.DefaultTheme.Muted.Render("[INSERT]"))
+	}
+
+	// Add default help (? for help, q to quit)
+	helpText := m.help.View()
+	if helpText != "" {
+		b.WriteString(" • ")
+		b.WriteString(helpText)
+	}
+
+	// Wrap entire view with left margin
+	container := lipgloss.NewStyle().PaddingLeft(2)
+	return container.Render(b.String())
+}
+
+// renderMainScreen renders the main configuration screen
+func (m planInitTUIModel) renderMainScreen() string {
+	var b strings.Builder
+
 	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render("󰠡 Create New Plan"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	// Define border styles for 2-column layout
 	borderStyle := lipgloss.NewStyle().
@@ -660,7 +749,7 @@ func (m planInitTUIModel) View() string {
 	renderField := func(index int, title string, content string, wide bool) string {
 		var fieldBuilder strings.Builder
 
-		// Add checkmark if field has been visited
+		// Add checkmark if field has been visited (only for main screen)
 		titlePrefix := "  "
 		if index <= m.highestFocusIndex {
 			titlePrefix = theme.DefaultTheme.Success.Render("✓ ")
@@ -693,33 +782,13 @@ func (m planInitTUIModel) View() string {
 		return style.Render(fieldBuilder.String())
 	}
 
-	// Plan Configuration Section
-	b.WriteString(theme.DefaultTheme.Info.Render("Plan Configuration"))
-	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", 90))
-	b.WriteString("\n")
-
 	// Row 1: Plan Name (full width)
 	b.WriteString(renderField(0, "Plan Name", m.nameInput.View(), true))
 	b.WriteString("\n")
 
-	// Row 2: Recipe | Default Model
-	recipeDisplay := "none"
-	if selected := m.recipeList.SelectedItem(); selected != nil {
-		if recipeItem, ok := selected.(item); ok {
-			recipeDisplay = fmt.Sprintf("[%s]", string(recipeItem))
-		}
-	}
-
-	modelDisplay := "(default)"
-	if selected := m.modelList.SelectedItem(); selected != nil {
-		if modelItem, ok := selected.(modelItem); ok {
-			modelDisplay = fmt.Sprintf("[%s]", modelItem.ID)
-		}
-	}
-
-	recipeField := renderField(1, "Recipe", recipeDisplay, false)
-	modelField := renderField(2, "Default Model", modelDisplay, false)
+	// Row 2: Recipe | Default Model For API (rendered as lists with visible options)
+	recipeField := renderField(1, "Recipe", m.recipeList.View(), false)
+	modelField := renderField(2, "Default Model For API", m.modelList.View(), false)
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, recipeField, "  ", modelField)
 	b.WriteString(row2)
 	b.WriteString("\n")
@@ -751,65 +820,103 @@ func (m planInitTUIModel) View() string {
 	b.WriteString(row3)
 	b.WriteString("\n")
 
-	// Advanced Options Section (conditionally shown)
-	if m.showAdvanced {
-		b.WriteString("\n")
-		b.WriteString(theme.DefaultTheme.Info.Render("Advanced Options"))
-		b.WriteString("\n")
-		b.WriteString(strings.Repeat("─", 90))
-		b.WriteString("\n")
+	return b.String()
+}
 
-		// Worktree Name (only shown if not auto-creating)
-		var worktreeDisplay string
-		if m.withWorktree {
-			worktreeDisplay = theme.DefaultTheme.Muted.Render("(matches plan name)")
-		} else if isInheritedContext {
-			worktreeDisplay = theme.DefaultTheme.Info.Render(m.worktreeInput.Value())
+// renderAdvancedScreen renders the advanced options screen
+func (m planInitTUIModel) renderAdvancedScreen() string {
+	var b strings.Builder
+
+	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render("󰠡 Advanced Options"))
+	b.WriteString("\n\n")
+
+	// Define border styles for 2-column layout
+	borderStyle := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Border).
+		Padding(0, 1).
+		Width(40) // Narrower for 2-column layout
+
+	borderStyleWide := borderStyle.Copy().
+		Width(85) // Full width for single fields
+
+	unfocusedBorderStyle := borderStyle.Copy().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")) // Dimmed gray
+
+	unfocusedBorderStyleWide := borderStyleWide.Copy().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")) // Dimmed gray
+
+	focusedBorderStyle := borderStyle.Copy().
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(theme.DefaultColors.Orange)
+
+	focusedBorderStyleWide := borderStyleWide.Copy().
+		BorderStyle(lipgloss.ThickBorder()).
+		BorderForeground(theme.DefaultColors.Orange)
+
+	// renderField helper function with width option
+	renderField := func(index int, title string, content string, wide bool) string {
+		var fieldBuilder strings.Builder
+
+		fieldBuilder.WriteString("  " + theme.DefaultTheme.Bold.Render(title))
+		fieldBuilder.WriteString("\n")
+		fieldBuilder.WriteString(content)
+
+		// Apply appropriate border style based on width and focus
+		var style lipgloss.Style
+		if wide {
+			if m.focusIndex == index && !m.unfocused {
+				style = focusedBorderStyleWide
+			} else if m.focusIndex == index && m.unfocused {
+				style = unfocusedBorderStyleWide
+			} else {
+				style = borderStyleWide
+			}
 		} else {
-			worktreeDisplay = m.worktreeInput.View()
+			if m.focusIndex == index && !m.unfocused {
+				style = focusedBorderStyle
+			} else if m.focusIndex == index && m.unfocused {
+				style = unfocusedBorderStyle
+			} else {
+				style = borderStyle
+			}
 		}
 
-		b.WriteString(renderField(5, "Worktree Name", worktreeDisplay, true))
-		b.WriteString("\n")
+		return style.Render(fieldBuilder.String())
+	}
 
-		// Note integration options
-		extractField := renderField(6, "Extract from File (from-note)", m.extractFromInput.View(), false)
-		targetFileField := renderField(7, "Note Target File", m.noteTargetFileInput.View(), false)
-		noteRow := lipgloss.JoinHorizontal(lipgloss.Top, extractField, "  ", targetFileField)
-		b.WriteString(noteRow)
-		b.WriteString("\n")
+	// Check if we're in an inherited context for worktree
+	isInheritedContext := false
+	currentNode, err := workspace.GetProjectByPath(".")
+	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
+		isInheritedContext = true
+	}
+
+	// Worktree Name field
+	var worktreeDisplay string
+	if m.withWorktree {
+		worktreeDisplay = theme.DefaultTheme.Muted.Render("(matches plan name)")
+	} else if isInheritedContext {
+		worktreeDisplay = theme.DefaultTheme.Info.Render(m.worktreeInput.Value())
 	} else {
-		// Show hint to toggle advanced options
-		b.WriteString("\n")
-		b.WriteString(theme.DefaultTheme.Muted.Render("Press 'a' to toggle advanced options (worktree name, note integration)"))
-		b.WriteString("\n")
+		worktreeDisplay = m.worktreeInput.View()
 	}
 
-	// Error message
-	if m.err != nil {
-		b.WriteString("\n")
-		b.WriteString(theme.DefaultTheme.Error.Render(m.err.Error()))
-		b.WriteString("\n")
-	}
-
-	// Footer with mode indicator and default help
+	b.WriteString(renderField(0, "Worktree Name", worktreeDisplay, true))
 	b.WriteString("\n")
-	if m.unfocused {
-		b.WriteString(theme.DefaultTheme.Muted.Render("[NORMAL]"))
-	} else {
-		b.WriteString(theme.DefaultTheme.Muted.Render("[INSERT]"))
-	}
 
-	// Add default help (? for help, q to quit)
-	helpText := m.help.View()
-	if helpText != "" {
-		b.WriteString(" • ")
-		b.WriteString(helpText)
-	}
+	// Extract from File | Note Target File
+	extractField := renderField(1, "Extract from File (from-note)", m.extractFromInput.View(), false)
+	targetField := renderField(2, "Note Target File", m.noteTargetFileInput.View(), false)
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, extractField, "  ", targetField))
+	b.WriteString("\n\n")
 
-	// Wrap entire view with left margin
-	container := lipgloss.NewStyle().PaddingLeft(2)
-	return container.Render(b.String())
+	b.WriteString(theme.DefaultTheme.Muted.Render("Press 'Esc' or 'b' to return to main screen"))
+	b.WriteString("\n")
+
+	return b.String()
 }
 
 // toPlanInitCmd converts the final TUI model state into a PlanInitCmd struct.
