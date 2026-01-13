@@ -219,7 +219,7 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 		unfocused: false, // Start in insert mode (focused)
 		helpModel: help.NewBuilder().
 			WithKeys(addKeys).
-			WithTitle("✨ Add New Job - Help").
+			WithTitle("󰝒 Add New Job - Help").
 			Build(),
 	}
 

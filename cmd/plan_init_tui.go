@@ -618,22 +618,16 @@ func (m planInitTUIModel) updateFocus() planInitTUIModel {
 
 func (m planInitTUIModel) View() string {
 	if m.help.ShowAll {
-		return lipgloss.JoinVertical(lipgloss.Left,
-			theme.DefaultTheme.Header.Render("✨ Create New Plan - Help"),
+		container := lipgloss.NewStyle().PaddingLeft(2)
+		return container.Render(lipgloss.JoinVertical(lipgloss.Left,
+			theme.DefaultTheme.Header.Render("󰠡 Create New Plan - Help"),
 			m.help.View(),
-		)
+		))
 	}
 
 	var b strings.Builder
 
-	// Header with progress indicator
-	maxSteps := 5 // Basic fields: 0-4
-	if m.showAdvanced {
-		maxSteps = 8 // Include advanced fields: 5-7
-	}
-	progressText := fmt.Sprintf("[Step %d of %d]", m.highestFocusIndex+1, maxSteps)
-	header := fmt.Sprintf("🌲 ✨ Create New Plan                          %s", progressText)
-	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render(header))
+	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render("󰠡 Create New Plan"))
 	b.WriteString("\n\n")
 
 	// Define border styles for 2-column layout
@@ -813,7 +807,9 @@ func (m planInitTUIModel) View() string {
 		b.WriteString(helpText)
 	}
 
-	return b.String()
+	// Wrap entire view with left margin
+	container := lipgloss.NewStyle().PaddingLeft(2)
+	return container.Render(b.String())
 }
 
 // toPlanInitCmd converts the final TUI model state into a PlanInitCmd struct.
