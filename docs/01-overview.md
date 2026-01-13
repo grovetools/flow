@@ -1,4 +1,4 @@
-Grove Flow is a command-line tool for managing local, Markdown-based development workflows. State is stored in version-controlled plain text files: plans are directories of `.md` jobs, and status is defined by YAML frontmatter. It is designed for terminal-native use with `tmux` for execution environments and does not use a database or a cloud service.
+Grove Flow is a command-line tool for managing local, Markdown-based development workflows. All state is stored in version-controlled plain text files: plans are directories of `.md` jobs, and status is defined by YAML frontmatter. It is designed for terminal-native use with `tmux` for execution environments and does not rely on a database or a cloud service.
 
 ## Key Features
 
@@ -9,30 +9,31 @@ Grove Flow is a command-line tool for managing local, Markdown-based development
     *   `headless_agent`: A non-interactive agent that carries out a job and then exits.
     *   `shell`: A command executed in the system's default shell.
     *   `file`: A non-executable job used to store reference content.
-*   **Worktree Isolation**: Creates git worktrees in a `.grove-worktrees/` directory at the repository root. This provides filesystem isolation for development tasks. It can also create multi-repo worktrees to enable isolated changes across interdependent repositories.
-*   **Dependency Orchestration**: Jobs declare dependencies on other jobs via the `depends_on` field in their frontmatter. The orchestrator reads these declarations to build a dependency graph and execute jobs in the correct order, enabling controlled context sharing.
-*   **Auditable History**: Captures a traceable history of development activities. Context definitions, specifications, LLM outputs, and agent transcripts (from Claude Code, Codex, and OpenCode) can be preserved in version-controlled Markdown files or viewed in tools like Obsidian.
+*   **Worktree Isolation**: Creates git worktrees in a `.grove-worktrees/` directory at the repository root for filesystem isolation. It can also create multi-repo worktrees to enable isolated changes across interdependent repositories.
+*   **Dependency Orchestration**: Jobs declare dependencies on other jobs via the `depends_on` field in their frontmatter. The orchestrator reads these declarations to build a dependency graph and execute jobs in the correct order, which enables controlled context sharing between steps.
 *   **Lifecycle Management**: Provides commands to manage a plan's lifecycle from creation (`flow init`), through review (`flow review`), to cleanup (`flow finish`).
 
 ## How It Works
 
 A "plan" is a directory containing numbered Markdown files (e.g., `01-setup.md`, `02-implement.md`). Each file represents a "job" and contains YAML frontmatter that defines its properties, including `type`, `status`, and `depends_on`.
 
-When a command like `flow run` is executed, an orchestrator reads all job files in the plan directory, builds an in-memory dependency graph, and identifies runnable jobs. It then executes these jobs using the appropriate executor for their type. Outputs, such as LLM responses and agent transcripts, are appended back to the corresponding `.md` job file, creating a persistent record.
+When a command like `flow run` is executed, an orchestrator reads all job files in the plan directory, builds an in-memory dependency graph, and identifies runnable jobs. It then executes these jobs using the appropriate executor for their type. This process creates an audit trail for a plan's execution:
+*   Specifications and context definitions can be captured in version control.
+*   Outputs, such as LLM responses and agent transcripts (from Claude Code, Codex, and OpenCode), are appended back to the corresponding `.md` job file, creating a persistent, reviewable record of development history.
 
 ## Ecosystem Integration
 
-Grove Flow executes other command-line tools and uses library code from other parts of the grove ecosystem as part of its operation:
+Grove Flow executes other command-line tools and uses library code from other parts of the Grove ecosystem as part of its operation:
 
-*   **`grove-notebook` (`nb`)**: Plan initialization hooks can execute `nb` commands to create plans from notes. The notebook system is used for context engineering.
-*   **`grove-context` (`cx`)**: Before executing `oneshot` or `chat` jobs, this tool creates a context file based on `.grove/rules`, enabling quick chatting about large chunks of a codebase or multiple codebases for planning (requires API keys from Gemini or Anthropic).
-*   **`grove-hooks`**: Running agent sessions are registered with the `grove-hooks` session registry, which independently tracks PID and agent status (e.g., `idle`, `running`).
-*   **`grove-tmux`**: Worktrees created by `flow` can be navigated using `grove-tmux`, which can dynamically bind workspaces to `tmux` hotkeys. Agents within a worktree are launched in new, named windows within a `tmux` session for management. When jobs complete, transcripts are finalized and appened to the markdown file. Agent associated with paritcular jobs can be revised in tmux windows if needed.
+*   **`grove-notebook` (`nb`)**: Plan initialization hooks can execute `nb` commands to create plans from notes. The notebook acts as a separate store for development artifacts, independent of the main project repository. `flow` can also be configured to automatically preserve markdown files generated by Claude Code's "Plan Mode" into an executable job graph.
+*   **`grove-context` (`cx`)**: Before executing `oneshot` or `chat` jobs, this tool can be used to generate a context file based on `.grove/rules`.
+*   **`grove-hooks`**: Running agent sessions are registered with the `grove-hooks` session registry, which independently tracks the process ID and agent status (e.g., `idle`, `running`).
+*   **`grove-tmux`**: Worktrees created by `flow` can be navigated using `grove-tmux`, which can dynamically bind workspaces to `tmux` hotkeys. Agents are launched in new, named windows within a `tmux` session.
 *   **Agent CLIs**: Interactive agent jobs launch `claude`, `codex`, or `opencode` as subprocesses.
 
 ## Advanced Usage & Automation
 
-As a command-line tool, `flow` can be executed by other processes, including agents. An agent, guided by a "skills", can use `flow` to construct and execute its own development pipelines. This enables workflows such as using multi-step `oneshot` jobs with large repository context for planning, potentially with an ensemble of different models, before carrying out the implementation.
+As a command-line tool, `flow` can be executed by other processes, including agents. An agent, guided by a "skill", can use `flow` to construct and execute its own development pipelines. This enables workflows such as using multi-step `oneshot` jobs with repository context for planning before carrying out an implementation.
 
 Using Grove's "ecosystem" model, `flow` can create worktrees that span multiple repositories, allowing agents to perform coordinated and isolated changes across a set of interdependent projects.
 
