@@ -196,13 +196,13 @@ type planInitTUIModel struct {
 	standalone bool
 	quitting   bool
 	// Form inputs
-	nameInput           textinput.Model
-	recipeList          list.Model
-	modelList           list.Model
-	openSession         bool
+	nameInput   textinput.Model
+	recipeList  list.Model
+	modelList   list.Model
+	openSession bool
 
 	// Screen navigation
-	currentScreen       planInitScreen
+	currentScreen planInitScreen
 
 	// Advanced options
 	withWorktree        bool
@@ -210,8 +210,8 @@ type planInitTUIModel struct {
 	extractFromInput    textinput.Model
 	noteTargetFileInput textinput.Model
 
-	keyMap              planInitTUIKeyMap
-	help                help.Model
+	keyMap planInitTUIKeyMap
+	help   help.Model
 }
 
 // newPlanInitTUIModel creates a new model for the plan initialization form.
@@ -352,40 +352,6 @@ func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
 	// For boolean flags, if they were set on the command line, their value will be passed in.
 	// Cobra handles the default values.
 	m.openSession = initialCmd.OpenSession
-
-	// Advanced section fields - auto-show if any are populated
-	hasAdvancedOptions := false
-
-	// Handle worktree logic. Default is true (auto-mode).
-	// Only change if the flag was explicitly provided with a value or set to false.
-	// We don't have a direct way to check for flag presence here, so we rely on the value.
-	if initialCmd.Worktree != "" && initialCmd.Worktree != "__AUTO__" {
-		m.withWorktree = false
-		m.worktreeInput.SetValue(initialCmd.Worktree)
-		hasAdvancedOptions = true
-	} else if initialCmd.Worktree == "__AUTO__" {
-		m.withWorktree = true
-		hasAdvancedOptions = true
-	}
-
-	// Populate extract from field - FromNote takes precedence over ExtractAllFrom
-	if initialCmd.FromNote != "" {
-		m.extractFromInput.SetValue(initialCmd.FromNote)
-		hasAdvancedOptions = true
-	} else if initialCmd.ExtractAllFrom != "" {
-		m.extractFromInput.SetValue(initialCmd.ExtractAllFrom)
-		hasAdvancedOptions = true
-	}
-
-	if initialCmd.NoteTargetFile != "" {
-		m.noteTargetFileInput.SetValue(initialCmd.NoteTargetFile)
-		hasAdvancedOptions = true
-	}
-
-	// Navigate to advanced screen if any advanced options were pre-populated
-	if hasAdvancedOptions {
-		m.currentScreen = AdvancedScreen
-	}
 }
 
 func (m planInitTUIModel) Init() tea.Cmd {
@@ -651,8 +617,8 @@ func (m planInitTUIModel) updateFocus() planInitTUIModel {
 			switch m.focusIndex {
 			case 0:
 				m.nameInput.Focus()
-			// cases 1, 2 are lists (recipe, model) - no text focus needed
-			// cases 3, 4 are checkboxes - no text focus needed
+				// cases 1, 2 are lists (recipe, model) - no text focus needed
+				// cases 3, 4 are checkboxes - no text focus needed
 			}
 		case AdvancedScreen:
 			switch m.focusIndex {
@@ -953,4 +919,3 @@ func (m planInitTUIModel) toPlanInitCmd() *PlanInitCmd {
 
 	return cmd
 }
-
