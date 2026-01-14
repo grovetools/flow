@@ -60,6 +60,7 @@ func main() {
 		scenarios.RecipeDockerComposePortRemovalScenario,
 		scenarios.HoistedCommandsScenario,
 		scenarios.HoistedCommandsWithActiveJobScenario,
+		scenarios.DefaultPlanWorkflowScenario,
 		scenarios.SessionArchivingScenario,
 		scenarios.RecipeConceptUpdateScenario,
 		scenarios.RecipeConceptUpdateWithPlansScenario,

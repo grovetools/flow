@@ -222,20 +222,99 @@ func getActivePlanWithMigration() (string, error) {
 }
 
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.
+// If no active job is set, it falls back to the "default" plan, creating it if necessary.
 func resolvePlanPathWithActiveJob(planName string) (string, error) {
+	usingDefaultPlan := false
+
 	// If no plan name provided, try to use active job
 	if planName == "" {
 		activeJob, err := getActivePlanWithMigration()
 		if err != nil {
 			return "", fmt.Errorf("get active job: %w", err)
 		}
-		if activeJob == "" {
-			return "", fmt.Errorf("no plan directory specified and no active job set.\nUse 'flow plan list' or 'flow plan tui' to see available plans, then 'flow plan set <plan-directory>' to set one")
+		if activeJob != "" {
+			planName = activeJob
+		} else {
+			// Fallback to the default plan
+			planName = "default"
+			usingDefaultPlan = true
 		}
-		planName = activeJob
+	}
+
+	// For the default plan, we need to ensure we have a valid workspace context.
+	// Don't create "default/" in random directories if workspace detection fails.
+	if usingDefaultPlan {
+		resolvedPath, err := resolvePlanPathInWorkspace(planName)
+		if err != nil {
+			return "", fmt.Errorf("cannot use default plan: %w", err)
+		}
+		if err := ensureDefaultPlanExists(resolvedPath); err != nil {
+			return "", fmt.Errorf("ensuring default plan exists: %w", err)
+		}
+		return resolvedPath, nil
 	}
 
 	return resolvePlanPath(planName)
+}
+
+// resolvePlanPathInWorkspace resolves a plan path but returns an error if workspace detection fails.
+// Unlike resolvePlanPath, it does not fall back to the local directory.
+func resolvePlanPathInWorkspace(planName string) (string, error) {
+	// If planName is already an absolute path, use it directly.
+	if filepath.IsAbs(planName) {
+		return planName, nil
+	}
+
+	// Get the current workspace node - required for this function
+	node, err := workspace.GetProjectByPath(".")
+	if err != nil {
+		return "", fmt.Errorf("not in a workspace (no git repository found): %w", err)
+	}
+
+	// Load config and initialize the locator.
+	coreCfg, err := config.LoadDefault()
+	if err != nil {
+		coreCfg = &config.Config{}
+	}
+	locator := workspace.NewNotebookLocator(coreCfg)
+
+	// Get the base plans directory for the current workspace using NotebookLocator.
+	plansDir, err := locator.GetPlansDir(node)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve plans directory: %w", err)
+	}
+
+	// Join with the specific plan name.
+	fullPath := filepath.Join(plansDir, planName)
+	return filepath.Abs(fullPath)
+}
+
+// ensureDefaultPlanExists checks if the default plan directory exists, creating it if necessary.
+func ensureDefaultPlanExists(planPath string) error {
+	// Check if the directory already exists
+	if _, err := os.Stat(planPath); err == nil {
+		return nil // Already exists, nothing to do
+	} else if !os.IsNotExist(err) {
+		// Another error occurred (e.g., permissions)
+		return fmt.Errorf("checking default plan path: %w", err)
+	}
+
+	// Directory does not exist, so create it
+	if err := os.MkdirAll(planPath, 0755); err != nil {
+		return fmt.Errorf("creating default plan directory: %w", err)
+	}
+
+	// Create a minimal .grove-plan.yml file
+	configPath := filepath.Join(planPath, ".grove-plan.yml")
+	configContent := []byte("# Default plan, automatically created by grove-flow.\n")
+	if err := os.WriteFile(configPath, configContent, 0644); err != nil {
+		return fmt.Errorf("creating default .grove-plan.yml: %w", err)
+	}
+
+	// Notify the user on stderr that the default plan is being used for the first time
+	fmt.Fprintf(os.Stderr, "No active plan set. Using default plan at: %s\n", planPath)
+
+	return nil
 }
 
 // loadFlowConfigWithDynamicRecipes is a helper to load flow config and extract the get_recipe_cmd.
