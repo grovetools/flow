@@ -11,3 +11,5 @@ prepend_dependencies: true
 ---
 
 Based on the provided test specification, implement the end-to-end tests for the new feature.
+
+Invoke the `tend-tester` skill, and if your tests involve TUIs, use the `tui-explorer` skill.

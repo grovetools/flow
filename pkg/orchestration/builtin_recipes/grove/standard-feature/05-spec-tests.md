@@ -23,6 +23,6 @@ Based on the feature specification and the implementation plan, write a detailed
 
 Describe the end-to-end tests needed to validate the feature. Use the `tend` testing framework syntax where applicable.
 
-Focus on the 'what' to test, not the 'how' to implement the test. The implementation test agent will use this specification as its primary guide.
+The implementation test agent will use this specification as its primary guide.
 
 The test spec should be comprehensive and cover all acceptance criteria mentioned in the original feature specification.
