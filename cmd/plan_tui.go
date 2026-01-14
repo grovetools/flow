@@ -1775,6 +1775,14 @@ func executePlanReview(plan *orchestration.Plan) tea.Cmd {
 		cmd := exec.Command("grove", "flow", "plan", "review")
 		output, err := cmd.CombinedOutput()
 
+		// If there was an error, include the command output in the error message
+		if err != nil {
+			outputStr := strings.TrimSpace(string(output))
+			if outputStr != "" {
+				err = fmt.Errorf("%w: %s", err, outputStr)
+			}
+		}
+
 		return reviewCompleteMsg{
 			output: string(output),
 			err:    err,

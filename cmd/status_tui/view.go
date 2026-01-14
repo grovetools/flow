@@ -266,7 +266,7 @@ func (m Model) renderTableView() string {
 	}
 
 	if len(rows) == 0 {
-		return "\n" + t.Muted.Render("No jobs to display.")
+		return "\n" + t.Muted.Render("No jobs to display.") + "\n\n" + t.Muted.Render("Press 'A' to add a job.")
 	}
 
 	tableStr := gtable.SelectableTable(headers, rows, m.Cursor-m.ScrollOffset)
