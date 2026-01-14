@@ -251,11 +251,21 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
+// RollingPlanName is the name of the auto-created rolling plan.
+// This constant is duplicated here to avoid import cycles with cmd package.
+const RollingPlanName = "rolling"
+
 // renderJobsPane renders the top (or left) pane containing the plan header and jobs list.
 func (m Model) renderJobsPane(contentWidth int) string {
 	// 1. Create Header
 	headerLabel := theme.DefaultTheme.Bold.Render(theme.IconPlan + " Plan Status: ")
-	planName := theme.DefaultTheme.Bold.Render(m.Plan.Name)
+	var planName string
+	if m.Plan.Name == RollingPlanName {
+		// Style the rolling plan name with parens and dim styling, plus a description
+		planName = theme.DefaultTheme.Muted.Render("(rolling)") + "  " + theme.DefaultTheme.Muted.Italic(true).Render("auto-created for quick tasks")
+	} else {
+		planName = theme.DefaultTheme.Bold.Render(m.Plan.Name)
+	}
 	headerText := headerLabel + planName
 	styledHeader := lipgloss.NewStyle().
 		Background(theme.DefaultTheme.Header.GetBackground()).

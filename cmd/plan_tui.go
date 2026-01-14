@@ -1014,7 +1014,12 @@ func (m planListTUIModel) renderPlanTable() string {
 		updatedText := theme.DefaultTheme.Muted.Render("◦ " + formatRelativeTime(plan.LastUpdated))
 
 		// Add active plan indicator - use bold for emphasis without explicit color
+		// Style the rolling plan name differently
 		titleText := plan.Name
+		if plan.Name == RollingPlanName {
+			// Rolling plan: show with parens and dim styling
+			titleText = theme.DefaultTheme.Muted.Render("(rolling)")
+		}
 		if plan.Name == m.activePlan {
 			// Use IconSelect for active plan indicator, but only if not also selected by cursor.
 			// The SelectableTable will handle the cursor indicator.

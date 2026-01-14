@@ -11,12 +11,15 @@ import (
 	"github.com/mattsolo1/grove-tend/pkg/verify"
 )
 
-// DefaultPlanWorkflowScenario tests the default plan feature that automatically creates
-// and uses a "default" plan when no plan is specified and no active job is set.
-var DefaultPlanWorkflowScenario = harness.NewScenario(
-	"default-plan-workflow",
-	"Verifies the complete lifecycle of the default plan feature, from lazy creation to precedence rules.",
-	[]string{"core", "plan", "default-plan", "ux"},
+// RollingPlanName is the name of the auto-created rolling plan.
+const RollingPlanName = "rolling"
+
+// RollingPlanWorkflowScenario tests the rolling plan feature that automatically creates
+// and uses a "rolling" plan when no plan is specified and no active job is set.
+var RollingPlanWorkflowScenario = harness.NewScenario(
+	"rolling-plan-workflow",
+	"Verifies the complete lifecycle of the rolling plan feature, from lazy creation to precedence rules.",
+	[]string{"core", "plan", "rolling-plan", "ux"},
 	[]harness.Step{
 		// Setup mocks for LLM operations
 		harness.SetupMocks(
@@ -25,14 +28,14 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 		),
 
 		harness.NewStep("Setup sandboxed environment", func(ctx *harness.Context) error {
-			projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "default-plan-project")
+			projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "rolling-plan-project")
 			if err != nil {
 				return err
 			}
 
-			// Store the expected default plan path for later verification
-			defaultPlanPath := filepath.Join(notebooksRoot, "workspaces", "default-plan-project", "plans", "default")
-			ctx.Set("default_plan_path", defaultPlanPath)
+			// Store the expected rolling plan path for later verification
+			rollingPlanPath := filepath.Join(notebooksRoot, "workspaces", "rolling-plan-project", "plans", RollingPlanName)
+			ctx.Set("rolling_plan_path", rollingPlanPath)
 
 			// Verify no active plan is set initially
 			cmd := ctx.Bin("current")
@@ -51,12 +54,12 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 
 		harness.NewStep("First use of 'flow add' triggers lazy creation", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
-			defaultPlanPath := ctx.GetString("default_plan_path")
+			rollingPlanPath := ctx.GetString("rolling_plan_path")
 
-			// Run 'flow add' without specifying a plan - should trigger default plan creation
+			// Run 'flow add' without specifying a plan - should trigger rolling plan creation
 			cmd := ctx.Bin("add",
-				"--title", "First Default Job",
-				"-p", "My first job added to default plan")
+				"--title", "First Rolling Job",
+				"-p", "My first job added to rolling plan")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -66,30 +69,30 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 			}
 
 			// Verify stderr contains the notification message
-			if err := ctx.Check("notification message in stderr", assert.Contains(result.Stderr, "No active plan set. Using default plan at:")); err != nil {
+			if err := ctx.Check("notification message in stderr", assert.Contains(result.Stderr, "No active plan set. Using rolling plan at:")); err != nil {
 				return err
 			}
 
-			// Verify the default plan directory was created
-			if err := ctx.Check("default plan directory exists", fs.AssertExists(defaultPlanPath)); err != nil {
+			// Verify the rolling plan directory was created
+			if err := ctx.Check("rolling plan directory exists", fs.AssertExists(rollingPlanPath)); err != nil {
 				return err
 			}
 
-			// Verify .grove-plan.yml exists in the default plan directory
-			planConfigPath := filepath.Join(defaultPlanPath, ".grove-plan.yml")
+			// Verify .grove-plan.yml exists in the rolling plan directory
+			planConfigPath := filepath.Join(rollingPlanPath, ".grove-plan.yml")
 			if err := ctx.Check("plan config file exists", fs.AssertExists(planConfigPath)); err != nil {
 				return err
 			}
 
 			// Verify a job file was created
-			jobFiles, err := fs.ListFiles(defaultPlanPath)
+			jobFiles, err := fs.ListFiles(rollingPlanPath)
 			if err != nil {
-				return fmt.Errorf("listing default plan files: %w", err)
+				return fmt.Errorf("listing rolling plan files: %w", err)
 			}
 
 			foundJob := false
 			for _, f := range jobFiles {
-				if strings.HasSuffix(f, ".md") && strings.Contains(f, "first-default-job") {
+				if strings.HasSuffix(f, ".md") && strings.Contains(f, "first-rolling-job") {
 					foundJob = true
 					ctx.Set("first_job_file", f)
 					break
@@ -97,13 +100,13 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 			}
 
 			if !foundJob {
-				return fmt.Errorf("job file '01-first-default-job.md' not found in default plan")
+				return fmt.Errorf("job file '01-first-rolling-job.md' not found in rolling plan")
 			}
 
 			return nil
 		}),
 
-		harness.NewStep("Verify state commands are unaffected by implicit default", func(ctx *harness.Context) error {
+		harness.NewStep("Verify state commands are unaffected by implicit rolling plan", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
 			// 'flow current' should still show no active job
@@ -117,11 +120,11 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 			}
 
 			return ctx.Verify(func(v *verify.Collector) {
-				v.Contains("no active job set after using default", result.Stdout, "No active job set")
+				v.Contains("no active job set after using rolling plan", result.Stdout, "No active job set")
 			})
 		}),
 
-		harness.NewStep("Verify default plan is discoverable by 'flow list'", func(ctx *harness.Context) error {
+		harness.NewStep("Verify rolling plan is discoverable by 'flow list'", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
 			cmd := ctx.Bin("list")
@@ -134,18 +137,18 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 			}
 
 			return ctx.Verify(func(v *verify.Collector) {
-				v.Contains("default plan in list", result.Stdout, "default")
+				v.Contains("rolling plan in list", result.Stdout, RollingPlanName)
 			})
 		}),
 
 		harness.NewStep("Subsequent use of 'flow add' does not re-notify", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
-			defaultPlanPath := ctx.GetString("default_plan_path")
+			rollingPlanPath := ctx.GetString("rolling_plan_path")
 
 			// Run another 'flow add' - should NOT trigger notification again
 			cmd := ctx.Bin("add",
-				"--title", "Second Default Job",
-				"-p", "My second job added to default plan")
+				"--title", "Second Rolling Job",
+				"-p", "My second job added to rolling plan")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -155,26 +158,26 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 			}
 
 			// Verify stderr does NOT contain the notification message
-			if strings.Contains(result.Stderr, "No active plan set. Using default plan at:") {
+			if strings.Contains(result.Stderr, "No active plan set. Using rolling plan at:") {
 				return fmt.Errorf("expected no notification on subsequent use, but got: %s", result.Stderr)
 			}
 
 			// Verify a second job file was created
-			jobFiles, err := fs.ListFiles(defaultPlanPath)
+			jobFiles, err := fs.ListFiles(rollingPlanPath)
 			if err != nil {
-				return fmt.Errorf("listing default plan files: %w", err)
+				return fmt.Errorf("listing rolling plan files: %w", err)
 			}
 
 			foundSecondJob := false
 			for _, f := range jobFiles {
-				if strings.HasSuffix(f, ".md") && strings.Contains(f, "second-default-job") {
+				if strings.HasSuffix(f, ".md") && strings.Contains(f, "second-rolling-job") {
 					foundSecondJob = true
 					break
 				}
 			}
 
 			if !foundSecondJob {
-				return fmt.Errorf("second job file not found in default plan")
+				return fmt.Errorf("second job file not found in rolling plan")
 			}
 
 			return nil
@@ -183,7 +186,7 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 		harness.NewStep("Verify explicit plan directory takes precedence", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")
-			defaultPlanPath := ctx.GetString("default_plan_path")
+			rollingPlanPath := ctx.GetString("rolling_plan_path")
 
 			// Initialize a new, separate plan
 			cmd := ctx.Bin("plan", "init", "explicit-plan")
@@ -195,18 +198,18 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 				return fmt.Errorf("plan init failed: %w", err)
 			}
 
-			explicitPlanPath := filepath.Join(notebooksRoot, "workspaces", "default-plan-project", "plans", "explicit-plan")
+			explicitPlanPath := filepath.Join(notebooksRoot, "workspaces", "rolling-plan-project", "plans", "explicit-plan")
 			ctx.Set("explicit_plan_path", explicitPlanPath)
 
-			// Count jobs in default plan before adding to explicit plan
-			defaultJobsBefore, err := fs.ListFiles(defaultPlanPath)
+			// Count jobs in rolling plan before adding to explicit plan
+			rollingJobsBefore, err := fs.ListFiles(rollingPlanPath)
 			if err != nil {
-				return fmt.Errorf("listing default plan files: %w", err)
+				return fmt.Errorf("listing rolling plan files: %w", err)
 			}
-			defaultJobCountBefore := 0
-			for _, f := range defaultJobsBefore {
+			rollingJobCountBefore := 0
+			for _, f := range rollingJobsBefore {
 				if strings.HasSuffix(f, ".md") && !strings.HasPrefix(f, ".") {
-					defaultJobCountBefore++
+					rollingJobCountBefore++
 				}
 			}
 
@@ -240,30 +243,30 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 				return fmt.Errorf("job not found in explicit plan")
 			}
 
-			// Verify no new jobs were added to default plan
-			defaultJobsAfter, err := fs.ListFiles(defaultPlanPath)
+			// Verify no new jobs were added to rolling plan
+			rollingJobsAfter, err := fs.ListFiles(rollingPlanPath)
 			if err != nil {
-				return fmt.Errorf("listing default plan files after: %w", err)
+				return fmt.Errorf("listing rolling plan files after: %w", err)
 			}
-			defaultJobCountAfter := 0
-			for _, f := range defaultJobsAfter {
+			rollingJobCountAfter := 0
+			for _, f := range rollingJobsAfter {
 				if strings.HasSuffix(f, ".md") && !strings.HasPrefix(f, ".") {
-					defaultJobCountAfter++
+					rollingJobCountAfter++
 				}
 			}
 
-			if defaultJobCountAfter != defaultJobCountBefore {
-				return fmt.Errorf("expected %d jobs in default plan, got %d (explicit plan should not affect default)",
-					defaultJobCountBefore, defaultJobCountAfter)
+			if rollingJobCountAfter != rollingJobCountBefore {
+				return fmt.Errorf("expected %d jobs in rolling plan, got %d (explicit plan should not affect rolling)",
+					rollingJobCountBefore, rollingJobCountAfter)
 			}
 
 			return nil
 		}),
 
-		harness.NewStep("Verify active plan takes precedence over default", func(ctx *harness.Context) error {
+		harness.NewStep("Verify active plan takes precedence over rolling plan", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			explicitPlanPath := ctx.GetString("explicit_plan_path")
-			defaultPlanPath := ctx.GetString("default_plan_path")
+			rollingPlanPath := ctx.GetString("rolling_plan_path")
 
 			// Set the active plan
 			cmd := ctx.Bin("set", "explicit-plan")
@@ -285,19 +288,19 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 				return err
 			}
 
-			// Count jobs in default plan before adding
-			defaultJobsBefore, err := fs.ListFiles(defaultPlanPath)
+			// Count jobs in rolling plan before adding
+			rollingJobsBefore, err := fs.ListFiles(rollingPlanPath)
 			if err != nil {
-				return fmt.Errorf("listing default plan files: %w", err)
+				return fmt.Errorf("listing rolling plan files: %w", err)
 			}
-			defaultJobCountBefore := 0
-			for _, f := range defaultJobsBefore {
+			rollingJobCountBefore := 0
+			for _, f := range rollingJobsBefore {
 				if strings.HasSuffix(f, ".md") && !strings.HasPrefix(f, ".") {
-					defaultJobCountBefore++
+					rollingJobCountBefore++
 				}
 			}
 
-			// Add a job without specifying a directory - should use active plan, not default
+			// Add a job without specifying a directory - should use active plan, not rolling
 			cmd = ctx.Bin("add",
 				"--title", "Active Job",
 				"-p", "Job added to active plan")
@@ -327,29 +330,29 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 				return fmt.Errorf("job not found in active plan (explicit-plan)")
 			}
 
-			// Verify no new jobs were added to default plan
-			defaultJobsAfter, err := fs.ListFiles(defaultPlanPath)
+			// Verify no new jobs were added to rolling plan
+			rollingJobsAfter, err := fs.ListFiles(rollingPlanPath)
 			if err != nil {
-				return fmt.Errorf("listing default plan files after: %w", err)
+				return fmt.Errorf("listing rolling plan files after: %w", err)
 			}
-			defaultJobCountAfter := 0
-			for _, f := range defaultJobsAfter {
+			rollingJobCountAfter := 0
+			for _, f := range rollingJobsAfter {
 				if strings.HasSuffix(f, ".md") && !strings.HasPrefix(f, ".") {
-					defaultJobCountAfter++
+					rollingJobCountAfter++
 				}
 			}
 
-			if defaultJobCountAfter != defaultJobCountBefore {
-				return fmt.Errorf("expected %d jobs in default plan, got %d (active plan should take precedence)",
-					defaultJobCountBefore, defaultJobCountAfter)
+			if rollingJobCountAfter != rollingJobCountBefore {
+				return fmt.Errorf("expected %d jobs in rolling plan, got %d (active plan should take precedence)",
+					rollingJobCountBefore, rollingJobCountAfter)
 			}
 
 			return nil
 		}),
 
-		harness.NewStep("Verify 'flow unset' reverts to default behavior", func(ctx *harness.Context) error {
+		harness.NewStep("Verify 'flow unset' reverts to rolling plan behavior", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
-			defaultPlanPath := ctx.GetString("default_plan_path")
+			rollingPlanPath := ctx.GetString("rolling_plan_path")
 
 			// Unset the active plan
 			cmd := ctx.Bin("unset")
@@ -361,9 +364,9 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 				return fmt.Errorf("unset command failed: %w", err)
 			}
 
-			// Add one final job without specifying a directory - should go to default plan
+			// Add one final job without specifying a directory - should go to rolling plan
 			cmd = ctx.Bin("add",
-				"--title", "Back to Default",
+				"--title", "Back to Rolling",
 				"-p", "Job added after unsetting active plan")
 			cmd.Dir(projectDir)
 			result = cmd.Run()
@@ -373,28 +376,28 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 				return fmt.Errorf("add after unset failed: %w", err)
 			}
 
-			// Verify the job was created in default plan
-			defaultJobFiles, err := fs.ListFiles(defaultPlanPath)
+			// Verify the job was created in rolling plan
+			rollingJobFiles, err := fs.ListFiles(rollingPlanPath)
 			if err != nil {
-				return fmt.Errorf("listing default plan files: %w", err)
+				return fmt.Errorf("listing rolling plan files: %w", err)
 			}
 
-			foundBackToDefaultJob := false
-			for _, f := range defaultJobFiles {
-				if strings.HasSuffix(f, ".md") && strings.Contains(f, "back-to-default") {
-					foundBackToDefaultJob = true
+			foundBackToRollingJob := false
+			for _, f := range rollingJobFiles {
+				if strings.HasSuffix(f, ".md") && strings.Contains(f, "back-to-rolling") {
+					foundBackToRollingJob = true
 					break
 				}
 			}
 
-			if !foundBackToDefaultJob {
-				return fmt.Errorf("job not found in default plan after unsetting active plan")
+			if !foundBackToRollingJob {
+				return fmt.Errorf("job not found in rolling plan after unsetting active plan")
 			}
 
 			return nil
 		}),
 
-		harness.NewStep("Verify 'flow status' works with default plan", func(ctx *harness.Context) error {
+		harness.NewStep("Verify 'flow status' works with rolling plan", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 
 			// Ensure no active plan is set
@@ -419,11 +422,11 @@ var DefaultPlanWorkflowScenario = harness.NewScenario(
 				return fmt.Errorf("status command failed: %w", err)
 			}
 
-			// Verify the JSON output contains jobs from the default plan
+			// Verify the JSON output contains jobs from the rolling plan
 			return ctx.Verify(func(v *verify.Collector) {
-				v.Contains("first job in status output", result.Stdout, "first-default-job")
-				v.Contains("second job in status output", result.Stdout, "second-default-job")
-				v.Contains("back-to-default job in status output", result.Stdout, "back-to-default")
+				v.Contains("first job in status output", result.Stdout, "first-rolling-job")
+				v.Contains("second job in status output", result.Stdout, "second-rolling-job")
+				v.Contains("back-to-rolling job in status output", result.Stdout, "back-to-rolling")
 			})
 		}),
 	},
