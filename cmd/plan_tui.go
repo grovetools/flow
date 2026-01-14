@@ -23,6 +23,7 @@ import (
 	"github.com/mattsolo1/grove-core/tui/components/table"
 	"github.com/mattsolo1/grove-core/tui/keymap"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -1711,8 +1712,8 @@ func openPlanStatusTUI(plan *orchestration.Plan) tea.Cmd {
 			}
 			return nil
 		},
-		// Run status TUI through grove delegator
-		tea.ExecProcess(exec.Command("grove", "flow", "plan", "status", "--tui"),
+		// Run status TUI through grove delegator (if available)
+		tea.ExecProcess(delegation.Command("flow", "plan", "status", "--tui"),
 			func(err error) tea.Msg {
 				// When in Neovim, quit the parent when child exits (for edit action)
 				if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
@@ -1733,7 +1734,7 @@ func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 			return nil
 		},
 		// Then run the finish command via 'grove' for workspace-awareness
-		tea.ExecProcess(exec.Command("grove", "flow", "plan", "finish"),
+		tea.ExecProcess(delegation.Command("flow", "plan", "finish"),
 			func(err error) tea.Msg {
 				return nil
 			}),
@@ -1751,7 +1752,7 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 		},
 		// Then run the open command via 'grove' for workspace-awareness
 		func() tea.Cmd {
-			openCmd := exec.Command("grove", "flow", "plan", "open")
+			openCmd := delegation.Command("flow", "plan", "open")
 			// Ensure the subprocess knows it's being called from a TUI
 			openCmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
 

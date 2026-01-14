@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/mattsolo1/grove-core/pkg/sessions"
+	"github.com/mattsolo1/grove-core/util/delegation"
 )
 
 // AppendAgentTranscript finds the transcript for an agent job
@@ -49,13 +49,13 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	}
 
 	// Get formatted transcript for job.log (with ANSI colors)
-	formattedCmd := exec.Command("grove", "aglogs", "read", aglogsSpec)
+	formattedCmd := delegation.Command("aglogs", "read", aglogsSpec)
 	formattedCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 	formattedOutput, formattedErr := formattedCmd.CombinedOutput()
 	formattedStr := string(formattedOutput)
 
 	// Get plain text transcript for .md file (without ANSI colors)
-	plainCmd := exec.Command("grove", "aglogs", "read", aglogsSpec)
+	plainCmd := delegation.Command("aglogs", "read", aglogsSpec)
 	plainOutput, plainErr := plainCmd.CombinedOutput()
 	plainStr := string(plainOutput)
 

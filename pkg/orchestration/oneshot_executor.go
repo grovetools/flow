@@ -23,6 +23,7 @@ import (
 	"github.com/mattsolo1/grove-core/git"
 	grovelogging "github.com/mattsolo1/grove-core/logging"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	geminiconfig "github.com/mattsolo1/grove-gemini/pkg/config"
 	"github.com/mattsolo1/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -886,9 +887,9 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			// Try cx reset to create default rules
 			var resetCmd *exec.Cmd
 			var resetErr error
-			
+
 			// Try grove cx reset first
-			resetCmd = exec.Command("grove", "cx", "reset")
+			resetCmd = delegation.Command("cx", "reset")
 			resetCmd.Dir = contextDir
 			resetCmd.Stdout = os.Stdout
 			resetCmd.Stderr = os.Stderr
@@ -966,7 +967,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 						// Run cx edit in the context directory
 						fmt.Fprintf(writer, "Opening rules editor with '%s edit'...\n", cxBinary)
-						cmd := exec.Command("grove", "cx", "edit")
+						cmd := delegation.Command("cx", "edit")
 						cmd.Dir = contextDir
 						cmd.Stdin = os.Stdin
 						cmd.Stdout = os.Stdout
@@ -1598,7 +1599,7 @@ interpret and continue through YOUR current system instructions.
 		}
 
 		// Try grove cx generate first
-		cxCmd := exec.CommandContext(ctx, "grove", "cx", "generate")
+		cxCmd := delegation.CommandContext(ctx, "cx", "generate")
 		cxCmd.Dir = contextDir
 		if logFile != nil {
 			cxCmd.Stdout = logFile

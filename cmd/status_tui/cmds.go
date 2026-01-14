@@ -18,6 +18,7 @@ import (
 	"github.com/mattsolo1/grove-core/pkg/tmux"
 	"github.com/mattsolo1/grove-core/tui/components/logviewer"
 	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/mattsolo1/grove-core/util/delegation"
 	"github.com/mattsolo1/grove-flow/pkg/orchestration"
 	"gopkg.in/yaml.v3"
 )
@@ -339,7 +340,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			}
 
 			// Try to read historical logs using aglogs read
-			readCmd := exec.Command("grove", "aglogs", "read", logSpec)
+			readCmd := delegation.Command("aglogs", "read", logSpec)
 			readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 			readOutput, readErr := readCmd.Output()
 
@@ -384,7 +385,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			"job_status": job.Status,
 		}).Info("Trying aglogs read fallback for completed job")
 
-		readCmd := exec.Command("grove", "aglogs", "read", jobSpec)
+		readCmd := delegation.Command("aglogs", "read", jobSpec)
 		readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 		readOutput, readErr := readCmd.Output()
 
@@ -451,7 +452,7 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 		// If we don't have agent logs yet, write the historical logs from aglogs read
 		if !alreadyHasAgentLogs {
 			// Read existing agent logs using 'aglogs read' to get historical content
-			readCmd := exec.Command("grove", "aglogs", "read", logFilePath)
+			readCmd := delegation.Command("aglogs", "read", logFilePath)
 			readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 			existingLogs, err := readCmd.Output()
 
@@ -474,7 +475,7 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 		}
 
 		// Start streaming new content using the direct file path
-		streamCmd := exec.Command("grove", "aglogs", "stream", logFilePath)
+		streamCmd := delegation.Command("aglogs", "stream", logFilePath)
 		streamCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
 
 		stdout, err := streamCmd.StdoutPipe()
@@ -768,7 +769,7 @@ func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.C
 		sync()
 
 		// Use 'grove flow' to ensure proper environment setup for worktrees
-		cmd := exec.Command("grove", args...)
+		cmd := delegation.Command(args[0], args[1:]...)
 		// Set the working directory to the plan directory
 		cmd.Dir = planDir
 		cmd.Stdout = f
@@ -890,7 +891,7 @@ func editJob(job *orchestration.Job) tea.Cmd {
 }
 
 func executePlanResume(job *orchestration.Job) tea.Cmd {
-	return tea.ExecProcess(exec.Command("grove", "flow", "plan", "resume", job.FilePath),
+	return tea.ExecProcess(delegation.Command("flow", "plan", "resume", job.FilePath),
 		func(err error) tea.Msg {
 			if err != nil {
 				return err // Propagate error to be displayed in the TUI
@@ -1049,9 +1050,8 @@ func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
 		args = append(args, "-d", dep)
 	}
 
-	// Run flow through grove delegator
-	cmdArgs := append([]string{"flow"}, args...)
-	return tea.ExecProcess(exec.Command("grove", cmdArgs...), func(err error) tea.Msg {
+	// Run flow through grove delegator (if available)
+	return tea.ExecProcess(delegation.Command("flow", args...), func(err error) tea.Msg {
 		if err != nil {
 			return err
 		}
