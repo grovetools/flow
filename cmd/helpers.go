@@ -72,6 +72,11 @@ func configureGroveHooks(worktreePath string) error {
 
 // configureDefaultContextRules applies default context rules to a given repository path.
 func configureDefaultContextRules(repoPath string) error {
+	// Check for zombie worktree - refuse to create rules in deleted worktrees
+	if grovecontext.IsZombieWorktree(repoPath) {
+		return fmt.Errorf("cannot create rules file: worktree has been deleted")
+	}
+
 	// Create a context manager scoped to the repository path. This is crucial
 	// for it to find the correct grove.yml for that specific repository.
 	mgr := grovecontext.NewManager(repoPath)

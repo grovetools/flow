@@ -706,6 +706,22 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			},
 		},
 		{
+			Name: "Close tmux session",
+			Check: func() (string, error) {
+				if sessionName == "" {
+					return "N/A", nil
+				}
+				err := executor.Execute("tmux", "has-session", "-t", sessionName)
+				if err == nil {
+					return color.YellowString("Running"), nil
+				}
+				return "Not found", nil
+			},
+			Action: func() error {
+				return executor.Execute("tmux", "kill-session", "-t", sessionName)
+			},
+		},
+		{
 			Name: "Prune git worktree",
 			Check: func() (string, error) {
 				if worktreeName == "" || gitRoot == "" {
@@ -999,22 +1015,6 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			},
 		},
 		{
-			Name: "Close tmux session",
-			Check: func() (string, error) {
-				if sessionName == "" {
-					return "N/A", nil
-				}
-				err := executor.Execute("tmux", "has-session", "-t", sessionName)
-				if err == nil {
-					return color.YellowString("Running"), nil
-				}
-				return "Not found", nil
-			},
-			Action: func() error {
-				return executor.Execute("tmux", "kill-session", "-t", sessionName)
-			},
-		},
-		{
 			Name: "Rebuild main repo binaries",
 			Check: func() (string, error) {
 				if gitRoot == "" {
@@ -1148,16 +1148,16 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
-		// Always enable merging submodules, docker cleanup, and marking as finished
+		// Always enable merging submodules, docker cleanup, marking as finished, and closing tmux
 		items[0].IsEnabled = items[0].IsAvailable                                          // Merge/fast-forward submodules to main
 		items[1].IsEnabled = items[1].IsAvailable                                          // Cleanup Docker Compose environment
 		items[2].IsEnabled = items[2].IsAvailable                                          // Mark plan as finished
-		items[3].IsEnabled = planFinishPruneWorktree && items[3].IsAvailable              // Prune git worktree
-		items[4].IsEnabled = planFinishCleanDevLinks && items[4].IsAvailable              // Clean up dev binaries
-		items[5].IsEnabled = planFinishDeleteBranch && items[5].IsAvailable               // Delete submodule branches
-		items[6].IsEnabled = planFinishDeleteBranch && items[6].IsAvailable               // Delete local git branch
-		items[7].IsEnabled = planFinishDeleteRemote && items[7].IsAvailable               // Delete remote git branch
-		items[8].IsEnabled = planFinishCloseSession && items[8].IsAvailable               // Close tmux session
+		items[3].IsEnabled = planFinishCloseSession && items[3].IsAvailable               // Close tmux session (before worktree removal!)
+		items[4].IsEnabled = planFinishPruneWorktree && items[4].IsAvailable              // Prune git worktree
+		items[5].IsEnabled = planFinishCleanDevLinks && items[5].IsAvailable              // Clean up dev binaries
+		items[6].IsEnabled = planFinishDeleteBranch && items[6].IsAvailable               // Delete submodule branches
+		items[7].IsEnabled = planFinishDeleteBranch && items[7].IsAvailable               // Delete local git branch
+		items[8].IsEnabled = planFinishDeleteRemote && items[8].IsAvailable               // Delete remote git branch
 		items[9].IsEnabled = planFinishRebuildBinaries && items[9].IsAvailable            // Rebuild main repo binaries
 		items[10].IsEnabled = planFinishArchive && items[10].IsAvailable                  // Archive plan directory
 	} else {
