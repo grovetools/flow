@@ -237,7 +237,6 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	jobTypes := []list.Item{
 		item("interactive_agent"),
 		item("headless_agent"),
-		item("agent"),
 		item("oneshot"),
 		item("shell"),
 		item("chat"),
