@@ -349,6 +349,17 @@ func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
 		}
 	}
 
+	// Pre-populate the extract-from input (from-note) if provided via CLI flag.
+	// This is critical for the note promotion flow where --from-note is passed.
+	if initialCmd.FromNote != "" {
+		m.extractFromInput.SetValue(initialCmd.FromNote)
+	}
+
+	// Pre-populate the note target file if provided via CLI flag.
+	if initialCmd.NoteTargetFile != "" {
+		m.noteTargetFileInput.SetValue(initialCmd.NoteTargetFile)
+	}
+
 	// For boolean flags, if they were set on the command line, their value will be passed in.
 	// Cobra handles the default values.
 	m.openSession = initialCmd.OpenSession
