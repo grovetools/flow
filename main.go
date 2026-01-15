@@ -49,7 +49,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewTmuxCmd())
 	rootCmd.AddCommand(cli.NewDocsCommand(docs.DocsJSON))
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := cli.Execute(rootCmd); err != nil {
 		os.Exit(1)
 	}
 }

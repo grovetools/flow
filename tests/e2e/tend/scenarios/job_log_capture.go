@@ -184,10 +184,11 @@ var JobLogCaptureScenario = harness.NewScenario(
 			}
 
 			// Verify job.log contains context generation output
+			// Context summary format: "Context Summary: X files, Y tokens, Z bytes"
 			return ctx.Verify(func(v *verify.Collector) {
 				v.Equal("job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
-				v.Equal("job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
-				v.Equal("job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
+				v.Equal("job.log contains files count", nil, fs.AssertContains(jobLogPath, "files,"))
+				v.Equal("job.log contains tokens count", nil, fs.AssertContains(jobLogPath, "tokens,"))
 			})
 		}),
 
@@ -292,10 +293,11 @@ var JobLogCaptureScenario = harness.NewScenario(
 			}
 
 			// Verify job.log contains context generation output
+			// Context summary format: "Context Summary: X files, Y tokens, Z bytes"
 			return ctx.Verify(func(v *verify.Collector) {
 				v.Equal("chat job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
-				v.Equal("chat job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
-				v.Equal("chat job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
+				v.Equal("chat job.log contains files count", nil, fs.AssertContains(jobLogPath, "files,"))
+				v.Equal("chat job.log contains tokens count", nil, fs.AssertContains(jobLogPath, "tokens,"))
 			})
 		}),
 
@@ -367,10 +369,11 @@ var JobLogCaptureScenario = harness.NewScenario(
 				return err
 			}
 
+			// Context summary format: "Context Summary: X files, Y tokens, Z bytes"
 			return ctx.Verify(func(v *verify.Collector) {
 				v.Equal("shell job.log contains context summary header", nil, fs.AssertContains(jobLogPath, "Context Summary"))
-				v.Equal("shell job.log contains total files count", nil, fs.AssertContains(jobLogPath, "Total Files"))
-				v.Equal("shell job.log contains total tokens", nil, fs.AssertContains(jobLogPath, "Total Tokens"))
+				v.Equal("shell job.log contains files count", nil, fs.AssertContains(jobLogPath, "files,"))
+				v.Equal("shell job.log contains tokens count", nil, fs.AssertContains(jobLogPath, "tokens,"))
 				v.Equal("shell job.log contains shell job output", nil, fs.AssertContains(jobLogPath, "This is a shell job execution"))
 			})
 		}),
