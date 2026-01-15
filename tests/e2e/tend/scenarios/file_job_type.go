@@ -129,10 +129,13 @@ var FileJobTypeScenario = harness.NewScenario(
 
 			// The command should fail or indicate the job is not runnable
 			// Check stderr or stdout for appropriate message
+			// File jobs are created as "completed" so we also accept "already completed" as valid
 			output := result.Stdout + result.Stderr
-			if !strings.Contains(strings.ToLower(output), "not runnable") &&
-				!strings.Contains(strings.ToLower(output), "cannot run") &&
-				!strings.Contains(strings.ToLower(output), "no runnable") {
+			outputLower := strings.ToLower(output)
+			if !strings.Contains(outputLower, "not runnable") &&
+				!strings.Contains(outputLower, "cannot run") &&
+				!strings.Contains(outputLower, "no runnable") &&
+				!strings.Contains(outputLower, "already completed") {
 				return fmt.Errorf("expected error about job not being runnable, got: %s", output)
 			}
 
@@ -216,8 +219,11 @@ var FileJobTypeScenario = harness.NewScenario(
 			ctx.ShowCommandOutput("flow plan run --next (file only)", result.Stdout, result.Stderr)
 
 			output := result.Stdout + result.Stderr
-			if !strings.Contains(strings.ToLower(output), "no runnable") &&
-				!strings.Contains(strings.ToLower(output), "no jobs") {
+			outputLower := strings.ToLower(output)
+			// File jobs are created as completed, so "all jobs completed" is also valid
+			if !strings.Contains(outputLower, "no runnable") &&
+				!strings.Contains(outputLower, "no jobs") &&
+				!strings.Contains(outputLower, "all jobs completed") {
 				return fmt.Errorf("expected message about no runnable jobs, got: %s", output)
 			}
 

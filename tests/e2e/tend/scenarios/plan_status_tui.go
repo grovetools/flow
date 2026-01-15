@@ -80,10 +80,11 @@ logging:
 	}
 
 	// Run Job A to generate some logs
-	runCmd := ctx.Bin("plan", "run", "dependency-plan", "01-job-a.md")
+	jobAPath := filepath.Join(planPath, "01-job-a.md")
+	runCmd := ctx.Bin("plan", "run", jobAPath, "--yes")
 	runCmd.Dir(projectDir)
 	if result := runCmd.Run(); result.Error != nil {
-		return fmt.Errorf("failed to run Job A: %w", result.Error)
+		return fmt.Errorf("failed to run Job A: %w\nStdout: %s\nStderr: %s", result.Error, result.Stdout, result.Stderr)
 	}
 
 	// Wait a moment for logs to be written

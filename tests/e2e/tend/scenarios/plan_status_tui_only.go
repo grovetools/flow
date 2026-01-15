@@ -23,7 +23,7 @@ var PlanStatusTUIOnlyScenario = harness.NewScenarioWithOptions(
 		harness.NewStep("Verify old flags are removed", verifyOldFlagsRemoved),
 		harness.NewStep("Test status with active plan launches TUI", testStatusWithActivePlanLaunchesTUI),
 		harness.NewStep("Test status with directory argument launches TUI", testStatusWithDirectoryLaunchesTUI),
-		harness.NewStep("Test status without active plan redirects to plan browser", testStatusWithoutActivePlanRedirectsToPlanBrowser),
+		harness.NewStep("Test status outside workspace shows error", testStatusWithoutActivePlanShowsError),
 		harness.NewStep("Test tmux status command updated", testTmuxStatusCommandUpdated),
 	},
 	true,  // localOnly = true, requires tmux for TUI testing
@@ -226,12 +226,12 @@ func testStatusWithDirectoryLaunchesTUI(ctx *harness.Context) error {
 	return nil
 }
 
-// testStatusWithoutActivePlanRedirectsToPlanBrowser verifies the redirect behavior
-func testStatusWithoutActivePlanRedirectsToPlanBrowser(ctx *harness.Context) error {
+// testStatusWithoutActivePlanShowsError verifies that running status outside a workspace shows an error
+func testStatusWithoutActivePlanShowsError(ctx *harness.Context) error {
 	homeDir := ctx.GetString("home_dir")
 
-	// Create a new directory that is NOT inside the project directory
-	// This ensures resolvePlanPathWithActiveJob won't find a plan in the current dir
+	// Create a new directory that is NOT inside a git repository
+	// This ensures we get the "not in a workspace" error
 	tempDir := filepath.Join(ctx.RootDir, "non-project-dir")
 	if err := fs.CreateDir(tempDir); err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
@@ -246,48 +246,21 @@ func testStatusWithoutActivePlanRedirectsToPlanBrowser(ctx *harness.Context) err
 		return fmt.Errorf("failed to clear active plan: %w", result.Error)
 	}
 
-	flowBinary, err := findFlowBinary()
-	if err != nil {
-		return err
+	// Run flow plan status from the non-project directory - it should fail with an error
+	statusCmd := ctx.Bin("plan", "status")
+	statusCmd.Dir(tempDir)
+	statusCmd.Env("HOME=" + homeDir)
+	statusResult := statusCmd.Run()
+
+	// Should fail with "not in a workspace" error
+	if statusResult.Error == nil {
+		return fmt.Errorf("expected status command to fail outside a workspace, but it succeeded")
 	}
 
-	// Create a wrapper script to run flow status from the non-project directory
-	wrapperScript := filepath.Join(ctx.RootDir, "run-flow-status-no-active")
-	scriptContent := fmt.Sprintf("#!/bin/bash\nexport HOME=%s\ncd %s\nexec %s plan status\n", homeDir, tempDir, flowBinary)
-	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
-		return fmt.Errorf("failed to create wrapper script: %w", err)
+	// Verify the error message mentions workspace
+	if !strings.Contains(statusResult.Stderr, "not in a workspace") && !strings.Contains(statusResult.Stderr, "no workspace found") {
+		return fmt.Errorf("expected 'not in a workspace' error, got: %s", statusResult.Stderr)
 	}
-	if err := os.Chmod(wrapperScript, 0755); err != nil {
-		return fmt.Errorf("failed to make wrapper script executable: %w", err)
-	}
-
-	session, err := ctx.StartTUI(wrapperScript, []string{})
-	if err != nil {
-		return fmt.Errorf("failed to start flow status without active plan: %w", err)
-	}
-	defer session.Close()
-
-	// Wait for the redirect message
-	if err := session.WaitForText("No active plan set", 5*time.Second); err != nil {
-		content, _ := session.Capture()
-		return fmt.Errorf("expected 'No active plan set' message: %w\nContent:\n%s", err, content)
-	}
-
-	// Wait for plan browser to load
-	if err := session.WaitForText("plan browser", 10*time.Second); err != nil {
-		content, _ := session.Capture()
-		// Note: The actual text may vary, but we should see some indication of the plan list/browser
-		// Let's check for common plan browser elements
-		if !strings.Contains(content, "test-plan") && !strings.Contains(content, "Plans") {
-			return fmt.Errorf("expected plan browser to launch, but didn't see plan list: %w\nContent:\n%s", err, content)
-		}
-	}
-
-	// Send 'q' to quit
-	if err := session.SendKeys("q"); err != nil {
-		return fmt.Errorf("failed to quit TUI: %w", err)
-	}
-	time.Sleep(500 * time.Millisecond)
 
 	return nil
 }

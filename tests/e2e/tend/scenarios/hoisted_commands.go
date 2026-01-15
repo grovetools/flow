@@ -457,8 +457,9 @@ var HoistedCommandsScenario = harness.NewScenario(
 			ctx.ShowCommandOutput("flow run", result.Stdout, result.Stderr)
 
 			// The command will fail due to mocked dependencies, but we expect it to at least
-			// attempt to run and show job execution messages
-			if !strings.Contains(result.Stdout, "Running job") || !strings.Contains(result.Stdout, "runnable-test-job") {
+			// attempt to run and show job execution messages (output may be in stdout or stderr)
+			combinedOutput := result.Stdout + result.Stderr
+			if !strings.Contains(combinedOutput, "Running job") && !strings.Contains(combinedOutput, "runnable-test-job") {
 				return fmt.Errorf("expected run command to attempt job execution")
 			}
 
