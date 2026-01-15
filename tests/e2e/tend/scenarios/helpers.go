@@ -19,6 +19,7 @@ import (
 func setupDefaultEnvironment(ctx *harness.Context, projectName string) (projectDir, notebooksRoot string, err error) {
 	// 1. Use the harness-provided sandboxed home directory
 	homeDir := ctx.HomeDir()
+	ctx.Set("home_dir", homeDir) // Store for tests that need to reference it in wrapper scripts
 
 	// 'code' directory will be our main grove for projects
 	codeDir := filepath.Join(homeDir, "code")
