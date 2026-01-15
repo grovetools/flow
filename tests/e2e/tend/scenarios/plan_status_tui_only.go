@@ -268,10 +268,8 @@ func testStatusWithoutActivePlanShowsError(ctx *harness.Context) error {
 // testTmuxStatusCommandUpdated verifies that the tmux status command no longer uses -t flag
 func testTmuxStatusCommandUpdated(ctx *harness.Context) error {
 	projectDir := ctx.GetString("project_dir")
-	planPath := ctx.GetString("plan_path")
 
-	// We can't easily test the actual tmux integration in the test environment,
-	// but we can verify the command help text and basic invocation
+	// We can only verify the command help text here
 	cmd := ctx.Bin("tmux", "status", "--help")
 	cmd.Dir(projectDir)
 	result := cmd.Run()
@@ -281,18 +279,9 @@ func testTmuxStatusCommandUpdated(ctx *harness.Context) error {
 		return fmt.Errorf("tmux status help still mentions -t/--tui flag: %s", result.Stdout)
 	}
 
-	// Test that tmux status with a directory works (even if we're not in tmux, it should fall back gracefully)
-	statusCmd := ctx.Bin("tmux", "status", planPath)
-	statusCmd.Dir(projectDir)
-	statusResult := statusCmd.Run()
-
-	// If not in tmux, it should either:
-	// 1. Launch TUI directly (and we can't test that here without actual tmux)
-	// 2. Show an error about not being in tmux
-	// Either way, it shouldn't crash or show flag-related errors
-	if strings.Contains(statusResult.Stderr, "unknown flag") || strings.Contains(statusResult.Stderr, "-t") {
-		return fmt.Errorf("tmux status command references removed -t flag: %s", statusResult.Stderr)
-	}
+	// NOTE: We intentionally do NOT test `flow tmux status <planPath>` here because
+	// it calls FocusOrRunTUIWithErrorHandling which switches the user's tmux client
+	// to the "plan" window, disrupting their workflow when running tests.
 
 	return nil
 }
