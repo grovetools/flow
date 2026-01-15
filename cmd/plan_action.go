@@ -142,7 +142,7 @@ func runPlanAction(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute action '%s': %w", actionName, err)
 	}
 
-	fmt.Println("✓ Action completed successfully.")
+	fmt.Println("* Action completed successfully.")
 	return nil
 }
 

@@ -334,7 +334,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 
 	defer func() {
 		if r := recover(); r != nil {
-			msg := fmt.Sprintf("❌ Panic in session registration: %v\n", r)
+			msg := fmt.Sprintf("Error: Panic in session registration: %v\n", r)
 			fmt.Fprintf(os.Stderr, "%s", msg)
 			if debugFile != nil {
 				debugFile.WriteString(msg)
@@ -350,7 +350,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 	}).Info("Starting codex session discovery and registration")
 
 	// Wait a moment for the log file to be created.
-	msg := fmt.Sprintf("⏳ Waiting 2s for Codex log file to be created...\n")
+	msg := fmt.Sprintf("[...] Waiting 2s for Codex log file to be created...\n")
 	fmt.Fprintf(os.Stderr, "%s", msg)
 	if debugFile != nil {
 		debugFile.WriteString(msg)
@@ -371,7 +371,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 	p.log.WithField("sessions_dir", codexSessionsDir).Debug("Looking for codex session files")
 	latestFile, err := findMostRecentFile(codexSessionsDir, debugFile)
 	if err != nil {
-		msg := fmt.Sprintf("❌ Failed to find Codex session file: %v\n", err)
+		msg := fmt.Sprintf("Error: Failed to find Codex session file: %v\n", err)
 		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
 			debugFile.WriteString(msg)
@@ -379,7 +379,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 		p.log.WithError(err).Error("Failed to find most recent codex session file")
 		return
 	}
-	msg = fmt.Sprintf("✓ Found Codex log: %s\n", latestFile)
+	msg = fmt.Sprintf("* Found Codex log: %s\n", latestFile)
 	fmt.Fprintf(os.Stderr, "%s", msg)
 	if debugFile != nil {
 		debugFile.WriteString(msg)
@@ -465,7 +465,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, wo
 
 // findMostRecentFile finds the most recently modified file in a directory tree.
 func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
-	msg := fmt.Sprintf("🔍 Searching for .jsonl files in: %s\n", dir)
+	msg := fmt.Sprintf(" Searching for .jsonl files in: %s\n", dir)
 	fmt.Fprintf(os.Stderr, "%s", msg)
 	if debugFile != nil {
 		debugFile.WriteString(msg)
@@ -477,7 +477,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			msg := fmt.Sprintf("  ⚠️  Walk error at %s: %v\n", path, err)
+			msg := fmt.Sprintf("  WARNING:  Walk error at %s: %v\n", path, err)
 			fmt.Fprintf(os.Stderr, "%s", msg)
 			if debugFile != nil {
 				debugFile.WriteString(msg)
@@ -489,7 +489,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 			if info.ModTime().After(latestModTime) {
 				latestModTime = info.ModTime()
 				latestFile = path
-				msg := fmt.Sprintf("  📄 Found newer file: %s (modified: %s)\n", filepath.Base(path), info.ModTime().Format("15:04:05"))
+				msg := fmt.Sprintf("   Found newer file: %s (modified: %s)\n", filepath.Base(path), info.ModTime().Format("15:04:05"))
 				if debugFile != nil {
 					debugFile.WriteString(msg)
 				}
@@ -499,7 +499,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 	})
 
 	if err != nil {
-		msg := fmt.Sprintf("❌ Walk failed: %v\n", err)
+		msg := fmt.Sprintf("Error: Walk failed: %v\n", err)
 		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
 			debugFile.WriteString(msg)
@@ -507,14 +507,14 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 		return "", err
 	}
 	if latestFile == "" {
-		msg := fmt.Sprintf("❌ No .jsonl files found (searched %d files)\n", fileCount)
+		msg := fmt.Sprintf("Error: No .jsonl files found (searched %d files)\n", fileCount)
 		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
 			debugFile.WriteString(msg)
 		}
 		return "", fmt.Errorf("no jsonl files found in %s", dir)
 	}
-	msg = fmt.Sprintf("✓ Selected most recent file: %s\n", filepath.Base(latestFile))
+	msg = fmt.Sprintf("* Selected most recent file: %s\n", filepath.Base(latestFile))
 	if debugFile != nil {
 		debugFile.WriteString(msg)
 	}

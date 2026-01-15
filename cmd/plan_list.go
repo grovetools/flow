@@ -142,7 +142,7 @@ func listCurrentWorkspacePlans() ([]PlanSummary, error) {
 	// Check for deprecated config and use it as fallback
 	flowCfg, _ := loadFlowConfig()
 	if flowCfg != nil && flowCfg.PlansDirectory != "" {
-		fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+		fmt.Fprintln(os.Stderr, "WARNING:  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
 		// Use deprecated config as fallback
 		plansDir, err := expandFlowPath(flowCfg.PlansDirectory)
 		if err != nil {

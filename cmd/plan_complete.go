@@ -95,7 +95,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 					fmt.Printf("Warning: failed to archive session artifacts: %v\n", err)
 				}
 			} else if !silent {
-				fmt.Println(color.GreenString("✓") + " Session artifacts archived.")
+				fmt.Println(color.GreenString("*") + " Session artifacts archived.")
 			}
 		}
 
@@ -110,7 +110,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 					fmt.Printf("Warning: failed to append transcript: %v\n", err)
 				}
 			} else if !silent {
-				fmt.Println(color.GreenString("✓") + " Appended session transcript.")
+				fmt.Println(color.GreenString("*") + " Appended session transcript.")
 			}
 		}
 
@@ -144,7 +144,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 						fmt.Printf("Warning: failed to add summary to job file: %v\n", err)
 					}
 				} else if !silent {
-					fmt.Println(color.GreenString("✓") + " Added summary to job frontmatter.")
+					fmt.Println(color.GreenString("*") + " Added summary to job frontmatter.")
 				}
 			}
 		}
@@ -162,7 +162,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 				fmt.Printf("  Note: could not kill agent session: %v\n", err)
 			}
 		} else if !silent {
-			fmt.Println("  ✓ Agent process killed.")
+			fmt.Println("  * Agent process killed.")
 		}
 
 		// Also kill the tmux window for any interactive_agent job
@@ -231,7 +231,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 								killCmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
 								if killErr := killCmd.Run(); killErr == nil {
 									if !silent {
-										fmt.Println("  ✓ Tmux window closed.")
+										fmt.Println("  * Tmux window closed.")
 									}
 									err = nil // Clear the error
 									break
@@ -247,7 +247,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 						fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
 					}
 				} else if !silent {
-					fmt.Println("  ✓ Tmux window closed.")
+					fmt.Println("  * Tmux window closed.")
 				}
 			}
 		}
@@ -260,10 +260,10 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 	// Success message
 	if !silent {
 		if !alreadyCompleted {
-			fmt.Printf("%s Job completed: %s\n", color.GreenString("✓"), job.Title)
+			fmt.Printf("%s Job completed: %s\n", color.GreenString("*"), job.Title)
 			fmt.Printf("Status: %s → %s\n", oldStatus, orchestration.JobStatusCompleted)
 		} else {
-			fmt.Printf("%s Cleaned up resources for: %s\n", color.GreenString("✓"), job.Title)
+			fmt.Printf("%s Cleaned up resources for: %s\n", color.GreenString("*"), job.Title)
 		}
 
 		// Special message for chat jobs

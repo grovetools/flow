@@ -248,10 +248,10 @@ func generateASCIIGraph(plan *orchestration.Plan, graph *DependencyGraph) string
 
 	// Add legend
 	buf.WriteString("Legend:\n")
-	buf.WriteString("  [✓] Completed\n")
+	buf.WriteString("  [*] Completed\n")
 	buf.WriteString("  [⚡] Running\n")
-	buf.WriteString("  [⏳] Pending\n")
-	buf.WriteString("  [✗] Failed\n")
+	buf.WriteString("  [[...]] Pending\n")
+	buf.WriteString("  [x] Failed\n")
 	buf.WriteString("  [⊘] Blocked\n")
 	buf.WriteString("  [?] Needs Review\n")
 
@@ -387,13 +387,13 @@ func serveInteractiveGraph(plan *orchestration.Plan, graph *DependencyGraph, por
 func getStatusSymbol(status orchestration.JobStatus) string {
 	switch status {
 	case orchestration.JobStatusCompleted:
-		return "✓ Completed"
+		return "* Completed"
 	case orchestration.JobStatusRunning:
 		return "⚡ Running"
 	case orchestration.JobStatusPending:
-		return "⏳ Pending"
+		return "[...] Pending"
 	case orchestration.JobStatusFailed:
-		return "✗ Failed"
+		return "x Failed"
 	case orchestration.JobStatusBlocked:
 		return "⊘ Blocked"
 	case orchestration.JobStatusNeedsReview:

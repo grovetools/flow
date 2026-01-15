@@ -206,7 +206,7 @@ func testCompletedAgentJobNoLogs(ctx *harness.Context) error {
 
 	// Most importantly: Should NOT attempt to stream (no sparkle icon or "new" label) for completed job
 	// The key feature being tested is that completed jobs don't show streaming UI
-	if strings.Contains(content, "✨") || strings.Contains(content, "new") {
+	if strings.Contains(content, "") || strings.Contains(content, "new") {
 		return fmt.Errorf("completed job should not show streaming indicators, got:\n%s", content)
 	}
 
@@ -293,7 +293,7 @@ func testCompletedAgentJobWithLogs(ctx *harness.Context) error {
 	}
 
 	// Should NOT show streaming indicators for completed job
-	if strings.Contains(content, "✨") || strings.Contains(content, "new") {
+	if strings.Contains(content, "") || strings.Contains(content, "new") {
 		return fmt.Errorf("completed job should not show streaming indicators, got:\n%s", content)
 	}
 

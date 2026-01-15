@@ -72,7 +72,7 @@ func GetRegisterOpencodeSessionCmd() *cobra.Command {
 				return fmt.Errorf("failed to register session: %w", err)
 			}
 
-			fmt.Printf("✅ Registered opencode session %s (PID %d)\n", opencodeSessionID, pid)
+			fmt.Printf(" Registered opencode session %s (PID %d)\n", opencodeSessionID, pid)
 			return nil
 		},
 	}

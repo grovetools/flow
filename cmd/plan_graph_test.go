@@ -226,10 +226,10 @@ func TestGetStatusSymbol(t *testing.T) {
 		status   orchestration.JobStatus
 		expected string
 	}{
-		{orchestration.JobStatusCompleted, "✓ Completed"},
+		{orchestration.JobStatusCompleted, "* Completed"},
 		{orchestration.JobStatusRunning, "⚡ Running"},
-		{orchestration.JobStatusPending, "⏳ Pending"},
-		{orchestration.JobStatusFailed, "✗ Failed"},
+		{orchestration.JobStatusPending, "[...] Pending"},
+		{orchestration.JobStatusFailed, "x Failed"},
 		{orchestration.JobStatusBlocked, "⊘ Blocked"},
 		{orchestration.JobStatusNeedsReview, "? Needs Review"},
 	}

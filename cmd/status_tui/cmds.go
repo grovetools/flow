@@ -353,7 +353,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			if readErr != nil {
 				// Session is still initializing, retry
 				return LogContentLoadedMsg{
-					Content:     "⏳ Waiting for agent session to start...\n(This may take a few seconds)\n",
+					Content:     "[...] Waiting for agent session to start...\n(This may take a few seconds)\n",
 					ShouldRetry: true,
 					JobID:       job.ID,
 				}
@@ -365,7 +365,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
 				content = content + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
 			} else {
-				content = "⏳ Agent session found, waiting for logs...\n"
+				content = "[...] Agent session found, waiting for logs...\n"
 			}
 
 			return LogContentLoadedMsg{

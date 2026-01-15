@@ -251,7 +251,7 @@ func setConfigValues(configPath string, pairs []string) error {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
-	fmt.Printf("✓ Updated %s\n", configPath)
+	fmt.Printf("* Updated %s\n", configPath)
 	
 	// Propagate non-blank values to job files that don't have them set
 	updatesToPropagate := make(map[string]interface{})
@@ -314,7 +314,7 @@ func setConfigValues(configPath string, pairs []string) error {
 		}
 		
 		if updatedJobs > 0 {
-			fmt.Printf("✓ Propagated config changes to %d job(s)\n", updatedJobs)
+			fmt.Printf("* Propagated config changes to %d job(s)\n", updatedJobs)
 		}
 	}
 	

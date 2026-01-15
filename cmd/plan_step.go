@@ -102,13 +102,13 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 			}
 
 			if allCompleted {
-				fmt.Println(color.GreenString("✓") + " All jobs in the plan have been completed!")
+				fmt.Println(color.GreenString("*") + " All jobs in the plan have been completed!")
 			} else if failedJobs > 0 {
 				fmt.Printf("%s %d job(s) failed. Fix and re-run failed jobs or skip them to continue.\n",
-					color.RedString("✗"), failedJobs)
+					color.RedString("x"), failedJobs)
 			} else if blockedJobs > 0 {
 				fmt.Printf("%s %d job(s) are blocked by dependencies.\n",
-					color.YellowString("⚠"), blockedJobs)
+					color.YellowString("WARNING:"), blockedJobs)
 			} else {
 				fmt.Println("No runnable jobs found.")
 			}
@@ -153,7 +153,7 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 				runCmd.Stdin = os.Stdin
 
 				if err := runCmd.Run(); err != nil {
-					fmt.Printf("%s Error running job: %v\n", color.RedString("✗"), err)
+					fmt.Printf("%s Error running job: %v\n", color.RedString("x"), err)
 				}
 			}
 
@@ -163,7 +163,7 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 				jobToLaunch := runnableJobs[0]
 				if jobToLaunch.Type != orchestration.JobTypeAgent {
 					fmt.Printf("%s Job '%s' is not an agent job. Use 'Run' instead.\n",
-						color.YellowString("⚠"), jobToLaunch.Title)
+						color.YellowString("WARNING:"), jobToLaunch.Title)
 					continue
 				}
 
@@ -177,7 +177,7 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 				launchCmd.Stdin = os.Stdin
 
 				if err := launchCmd.Run(); err != nil {
-					fmt.Printf("%s Error launching job: %v\n", color.RedString("✗"), err)
+					fmt.Printf("%s Error launching job: %v\n", color.RedString("x"), err)
 				}
 			}
 
@@ -198,18 +198,18 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 
 				content, err := os.ReadFile(jobToSkip.FilePath)
 				if err != nil {
-					fmt.Printf("%s Error reading job file: %v\n", color.RedString("✗"), err)
+					fmt.Printf("%s Error reading job file: %v\n", color.RedString("x"), err)
 					continue
 				}
 
 				newContent, err := orchestration.UpdateFrontmatter(content, updates)
 				if err != nil {
-					fmt.Printf("%s Error updating frontmatter: %v\n", color.RedString("✗"), err)
+					fmt.Printf("%s Error updating frontmatter: %v\n", color.RedString("x"), err)
 					continue
 				}
 
 				if err := os.WriteFile(jobToSkip.FilePath, newContent, 0644); err != nil {
-					fmt.Printf("%s Error writing job file: %v\n", color.RedString("✗"), err)
+					fmt.Printf("%s Error writing job file: %v\n", color.RedString("x"), err)
 					continue
 				}
 			}
@@ -219,7 +219,7 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 			return nil
 
 		default:
-			fmt.Printf("%s Invalid choice. Please enter R, L, S, or Q.\n", color.RedString("✗"))
+			fmt.Printf("%s Invalid choice. Please enter R, L, S, or Q.\n", color.RedString("x"))
 			continue
 		}
 

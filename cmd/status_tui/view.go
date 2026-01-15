@@ -239,7 +239,7 @@ func (m Model) renderTableView() string {
 				}
 			case "PREPEND":
 				if job.PrependDependencies {
-					cell = t.Success.Render("✓")
+					cell = t.Success.Render("*")
 				} else {
 					cell = t.Muted.Render("-")
 				}
@@ -904,7 +904,7 @@ func renderProperty(builder *strings.Builder, k string, v interface{}, keyStyle,
 		builder.WriteString(fmt.Sprintf("%s%s%s %v\n", bullet, keyStyle.Render(k), dimStyle.Render(":"), val))
 
 	case bool:
-		valueStr := theme.DefaultTheme.Success.Render("✓")
+		valueStr := theme.DefaultTheme.Success.Render("*")
 		if !val {
 			valueStr = dimStyle.Render("-")
 		}

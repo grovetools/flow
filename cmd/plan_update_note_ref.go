@@ -72,7 +72,7 @@ func runPlanUpdateNoteRef(cmd *cobra.Command, args []string) error {
 	}
 
 	if updated > 0 {
-		fmt.Printf("✓ Updated note_ref in %d job(s)\n", updated)
+		fmt.Printf("* Updated note_ref in %d job(s)\n", updated)
 	}
 
 	return nil

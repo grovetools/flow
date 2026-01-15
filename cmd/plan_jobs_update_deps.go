@@ -68,7 +68,7 @@ func runPlanJobsUpdateDeps(cmd *cobra.Command, args []string) error {
 	}
 
 	// Success message
-	fmt.Printf("%s Dependencies updated for: %s\n", color.GreenString("✓"), job.Title)
+	fmt.Printf("%s Dependencies updated for: %s\n", color.GreenString("*"), job.Title)
 
 	if len(oldDeps) > 0 {
 		fmt.Printf("\nOld dependencies (%d):\n", len(oldDeps))

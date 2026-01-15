@@ -246,7 +246,7 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	m.recipeList.SetFilteringEnabled(true)
 	m.recipeList.SetShowHelp(false)
 	m.recipeList.SetShowPagination(true)
-	m.recipeList.FilterInput.Prompt = "🔍 "
+	m.recipeList.FilterInput.Prompt = " "
 	m.recipeList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
 	m.recipeList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 	m.recipeList.Select(defaultRecipeIndex) // Default to standard-feature
@@ -269,7 +269,7 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	m.modelList.SetFilteringEnabled(true)
 	m.modelList.SetShowHelp(false)
 	m.modelList.SetShowPagination(true)
-	m.modelList.FilterInput.Prompt = "🔍 "
+	m.modelList.FilterInput.Prompt = " "
 	m.modelList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
 	m.modelList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 	m.modelList.Select(defaultModelIndex)
@@ -729,7 +729,7 @@ func (m planInitTUIModel) renderMainScreen() string {
 		// Add checkmark if field has been visited (only for main screen)
 		titlePrefix := "  "
 		if index <= m.highestFocusIndex {
-			titlePrefix = theme.DefaultTheme.Success.Render("✓ ")
+			titlePrefix = theme.DefaultTheme.Success.Render("* ")
 		}
 
 		fieldBuilder.WriteString(titlePrefix + theme.DefaultTheme.Bold.Render(title))

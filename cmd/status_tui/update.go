@@ -228,7 +228,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error adding recipe: %v", msg.err))
 		} else {
-			m.StatusSummary = theme.DefaultTheme.Success.Render("✓ Recipe jobs added successfully.")
+			m.StatusSummary = theme.DefaultTheme.Success.Render("* Recipe jobs added successfully.")
 		}
 		return m, refreshPlan(m.PlanDir)
 

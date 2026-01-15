@@ -92,7 +92,7 @@ func updateWorktreeSingleRepo(worktreeName string) error {
 		return fmt.Errorf("failed to update: %w", err)
 	}
 
-	fmt.Printf("✓ Successfully updated worktree '%s' from '%s'\n", worktreeName, defaultBranch)
+	fmt.Printf("* Successfully updated worktree '%s' from '%s'\n", worktreeName, defaultBranch)
 	return nil
 }
 
@@ -144,7 +144,7 @@ func updateWorktreeEcosystem(plan *orchestration.Plan, worktreeName string) erro
 
 	// Print summary
 	if len(results) > 0 {
-		fmt.Printf("\n✓ Successfully updated %d repos: %s\n", len(results), strings.Join(results, ", "))
+		fmt.Printf("\n* Successfully updated %d repos: %s\n", len(results), strings.Join(results, ", "))
 	}
 	if len(errors) > 0 {
 		return fmt.Errorf("failed to update %d repos:\n  %s", len(errors), strings.Join(errors, "\n  "))

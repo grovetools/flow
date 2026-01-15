@@ -220,8 +220,8 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		return fmt.Errorf("failed to add job: %w", err)
 	}
 
-	fmt.Printf("✓ Extracted %d blocks to new chat job: %s\n", foundBlocks, filename)
-	fmt.Printf("✓ You can now run: flow plan run %s\n", filename)
+	fmt.Printf("* Extracted %d blocks to new chat job: %s\n", foundBlocks, filename)
+	fmt.Printf("* You can now run: flow plan run %s\n", filename)
 
 	return nil
 }

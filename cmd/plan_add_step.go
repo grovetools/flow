@@ -143,7 +143,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		}
 
 		// 4. Print success message
-		fmt.Println(theme.DefaultTheme.Success.Render("✓") + " Added " + fmt.Sprintf("%d jobs from recipe '%s':", len(newFiles), cmd.Recipe))
+		fmt.Println(theme.DefaultTheme.Success.Render("*") + " Added " + fmt.Sprintf("%d jobs from recipe '%s':", len(newFiles), cmd.Recipe))
 		for _, file := range newFiles {
 			fmt.Println("  - " + file)
 		}
@@ -183,7 +183,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	}
 
 	// Display success
-	fmt.Println(theme.DefaultTheme.Success.Render("✓") + " Created " + filename)
+	fmt.Println(theme.DefaultTheme.Success.Render("*") + " Created " + filename)
 	fmt.Println("\nNext steps:")
 	fmt.Println("- Review the job file")
 	fmt.Printf("- Run with: flow plan run %s/%s\n", cmd.Dir, filename)

@@ -236,7 +236,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 
 	// If status is finished, it's a legacy plan or already processed, so we allow cleanup but warn.
 	if plan.Config != nil && plan.Config.Status == "finished" {
-		fmt.Println("⚠️  Warning: This plan is already 'finished'. The new workflow uses a 'review' step.")
+		fmt.Println("WARNING:  Warning: This plan is already 'finished'. The new workflow uses a 'review' step.")
 		fmt.Println("   Running cleanup directly. In the future, please run 'flow plan review' first.")
 	}
 
@@ -519,7 +519,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 						continue
 					}
 
-					fmt.Printf("        ✓ Merged successfully\n")
+					fmt.Printf("        * Merged successfully\n")
 				}
 
 				if hasErrors {
@@ -654,7 +654,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 						if err := cmd.Run(); err != nil {
 							fmt.Printf("    Warning: failed to stop project %s: %v\n", projectName, err)
 						} else {
-							fmt.Printf("    ✓ Stopped and removed Docker Compose project: %s\n", projectName)
+							fmt.Printf("    * Stopped and removed Docker Compose project: %s\n", projectName)
 						}
 					}
 				}
@@ -807,7 +807,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 						fmt.Printf("    Warning: Failed to prune worktree metadata: %v\n", err)
 					}
 					
-					fmt.Printf("    ✓ Worktree removed successfully\n")
+					fmt.Printf("    * Worktree removed successfully\n")
 					return nil // Success
 				}
 				
@@ -1213,7 +1213,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 						if err := hookCmd.Run(); err != nil {
 							fmt.Printf("Warning: on_finish hook execution failed: %v\n", err)
 						} else {
-							fmt.Println("✓ on_finish hook executed successfully.")
+							fmt.Println("* on_finish hook executed successfully.")
 						}
 					}
 				}
@@ -1258,7 +1258,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		} else {
 			// Also delete legacy key
 			_ = state.Delete("active_plan")
-			fmt.Println("\n✓ Unset active plan")
+			fmt.Println("\n* Unset active plan")
 		}
 	}
 
@@ -1317,7 +1317,7 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 				fmt.Printf("      Warning: failed to delete branch '%s' from %s: %s\n", worktreeName, repo, string(output))
 			}
 		} else {
-			fmt.Printf("      ✓ Deleted branch '%s'\n", worktreeName)
+			fmt.Printf("      * Deleted branch '%s'\n", worktreeName)
 		}
 	}
 
@@ -1326,6 +1326,6 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		return fmt.Errorf("failed to remove ecosystem directory: %w", err)
 	}
 
-	fmt.Printf("    ✓ Ecosystem worktree removed successfully\n")
+	fmt.Printf("    * Ecosystem worktree removed successfully\n")
 	return nil
 }

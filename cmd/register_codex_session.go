@@ -76,7 +76,7 @@ func GetRegisterCodexSessionCmd() *cobra.Command {
 			return fmt.Errorf("failed to register session: %w", err)
 		}
 
-		fmt.Printf("✅ Registered Codex session %s (PID %d)\n", codexSessionID, pid)
+		fmt.Printf(" Registered Codex session %s (PID %d)\n", codexSessionID, pid)
 		return nil
 	},
 	}

@@ -102,7 +102,7 @@ func mergeWorktreeSingleRepo(worktreeName string) error {
 		return fmt.Errorf("failed to merge: %w", err)
 	}
 
-	fmt.Printf("✓ Successfully merged '%s' into '%s' and synchronized the worktree\n", worktreeName, defaultBranch)
+	fmt.Printf("* Successfully merged '%s' into '%s' and synchronized the worktree\n", worktreeName, defaultBranch)
 	return nil
 }
 
@@ -148,7 +148,7 @@ func mergeWorktreeEcosystem(plan *orchestration.Plan, worktreeName string) error
 
 	// Print summary
 	if len(results) > 0 {
-		fmt.Printf("\n✓ Successfully merged %d repos: %s\n", len(results), strings.Join(results, ", "))
+		fmt.Printf("\n* Successfully merged %d repos: %s\n", len(results), strings.Join(results, ", "))
 	}
 	if len(errors) > 0 {
 		return fmt.Errorf("failed to merge %d repos:\n  %s", len(errors), strings.Join(errors, "\n  "))

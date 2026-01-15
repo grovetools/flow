@@ -112,7 +112,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	discoveryService := workspace.NewDiscoveryService(logger)
 	discoveryResult, err := discoveryService.DiscoverAll()
 	if err != nil {
-		fmt.Printf("⚠️  Warning: failed to discover workspaces for go.work generation: %v\n", err)
+		fmt.Printf("WARNING:  Warning: failed to discover workspaces for go.work generation: %v\n", err)
 	}
 	var provider *workspace.Provider
 	if discoveryResult != nil {
@@ -203,11 +203,11 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Build success message
 	result.WriteString(fmt.Sprintf("Initializing orchestration plan in:\n  %s\n\n", planPath))
-	result.WriteString("✓ Created plan directory\n")
+	result.WriteString("* Created plan directory\n")
 	if worktreeToSet != "" {
-		result.WriteString(fmt.Sprintf("✓ Created worktree: %s\n", worktreeToSet))
+		result.WriteString(fmt.Sprintf("* Created worktree: %s\n", worktreeToSet))
 	}
-	result.WriteString("✓ Created .grove-plan.yml with default configuration\n")
+	result.WriteString("* Created .grove-plan.yml with default configuration\n")
 
 	// Set the new plan as active, but only if we are not opening a new session.
 	// If a new session is opened, the active plan will be set inside that session.
@@ -216,7 +216,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if err := state.Set("flow.active_plan", planName); err != nil {
 			result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
 		} else {
-			result.WriteString(fmt.Sprintf("✓ Set active plan to: %s\n", planName))
+			result.WriteString(fmt.Sprintf("* Set active plan to: %s\n", planName))
 		}
 	}
 
@@ -279,20 +279,20 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to add extracted job to plan: %w", err)
 		}
-		result.WriteString(fmt.Sprintf("✓ Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename))
+		result.WriteString(fmt.Sprintf("* Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename))
 	}
 
 	// Execute on_start hook if plan was initialized from a note
 	// This runs after extraction to avoid file path conflicts
 	if cmd.NoteRef != "" {
 		if err := executeOnStartHook(planPath, planName, cmd.NoteRef); err != nil {
-			result.WriteString(fmt.Sprintf("⚠️  Warning: on_start hook execution failed: %v\n", err))
+			result.WriteString(fmt.Sprintf("WARNING:  Warning: on_start hook execution failed: %v\n", err))
 		}
 	}
 
 	// Open Session Logic
 	if cmd.OpenSession {
-		result.WriteString("\n🚀 Launching new session...\n")
+		result.WriteString("\n Launching new session...\n")
 
 		ctx := context.Background()
 		commandToRun := []string{"flow", "plan", "status", "-t"}
@@ -305,13 +305,13 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			}
 			if err := CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeToSet, commandToRun); err != nil {
 				// Log the error but don't fail the init command, as the primary goal was completed
-				result.WriteString(fmt.Sprintf("⚠️  Warning: Failed to launch tmux session: %v\n", err))
+				result.WriteString(fmt.Sprintf("WARNING:  Warning: Failed to launch tmux session: %v\n", err))
 				result.WriteString("   You can launch it manually later with `flow plan open`\n")
 			}
 		} else {
 			// Launch session without worktree (in main repo)
 			if err := CreateOrSwitchToMainRepoSessionAndRunCommand(ctx, planName, commandToRun); err != nil {
-				result.WriteString(fmt.Sprintf("⚠️  Warning: Failed to launch tmux session: %v\n", err))
+				result.WriteString(fmt.Sprintf("WARNING:  Warning: Failed to launch tmux session: %v\n", err))
 				result.WriteString("   You can launch it manually later with `flow plan status -t`\n")
 			}
 		}
@@ -365,7 +365,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	discoveryService := workspace.NewDiscoveryService(logger)
 	discoveryResult, err := discoveryService.DiscoverAll()
 	if err != nil {
-		fmt.Printf("⚠️  Warning: failed to discover workspaces for go.work generation: %v\n", err)
+		fmt.Printf("WARNING:  Warning: failed to discover workspaces for go.work generation: %v\n", err)
 	}
 	var provider *workspace.Provider
 	if discoveryResult != nil {
@@ -397,7 +397,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			if len(dynamicRecipes) == 1 {
 				// Auto-select the only recipe
 				recipeName = dynamicRecipes[0].Name
-				fmt.Printf("✓ Auto-selected recipe: %s\n", recipeName)
+				fmt.Printf("* Auto-selected recipe: %s\n", recipeName)
 			} else if cmd.Recipe == "" || cmd.Recipe == "chat-workflow" {
 				// Multiple recipes available and no specific one requested
 				fmt.Println("Available recipes from command:")
@@ -406,7 +406,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 				}
 				// For now, we'll use the first one, but this could be made interactive
 				recipeName = dynamicRecipes[0].Name
-				fmt.Printf("✓ Using first recipe: %s (specify with --recipe to choose a different one)\n", recipeName)
+				fmt.Printf("* Using first recipe: %s (specify with --recipe to choose a different one)\n", recipeName)
 			}
 		}
 	}
@@ -426,7 +426,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	}
 
 	fmt.Printf("Initializing orchestration plan in:\n  %s\n\n", planPath)
-	fmt.Printf("✓ Using recipe: %s %s\n", recipe.Name, recipe.Source)
+	fmt.Printf("* Using recipe: %s %s\n", recipe.Name, recipe.Source)
 
 	// Prepare extracted content if provided
 	var extractedBody []byte
@@ -450,7 +450,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		}
 
 		extractedBody = body
-		fmt.Printf("✓ Extracted content from %s\n", extractFilePath)
+		fmt.Printf("* Extracted content from %s\n", extractFilePath)
 	}
 
 	// Parse recipe vars into a map
@@ -462,7 +462,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 			for k, v := range recipeCfg.Vars {
 				recipeVars[k] = v
 			}
-			fmt.Printf("✓ Loaded default vars from grove.yml for recipe '%s'\n", cmd.Recipe)
+			fmt.Printf("* Loaded default vars from grove.yml for recipe '%s'\n", cmd.Recipe)
 		}
 	}
 
@@ -712,9 +712,9 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		// If we have extracted content, merge it into the target job's body
 		if extractedBody != nil && isNoteTarget {
 			body = extractedBody // Replace the template's body with the extracted content
-			fmt.Printf("✓ Merged extracted content into job: %s\n", filename)
+			fmt.Printf("* Merged extracted content into job: %s\n", filename)
 		} else {
-			fmt.Printf("✓ Created job: %s\n", filename)
+			fmt.Printf("* Created job: %s\n", filename)
 		}
 
 		// Rebuild the markdown file with the potentially modified frontmatter and body
@@ -745,7 +745,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.NoteRef, cmd.Recipe, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
-		fmt.Println("✓ Created .grove-plan.yml")
+		fmt.Println("* Created .grove-plan.yml")
 	}
 
 	// Execute init actions after everything is set up (only if --init flag is set)
@@ -753,12 +753,12 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		fmt.Println("\n▶️  Executing initialization actions from recipe...")
 		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, templateData); err != nil {
 			// Log a warning but do not fail the entire plan init
-			fmt.Printf("⚠️  Warning: one or more init actions failed: %v\n", err)
+			fmt.Printf("WARNING:  Warning: one or more init actions failed: %v\n", err)
 		} else {
-			fmt.Println("✓ Initialization actions completed successfully.")
+			fmt.Println("* Initialization actions completed successfully.")
 		}
 	} else if len(recipe.InitActions) > 0 && !cmd.RunInit {
-		fmt.Println("\n💡 Tip: This recipe has initialization actions. Run them with: flow plan action init")
+		fmt.Println("\nTip: Tip: This recipe has initialization actions. Run them with: flow plan action init")
 	}
 
 	// Execute on_start hook if plan was initialized from a note
@@ -775,13 +775,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		if err := state.Set("flow.active_plan", planName); err != nil {
 			fmt.Printf("Warning: failed to set active job: %v\n", err)
 		} else {
-			fmt.Printf("✓ Set active plan to: %s\n", planName)
+			fmt.Printf("* Set active plan to: %s\n", planName)
 		}
 	}
 
 	// Handle --open-session for recipe flow
 	if cmd.OpenSession {
-		fmt.Println("\n🚀 Launching new session...")
+		fmt.Println("\n Launching new session...")
 
 		ctx := context.Background()
 		commandToRun := []string{"flow", "plan", "status", "-t"}
@@ -794,13 +794,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 				Directory: planPath,
 			}
 			if err := CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeToSet, commandToRun); err != nil {
-				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
+				fmt.Printf("WARNING:  Warning: Failed to launch tmux session: %v\n", err)
 				fmt.Printf("   You can launch it manually later with `flow plan open`\n")
 			}
 		} else {
 			// Launch session without worktree (in main repo)
 			if err := CreateOrSwitchToMainRepoSessionAndRunCommand(ctx, planName, commandToRun); err != nil {
-				fmt.Printf("⚠️  Warning: Failed to launch tmux session: %v\n", err)
+				fmt.Printf("WARNING:  Warning: Failed to launch tmux session: %v\n", err)
 				fmt.Printf("   You can launch it manually later with `flow plan status -t`\n")
 			}
 		}
@@ -899,7 +899,7 @@ func executeOnStartHook(planPath, planName, noteRef string) error {
 			if err := hookCmd.Run(); err != nil {
 				return fmt.Errorf("on_start hook execution failed: %w", err)
 			}
-			fmt.Println("✓ on_start hook executed successfully.")
+			fmt.Println("* on_start hook executed successfully.")
 		}
 	}
 	return nil
@@ -1084,7 +1084,7 @@ func applyDefaultContextRulesToWorktree(worktreePath string, explicitRepos []str
 			subRepoPath := filepath.Join(worktreePath, repoName)
 			if err := configureDefaultContextRules(subRepoPath); err != nil {
 				// Non-fatal warning for individual repos
-				fmt.Printf("⚠️  Warning: could not apply default rules to '%s': %v\n", repoName, err)
+				fmt.Printf("WARNING:  Warning: could not apply default rules to '%s': %v\n", repoName, err)
 			}
 		}
 	} else {
@@ -1232,7 +1232,7 @@ func executeDockerComposeAction(action orchestration.InitAction, workDir string,
 	if err := os.WriteFile(overridePath, append([]byte(header), overrideContent...), 0644); err != nil {
 		return fmt.Errorf("writing override file: %w", err)
 	}
-	fmt.Printf("    ✓ Generated %s\n", overridePath)
+	fmt.Printf("    * Generated %s\n", overridePath)
 
 	// 6. Execute docker compose
 	composeArgs := []string{"compose"}
@@ -1339,7 +1339,7 @@ func sanitizeDockerComposeFile(baseFile, workDir, groveDockerDir string, service
 		return "", fmt.Errorf("writing sanitized file: %w", err)
 	}
 
-	fmt.Printf("    ✓ Generated sanitized compose file: %s\n", sanitizedPath)
+	fmt.Printf("    * Generated sanitized compose file: %s\n", sanitizedPath)
 	return sanitizedPath, nil
 }
 

@@ -67,7 +67,7 @@ func runPlanJobsRename(cmd *cobra.Command, args []string) error {
 	}
 
 	// Success message
-	fmt.Printf("%s Job renamed successfully\n", color.GreenString("✓"))
+	fmt.Printf("%s Job renamed successfully\n", color.GreenString("*"))
 	fmt.Printf("  Title:    %s → %s\n", oldTitle, newTitle)
 	fmt.Printf("  Filename: %s → %s\n", oldFilename, job.Filename)
 
@@ -108,7 +108,7 @@ func runPlanJobsRename(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(updatedJobs) > 0 {
-		fmt.Printf("\n%s Updated %d job(s):\n", color.GreenString("✓"), len(updatedJobs))
+		fmt.Printf("\n%s Updated %d job(s):\n", color.GreenString("*"), len(updatedJobs))
 		for _, info := range updatedJobs {
 			var fields []string
 			if info.updatedDepends {

@@ -78,7 +78,7 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	if err := persister.UpdateJobStatus(job, orchestration.JobStatusRunning); err != nil {
 		return fmt.Errorf("failed to update job status to running: %w", err)
 	}
-	fmt.Printf("✓ Job status updated to 'running'.\n")
+	fmt.Printf("* Job status updated to 'running'.\n")
 
 	// 4. Re-launch the Agent in Tmux
 	// Load agent config to get default arguments
@@ -109,7 +109,7 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to re-launch agent session: %w", err)
 	}
 
-	fmt.Printf("✓ Resumed session for job '%s' in new tmux window.\n", job.Title)
+	fmt.Printf("* Resumed session for job '%s' in new tmux window.\n", job.Title)
 	return nil
 }
 
@@ -168,12 +168,12 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 			Panes:            panes,
 		}
 
-		fmt.Printf("🚀 Creating tmux session '%s' for resumed job...\n", sessionName)
+		fmt.Printf(" Creating tmux session '%s' for resumed job...\n", sessionName)
 		if err := tmuxClient.Launch(ctx, opts); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 
-		fmt.Printf("✓ Session '%s' created\n", sessionName)
+		fmt.Printf("* Session '%s' created\n", sessionName)
 	} else {
 		// Session exists, create a new window for the resumed job
 		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workingDir); err != nil {
@@ -200,7 +200,7 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 
 	// Switch to the session if we're already in tmux
 	if os.Getenv("TMUX") != "" {
-		fmt.Printf("✓ Switching to session '%s'...\n", sessionName)
+		fmt.Printf("* Switching to session '%s'...\n", sessionName)
 		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 		}

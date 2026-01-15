@@ -122,7 +122,7 @@ func runPlanContextSet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Display success message
-	fmt.Printf("✅ Context rules saved for job: %s\n", jobFileName)
+	fmt.Printf(" Context rules saved for job: %s\n", jobFileName)
 	fmt.Printf("   Rules file: %s\n", destPath)
 	fmt.Printf("   Frontmatter updated with: rules_file: %s\n", relativePath)
 
@@ -130,7 +130,7 @@ func runPlanContextSet(cmd *cobra.Command, args []string) error {
 	rulesStr := strings.TrimSpace(string(rulesContent))
 	if rulesStr != "" {
 		lines := strings.Split(rulesStr, "\n")
-		fmt.Printf("\n📋 Saved rules (%d lines):\n", len(lines))
+		fmt.Printf("\n Saved rules (%d lines):\n", len(lines))
 
 		maxLines := 5
 		displayLines := lines

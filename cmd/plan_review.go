@@ -52,7 +52,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 	}
 
 	if plan.Config != nil && (plan.Config.Status == "review" || plan.Config.Status == "finished") {
-		fmt.Printf("✓ Plan '%s' is already marked as '%s'. No action taken.\n", plan.Name, plan.Config.Status)
+		fmt.Printf("* Plan '%s' is already marked as '%s'. No action taken.\n", plan.Name, plan.Config.Status)
 		fmt.Println("You can now proceed with final cleanup using 'flow plan finish'.")
 		return nil
 	}
@@ -97,7 +97,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 			if err := hookCmd.Run(); err != nil {
 				return fmt.Errorf("on_review hook execution failed: %w", err)
 			}
-			fmt.Println("✓ on_review hook executed successfully.")
+			fmt.Println("* on_review hook executed successfully.")
 		}
 	}
 
@@ -127,7 +127,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write updated plan config: %w", err)
 	}
 
-	fmt.Printf("✓ Plan '%s' marked for review.\n", plan.Name)
+	fmt.Printf("* Plan '%s' marked for review.\n", plan.Name)
 	fmt.Println("  You can now verify the results and then run 'flow plan finish' to clean up the worktree and branches.")
 
 	return nil

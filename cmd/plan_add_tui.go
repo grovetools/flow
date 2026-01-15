@@ -249,7 +249,7 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	m.jobTypeList.SetFilteringEnabled(true)
 	m.jobTypeList.SetShowHelp(false)
 	m.jobTypeList.SetShowPagination(true)
-	m.jobTypeList.FilterInput.Prompt = "🔍 "
+	m.jobTypeList.FilterInput.Prompt = " "
 	m.jobTypeList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
 	m.jobTypeList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 
@@ -277,7 +277,7 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	m.depList.SetFilteringEnabled(true)
 	m.depList.SetShowHelp(false)
 	m.depList.SetShowPagination(true)
-	m.depList.FilterInput.Prompt = "🔍 "
+	m.depList.FilterInput.Prompt = " "
 	m.depList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
 	m.depList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 
@@ -344,7 +344,7 @@ func (m tuiModel) buildTemplateList(jobType string) list.Model {
 	templateList.SetFilteringEnabled(true)
 	templateList.SetShowHelp(false)
 	templateList.SetShowPagination(true)
-	templateList.FilterInput.Prompt = "🔍 "
+	templateList.FilterInput.Prompt = " "
 	templateList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
 	templateList.FilterInput.TextStyle = theme.DefaultTheme.Selected
 

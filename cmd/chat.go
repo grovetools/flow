@@ -149,7 +149,7 @@ func ensureChatJob(filePath string) (*orchestration.Job, error) {
 		return nil, fmt.Errorf("failed to write updated file: %w", err)
 	}
 
-	fmt.Printf("✓ Initialized chat job: %s\n", filePath)
+	fmt.Printf("* Initialized chat job: %s\n", filePath)
 
 	// Load and return the newly created job
 	return orchestration.LoadJob(filePath)
@@ -234,7 +234,7 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write updated file: %w", err)
 	}
 
-	fmt.Printf("✓ Initialized chat job: %s\n", filePath)
+	fmt.Printf("* Initialized chat job: %s\n", filePath)
 	fmt.Printf("  You can now start the conversation with: flow chat run %s\n", filePath)
 	return nil
 }
@@ -507,7 +507,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		// Create orchestrator
 		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 		if err != nil {
-			errorMsg := fmt.Sprintf("✗ Error creating orchestrator for chat '%s': %v\n", job.Title, err)
+			errorMsg := fmt.Sprintf("x Error creating orchestrator for chat '%s': %v\n", job.Title, err)
 			fmt.Print(errorMsg)
 			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
 			continue
@@ -516,14 +516,14 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		// Create a job-specific logger
 		logFilePath, err := orchestration.GetJobLogPath(plan, job)
 		if err != nil {
-			errorMsg := fmt.Sprintf("✗ Error getting log path for chat '%s': %v\n", job.Title, err)
+			errorMsg := fmt.Sprintf("x Error getting log path for chat '%s': %v\n", job.Title, err)
 			fmt.Print(errorMsg)
 			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
 			continue
 		}
 		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			errorMsg := fmt.Sprintf("✗ Error opening log file for chat '%s': %v\n", job.Title, err)
+			errorMsg := fmt.Sprintf("x Error opening log file for chat '%s': %v\n", job.Title, err)
 			fmt.Print(errorMsg)
 			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
 			continue
@@ -535,7 +535,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 
 		// Use the orchestrator to run the specific job with the custom writer
 		if err := orch.ExecuteJobWithWriter(jobCtx, job, multiWriter); err != nil {
-			errorMsg := fmt.Sprintf("✗ Error running chat '%s': %v\n", job.Title, err)
+			errorMsg := fmt.Sprintf("x Error running chat '%s': %v\n", job.Title, err)
 			fmt.Fprint(multiWriter, errorMsg) // Log error to both console and file
 			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
 		}

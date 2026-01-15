@@ -123,7 +123,7 @@ func resolvePlanPath(planName string) (string, error) {
 		flowCfg, err := loadFlowConfig()
 		if err == nil && flowCfg.PlansDirectory != "" {
 			// Legacy configuration detected - use it for backward compatibility
-			fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+			fmt.Fprintln(os.Stderr, "WARNING:  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
 			expandedBasePath, err := expandFlowPath(flowCfg.PlansDirectory)
 			if err != nil {
 				return "", fmt.Errorf("could not expand plans_directory path: %w", err)
@@ -174,7 +174,7 @@ func resolveChatsDir() (string, error) {
 		flowCfg, err := loadFlowConfig()
 		if err == nil && flowCfg.ChatDirectory != "" {
 			// Legacy configuration detected - use it for backward compatibility
-			fmt.Fprintln(os.Stderr, "⚠️  Warning: The 'flow.chat_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
+			fmt.Fprintln(os.Stderr, "WARNING:  Warning: The 'flow.chat_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
 			return expandFlowPath(flowCfg.ChatDirectory)
 		}
 	}

@@ -907,7 +907,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			// Check if cx reset succeeded in creating the rules file
 			if resetErr == nil {
 				if _, err := os.Stat(rulesPath); err == nil {
-					fmt.Fprintf(writer, "✓ Created default .grove/rules file\n")
+					fmt.Fprintf(writer, "* Created default .grove/rules file\n")
 					// Continue with the normal flow - the rules file now exists
 					// Fall through to the code below that handles existing rules files
 				} else {
@@ -981,7 +981,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 						// After edit completes, check if rules file now exists
 						if _, err := os.Stat(rulesPath); err == nil {
-							fmt.Fprintf(writer, "✓ Rules file created successfully.\n")
+							fmt.Fprintf(writer, "* Rules file created successfully.\n")
 							// Break out of the prompt loop and continue with regeneration
 							break
 						} else {
@@ -991,7 +991,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 					case "p", "proceed":
 						fmt.Fprintf(writer, "Warning: Proceeding without context from rules.\n")
-						fmt.Fprintf(writer, "💡 To add context for future runs, open a new terminal, navigate to the context directory, and run 'cx edit'.\n")
+						fmt.Fprintf(writer, "Tip: To add context for future runs, open a new terminal, navigate to the context directory, and run 'cx edit'.\n")
 						return e.displayContextInfo(ctx, contextDir)
 
 					case "c", "cancel":
