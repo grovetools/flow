@@ -398,7 +398,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "gg", "home":
-			// Go to top (first field)
+			// Go to top (first field) - but not when typing in text input
+			if inTextInput {
+				// Let text input handle these keys
+				break
+			}
 			if inList {
 				// If in a list, go to top of list
 				switch m.focusIndex {
@@ -417,7 +421,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "G", "end":
-			// Go to bottom (last field)
+			// Go to bottom (last field) - but not when typing in text input
+			if inTextInput {
+				// Let text input handle these keys
+				break
+			}
 			if inList {
 				// If in a list, go to bottom of list
 				switch m.focusIndex {
@@ -555,7 +563,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "c":
 			// Quick chat setup - set type to chat and template to chat
-			if m.unfocused {
+			// Only activate shortcut if in NORMAL mode and NOT on a text field
+			if m.unfocused && m.focusIndex != 0 && m.focusIndex != 4 {
 				// Set job type to chat
 				for i, listItem := range m.jobTypeList.Items() {
 					if string(listItem.(item)) == "chat" {
@@ -577,7 +586,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "a":
 			// Quick agent setup - set type to interactive_agent
-			if m.unfocused {
+			// Only activate shortcut if in NORMAL mode and NOT on a text field
+			if m.unfocused && m.focusIndex != 0 && m.focusIndex != 4 {
 				// Set job type to interactive_agent
 				for i, listItem := range m.jobTypeList.Items() {
 					if string(listItem.(item)) == "interactive_agent" {
