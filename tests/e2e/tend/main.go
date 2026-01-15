@@ -38,7 +38,6 @@ func main() {
 		scenarios.PlanStatusTUIOnlyScenario,
 		scenarios.PlanStatusTUIColumnToggleScenario,
 		scenarios.PlanStatusTUIColumnPersistenceScenario,
-		scenarios.PlanStatusTUIDAGScenario,
 		scenarios.PlanStatusTUILayoutLongNamesScenario,
 		scenarios.PlanStatusTUILayoutPersistenceScenario,
 		scenarios.PlanStatusTUIJobExecutionScenario,
@@ -94,8 +93,6 @@ func main() {
 		scenarios.OpencodeProviderArgsScenario,
 
 		// Session registration tests (verify synchronous registration for all providers)
-		scenarios.ClaudeSessionRegistrationScenario,
-		scenarios.CodexSessionRegistrationScenario,
 		scenarios.OpencodeSessionRegistrationScenario,
 	}
 

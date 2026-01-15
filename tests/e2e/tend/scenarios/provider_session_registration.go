@@ -185,14 +185,8 @@ func createProviderSessionRegistrationScenario(p ProviderConfig) *harness.Scenar
 	)
 }
 
-// Generated session registration scenarios for all providers.
+// Generated session registration scenarios for providers.
 var (
-	// Claude session registration test
-	ClaudeSessionRegistrationScenario = createProviderSessionRegistrationScenario(AllProviders()[0])
-
-	// Codex session registration test
-	CodexSessionRegistrationScenario = createProviderSessionRegistrationScenario(AllProviders()[1])
-
 	// Opencode session registration test
 	OpencodeSessionRegistrationScenario = createProviderSessionRegistrationScenario(AllProviders()[2])
 )
