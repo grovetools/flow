@@ -1,5 +1,6 @@
-name: grove-flow
+name: flow
 description: Job orchestration and workflows
+managed: true
 binary:
   name: flow
   path: ./bin/flow
