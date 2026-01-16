@@ -1,8 +1,8 @@
-This document provides a complete example of using `grove-flow` to manage a multi-step workflow.
+This document provides a complete example of using `flow` to manage a multi-step workflow.
 
 ## Prerequisites
 
-Before starting, ensure `grove-flow` is installed and API keys are configured. For detailed instructions, see the [Grove installation guide](/docs/overview/03-installation).
+Before starting, ensure `flow` is installed and API keys are configured. For detailed instructions, see the [Grove installation guide](/docs/overview/03-installation).
 
 A summary of prerequisites:
 *   `grove install flow`: Installs the `flow` binary.

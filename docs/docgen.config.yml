@@ -1,5 +1,5 @@
 enabled: true
-title: Grove Flow
+title: flow
 description: LLM job orchestration in Markdown for complex development workflows.
 category: Developer Tools
 settings:
@@ -74,5 +74,5 @@ readme:
     template: docs/README.md.tpl
     output: README.md
     source_section: overview
-    strip_lines: 2
+    strip_lines: 0
     generate_toc: true
