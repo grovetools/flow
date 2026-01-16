@@ -6,8 +6,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	anthropicmodels "github.com/mattsolo1/grove-anthropic/pkg/models"
-	geminimodels "github.com/mattsolo1/grove-gemini/pkg/models"
+	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
+	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
 	"github.com/spf13/cobra"
 )
 

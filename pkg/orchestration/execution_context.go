@@ -4,8 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/git"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/git"
 )
 
 // ExecutionContext provides context about where jobs are being executed from

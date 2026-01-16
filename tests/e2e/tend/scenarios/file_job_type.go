@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/tui"
-	"github.com/mattsolo1/grove-tend/pkg/verify"
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/tui"
+	"github.com/grovetools/tend/pkg/verify"
 )
 
 // FileJobTypeScenario tests the file job type - a non-executable job for context/reference content.

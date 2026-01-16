@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/alias"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/alias"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )

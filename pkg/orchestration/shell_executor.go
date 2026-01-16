@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
 )
 
 // ShellExecutor executes shell commands as orchestration jobs.

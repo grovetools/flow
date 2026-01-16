@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

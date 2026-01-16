@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mattsolo1/grove-core/command"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-gemini/pkg/gemini"
+	"github.com/grovetools/core/command"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/grove-gemini/pkg/gemini"
 )
 
 // Logger defines the logging interface.

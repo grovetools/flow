@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/sessions"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-core/util/sanitize"
-	"github.com/mattsolo1/grove-flow/pkg/exec"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/core/util/sanitize"
+	"github.com/grovetools/flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
 

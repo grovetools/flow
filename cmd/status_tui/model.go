@@ -12,10 +12,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/tui/components/help"
-	"github.com/mattsolo1/grove-core/tui/components/logviewer"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // initProgramRef is a package-level variable to store the program reference

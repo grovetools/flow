@@ -8,10 +8,10 @@ import (
 
 	"os"
 
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/tui"
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/tui"
 )
 
 // PlanStatusTUIAbandonedScenario tests the abandoned job status display and interaction in the TUI.

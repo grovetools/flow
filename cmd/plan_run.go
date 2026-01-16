@@ -13,12 +13,12 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/state"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-core/util/sanitize"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/state"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/core/util/sanitize"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 

@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/mattn/go-isatty"
-	"github.com/mattsolo1/grove-core/git"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/grovetools/core/git"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/tui/theme"
 )
 
 var recipeUlog = grovelogging.NewUnifiedLogger("grove-flow.recipe")

@@ -12,11 +12,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/components/help"
-	"github.com/mattsolo1/grove-core/tui/keymap"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var ErrTUIQuit = errors.New("quit")

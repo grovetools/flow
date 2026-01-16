@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-core/fs"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-skills/pkg/skills"
+	"github.com/grovetools/core/fs"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/skills/pkg/skills"
 )
 
 var worktreeUlog = grovelogging.NewUnifiedLogger("grove-flow.worktree")

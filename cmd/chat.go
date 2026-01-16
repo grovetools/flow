@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mattsolo1/grove-core/cli"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/cli"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 

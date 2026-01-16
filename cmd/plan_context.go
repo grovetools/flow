@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	grovecontext "github.com/grovetools/cx/pkg/context"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 

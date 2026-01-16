@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/command"
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/state"
+	"github.com/grovetools/core/command"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/state"
 )
 
 // expandFlowPath expands path variables like {{REPO}} and {{BRANCH}} correctly,

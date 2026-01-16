@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-flow/cmd"
-	"github.com/mattsolo1/grove-flow/pkg/docs"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/flow/cmd"
+	"github.com/grovetools/flow/pkg/docs"
 )
 
 func main() {

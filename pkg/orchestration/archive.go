@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-core/fs"
-	"github.com/mattsolo1/grove-core/util/pathutil"
-	coresessions "github.com/mattsolo1/grove-core/pkg/sessions"
+	"github.com/grovetools/core/fs"
+	"github.com/grovetools/core/util/pathutil"
+	coresessions "github.com/grovetools/core/pkg/sessions"
 )
 
 // ArchiveInteractiveSession copies session metadata and the transcript to the plan's artifacts.

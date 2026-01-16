@@ -8,8 +8,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/workspace"
 )
 
 // JobTemplate represents a predefined job structure.

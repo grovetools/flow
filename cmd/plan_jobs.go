@@ -6,8 +6,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/mattsolo1/grove-core/cli"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 

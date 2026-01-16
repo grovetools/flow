@@ -12,10 +12,10 @@ import (
 	"syscall"
 
 	"github.com/fatih/color"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/util/sanitize"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/sanitize"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )

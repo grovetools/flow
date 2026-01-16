@@ -2,7 +2,7 @@ package status_tui
 
 import (
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/mattsolo1/grove-core/tui/keymap"
+	"github.com/grovetools/core/tui/keymap"
 )
 
 type KeyMap struct {

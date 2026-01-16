@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/verify"
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/verify"
 )
 
 var PlanAddRecipeScenario = harness.NewScenario(

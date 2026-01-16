@@ -11,12 +11,12 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	anthropicmodels "github.com/mattsolo1/grove-anthropic/pkg/models"
-	"github.com/mattsolo1/grove-core/tui/components/help"
-	"github.com/mattsolo1/grove-core/tui/keymap"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	geminimodels "github.com/mattsolo1/grove-gemini/pkg/models"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
+	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
+	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // Custom keymap extending the base

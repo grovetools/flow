@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	gtable "github.com/mattsolo1/grove-core/tui/components/table"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	gtable "github.com/grovetools/core/tui/components/table"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"gopkg.in/yaml.v3"
 )
 

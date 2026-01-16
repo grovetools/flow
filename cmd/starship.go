@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/mattsolo1/grove-core/starship"
+	"github.com/grovetools/core/starship"
 	"github.com/spf13/cobra"
 )
 

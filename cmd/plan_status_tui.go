@@ -5,10 +5,10 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/tui/components/logviewer"
-	"github.com/mattsolo1/grove-flow/cmd/status_tui"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/flow/cmd/status_tui"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // runStatusTUI runs the interactive TUI for plan status

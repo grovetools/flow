@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	grovecontext "github.com/mattsolo1/grove-context/pkg/context"
-	"github.com/mattsolo1/grove-core/git"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/theme"
+	grovecontext "github.com/grovetools/cx/pkg/context"
+	"github.com/grovetools/core/git"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
 )
 
 var helpersUlog = grovelogging.NewUnifiedLogger("grove-flow.helpers")

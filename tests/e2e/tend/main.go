@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
-	"github.com/mattsolo1/grove-tend/pkg/app"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-flow/tests/e2e/tend/scenarios"
+	"github.com/grovetools/tend/pkg/app"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/flow/tests/e2e/tend/scenarios"
 )
 
 func main() {

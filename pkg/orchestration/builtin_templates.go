@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/util/sanitize"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/util/sanitize"
 )
 
 var templateUlog = grovelogging.NewUnifiedLogger("grove-flow.templates")

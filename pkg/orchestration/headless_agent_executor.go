@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/config"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/workspace"
 )
 
 // AgentRunner defines the interface for running agents.

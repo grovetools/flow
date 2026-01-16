@@ -1,4 +1,4 @@
-module github.com/mattsolo1/grove-flow
+module github.com/grovetools/flow
 
 go 1.24.4
 
@@ -10,12 +10,12 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mattn/go-isatty v0.0.20
-	github.com/mattsolo1/grove-anthropic v0.1.0
-	github.com/mattsolo1/grove-context v0.5.0
-	github.com/mattsolo1/grove-core v0.5.0
-	github.com/mattsolo1/grove-gemini v0.2.0
-	github.com/mattsolo1/grove-skills v0.2.0
-	github.com/mattsolo1/grove-tend v0.4.0
+	github.com/grovetools/grove-anthropic v0.0.1
+	github.com/grovetools/cx v0.0.1
+	github.com/grovetools/core v0.0.1
+	github.com/grovetools/grove-gemini v0.0.1
+	github.com/grovetools/skills v0.0.1
+	github.com/grovetools/tend v0.0.1
 	github.com/muesli/termenv v0.16.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1

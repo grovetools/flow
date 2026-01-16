@@ -13,13 +13,13 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/sessions"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-core/tui/components/logviewer"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-core/util/delegation"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/core/util/delegation"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"gopkg.in/yaml.v3"
 )
 

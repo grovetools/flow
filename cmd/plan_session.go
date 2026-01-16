@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/mattsolo1/grove-core/util/sanitize"
+	"github.com/grovetools/core/util/sanitize"
 	"context"
 	"fmt"
 	"os"
@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	groveexec "github.com/mattsolo1/grove-flow/pkg/exec"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/pkg/workspace"
+	groveexec "github.com/grovetools/flow/pkg/exec"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // CreateOrSwitchToWorktreeSessionAndRunCommand creates or switches to a tmux session for the worktree and executes a command.

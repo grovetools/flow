@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
-	"github.com/mattsolo1/grove-tend/pkg/tui"
-	"github.com/mattsolo1/grove-tend/pkg/verify"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/tui"
+	"github.com/grovetools/tend/pkg/verify"
 )
 
 // PlanStatusTUIMultiSelectScenario tests multi-job selection and batch operations.

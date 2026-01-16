@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/invopop/jsonschema"
-	"github.com/mattsolo1/grove-flow/cmd"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/flow/cmd"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 func main() {

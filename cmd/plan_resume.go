@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/pkg/tmux"
-	"github.com/mattsolo1/grove-core/util/delegation"
-	"github.com/mattsolo1/grove-core/util/sanitize"
-	groveexec "github.com/mattsolo1/grove-flow/pkg/exec"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/util/delegation"
+	"github.com/grovetools/core/util/sanitize"
+	groveexec "github.com/grovetools/flow/pkg/exec"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
 

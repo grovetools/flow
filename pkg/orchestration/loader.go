@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/util/sanitize"
+	"github.com/grovetools/core/util/sanitize"
 	"gopkg.in/yaml.v3"
 )
 

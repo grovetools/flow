@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
+	grovelogging "github.com/grovetools/core/logging"
 )
 
 var worktreeMgrUlog = grovelogging.NewUnifiedLogger("grove-flow.worktree-manager")

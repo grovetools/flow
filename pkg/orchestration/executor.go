@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
+	grovelogging "github.com/grovetools/core/logging"
 )
 
 // Executor is the interface for job executors.

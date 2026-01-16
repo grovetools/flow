@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	grovelogging "github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/version"
+	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/version"
 	"github.com/spf13/cobra"
 )
 

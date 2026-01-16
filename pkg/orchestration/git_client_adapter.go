@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/git"
+	"github.com/grovetools/core/git"
 )
 
 // GitClientAdapter adapts the git.WorktreeManager to the GitClient interface.

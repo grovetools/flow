@@ -11,13 +11,13 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/logging"
-	"github.com/mattsolo1/grove-core/pkg/logging/logutil"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/tui/components/logviewer"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-core/tui/utils/scrollbar"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/logging/logutil"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/core/tui/utils/scrollbar"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // Update handles messages and updates the model

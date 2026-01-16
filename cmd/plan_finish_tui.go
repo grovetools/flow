@@ -7,10 +7,10 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattsolo1/grove-core/tui/components"
-	"github.com/mattsolo1/grove-core/tui/components/help"
-	"github.com/mattsolo1/grove-core/tui/keymap"
-	"github.com/mattsolo1/grove-core/tui/theme"
+	"github.com/grovetools/core/tui/components"
+	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
 )
 
 type finishTUIKeyMap struct {

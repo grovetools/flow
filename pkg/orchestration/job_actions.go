@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/pkg/sessions"
-	"github.com/mattsolo1/grove-core/util/delegation"
+	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/util/delegation"
 )
 
 // AppendAgentTranscript finds the transcript for an agent job

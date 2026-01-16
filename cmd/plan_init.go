@@ -13,10 +13,10 @@ import (
 	"text/template"
 
 	"github.com/google/uuid"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/state"
-	"github.com/mattsolo1/grove-core/tui/theme"
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/state"
+	"github.com/grovetools/core/tui/theme"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )

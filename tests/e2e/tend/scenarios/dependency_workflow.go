@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-tend/pkg/fs"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/tend/pkg/fs"
+	"github.com/grovetools/tend/pkg/harness"
 )
 
 var DependencyWorkflowScenario = harness.NewScenario(

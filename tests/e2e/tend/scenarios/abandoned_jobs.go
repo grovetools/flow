@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-flow/pkg/orchestration"
-	"github.com/mattsolo1/grove-tend/pkg/assert"
-	"github.com/mattsolo1/grove-tend/pkg/harness"
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/tend/pkg/assert"
+	"github.com/grovetools/tend/pkg/harness"
 )
 
 var AbandonedJobsScenario = harness.NewScenario(

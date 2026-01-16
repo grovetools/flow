@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattsolo1/grove-core/command"
-	grovelogging "github.com/mattsolo1/grove-core/logging"
+	"github.com/grovetools/core/command"
+	grovelogging "github.com/grovetools/core/logging"
 )
 
 // LLMOptions defines configuration for an LLM completion request.

@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattsolo1/grove-core/git"
-	"github.com/mattsolo1/grove-core/pkg/workspace"
-	"github.com/mattsolo1/grove-core/util/pathutil"
+	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/pathutil"
 )
 
 // DetermineWorkingDirectory determines the working directory for a job based on
