@@ -174,7 +174,13 @@ func NewPlanCmd() *cobra.Command {
 
 	// Add-step command flags
 	planAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
-	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, chat, shell, headless_agent, interactive_agent, or file (agent is an alias for interactive_agent)")
+	planAddCmd.Flags().StringVarP(&planAddType, "type", "t", "interactive_agent", `Job type:
+   • oneshot          - Single LLM call, no tools or iteration
+   • chat             - Interactive conversation requiring user input
+   • shell            - Execute shell commands directly
+   • headless_agent   - Autonomous agent without user interaction
+   • interactive_agent - Agent with user interaction (default)
+   • file             - Static file content, no execution`)
 	planAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	planAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
@@ -182,7 +188,13 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
 	planAddCmd.Flags().StringSliceVar(&planAddIncludeFiles, "include", nil, "Comma-separated list of files to include as context")
 	planAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
-	planAddCmd.Flags().StringSliceVar(&planAddInline, "inline", nil, "File types to inline in prompt: dependencies, include, context, all, files, none")
+	planAddCmd.Flags().StringSliceVar(&planAddInline, "inline", nil, `File types to inline in prompt:
+   • dependencies - Embed dependency output directly in prompt (vs separate files)
+   • include      - Embed --include file content directly in prompt
+   • context      - Embed project context (.grove/context) in prompt
+   • all          - Inline all of the above
+   • files        - Inline dependencies + include (not context)
+   • none         - No inlining; content provided as separate files (default)`)
 	planAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "[DEPRECATED] Use --inline=dependencies. Inline dependency content into prompt body")
 	planAddCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
 	planAddCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")

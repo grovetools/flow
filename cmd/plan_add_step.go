@@ -18,7 +18,7 @@ import (
 type PlanAddStepCmd struct {
 	Dir                 string   `arg:"" help:"Plan directory"`
 	Template            string   `flag:"" help:"Name of the job template to use"`
-	Type                string   `flag:"t" default:"agent" help:"Job type: oneshot, agent, chat, interactive_agent, headless_agent, shell, or file"`
+	Type                string   `flag:"t" default:"interactive_agent" help:"Job type: oneshot, chat, interactive_agent, headless_agent, shell, or file"`
 	Title               string   `flag:"" help:"Job title"`
 	DependsOn           []string `flag:"d" help:"Dependencies (job filenames)"`
 	PromptFile          string   `flag:"f" help:"File containing the prompt"`
@@ -220,8 +220,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		return nil, fmt.Errorf("title is required (use --title or -i for interactive mode)")
 	}
 
-	if cmd.Type != "oneshot" && cmd.Type != "agent" && cmd.Type != "chat" && cmd.Type != "shell" && cmd.Type != "interactive_agent" && cmd.Type != "headless_agent" && cmd.Type != "file" {
-		return nil, fmt.Errorf("invalid job type: must be oneshot, agent, chat, shell, interactive_agent, headless_agent, or file")
+	if cmd.Type != "oneshot" && cmd.Type != "chat" && cmd.Type != "shell" && cmd.Type != "interactive_agent" && cmd.Type != "headless_agent" && cmd.Type != "file" {
+		return nil, fmt.Errorf("invalid job type: must be oneshot, chat, shell, interactive_agent, headless_agent, or file")
 	}
 
 	// Validate dependencies
@@ -616,7 +616,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 
 	// CLI flags override template defaults
-	if cmd.Type != "" && cmd.Type != "agent" { // "agent" is the default, so only override if explicitly set
+	if cmd.Type != "" && cmd.Type != "interactive_agent" { // "interactive_agent" is the default, so only override if explicitly set
 		job.Type = orchestration.JobType(cmd.Type)
 	}
 	if len(cmd.DependsOn) > 0 {

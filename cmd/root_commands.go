@@ -27,7 +27,13 @@ Examples:
 	}
 	// Add flags from plan_add_step.go
 	addCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
-	addCmd.Flags().StringVarP(&planAddType, "type", "t", "agent", "Job type: oneshot, chat, shell, headless_agent, interactive_agent, or file (agent is an alias for interactive_agent)")
+	addCmd.Flags().StringVarP(&planAddType, "type", "t", "interactive_agent", `Job type:
+   • oneshot          - Single LLM call, no tools or iteration
+   • chat             - Interactive conversation requiring user input
+   • shell            - Execute shell commands directly
+   • headless_agent   - Autonomous agent without user interaction
+   • interactive_agent - Agent with user interaction (default)
+   • file             - Static file content, no execution`)
 	addCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	addCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	addCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
@@ -35,7 +41,13 @@ Examples:
 	addCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
 	addCmd.Flags().StringSliceVar(&planAddIncludeFiles, "include", nil, "Comma-separated list of files to include as context")
 	addCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
-	addCmd.Flags().StringSliceVar(&planAddInline, "inline", nil, "File types to inline in prompt: dependencies, include, context, all, files, none")
+	addCmd.Flags().StringSliceVar(&planAddInline, "inline", nil, `File types to inline in prompt:
+   • dependencies - Embed dependency output directly in prompt (vs separate files)
+   • include      - Embed --include file content directly in prompt
+   • context      - Embed project context (.grove/context) in prompt
+   • all          - Inline all of the above
+   • files        - Inline dependencies + include (not context)
+   • none         - No inlining; content provided as separate files (default)`)
 	addCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "[DEPRECATED] Use --inline=dependencies. Inline dependency content into prompt body")
 	addCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
 	addCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
