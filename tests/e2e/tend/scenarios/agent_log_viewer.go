@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/tui"
@@ -206,8 +207,11 @@ func testCompletedAgentJobNoLogs(ctx *harness.Context) error {
 
 	// Most importantly: Should NOT attempt to stream (no sparkle icon or "new" label) for completed job
 	// The key feature being tested is that completed jobs don't show streaming UI
-	if strings.Contains(content, "") || strings.Contains(content, "new") {
-		return fmt.Errorf("completed job should not show streaming indicators, got:\n%s", content)
+	// Note: we check len(theme.IconSparkle) > 0 to avoid matching empty string (which matches everything)
+	hasSparkle := len(theme.IconSparkle) > 0 && strings.Contains(content, theme.IconSparkle)
+	hasNewLabel := strings.Contains(content, " new ")
+	if hasSparkle || hasNewLabel {
+		return fmt.Errorf("completed job should not show streaming indicators (sparkle=%v, new=%v), got:\n%s", hasSparkle, hasNewLabel, content)
 	}
 
 	// The content should be either the mock logs OR the "no logs found" message,
@@ -293,8 +297,10 @@ func testCompletedAgentJobWithLogs(ctx *harness.Context) error {
 	}
 
 	// Should NOT show streaming indicators for completed job
-	if strings.Contains(content, "") || strings.Contains(content, "new") {
-		return fmt.Errorf("completed job should not show streaming indicators, got:\n%s", content)
+	hasSparkle := len(theme.IconSparkle) > 0 && strings.Contains(content, theme.IconSparkle)
+	hasNewLabel := strings.Contains(content, " new ")
+	if hasSparkle || hasNewLabel {
+		return fmt.Errorf("completed job should not show streaming indicators (sparkle=%v, new=%v), got:\n%s", hasSparkle, hasNewLabel, content)
 	}
 
 	// Close and quit
