@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/mattsolo1/grove-flow/pkg/orchestration/job",
+  "$id": "https://github.com/grovetools/flow/pkg/orchestration/job",
   "$defs": {
     "InlineConfig": {
       "properties": {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/mattsolo1/grove-flow/cmd/flow-config",
+  "$id": "https://github.com/grovetools/flow/cmd/flow-config",
   "$defs": {
     "RecipeConfig": {
       "properties": {
