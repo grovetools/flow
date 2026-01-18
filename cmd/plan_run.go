@@ -14,6 +14,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
@@ -218,7 +219,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		currentTmuxSession := ""
 		if os.Getenv("TMUX") != "" {
 			// We're in tmux, get the current session name
-			cmd := exec.Command("tmux", "display-message", "-p", "#S")
+			cmd := tmux.Command("display-message", "-p", "#S")
 			output, err := cmd.Output()
 			if err == nil {
 				currentTmuxSession = strings.TrimSpace(string(output))

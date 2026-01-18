@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -174,7 +173,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	// We no longer need the async discoverAndRegisterSession call.
 
 	if os.Getenv("TMUX") != "" && !isTUIMode {
-		currentSessionCmd := osexec.Command("tmux", "display-message", "-p", "#S")
+		currentSessionCmd := tmux.Command("display-message", "-p", "#S")
 		currentSessionOutput, err := currentSessionCmd.Output()
 		if err == nil {
 			currentSession := strings.TrimSpace(string(currentSessionOutput))
@@ -353,7 +352,7 @@ func (p *OpencodeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan,
 
 // getPanePID gets the PID of a tmux pane
 func getPanePID(targetPane string) int {
-	cmd := osexec.Command("tmux", "display-message", "-p", "-t", targetPane, "#{pane_pid}")
+	cmd := tmux.Command("display-message", "-p", "-t", targetPane, "#{pane_pid}")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -390,7 +389,7 @@ func findMostRecentOpencodeFile(dir string) (string, error) {
 
 // FindOpencodePIDForPane finds the PID of the 'opencode' process running within a specific tmux pane
 func FindOpencodePIDForPane(targetPane string) (int, error) {
-	cmd := osexec.Command("tmux", "display-message", "-p", "-t", targetPane, "#{pane_pid}")
+	cmd := tmux.Command("display-message", "-p", "-t", targetPane, "#{pane_pid}")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get pane PID: %w", err)

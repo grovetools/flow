@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/fatih/color"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -212,13 +212,13 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 				if !silent {
 					fmt.Printf("  Closing tmux window: %s\n", targetWindow)
 				}
-				cmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
+				cmd := tmux.Command("kill-window", "-t", targetWindow)
 				err := cmd.Run()
 
 				// If exact match fails, try to find windows with this prefix
 				// (tmux may add numeric suffixes like "job-hi5-" for duplicate names)
 				if err != nil {
-					listCmd := exec.Command("tmux", "list-windows", "-t", sessionName, "-F", "#{window_name}")
+					listCmd := tmux.Command("list-windows", "-t", sessionName, "-F", "#{window_name}")
 					output, listErr := listCmd.Output()
 					if listErr == nil {
 						windows := strings.Split(strings.TrimSpace(string(output)), "\n")
@@ -228,7 +228,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 								if !silent {
 									fmt.Printf("  Found window with prefix: %s\n", targetWindow)
 								}
-								killCmd := exec.Command("tmux", "kill-window", "-t", targetWindow)
+								killCmd := tmux.Command("kill-window", "-t", targetWindow)
 								if killErr := killCmd.Run(); killErr == nil {
 									if !silent {
 										fmt.Println("  * Tmux window closed.")

@@ -244,7 +244,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// Note: isTUIMode already declared above when building new-window args
 	if os.Getenv("TMUX") != "" && !isTUIMode {
 		// Check if we are in the correct session before trying to select window
-		currentSessionCmd := osexec.Command("tmux", "display-message", "-p", "#S")
+		currentSessionCmd := tmux.Command("display-message", "-p", "#S")
 		currentSessionOutput, err := currentSessionCmd.Output()
 		if err == nil {
 			currentSession := strings.TrimSpace(string(currentSessionOutput))
@@ -576,7 +576,7 @@ func findDescendantPID(parentPID int, targetComm string) (int, error) {
 // by traversing the process tree from the pane's shell.
 func FindCodexPIDForPane(targetPane string) (int, error) {
 	// Use tmux display-message to get the pane PID
-	cmd := osexec.Command("tmux", "display-message", "-p", "-t", targetPane, "#{pane_pid}")
+	cmd := tmux.Command("display-message", "-p", "-t", targetPane, "#{pane_pid}")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get pane PID: %w", err)

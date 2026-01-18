@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,7 +86,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	// Check if we're currently in that session
 	inTargetSession := false
 	if os.Getenv("TMUX") != "" {
-		cmd := exec.Command("tmux", "display-message", "-p", "#S")
+		cmd := tmux.Command("display-message", "-p", "#S")
 		output, err := cmd.Output()
 		if err == nil && strings.TrimSpace(string(output)) == sessionName {
 			inTargetSession = true

@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	osexec "os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -543,7 +542,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Note: isTUIMode already declared above when building new-window args
 		if os.Getenv("TMUX") != "" && !isTUIMode {
 			// Check if we are in the correct session before trying to select window
-			currentSessionCmd := exec.Command("tmux", "display-message", "-p", "#S")
+			currentSessionCmd := tmux.Command("display-message", "-p", "#S")
 			currentSessionOutput, err := currentSessionCmd.Output()
 			if err == nil {
 				currentSession := strings.TrimSpace(string(currentSessionOutput))
@@ -1005,7 +1004,7 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 // findClaudePIDForPane finds the PID of the Claude Code process running in a specific tmux pane
 func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string, logger *logrus.Entry) (int, error) {
 	// Use tmux display-message to get the pane PID
-	cmd := osexec.Command("tmux", "display-message", "-p", "-t", targetPane, "#{pane_pid}")
+	cmd := tmux.Command("display-message", "-p", "-t", targetPane, "#{pane_pid}")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get pane PID: %w", err)
@@ -1032,7 +1031,7 @@ func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string, logger *lo
 // findDescendantPID recursively finds a descendant process with a given name.
 func (p *ClaudeAgentProvider) findDescendantPID(parentPID int, targetComm string, logger *logrus.Entry) (int, error) {
 	// Get all processes
-	cmd := osexec.Command("ps", "-o", "pid,ppid,comm")
+	cmd := exec.Command("ps", "-o", "pid,ppid,comm")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, err
