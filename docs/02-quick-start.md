@@ -25,6 +25,12 @@ A plan is created using `flow plan init`. This command launches a terminal inter
 }
 ```
 
+./videos/01-plan-init.mp4
+
+/Users/solom4/Code/grovetools/flow/docs/videos/01-plan-init.mp4
+
+![Plan Init Video](./videos/01-plan-init.mp4#themed)
+
 This creates a directory named `grilled-cheese-sandwich/` containing a series of job files (`.md`) that form a dependency chain. The `flow status` command displays this chain in its terminal interface.
 
 ```asciinema
