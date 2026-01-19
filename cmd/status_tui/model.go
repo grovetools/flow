@@ -115,6 +115,7 @@ type Model struct {
 	editRawContent        string
 	Focus               ViewFocus // Track which pane is active
 	LogSplitVertical    bool      // Track log viewer layout
+	LogPaneFullscreen   bool      // Track if logs pane is fullscreen
 	IsRunningJob        bool      // Track if a job is currently running
 	isAutorunning       bool      // True when automatically running all stages
 	originalSelection   map[string]bool // Track the original user selection for autorun
@@ -500,9 +501,17 @@ func (m Model) View() string {
 			detailContent = addScrollbarToViewport(&m.editViewport)
 		}
 
-		// Use the existing renderLogsPane structure but pass in the dynamic content
-		logsPane, separator := m.renderLogsPane(contentWidth, detailContent)
-		if m.LogSplitVertical {
+		// Check if fullscreen mode is active
+		if m.LogPaneFullscreen {
+			// Fullscreen: render only the logs pane at full width
+			logsPane, _ := m.renderLogsPane(contentWidth, detailContent)
+			contentHeight := m.Height - topMargin - bottomMargin - footerHeight
+			logsPaneStyled := lipgloss.NewStyle().Height(contentHeight).Render(logsPane)
+			finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, footer)
+		} else {
+			// Use the existing renderLogsPane structure but pass in the dynamic content
+			logsPane, separator := m.renderLogsPane(contentWidth, detailContent)
+			if m.LogSplitVertical {
 			// Vertical split: constrain jobs pane height
 			maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
 			if maxJobsPaneHeight < 10 {
@@ -525,6 +534,7 @@ func (m Model) View() string {
 			combinedContent := lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane)
 			combinedContent = lipgloss.NewStyle().Height(contentHeight).Render(combinedContent)
 			finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, footer)
+			}
 		}
 	} else {
 		// No logs: use same calculation as vertical split
@@ -697,7 +707,11 @@ func (m *Model) updateLayoutDimensions() {
 	}
 
 	if m.ShowLogs {
-		if m.LogSplitVertical {
+		if m.LogPaneFullscreen {
+			// Fullscreen: use full terminal dimensions minus margins
+			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
+			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
+		} else if m.LogSplitVertical {
 			// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
 			// So the content width is LogViewerWidth - 2
 			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2

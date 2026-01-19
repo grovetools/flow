@@ -40,6 +40,7 @@ type KeyMap struct {
 	CloseDetailPane   key.Binding
 	SwitchFocus       key.Binding
 	ToggleLayout      key.Binding
+	ToggleFullscreen  key.Binding
 }
 
 func NewKeyMap() KeyMap {
@@ -177,6 +178,10 @@ func NewKeyMap() KeyMap {
 			key.WithKeys("V"),
 			key.WithHelp("V", "toggle layout"),
 		),
+		ToggleFullscreen: key.NewBinding(
+			key.WithKeys("z"),
+			key.WithHelp("z", "fullscreen logs"),
+		),
 	}
 }
 
@@ -215,6 +220,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			k.CloseDetailPane,
 			k.SwitchFocus,
 			k.ToggleLayout,
+			k.ToggleFullscreen,
 		},
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),

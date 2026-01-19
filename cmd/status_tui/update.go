@@ -926,6 +926,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let 'tab' and 'shift+tab' be handled by the main logic to switch focus.
 			case "V":
 				// Let 'V' be handled by the main logic to toggle layout.
+			case "z":
+				// Let 'z' be handled by the main logic to toggle fullscreen.
 			case "esc":
 				// 'esc' closes the detail pane (handled by main logic below)
 			case "g":
@@ -990,7 +992,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Help.Toggle()
 
 		case key.Matches(msg, m.KeyMap.SwitchFocus):
-			if m.ShowLogs {
+			if m.ShowLogs && !m.LogPaneFullscreen {
 				if m.Focus == JobsPane {
 					m.Focus = LogsPane
 				} else {
@@ -1003,6 +1005,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.LogSplitVertical = !m.LogSplitVertical
 				// Save the new state
 				_ = saveState(m.columnVisibility, m.LogSplitVertical)
+
+				// Centralized layout calculation
+				m.updateLayoutDimensions()
+
+				// Update viewport sizes for all detail panes
+				m.frontmatterViewport.Width = m.LogViewerWidth
+				m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.briefingViewport.Width = m.LogViewerWidth
+				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.editViewport.Width = m.LogViewerWidth
+				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
+
+				// Re-wrap content for all detail viewports to adapt to the new layout
+				if m.frontmatterRawContent != "" {
+					styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
+					wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
+					m.frontmatterViewport.SetContent(wrappedContent)
+				}
+				if m.briefingRawContent != "" {
+					styledContent := renderStyledBriefing(m.briefingRawContent)
+					wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
+					m.briefingViewport.SetContent(wrappedContent)
+				}
+				if m.editRawContent != "" {
+					styledContent := renderStyledMarkdown(m.editRawContent)
+					wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
+					m.editViewport.SetContent(wrappedContent)
+				}
+
+				// Update log viewer with new dimensions
+				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
+				return m, cmd
+			}
+			return m, nil
+
+		case key.Matches(msg, m.KeyMap.ToggleFullscreen):
+			if m.ShowLogs {
+				m.LogPaneFullscreen = !m.LogPaneFullscreen
+
+				// When entering fullscreen, force focus to logs pane
+				if m.LogPaneFullscreen {
+					m.Focus = LogsPane
+				}
 
 				// Centralized layout calculation
 				m.updateLayoutDimensions()
@@ -1148,6 +1193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.CloseDetailPane):
 			m.LogViewer.Stop()
 			m.ShowLogs = false
+			m.LogPaneFullscreen = false
 			m.Focus = JobsPane
 			m.ActiveLogJob = nil
 			m.ActiveDetailPane = NoPane
