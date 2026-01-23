@@ -1,9 +1,11 @@
 package orchestration
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -908,6 +910,34 @@ func sanitizePathForClaude(path string) string {
 	return result
 }
 
+// getFirstTimestampFromSessionFile reads the first timestamp from a Claude session jsonl file.
+// This is more reliable than using file modification time, which can be stale on some systems
+// (e.g., when Claude uses buffered writes or memory-mapped files).
+func getFirstTimestampFromSessionFile(filePath string) (time.Time, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	// Use a larger buffer for potentially large JSON lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	// Read up to 10 lines looking for a timestamp
+	for i := 0; i < 10 && scanner.Scan(); i++ {
+		var entry struct {
+			Timestamp time.Time `json:"timestamp"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil && !entry.Timestamp.IsZero() {
+			return entry.Timestamp, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("no timestamp found in first 10 lines of %s", filePath)
+}
+
 // findClaudeSessionID finds the Claude Code session ID by looking for the most recent session file
 // created after the specified job start time (to avoid reusing old sessions)
 func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime time.Time, logger *logrus.Entry) (string, error) {
@@ -964,24 +994,34 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 			continue
 		}
 
-		info, err := entry.Info()
+		filePath := filepath.Join(claudeProjectsDir, entry.Name())
+
+		// Read the first timestamp from the file content instead of relying on
+		// file modification time. File mod times can be stale on some systems
+		// (e.g., macOS with APFS when Claude uses buffered writes).
+		contentTime, err := getFirstTimestampFromSessionFile(filePath)
 		if err != nil {
-			continue
+			// Fall back to file mod time if we can't read content timestamp
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				continue
+			}
+			contentTime = info.ModTime()
 		}
 
-		// Only consider files modified after the job started
+		// Only consider files with timestamps after the job started
 		// This prevents reusing old session files from previous jobs
-		if !info.ModTime().After(jobStartTime) {
+		if !contentTime.After(jobStartTime) {
 			logger.WithFields(map[string]interface{}{
 				"file":           entry.Name(),
-				"mod_time":       info.ModTime(),
+				"content_time":   contentTime,
 				"job_start_time": jobStartTime,
 			}).Debug("Skipping old session file")
 			continue
 		}
 
-		if info.ModTime().After(latestTime) {
-			latestTime = info.ModTime()
+		if contentTime.After(latestTime) {
+			latestTime = contentTime
 			latestFile = entry.Name()
 		}
 	}
