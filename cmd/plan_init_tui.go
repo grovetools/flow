@@ -200,6 +200,7 @@ type planInitTUIModel struct {
 	recipeList  list.Model
 	modelList   list.Model
 	openSession bool
+	runInit     bool // Run init actions from recipe
 
 	// Screen navigation
 	currentScreen planInitScreen
@@ -297,6 +298,12 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	m.withWorktree = true
 	m.openSession = false // Changed default to false since it's now in advanced
 
+	// Run init actions by default, unless configured otherwise in grove.yml
+	m.runInit = true
+	if flowCfg, err := loadFlowConfig(); err == nil && flowCfg.RunInitByDefault != nil {
+		m.runInit = *flowCfg.RunInitByDefault
+	}
+
 	// Start on main screen
 	m.currentScreen = MainScreen
 
@@ -363,6 +370,11 @@ func (m *planInitTUIModel) prePopulate(initialCmd *PlanInitCmd) {
 	// For boolean flags, if they were set on the command line, their value will be passed in.
 	// Cobra handles the default values.
 	m.openSession = initialCmd.OpenSession
+
+	// If --init flag was explicitly set (true), respect it
+	if initialCmd.RunInit {
+		m.runInit = true
+	}
 }
 
 func (m planInitTUIModel) Init() tea.Cmd {
@@ -391,13 +403,13 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Check if we're in a text input field that should capture all keys
 		// MainScreen: 0=name
-		// AdvancedScreen: 0=worktree, 1=extractFrom, 2=noteTargetFile
+		// AdvancedScreen: 0=runInit checkbox, 1=worktree, 2=extractFrom, 3=noteTargetFile
 		inTextInput := false
 		if !m.unfocused {
 			if m.currentScreen == MainScreen && m.focusIndex == 0 {
 				inTextInput = true
-			} else if m.currentScreen == AdvancedScreen {
-				inTextInput = true // All advanced fields are text inputs
+			} else if m.currentScreen == AdvancedScreen && m.focusIndex >= 1 {
+				inTextInput = true // Advanced fields 1-3 are text inputs (0 is checkbox)
 			}
 		}
 		// Check if we're in a list that needs arrow keys
@@ -515,7 +527,7 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case " ":
-			// Space toggles checkboxes (only on main screen)
+			// Space toggles checkboxes
 			if m.currentScreen == MainScreen {
 				switch m.focusIndex {
 				case 3: // Auto-create Worktree
@@ -526,6 +538,12 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				case 4: // Open Session on Create
 					m.openSession = !m.openSession
+					return m, nil
+				}
+			} else if m.currentScreen == AdvancedScreen {
+				switch m.focusIndex {
+				case 0: // Run Init Actions
+					m.runInit = !m.runInit
 					return m, nil
 				}
 			}
@@ -588,12 +606,14 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case AdvancedScreen:
 			switch m.focusIndex {
 			case 0:
+				// Run Init Actions checkbox - no text input
+			case 1:
 				if !m.withWorktree {
 					m.worktreeInput, cmd = m.worktreeInput.Update(msg)
 				}
-			case 1:
-				m.extractFromInput, cmd = m.extractFromInput.Update(msg)
 			case 2:
+				m.extractFromInput, cmd = m.extractFromInput.Update(msg)
+			case 3:
 				m.noteTargetFileInput, cmd = m.noteTargetFileInput.Update(msg)
 			}
 		}
@@ -608,7 +628,7 @@ func (m planInitTUIModel) getMaxFocusIndex() int {
 	case MainScreen:
 		return 4 // 0-4: name, recipe, model, worktree checkbox, session checkbox
 	case AdvancedScreen:
-		return 2 // 0-2: worktree name, extract-from, note-target
+		return 3 // 0-3: run-init checkbox, worktree name, extract-from, note-target
 	}
 	return 4
 }
@@ -634,12 +654,14 @@ func (m planInitTUIModel) updateFocus() planInitTUIModel {
 		case AdvancedScreen:
 			switch m.focusIndex {
 			case 0:
+				// Run Init Actions checkbox - no text focus
+			case 1:
 				if !m.withWorktree {
 					m.worktreeInput.Focus()
 				}
-			case 1:
-				m.extractFromInput.Focus()
 			case 2:
+				m.extractFromInput.Focus()
+			case 3:
 				m.noteTargetFileInput.Focus()
 			}
 		}
@@ -864,6 +886,14 @@ func (m planInitTUIModel) renderAdvancedScreen() string {
 		return style.Render(fieldBuilder.String())
 	}
 
+	// Run Init Actions checkbox
+	runInitDisplay := "[ ]"
+	if m.runInit {
+		runInitDisplay = "[x]"
+	}
+	b.WriteString(renderField(0, "Run Init Actions", runInitDisplay, true))
+	b.WriteString("\n")
+
 	// Check if we're in an inherited context for worktree
 	isInheritedContext := false
 	currentNode, err := workspace.GetProjectByPath(".")
@@ -881,12 +911,12 @@ func (m planInitTUIModel) renderAdvancedScreen() string {
 		worktreeDisplay = m.worktreeInput.View()
 	}
 
-	b.WriteString(renderField(0, "Worktree Name", worktreeDisplay, true))
+	b.WriteString(renderField(1, "Worktree Name", worktreeDisplay, true))
 	b.WriteString("\n")
 
 	// Extract from File | Note Target File
-	extractField := renderField(1, "Extract from File (from-note)", m.extractFromInput.View(), false)
-	targetField := renderField(2, "Note Target File", m.noteTargetFileInput.View(), false)
+	extractField := renderField(2, "Extract from File (from-note)", m.extractFromInput.View(), false)
+	targetField := renderField(3, "Note Target File", m.noteTargetFileInput.View(), false)
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, extractField, "  ", targetField))
 	b.WriteString("\n\n")
 
@@ -903,6 +933,7 @@ func (m planInitTUIModel) toPlanInitCmd() *PlanInitCmd {
 		FromNote:       m.extractFromInput.Value(), // The extract field represents --from-note
 		NoteTargetFile: m.noteTargetFileInput.Value(),
 		OpenSession:    m.openSession,
+		RunInit:        m.runInit,
 		Force:          false, // Not settable from TUI
 	}
 

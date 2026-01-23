@@ -18,6 +18,7 @@ type FlowConfig struct {
 	SummaryModel         string                  `yaml:"summary_model"`
 	SummaryPrompt        string                  `yaml:"summary_prompt"`
 	SummaryMaxChars      int                     `yaml:"summary_max_chars"`
+	RunInitByDefault     *bool                   `yaml:"run_init_by_default"` // Whether to run init actions by default (nil = true)
 	Recipes              map[string]RecipeConfig `yaml:"recipes"`
 }
 

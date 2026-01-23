@@ -45,6 +45,9 @@
     "summary_max_chars": {
       "type": "integer"
     },
+    "run_init_by_default": {
+      "type": "boolean"
+    },
     "recipes": {
       "additionalProperties": {
         "$ref": "#/$defs/RecipeConfig"

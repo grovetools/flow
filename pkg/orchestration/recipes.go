@@ -32,24 +32,36 @@ type InitAction struct {
 	Overlay     map[string]interface{} `yaml:"overlay,omitempty"`      // For 'docker_compose': the generic overlay
 }
 
-// loadRecipeMetadata parses a recipe.yml file and populates the metadata fields of a Recipe.
+// loadRecipeMetadata parses a workspace_init.yml (or recipe.yml for backward compatibility)
+// file and populates the metadata fields of a Recipe.
 func loadRecipeMetadata(recipe *Recipe, recipeDir string, fs embed.FS) error {
 	var initData []byte
 	var err error
+	var initFilePath string
 
-	initFilePath := filepath.Join(recipeDir, "recipe.yml")
+	// Try workspace_init.yml first (documented name), then recipe.yml for backward compatibility
+	filenames := []string{"workspace_init.yml", "recipe.yml"}
 
-	if (fs != embed.FS{}) { // A non-zero embed.FS indicates we are reading from embedded assets
-		initData, err = fs.ReadFile(initFilePath)
-	} else {
-		initData, err = os.ReadFile(initFilePath)
+	for _, filename := range filenames {
+		initFilePath = filepath.Join(recipeDir, filename)
+
+		if (fs != embed.FS{}) { // A non-zero embed.FS indicates we are reading from embedded assets
+			initData, err = fs.ReadFile(initFilePath)
+		} else {
+			initData, err = os.ReadFile(initFilePath)
+		}
+
+		if err == nil {
+			break // Found a file, use it
+		}
+		if !os.IsNotExist(err) {
+			return err // Real error, not just missing file
+		}
 	}
 
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // It's okay if the file doesn't exist
-		}
-		return err
+		// Neither file exists, which is okay
+		return nil
 	}
 
 	var initConfig struct {
