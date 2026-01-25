@@ -30,7 +30,7 @@ schema:
 	@echo "Generating JSON schema..."
 	@go generate ./cmd
 	@echo "Regenerating docs JSON..."
-	@docgen regen-json
+	# @docgen regen-json
 
 build: schema
 	@mkdir -p $(BIN_DIR)
@@ -78,12 +78,6 @@ run: build
 # Run all checks
 check: fmt vet test
 
-# Generate documentation
-generate-docs: build
-	@echo "Generating documentation..."
-	@docgen generate
-	@echo "Synchronizing README.md..."
-	@docgen sync-readme
 
 # Development build with race detector
 dev:
