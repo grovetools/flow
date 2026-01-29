@@ -12,6 +12,7 @@ import (
 
 	"github.com/fatih/color"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/sanitize"
@@ -316,13 +317,7 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 	log := grovelogging.NewLogger("flow.session.lookup")
 	log.WithField("job_id", jobID).Debug("Starting session lookup for job")
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		log.WithError(err).Error("Failed to get home directory")
-		return 0, "", fmt.Errorf("get home directory: %w", err)
-	}
-
-	sessionsDir := filepath.Join(homeDir, ".grove", "hooks", "sessions")
+	sessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	log.WithField("sessions_dir", sessionsDir).Debug("Scanning sessions directory")
 
 	entries, err := os.ReadDir(sessionsDir)
