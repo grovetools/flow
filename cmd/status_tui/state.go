@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/grovetools/core/pkg/paths"
 )
 
 // tuiState holds persistent TUI settings.
@@ -14,11 +16,7 @@ type tuiState struct {
 
 // getStateFilePath returns the path to the TUI state file.
 func getStateFilePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	stateDir := filepath.Join(home, ".grove", "flow")
+	stateDir := filepath.Join(paths.StateDir(), "flow")
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
 		return "", err
 	}
