@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/grovetools/core/fs"
-	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/core/pkg/paths"
 	coresessions "github.com/grovetools/core/pkg/sessions"
 )
 
@@ -28,11 +28,8 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 	}
 
 	// 2. Construct the source session directory path.
-	// Sessions are stored at ~/.grove/hooks/sessions/{claude-session-id}/
-	sessionsBaseDir, err := pathutil.Expand("~/.grove/hooks/sessions")
-	if err != nil {
-		return fmt.Errorf("failed to expand sessions base directory: %w", err)
-	}
+	// Sessions are stored at $XDG_STATE_HOME/grove/hooks/sessions/{claude-session-id}/
+	sessionsBaseDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	sourceSessionDir := filepath.Join(sessionsBaseDir, metadata.ClaudeSessionID)
 	sourceMetadataPath := filepath.Join(sourceSessionDir, "metadata.json")
 

@@ -130,7 +130,8 @@ func createProviderSessionRegistrationScenario(p ProviderConfig) *harness.Scenar
 
 				// Verify the session directory was created synchronously
 				// This should exist immediately after the run command completes
-				sessionDir := filepath.Join(homeDir, ".grove", "hooks", "sessions", jobID)
+				// Uses XDG-compliant path: $HOME/.local/state/grove/hooks/sessions/
+				sessionDir := filepath.Join(homeDir, ".local", "state", "grove", "hooks", "sessions", jobID)
 
 				// First verify the files exist
 				if err := fs.AssertExists(sessionDir); err != nil {

@@ -226,7 +226,7 @@ func hideAndReshowLogs(ctx *harness.Context) error {
 // checkStateFileAfterVertical verifies the state file contains log_split_vertical: true.
 func checkStateFileAfterVertical(ctx *harness.Context) error {
 	homeDir := ctx.HomeDir()
-	stateFile := filepath.Join(homeDir, ".grove", "flow", "status-tui-state.json")
+	stateFile := filepath.Join(homeDir, ".local", "state", "grove", "flow", "status-tui-state.json")
 
 	time.Sleep(1000 * time.Millisecond)
 
@@ -250,7 +250,7 @@ func checkStateFileAfterVertical(ctx *harness.Context) error {
 // checkStateFileAfterHorizontal verifies the state file contains log_split_vertical: false.
 func checkStateFileAfterHorizontal(ctx *harness.Context) error {
 	homeDir := ctx.HomeDir()
-	stateFile := filepath.Join(homeDir, ".grove", "flow", "status-tui-state.json")
+	stateFile := filepath.Join(homeDir, ".local", "state", "grove", "flow", "status-tui-state.json")
 
 	time.Sleep(2000 * time.Millisecond)
 

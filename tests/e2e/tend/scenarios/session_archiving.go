@@ -128,8 +128,8 @@ var SessionArchivingScenario = harness.NewScenario(
 			ctx.Set("claude_session_id", mockClaudeSessionID)
 
 			// Create session registry directory structure
-			// The registry stores session metadata in ~/.grove/hooks/sessions/{claude-session-id}/
-			claudeSessionDir := filepath.Join(homeDir, ".grove", "hooks", "sessions", mockClaudeSessionID)
+			// The registry stores session metadata in $HOME/.local/state/grove/hooks/sessions/{claude-session-id}/
+			claudeSessionDir := filepath.Join(homeDir, ".local", "state", "grove", "hooks", "sessions", mockClaudeSessionID)
 			if err := fs.CreateDir(claudeSessionDir); err != nil {
 				return fmt.Errorf("creating Claude session directory: %w", err)
 			}
@@ -317,7 +317,7 @@ var SessionArchivingScenario = harness.NewScenario(
 			ctx.Set("headless_claude_session_id", mockClaudeSessionID)
 
 			// Create Claude session directory
-			claudeSessionDir := filepath.Join(homeDir, ".grove", "hooks", "sessions", mockClaudeSessionID)
+			claudeSessionDir := filepath.Join(homeDir, ".local", "state", "grove", "hooks", "sessions", mockClaudeSessionID)
 			if err := fs.CreateDir(claudeSessionDir); err != nil {
 				return err
 			}
