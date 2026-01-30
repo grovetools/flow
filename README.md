@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://grovetools.ai/docs/flow/images/flow-logo-dark.svg" alt="Grove Flow" width="400">
+  <img src="https://grovetools.ai/docs/flow/images/flow-logo-with-text-dark.svg" alt="Grove Flow">
 </p>
 
 <!-- DOCGEN:OVERVIEW:START -->
