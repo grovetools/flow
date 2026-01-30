@@ -1,4 +1,7 @@
-# Grove Flow
+<p align="center">
+  <img src="https://grovetools.ai/docs/flow/images/flow-logo-dark.svg" alt="Grove Flow" width="400">
+</p>
+
 <!-- DOCGEN:OVERVIEW:START -->
 
 Grove Flow is a command-line tool for managing local, Markdown-based development workflows. It is designed for developers who use terminal-native tools, combining `tmux` for process isolation, `git` for observing changes, a text editor for authoring plans, and `flow` for orchestration. This approach provides a structure for LLM-assisted development that moves beyond a single chat window, enabling deliberate planning and context management. The goal is to create a sustainable practice where specifications, context, and outcomes are captured in version-controlled files, forming a git-diffable audit trail that does not rely on a database or a cloud service.
