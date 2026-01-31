@@ -1,0 +1,12 @@
+*.go
+Makefile
+go.mod
+grove.yml
+
+# Exclude test files
+!tests
+!*_test.go
+
+@a:grovetools:hooks/README.md
+@a:grovetools:nav/README.md
+@a:grovetools:grove/README.md
