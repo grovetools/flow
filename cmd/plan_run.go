@@ -155,6 +155,25 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			job, found := plan.GetJobByFilename(jobFile)
 			if found {
 				jobsToRun = append(jobsToRun, job)
+			} else {
+				// Check if the file exists but wasn't loaded (e.g. missing frontmatter)
+				// If so, try to initialize it as a chat job automatically
+				fullPath := filepath.Join(planDir, jobFile)
+				if _, err := os.Stat(fullPath); err == nil {
+					// File exists, try to ensure it's a chat job
+					if initializedJob, err := ensureChatJob(fullPath); err == nil {
+						// Set derived fields that LoadJob doesn't set
+						initializedJob.Filename = jobFile
+						initializedJob.FilePath = fullPath
+
+						// Add to plan and runnable list
+						plan.Jobs = append(plan.Jobs, initializedJob)
+						if initializedJob.ID != "" {
+							plan.JobsByID[initializedJob.ID] = initializedJob
+						}
+						jobsToRun = append(jobsToRun, initializedJob)
+					}
+				}
 			}
 		}
 	} else if !planRunAll {
