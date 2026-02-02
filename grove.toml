@@ -6,18 +6,5 @@ managed = true
 name = "flow"
 path = "./bin/flow"
 
-[agent]
-enabled = true
-image = "grove-claude-agent:latest"
-logs_path = "/Users/solom4/.cache/grove/logs"
-extra_volumes = [
-    "/Users/solom4/Documents/nb:/Users/solom4/Documents/nb",
-    "/Users/solom4/.gitconfig:/home/claude/.gitconfig:ro"
-]
-args = ["--dangerously-skip-permissions"]
-output_format = "text"
-mount_workspace_at_host_path = true
-use_superproject_root = true
-
 [context]
 default_rules_path = ".cx/dev-no-tests.rules"
