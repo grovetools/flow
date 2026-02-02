@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
@@ -97,28 +98,18 @@ func GetProjectRootSafe(startPath string) string {
 	return startPath
 }
 
-// GetProjectRoot attempts to find the project root directory by searching upwards for a grove.yml file.
+// GetProjectRoot attempts to find the project root directory by searching upwards for a grove config file.
 func GetProjectRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("could not get current working directory: %w", err)
 	}
 
-	startDir := dir // For error message
-
-	for {
-		configPath := filepath.Join(dir, "grove.yml")
-		if _, err := os.Stat(configPath); err == nil {
-			return dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached root without finding grove.yml
-			return "", fmt.Errorf("could not find project root (grove.yml) searching up from %s", startDir)
-		}
-		dir = parent
+	configPath, err := config.FindConfigFile(dir)
+	if err != nil {
+		return "", fmt.Errorf("could not find project root (grove config) searching up from %s: %w", dir, err)
 	}
+	return filepath.Dir(configPath), nil
 }
 
 // GetGitRootSafe attempts to find git root with multiple fallback strategies
