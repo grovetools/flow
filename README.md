@@ -51,5 +51,6 @@ Jobs declare dependencies via the `depends_on` field. The orchestrator ensures j
 See the [documentation](docs/) for detailed usage instructions:
 - [Overview](docs/01-overview.md)
 - [Quick Start](docs/02-quick-start.md)
+- [Configuration](docs/14-configuration.md)
 
 <!-- DOCGEN:TOC:END -->
