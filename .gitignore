@@ -7,8 +7,8 @@ bin/
 # Go coverage
 *.out
 
-# Generated documentation
-pkg/docs/docs.json
+# Generated documentation is now committed to ensure builds work in CI
+# pkg/docs/docs.json
 
 .grove
 # Ignore worktrees created by flow.
