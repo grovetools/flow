@@ -8,12 +8,12 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/fatih/color v1.18.0
 	github.com/google/uuid v1.6.0
-	github.com/grovetools/core v0.0.1
-	github.com/grovetools/cx v0.0.1
-	github.com/grovetools/grove-anthropic v0.0.1
-	github.com/grovetools/grove-gemini v0.0.1
-	github.com/grovetools/skills v0.0.1
-	github.com/grovetools/tend v0.0.1
+	github.com/grovetools/core v0.6.1
+	github.com/grovetools/cx v0.6.0
+	github.com/grovetools/grove-anthropic v0.6.0
+	github.com/grovetools/grove-gemini v0.6.0
+	github.com/grovetools/skills v0.6.0
+	github.com/grovetools/tend v0.6.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/muesli/termenv v0.16.0
@@ -60,6 +60,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
+	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
