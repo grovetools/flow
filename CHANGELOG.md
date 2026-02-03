@@ -1,3 +1,89 @@
+## v0.6.0 (2026-02-02)
+
+This release brings structural improvements, including migration to the `grovetools` organization and adoption of XDG Base Directory standards for state and configuration storage (9a43f46, b0b5c50, c439d30). Configuration flexibility is enhanced with support for `grove.toml` alongside YAML (b6228ce, 51381db).
+
+User experience in the terminal interface is improved with a new fullscreen toggle for the log pane (1c1b262) and detailed descriptions for CLI flags (4af39eb). The `flow run` command now automatically initializes plain markdown files as chat jobs (0c507fb), streamlining ad-hoc usage.
+
+Reliability and correctness fixes include better session file discovery using content timestamps (55e4a1c), socket-aware tmux command execution (773a5e4), and support for the documented `workspace_init.yml` filename in recipes (258c580).
+
+### Features
+- Support `grove.toml` configuration (b6228ce)
+- Add fullscreen toggle for status TUI log pane (1c1b262)
+- Add detailed descriptions for --type and --inline flag options (4af39eb)
+- Update configuration documentation (140b155)
+
+### Bug Fixes
+- Auto-initialize plain markdown files as chat jobs in flow run (0c507fb)
+- Use content timestamps for session file discovery (55e4a1c)
+- Support workspace_init.yml filename and add TUI option (258c580)
+- Use tmux.Command() for socket-aware tmux calls (773a5e4)
+- Fix version injection during build (11f9199)
+- Use XDG paths for session directory lookup (b2a6974)
+- Correct streaming indicator checks in agent-log-viewer test (21a2cda)
+- Standardize flow logo SVG width (2635023)
+
+### Refactoring
+- Update go.mod for grovetools migration (c439d30)
+- Use XDG-compliant paths for TUI state storage (9a43f46)
+- Use XDG-compliant paths for session archiving (b0b5c50)
+- Use config.FindConfigFile for TOML support (51381db)
+
+### Documentation & Chores
+- Add MIT License (5671091)
+- Restore release workflow (b8379d6)
+- Add logo with absolute URL for GitHub rendering (7cc80c1)
+- Move README template to notebook (5a4cefe)
+- Remove docgen files from repo (4c4b143)
+
+### File Changes
+```
+ .cx/docs.rules                                     |   12 +
+ .github/workflows/release.yml                      |   64 +-
+ CLAUDE.md                                          |   15 +-
+ LICENSE                                            |   21 +
+ Makefile                                           |   10 +-
+ README.md                                          |   71 +-
+ cmd/config.go                                      |    1 +
+ cmd/plan.go                                        |   16 +-
+ cmd/plan_add_step.go                               |    8 +-
+ cmd/plan_complete.go                               |   17 +-
+ cmd/plan_init_tui.go                               |   55 +-
+ cmd/plan_run.go                                    |   22 +-
+ cmd/plan_session.go                                |    3 +-
+ cmd/root_commands.go                               |   16 +-
+ cmd/status_tui/keys.go                             |    6 +
+ cmd/status_tui/model.go                            |   22 +-
+ cmd/status_tui/state.go                            |    8 +-
+ cmd/status_tui/update.go                           |   48 +-
+ docs/01-overview.md                                |   93 +-
+ docs/02-quick-start.md                             |   12 +-
+ docs/14-configuration.md                           |   97 +
+ docs/README.md.tpl                                 |    6 -
+ docs/asciicasts/01-plan-init-status.cast           |  213 +++
+ docs/asciicasts/01-plan-init.cast                  | 1942 ++++++++++++++++++++
+ docs/docgen.config.yml                             |   78 -
+ docs/videos/01-plan-init-dark.mp4                  |  Bin 0 -> 908371 bytes
+ docs/videos/01-plan-init-light.mp4                 |  Bin 0 -> 942032 bytes
+ docs/videos/01-plan-init-snippet.html              |   11 +
+ flow-job.schema.json                               |    2 +-
+ flow.schema.json                                   |    5 +-
+ go.mod                                             |   36 +-
+ go.sum                                             |   78 +-
+ grove.toml                                         |   10 +
+ grove.yml                                          |   21 -
+ pkg/orchestration/archive.go                       |    9 +-
+ pkg/orchestration/codex_agent_provider.go          |    4 +-
+ pkg/orchestration/context_utils.go                 |   21 +-
+ pkg/orchestration/interactive_agent_executor.go    |   61 +-
+ pkg/orchestration/opencode_agent_provider.go       |    7 +-
+ pkg/orchestration/recipes.go                       |   32 +-
+ tests/e2e/tend/scenarios/agent_log_viewer.go       |   14 +-
+ tests/e2e/tend/scenarios/plan_status_tui_layout.go |    4 +-
+ .../scenarios/provider_session_registration.go     |    3 +-
+ tests/e2e/tend/scenarios/session_archiving.go      |    6 +-
+ 44 files changed, 2716 insertions(+), 464 deletions(-)
+```
+
 ## v0.3.1-nightly.7c6bbee (2025-10-03)
 
 ## v0.3.0 (2025-10-01)
