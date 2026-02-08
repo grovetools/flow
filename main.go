@@ -30,6 +30,9 @@ func main() {
 	// Add the plan command (with all subcommands for backward compatibility)
 	rootCmd.AddCommand(cmd.NewPlanCmd())
 
+	// Add the job command (top-level alias for job management)
+	rootCmd.AddCommand(cmd.NewJobCmd())
+
 	// Add plan configuration commands at the top level
 	rootCmd.AddCommand(cmd.NewSetCmd())
 	rootCmd.AddCommand(cmd.NewCurrentCmd())

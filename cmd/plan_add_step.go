@@ -32,6 +32,8 @@ type PlanAddStepCmd struct {
 	Recipe              string   `flag:"" help:"Name of a recipe to add to the plan"`
 	RecipeVars          []string `flag:"" help:"Variables for the recipe templates (e.g., key=value)"`
 	SourceFile          string   `flag:"" help:"Origin file path for tracking job provenance (e.g., Claude plan file)"`
+	RulesFile           string   `flag:"" help:"Path to a custom rules file for this job"`
+	GitChanges          bool     `flag:"" help:"Include git changes as context for this job"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -295,6 +297,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			Inline:              inlineConfig,
 			PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 			SourceFile:          cmd.SourceFile,
+			RulesFile:           cmd.RulesFile,
+			GitChanges:          cmd.GitChanges,
 		}
 
 		// Initialize empty prompt body - no comments needed since info is in frontmatter
@@ -416,6 +420,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		Inline:              inlineConfig,
 		PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 		SourceFile:          cmd.SourceFile,
+		RulesFile:           cmd.RulesFile,
+		GitChanges:          cmd.GitChanges,
 	}
 
 	// Set worktree only if explicitly provided
@@ -558,6 +564,8 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		Title:      cmd.Title,
 		Status:     orchestration.JobStatusPending,
 		SourceFile: cmd.SourceFile,
+		RulesFile:  cmd.RulesFile,
+		GitChanges: cmd.GitChanges,
 	}
 
 	// Use reflection or a helper to merge template.Frontmatter into the job struct
@@ -590,6 +598,12 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if prependDeps, ok := template.Frontmatter["prepend_dependencies"].(bool); ok {
 		job.PrependDependencies = prependDeps
+	}
+	if rulesFile, ok := template.Frontmatter["rules_file"].(string); ok && job.RulesFile == "" {
+		job.RulesFile = rulesFile
+	}
+	if gitChanges, ok := template.Frontmatter["git_changes"].(bool); ok && !job.GitChanges {
+		job.GitChanges = gitChanges
 	}
 	// Handle inline field from template (can be string or array)
 	if inlineVal, ok := template.Frontmatter["inline"]; ok {

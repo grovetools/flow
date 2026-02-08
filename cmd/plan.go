@@ -46,25 +46,9 @@ With multiple job file arguments, runs those jobs in parallel.`,
 var planAddCmd = &cobra.Command{
 	Use:   "add [directory]",
 	Short: "Add a new job to an existing plan (use: flow add)",
-	Long: `Add a new job to an existing orchestration plan.
-Can be used interactively or with command-line arguments.
-If no directory is specified, uses the active job if set.
-
-Examples:
-  # Add a job with inline prompt
-  flow plan add myplan -t agent --title "Implementation" -d 01-plan.md -p "Implement the user authentication feature"
-  
-  # Add a job with prompt from file
-  flow plan add myplan -t agent --title "Implementation" -d 01-plan.md -f prompt.md
-  
-  # Add a job with prompt from stdin
-  echo "Implement feature X" | flow plan add myplan -t agent --title "Implementation" -d 01-plan.md
-  
-  # Use active job
-  flow plan set myplan
-  flow plan add -t agent --title "Implementation" -d 01-plan.md -p "Implement feature"`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runPlanAdd,
+	Long:  addCmdLongDesc + addCmdExamples("flow plan add"),
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runPlanAdd,
 }
 
 var planGraphCmd = &cobra.Command{
@@ -134,6 +118,9 @@ var (
 	planAddRecipe              string
 	planAddRecipeVars          []string
 	planAddSourceFile          string
+	planAddModel               string
+	planAddRulesFile           string
+	planAddGitChanges          bool
 
 	// Graph flags
 	planGraphFormat string
@@ -199,6 +186,9 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
 	planAddCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
 	planAddCmd.Flags().StringVar(&planAddSourceFile, "source-file", "", "Origin file path for tracking job provenance (e.g., Claude plan file)")
+	planAddCmd.Flags().StringVarP(&planAddModel, "model", "m", "", "LLM model to use for this job (e.g., gemini-3-pro-preview, claude-sonnet-4-20250514)")
+	planAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
+	planAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
 
 	// Graph command flags
 	planGraphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
@@ -317,6 +307,9 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		Recipe:              planAddRecipe,
 		RecipeVars:          planAddRecipeVars,
 		SourceFile:          planAddSourceFile,
+		Model:               planAddModel,
+		RulesFile:           planAddRulesFile,
+		GitChanges:          planAddGitChanges,
 	}
 	return RunPlanAddStep(addStepCmd)
 }

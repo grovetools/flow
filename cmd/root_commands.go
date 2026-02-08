@@ -7,23 +7,56 @@ import (
 // This file contains the constructors for simple top-level commands
 // that are aliases for existing `plan` subcommands.
 
+// addCmdExamples returns examples for the add command, parameterized by command prefix
+func addCmdExamples(cmdPrefix string) string {
+	return `
+  # Add a job with inline prompt
+  ` + cmdPrefix + ` myplan -t agent --title "implement-feature" -d 01-plan.md -p "Implement the feature"
+
+  # Add a job with prompt from file
+  ` + cmdPrefix + ` myplan -t agent --title "implement-feature" -d 01-plan.md -f prompt.md
+
+  # Add a job with prompt from stdin
+  echo "Implement feature X" | ` + cmdPrefix + ` myplan -t agent --title "implement-feature" -d 01-plan.md
+
+  # Use active job (after: flow set myplan)
+  ` + cmdPrefix + ` -t agent --title "implement-feature" -d 01-plan.md -p "Implement feature"
+
+  # Specify a model for this job
+  ` + cmdPrefix + ` myplan --title "analyze-codebase" --model gemini-3-pro-preview -p "Analyze the codebase"
+
+  # Include git changes as context (useful for review/commit jobs)
+  ` + cmdPrefix + ` myplan --title "review-changes" --git-changes -p "Review uncommitted changes"
+
+  # Use a custom rules file
+  ` + cmdPrefix + ` myplan --title "update-docs" --rules-file docs/.rules -p "Update documentation"
+
+  # Use a job template
+  ` + cmdPrefix + ` myplan --template code-review --title "code-review" -d 01-implement.md
+
+  # Include specific files as context
+  ` + cmdPrefix + ` myplan --title "refactor-api" --include src/api.go,src/types.go -p "Refactor the API"
+
+  # Inline dependency output into the prompt
+  ` + cmdPrefix + ` myplan --title "fix-issues" -d 01-review.md --inline=dependencies -p "Fix the issues"
+
+  # Add jobs from a recipe
+  ` + cmdPrefix + ` myplan --recipe standard-feature --recipe-vars "feature=auth"`
+}
+
+const addCmdLongDesc = `Add a new job to an existing orchestration plan.
+Can be used interactively or with command-line arguments.
+If no directory is specified, uses the active job if set.
+
+Examples:`
+
 func NewAddCmd() *cobra.Command {
 	addCmd := &cobra.Command{
 		Use:   "add [directory]",
 		Short: "Add a new job to an existing plan",
-		Long: `Add a new job to an existing orchestration plan.
-Can be used interactively or with command-line arguments.
-If no directory is specified, uses the active job if set.
-
-Examples:
-  # Add a job with inline prompt
-  flow add myplan -t agent --title "Implementation" -d 01-plan.md -p "Implement the user authentication feature"
-
-  # Use active job
-  flow set myplan
-  flow add -t agent --title "Implementation" -d 01-plan.md -p "Implement feature"`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: runPlanAdd,
+		Long:  addCmdLongDesc + addCmdExamples("flow add"),
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runPlanAdd,
 	}
 	// Add flags from plan_add_step.go
 	addCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
@@ -52,6 +85,9 @@ Examples:
 	addCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
 	addCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
 	addCmd.Flags().StringVar(&planAddSourceFile, "source-file", "", "Origin file path for tracking job provenance (e.g., Claude plan file)")
+	addCmd.Flags().StringVarP(&planAddModel, "model", "m", "", "LLM model to use for this job (e.g., gemini-3-pro-preview, claude-sonnet-4-20250514)")
+	addCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
+	addCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
 	return addCmd
 }
 
@@ -88,6 +124,57 @@ If no active job is set, it will launch the plan browser.`,
 	}
 	statusCmd.Flags().BoolVarP(&statusTUI, "tui", "t", false, "Launch interactive TUI (default behavior, kept for backwards compatibility)")
 	return statusCmd
+}
+
+func NewJobCmd() *cobra.Command {
+	jobCmd := &cobra.Command{
+		Use:   "job",
+		Short: "Manage jobs in orchestration plans",
+		Long:  `Commands for managing jobs in orchestration plans.`,
+	}
+
+	// Create the add subcommand
+	jobAddCmd := &cobra.Command{
+		Use:   "add [directory]",
+		Short: "Add a new job to an existing plan",
+		Long:  addCmdLongDesc + addCmdExamples("flow job add"),
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runPlanAdd,
+	}
+
+	// Register all flags (same as plan add)
+	jobAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
+	jobAddCmd.Flags().StringVarP(&planAddType, "type", "t", "interactive_agent", `Job type:
+   • oneshot          - Single LLM call, no tools or iteration
+   • chat             - Interactive conversation requiring user input
+   • shell            - Execute shell commands directly
+   • headless_agent   - Autonomous agent without user interaction
+   • interactive_agent - Agent with user interaction (default)
+   • file             - Static file content, no execution`)
+	jobAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
+	jobAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
+	jobAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
+	jobAddCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
+	jobAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
+	jobAddCmd.Flags().StringSliceVar(&planAddIncludeFiles, "include", nil, "Comma-separated list of files to include as context")
+	jobAddCmd.Flags().StringVar(&planAddWorktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
+	jobAddCmd.Flags().StringSliceVar(&planAddInline, "inline", nil, `File types to inline in prompt:
+   • dependencies - Embed dependency output directly in prompt (vs separate files)
+   • include      - Embed --include file content directly in prompt
+   • context      - Embed project context (.grove/context) in prompt
+   • all          - Inline all of the above
+   • files        - Inline dependencies + include (not context)
+   • none         - No inlining; content provided as separate files (default)`)
+	jobAddCmd.Flags().BoolVar(&planAddPrependDependencies, "prepend-dependencies", false, "[DEPRECATED] Use --inline=dependencies. Inline dependency content into prompt body")
+	jobAddCmd.Flags().StringVar(&planAddRecipe, "recipe", "", "Name of a recipe to add to the plan")
+	jobAddCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
+	jobAddCmd.Flags().StringVar(&planAddSourceFile, "source-file", "", "Origin file path for tracking job provenance (e.g., Claude plan file)")
+	jobAddCmd.Flags().StringVarP(&planAddModel, "model", "m", "", "LLM model to use for this job (e.g., gemini-3-pro-preview, claude-sonnet-4-20250514)")
+	jobAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
+	jobAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
+
+	jobCmd.AddCommand(jobAddCmd)
+	return jobCmd
 }
 
 func NewActionCmd() *cobra.Command {
