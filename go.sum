@@ -79,8 +79,8 @@ github.com/googleapis/gax-go/v2 v2.14.1/go.mod h1:Hb/NubMaVM88SrNkvl8X/o8XWwDJEP
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
-github.com/grovetools/core v0.6.1 h1:UtvCCHweLlHae9n6YtvgQP9oziPO23pagEhGCGqtgmw=
-github.com/grovetools/core v0.6.1/go.mod h1:RDFAOmjoEbh9ygGpmZU1oAK9YeU1psek3GIFxIB30fA=
+github.com/grovetools/core v0.6.2 h1:0A9Yn3FA7sTEkXf3QigiIyfYB9dVcVe5B0AXyxDukFk=
+github.com/grovetools/core v0.6.2/go.mod h1:IFPIeN4IpCiTP2rj9OIzJARRC6oyagWu/GzfV+IUJU0=
 github.com/grovetools/cx v0.6.0 h1:q7WF21WMuBcSZsZtCbEn5R9SwAzScx6B9q7r2+Kr9dE=
 github.com/grovetools/cx v0.6.0/go.mod h1:3JFu0OcgMMSe+P4RmspvkEobgS5hOwblIQZi7HmE/8c=
 github.com/grovetools/grove-anthropic v0.6.0 h1:JWB/+ik3gMsIQlHFpkWPVyEGXmpcxWYusaSI764X0Fo=
