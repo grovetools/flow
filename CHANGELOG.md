@@ -1,3 +1,22 @@
+## v0.6.2 (2026-02-10)
+
+New configuration flags for model selection, rules files, and git context have been added to the job creation commands (730770a). The command structure has been unified with a new `flow job add` alias, ensuring consistent flag availability across all job addition entry points (730770a).
+
+### Features
+
+- Add model, rules file, and git changes flags to plan add command 730770a
+- Register `flow job add` alias and standardize flags across all add commands 730770a
+
+### File Changes
+
+```
+ cmd/plan.go          |  31 ++++++--------
+ cmd/plan_add_step.go |  14 +++++++
+ cmd/root_commands.go | 113 +++++++++++++++++++++++++++++++++++++++++++++------
+ main.go              |   3 ++
+ 4 files changed, 129 insertions(+), 32 deletions(-)
+```
+
 ## v0.6.0 (2026-02-02)
 
 This release brings structural improvements, including migration to the `grovetools` organization and adoption of XDG Base Directory standards for state and configuration storage (9a43f46, b0b5c50, c439d30). Configuration flexibility is enhanced with support for `grove.toml` alongside YAML (b6228ce, 51381db).
