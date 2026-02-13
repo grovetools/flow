@@ -1,6 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/grovetools/flow/cmd/flow-config",
   "$defs": {
     "RecipeConfig": {
       "properties": {
@@ -11,30 +9,54 @@
           "type": "object"
         }
       },
-      "type": "object",
       "required": [
         "vars"
-      ]
+      ],
+      "type": "object"
     }
   },
+  "$id": "https://github.com/grovetools/flow/cmd/flow-config",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Schema for the 'flow' extension in grove.yml.",
   "properties": {
     "chat_directory": {
-      "type": "string"
-    },
-    "oneshot_model": {
-      "type": "string"
-    },
-    "target_agent_container": {
-      "type": "string"
-    },
-    "plans_directory": {
-      "type": "string"
+      "description": "DEPRECATED: Configure notebook.root_dir instead",
+      "type": "string",
+      "x-status": "deprecated",
+      "x-status-message": "Chats are now stored in notebook workspaces",
+      "x-status-replaced-by": "notebook.root_dir",
+      "x-status-since": "v0.6.0",
+      "x-status-target": "v1.0"
     },
     "max_consecutive_steps": {
       "type": "integer"
     },
+    "oneshot_model": {
+      "type": "string"
+    },
+    "plans_directory": {
+      "description": "DEPRECATED: Configure notebook.root_dir instead",
+      "type": "string",
+      "x-status": "deprecated",
+      "x-status-message": "Plans are now stored in notebook workspaces",
+      "x-status-replaced-by": "notebook.root_dir",
+      "x-status-since": "v0.6.0",
+      "x-status-target": "v1.0"
+    },
+    "recipes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RecipeConfig"
+      },
+      "type": "object"
+    },
+    "run_init_by_default": {
+      "type": "boolean"
+    },
     "summarize_on_complete": {
       "type": "boolean"
+    },
+    "summary_max_chars": {
+      "type": "integer"
     },
     "summary_model": {
       "type": "string"
@@ -42,20 +64,10 @@
     "summary_prompt": {
       "type": "string"
     },
-    "summary_max_chars": {
-      "type": "integer"
-    },
-    "run_init_by_default": {
-      "type": "boolean"
-    },
-    "recipes": {
-      "additionalProperties": {
-        "$ref": "#/$defs/RecipeConfig"
-      },
-      "type": "object"
+    "target_agent_container": {
+      "type": "string"
     }
   },
-  "type": "object",
   "title": "Grove Flow Configuration",
-  "description": "Schema for the 'flow' extension in grove.yml."
+  "type": "object"
 }

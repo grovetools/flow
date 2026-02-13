@@ -9,10 +9,10 @@ import (
 
 // FlowConfig defines the structure for the 'flow' section in grove.yml.
 type FlowConfig struct {
-	ChatDirectory        string                  `yaml:"chat_directory"`
+	ChatDirectory        string                  `yaml:"chat_directory" jsonschema:"description=DEPRECATED: Configure notebook.root_dir instead" jsonschema_extras:"x-status=deprecated,x-status-message=Chats are now stored in notebook workspaces,x-status-since=v0.6.0,x-status-target=v1.0,x-status-replaced-by=notebook.root_dir"`
 	OneshotModel         string                  `yaml:"oneshot_model"`
 	TargetAgentContainer string                  `yaml:"target_agent_container"`
-	PlansDirectory       string                  `yaml:"plans_directory"`
+	PlansDirectory       string                  `yaml:"plans_directory" jsonschema:"description=DEPRECATED: Configure notebook.root_dir instead" jsonschema_extras:"x-status=deprecated,x-status-message=Plans are now stored in notebook workspaces,x-status-since=v0.6.0,x-status-target=v1.0,x-status-replaced-by=notebook.root_dir"`
 	MaxConsecutiveSteps  int                     `yaml:"max_consecutive_steps"`
 	SummarizeOnComplete  bool                    `yaml:"summarize_on_complete"`
 	SummaryModel         string                  `yaml:"summary_model"`
