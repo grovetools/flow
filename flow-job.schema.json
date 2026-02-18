@@ -19,97 +19,125 @@
   },
   "properties": {
     "id": {
-      "type": "string"
+      "type": "string",
+      "description": "Unique identifier for the job"
     },
     "title": {
-      "type": "string"
+      "type": "string",
+      "description": "Human-readable title for the job"
     },
     "status": {
-      "type": "string"
+      "type": "string",
+      "description": "Current execution status (pending/running/completed/failed)"
     },
     "type": {
-      "type": "string"
+      "type": "string",
+      "description": "Job type determining execution behavior (oneshot/chat/interactive_agent/headless_agent/shell/file)"
     },
     "model": {
-      "type": "string"
+      "type": "string",
+      "description": "LLM model to use for this job"
+    },
+    "template": {
+      "type": "string",
+      "description": "Template name for generating the job prompt"
     },
     "depends_on": {
       "items": {
         "type": "string"
       },
-      "type": "array"
+      "type": "array",
+      "description": "List of job IDs that must complete before this job runs"
     },
     "include": {
       "items": {
         "type": "string"
       },
-      "type": "array"
+      "type": "array",
+      "description": "Files or globs to include as context in the job prompt"
     },
     "source_block": {
-      "type": "string"
+      "type": "string",
+      "description": "Reference to a named block in another job to use as input"
     },
-    "template": {
-      "type": "string"
+    "source_file": {
+      "type": "string",
+      "description": "Path to source file for context"
     },
     "repository": {
-      "type": "string"
+      "type": "string",
+      "description": "Git repository URL for worktree creation"
     },
     "branch": {
-      "type": "string"
+      "type": "string",
+      "description": "Git branch name for worktree"
     },
     "worktree": {
-      "type": "string"
+      "type": "string",
+      "description": "Worktree name for isolated execution"
     },
     "inline": {
-      "$ref": "#/$defs/InlineConfig"
+      "$ref": "#/$defs/InlineConfig",
+      "description": "Controls which content types are inlined vs uploaded"
     },
     "prepend_dependencies": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "DEPRECATED: Use inline: [dependencies] instead"
     },
     "on_complete_status": {
-      "type": "string"
+      "type": "string",
+      "description": "Status to set on dependent jobs when this job completes"
     },
     "created_at": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "When the job was created"
     },
     "updated_at": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "When the job was last modified"
     },
     "completed_at": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "When the job completed execution"
     },
     "duration": {
-      "type": "integer"
+      "type": "integer",
+      "description": "Total execution time"
     },
     "source_plan": {
-      "type": "string"
+      "type": "string",
+      "description": "Reference to the plan this job was generated from"
     },
     "recipe_name": {
-      "type": "string"
+      "type": "string",
+      "description": "Name of the recipe used to create this job"
     },
     "generate_plan_from": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Generate a new plan from this job's output"
     },
     "git_changes": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Include git diff/status in job context"
     },
     "gather_concept_notes": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Include related concept notes in context"
     },
     "gather_concept_plans": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Include related concept plans in context"
     },
     "rules_file": {
-      "type": "string"
+      "type": "string",
+      "description": "Path to rules file for agent behavior"
     },
     "note_ref": {
-      "type": "string"
-    },
-    "source_file": {
-      "type": "string"
+      "type": "string",
+      "description": "Reference to a notebook entry for context"
     }
   },
   "type": "object",
