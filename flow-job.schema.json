@@ -103,9 +103,6 @@
     "duration": {
       "type": "integer"
     },
-    "summary": {
-      "type": "string"
-    },
     "source_plan": {
       "type": "string"
     },

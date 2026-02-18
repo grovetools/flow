@@ -228,13 +228,25 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		coreCfg = &config.Config{}
 	}
 
+	// Unmarshal flow configuration to get provider args
+	type flowProviderConfig struct {
+		Args []string `yaml:"args"`
+	}
 	type flowConfig struct {
-		AgentArgs []string `yaml:"agent_args"`
+		Providers map[string]flowProviderConfig `yaml:"providers"`
 	}
 	var flowCfg flowConfig
 	coreCfg.UnmarshalExtension("flow", &flowCfg)
 
-	return e.runOnHost(ctx, worktreePath, prompt, job, plan, flowCfg.AgentArgs)
+	// Get agent args for claude provider (headless always uses claude)
+	var agentArgs []string
+	if flowCfg.Providers != nil {
+		if providerCfg, ok := flowCfg.Providers["claude"]; ok {
+			agentArgs = providerCfg.Args
+		}
+	}
+
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, agentArgs)
 }
 
 

@@ -1630,9 +1630,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case key.Matches(msg, m.KeyMap.ToggleSummaries):
-			m.ShowSummaries = !m.ShowSummaries
-
 		case key.Matches(msg, m.KeyMap.ToggleColumns):
 			m.columnSelectMode = true
 

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -112,41 +111,6 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 				}
 			} else if !silent {
 				fmt.Println(color.GreenString("*") + " Appended session transcript.")
-			}
-		}
-
-		// Summarize the job content if enabled
-		flowCfg, err := loadFlowConfig()
-		if err != nil {
-			// Don't fail the command, just log a warning
-			if !silent {
-				fmt.Printf("Warning: could not load flow config for summarization: %v\n", err)
-			}
-		} else if flowCfg.SummarizeOnComplete {
-			summaryCfg := orchestration.SummaryConfig{
-				Enabled:  flowCfg.SummarizeOnComplete,
-				Model:    flowCfg.SummaryModel,
-				Prompt:   flowCfg.SummaryPrompt,
-				MaxChars: flowCfg.SummaryMaxChars,
-			}
-
-			if !silent {
-				fmt.Println("Generating job summary...")
-			}
-			summary, err := orchestration.SummarizeJobContent(context.Background(), job, plan, summaryCfg)
-			if err != nil {
-				if !silent {
-					fmt.Printf("Warning: failed to generate job summary: %v\n", err)
-				}
-			} else if summary != "" {
-				// Add summary to frontmatter
-				if err := orchestration.AddSummaryToJobFile(job, summary); err != nil {
-					if !silent {
-						fmt.Printf("Warning: failed to add summary to job file: %v\n", err)
-					}
-				} else if !silent {
-					fmt.Println(color.GreenString("*") + " Added summary to job frontmatter.")
-				}
 			}
 		}
 	}

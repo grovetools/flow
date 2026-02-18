@@ -25,7 +25,6 @@ type KeyMap struct {
 	Rename          key.Binding
 	Resume          key.Binding
 	EditDeps        key.Binding
-	ToggleSummaries key.Binding
 	ToggleView      key.Binding
 	ToggleColumns   key.Binding
 	GoToTop         key.Binding
@@ -118,10 +117,6 @@ func NewKeyMap() KeyMap {
 			key.WithKeys("D"),
 			key.WithHelp("D", "edit dependencies"),
 		),
-		ToggleSummaries: key.NewBinding(
-			key.WithKeys("s"),
-			key.WithHelp("s", "toggle summaries"),
-		),
 		ToggleView: key.NewBinding(
 			key.WithKeys("t"),
 			key.WithHelp("t", "toggle view"),
@@ -211,7 +206,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Views")),
 			k.ToggleView,
 			k.ToggleColumns,
-			k.ToggleSummaries,
 			k.ViewLogs,
 			k.ViewFrontmatter,
 			k.ViewBriefing,

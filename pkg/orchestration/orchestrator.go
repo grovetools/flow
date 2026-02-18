@@ -30,7 +30,6 @@ type OrchestratorConfig struct {
 	ModelOverride       string           // Override model for all jobs
 	MaxConsecutiveSteps int              // Maximum consecutive steps before halting
 	SkipInteractive     bool             // Skip interactive agent jobs
-	SummaryConfig       *SummaryConfig   // Configuration for job summarization
 	CommandExecutor     command.Executor // For dependency injection
 }
 
@@ -530,32 +529,11 @@ func (o *Orchestrator) UpdateJobStatus(job *Job, status JobStatus) error {
 	}
 	
 	// Log state transition
-	o.logger.Info("Job status updated", 
+	o.logger.Info("Job status updated",
 		"job", job.ID,
 		"from", oldStatus,
 		"to", status)
-	
-	// If job is being marked as completed and summarization is enabled, generate summary
-	if status == JobStatusCompleted && oldStatus != JobStatusCompleted && o.config.SummaryConfig != nil && o.config.SummaryConfig.Enabled {
-		// Note: Running summarization in a goroutine to avoid blocking the orchestrator
-		go func() {
-			o.logger.Info("Generating job summary", "job", job.ID)
-			ctx := context.Background()
-			summary, err := SummarizeJobContent(ctx, job, o.Plan, *o.config.SummaryConfig)
-			if err != nil {
-				o.logger.Error("Failed to generate job summary", "job", job.ID, "error", err)
-				return
-			}
-			if summary != "" {
-				if err := AddSummaryToJobFile(job, summary); err != nil {
-					o.logger.Error("Failed to add summary to job file", "job", job.ID, "error", err)
-				} else {
-					o.logger.Info("Added summary to job", "job", job.ID)
-				}
-			}
-		}()
-	}
-	
+
 	return nil
 }
 

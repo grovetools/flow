@@ -81,12 +81,19 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	fmt.Printf("* Job status updated to 'running'.\n")
 
 	// 4. Re-launch the Agent in Tmux
-	// Load agent config to get default arguments
+	// Load agent config to get provider-specific arguments
 	appCfg, err := loadFullConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load flow configuration: %w", err)
 	}
-	agentArgs := appCfg.Flow.AgentArgs
+
+	// Get agent args for the specific provider
+	var agentArgs []string
+	if appCfg.Flow.Providers != nil {
+		if providerCfg, ok := appCfg.Flow.Providers[sessionInfo.Provider]; ok {
+			agentArgs = providerCfg.Args
+		}
+	}
 
 	var resumeCmdParts []string
 	if sessionInfo.Provider == "codex" {

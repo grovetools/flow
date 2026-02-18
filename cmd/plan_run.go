@@ -307,7 +307,6 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// Inject the loaded configuration into the plan object
 	plan.Orchestration = &orchestration.Config{
 		OneshotModel:        flowCfg.OneshotModel,
-		PlansDirectory:      flowCfg.PlansDirectory,
 		MaxConsecutiveSteps: flowCfg.MaxConsecutiveSteps,
 	}
 
@@ -341,16 +340,6 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		ModelOverride:       modelOverride,
 		MaxConsecutiveSteps: maxSteps,
 		SkipInteractive:     planRunSkipInteractive || planRunYes, // --yes implies skip interactive
-	}
-	
-	// Add summary configuration if enabled
-	if flowCfg.SummarizeOnComplete {
-		orchConfig.SummaryConfig = &orchestration.SummaryConfig{
-			Enabled:  true,
-			Model:    flowCfg.SummaryModel,
-			Prompt:   flowCfg.SummaryPrompt,
-			MaxChars: flowCfg.SummaryMaxChars,
-		}
 	}
 
 	// Create orchestrator

@@ -37,24 +37,6 @@ func main() {
 		log.Fatalf("Error unmarshaling schema: %v", err)
 	}
 
-	// Inject deprecation status for chat_directory and plans_directory
-	if props, ok := rawSchema["properties"].(map[string]interface{}); ok {
-		if chatDir, ok := props["chat_directory"].(map[string]interface{}); ok {
-			chatDir["x-status"] = "deprecated"
-			chatDir["x-status-message"] = "Chats are now stored in notebook workspaces"
-			chatDir["x-status-since"] = "v0.6.0"
-			chatDir["x-status-target"] = "v1.0"
-			chatDir["x-status-replaced-by"] = "notebook.root_dir"
-		}
-		if plansDir, ok := props["plans_directory"].(map[string]interface{}); ok {
-			plansDir["x-status"] = "deprecated"
-			plansDir["x-status-message"] = "Plans are now stored in notebook workspaces"
-			plansDir["x-status-since"] = "v0.6.0"
-			plansDir["x-status-target"] = "v1.0"
-			plansDir["x-status-replaced-by"] = "notebook.root_dir"
-		}
-	}
-
 	data, err := json.MarshalIndent(rawSchema, "", "  ")
 	if err != nil {
 		log.Fatalf("Error marshaling schema: %v", err)

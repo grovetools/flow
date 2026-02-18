@@ -111,29 +111,7 @@ func resolvePlanPath(planName string) (string, error) {
 	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 
-	// 3. Check if notebooks configuration exists
-	// If it does, use it; otherwise fall back to deprecated flow.plans_directory
-	// A more robust check to see if any actual notebook configuration is defined.
-	hasNotebooksConfig := coreCfg != nil && coreCfg.Notebooks != nil &&
-		((coreCfg.Notebooks.Rules != nil && (coreCfg.Notebooks.Rules.Default != "" || (coreCfg.Notebooks.Rules.Global != nil && coreCfg.Notebooks.Rules.Global.RootDir != ""))) ||
-			(coreCfg.Notebooks.Definitions != nil && len(coreCfg.Notebooks.Definitions) > 0))
-
-	if !hasNotebooksConfig {
-		// No notebooks config, check for deprecated flow.plans_directory configuration
-		flowCfg, err := loadFlowConfig()
-		if err == nil && flowCfg.PlansDirectory != "" {
-			// Legacy configuration detected - use it for backward compatibility
-			fmt.Fprintln(os.Stderr, "WARNING:  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
-			expandedBasePath, err := expandFlowPath(flowCfg.PlansDirectory)
-			if err != nil {
-				return "", fmt.Errorf("could not expand plans_directory path: %w", err)
-			}
-			fullPath := filepath.Join(expandedBasePath, planName)
-			return filepath.Abs(fullPath)
-		}
-	}
-
-	// 4. Get the base plans directory for the current workspace using NotebookLocator.
+	// 3. Get the base plans directory for the current workspace using NotebookLocator.
 	plansDir, err := locator.GetPlansDir(node)
 	if err != nil {
 		return "", fmt.Errorf("could not resolve plans directory: %w", err)
@@ -162,24 +140,7 @@ func resolveChatsDir() (string, error) {
 	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 
-	// 3. Check if notebooks configuration exists
-	// If it does, use it; otherwise fall back to deprecated flow.chat_directory
-	// A more robust check to see if any actual notebook configuration is defined.
-	hasNotebooksConfig := coreCfg != nil && coreCfg.Notebooks != nil &&
-		((coreCfg.Notebooks.Rules != nil && (coreCfg.Notebooks.Rules.Default != "" || (coreCfg.Notebooks.Rules.Global != nil && coreCfg.Notebooks.Rules.Global.RootDir != ""))) ||
-			(coreCfg.Notebooks.Definitions != nil && len(coreCfg.Notebooks.Definitions) > 0))
-
-	if !hasNotebooksConfig {
-		// No notebooks config, check for deprecated flow.chat_directory configuration
-		flowCfg, err := loadFlowConfig()
-		if err == nil && flowCfg.ChatDirectory != "" {
-			// Legacy configuration detected - use it for backward compatibility
-			fmt.Fprintln(os.Stderr, "WARNING:  Warning: The 'flow.chat_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
-			return expandFlowPath(flowCfg.ChatDirectory)
-		}
-	}
-
-	// 4. Get the chats directory for the current workspace using NotebookLocator.
+	// 3. Get the chats directory for the current workspace using NotebookLocator.
 	chatsDir, err := locator.GetChatsDir(node)
 	if err != nil {
 		return "", fmt.Errorf("could not resolve chats directory: %w", err)

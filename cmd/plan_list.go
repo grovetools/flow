@@ -139,18 +139,6 @@ func listCurrentWorkspacePlans() ([]PlanSummary, error) {
 	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 
-	// Check for deprecated config and use it as fallback
-	flowCfg, _ := loadFlowConfig()
-	if flowCfg != nil && flowCfg.PlansDirectory != "" {
-		fmt.Fprintln(os.Stderr, "WARNING:  Warning: The 'flow.plans_directory' config is deprecated. Please configure 'notebook.root_dir' in your global grove.yml instead.")
-		// Use deprecated config as fallback
-		plansDir, err := expandFlowPath(flowCfg.PlansDirectory)
-		if err != nil {
-			return nil, fmt.Errorf("could not expand plans_directory path: %w", err)
-		}
-		return findPlansInDir(plansDir, node.Name, node.Path)
-	}
-
 	// Get plans directory for current workspace using NotebookLocator
 	plansDir, err := locator.GetPlansDir(node)
 	if err != nil {

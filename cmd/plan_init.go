@@ -23,21 +23,8 @@ import (
 
 // RunPlanInitTUI launches the interactive TUI for creating a new plan.
 func RunPlanInitTUI(dir string, cliCmd *PlanInitCmd) error {
-	flowCfg, err := loadFlowConfig()
-	if err != nil {
-		// Don't fail if config doesn't exist.
-		flowCfg = &FlowConfig{}
-	}
-	var plansDir string
-	if flowCfg.PlansDirectory != "" {
-		plansDir, err = expandPath(flowCfg.PlansDirectory)
-		if err != nil {
-			return err
-		}
-	} else {
-		// If not configured, plans are relative to CWD.
-		plansDir, _ = os.Getwd()
-	}
+	// Plans are relative to CWD (notebook locator handles workspace resolution)
+	plansDir, _ := os.Getwd()
 
 	finalCmd, err := runPlanInitTUI(plansDir, cliCmd)
 	if err != nil {

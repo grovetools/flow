@@ -485,7 +485,6 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			plan = fullPlan
 			plan.Orchestration = &orchestration.Config{
 				OneshotModel:        flowCfg.OneshotModel,
-				PlansDirectory:      flowCfg.PlansDirectory,
 				MaxConsecutiveSteps: flowCfg.MaxConsecutiveSteps,
 			}
 		} else {
@@ -496,7 +495,6 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 				Jobs:      []*orchestration.Job{job},
 				Orchestration: &orchestration.Config{
 					OneshotModel:        flowCfg.OneshotModel,
-					PlansDirectory:      flowCfg.PlansDirectory,
 					MaxConsecutiveSteps: flowCfg.MaxConsecutiveSteps,
 				},
 			}

@@ -68,7 +68,6 @@ type Model struct {
 	Cursor             int
 	ScrollOffset       int             // Track scroll position for viewport
 	Selected           map[string]bool // For multi-select
-	ShowSummaries      bool            // Toggle for showing job summaries
 	StatusSummary      string
 	Err                error
 	Width              int
@@ -573,11 +572,7 @@ func (m *Model) calculateOptimalLogHeight() int {
 	if len(m.Jobs) < minVisibleJobs {
 		minVisibleJobs = len(m.Jobs) // Don't exceed actual job count
 	}
-	if m.ShowSummaries {
-		minJobsHeight += minVisibleJobs * 2 // Each job takes 2 lines with summaries
-	} else {
-		minJobsHeight += minVisibleJobs
-	}
+	minJobsHeight += minVisibleJobs
 
 	// Add scroll indicator if needed
 	if len(m.Jobs) > minVisibleJobs {
@@ -757,14 +752,6 @@ func (m *Model) getVisibleJobCount() int {
 
 	if availableHeight < 1 {
 		availableHeight = 1
-	}
-
-	// If summaries are shown, each job might take 2 lines
-	if m.ShowSummaries {
-		availableHeight = availableHeight / 2
-		if availableHeight < 1 {
-			availableHeight = 1
-		}
 	}
 
 	return availableHeight
