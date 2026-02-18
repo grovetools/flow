@@ -2,10 +2,9 @@ package orchestration
 
 // PlanConfig holds plan-specific default settings from .grove-plan.yml.
 type PlanConfig struct {
-	Model                string            `yaml:"model,omitempty"`
-	Worktree             string            `yaml:"worktree,omitempty"`
-	TargetAgentContainer string            `yaml:"target_agent_container,omitempty"`
-	Status               string            `yaml:"status,omitempty"`
+	Model    string `yaml:"model,omitempty"`
+	Worktree string `yaml:"worktree,omitempty"`
+	Status   string `yaml:"status,omitempty"`
 	Repos                []string          `yaml:"repos,omitempty"`                // List of repos to include in ecosystem worktree
 	Notes                string            `yaml:"notes,omitempty"`                // User notes/description for the plan
 	Inline               InlineConfig      `yaml:"inline,omitempty"`               // New field: controls which file types are inlined by default

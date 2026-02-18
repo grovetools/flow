@@ -215,7 +215,7 @@ func setConfigValues(configPath string, pairs []string) error {
 
 		// Validate key and handle type conversion
 		switch key {
-		case "model", "worktree", "target_agent_container", "notes", "status":
+		case "model", "worktree", "notes", "status":
 			config[key] = value
 		case "prepend_dependencies":
 			// Handle boolean conversion
@@ -289,10 +289,6 @@ func setConfigValues(configPath string, pairs []string) error {
 					jobType, _ := frontmatter["type"].(string)
 					if key == "worktree" && jobType == "shell" {
 						// Shell jobs don't use worktrees
-						continue
-					}
-					if key == "target_agent_container" && jobType != "agent" && jobType != "interactive_agent" {
-						// Only agent jobs use containers
 						continue
 					}
 					jobUpdates[key] = value

@@ -118,9 +118,8 @@ type Job struct {
 	Template             string       `yaml:"template,omitempty" json:"template,omitempty"`
 	Repository           string       `yaml:"repository,omitempty" json:"repository,omitempty"`
 	Branch               string       `yaml:"branch,omitempty" json:"branch,omitempty"`
-	Worktree             string       `yaml:"worktree" json:"worktree,omitempty"`
-	TargetAgentContainer string       `yaml:"target_agent_container,omitempty" json:"target_agent_container,omitempty"`
-	Inline               InlineConfig `yaml:"inline,omitempty" json:"inline,omitempty"`               // New field: controls which file types are inlined vs uploaded
+	Worktree string       `yaml:"worktree" json:"worktree,omitempty"`
+	Inline   InlineConfig `yaml:"inline,omitempty" json:"inline,omitempty"` // New field: controls which file types are inlined vs uploaded
 	PrependDependencies  bool         `yaml:"prepend_dependencies,omitempty" json:"prepend_dependencies,omitempty"` // Deprecated: use inline: [dependencies] instead
 	OnCompleteStatus     string       `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty"`
 	CreatedAt            time.Time     `yaml:"created_at,omitempty" json:"created_at,omitempty"`

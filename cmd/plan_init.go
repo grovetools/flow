@@ -182,14 +182,6 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Only use the model if explicitly provided via --model flag
 	effectiveModel := cmd.Model
-	effectiveContainer := cmd.Container
-
-	// Load flow config to get default container if not specified by flag
-	if effectiveContainer == "" {
-		if flowCfg, err := loadFlowConfig(); err == nil && flowCfg.TargetAgentContainer != "" {
-			effectiveContainer = flowCfg.TargetAgentContainer
-		}
-	}
 
 	// Create directory using the resolved path
 	if err := createPlanDirectory(planPath, cmd.Force); err != nil {
@@ -197,7 +189,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.Container, cmd.NoteRef, "", cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.NoteRef, "", cmd.Repos); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -733,16 +725,8 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	// The final worktree to use in .grove-plan.yml is simply the one from the CLI flag
 	finalWorktree := worktreeOverride
 
-	// Load flow config to get default container if not specified by flag
-	effectiveContainer := cmd.Container
-	if effectiveContainer == "" {
-		if flowCfg, err := loadFlowConfig(); err == nil && flowCfg.TargetAgentContainer != "" {
-			effectiveContainer = flowCfg.TargetAgentContainer
-		}
-	}
-
 	// Create a default .grove-plan.yml, using the determined worktree and recipe name
-	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.Container, cmd.NoteRef, cmd.Recipe, cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("* Created .grove-plan.yml")
@@ -953,7 +937,7 @@ func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
 }
 
 // createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
-func createDefaultPlanConfig(planPath, model, worktree, container, noteRef, recipe string, repos []string) error {
+func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe string, repos []string) error {
 	var configContent strings.Builder
 
 	// Recipe field (if applicable)
@@ -976,14 +960,6 @@ func createDefaultPlanConfig(planPath, model, worktree, container, noteRef, reci
 		configContent.WriteString(fmt.Sprintf("worktree: %s\n", worktree))
 	} else {
 		configContent.WriteString("# worktree: feature-branch\n")
-	}
-	configContent.WriteString("\n")
-
-	configContent.WriteString("# Default container for agent jobs\n")
-	if container != "" {
-		configContent.WriteString(fmt.Sprintf("target_agent_container: %s\n", container))
-	} else {
-		configContent.WriteString("# target_agent_container: grove-agent-ide\n")
 	}
 	configContent.WriteString("\n")
 

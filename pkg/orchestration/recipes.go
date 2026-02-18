@@ -679,9 +679,6 @@ func AddJobsFromRecipe(plan *Plan, recipe *Recipe, externalDeps []string, templa
 			if job.Worktree == "" && plan.Config.Worktree != "" {
 				job.Worktree = plan.Config.Worktree
 			}
-			if job.TargetAgentContainer == "" && plan.Config.TargetAgentContainer != "" {
-				job.TargetAgentContainer = plan.Config.TargetAgentContainer
-			}
 			if !job.PrependDependencies && plan.Config.PrependDependencies {
 				job.PrependDependencies = plan.Config.PrependDependencies
 			}

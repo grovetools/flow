@@ -144,12 +144,6 @@
       "type": "string",
       "x-layer": "global",
       "x-priority": "72"
-    },
-    "target_agent_container": {
-      "description": "Docker container name for agent execution",
-      "type": "string",
-      "x-layer": "project",
-      "x-priority": "80"
     }
   },
   "title": "Grove Flow Configuration",

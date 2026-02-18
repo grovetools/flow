@@ -209,9 +209,6 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		if job.Worktree == "" && currentPlan.Config.Worktree != "" {
 			job.Worktree = currentPlan.Config.Worktree
 		}
-		if currentPlan.Config.TargetAgentContainer != "" {
-			job.TargetAgentContainer = currentPlan.Config.TargetAgentContainer
-		}
 	}
 
 	// Add the job to the current plan

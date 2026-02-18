@@ -10,10 +10,9 @@ import (
 // FlowConfig defines the structure for the 'flow' section in grove.yml.
 type FlowConfig struct {
 	// Job execution settings
-	OneshotModel         string                  `yaml:"oneshot_model" jsonschema:"description=Default model for oneshot jobs" jsonschema_extras:"x-layer=global,x-priority=60,x-important=true"`
-	MaxConsecutiveSteps  int                     `yaml:"max_consecutive_steps" jsonschema:"description=Maximum consecutive steps before requiring user input" jsonschema_extras:"x-layer=global,x-priority=85"`
-	TargetAgentContainer string                  `yaml:"target_agent_container" jsonschema:"description=Docker container name for agent execution" jsonschema_extras:"x-layer=project,x-priority=80"`
-	RunInitByDefault     *bool                   `yaml:"run_init_by_default" jsonschema:"description=Run init actions by default (nil = true)" jsonschema_extras:"x-layer=project,x-priority=81"`
+	OneshotModel        string `yaml:"oneshot_model" jsonschema:"description=Default model for oneshot jobs" jsonschema_extras:"x-layer=global,x-priority=60,x-important=true"`
+	MaxConsecutiveSteps int    `yaml:"max_consecutive_steps" jsonschema:"description=Maximum consecutive steps before requiring user input" jsonschema_extras:"x-layer=global,x-priority=85"`
+	RunInitByDefault    *bool  `yaml:"run_init_by_default" jsonschema:"description=Run init actions by default (nil = true)" jsonschema_extras:"x-layer=project,x-priority=81"`
 
 	// Summary settings
 	SummarizeOnComplete bool   `yaml:"summarize_on_complete" jsonschema:"description=Generate summary when job completes" jsonschema_extras:"x-layer=global,x-priority=70"`

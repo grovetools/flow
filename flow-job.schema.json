@@ -79,9 +79,6 @@
     "worktree": {
       "type": "string"
     },
-    "target_agent_container": {
-      "type": "string"
-    },
     "inline": {
       "$ref": "#/$defs/InlineConfig"
     },

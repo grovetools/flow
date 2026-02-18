@@ -14,7 +14,6 @@ This section details the configuration properties available under the `flow` ext
 | `summary_max_chars` | (integer, optional) <br> The maximum character length for the automatically generated summary. Useful for keeping summaries concise for display in lists. |
 | `summary_model` | (string, optional) <br> The specific LLM model to use when generating summaries. This allows you to use a cheaper or faster model for summarization than the one used for the main task. |
 | `summary_prompt` | (string, optional) <br> A custom prompt template used to instruct the LLM on how to summarize the job output. |
-| `target_agent_container` | (string, optional) <br> Specifies the default Docker container or environment where agent jobs should be executed. Useful for isolating agent execution environments. |
 
 ```toml
 [flow]
@@ -22,7 +21,6 @@ plans_directory = "./plans"
 oneshot_model = "claude-3-5-sonnet-20240620"
 summarize_on_complete = true
 max_consecutive_steps = 25
-target_agent_container = "grove-agent-v1"
 ```
 
 ## Job Schema
@@ -60,7 +58,6 @@ This section describes the schema for Grove Flow jobs. These properties are typi
 | `source_plan` | (string, optional) <br> The name of the plan this job belongs to or originated from. |
 | `status` | (string, optional) <br> The current state of the job. Common values include `pending`, `running`, `completed`, `failed`. |
 | `summary` | (string, optional) <br> **System Managed.** An automatically generated summary of the job's execution results. |
-| `target_agent_container` | (string, optional) <br> Overrides the global agent container setting for this specific job. |
 | `template` | (string, optional) <br> The name of a template to use for rendering the job's prompt structure. |
 | `title` | (string, optional) <br> A human-readable title for the job. |
 | `type` | (string, optional) <br> The type of job (e.g., `oneshot`, `agent`, `chat`, `interactive_agent`). |

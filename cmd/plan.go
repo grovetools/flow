@@ -86,8 +86,7 @@ var (
 	planInitForce          bool
 	planInitModel          string
 	planInitWorktree       string
-	planInitContainer       string
-	planInitExtractAllFrom  string
+	planInitExtractAllFrom string
 	planInitOpenSession     bool
 	planInitRecipe          string
 	planInitTUI             bool
@@ -136,7 +135,6 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitModel, "model", "", "Default model for jobs (e.g., claude-3-5-sonnet-20241022, gpt-4)")
 	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Set default worktree (uses plan name if no value provided)")
 	planInitCmd.Flags().Lookup("worktree").NoOptDefVal = "__AUTO__" // Special marker for auto-naming
-	planInitCmd.Flags().StringVar(&planInitContainer, "target-agent-container", "", "Default container for agent jobs in the plan")
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
 	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature). When using --recipe-cmd, this can be omitted if the command provides only one recipe")
@@ -249,11 +247,10 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		Force:          planInitForce,
 		Model:          planInitModel,
 		Worktree:       planInitWorktree,
-		Container:       planInitContainer,
-		ExtractAllFrom:  planInitExtractAllFrom,
-		OpenSession:     planInitOpenSession,
-		Recipe:          planInitRecipe,
-		RecipeVars:      planInitRecipeVars,
+		ExtractAllFrom: planInitExtractAllFrom,
+		OpenSession:    planInitOpenSession,
+		Recipe:         planInitRecipe,
+		RecipeVars:     planInitRecipeVars,
 		RecipeCmd:      planInitRecipeCmd,
 		Repos:          planInitRepos,
 		NoteRef:        planInitNoteRef,
@@ -333,15 +330,14 @@ type PlanInitCmd struct {
 	Force          bool
 	Model          string
 	Worktree       string
-	Container       string
-	ExtractAllFrom  string
-	OpenSession     bool
-	Recipe          string
-	RecipeVars      []string
+	ExtractAllFrom string
+	OpenSession    bool
+	Recipe         string
+	RecipeVars     []string
 	RecipeCmd      string
 	Repos          []string // List of repos to include in ecosystem worktree
 	NoteRef        string
 	FromNote       string
 	NoteTargetFile string
-	RunInit        bool     // Run init actions from workspace_init.yml
+	RunInit        bool // Run init actions from workspace_init.yml
 }

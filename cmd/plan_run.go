@@ -306,10 +306,9 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 
 	// Inject the loaded configuration into the plan object
 	plan.Orchestration = &orchestration.Config{
-		OneshotModel:         flowCfg.OneshotModel,
-		TargetAgentContainer: flowCfg.TargetAgentContainer,
-		PlansDirectory:       flowCfg.PlansDirectory,
-		MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
+		OneshotModel:        flowCfg.OneshotModel,
+		PlansDirectory:      flowCfg.PlansDirectory,
+		MaxConsecutiveSteps: flowCfg.MaxConsecutiveSteps,
 	}
 
 	// Check if any oneshot jobs need to be run

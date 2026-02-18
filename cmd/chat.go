@@ -484,10 +484,9 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			}
 			plan = fullPlan
 			plan.Orchestration = &orchestration.Config{
-				OneshotModel:         flowCfg.OneshotModel,
-				TargetAgentContainer: flowCfg.TargetAgentContainer,
-				PlansDirectory:       flowCfg.PlansDirectory,
-				MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
+				OneshotModel:        flowCfg.OneshotModel,
+				PlansDirectory:      flowCfg.PlansDirectory,
+				MaxConsecutiveSteps: flowCfg.MaxConsecutiveSteps,
 			}
 		} else {
 			// Fallback: Create a minimal plan for this chat job
@@ -496,10 +495,9 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 				Directory: planDir,
 				Jobs:      []*orchestration.Job{job},
 				Orchestration: &orchestration.Config{
-					OneshotModel:         flowCfg.OneshotModel,
-					TargetAgentContainer: flowCfg.TargetAgentContainer,
-					PlansDirectory:       flowCfg.PlansDirectory,
-					MaxConsecutiveSteps:  flowCfg.MaxConsecutiveSteps,
+					OneshotModel:        flowCfg.OneshotModel,
+					PlansDirectory:      flowCfg.PlansDirectory,
+					MaxConsecutiveSteps: flowCfg.MaxConsecutiveSteps,
 				},
 			}
 		}
