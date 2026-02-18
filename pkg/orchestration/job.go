@@ -136,14 +136,14 @@ type Job struct {
 	NoteRef              string       `yaml:"note_ref,omitempty" json:"note_ref,omitempty"`
 	SourceFile           string       `yaml:"source_file,omitempty" json:"source_file,omitempty"` // Origin file path (e.g., Claude plan file)
 
-	// Derived fields
-	Filename     string      `json:"filename,omitempty"`     // The markdown filename
-	FilePath     string      `json:"file_path,omitempty"`    // Full path to the file
-	PromptBody   string      `json:"-"`                       // Content after frontmatter
-	Dependencies []*Job      `json:"-"`                       // Resolved job references
-	StartTime    time.Time   `json:"start_time,omitempty"`   // When job started
-	EndTime      time.Time   `json:"end_time,omitempty"`     // When job completed
-	Metadata     JobMetadata `json:"metadata,omitempty"`
+	// Derived fields (excluded from schema - these are runtime/internal fields)
+	Filename     string      `json:"filename,omitempty" jsonschema:"-"`
+	FilePath     string      `json:"file_path,omitempty" jsonschema:"-"`
+	PromptBody   string      `json:"-" jsonschema:"-"`
+	Dependencies []*Job      `json:"-" jsonschema:"-"`
+	StartTime    time.Time   `json:"start_time,omitempty" jsonschema:"-"`
+	EndTime      time.Time   `json:"end_time,omitempty" jsonschema:"-"`
+	Metadata     JobMetadata `json:"metadata,omitempty" jsonschema:"-"`
 }
 
 // JobMetadata holds additional job metadata.

@@ -15,25 +15,6 @@
       "required": [
         "Categories"
       ]
-    },
-    "JobMetadata": {
-      "properties": {
-        "execution_time": {
-          "type": "integer"
-        },
-        "retry_count": {
-          "type": "integer"
-        },
-        "last_error": {
-          "type": "string"
-        }
-      },
-      "type": "object",
-      "required": [
-        "execution_time",
-        "retry_count",
-        "last_error"
-      ]
     }
   },
   "properties": {
@@ -129,32 +110,6 @@
     },
     "source_file": {
       "type": "string"
-    },
-    "Filename": {
-      "type": "string"
-    },
-    "FilePath": {
-      "type": "string"
-    },
-    "PromptBody": {
-      "type": "string"
-    },
-    "Dependencies": {
-      "items": {
-        "$ref": "#/$defs/Job"
-      },
-      "type": "array"
-    },
-    "StartTime": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "EndTime": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "Metadata": {
-      "$ref": "#/$defs/JobMetadata"
     }
   },
   "type": "object",
