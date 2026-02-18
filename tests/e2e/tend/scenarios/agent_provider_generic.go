@@ -73,7 +73,7 @@ func createProviderLifecycleScenario(p ProviderConfig) *harness.Scenario {
 					Name:    projectName,
 					Version: "1.0",
 					Extensions: map[string]interface{}{
-						"agent": map[string]interface{}{
+						"flow": map[string]interface{}{
 							"interactive_provider": p.Name,
 						},
 					},
@@ -229,7 +229,7 @@ func createProviderArgsScenario(p ProviderConfig) *harness.Scenario {
 					Name:    projectName,
 					Version: "1.0",
 					Extensions: map[string]interface{}{
-						"agent": map[string]interface{}{
+						"flow": map[string]interface{}{
 							"interactive_provider": p.Name,
 							"providers": map[string]interface{}{
 								p.Name: map[string]interface{}{

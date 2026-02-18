@@ -170,21 +170,21 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		coreCfg = &config.Config{}
 	}
 
-	// Unmarshal agent configuration
-	type agentProviderConfig struct {
+	// Unmarshal flow configuration (agent settings moved to flow extension)
+	type flowProviderConfig struct {
 		Args []string `yaml:"args"`
 	}
-	type agentConfig struct {
-		InteractiveProvider string                           `yaml:"interactive_provider,omitempty"`
-		Providers           map[string]agentProviderConfig   `yaml:"providers"`
+	type flowConfig struct {
+		InteractiveProvider string                          `yaml:"interactive_provider,omitempty"`
+		Providers           map[string]flowProviderConfig   `yaml:"providers"`
 	}
-	var agentCfg agentConfig
-	coreCfg.UnmarshalExtension("agent", &agentCfg)
+	var flowCfg flowConfig
+	coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	// Determine which provider to use
 	providerName := "claude" // Default for backward compatibility
-	if agentCfg.InteractiveProvider != "" {
-		providerName = agentCfg.InteractiveProvider
+	if flowCfg.InteractiveProvider != "" {
+		providerName = flowCfg.InteractiveProvider
 	}
 
 	var provider InteractiveAgentProvider
@@ -201,8 +201,8 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 
 	// Get agent args for the selected provider
 	var agentArgs []string
-	if agentCfg.Providers != nil {
-		if providerCfg, ok := agentCfg.Providers[providerName]; ok {
+	if flowCfg.Providers != nil {
+		if providerCfg, ok := flowCfg.Providers[providerName]; ok {
 			agentArgs = providerCfg.Args
 		}
 	}

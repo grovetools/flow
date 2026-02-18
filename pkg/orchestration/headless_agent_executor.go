@@ -228,13 +228,13 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		coreCfg = &config.Config{}
 	}
 
-	type agentConfig struct {
-		Args []string `yaml:"args"`
+	type flowConfig struct {
+		AgentArgs []string `yaml:"agent_args"`
 	}
-	var agentCfg agentConfig
-	coreCfg.UnmarshalExtension("agent", &agentCfg)
+	var flowCfg flowConfig
+	coreCfg.UnmarshalExtension("flow", &flowCfg)
 
-	return e.runOnHost(ctx, worktreePath, prompt, job, plan, agentCfg.Args)
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, flowCfg.AgentArgs)
 }
 
 

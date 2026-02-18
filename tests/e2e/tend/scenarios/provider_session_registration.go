@@ -43,7 +43,7 @@ func createProviderSessionRegistrationScenario(p ProviderConfig) *harness.Scenar
 					Name:    projectName,
 					Version: "1.0",
 					Extensions: map[string]interface{}{
-						"agent": map[string]interface{}{
+						"flow": map[string]interface{}{
 							"interactive_provider": p.Name,
 						},
 					},
