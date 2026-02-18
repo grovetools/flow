@@ -84,9 +84,9 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	// Load agent config to get default arguments
 	appCfg, err := loadFullConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load agent configuration: %w", err)
+		return fmt.Errorf("failed to load flow configuration: %w", err)
 	}
-	agentArgs := appCfg.Agent.Args
+	agentArgs := appCfg.Flow.AgentArgs
 
 	var resumeCmdParts []string
 	if sessionInfo.Provider == "codex" {

@@ -1,12 +1,33 @@
 {
   "$defs": {
+    "ProviderConfig": {
+      "properties": {
+        "args": {
+          "description": "Command-line arguments for this provider",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "x-important": true,
+          "x-layer": "global",
+          "x-priority": "65"
+        }
+      },
+      "required": [
+        "args"
+      ],
+      "type": "object"
+    },
     "RecipeConfig": {
       "properties": {
         "vars": {
           "additionalProperties": {
             "type": "string"
           },
-          "type": "object"
+          "description": "Variable overrides for this recipe",
+          "type": "object",
+          "x-layer": "project",
+          "x-priority": "90"
         }
       },
       "required": [
@@ -19,53 +40,116 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Schema for the 'flow' extension in grove.yml.",
   "properties": {
+    "agent_args": {
+      "description": "Default command-line arguments for agents",
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "x-layer": "global",
+      "x-priority": "50"
+    },
     "chat_directory": {
       "description": "DEPRECATED: Configure notebook.root_dir instead",
       "type": "string",
+      "x-layer": "global",
+      "x-priority": "200",
       "x-status": "deprecated",
       "x-status-message": "Chats are now stored in notebook workspaces",
       "x-status-replaced-by": "notebook.root_dir",
       "x-status-since": "v0.6.0",
       "x-status-target": "v1.0"
     },
+    "interactive_provider": {
+      "description": "Provider for interactive sessions: claude/codex/opencode",
+      "enum": [
+        "claude",
+        "codex",
+        "opencode"
+      ],
+      "type": "string",
+      "x-important": true,
+      "x-layer": "global",
+      "x-priority": "55"
+    },
     "max_consecutive_steps": {
-      "type": "integer"
+      "description": "Maximum consecutive steps before requiring user input",
+      "type": "integer",
+      "x-layer": "global",
+      "x-priority": "85"
     },
     "oneshot_model": {
-      "type": "string"
+      "description": "Default model for oneshot jobs",
+      "type": "string",
+      "x-important": true,
+      "x-layer": "global",
+      "x-priority": "60"
     },
     "plans_directory": {
       "description": "DEPRECATED: Configure notebook.root_dir instead",
       "type": "string",
+      "x-layer": "global",
+      "x-priority": "200",
       "x-status": "deprecated",
       "x-status-message": "Plans are now stored in notebook workspaces",
       "x-status-replaced-by": "notebook.root_dir",
       "x-status-since": "v0.6.0",
       "x-status-target": "v1.0"
     },
+    "providers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProviderConfig"
+      },
+      "description": "Configuration for agent providers",
+      "type": "object",
+      "x-important": true,
+      "x-layer": "global",
+      "x-priority": "65"
+    },
     "recipes": {
       "additionalProperties": {
         "$ref": "#/$defs/RecipeConfig"
       },
-      "type": "object"
+      "description": "Recipe-specific variable overrides",
+      "type": "object",
+      "x-layer": "project",
+      "x-priority": "90"
     },
     "run_init_by_default": {
-      "type": "boolean"
+      "description": "Run init actions by default (nil = true)",
+      "type": "boolean",
+      "x-layer": "project",
+      "x-priority": "81"
     },
     "summarize_on_complete": {
-      "type": "boolean"
+      "description": "Generate summary when job completes",
+      "type": "boolean",
+      "x-layer": "global",
+      "x-priority": "70"
     },
     "summary_max_chars": {
-      "type": "integer"
+      "description": "Maximum characters in generated summary",
+      "type": "integer",
+      "x-layer": "global",
+      "x-priority": "73"
     },
     "summary_model": {
-      "type": "string"
+      "description": "Model to use for generating summaries",
+      "type": "string",
+      "x-layer": "global",
+      "x-priority": "71"
     },
     "summary_prompt": {
-      "type": "string"
+      "description": "Custom prompt for summary generation",
+      "type": "string",
+      "x-layer": "global",
+      "x-priority": "72"
     },
     "target_agent_container": {
-      "type": "string"
+      "description": "Docker container name for agent execution",
+      "type": "string",
+      "x-layer": "project",
+      "x-priority": "80"
     }
   },
   "title": "Grove Flow Configuration",
