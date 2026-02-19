@@ -1,3 +1,59 @@
+## v0.6.3 (2026-02-19)
+
+The configuration structure has been significantly refactored, merging the agent configuration into the flow extension (ced1478). This change necessitates updating `grove.yml` to move provider arguments under the `[flow]` section. Additionally, deprecated configuration fields including `target_agent_container` (6c8e45e) and summarization settings like `summarize_on_complete` (8bd96ea) have been removed to streamline the codebase.
+
+Job schema definitions have been improved by adding descriptions to frontmatter fields (334e775) and excluding internal runtime fields (b9c82a8) to ensure cleaner generated documentation. A fix was also applied to JSON-level post-processing for deprecated status fields (bdd32b2).
+
+A critical fix ensures that provider arguments are correctly read from the new flow extension location, resolving an issue where flags like `--dangerously-skip-permissions` were ignored (a49467d).
+
+### BREAKING CHANGES
+- Merge AgentConfig into FlowConfig, requiring migration of `[agent]` settings to `[flow]` ced1478
+- Remove unused `target_agent_container` field and CLI flag 6c8e45e
+- Remove deprecated config fields and job summaries functionality 8bd96ea
+
+### Bug Fixes
+- Read provider args from flow extension instead of agent a49467d
+- Exclude internal runtime fields from job schema b9c82a8
+- Use JSON-level post-processing for x-status extras bdd32b2
+
+### Documentation
+- Add descriptions to all job frontmatter fields 334e775
+
+### File Changes
+```
+ cmd/chat.go                                        |  12 +-
+ cmd/config.go                                      |  50 +++-----
+ cmd/plan.go                                        |  24 ++--
+ cmd/plan_complete.go                               |  36 ------
+ cmd/plan_config.go                                 |   6 +-
+ cmd/plan_extract.go                                |   3 -
+ cmd/plan_helpers.go                                |  43 +------
+ cmd/plan_init.go                                   |  47 +------
+ cmd/plan_list.go                                   |  12 --
+ cmd/plan_resume.go                                 |  13 +-
+ cmd/plan_run.go                                    |  16 +--
+ cmd/plan_tui.go                                    |   6 -
+ cmd/status_tui/keys.go                             |   6 -
+ cmd/status_tui/model.go                            |  15 +--
+ cmd/status_tui/update.go                           |   3 -
+ docs/14-configuration.md                           |   3 -
+ flow-job.schema.json                               | 139 +++++++++------------
+ flow.schema.json                                   | 101 ++++++++++-----
+ pkg/docs/docs.json                                 |   6 +-
+ pkg/orchestration/config.go                        |   6 +-
+ pkg/orchestration/headless_agent_executor.go       |  20 ++-
+ pkg/orchestration/interactive_agent_executor.go    |  22 ++--
+ pkg/orchestration/job.go                           |  92 ++++++++------
+ pkg/orchestration/job_summary.go                   | 105 ----------------
+ pkg/orchestration/orchestrator.go                  |  26 +---
+ pkg/orchestration/plan.go                          |   7 +-
+ pkg/orchestration/recipes.go                       |   3 -
+ tests/e2e/tend/scenarios/agent_provider_generic.go |   4 +-
+ .../scenarios/provider_session_registration.go     |   2 +-
+ tools/schema-generator/main.go                     |  15 ++-
+ 30 files changed, 285 insertions(+), 558 deletions(-)
+```
+
 ## v0.6.2 (2026-02-10)
 
 New configuration flags for model selection, rules files, and git context have been added to the job creation commands (730770a). The command structure has been unified with a new `flow job add` alias, ensuring consistent flag availability across all job addition entry points (730770a).
