@@ -192,3 +192,15 @@ func (k KeyMap) Sections() []keymap.Section {
 		},
 	}
 }
+
+// KeymapInfo returns the keymap metadata for the flow status TUI.
+// Used by the grove keys registry generator to aggregate all TUI keybindings.
+func KeymapInfo() keymap.TUIInfo {
+	km := NewKeyMap(nil)
+	return keymap.MakeTUIInfo(
+		"flow-status",
+		"flow",
+		"Flow plan status browser and job manager",
+		km,
+	)
+}
