@@ -12,8 +12,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -80,10 +82,10 @@ type Model struct {
 	ShowTemplatePicker bool // Show template picker
 	TemplatePickerCursor int  // Cursor position in template picker
 	PlanDir            string // Store plan directory for refresh
-	KeyMap             KeyMap
-	Help               help.Model
-	WaitingForG        bool      // Track if we're waiting for second 'g' in 'gg' sequence
-	CursorVisible      bool      // Track cursor visibility for blinking animation
+	KeyMap        KeyMap
+	Help          help.Model
+	Sequence      *keymap.SequenceState // For detecting multi-key sequences (gg)
+	CursorVisible bool                  // Track cursor visibility for blinking animation
 	Renaming           bool
 	RenameInput        textinput.Model
 	RenameJobIndex     int
@@ -130,10 +132,13 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	// Set TUI mode env var early so loggers are configured correctly
 	os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
+	// Load user-configurable keybindings
+	cfg, _ := config.LoadDefault() // Ignore error - NewKeyMap handles nil config gracefully
+
 	// Flatten the job tree for navigation with parent tracking
 	jobs, parents, indents := flattenJobTreeWithParents(plan)
 
-	keyMap := NewKeyMap()
+	keyMap := NewKeyMap(cfg)
 	helpModel := help.NewBuilder().
 		WithKeys(keyMap).
 		WithTitle("Plan Status - Help").
@@ -210,6 +215,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		PlanDir:          plan.Directory,
 		KeyMap:           keyMap,
 		Help:             helpModel,
+		Sequence:         keymap.NewSequenceState(),
 		CursorVisible:    true,
 		LogViewer:        logViewerModel,
 		ShowLogs:         false, // Start with logs hidden by default

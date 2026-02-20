@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/pkg/logging/logutil"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/tui/utils/scrollbar"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -931,26 +932,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				// 'esc' closes the detail pane (handled by main logic below)
 			case "g":
-				if m.WaitingForG {
-					// Second 'g' - jump to top of logs
+				// Process sequence for gg
+				result, _ := m.Sequence.Process(msg, m.KeyMap.Top)
+				if result == keymap.SequenceMatch {
+					// gg - jump to top of logs
 					m.LogViewer.GotoTop()
-					m.WaitingForG = false
-					return m, nil
-				} else {
-					// First 'g' - wait for second
-					m.WaitingForG = true
+					m.Sequence.Clear()
 					return m, nil
 				}
+				// First 'g' - sequence is tracking it
+				return m, nil
 			case "G":
 				// Jump to bottom of logs
 				m.LogViewer.GotoBottom()
-				m.WaitingForG = false // Clear any pending 'g'
+				m.Sequence.Clear() // Clear any pending sequence
 				return m, nil
 			default:
-				// Clear waiting for 'g' if any other key is pressed
-				if m.WaitingForG {
-					m.WaitingForG = false
-				}
+				// Clear sequence for any other key
+				m.Sequence.Clear()
 
 				// Delegate other keys to the active viewport for scrolling, etc.
 				switch m.ActiveDetailPane {
@@ -969,19 +968,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle 'gg' sequence for going to top
 		if msg.String() == "g" {
-			if m.WaitingForG {
-				// Second 'g' - go to top
+			result, _ := m.Sequence.Process(msg, m.KeyMap.Top)
+			if result == keymap.SequenceMatch {
+				// gg - go to top
 				m.Cursor = 0
 				m.ScrollOffset = 0
-				m.WaitingForG = false
-			} else {
-				// First 'g' - wait for second
-				m.WaitingForG = true
+				m.Sequence.Clear()
 			}
+			// First 'g' or sequence in progress - sequence is tracking it
 			return m, nil
 		} else {
-			// Any other key resets the 'g' waiting state
-			m.WaitingForG = false
+			// Any other key clears the sequence
+			m.Sequence.Clear()
 		}
 
 		switch {
@@ -1101,7 +1099,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case key.Matches(msg, m.KeyMap.GoToBottom):
+		case key.Matches(msg, m.KeyMap.Bottom):
 			if len(m.Jobs) > 0 {
 				m.Cursor = len(m.Jobs) - 1
 				m.adjustScrollOffset()
@@ -1132,7 +1130,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.reloadActiveDetailPane()
 			}
 
-		case key.Matches(msg, m.KeyMap.Select):
+		case key.Matches(msg, m.KeyMap.ToggleSelect):
 			if m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
 				if m.Selected[job.ID] {

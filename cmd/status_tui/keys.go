@@ -2,61 +2,50 @@ package status_tui
 
 import (
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
 )
 
+// KeyMap defines the keybindings for the flow status TUI.
+// It embeds keymap.Base for standard navigation, actions, search, selection, and fold bindings.
+// Only TUI-specific bindings that don't exist in Base are defined here.
 type KeyMap struct {
 	keymap.Base
-	Select          key.Binding
-	SelectAll       key.Binding
-	SelectNone      key.Binding
-	Archive         key.Binding
-	AddXmlPlan      key.Binding
-	Edit            key.Binding
-	Run             key.Binding
-	SetCompleted    key.Binding
-	SetStatus       key.Binding
-	SetType         key.Binding
-	SetTemplate     key.Binding
-	AddJob          key.Binding
-	AddFromRecipe   key.Binding
-	Implement       key.Binding
-	AgentFromChat   key.Binding
-	Rename          key.Binding
-	Resume          key.Binding
-	EditDeps        key.Binding
-	ToggleView      key.Binding
-	ToggleColumns   key.Binding
-	GoToTop         key.Binding
-	GoToBottom      key.Binding
-	PageUp            key.Binding
-	PageDown          key.Binding
-	ViewLogs          key.Binding
-	ViewFrontmatter   key.Binding
-	ViewBriefing      key.Binding
-	ViewEdit          key.Binding
-	CycleDetailPane   key.Binding
-	CloseDetailPane   key.Binding
-	SwitchFocus       key.Binding
-	ToggleLayout      key.Binding
-	ToggleFullscreen  key.Binding
+	// Job operations (TUI-specific)
+	Archive       key.Binding
+	AddXmlPlan    key.Binding
+	Run           key.Binding
+	SetCompleted  key.Binding
+	SetStatus     key.Binding
+	SetType       key.Binding
+	SetTemplate   key.Binding
+	AddJob        key.Binding
+	AddFromRecipe key.Binding
+	Implement     key.Binding
+	AgentFromChat key.Binding
+	Rename        key.Binding
+	Resume        key.Binding
+	EditDeps      key.Binding
+	// View operations (TUI-specific)
+	ToggleColumns    key.Binding
+	ViewLogs         key.Binding
+	ViewFrontmatter  key.Binding
+	ViewBriefing     key.Binding
+	ViewEdit         key.Binding
+	CycleDetailPane  key.Binding
+	CloseDetailPane  key.Binding
+	SwitchFocus      key.Binding
+	ToggleLayout     key.Binding
+	ToggleFullscreen key.Binding
 }
 
-func NewKeyMap() KeyMap {
-	return KeyMap{
-		Base: keymap.NewBase(),
-		Select: key.NewBinding(
-			key.WithKeys(" "),
-			key.WithHelp("space", "toggle select"),
-		),
-		SelectAll: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "select all"),
-		),
-		SelectNone: key.NewBinding(
-			key.WithKeys("N"),
-			key.WithHelp("N", "deselect all"),
-		),
+// NewKeyMap creates a new KeyMap with user configuration applied.
+// Base bindings (navigation, actions, search, selection, fold) come from keymap.Load().
+// Only TUI-specific bindings are defined here.
+func NewKeyMap(cfg *config.Config) KeyMap {
+	km := KeyMap{
+		Base: keymap.Load(cfg, "flow.status"),
+		// Job operations
 		Archive: key.NewBinding(
 			key.WithKeys("X"),
 			key.WithHelp("X", "archive selected"),
@@ -64,10 +53,6 @@ func NewKeyMap() KeyMap {
 		AddXmlPlan: key.NewBinding(
 			key.WithKeys("x"),
 			key.WithHelp("x", "add XML plan job"),
-		),
-		Edit: key.NewBinding(
-			key.WithKeys("e", "enter"),
-			key.WithHelp("e/enter", "edit job"),
 		),
 		Run: key.NewBinding(
 			key.WithKeys("r"),
@@ -117,29 +102,10 @@ func NewKeyMap() KeyMap {
 			key.WithKeys("D"),
 			key.WithHelp("D", "edit dependencies"),
 		),
-		ToggleView: key.NewBinding(
-			key.WithKeys("t"),
-			key.WithHelp("t", "toggle view"),
-		),
+		// View operations
 		ToggleColumns: key.NewBinding(
 			key.WithKeys("T"),
 			key.WithHelp("T", "toggle columns"),
-		),
-		GoToTop: key.NewBinding(
-			key.WithKeys("g"),
-			key.WithHelp("gg", "go to top"),
-		),
-		GoToBottom: key.NewBinding(
-			key.WithKeys("G"),
-			key.WithHelp("G", "go to bottom"),
-		),
-		PageUp: key.NewBinding(
-			key.WithKeys("ctrl+u"),
-			key.WithHelp("ctrl+u", "page up"),
-		),
-		PageDown: key.NewBinding(
-			key.WithKeys("ctrl+d"),
-			key.WithHelp("ctrl+d", "page down"),
 		),
 		ViewLogs: key.NewBinding(
 			key.WithKeys("l"),
@@ -178,6 +144,17 @@ func NewKeyMap() KeyMap {
 			key.WithHelp("z", "fullscreen logs"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config (uses reflection to map all bindings)
+	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
+		if flowOverrides, ok := cfg.TUI.Keybindings.Overrides["flow"]; ok {
+			if overrides, ok := flowOverrides["status"]; ok {
+				keymap.ApplyOverrides(&km, overrides)
+			}
+		}
+	}
+
+	return km
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -185,55 +162,33 @@ func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Quit}
 }
 
-func (k KeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
+// Sections returns all keybinding sections for the flow status TUI.
+// It includes the base sections plus flow-specific sections.
+func (k KeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
 		{
-			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Navigation")),
-			k.Up,
-			k.Down,
-			k.GoToTop,
-			k.GoToBottom,
-			k.PageUp,
-			k.PageDown,
+			Name:     "Navigation",
+			Bindings: []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown},
 		},
 		{
-			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Selection")),
-			k.Select,
-			k.SelectAll,
-			k.SelectNone,
+			Name:     "Selection",
+			Bindings: []key.Binding{k.ToggleSelect, k.SelectAll, k.SelectNone},
 		},
 		{
-			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Views")),
-			k.ToggleView,
-			k.ToggleColumns,
-			k.ViewLogs,
-			k.ViewFrontmatter,
-			k.ViewBriefing,
-			k.ViewEdit,
-			k.CycleDetailPane,
-			k.CloseDetailPane,
-			k.SwitchFocus,
-			k.ToggleLayout,
-			k.ToggleFullscreen,
+			Name: "Views",
+			Bindings: []key.Binding{
+				k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
+				k.ViewBriefing, k.ViewEdit, k.TogglePreview, k.CycleDetailPane,
+				k.CloseDetailPane, k.SwitchFocus, k.ToggleLayout, k.ToggleFullscreen,
+			},
 		},
 		{
-			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
-			k.Run,
-			k.Edit,
-			k.SetCompleted,
-			k.SetStatus,
-			k.SetType,
-			k.SetTemplate,
-			k.AddJob,
-			k.AddFromRecipe,
-			k.AddXmlPlan,
-			k.Implement,
-			k.Rename,
-			k.Resume,
-			k.EditDeps,
-			k.Archive,
-			k.Help,
-			k.Quit,
+			Name: "Actions",
+			Bindings: []key.Binding{
+				k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
+				k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
+				k.Resume, k.EditDeps, k.Archive, k.Help, k.Quit,
+			},
 		},
 	}
 }

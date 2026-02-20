@@ -36,17 +36,18 @@ func GenerateGitChangesXML(workDir string) (string, error) {
 	}
 
 	// 1. Committed changes (diff from main)
-	if err := runAndAppend("committed", "Changes committed to the current branch but not in main", "diff", "main...HEAD"); err != nil {
+	// Use --submodule=diff to include submodule content changes in ecosystem repos
+	if err := runAndAppend("committed", "Changes committed to the current branch but not in main", "diff", "--submodule=diff", "main...HEAD"); err != nil {
 		return "", err
 	}
 
 	// 2. Staged changes
-	if err := runAndAppend("staged", "Changes staged for the next commit", "diff", "--cached"); err != nil {
+	if err := runAndAppend("staged", "Changes staged for the next commit", "diff", "--submodule=diff", "--cached"); err != nil {
 		return "", err
 	}
 
 	// 3. Uncommitted changes
-	if err := runAndAppend("uncommitted", "Changes in the working directory not yet staged", "diff"); err != nil {
+	if err := runAndAppend("uncommitted", "Changes in the working directory not yet staged", "diff", "--submodule=diff"); err != nil {
 		return "", err
 	}
 
