@@ -84,8 +84,8 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 			return fmt.Errorf("update job status: %w", err)
 		}
 
-		// Archive session artifacts if it's an interactive agent job
-		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent {
+		// Archive session artifacts if it's an agent job
+		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent {
 			if !silent {
 				fmt.Println("Archiving session artifacts...")
 			}
@@ -100,7 +100,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 		}
 
 		// Append transcript if it's an agent job
-		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent {
+		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent {
 			if !silent {
 				fmt.Println("Appending agent session transcript...")
 			}
@@ -112,6 +112,30 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 			} else if !silent {
 				fmt.Println(color.GreenString("*") + " Appended session transcript.")
 			}
+		}
+	}
+
+	// If this was an isolated agent, kill its dedicated tmux server
+	if job.Type == orchestration.JobTypeIsolatedAgent {
+		if !silent {
+			fmt.Println("Cleaning up isolated agent tmux server...")
+		}
+
+		if err := orchestration.KillIsolatedAgentServer(job.ID); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not kill isolated tmux server (it may already be closed): %v\n", err)
+			}
+		} else if !silent {
+			fmt.Println("  * Isolated tmux server terminated.")
+		}
+
+		// Also try to kill the agent process via session metadata
+		if err := killAgentSession(job.ID); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not kill agent session: %v\n", err)
+			}
+		} else if !silent {
+			fmt.Println("  * Agent process killed.")
 		}
 	}
 

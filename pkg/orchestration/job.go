@@ -100,6 +100,7 @@ const (
 	JobTypeShell            JobType = "shell"
 	JobTypeChat             JobType = "chat"
 	JobTypeInteractiveAgent JobType = "interactive_agent"
+	JobTypeIsolatedAgent    JobType = "isolated_agent"
 	JobTypeGenerateRecipe   JobType = "generate-recipe"
 	JobTypeFile             JobType = "file" // Non-executable job for storing context/reference content
 )
@@ -217,7 +218,7 @@ func (j *Job) IsRunnable() bool {
 		dependencyMet := false
 		if dep.Status == JobStatusCompleted || dep.Status == JobStatusAbandoned {
 			dependencyMet = true
-		} else if (j.Type == JobTypeInteractiveAgent || j.Type == JobTypeAgent) && dep.Type == JobTypeChat && dep.Status == JobStatusPendingUser {
+		} else if (j.Type == JobTypeInteractiveAgent || j.Type == JobTypeIsolatedAgent || j.Type == JobTypeAgent) && dep.Type == JobTypeChat && dep.Status == JobStatusPendingUser {
 			// Special case: an interactive agent can run if its chat dependency is pending user input.
 			dependencyMet = true
 		}
@@ -247,7 +248,7 @@ func (j *Job) CanBeRetried() bool {
 		dependencyMet := false
 		if dep.Status == JobStatusCompleted || dep.Status == JobStatusAbandoned {
 			dependencyMet = true
-		} else if (j.Type == JobTypeInteractiveAgent || j.Type == JobTypeAgent) && dep.Type == JobTypeChat && dep.Status == JobStatusPendingUser {
+		} else if (j.Type == JobTypeInteractiveAgent || j.Type == JobTypeIsolatedAgent || j.Type == JobTypeAgent) && dep.Type == JobTypeChat && dep.Status == JobStatusPendingUser {
 			// Special case: an interactive agent can run if its chat dependency is pending user input.
 			dependencyMet = true
 		}

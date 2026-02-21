@@ -262,6 +262,7 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 	// 2. Job Type Input (list)
 	jobTypes := []list.Item{
 		item("interactive_agent"),
+		item("isolated_agent"),
 		item("headless_agent"),
 		item("oneshot"),
 		item("shell"),
@@ -337,7 +338,7 @@ func (m tuiModel) buildTemplateList(jobType string) list.Model {
 		includeTemplate := false
 
 		switch jobType {
-		case "interactive_agent", "headless_agent", "agent":
+		case "interactive_agent", "isolated_agent", "headless_agent", "agent":
 			// Show agent templates (Type == "agent")
 			includeTemplate = t.Type == "agent"
 		case "oneshot", "chat":

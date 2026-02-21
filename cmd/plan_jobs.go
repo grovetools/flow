@@ -67,6 +67,10 @@ func runPlanJobsList(cmd *cobra.Command, args []string) error {
 			Description: "Interactive agent job with user input",
 		},
 		{
+			Type:        string(orchestration.JobTypeIsolatedAgent),
+			Description: "Background agent in isolated tmux server with TUI input",
+		},
+		{
 			Type:        string(orchestration.JobTypeGenerateRecipe),
 			Description: "Recipe generation job for automation",
 		},

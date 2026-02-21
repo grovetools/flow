@@ -139,6 +139,10 @@ func (o *Orchestrator) registerExecutors() {
 	o.executors[JobTypeAgent] = interactiveExecutor
 	o.executors[JobTypeInteractiveAgent] = interactiveExecutor
 
+	// Register isolated agent executor
+	isolatedExecutor := NewIsolatedAgentExecutor(llmClient, geminiRunner, o.config.SkipInteractive)
+	o.executors[JobTypeIsolatedAgent] = isolatedExecutor
+
 	// Register shell executor
 	o.executors[JobTypeShell] = NewShellExecutor(execConfig)
 

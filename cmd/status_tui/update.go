@@ -251,13 +251,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if any of the completed jobs were interactive agents.
 		// Their "run" phase is just the launch, so we don't want to stop the log stream.
 		containsInteractiveAgent := false
+		containsIsolatedAgent := false
 		if msg.Jobs != nil {
 			for _, job := range msg.Jobs {
 				// IMPORTANT: This check should only be for JobTypeInteractiveAgent.
 				// Headless agents are blocking and their completion is final.
 				if job.Type == orchestration.JobTypeInteractiveAgent {
 					containsInteractiveAgent = true
-					break
+				}
+				if job.Type == orchestration.JobTypeIsolatedAgent {
+					containsIsolatedAgent = true
 				}
 			}
 		}
@@ -274,14 +277,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			if containsInteractiveAgent {
 				m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Interactive agent launched successfully.")
+			} else if containsIsolatedAgent {
+				m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Isolated agent launched. Press 's' to send input.")
+				// For isolated agents, activate the input mode
+				m.IsolatedAgentInputActive = true
+				m.IsolatedAgentInput.Focus()
 			} else {
 				m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job run completed successfully.")
 			}
 		}
 
-		// Only stop the log viewer and return focus to the jobs pane if no interactive agents were launched.
-		// Interactive agents continue running in tmux, so we want to keep streaming their logs.
-		if !containsInteractiveAgent {
+		// Only stop the log viewer and return focus to the jobs pane if no interactive or isolated agents were launched.
+		// Both types continue running in tmux, so we want to keep streaming their logs.
+		if !containsInteractiveAgent && !containsIsolatedAgent {
 			// Stop following the log file
 			m.LogViewer.Stop()
 
@@ -301,6 +309,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Quit
+
+	case IsolatedAgentInputSentMsg:
+		// Handle response from sending input to isolated agent
+		if msg.Err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to send input: %v", msg.Err))
+		} else {
+			m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Sent: %s", msg.Input))
+			// Refresh the log pane to show the new output
+			if m.ActiveLogJob != nil {
+				return m, captureIsolatedAgentOutputCmd(m.ActiveLogJob.ID)
+			}
+		}
+		return m, nil
 
 	case TickMsg:
 		// Toggle cursor visibility for blinking effect
@@ -545,6 +566,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.RenameInput, cmd = m.RenameInput.Update(msg)
+			return m, cmd
+		}
+
+		// Handle isolated agent input mode
+		if m.IsolatedAgentInputActive {
+			switch msg.String() {
+			case "enter":
+				if m.ActiveLogJob != nil && m.IsolatedAgentInput.Value() != "" {
+					input := m.IsolatedAgentInput.Value()
+					m.IsolatedAgentInput.SetValue("") // Clear input
+					m.StatusSummary = fmt.Sprintf("Sending: %s", input)
+					return m, sendIsolatedAgentInputCmd(m.ActiveLogJob.ID, input)
+				}
+			case "esc":
+				m.IsolatedAgentInputActive = false
+				m.IsolatedAgentInput.Blur()
+				m.Focus = JobsPane
+				m.StatusSummary = ""
+				return m, nil
+			}
+			m.IsolatedAgentInput, cmd = m.IsolatedAgentInput.Update(msg)
 			return m, cmd
 		}
 
@@ -1209,6 +1251,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ActiveLogJob = nil
 			m.ActiveDetailPane = NoPane
 			m.StatusSummary = ""
+			// Also clear isolated agent input mode
+			m.IsolatedAgentInputActive = false
+			m.IsolatedAgentInput.Blur()
+			return m, nil
+
+		case key.Matches(msg, m.KeyMap.SendInput):
+			// Toggle isolated agent input mode when viewing an isolated agent job
+			if m.ActiveLogJob != nil && m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent {
+				if m.IsolatedAgentInputActive {
+					m.IsolatedAgentInputActive = false
+					m.IsolatedAgentInput.Blur()
+					m.Focus = LogsPane
+					m.StatusSummary = ""
+				} else {
+					m.IsolatedAgentInputActive = true
+					m.IsolatedAgentInput.Focus()
+					m.Focus = InputPane
+					m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for isolated agent (Enter to send, Esc to cancel)")
+				}
+				return m, nil
+			}
+			// Not an isolated agent job - show helpful message
+			m.StatusSummary = theme.DefaultTheme.Warning.Render("Send input only works for isolated_agent jobs")
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.Run):

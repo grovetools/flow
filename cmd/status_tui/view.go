@@ -192,6 +192,7 @@ func (m Model) renderTableView() string {
 				var jobTypeSymbol string
 				switch job.Type {
 				case "interactive_agent": jobTypeSymbol = theme.IconInteractiveAgent
+				case "isolated_agent": jobTypeSymbol = theme.IconInteractiveAgent // Uses same icon as interactive_agent
 				case "headless_agent": jobTypeSymbol = theme.IconHeadlessAgent
 				case "chat": jobTypeSymbol = theme.IconChat
 				case "oneshot": jobTypeSymbol = theme.IconOneshot
@@ -278,6 +279,8 @@ func getJobIcon(job *orchestration.Job) string {
 	switch job.Type {
 	case "interactive_agent":
 		return theme.IconInteractiveAgent
+	case "isolated_agent":
+		return theme.IconInteractiveAgent // Uses same icon as interactive_agent
 	case "headless_agent":
 		return theme.IconHeadlessAgent
 	case "chat":
@@ -417,6 +420,7 @@ func (m Model) renderTypePicker() string {
 		{orchestration.JobTypeChat, "Chat"},
 		{orchestration.JobTypeAgent, "Agent"},
 		{orchestration.JobTypeInteractiveAgent, "Interactive Agent"},
+		{orchestration.JobTypeIsolatedAgent, "Isolated Agent"},
 		{orchestration.JobTypeHeadlessAgent, "Headless Agent"},
 		{orchestration.JobTypeGenerateRecipe, "Generate Recipe"},
 		{orchestration.JobTypeFile, "File"},
@@ -866,6 +870,8 @@ func renderProperty(builder *strings.Builder, k string, v interface{}, keyStyle,
 			switch val {
 			case "interactive_agent":
 				icon = theme.IconInteractiveAgent + " "
+			case "isolated_agent":
+				icon = theme.IconInteractiveAgent + " " // Uses same icon as interactive_agent
 			case "headless_agent":
 				icon = theme.IconHeadlessAgent + " "
 			case "chat":

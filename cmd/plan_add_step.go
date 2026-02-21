@@ -18,7 +18,7 @@ import (
 type PlanAddStepCmd struct {
 	Dir                 string   `arg:"" help:"Plan directory"`
 	Template            string   `flag:"" help:"Name of the job template to use"`
-	Type                string   `flag:"t" default:"interactive_agent" help:"Job type: oneshot, chat, interactive_agent, headless_agent, shell, or file"`
+	Type                string   `flag:"t" default:"interactive_agent" help:"Job type: oneshot, chat, interactive_agent, isolated_agent, headless_agent, shell, or file"`
 	Title               string   `flag:"" help:"Job title"`
 	DependsOn           []string `flag:"d" help:"Dependencies (job filenames)"`
 	PromptFile          string   `flag:"f" help:"File containing the prompt"`

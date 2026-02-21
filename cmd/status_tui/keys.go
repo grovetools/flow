@@ -38,6 +38,7 @@ type KeyMap struct {
 	SwitchFocus      key.Binding
 	ToggleLayout     key.Binding
 	ToggleFullscreen key.Binding
+	SendInput        key.Binding // For isolated agents: toggle input mode
 }
 
 // NewKeyMap creates a new KeyMap with user configuration applied.
@@ -144,6 +145,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("z"),
 			key.WithHelp("z", "fullscreen logs"),
 		),
+		SendInput: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "send input (isolated agent)"),
+		),
 	}
 
 	// Apply TUI-specific overrides from config
@@ -171,7 +176,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.ActionsSection(
 			k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
 			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
-			k.Resume, k.EditDeps, k.Archive, k.CopyPath, k.Help, k.Quit,
+			k.Resume, k.EditDeps, k.Archive, k.SendInput, k.CopyPath, k.Help, k.Quit,
 		),
 	}
 }

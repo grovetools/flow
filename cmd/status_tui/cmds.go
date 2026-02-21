@@ -957,6 +957,13 @@ type JobCompletedMsg struct {
 	Err error
 }
 
+// IsolatedAgentInputSentMsg is sent when input has been sent to an isolated agent
+type IsolatedAgentInputSentMsg struct {
+	JobID string
+	Input string
+	Err   error
+}
+
 func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan, completeJobFunc func(*orchestration.Job, *orchestration.Plan, bool) error) tea.Cmd {
 	return func() tea.Msg {
 		// Use the shared completion function (silent mode for TUI)
@@ -1332,6 +1339,35 @@ func createAgentFromChatJobWithTitle(plan *orchestration.Plan, selectedJobs []*o
 		}
 
 		return CreateJobCompleteMsg{Err: nil}
+	}
+}
+
+// sendIsolatedAgentInputCmd sends input to an isolated agent via its dedicated tmux socket
+func sendIsolatedAgentInputCmd(jobID, input string) tea.Cmd {
+	return func() tea.Msg {
+		err := orchestration.SendInputToIsolatedAgent(jobID, input)
+		return IsolatedAgentInputSentMsg{
+			JobID: jobID,
+			Input: input,
+			Err:   err,
+		}
+	}
+}
+
+// captureIsolatedAgentOutputCmd captures the current output from an isolated agent's pane
+func captureIsolatedAgentOutputCmd(jobID string) tea.Cmd {
+	return func() tea.Msg {
+		output, err := orchestration.CaptureIsolatedAgentOutput(jobID)
+		if err != nil {
+			return LogContentLoadedMsg{
+				Content: fmt.Sprintf("Error capturing output: %v", err),
+				JobID:   jobID,
+			}
+		}
+		return LogContentLoadedMsg{
+			Content: output,
+			JobID:   jobID,
+		}
 	}
 }
 

@@ -165,6 +165,7 @@ func NewPlanCmd() *cobra.Command {
    • shell            - Execute shell commands directly
    • headless_agent   - Autonomous agent without user interaction
    • interactive_agent - Agent with user interaction (default)
+   • isolated_agent   - Background agent in isolated tmux server with TUI input
    • file             - Static file content, no execution`)
 	planAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	planAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")

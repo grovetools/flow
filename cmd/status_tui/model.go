@@ -47,6 +47,7 @@ type ViewFocus int
 const (
 	JobsPane ViewFocus = iota
 	LogsPane
+	InputPane // For isolated agents: allows typing input to send to the agent
 )
 
 type DetailPane int
@@ -125,6 +126,10 @@ type Model struct {
 	LogViewerWidth     int       // Cached log viewer width
 	LogViewerHeight    int       // Cached log viewer height
 	JobsPaneWidth      int       // Cached jobs pane width for vertical split
+
+	// Isolated agent input support
+	IsolatedAgentInput       textinput.Model // Text input for sending to isolated agents
+	IsolatedAgentInputActive bool            // Whether the input pane is active
 }
 
 // New creates a new Model
@@ -200,6 +205,12 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		initialCursor = len(jobs) - 1
 	}
 
+	// Initialize text input for isolated agent input
+	isolatedInput := textinput.New()
+	isolatedInput.Placeholder = "Type input for isolated agent..."
+	isolatedInput.CharLimit = 4096
+	isolatedInput.Width = 60
+
 	return Model{
 		Plan:             plan,
 		Graph:            graph,
@@ -232,7 +243,9 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		Program:             nil, // Will be set by SetProgram after creating the program
 		frontmatterViewport: frontmatterVp,
 		briefingViewport:    briefingVp,
-		editViewport:        editVp,
+		editViewport:             editVp,
+		IsolatedAgentInput:       isolatedInput,
+		IsolatedAgentInputActive: false,
 	}
 }
 
@@ -395,6 +408,20 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, str
 
 // renderFooter renders the help and status message footer.
 func (m Model) renderFooter() string {
+	// If isolated agent input is active, show the input field prominently
+	if m.IsolatedAgentInputActive {
+		inputStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(theme.DefaultColors.Orange).
+			Padding(0, 1)
+
+		inputLabel := theme.DefaultTheme.Bold.Render("Send to agent: ")
+		inputView := inputStyle.Render(m.IsolatedAgentInput.View())
+		helpText := theme.DefaultTheme.Muted.Render("  (Enter: send, Esc: cancel)")
+
+		return inputLabel + inputView + helpText
+	}
+
 	helpView := m.Help.View()
 	followStatus := ""
 	if m.ShowLogs {
