@@ -150,6 +150,24 @@ func (k planInitTUIKeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
+// Sections returns all keybinding sections for the plan init TUI.
+func (k planInitTUIKeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		{
+			Name:     "Navigation",
+			Bindings: []key.Binding{k.NextField, k.PrevField},
+		},
+		{
+			Name:     "Actions",
+			Bindings: []key.Binding{k.Toggle, k.Submit, k.ToggleAdvanced, k.Insert, k.Escape},
+		},
+		{
+			Name:     "System",
+			Bindings: []key.Binding{k.Help, k.Back, k.Base.Quit},
+		},
+	}
+}
+
 // getDefaultNoteTargetFile returns the appropriate default note target file for a given recipe.
 // It first checks the recipe's DefaultNoteTarget field, then falls back to the first job file alphabetically.
 func getDefaultNoteTargetFile(recipeName string) string {

@@ -68,6 +68,24 @@ var addKeys = addTuiKeyMap{
 	),
 }
 
+// Sections returns all keybinding sections for the add job TUI.
+func (k addTuiKeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		{
+			Name:     "Navigation",
+			Bindings: []key.Binding{k.Next, k.Prev, k.GoTop, k.GoBottom, k.PageUp, k.PageDown},
+		},
+		{
+			Name:     "Actions",
+			Bindings: []key.Binding{k.Toggle, k.Submit},
+		},
+		{
+			Name:     "System",
+			Bindings: []key.Binding{k.Help, k.Quit},
+		},
+	}
+}
+
 // ShortHelp returns key bindings to show in the mini help view
 func (k addTuiKeyMap) ShortHelp() []key.Binding {
 	// Return just the base help to show the help menu

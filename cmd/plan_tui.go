@@ -207,6 +207,31 @@ var planListKeys = planListKeyMap{
 	),
 }
 
+// Sections returns all keybinding sections for the plan list TUI.
+func (k planListKeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		{
+			Name:     "Navigation",
+			Bindings: []key.Binding{k.Up, k.Down, k.ViewPlan, k.OpenPlan},
+		},
+		{
+			Name: "Actions",
+			Bindings: []key.Binding{
+				k.NewPlan, k.SetActive, k.EditNotes, k.ReviewPlan, k.FinishPlan,
+				k.SetHoldStatus, k.FastForwardUpdate, k.FastForwardMain,
+			},
+		},
+		{
+			Name:     "View",
+			Bindings: []key.Binding{k.ToggleGitLog, k.ToggleHold},
+		},
+		{
+			Name:     "System",
+			Bindings: []key.Binding{k.Help, k.Quit},
+		},
+	}
+}
+
 
 // Messages for the plan list TUI
 type planListLoadCompleteMsg struct {

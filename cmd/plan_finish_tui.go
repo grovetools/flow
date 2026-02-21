@@ -54,6 +54,28 @@ func (k finishTUIKeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
+// Sections returns all keybinding sections for the plan finish TUI.
+func (k finishTUIKeyMap) Sections() []keymap.Section {
+	return []keymap.Section{
+		{
+			Name:     "Navigation",
+			Bindings: []key.Binding{k.Up, k.Down},
+		},
+		{
+			Name:     "Selection",
+			Bindings: []key.Binding{k.Toggle, k.SelectAll, k.SelectNone},
+		},
+		{
+			Name:     "Actions",
+			Bindings: []key.Binding{k.Confirm},
+		},
+		{
+			Name:     "System",
+			Bindings: []key.Binding{k.Help, k.Quit},
+		},
+	}
+}
+
 type finishTUIModel struct {
 	planName       string
 	items          []*cleanupItem
