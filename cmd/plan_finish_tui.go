@@ -15,10 +15,8 @@ import (
 
 type finishTUIKeyMap struct {
 	keymap.Base
-	Toggle     key.Binding
-	SelectAll  key.Binding
-	SelectNone key.Binding
-	Confirm    key.Binding
+	Toggle  key.Binding
+	Confirm key.Binding
 }
 
 func newFinishTUIKeyMap() finishTUIKeyMap {
@@ -27,14 +25,6 @@ func newFinishTUIKeyMap() finishTUIKeyMap {
 		Toggle: key.NewBinding(
 			key.WithKeys(" "),
 			key.WithHelp("space", "toggle selection"),
-		),
-		SelectAll: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "select all"),
-		),
-		SelectNone: key.NewBinding(
-			key.WithKeys("n"),
-			key.WithHelp("n", "select none"),
 		),
 		Confirm: key.NewBinding(
 			key.WithKeys("enter"),

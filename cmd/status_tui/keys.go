@@ -91,12 +91,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("I", "agent from chat"),
 		),
 		Rename: key.NewBinding(
-			key.WithKeys("ctrl+r"),
-			key.WithHelp("ctrl+r", "rename job"),
+			key.WithKeys("R"),
+			key.WithHelp("R", "rename job"),
 		),
 		Resume: key.NewBinding(
-			key.WithKeys("R"),
-			key.WithHelp("R", "resume job"),
+			key.WithKeys("ctrl+R"),
+			key.WithHelp("ctrl+R", "resume job"),
 		),
 		EditDeps: key.NewBinding(
 			key.WithKeys("D"),
@@ -172,7 +172,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		},
 		{
 			Name:     "Selection",
-			Bindings: []key.Binding{k.ToggleSelect, k.SelectAll, k.SelectNone},
+			Bindings: []key.Binding{k.Select, k.SelectAll, k.SelectNone},
 		},
 		{
 			Name: "Views",

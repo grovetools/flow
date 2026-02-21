@@ -18,7 +18,7 @@ import (
 // PlanStatusTUIMultiSelectScenario tests multi-job selection and batch operations.
 var PlanStatusTUIMultiSelectScenario = harness.NewScenarioWithOptions(
 	"plan-status-tui-multi-select",
-	"Verifies multi-job selection with space, 'a', and 'N' keys in the status TUI.",
+	"Verifies multi-job selection with space, ctrl+a, and '-' keys in the status TUI.",
 	[]string{"tui", "plan", "status", "multi-select"},
 	[]harness.Step{
 		harness.NewStep("Setup plan with multiple jobs", setupMultiSelectPlan),
@@ -27,9 +27,9 @@ var PlanStatusTUIMultiSelectScenario = harness.NewScenarioWithOptions(
 		harness.NewStep("Verify SEL column appears with checkbox", verifySingleSelection),
 		harness.NewStep("Deselect job with space again", deselectSingleJob),
 		harness.NewStep("Verify SEL column disappears", verifyNoSelection),
-		harness.NewStep("Select all jobs with 'a'", selectAllJobs),
+		harness.NewStep("Select all jobs with ctrl+a", selectAllJobs),
 		harness.NewStep("Verify all jobs selected", verifyAllJobsSelected),
-		harness.NewStep("Deselect all jobs with 'N'", deselectAllJobs),
+		harness.NewStep("Deselect all jobs with '-'", deselectAllJobs),
 		harness.NewStep("Verify all jobs deselected", verifyAllJobsDeselected),
 		harness.NewStep("Quit the TUI", quitStatusTUI),
 	},
@@ -356,14 +356,14 @@ func verifyNoSelection(ctx *harness.Context) error {
 	return nil
 }
 
-// selectAllJobs presses 'a' to select all jobs.
+// selectAllJobs presses ctrl+a to select all jobs.
 func selectAllJobs(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	time.Sleep(500 * time.Millisecond)
 
-	if err := session.SendKeys("a"); err != nil {
-		return fmt.Errorf("failed to send 'a' key: %w", err)
+	if err := session.SendKeys("C-a"); err != nil {
+		return fmt.Errorf("failed to send ctrl+a key: %w", err)
 	}
 
 	time.Sleep(500 * time.Millisecond)
@@ -391,14 +391,14 @@ func verifyAllJobsSelected(ctx *harness.Context) error {
 	})
 }
 
-// deselectAllJobs presses 'N' to deselect all jobs.
+// deselectAllJobs presses '-' to deselect all jobs.
 func deselectAllJobs(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	time.Sleep(500 * time.Millisecond)
 
-	if err := session.SendKeys("N"); err != nil {
-		return fmt.Errorf("failed to send 'N' key: %w", err)
+	if err := session.SendKeys("-"); err != nil {
+		return fmt.Errorf("failed to send '-' key: %w", err)
 	}
 
 	time.Sleep(500 * time.Millisecond)

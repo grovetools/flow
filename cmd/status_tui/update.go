@@ -1130,7 +1130,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.reloadActiveDetailPane()
 			}
 
-		case key.Matches(msg, m.KeyMap.ToggleSelect):
+		case key.Matches(msg, m.KeyMap.Select):
 			if m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
 				if m.Selected[job.ID] {
@@ -1154,7 +1154,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ConfirmArchive = true
 			}
 
-		case key.Matches(msg, m.KeyMap.Edit):
+		case key.Matches(msg, m.KeyMap.Edit), key.Matches(msg, m.KeyMap.Confirm):
 			if m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
 				return m, editJob(job)
