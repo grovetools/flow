@@ -448,6 +448,17 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// MainScreen: 1=recipe, 2=model
 		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2)
 
+		// Handle configurable keybindings using key.Matches (these take precedence)
+		if key.Matches(msg, m.keyMap.ToggleAdvanced) {
+			// Navigate to advanced screen (only from main screen and when not in text input or in normal mode)
+			if m.currentScreen == MainScreen && (!inTextInput || m.unfocused) {
+				m.currentScreen = AdvancedScreen
+				m.focusIndex = 0 // Reset focus to first field on advanced screen
+				m.unfocused = false
+				return m.updateFocus(), nil
+			}
+		}
+
 		switch msg.String() {
 		case "esc", "escape":
 			if m.currentScreen == AdvancedScreen {
@@ -476,15 +487,6 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle help - must call Toggle() to trigger setViewportContent()
 			m.help.Toggle()
 			return m, nil
-
-		case "a":
-			// Navigate to advanced screen (only from main screen and when not in text input or in normal mode)
-			if m.currentScreen == MainScreen && (!inTextInput || m.unfocused) {
-				m.currentScreen = AdvancedScreen
-				m.focusIndex = 0 // Reset focus to first field on advanced screen
-				m.unfocused = false
-				return m.updateFocus(), nil
-			}
 
 		case "ctrl+c":
 			m.quitting = true
