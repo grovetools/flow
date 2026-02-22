@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/core/tui/theme"
 )
 
 // KeyMap defines the keybindings for the flow status TUI.
@@ -166,30 +167,18 @@ func (k KeyMap) ShortHelp() []key.Binding {
 // It includes the base sections plus flow-specific sections.
 func (k KeyMap) Sections() []keymap.Section {
 	return []keymap.Section{
-		{
-			Name:     "Navigation",
-			Bindings: []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown},
-		},
-		{
-			Name:     "Selection",
-			Bindings: []key.Binding{k.Select, k.SelectAll, k.SelectNone},
-		},
-		{
-			Name: "Views",
-			Bindings: []key.Binding{
-				k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-				k.ViewBriefing, k.ViewEdit, k.TogglePreview, k.CycleDetailPane,
-				k.CloseDetailPane, k.SwitchFocus, k.ToggleLayout, k.ToggleFullscreen,
-			},
-		},
-		{
-			Name: "Actions",
-			Bindings: []key.Binding{
-				k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
-				k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
-				k.Resume, k.EditDeps, k.Archive, k.CopyPath, k.Help, k.Quit,
-			},
-		},
+		keymap.NavigationSection(k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown),
+		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
+		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
+			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
+			k.ViewBriefing, k.ViewEdit, k.TogglePreview, k.CycleDetailPane,
+			k.CloseDetailPane, k.SwitchFocus, k.ToggleLayout, k.ToggleFullscreen,
+		),
+		keymap.ActionsSection(
+			k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
+			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
+			k.Resume, k.EditDeps, k.Archive, k.CopyPath, k.Help, k.Quit,
+		),
 	}
 }
 
