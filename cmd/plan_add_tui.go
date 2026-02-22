@@ -240,14 +240,7 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 
 	// Create keymap with overrides
 	keys := addKeys
-	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
-		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
-		if flowOverrides, ok := tuiOverrides["flow"]; ok {
-			if overrides, ok := flowOverrides["plan-add"]; ok {
-				keymap.ApplyOverrides(&keys, overrides)
-			}
-		}
-	}
+	keymap.ApplyTUIOverrides(cfg, "flow", "plan-add", &keys)
 
 	m := tuiModel{
 		plan: plan,

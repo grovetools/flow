@@ -122,14 +122,7 @@ func newPlanInitTUIKeyMap(cfg *config.Config) planInitTUIKeyMap {
 	}
 
 	// Apply TUI-specific overrides from config
-	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
-		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
-		if flowOverrides, ok := tuiOverrides["flow"]; ok {
-			if overrides, ok := flowOverrides["plan-init"]; ok {
-				keymap.ApplyOverrides(&km, overrides)
-			}
-		}
-	}
+	keymap.ApplyTUIOverrides(cfg, "flow", "plan-init", &km)
 
 	return km
 }
