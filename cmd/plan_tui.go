@@ -147,65 +147,74 @@ func (k planListKeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
-var planListKeys = planListKeyMap{
-	Base: keymap.NewBase(),
-	Up: key.NewBinding(
-		key.WithKeys("k", "up"),
-		key.WithHelp("k/↑", "move up"),
-	),
-	Down: key.NewBinding(
-		key.WithKeys("j", "down"),
-		key.WithHelp("j/↓", "move down"),
-	),
-	ViewPlan: key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "view plan details"),
-	),
-	OpenPlan: key.NewBinding(
-		key.WithKeys("o"),
-		key.WithHelp("o", "open plan workspace"),
-	),
-	FinishPlan: key.NewBinding(
-		key.WithKeys("ctrl+x"),
-		key.WithHelp("ctrl+x", "finish plan"),
-	),
-	NewPlan: key.NewBinding(
-		key.WithKeys("n"),
-		key.WithHelp("n", "create new plan"),
-	),
-	SetActive: key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "set active plan"),
-	),
-	ReviewPlan: key.NewBinding(
-		key.WithKeys("r"),
-		key.WithHelp("r", "review changes"),
-	),
-	EditNotes: key.NewBinding(
-		key.WithKeys("e"),
-		key.WithHelp("e", "edit notes"),
-	),
-	FastForwardMain: key.NewBinding(
-		key.WithKeys("M"),
-		key.WithHelp("M", "merge to main"),
-	),
-	FastForwardUpdate: key.NewBinding(
-		key.WithKeys("U"),
-		key.WithHelp("U", "update from main"),
-	),
-	ToggleGitLog: key.NewBinding(
-		key.WithKeys("g"),
-		key.WithHelp("g", "toggle git log"),
-	),
-	ToggleHold: key.NewBinding(
-		key.WithKeys("H"),
-		key.WithHelp("H", "toggle on-hold"),
-	),
-	SetHoldStatus: key.NewBinding(
-		key.WithKeys("h"),
-		key.WithHelp("h", "hold/unhold plan"),
-	),
+func newPlanListKeyMap(cfg *config.Config) planListKeyMap {
+	km := planListKeyMap{
+		Base: keymap.Load(cfg, "flow.plan-list"),
+		Up: key.NewBinding(
+			key.WithKeys("k", "up"),
+			key.WithHelp("k/↑", "move up"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("j", "down"),
+			key.WithHelp("j/↓", "move down"),
+		),
+		ViewPlan: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "view plan details"),
+		),
+		OpenPlan: key.NewBinding(
+			key.WithKeys("o"),
+			key.WithHelp("o", "open plan workspace"),
+		),
+		FinishPlan: key.NewBinding(
+			key.WithKeys("ctrl+x"),
+			key.WithHelp("ctrl+x", "finish plan"),
+		),
+		NewPlan: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "create new plan"),
+		),
+		SetActive: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "set active plan"),
+		),
+		ReviewPlan: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "review changes"),
+		),
+		EditNotes: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "edit notes"),
+		),
+		FastForwardMain: key.NewBinding(
+			key.WithKeys("M"),
+			key.WithHelp("M", "merge to main"),
+		),
+		FastForwardUpdate: key.NewBinding(
+			key.WithKeys("U"),
+			key.WithHelp("U", "update from main"),
+		),
+		ToggleGitLog: key.NewBinding(
+			key.WithKeys("g"),
+			key.WithHelp("g", "toggle git log"),
+		),
+		ToggleHold: key.NewBinding(
+			key.WithKeys("H"),
+			key.WithHelp("H", "toggle on-hold"),
+		),
+		SetHoldStatus: key.NewBinding(
+			key.WithKeys("h"),
+			key.WithHelp("h", "hold/unhold plan"),
+		),
+	}
+	keymap.ApplyTUIOverrides(cfg, "flow", "plan-list", &km)
+	return km
 }
+
+var planListKeys = func() planListKeyMap {
+	cfg, _ := config.LoadDefault()
+	return newPlanListKeyMap(cfg)
+}()
 
 // Sections returns all keybinding sections for the plan list TUI.
 func (k planListKeyMap) Sections() []keymap.Section {

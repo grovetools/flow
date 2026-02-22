@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/components"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
@@ -19,9 +20,9 @@ type finishTUIKeyMap struct {
 	Confirm key.Binding
 }
 
-func newFinishTUIKeyMap() finishTUIKeyMap {
-	return finishTUIKeyMap{
-		Base: keymap.NewBase(),
+func newFinishTUIKeyMap(cfg *config.Config) finishTUIKeyMap {
+	km := finishTUIKeyMap{
+		Base: keymap.Load(cfg, "flow.plan-finish"),
 		Toggle: key.NewBinding(
 			key.WithKeys(" "),
 			key.WithHelp("space", "toggle selection"),
@@ -31,6 +32,8 @@ func newFinishTUIKeyMap() finishTUIKeyMap {
 			key.WithHelp("enter", "confirm and proceed"),
 		),
 	}
+	keymap.ApplyTUIOverrides(cfg, "flow", "plan-finish", &km)
+	return km
 }
 
 func (k finishTUIKeyMap) ShortHelp() []key.Binding {
@@ -88,6 +91,10 @@ func initialFinishTUIModel(planName string, items []*cleanupItem, branchIsMerged
 		}
 	}
 
+	// Load config for keybinding overrides
+	cfg, _ := config.LoadDefault()
+	keys := newFinishTUIKeyMap(cfg)
+
 	return finishTUIModel{
 		planName:       planName,
 		items:          items,
@@ -96,8 +103,8 @@ func initialFinishTUIModel(planName string, items []*cleanupItem, branchIsMerged
 		quitting:       false,
 		branchIsMerged: branchIsMerged,
 		branchExists:   branchExists,
-		keyMap:         newFinishTUIKeyMap(),
-		help:           help.New(newFinishTUIKeyMap()),
+		keyMap:         keys,
+		help:           help.New(keys),
 	}
 }
 

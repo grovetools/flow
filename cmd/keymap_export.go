@@ -11,7 +11,7 @@ func PlanListKeymapInfo() keymap.TUIInfo {
 		"flow-plan-list",
 		"flow",
 		"Plan browser and manager",
-		planListKeys,
+		newPlanListKeyMap(nil),
 	)
 }
 
@@ -41,7 +41,7 @@ func PlanInitKeymapInfo() keymap.TUIInfo {
 // PlanFinishKeymapInfo returns the keymap metadata for the flow plan finish TUI.
 // Used by the grove keys registry generator to aggregate all TUI keybindings.
 func PlanFinishKeymapInfo() keymap.TUIInfo {
-	km := newFinishTUIKeyMap()
+	km := newFinishTUIKeyMap(nil)
 	return keymap.MakeTUIInfo(
 		"flow-plan-finish",
 		"flow",
