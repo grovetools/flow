@@ -187,7 +187,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			Bindings: []key.Binding{
 				k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
 				k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
-				k.Resume, k.EditDeps, k.Archive, k.Help, k.Quit,
+				k.Resume, k.EditDeps, k.Archive, k.CopyPath, k.Help, k.Quit,
 			},
 		},
 	}

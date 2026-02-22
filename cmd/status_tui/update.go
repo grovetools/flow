@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -1159,6 +1160,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				job := m.Jobs[m.Cursor]
 				return m, editJob(job)
 			}
+
+		case key.Matches(msg, m.KeyMap.CopyPath):
+			if m.Cursor < len(m.Jobs) {
+				job := m.Jobs[m.Cursor]
+				path := job.FilePath
+				if err := clipboard.WriteAll(path); err != nil {
+					m.StatusSummary = fmt.Sprintf("Error copying path: %v", err)
+				} else {
+					m.StatusSummary = fmt.Sprintf("Copied: %s", path)
+				}
+			}
+			return m, nil
 
 		case key.Matches(msg, m.KeyMap.ViewLogs):
 			return m.openDetailPane(LogsPaneDetail)
