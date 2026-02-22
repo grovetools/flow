@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
@@ -79,8 +80,8 @@ type planInitTUIKeyMap struct {
 	Help           key.Binding
 }
 
-func newPlanInitTUIKeyMap() planInitTUIKeyMap {
-	return planInitTUIKeyMap{
+func newPlanInitTUIKeyMap(cfg *config.Config) planInitTUIKeyMap {
+	km := planInitTUIKeyMap{
 		Base: keymap.NewBase(),
 		Toggle: key.NewBinding(
 			key.WithKeys(" "),
@@ -119,6 +120,18 @@ func newPlanInitTUIKeyMap() planInitTUIKeyMap {
 			key.WithHelp("?", "show help"),
 		),
 	}
+
+	// Apply TUI-specific overrides from config
+	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
+		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
+		if flowOverrides, ok := tuiOverrides["flow"]; ok {
+			if overrides, ok := flowOverrides["plan-init"]; ok {
+				keymap.ApplyOverrides(&km, overrides)
+			}
+		}
+	}
+
+	return km
 }
 
 func (k planInitTUIKeyMap) ShortHelp() []key.Binding {
@@ -325,8 +338,9 @@ func newPlanInitTUIModel(plansDir string, initialCmd *PlanInitCmd) planInitTUIMo
 	// Start on main screen
 	m.currentScreen = MainScreen
 
-	// Initialize keymap and help
-	m.keyMap = newPlanInitTUIKeyMap()
+	// Initialize keymap and help (load config for overrides)
+	cfg, _ := config.LoadDefault()
+	m.keyMap = newPlanInitTUIKeyMap(cfg)
 	m.help = help.NewBuilder().
 		WithKeys(m.keyMap).
 		WithTitle("󰠡 Create New Plan - Help").

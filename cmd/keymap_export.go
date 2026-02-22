@@ -29,7 +29,7 @@ func PlanAddKeymapInfo() keymap.TUIInfo {
 // PlanInitKeymapInfo returns the keymap metadata for the flow plan init TUI.
 // Used by the grove keys registry generator to aggregate all TUI keybindings.
 func PlanInitKeymapInfo() keymap.TUIInfo {
-	km := newPlanInitTUIKeyMap()
+	km := newPlanInitTUIKeyMap(nil) // nil config = default keybindings
 	return keymap.MakeTUIInfo(
 		"flow-plan-init",
 		"flow",

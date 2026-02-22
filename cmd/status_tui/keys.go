@@ -148,7 +148,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 
 	// Apply TUI-specific overrides from config (uses reflection to map all bindings)
 	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
-		if flowOverrides, ok := cfg.TUI.Keybindings.Overrides["flow"]; ok {
+		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
+		if flowOverrides, ok := tuiOverrides["flow"]; ok {
 			if overrides, ok := flowOverrides["status"]; ok {
 				keymap.ApplyOverrides(&km, overrides)
 			}
