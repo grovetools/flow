@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
@@ -234,12 +235,26 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 }
 
 func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
+	// Load config for keybinding overrides
+	cfg, _ := config.LoadDefault()
+
+	// Create keymap with overrides
+	keys := addKeys
+	if cfg != nil && cfg.TUI != nil && cfg.TUI.Keybindings != nil {
+		tuiOverrides := cfg.TUI.Keybindings.GetTUIOverrides()
+		if flowOverrides, ok := tuiOverrides["flow"]; ok {
+			if overrides, ok := flowOverrides["plan-add"]; ok {
+				keymap.ApplyOverrides(&keys, overrides)
+			}
+		}
+	}
+
 	m := tuiModel{
 		plan: plan,
-		keys: addKeys,
+		keys: keys,
 		unfocused: false, // Start in insert mode (focused)
 		helpModel: help.NewBuilder().
-			WithKeys(addKeys).
+			WithKeys(keys).
 			WithTitle("󰝒 Add New Job - Help").
 			Build(),
 	}
@@ -393,32 +408,57 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if we're in a list that needs arrow keys
 		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 2 || m.focusIndex == 3)
 
-		switch msg.String() {
-		case "esc", "escape":
-			// ESC unfocuses any focused field (text inputs or lists)
-			m.unfocused = true
-			m.titleInput.Blur()
-			m.promptInput.Blur()
-			return m, nil
-		case "?":
+		// Handle configurable keybindings using key.Matches (these take precedence)
+		switch {
+		case key.Matches(msg, m.keys.Help):
 			m.helpModel.Toggle()
 			return m, nil
 
-		case "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-
-		case "q":
-			// Only quit on 'q' if not in text input
+		case key.Matches(msg, m.keys.Quit):
+			// Only quit if not in text input
 			if !inTextInput {
 				m.quitting = true
 				return m, tea.Quit
 			}
 
-		case "gg", "home":
+		case key.Matches(msg, m.keys.Submit):
+			// Save - extract values and quit (works in both normal and insert mode)
+			m.extractValues()
+			m.quitting = true
+			return m, tea.Quit
+
+		case key.Matches(msg, m.keys.Next):
+			// Tab moves to next field, preserving unfocused state if already unfocused
+			m.focusIndex++
+			if m.focusIndex > 4 {
+				m.focusIndex = 0
+			}
+			return m.updateFocus(), nil
+
+		case key.Matches(msg, m.keys.Prev):
+			// Shift+tab moves to previous field, preserving unfocused state if already unfocused
+			m.focusIndex--
+			if m.focusIndex < 0 {
+				m.focusIndex = 4
+			}
+			return m.updateFocus(), nil
+
+		case key.Matches(msg, m.keys.Toggle):
+			// Space toggles selection in dependency list
+			if m.focusIndex == 3 {
+				if selectedItem := m.depList.SelectedItem(); selectedItem != nil {
+					if depItem, ok := selectedItem.(dependencyItem); ok {
+						// Toggle selection
+						m.selectedDeps[depItem.job.ID] = !m.selectedDeps[depItem.job.ID]
+					}
+				}
+				return m, nil
+			}
+
+		case key.Matches(msg, m.keys.GoTop):
 			// Go to top (first field) - but not when typing in text input
 			if inTextInput {
-				// Let text input handle these keys
+				// Let text input handle these keys - fall through to default handling
 				break
 			}
 			if inList {
@@ -438,10 +478,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "G", "end":
+		case key.Matches(msg, m.keys.GoBottom):
 			// Go to bottom (last field) - but not when typing in text input
 			if inTextInput {
-				// Let text input handle these keys
+				// Let text input handle these keys - fall through to default handling
 				break
 			}
 			if inList {
@@ -461,7 +501,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl+u", "pgup":
+		case key.Matches(msg, m.keys.PageUp):
 			// Page up in lists
 			if inList {
 				switch m.focusIndex {
@@ -490,7 +530,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl+d", "pgdown":
+		case key.Matches(msg, m.keys.PageDown):
 			// Page down in lists
 			if inList {
 				switch m.focusIndex {
@@ -518,14 +558,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		}
 
-		case "tab":
-			// Tab moves to next field, preserving unfocused state if already unfocused
-			m.focusIndex++
-			if m.focusIndex > 4 {
-				m.focusIndex = 0
-			}
-			return m.updateFocus(), nil
+		// Handle non-configurable keys via switch on string
+		switch msg.String() {
+		case "esc", "escape":
+			// ESC unfocuses any focused field (text inputs or lists)
+			m.unfocused = true
+			m.titleInput.Blur()
+			m.promptInput.Blur()
+			return m, nil
+
+		case "ctrl+c":
+			m.quitting = true
+			return m, tea.Quit
 
 		case "down", "j":
 			// Down arrow and j navigate fields when not in a list or when unfocused, but never interrupt text input
@@ -537,14 +583,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m.updateFocus(), nil
 			}
-
-		case "shift+tab":
-			// Shift+tab moves to previous field, preserving unfocused state if already unfocused
-			m.focusIndex--
-			if m.focusIndex < 0 {
-				m.focusIndex = 4
-			}
-			return m.updateFocus(), nil
 
 		case "up", "k":
 			// Up arrow and k navigate fields when not in a list or when unfocused, but never interrupt text input
@@ -618,12 +656,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-		case "ctrl+s":
-			// Save - extract values and quit (works in both normal and insert mode)
-			m.extractValues()
-			m.quitting = true
-			return m, tea.Quit
-
 		case ":wq":
 			// Vim-style save and quit
 			m.extractValues()
@@ -678,17 +710,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case 2: // Template list
 		m.templateList, cmd = m.templateList.Update(msg)
 	case 3: // Dependency list
-		// Handle space key for toggling selection
-		if key, ok := msg.(tea.KeyMsg); ok && key.String() == " " {
-			if selectedItem := m.depList.SelectedItem(); selectedItem != nil {
-				if depItem, ok := selectedItem.(dependencyItem); ok {
-					// Toggle selection
-					m.selectedDeps[depItem.job.ID] = !m.selectedDeps[depItem.job.ID]
-				}
-			}
-		} else {
-			m.depList, cmd = m.depList.Update(msg)
-		}
+		// Toggle is handled via key.Matches above, just delegate other keys to list
+		m.depList, cmd = m.depList.Update(msg)
 	case 4: // Prompt textarea
 		m.promptInput, cmd = m.promptInput.Update(msg)
 	}
