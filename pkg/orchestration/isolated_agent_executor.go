@@ -471,12 +471,22 @@ func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 }
 
 // SendInputToIsolatedAgent sends input text to an isolated agent via tmux send-keys.
+// Uses a sequence that works in both vim mode and normal mode in claude code:
+// 1. Escape i <text> - ensures we're in insert mode (Escape is no-op in normal mode)
+// 2. C-Enter - submits the input (must be separate send-keys call)
 func SendInputToIsolatedAgent(jobID, input string) error {
 	socketName := TmuxSocketName(jobID)
 	targetPane := TmuxTargetPane(jobID)
 
 	executor := &exec.RealCommandExecutor{}
-	return executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, input, "C-m")
+
+	// First: Escape to ensure clean state, i to enter insert mode, then the text
+	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "Escape", "i", input); err != nil {
+		return err
+	}
+
+	// Second: C-Enter to submit (must be separate call)
+	return executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "C-Enter")
 }
 
 // KillIsolatedAgentServer kills the isolated tmux server for a job.

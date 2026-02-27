@@ -315,11 +315,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to send input: %v", msg.Err))
 		} else {
-			m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Sent: %s", msg.Input))
-			// Refresh the log pane to show the new output
-			if m.ActiveLogJob != nil {
-				return m, captureIsolatedAgentOutputCmd(m.ActiveLogJob.ID)
-			}
+			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Sent")
+			// Don't capture pane output - log streaming will handle updates
+			// Capturing would show the raw input prompt which is redundant
 		}
 		return m, nil
 
@@ -582,8 +580,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				m.IsolatedAgentInputActive = false
 				m.IsolatedAgentInput.Blur()
-				m.Focus = JobsPane
+				m.Focus = LogsPane
 				m.StatusSummary = ""
+				m.updateLayoutDimensions() // Recalculate after closing chat box
 				return m, nil
 			}
 			m.IsolatedAgentInput, cmd = m.IsolatedAgentInput.Update(msg)
@@ -1254,6 +1253,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Also clear isolated agent input mode
 			m.IsolatedAgentInputActive = false
 			m.IsolatedAgentInput.Blur()
+			m.updateLayoutDimensions() // Recalculate after closing chat box
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.SendInput):
@@ -1264,11 +1264,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.IsolatedAgentInput.Blur()
 					m.Focus = LogsPane
 					m.StatusSummary = ""
+					m.updateLayoutDimensions() // Recalculate after closing chat box
 				} else {
 					m.IsolatedAgentInputActive = true
 					m.IsolatedAgentInput.Focus()
 					m.Focus = InputPane
 					m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for isolated agent (Enter to send, Esc to cancel)")
+					m.updateLayoutDimensions() // Recalculate to account for chat box
 				}
 				return m, nil
 			}

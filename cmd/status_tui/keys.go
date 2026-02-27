@@ -85,8 +85,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("P", "add from recipe"),
 		),
 		Implement: key.NewBinding(
-			key.WithKeys("i"),
-			key.WithHelp("i", "implement selected"),
+			key.WithKeys("n"),
+			key.WithHelp("n", "new implementation"),
 		),
 		AgentFromChat: key.NewBinding(
 			key.WithKeys("I"),
@@ -146,8 +146,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("z", "fullscreen logs"),
 		),
 		SendInput: key.NewBinding(
-			key.WithKeys("s"),
-			key.WithHelp("s", "send input (isolated agent)"),
+			key.WithKeys("i"),
+			key.WithHelp("i", "input to agent"),
 		),
 	}
 

@@ -406,21 +406,39 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string) (string, str
 	return logView, separator
 }
 
+// renderAgentInputBox renders the chat input box for isolated agents.
+// If rightAligned is true, adds left margin to align with log pane in vertical split.
+func (m Model) renderAgentInputBox(rightAligned bool) string {
+	boxWidth := m.LogViewerWidth - 4
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Orange).
+		Padding(0, 1).
+		Width(boxWidth)
+
+	inputView := m.IsolatedAgentInput.View()
+	chatBox := boxStyle.Render(inputView)
+
+	helpText := theme.DefaultTheme.Muted.Render("  Enter: send │ Esc: close")
+
+	result := chatBox + "\n" + helpText
+
+	// Add left margin to align with log pane in vertical split
+	if rightAligned {
+		leftMargin := m.JobsPaneWidth + 3 // +3 for separator
+		marginStyle := lipgloss.NewStyle().MarginLeft(leftMargin)
+		result = marginStyle.Render(result)
+	}
+
+	return result
+}
+
 // renderFooter renders the help and status message footer.
 func (m Model) renderFooter() string {
-	// If isolated agent input is active, show the input field prominently
-	if m.IsolatedAgentInputActive {
-		inputStyle := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(theme.DefaultColors.Orange).
-			Padding(0, 1)
-
-		inputLabel := theme.DefaultTheme.Bold.Render("Send to agent: ")
-		inputView := inputStyle.Render(m.IsolatedAgentInput.View())
-		helpText := theme.DefaultTheme.Muted.Render("  (Enter: send, Esc: cancel)")
-
-		return inputLabel + inputView + helpText
-	}
 
 	helpView := m.Help.View()
 	followStatus := ""
@@ -533,39 +551,68 @@ func (m Model) View() string {
 			detailContent = addScrollbarToViewport(&m.editViewport)
 		}
 
+
 		// Check if fullscreen mode is active
 		if m.LogPaneFullscreen {
 			// Fullscreen: render only the logs pane at full width
 			logsPane, _ := m.renderLogsPane(contentWidth, detailContent)
 			contentHeight := m.Height - topMargin - bottomMargin - footerHeight
-			logsPaneStyled := lipgloss.NewStyle().Height(contentHeight).Render(logsPane)
-			finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, footer)
+			// Account for chat input box if active
+			if m.IsolatedAgentInputActive && m.ActiveDetailPane == LogsPaneDetail {
+				chatBox := m.renderAgentInputBox(false) // Not right-aligned in fullscreen
+				contentHeight -= 6                      // Height for chat box
+				logsPaneStyled := lipgloss.NewStyle().Height(contentHeight).Render(logsPane)
+				finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, chatBox, footer)
+			} else {
+				logsPaneStyled := lipgloss.NewStyle().Height(contentHeight).Render(logsPane)
+				finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, footer)
+			}
 		} else {
 			// Use the existing renderLogsPane structure but pass in the dynamic content
 			logsPane, separator := m.renderLogsPane(contentWidth, detailContent)
 			if m.LogSplitVertical {
-			// Vertical split: constrain jobs pane height
-			maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
-			if maxJobsPaneHeight < 10 {
-				maxJobsPaneHeight = 10
-			}
-			jobsPaneStyled := lipgloss.NewStyle().Width(m.JobsPaneWidth).MaxWidth(m.JobsPaneWidth).MaxHeight(maxJobsPaneHeight).Render(jobsPane)
+				// Vertical split: constrain jobs pane height
+				chatBoxHeight := 0
+				if m.IsolatedAgentInputActive && m.ActiveDetailPane == LogsPaneDetail {
+					chatBoxHeight = 5
+				}
+				maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + chatBoxHeight)
+				if maxJobsPaneHeight < 10 {
+					maxJobsPaneHeight = 10
+				}
+				jobsPaneStyled := lipgloss.NewStyle().Width(m.JobsPaneWidth).MaxWidth(m.JobsPaneWidth).MaxHeight(maxJobsPaneHeight).Render(jobsPane)
 
-			combinedPanes := lipgloss.JoinHorizontal(lipgloss.Top, jobsPaneStyled, separator, logsPane)
-			finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, "\n", footer)
-		} else {
-			// Horizontal split: account for log viewer height
-			maxJobsPaneHeight := m.Height - m.LogViewerHeight - (horizontalDividerHeight + footerHeight + topMargin + bottomMargin)
-			if maxJobsPaneHeight < 10 {
-				maxJobsPaneHeight = 10
-			}
-			jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxJobsPaneHeight).Render(jobsPane)
+				combinedPanes := lipgloss.JoinHorizontal(lipgloss.Top, jobsPaneStyled, separator, logsPane)
+				// Add chat input box if active (right-aligned to match log pane)
+				if m.IsolatedAgentInputActive && m.ActiveDetailPane == LogsPaneDetail {
+					chatBox := m.renderAgentInputBox(true) // Right-aligned in vertical split
+					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, chatBox, footer)
+				} else {
+					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, footer)
+				}
+			} else {
+				// Horizontal split: account for log viewer height
+				chatBoxHeight := 0
+				if m.IsolatedAgentInputActive && m.ActiveDetailPane == LogsPaneDetail {
+					chatBoxHeight = 6
+				}
+				maxJobsPaneHeight := m.Height - m.LogViewerHeight - (horizontalDividerHeight + footerHeight + topMargin + bottomMargin + chatBoxHeight)
+				if maxJobsPaneHeight < 10 {
+					maxJobsPaneHeight = 10
+				}
+				jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxJobsPaneHeight).Render(jobsPane)
 
-			// Push footer to bottom by setting height on combined content
-			contentHeight := m.Height - topMargin - bottomMargin - footerHeight
-			combinedContent := lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane)
-			combinedContent = lipgloss.NewStyle().Height(contentHeight).Render(combinedContent)
-			finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, footer)
+				// Push footer to bottom by setting height on combined content
+				contentHeight := m.Height - topMargin - bottomMargin - footerHeight - chatBoxHeight
+				combinedContent := lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, separator, logsPane)
+				combinedContent = lipgloss.NewStyle().Height(contentHeight).Render(combinedContent)
+				// Add chat input box if active
+				if m.IsolatedAgentInputActive && m.ActiveDetailPane == LogsPaneDetail {
+					chatBox := m.renderAgentInputBox(false) // Not right-aligned in horizontal split
+					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, chatBox, footer)
+				} else {
+					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, footer)
+				}
 			}
 		}
 	} else {
@@ -735,19 +782,25 @@ func (m *Model) updateLayoutDimensions() {
 	}
 
 	if m.ShowLogs {
+		// Account for chat input box if active (4 lines for vertical split)
+		chatInputHeight := 0
+		if m.IsolatedAgentInputActive {
+			chatInputHeight = 5
+		}
+
 		if m.LogPaneFullscreen {
 			// Fullscreen: use full terminal dimensions minus margins
 			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
-			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
+			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin + chatInputHeight)
 		} else if m.LogSplitVertical {
 			// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
 			// So the content width is LogViewerWidth - 2
 			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2
-			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin)
+			m.LogViewerHeight = m.Height - (headerHeight + footerHeight + topMargin + chatInputHeight)
 		} else {
 			// In horizontal split, only PaddingLeft(1) is applied
 			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
-			m.LogViewerHeight = m.calculateOptimalLogHeight()
+			m.LogViewerHeight = m.calculateOptimalLogHeight() - chatInputHeight
 		}
 
 		// Ensure minimum dimensions
