@@ -579,16 +579,17 @@ func (m Model) View() string {
 		}
 
 
-		// Determine if chat input should be visible based on job type
-		// For isolated_agent and interactive_agent jobs, always show the chat input when logs pane is open
+		// Determine if chat input should be visible based on job type and status
+		// For isolated_agent and interactive_agent jobs, show the chat input when logs pane is open
+		// but NOT for completed jobs (no point sending input to a finished agent)
 		isAgentWithInput := m.ActiveLogJob != nil &&
 			(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 				m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
-		showChatInput := isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail
+		jobIsCompleted := m.ActiveLogJob != nil && m.ActiveLogJob.Status == orchestration.JobStatusCompleted
+		showChatInput := isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail && !jobIsCompleted
 
-		// Calculate chatBoxHeight once, used for both renderLogsPane and layout calculations
-		// Also account for status bar height when present
-		showStatusBar := m.CurrentAgentStatus != nil && isAgentWithInput
+		// Calculate chatBoxHeight based on what's actually shown
+		showStatusBar := m.CurrentAgentStatus != nil && isAgentWithInput && !jobIsCompleted
 		chatBoxHeight := 0
 		if showChatInput {
 			chatBoxHeight = 3
@@ -840,13 +841,13 @@ func (m *Model) updateLayoutDimensions() {
 	}
 
 	if m.ShowLogs {
-		// Determine if chat input should be visible based on job type
-		// For isolated_agent and interactive_agent jobs, always show the chat input when logs pane is open
+		// Calculate chat input height based on what's actually shown
 		isAgentWithInput := m.ActiveLogJob != nil &&
 			(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 				m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
+		jobIsCompleted := m.ActiveLogJob != nil && m.ActiveLogJob.Status == orchestration.JobStatusCompleted
 		chatInputHeight := 0
-		if isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail {
+		if isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail && !jobIsCompleted {
 			chatInputHeight = 3
 			// Add height for status bar if it's visible (no border, just content)
 			if m.CurrentAgentStatus != nil {

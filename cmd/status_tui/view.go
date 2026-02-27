@@ -1372,7 +1372,7 @@ func (m Model) renderAgentStatusBar(width int) string {
 		return fmt.Sprintf("%d tokens", tokens)
 	}
 
-	// Helper to render progress bar
+	// Helper to render progress bar (using small squares for consistent width)
 	renderProgressBar := func(current, max int) string {
 		ratio := float64(current) / float64(max)
 		if ratio > 1.0 {
@@ -1383,7 +1383,7 @@ func (m Model) renderAgentStatusBar(width int) string {
 		}
 		filled := int(ratio * float64(progressBarWidth))
 		empty := progressBarWidth - filled
-		bar := strings.Repeat("▓", filled) + strings.Repeat("░", empty)
+		bar := strings.Repeat("▪", filled) + strings.Repeat("▫", empty)
 		return theme.DefaultTheme.Muted.Render("[" + bar + "]")
 	}
 
@@ -1418,11 +1418,9 @@ func (m Model) renderAgentStatusBar(width int) string {
 	}
 
 	// Calculate widths for proper alignment
-	// Match the input box width: input box has boxWidth=width-4 + padding(2) + border(2) = width
-	// Status bar has PaddingLeft(2), so content should be width-2 to total width
 	leftWidth := lipgloss.Width(leftSection)
 	rightWidth := lipgloss.Width(rightSection)
-	availableWidth := width - 2 // Account for PaddingLeft(2) added at the end
+	availableWidth := width - 4 // Account for padding
 
 	// Build the status line with right-justified right section
 	if leftSection != "" && rightSection != "" {
