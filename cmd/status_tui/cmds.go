@@ -232,7 +232,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 					}).Info("Fast path: successfully read job logs from job.log")
 
 					contentStr := string(content)
-					shouldStream := job.Status == orchestration.JobStatusRunning
+					shouldStream := job.Status == orchestration.JobStatusRunning || job.Status == orchestration.JobStatusIdle
 
 					if shouldStream {
 						// Add a separator before the live stream
@@ -297,19 +297,22 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 
 		// For agent jobs, if status is pending but we're in the TUI (indicated by being called
 		// from runJobsWithOrchestrator), the job is about to start. Treat it like a running job.
+		// Idle status also indicates an agent waiting for input - still needs streaming.
 		isPending := job.Status == orchestration.JobStatusPending
 		isRunning := job.Status == orchestration.JobStatusRunning
-		isAgentJob := job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeInteractiveAgent
+		isIdle := job.Status == orchestration.JobStatusIdle
+		isAgentJob := job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeIsolatedAgent
 
 		logger.WithFields(map[string]interface{}{
 			"job_id":       job.ID,
 			"is_pending":   isPending,
 			"is_running":   isRunning,
+			"is_idle":      isIdle,
 			"is_agent_job": isAgentJob,
-			"will_stream":  isRunning || (isPending && isAgentJob),
+			"will_stream":  isRunning || isIdle || (isPending && isAgentJob),
 		}).Info("Checking if job should use streaming fallback")
 
-		if isRunning || (isPending && isAgentJob) {
+		if isRunning || isIdle || (isPending && isAgentJob) {
 			// Try to get session ID from session registry for aglogs
 			var logSpec string = jobSpec
 			if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {

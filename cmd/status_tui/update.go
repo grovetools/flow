@@ -178,7 +178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if currentJob != nil {
-				isAgentJob := currentJob.Type == orchestration.JobTypeInteractiveAgent || currentJob.Type == orchestration.JobTypeHeadlessAgent
+				isAgentJob := currentJob.Type == orchestration.JobTypeInteractiveAgent || currentJob.Type == orchestration.JobTypeHeadlessAgent || currentJob.Type == orchestration.JobTypeIsolatedAgent
 
 				logger.WithFields(map[string]interface{}{
 					"job_id":       currentJob.ID,
@@ -1419,9 +1419,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmds []tea.Cmd
 				cmds = append(cmds, runCmd)
 
-				// Check if any of the jobs being run are interactive agents
+				// Check if any of the jobs being run are agent jobs
 				for _, job := range jobsToRun {
-					isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+					isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
 
 					logger.WithFields(map[string]interface{}{
 						"job_id":       job.ID,
@@ -1759,7 +1759,7 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	// Trigger the actual content loading
 	switch m.ActiveDetailPane {
 	case LogsPaneDetail:
-		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
 		if isAgentJob {
 			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
 		}
@@ -1804,7 +1804,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// Trigger content loading for the active pane
 	switch pane {
 	case LogsPaneDetail:
-		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent
+		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading logs for %s...", job.Title))
 		if isAgentJob {
 			return m, loadAndStreamAgentLogsCmd(m.Plan, job)

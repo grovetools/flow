@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/fatih/color"
 	grovelogging "github.com/grovetools/core/logging"
@@ -73,6 +74,39 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 		// Still need to clean up associated resources (Claude process, tmux window)
 	}
 
+	// For isolated agents, kill the agent FIRST before updating status.
+	// The agent holds a lock on the job file, so we must terminate it first.
+	if job.Type == orchestration.JobTypeIsolatedAgent && !alreadyCompleted {
+		if !silent {
+			fmt.Println("Cleaning up isolated agent tmux server...")
+		}
+
+		if err := orchestration.KillIsolatedAgentServer(job.ID); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not kill isolated tmux server (it may already be closed): %v\n", err)
+			}
+		} else if !silent {
+			fmt.Println("  * Isolated tmux server terminated.")
+		}
+
+		// Also try to kill the agent process via session metadata
+		if err := killAgentSession(job.ID); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not kill agent session: %v\n", err)
+			}
+		} else if !silent {
+			fmt.Println("  * Agent process killed.")
+		}
+
+		// Give the process a moment to terminate, then remove the stale lock file
+		time.Sleep(200 * time.Millisecond)
+		if err := orchestration.RemoveLockFile(job.FilePath); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not remove lock file: %v\n", err)
+			}
+		}
+	}
+
 	// Update status (skip if already completed)
 	oldStatus := job.Status
 	if !alreadyCompleted {
@@ -112,30 +146,6 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 			} else if !silent {
 				fmt.Println(color.GreenString("*") + " Appended session transcript.")
 			}
-		}
-	}
-
-	// If this was an isolated agent, kill its dedicated tmux server
-	if job.Type == orchestration.JobTypeIsolatedAgent {
-		if !silent {
-			fmt.Println("Cleaning up isolated agent tmux server...")
-		}
-
-		if err := orchestration.KillIsolatedAgentServer(job.ID); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not kill isolated tmux server (it may already be closed): %v\n", err)
-			}
-		} else if !silent {
-			fmt.Println("  * Isolated tmux server terminated.")
-		}
-
-		// Also try to kill the agent process via session metadata
-		if err := killAgentSession(job.ID); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not kill agent session: %v\n", err)
-			}
-		} else if !silent {
-			fmt.Println("  * Agent process killed.")
 		}
 	}
 
