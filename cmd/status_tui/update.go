@@ -43,6 +43,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Reset markdown state for fresh log loading
+		m.MarkdownInCodeBlock = false
+
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
 			"has_error":       msg.Err != nil,
@@ -60,6 +63,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			content := msg.Content
 			if strings.HasPrefix(content, "No logs found") {
 				content = theme.DefaultTheme.Muted.Render(content)
+			} else if m.ActiveLogJob != nil {
+				// Apply markdown styling for agent job types
+				isAgentJob := m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent ||
+					m.ActiveLogJob.Type == orchestration.JobTypeHeadlessAgent ||
+					m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent
+				if isAgentJob {
+					content = renderStyledMarkdown(content)
+				}
 			}
 			m.LogViewer.SetContent(content)
 		}
@@ -540,6 +551,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Delegate log messages to the log viewer only if the message
 		// belongs to the currently active job being viewed.
 		if m.ShowLogs && m.ActiveLogJob != nil && msg.Workspace == m.ActiveLogJob.ID {
+			// Apply markdown styling for agent job types
+			isAgentJob := m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent ||
+				m.ActiveLogJob.Type == orchestration.JobTypeHeadlessAgent ||
+				m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent
+			if isAgentJob {
+				msg.Line = styleStreamingLogLine(msg.Line, &m.MarkdownInCodeBlock)
+			}
 			m.LogViewer, cmd = m.LogViewer.Update(msg)
 			return m, cmd
 		}
@@ -578,11 +596,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, sendIsolatedAgentInputCmd(m.ActiveLogJob.ID, input)
 				}
 			case "esc":
+				// Unfocus the input but keep it visible (for isolated agents, it's always visible)
 				m.IsolatedAgentInputActive = false
 				m.IsolatedAgentInput.Blur()
 				m.Focus = LogsPane
 				m.StatusSummary = ""
-				m.updateLayoutDimensions() // Recalculate after closing chat box
+				// Don't call updateLayoutDimensions - the chat box visibility is based on job type, not focus
 				return m, nil
 			}
 			m.IsolatedAgentInput, cmd = m.IsolatedAgentInput.Update(msg)
@@ -971,6 +990,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let 'V' be handled by the main logic to toggle layout.
 			case "z":
 				// Let 'z' be handled by the main logic to toggle fullscreen.
+			case "i", "s":
+				// Let 'i' and 's' (SendInput) be handled by main logic to focus isolated agent input.
 			case "esc":
 				// 'esc' closes the detail pane (handled by main logic below)
 			case "g":
@@ -1253,25 +1274,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Also clear isolated agent input mode
 			m.IsolatedAgentInputActive = false
 			m.IsolatedAgentInput.Blur()
-			m.updateLayoutDimensions() // Recalculate after closing chat box
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.SendInput):
-			// Toggle isolated agent input mode when viewing an isolated agent job
+			// Focus the chat input when viewing an isolated agent job
+			// The 'i' key focuses the input - it doesn't toggle visibility since chat is always shown for isolated agents
 			if m.ActiveLogJob != nil && m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent {
-				if m.IsolatedAgentInputActive {
-					m.IsolatedAgentInputActive = false
-					m.IsolatedAgentInput.Blur()
-					m.Focus = LogsPane
-					m.StatusSummary = ""
-					m.updateLayoutDimensions() // Recalculate after closing chat box
-				} else {
-					m.IsolatedAgentInputActive = true
-					m.IsolatedAgentInput.Focus()
-					m.Focus = InputPane
-					m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for isolated agent (Enter to send, Esc to cancel)")
-					m.updateLayoutDimensions() // Recalculate to account for chat box
+				// Ensure logs pane is open and focused
+				if m.ActiveDetailPane != LogsPaneDetail {
+					// Switch to logs pane
+					m.ActiveDetailPane = LogsPaneDetail
+					m.ShowLogs = true
 				}
+				// Focus the input
+				m.IsolatedAgentInputActive = true
+				m.IsolatedAgentInput.Focus()
+				m.Focus = InputPane
+				m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for isolated agent (Enter to send, Esc to cancel)")
 				return m, nil
 			}
 			// Not an isolated agent job - show helpful message
@@ -1745,6 +1764,9 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 
 	job := m.Jobs[m.Cursor]
 	m.ActiveLogJob = job
+
+	// Recalculate layout dimensions since chat input visibility depends on job type
+	m.updateLayoutDimensions()
 
 	// Clear the current content immediately to avoid showing stale data
 	switch m.ActiveDetailPane {

@@ -703,7 +703,7 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 				for _, e := range execErrors {
 					errStrings = append(errStrings, e.Error())
 				}
-				program.Send(JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf(strings.Join(errStrings, "\n"))})
+				program.Send(JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf("%s", strings.Join(errStrings, "\n"))})
 			} else {
 				logger.Info("All jobs completed successfully")
 				program.Send(JobRunFinishedMsg{Jobs: jobs, Err: nil})

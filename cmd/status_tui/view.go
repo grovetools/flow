@@ -940,28 +940,45 @@ func renderProperty(builder *strings.Builder, k string, v interface{}, keyStyle,
 
 // renderStyledMarkdown applies basic syntax highlighting to markdown content.
 func renderStyledMarkdown(rawContent string) string {
-	// Find frontmatter boundaries
-	if !strings.HasPrefix(rawContent, "---\n") {
-		return rawContent
+	var styledFrontmatter string
+	bodyBlock := rawContent
+
+	// Check for frontmatter and extract it if present
+	if strings.HasPrefix(rawContent, "---\n") {
+		secondSeparator := strings.Index(rawContent[4:], "\n---\n")
+		if secondSeparator != -1 {
+			frontmatterEnd := 4 + secondSeparator + 5
+			frontmatterBlock := rawContent[:frontmatterEnd]
+			bodyBlock = rawContent[frontmatterEnd:]
+			styledFrontmatter = theme.DefaultTheme.Muted.Italic(true).Render(frontmatterBlock)
+		}
 	}
-
-	secondSeparator := strings.Index(rawContent[4:], "\n---\n")
-	if secondSeparator == -1 {
-		return rawContent
-	}
-
-	frontmatterEnd := 4 + secondSeparator + 5
-	frontmatterBlock := rawContent[:frontmatterEnd]
-	bodyBlock := rawContent[frontmatterEnd:]
-
-	styledFrontmatter := theme.DefaultTheme.Muted.Italic(true).Render(frontmatterBlock)
 
 	var bodyBuilder strings.Builder
 	h1Style := theme.DefaultTheme.Header.Copy().Bold(true).Foreground(theme.DefaultColors.Cyan)
 	h2Style := theme.DefaultTheme.Header.Copy().Foreground(theme.DefaultColors.Blue)
 	h3Style := theme.DefaultTheme.Header.Copy().Foreground(theme.DefaultColors.Violet)
+	codeBlockStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Green)
+	bulletStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Orange).Bold(true)
 
-	for _, line := range strings.Split(bodyBlock, "\n") {
+	inCodeBlock := false
+	lines := strings.Split(bodyBlock, "\n")
+
+	for _, line := range lines {
+		// Handle fenced code blocks
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inCodeBlock = !inCodeBlock
+			bodyBuilder.WriteString(codeBlockStyle.Render(line) + "\n")
+			continue
+		}
+
+		if inCodeBlock {
+			// Inside code block - render with code style
+			bodyBuilder.WriteString(codeBlockStyle.Render(line) + "\n")
+			continue
+		}
+
+		// Handle headers
 		if strings.HasPrefix(line, "### ") {
 			bodyBuilder.WriteString(h3Style.Render(line) + "\n")
 		} else if strings.HasPrefix(line, "## ") {
@@ -969,19 +986,73 @@ func renderStyledMarkdown(rawContent string) string {
 		} else if strings.HasPrefix(line, "# ") {
 			bodyBuilder.WriteString(h1Style.Render(line) + "\n")
 		} else {
-			styledLine := styleInlineMarkdown(line)
-			bodyBuilder.WriteString(styledLine + "\n")
+			// Handle list bullets
+			trimmed := strings.TrimLeft(line, " \t")
+			if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+				// Find the leading whitespace
+				indent := line[:len(line)-len(trimmed)]
+				bullet := trimmed[:2]
+				rest := trimmed[2:]
+				styledRest := styleInlineMarkdown(rest)
+				bodyBuilder.WriteString(indent + bulletStyle.Render(bullet) + styledRest + "\n")
+			} else if len(trimmed) > 0 && trimmed[0] >= '0' && trimmed[0] <= '9' {
+				// Check for numbered lists (e.g., "1. ")
+				dotIdx := strings.Index(trimmed, ". ")
+				if dotIdx > 0 && dotIdx <= 3 {
+					indent := line[:len(line)-len(trimmed)]
+					bullet := trimmed[:dotIdx+2]
+					rest := trimmed[dotIdx+2:]
+					styledRest := styleInlineMarkdown(rest)
+					bodyBuilder.WriteString(indent + bulletStyle.Render(bullet) + styledRest + "\n")
+				} else {
+					styledLine := styleInlineMarkdown(line)
+					bodyBuilder.WriteString(styledLine + "\n")
+				}
+			} else {
+				styledLine := styleInlineMarkdown(line)
+				bodyBuilder.WriteString(styledLine + "\n")
+			}
 		}
 	}
 
 	return styledFrontmatter + bodyBuilder.String()
 }
 
-// styleInlineMarkdown applies styling for bold and italic markdown syntax.
+// styleInlineMarkdown applies styling for bold, italic, and inline code markdown syntax.
 func styleInlineMarkdown(line string) string {
 	boldStyle := lipgloss.NewStyle().Bold(true)
 	italicStyle := lipgloss.NewStyle().Italic(true)
+	codeStyle := lipgloss.NewStyle().
+		Background(theme.DefaultColors.SubtleBackground).
+		Foreground(theme.DefaultColors.Cyan)
 	result := line
+
+	// Handle inline `code` first (before other styling to prevent interference)
+	for {
+		start := strings.Index(result, "`")
+		if start == -1 {
+			break
+		}
+		// Skip if this is part of a code fence (```)
+		if start+2 < len(result) && result[start:start+3] == "```" {
+			// Skip the triple backticks
+			result = result[:start] + "\x00\x00\x00" + result[start+3:] // Placeholder
+			continue
+		}
+		end := strings.Index(result[start+1:], "`")
+		if end == -1 {
+			break
+		}
+		end += start + 1
+		// Skip if end is part of a code fence
+		if end+2 < len(result) && result[end:end+3] == "```" {
+			break
+		}
+		codeContent := result[start+1 : end]
+		result = result[:start] + codeStyle.Render(codeContent) + result[end+1:]
+	}
+	// Restore triple backticks
+	result = strings.ReplaceAll(result, "\x00\x00\x00", "```")
 
 	// Handle **bold**
 	for {
@@ -1056,6 +1127,57 @@ func styleInlineMarkdown(line string) string {
 	}
 
 	return result
+}
+
+// styleStreamingLogLine applies markdown styling to a single log line during streaming.
+// It takes a pointer to the inCodeBlock state to track fenced code blocks across lines.
+func styleStreamingLogLine(line string, inCodeBlock *bool) string {
+	h1Style := theme.DefaultTheme.Header.Copy().Bold(true).Foreground(theme.DefaultColors.Cyan)
+	h2Style := theme.DefaultTheme.Header.Copy().Foreground(theme.DefaultColors.Blue)
+	h3Style := theme.DefaultTheme.Header.Copy().Foreground(theme.DefaultColors.Violet)
+	codeBlockStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Green)
+	bulletStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Orange).Bold(true)
+
+	// Handle fenced code blocks
+	if strings.HasPrefix(strings.TrimSpace(line), "```") {
+		*inCodeBlock = !*inCodeBlock
+		return codeBlockStyle.Render(line)
+	}
+
+	if *inCodeBlock {
+		return codeBlockStyle.Render(line)
+	}
+
+	// Handle headers
+	if strings.HasPrefix(line, "### ") {
+		return h3Style.Render(line)
+	} else if strings.HasPrefix(line, "## ") {
+		return h2Style.Render(line)
+	} else if strings.HasPrefix(line, "# ") {
+		return h1Style.Render(line)
+	}
+
+	// Handle list bullets
+	trimmed := strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+		indent := line[:len(line)-len(trimmed)]
+		bullet := trimmed[:2]
+		rest := trimmed[2:]
+		styledRest := styleInlineMarkdown(rest)
+		return indent + bulletStyle.Render(bullet) + styledRest
+	} else if len(trimmed) > 0 && trimmed[0] >= '0' && trimmed[0] <= '9' {
+		// Check for numbered lists
+		dotIdx := strings.Index(trimmed, ". ")
+		if dotIdx > 0 && dotIdx <= 3 {
+			indent := line[:len(line)-len(trimmed)]
+			bullet := trimmed[:dotIdx+2]
+			rest := trimmed[dotIdx+2:]
+			styledRest := styleInlineMarkdown(rest)
+			return indent + bulletStyle.Render(bullet) + styledRest
+		}
+	}
+
+	return styleInlineMarkdown(line)
 }
 
 // renderStyledBriefing applies syntax highlighting to XML briefing content.
