@@ -978,6 +978,9 @@ func renderStyledMarkdown(rawContent string) string {
 			continue
 		}
 
+		// Replace Claude todo list markers with themed icons
+		line = styleTodoMarkers(line)
+
 		// Handle headers
 		if strings.HasPrefix(line, "### ") {
 			bodyBuilder.WriteString(h3Style.Render(line) + "\n")
@@ -1148,6 +1151,9 @@ func styleStreamingLogLine(line string, inCodeBlock *bool) string {
 		return codeBlockStyle.Render(line)
 	}
 
+	// Replace Claude todo list markers with themed icons
+	line = styleTodoMarkers(line)
+
 	// Handle headers
 	if strings.HasPrefix(line, "### ") {
 		return h3Style.Render(line)
@@ -1178,6 +1184,36 @@ func styleStreamingLogLine(line string, inCodeBlock *bool) string {
 	}
 
 	return styleInlineMarkdown(line)
+}
+
+// styleTodoMarkers replaces Claude's todo list markers with themed icons
+// [*] -> completed (green checkmark)
+// [→] -> in progress (running icon)
+// [ ] -> pending (empty checkbox)
+// ☒ -> completed
+// ☐ -> pending
+func styleTodoMarkers(line string) string {
+	// Replace [*] with completed icon (green)
+	if strings.Contains(line, "[*]") {
+		line = strings.Replace(line, "[*]", theme.DefaultTheme.Success.Render(theme.IconStatusCompleted), -1)
+	}
+	// Replace [→] with in-progress icon (cyan/info)
+	if strings.Contains(line, "[→]") {
+		line = strings.Replace(line, "[→]", theme.DefaultTheme.Info.Render(theme.IconStatusRunning), -1)
+	}
+	// Replace [ ] with pending icon (muted)
+	if strings.Contains(line, "[ ]") {
+		line = strings.Replace(line, "[ ]", theme.DefaultTheme.Muted.Render(theme.IconStatusTodo), -1)
+	}
+	// Replace ☒ with completed icon (green)
+	if strings.Contains(line, "☒") {
+		line = strings.Replace(line, "☒", theme.DefaultTheme.Success.Render(theme.IconStatusCompleted), -1)
+	}
+	// Replace ☐ with pending icon (muted)
+	if strings.Contains(line, "☐") {
+		line = strings.Replace(line, "☐", theme.DefaultTheme.Muted.Render(theme.IconStatusTodo), -1)
+	}
+	return line
 }
 
 // renderStyledBriefing applies syntax highlighting to XML briefing content.
@@ -1305,6 +1341,132 @@ func styleXMLTag(tag string, tagStyle, attrNameStyle, attrValueStyle, dimStyle l
 	result.WriteString(dimStyle.Render(">"))
 
 	return result.String()
+}
+
+// renderAgentStatusBar renders a status bar showing Claude session metadata.
+// Returns an empty string if there's no status to show.
+// Renders without a bounding box, like Claude Code's status line.
+// Format: · Calculating… (1s · ↑ 0 tokens)                            ○ idle · 58.5k tokens [▓▓▓░░░░░░░]
+func (m Model) renderAgentStatusBar(width int) string {
+	if m.CurrentAgentStatus == nil {
+		return ""
+	}
+
+	status := m.CurrentAgentStatus
+
+	var lines []string
+
+	// Build left section (activity/status) and right section (state + tokens + progress bar)
+	var leftSection string
+	var rightSection string
+
+	// Token progress bar constants
+	const maxTokens = 185000
+	const progressBarWidth = 10
+
+	// Helper to format token count
+	formatTokens := func(tokens int) string {
+		if tokens >= 1000 {
+			return fmt.Sprintf("%.1fk tokens", float64(tokens)/1000)
+		}
+		return fmt.Sprintf("%d tokens", tokens)
+	}
+
+	// Helper to render progress bar
+	renderProgressBar := func(current, max int) string {
+		ratio := float64(current) / float64(max)
+		if ratio > 1.0 {
+			ratio = 1.0
+		}
+		if ratio < 0 {
+			ratio = 0
+		}
+		filled := int(ratio * float64(progressBarWidth))
+		empty := progressBarWidth - filled
+		bar := strings.Repeat("▓", filled) + strings.Repeat("░", empty)
+		return theme.DefaultTheme.Muted.Render("[" + bar + "]")
+	}
+
+	if status.State == "running" && status.RawLine != "" {
+		// When running, left section shows the raw status line from Claude
+		leftSection = status.RawLine
+		// Right section shows state and total tokens with progress bar
+		rightParts := []string{
+			theme.DefaultTheme.Info.Render("● running"),
+		}
+		if status.TotalTokens > 0 {
+			rightParts = append(rightParts, theme.DefaultTheme.Muted.Render(formatTokens(status.TotalTokens)))
+			rightParts = append(rightParts, renderProgressBar(status.TotalTokens, maxTokens))
+		}
+		rightSection = strings.Join(rightParts, " · ")
+	} else if status.State == "idle" {
+		// When idle, left section is empty or minimal
+		leftSection = ""
+		// Right section shows idle state, total tokens, and progress bar
+		rightParts := []string{
+			theme.DefaultTheme.Muted.Render("○ idle"),
+		}
+		if status.TotalTokens > 0 {
+			rightParts = append(rightParts, theme.DefaultTheme.Muted.Render(formatTokens(status.TotalTokens)))
+			rightParts = append(rightParts, renderProgressBar(status.TotalTokens, maxTokens))
+		}
+		rightSection = strings.Join(rightParts, " · ")
+	} else {
+		// Fallback
+		leftSection = theme.DefaultTheme.Muted.Render("...")
+		rightSection = ""
+	}
+
+	// Calculate widths for proper alignment
+	// Match the input box width: input box has boxWidth=width-4 + padding(2) + border(2) = width
+	// Status bar has PaddingLeft(2), so content should be width-2 to total width
+	leftWidth := lipgloss.Width(leftSection)
+	rightWidth := lipgloss.Width(rightSection)
+	availableWidth := width - 2 // Account for PaddingLeft(2) added at the end
+
+	// Build the status line with right-justified right section
+	if leftSection != "" && rightSection != "" {
+		// Both sections present
+		gap := availableWidth - leftWidth - rightWidth
+		if gap < 1 {
+			gap = 1
+		}
+		statusLine := leftSection + strings.Repeat(" ", gap) + rightSection
+		lines = append(lines, statusLine)
+	} else if rightSection != "" {
+		// Only right section (e.g., idle state)
+		gap := availableWidth - rightWidth
+		if gap < 0 {
+			gap = 0
+		}
+		statusLine := strings.Repeat(" ", gap) + rightSection
+		lines = append(lines, statusLine)
+	} else {
+		// Only left section
+		lines = append(lines, leftSection)
+	}
+
+	// Add todo items if present
+	if len(status.TodoItems) > 0 {
+		for _, todo := range status.TodoItems {
+			var icon string
+			var style lipgloss.Style
+			if todo.Completed {
+				icon = theme.IconStatusCompleted
+				style = theme.DefaultTheme.Success
+			} else {
+				icon = theme.IconStatusTodo
+				style = theme.DefaultTheme.Muted
+			}
+			todoLine := fmt.Sprintf("  %s %s", style.Render(icon), todo.Text)
+			lines = append(lines, todoLine)
+		}
+	}
+
+	content := strings.Join(lines, "\n")
+
+	// No bounding box - just return the content with minimal left padding to align with chat input
+	return lipgloss.NewStyle().PaddingLeft(2).Render(content)
 }
 
 // styleAttributes styles XML attributes in the form name="value".

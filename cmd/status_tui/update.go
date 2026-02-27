@@ -48,7 +48,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.MarkdownInCodeBlock = false
 
 		logger := logging.NewLogger("flow-tui")
+		activeJobID := ""
+		if m.ActiveLogJob != nil {
+			activeJobID = m.ActiveLogJob.ID
+		}
 		logger.WithFields(map[string]interface{}{
+			"msg_job_id":      msg.JobID,
+			"active_job_id":   activeJobID,
 			"has_error":       msg.Err != nil,
 			"should_retry":    msg.ShouldRetry,
 			"start_streaming": msg.StartStreaming,
@@ -56,6 +62,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"show_logs":       m.ShowLogs,
 			"active_log_job":  m.ActiveLogJob != nil,
 		}).Info("Received LogContentLoadedMsg")
+
+		// Discard messages for jobs we're not currently viewing
+		if m.ActiveLogJob == nil || (msg.JobID != "" && msg.JobID != m.ActiveLogJob.ID) {
+			logger.WithFields(map[string]interface{}{
+				"msg_job_id":    msg.JobID,
+				"active_job_id": activeJobID,
+			}).Debug("Discarding LogContentLoadedMsg for different/stale job")
+			return m, nil
+		}
 
 		if msg.Err != nil {
 			m.LogViewer.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error loading logs: %v", msg.Err)))
@@ -105,6 +120,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StreamingJobID = m.ActiveLogJob.ID
 
 				cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
+
+				// Start status polling for agent jobs that support it
+				isAgentWithStatus := m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
+					m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent
+				if isAgentWithStatus {
+					cmds = append(cmds, func() tea.Msg { return PollAgentStatusMsg{} })
+				}
 			} else {
 				logger.WithFields(map[string]interface{}{
 					"job_id": m.ActiveLogJob.ID,
@@ -186,6 +208,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
 				m.editViewport.SetContent(wrappedContent)
 			}
+		}
+		return m, nil
+
+	case PollAgentStatusMsg:
+		// Only poll if we're showing logs for an agent job
+		if m.ShowLogs && m.ActiveDetailPane == LogsPaneDetail && m.ActiveLogJob != nil {
+			isAgentJob := m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
+				m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent
+			if isAgentJob {
+				return m, fetchAgentStatusCmd(m.Plan, m.ActiveLogJob)
+			}
+		}
+		return m, nil
+
+	case AgentStatusMsg:
+		// Discard if this is for a different job
+		if m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID {
+			return m, nil
+		}
+
+		// Update status with anti-flicker debounce for idle state
+		// Requires two consecutive "idle" polls before showing idle (prevents flicker between turns)
+		if msg.Err == nil && msg.Status != nil {
+			if msg.Status.State == "running" {
+				// Running state: update immediately, reset idle confirmation
+				m.PendingIdleConfirmation = false
+				m.CurrentAgentStatus = msg.Status
+				m.updateLayoutDimensions()
+			} else if msg.Status.State == "idle" {
+				// Idle state: require two consecutive polls to confirm
+				if m.PendingIdleConfirmation {
+					// Second consecutive idle - confirmed, show idle state
+					m.CurrentAgentStatus = msg.Status
+					m.updateLayoutDimensions()
+				} else {
+					// First idle after running - mark as pending, don't update yet
+					m.PendingIdleConfirmation = true
+					// Keep showing previous status (running) until confirmed
+				}
+			} else {
+				// Unknown state - update anyway
+				m.PendingIdleConfirmation = false
+				m.CurrentAgentStatus = msg.Status
+				m.updateLayoutDimensions()
+			}
+		}
+
+		// Continue polling if we're still showing this agent job
+		if m.ShowLogs && m.ActiveDetailPane == LogsPaneDetail {
+			return m, pollAgentStatusAfterDelay()
 		}
 		return m, nil
 
@@ -348,6 +420,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Sent")
 			// Don't capture pane output - log streaming will handle updates
 			// Capturing would show the raw input prompt which is redundant
+		}
+		return m, nil
+
+	case InterruptAgentMsg:
+		// Handle response from interrupting an agent
+		if msg.Err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to interrupt: %v", msg.Err))
+		} else {
+			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Interrupt sent (Ctrl+C)")
 		}
 		return m, nil
 
@@ -1288,6 +1369,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Focus = JobsPane
 				m.ActiveLogJob = nil
 				m.ActiveDetailPane = NoPane
+				m.CurrentAgentStatus = nil // Clear agent status when closing pane
 				m.StatusSummary = ""
 				return m, nil
 			}
@@ -1296,11 +1378,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// For agent jobs (isolated_agent, interactive_agent), Esc should only blur
 			// the input (handled above), not close the detail pane. Users can close
 			// with 'v' (CycleDetailPane) instead.
+			// However, double-Esc (two Esc presses within 500ms) will interrupt the agent.
 			isAgentJob := m.ActiveLogJob != nil &&
 				(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 					m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
 			if isAgentJob {
-				// Absorb the Esc keypress without closing the detail pane
+				now := time.Now()
+				doubleEscThreshold := 500 * time.Millisecond
+
+				// Check if this is a double-Esc (within threshold of last Esc press)
+				if !m.LastEscPress.IsZero() && now.Sub(m.LastEscPress) < doubleEscThreshold {
+					// Double-Esc detected - interrupt the agent if it's running
+					if m.CurrentAgentStatus != nil && m.CurrentAgentStatus.State == "running" {
+						m.StatusSummary = theme.DefaultTheme.Warning.Render("Interrupting agent...")
+						m.LastEscPress = time.Time{} // Reset to prevent triple-Esc triggering again
+						return m, interruptAgentCmd(m.Plan, m.ActiveLogJob)
+					}
+					// Agent not running, reset and show message
+					m.LastEscPress = time.Time{}
+					m.StatusSummary = theme.DefaultTheme.Muted.Render("Agent not running - nothing to interrupt")
+					return m, nil
+				}
+
+				// First Esc press - record time and show hint
+				m.LastEscPress = now
+				m.StatusSummary = theme.DefaultTheme.Muted.Render("Press Esc again to interrupt agent")
 				return m, nil
 			}
 			m.LogViewer.Stop()
@@ -1314,6 +1416,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Focus = JobsPane
 			m.ActiveLogJob = nil
 			m.ActiveDetailPane = NoPane
+			m.CurrentAgentStatus = nil // Clear agent status when closing pane
 			m.StatusSummary = ""
 			// Also clear isolated agent input mode
 			m.IsolatedAgentInputActive = false
@@ -1832,6 +1935,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	case LogsPaneDetail:
 		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
 		if isAgentJob {
+			// Reset current agent status when switching jobs
+			m.CurrentAgentStatus = nil
 			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
 		}
 		return m, loadLogContentCmd(m.Plan, job)

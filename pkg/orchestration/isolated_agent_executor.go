@@ -497,6 +497,15 @@ func KillIsolatedAgentServer(jobID string) error {
 	return executor.Execute("tmux", "-L", socketName, "kill-server")
 }
 
+// SendInterruptToIsolatedAgent sends Ctrl+C to interrupt an isolated agent.
+func SendInterruptToIsolatedAgent(jobID string) error {
+	socketName := TmuxSocketName(jobID)
+	targetPane := TmuxTargetPane(jobID)
+
+	executor := &exec.RealCommandExecutor{}
+	return executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "C-c")
+}
+
 // CaptureIsolatedAgentOutput captures the visible output from an isolated agent's pane.
 func CaptureIsolatedAgentOutput(jobID string) (string, error) {
 	socketName := TmuxSocketName(jobID)

@@ -1149,6 +1149,49 @@ func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, work
 	return contextFiles
 }
 
+// CaptureInteractiveAgentOutput captures the visible output from an interactive agent's pane.
+// Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
+// worktree session.
+func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
+	// Get the git root from the plan directory
+	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	if err != nil {
+		return "", fmt.Errorf("could not find project git root: %w", err)
+	}
+
+	// Resolve project info for session naming
+	projInfo, err := ResolveProjectForSessionNaming(gitRoot)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve project for session naming: %w", err)
+	}
+
+	sessionName := projInfo.Identifier()
+	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+
+	// Extract tmux socket from TMUX env var if available
+	// Format: /path/to/socket,pid,pane (e.g., /private/tmp/tmux-501/default,12345,0)
+	tmuxEnv := os.Getenv("TMUX")
+	var tmuxArgs []string
+	if tmuxEnv != "" {
+		parts := strings.Split(tmuxEnv, ",")
+		if len(parts) >= 1 && parts[0] != "" {
+			// Use the socket path with -S flag
+			tmuxArgs = []string{"-S", parts[0]}
+		}
+	}
+
+	// Capture the pane output
+	captureArgs := append(tmuxArgs, "capture-pane", "-t", targetPane, "-p")
+	cmd := tmux.Command(captureArgs...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to capture pane output: %w", err)
+	}
+
+	return string(output), nil
+}
+
 // SendInputToInteractiveAgent sends input text to an interactive agent via tmux send-keys.
 // Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
 // worktree session. We extract the tmux socket from the TMUX env var to ensure we're
@@ -1198,4 +1241,41 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	}
 
 	return nil
+}
+
+// SendInterruptToInteractiveAgent sends Ctrl+C to interrupt an interactive agent.
+// Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
+// worktree session.
+func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
+	// Get the git root from the plan directory
+	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	if err != nil {
+		return fmt.Errorf("could not find project git root: %w", err)
+	}
+
+	// Resolve project info for session naming
+	projInfo, err := ResolveProjectForSessionNaming(gitRoot)
+	if err != nil {
+		return fmt.Errorf("failed to resolve project for session naming: %w", err)
+	}
+
+	sessionName := projInfo.Identifier()
+	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+
+	executor := &flowexec.RealCommandExecutor{}
+
+	// Extract tmux socket from TMUX env var if available
+	tmuxEnv := os.Getenv("TMUX")
+	var tmuxArgs []string
+	if tmuxEnv != "" {
+		parts := strings.Split(tmuxEnv, ",")
+		if len(parts) >= 1 && parts[0] != "" {
+			tmuxArgs = []string{"-S", parts[0]}
+		}
+	}
+
+	// Send Ctrl+C to interrupt the agent
+	interruptArgs := append(tmuxArgs, "send-keys", "-t", targetPane, "C-c")
+	return executor.Execute("tmux", interruptArgs...)
 }

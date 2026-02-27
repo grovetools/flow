@@ -135,6 +135,11 @@ type Model struct {
 
 	// Markdown rendering state for streaming logs
 	MarkdownInCodeBlock bool // Track if we're inside a fenced code block during streaming
+
+	// Agent status bar support (for isolated_agent and interactive_agent jobs)
+	CurrentAgentStatus      *AgentStatus // Parsed agent status from tmux pane output
+	LastEscPress            time.Time    // Track last ESC press for double-ESC interrupt
+	PendingIdleConfirmation bool         // True if we saw idle once and need another poll to confirm
 }
 
 // New creates a new Model
@@ -582,9 +587,19 @@ func (m Model) View() string {
 		showChatInput := isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail
 
 		// Calculate chatBoxHeight once, used for both renderLogsPane and layout calculations
+		// Also account for status bar height when present
+		showStatusBar := m.CurrentAgentStatus != nil && isAgentWithInput
 		chatBoxHeight := 0
 		if showChatInput {
 			chatBoxHeight = 3
+			if showStatusBar {
+				// Status bar without border: 1 line for status + todo items
+				statusBarHeight := 1
+				if m.CurrentAgentStatus != nil && len(m.CurrentAgentStatus.TodoItems) > 0 {
+					statusBarHeight += len(m.CurrentAgentStatus.TodoItems)
+				}
+				chatBoxHeight += statusBarHeight
+			}
 		}
 
 		// Check if fullscreen mode is active
@@ -596,7 +611,12 @@ func (m Model) View() string {
 			// Account for chat input box if visible
 			if showChatInput {
 				chatBox := m.renderAgentInputBox(false) // Not right-aligned in fullscreen
-				finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, chatBox, footer)
+				if showStatusBar {
+					statusBar := m.renderAgentStatusBar(m.LogViewerWidth)
+					finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, statusBar, chatBox, footer)
+				} else {
+					finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, chatBox, footer)
+				}
 			} else {
 				finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, footer)
 			}
@@ -615,7 +635,15 @@ func (m Model) View() string {
 				// Add chat input box if visible (right-aligned to match log pane)
 				if showChatInput {
 					chatBox := m.renderAgentInputBox(true) // Right-aligned in vertical split
-					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, chatBox, footer)
+					if showStatusBar {
+						statusBar := m.renderAgentStatusBar(m.LogViewerWidth)
+						// Apply margin to status bar to align with chat box
+						leftMargin := m.JobsPaneWidth + 3 // +3 for separator
+						statusBarStyled := lipgloss.NewStyle().MarginLeft(leftMargin).Render(statusBar)
+						finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, statusBarStyled, chatBox, footer)
+					} else {
+						finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, chatBox, footer)
+					}
 				} else {
 					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, footer)
 				}
@@ -634,7 +662,12 @@ func (m Model) View() string {
 				// Add chat input box if visible
 				if showChatInput {
 					chatBox := m.renderAgentInputBox(false) // Not right-aligned in horizontal split
-					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, chatBox, footer)
+					if showStatusBar {
+						statusBar := m.renderAgentStatusBar(m.LogViewerWidth)
+						finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, statusBar, chatBox, footer)
+					} else {
+						finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, chatBox, footer)
+					}
 				} else {
 					finalView = lipgloss.JoinVertical(lipgloss.Left, combinedContent, footer)
 				}
@@ -815,6 +848,14 @@ func (m *Model) updateLayoutDimensions() {
 		chatInputHeight := 0
 		if isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail {
 			chatInputHeight = 3
+			// Add height for status bar if it's visible (no border, just content)
+			if m.CurrentAgentStatus != nil {
+				statusBarHeight := 1
+				if len(m.CurrentAgentStatus.TodoItems) > 0 {
+					statusBarHeight += len(m.CurrentAgentStatus.TodoItems)
+				}
+				chatInputHeight += statusBarHeight
+			}
 		}
 
 		if m.LogPaneFullscreen {

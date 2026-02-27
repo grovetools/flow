@@ -484,6 +484,14 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 			scanner := bufio.NewScanner(stdout)
 			lineCount := 0
 			for scanner.Scan() {
+				// Check if context was cancelled - stop sending to TUI
+				select {
+				case <-ctx.Done():
+					logger.Info("Stream context cancelled, stopping message send")
+					return
+				default:
+				}
+
 				line := scanner.Text()
 				lineCount++
 
@@ -951,6 +959,16 @@ type IsolatedAgentInputSentMsg struct {
 	Err   error
 }
 
+// PollAgentStatusMsg triggers a poll for agent status
+type PollAgentStatusMsg struct{}
+
+// AgentStatusMsg contains the parsed agent status
+type AgentStatusMsg struct {
+	Status *AgentStatus
+	JobID  string
+	Err    error
+}
+
 func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan, completeJobFunc func(*orchestration.Job, *orchestration.Plan, bool) error) tea.Cmd {
 	return func() tea.Msg {
 		// Use the shared completion function (silent mode for TUI)
@@ -1367,6 +1385,68 @@ func captureIsolatedAgentOutputCmd(jobID string) tea.Cmd {
 			Content: output,
 			JobID:   jobID,
 		}
+	}
+}
+
+// pollAgentStatusAfterDelay creates a command that waits and then triggers a status poll
+func pollAgentStatusAfterDelay() tea.Cmd {
+	return tea.Tick(1500*time.Millisecond, func(t time.Time) tea.Msg {
+		return PollAgentStatusMsg{}
+	})
+}
+
+// fetchAgentStatusCmd fetches the current agent status by capturing tmux pane output
+func fetchAgentStatusCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		var output string
+		var err error
+
+		if job.Type == orchestration.JobTypeIsolatedAgent {
+			// For isolated agents, use dedicated socket
+			output, err = orchestration.CaptureIsolatedAgentOutput(job.ID)
+		} else if job.Type == orchestration.JobTypeInteractiveAgent {
+			// For interactive agents, capture from the worktree tmux session
+			output, err = orchestration.CaptureInteractiveAgentOutput(plan, job)
+		} else {
+			// Not an agent job that supports status polling
+			return AgentStatusMsg{JobID: job.ID, Err: fmt.Errorf("job type %s does not support status polling", job.Type)}
+		}
+
+		if err != nil {
+			return AgentStatusMsg{JobID: job.ID, Err: err}
+		}
+
+		// Parse the pane output to extract status
+		status := ParseAgentPane(output)
+		return AgentStatusMsg{Status: status, JobID: job.ID, Err: nil}
+	}
+}
+
+// InterruptAgentMsg is sent when an agent interrupt attempt finishes
+type InterruptAgentMsg struct {
+	JobID string
+	Err   error
+}
+
+// interruptAgentCmd sends Ctrl+C to interrupt the running agent
+func interruptAgentCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		if job == nil {
+			return InterruptAgentMsg{Err: fmt.Errorf("no job to interrupt")}
+		}
+
+		var err error
+		if job.Type == orchestration.JobTypeIsolatedAgent {
+			// For isolated agents, use dedicated socket: tmux -L flow-job-<jobID> send-keys -t main:0 C-c
+			err = orchestration.SendInterruptToIsolatedAgent(job.ID)
+		} else if job.Type == orchestration.JobTypeInteractiveAgent {
+			// For interactive agents, use worktree session
+			err = orchestration.SendInterruptToInteractiveAgent(plan, job)
+		} else {
+			err = fmt.Errorf("job type %s does not support interrupt", job.Type)
+		}
+
+		return InterruptAgentMsg{JobID: job.ID, Err: err}
 	}
 }
 
