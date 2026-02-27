@@ -1357,6 +1357,18 @@ func sendIsolatedAgentInputCmd(jobID, input string) tea.Cmd {
 	}
 }
 
+// sendInteractiveAgentInputCmd sends input to an interactive agent via the worktree tmux session
+func sendInteractiveAgentInputCmd(plan *orchestration.Plan, job *orchestration.Job, input string) tea.Cmd {
+	return func() tea.Msg {
+		err := orchestration.SendInputToInteractiveAgent(plan, job, input)
+		return IsolatedAgentInputSentMsg{
+			JobID: job.ID,
+			Input: input,
+			Err:   err,
+		}
+	}
+}
+
 // captureIsolatedAgentOutputCmd captures the current output from an isolated agent's pane
 func captureIsolatedAgentOutputCmd(jobID string) tea.Cmd {
 	return func() tea.Msg {

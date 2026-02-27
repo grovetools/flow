@@ -561,9 +561,11 @@ func (m Model) View() string {
 
 
 		// Determine if chat input should be visible based on job type
-		// For isolated_agent jobs, always show the chat input when logs pane is open
-		isIsolatedAgent := m.ActiveLogJob != nil && m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent
-		showChatInput := isIsolatedAgent && m.ActiveDetailPane == LogsPaneDetail
+		// For isolated_agent and interactive_agent jobs, always show the chat input when logs pane is open
+		isAgentWithInput := m.ActiveLogJob != nil &&
+			(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
+				m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
+		showChatInput := isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail
 
 		// Calculate chatBoxHeight once, used for both renderLogsPane and layout calculations
 		chatBoxHeight := 0
@@ -792,10 +794,12 @@ func (m *Model) updateLayoutDimensions() {
 
 	if m.ShowLogs {
 		// Determine if chat input should be visible based on job type
-		// For isolated_agent jobs, always show the chat input when logs pane is open
-		isIsolatedAgent := m.ActiveLogJob != nil && m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent
+		// For isolated_agent and interactive_agent jobs, always show the chat input when logs pane is open
+		isAgentWithInput := m.ActiveLogJob != nil &&
+			(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
+				m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
 		chatInputHeight := 0
-		if isIsolatedAgent && m.ActiveDetailPane == LogsPaneDetail {
+		if isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail {
 			chatInputHeight = 5
 		}
 

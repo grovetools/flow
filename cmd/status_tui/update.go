@@ -585,7 +585,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// Handle isolated agent input mode
+		// Handle agent input mode (for isolated_agent and interactive_agent)
 		if m.IsolatedAgentInputActive {
 			switch msg.String() {
 			case "enter":
@@ -593,7 +593,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					input := m.IsolatedAgentInput.Value()
 					m.IsolatedAgentInput.SetValue("") // Clear input
 					m.StatusSummary = fmt.Sprintf("Sending: %s", input)
-					return m, sendIsolatedAgentInputCmd(m.ActiveLogJob.ID, input)
+					// Dispatch to the correct send function based on job type
+					if m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent {
+						return m, sendIsolatedAgentInputCmd(m.ActiveLogJob.ID, input)
+					} else if m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent {
+						return m, sendInteractiveAgentInputCmd(m.Plan, m.ActiveLogJob, input)
+					}
 				}
 			case "esc":
 				// Unfocus the input but keep it visible (for isolated agents, it's always visible)
@@ -1277,9 +1282,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.SendInput):
-			// Focus the chat input when viewing an isolated agent job
-			// The 'i' key focuses the input - it doesn't toggle visibility since chat is always shown for isolated agents
-			if m.ActiveLogJob != nil && m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent {
+			// Focus the chat input when viewing an agent job that supports input
+			// The 'i' key focuses the input - it doesn't toggle visibility since chat is always shown for these agent types
+			isAgentWithInput := m.ActiveLogJob != nil &&
+				(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
+					m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
+			if isAgentWithInput {
 				// Ensure logs pane is open and focused
 				if m.ActiveDetailPane != LogsPaneDetail {
 					// Switch to logs pane
@@ -1290,11 +1298,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.IsolatedAgentInputActive = true
 				m.IsolatedAgentInput.Focus()
 				m.Focus = InputPane
-				m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for isolated agent (Enter to send, Esc to cancel)")
+				m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for agent (Enter to send, Esc to cancel)")
 				return m, nil
 			}
-			// Not an isolated agent job - show helpful message
-			m.StatusSummary = theme.DefaultTheme.Warning.Render("Send input only works for isolated_agent jobs")
+			// Not an agent job that supports input - show helpful message
+			m.StatusSummary = theme.DefaultTheme.Warning.Render("Send input only works for isolated_agent and interactive_agent jobs")
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.Run):

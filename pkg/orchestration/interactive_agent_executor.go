@@ -1148,3 +1148,54 @@ func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, work
 
 	return contextFiles
 }
+
+// SendInputToInteractiveAgent sends input text to an interactive agent via tmux send-keys.
+// Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
+// worktree session. We extract the tmux socket from the TMUX env var to ensure we're
+// targeting the correct tmux server.
+// Uses the same key sequence as isolated agents that works in both vim mode and normal mode.
+func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
+	// Get the git root from the plan directory
+	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	if err != nil {
+		return fmt.Errorf("could not find project git root: %w", err)
+	}
+
+	// Resolve project info for session naming
+	projInfo, err := ResolveProjectForSessionNaming(gitRoot)
+	if err != nil {
+		return fmt.Errorf("failed to resolve project for session naming: %w", err)
+	}
+
+	sessionName := projInfo.Identifier()
+	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+
+	executor := &flowexec.RealCommandExecutor{}
+
+	// Extract tmux socket from TMUX env var if available
+	// Format: /path/to/socket,pid,pane (e.g., /private/tmp/tmux-501/default,12345,0)
+	tmuxEnv := os.Getenv("TMUX")
+	var tmuxArgs []string
+	if tmuxEnv != "" {
+		parts := strings.Split(tmuxEnv, ",")
+		if len(parts) >= 1 && parts[0] != "" {
+			// Use the socket path with -S flag
+			tmuxArgs = []string{"-S", parts[0]}
+		}
+	}
+
+	// First: Escape to ensure clean state, i to enter insert mode, then the text
+	sendKeysArgs := append(tmuxArgs, "send-keys", "-t", targetPane, "Escape", "i", input)
+	if err := executor.Execute("tmux", sendKeysArgs...); err != nil {
+		return fmt.Errorf("failed to send input text: %w", err)
+	}
+
+	// Second: C-Enter to submit (must be separate call)
+	submitArgs := append(tmuxArgs, "send-keys", "-t", targetPane, "C-m")
+	if err := executor.Execute("tmux", submitArgs...); err != nil {
+		return fmt.Errorf("failed to send submit key: %w", err)
+	}
+
+	return nil
+}
