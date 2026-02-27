@@ -1,6 +1,7 @@
 package status_tui
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -103,7 +104,8 @@ type Model struct {
 	ShowLogs            bool
 	LogViewer           logviewer.Model
 	ActiveLogJob        *orchestration.Job
-	StreamingJobID      string // Track which job is currently streaming to prevent duplicates
+	StreamingJobID      string             // Track which job is currently streaming to prevent duplicates
+	StreamCancel        context.CancelFunc // Function to cancel the active agent log stream
 	ActiveDetailPane    DetailPane
 	columnSelectMode    bool
 	columnList          list.Model
@@ -422,18 +424,30 @@ func (m Model) renderAgentInputBox(rightAligned bool) string {
 		boxWidth = 20
 	}
 
+	// Dynamically set the text input width to fit inside the box
+	// Create a copy to avoid modifying the original
+	inputWidth := boxWidth - 2 // Account for padding
+	if inputWidth < 10 {
+		inputWidth = 10
+	}
+
+	// Dynamic border highlighting based on whether input is focused
+	borderColor := theme.DefaultColors.Cyan // Unfocused: cyan (visible but subtle)
+	if m.IsolatedAgentInputActive {
+		borderColor = theme.DefaultColors.Orange // Focused: orange (highlight)
+	}
+
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.DefaultColors.Orange).
+		BorderForeground(borderColor).
 		Padding(0, 1).
 		Width(boxWidth)
 
-	inputView := m.IsolatedAgentInput.View()
-	chatBox := boxStyle.Render(inputView)
-
-	helpText := theme.DefaultTheme.Muted.Render("  Enter: send │ Esc: close")
-
-	result := chatBox + "\n" + helpText
+	// Create a temporary copy with the correct width for rendering
+	inputCopy := m.IsolatedAgentInput
+	inputCopy.Width = inputWidth
+	inputView := inputCopy.View()
+	result := boxStyle.Render(inputView)
 
 	// Add left margin to align with log pane in vertical split
 	if rightAligned {
@@ -570,7 +584,7 @@ func (m Model) View() string {
 		// Calculate chatBoxHeight once, used for both renderLogsPane and layout calculations
 		chatBoxHeight := 0
 		if showChatInput {
-			chatBoxHeight = 5
+			chatBoxHeight = 3
 		}
 
 		// Check if fullscreen mode is active
@@ -800,7 +814,7 @@ func (m *Model) updateLayoutDimensions() {
 				m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
 		chatInputHeight := 0
 		if isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail {
-			chatInputHeight = 5
+			chatInputHeight = 3
 		}
 
 		if m.LogPaneFullscreen {

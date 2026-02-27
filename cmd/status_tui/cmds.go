@@ -235,11 +235,6 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 					shouldStream := job.Status == orchestration.JobStatusRunning || job.Status == orchestration.JobStatusIdle
 
 					if shouldStream {
-						// Add a separator before the live stream
-						separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
-						streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
-						contentStr = contentStr + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
-
 						// Get the direct transcript path for streaming
 						var logSpec string = jobSpec
 						if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
@@ -363,11 +358,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			}
 
 			content := string(readOutput)
-			if content != "" {
-				separator := theme.DefaultTheme.Success.Render(strings.Repeat("─", 80))
-				streamLabel := theme.DefaultTheme.Success.Render(fmt.Sprintf("  %s new  ", theme.IconSparkle))
-				content = content + "\n\n" + separator + "\n" + streamLabel + "\n" + separator + "\n\n"
-			} else {
+			if content == "" {
 				content = "[...] Agent session found, waiting for logs...\n"
 			}
 
@@ -428,53 +419,20 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 }
 
 // streamAgentLogsCmd creates a background process to stream agent logs from a specific file.
-func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFilePath string, program *tea.Program) tea.Cmd {
+func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orchestration.Job, logFilePath string, program *tea.Program) tea.Cmd {
 	return func() tea.Msg {
-		logger := logging.NewLogger("flow-tui")
-
-		// Get the log file path for this job
+		// Get the log file path for this job (for writing streamed content)
 		jobLogPath, err := orchestration.GetJobLogPath(plan, job)
 		if err != nil {
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to get log path: %w", err)}
+			return LogContentLoadedMsg{Err: fmt.Errorf("failed to get log path: %w", err), JobID: job.ID}
 		}
 
-		// Read the current file content to check if agent logs are already there
-		currentContent, err := os.ReadFile(jobLogPath)
-		alreadyHasAgentLogs := false
-		if err == nil {
-			// Check if the file already contains the agent session header
-			alreadyHasAgentLogs = strings.Contains(string(currentContent), "=== Job:")
-		}
-
-		// Open the log file in append mode
+		// Open the log file in append mode for writing streamed content
+		// Note: We don't write historical logs here - loadAndStreamAgentLogsCmd already
+		// displayed the initial content. We only capture NEW content from this point.
 		logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err)}
-		}
-
-		// If we don't have agent logs yet, write the historical logs from aglogs read
-		if !alreadyHasAgentLogs {
-			// Read existing agent logs using 'aglogs read' to get historical content
-			readCmd := delegation.Command("aglogs", "read", logFilePath)
-			readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
-			existingLogs, err := readCmd.Output()
-
-			if err == nil && len(existingLogs) > 0 {
-				logger.WithFields(map[string]interface{}{
-					"log_path":    jobLogPath,
-					"logs_length": len(existingLogs),
-				}).Info("Writing existing agent logs to file before streaming")
-
-				if _, err := logFile.Write(existingLogs); err != nil {
-					logFile.Close()
-					return LogContentLoadedMsg{Err: fmt.Errorf("failed to write existing logs: %w", err)}
-				}
-				logFile.Sync() // Ensure existing logs are written
-			}
-		} else {
-			logger.WithFields(map[string]interface{}{
-				"log_path": jobLogPath,
-			}).Debug("Agent logs already in file, skipping duplicate write")
+			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err), JobID: job.ID}
 		}
 
 		// Start streaming new content using the direct file path
@@ -484,19 +442,34 @@ func streamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job, logFil
 		stdout, err := streamCmd.StdoutPipe()
 		if err != nil {
 			logFile.Close()
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to create stdout pipe: %w", err)}
+			return LogContentLoadedMsg{Err: fmt.Errorf("failed to create stdout pipe: %w", err), JobID: job.ID}
 		}
 
 		if err := streamCmd.Start(); err != nil {
 			logFile.Close()
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start aglogs stream: %w", err)}
+			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start aglogs stream: %w", err), JobID: job.ID}
 		}
+
+		// Channel to signal that the stream finished normally
+		doneCh := make(chan struct{})
+
+		// Monitor for context cancellation to kill the leaked process
+		go func() {
+			select {
+			case <-ctx.Done():
+				if streamCmd.Process != nil {
+					streamCmd.Process.Kill()
+				}
+			case <-doneCh:
+			}
+		}()
 
 		// Stream output line by line back to the TUI and write to log file
 		go func() {
 			logger := logging.NewLogger("flow-tui")
 			defer logFile.Close()
 			defer stdout.Close()
+			defer close(doneCh) // Signal monitor goroutine to exit
 
 			// Recover from any panics in the streaming goroutine
 			// This can happen if program.Send() is called after the TUI is shutting down
@@ -677,9 +650,20 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 					}
 					defer logFile.Close()
 
-					// Create a MultiWriter for this job - output goes to both log file and TUI
-					// DO NOT redirect os.Stdout - that breaks bubbletea!
-					multiWriter := io.MultiWriter(logFile, tuiWriter)
+					// For agent jobs, don't write to TUI directly - agent log streaming handles that
+					// via aglogs stream. Writing to both would cause duplicate output.
+					isAgentJob := j.Type == orchestration.JobTypeInteractiveAgent ||
+						j.Type == orchestration.JobTypeHeadlessAgent ||
+						j.Type == orchestration.JobTypeIsolatedAgent
+
+					var multiWriter io.Writer
+					if isAgentJob {
+						// Agent jobs use separate log streaming via aglogs, so only write to log file
+						multiWriter = logFile
+					} else {
+						// Non-agent jobs write to both log file and TUI
+						multiWriter = io.MultiWriter(logFile, tuiWriter)
+					}
 
 					// Execute the job
 					if execErr := orchestrator.ExecuteJobWithWriter(ctx, j, multiWriter); execErr != nil {

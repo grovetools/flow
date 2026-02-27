@@ -1,6 +1,7 @@
 package status_tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -85,19 +86,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// If we should start streaming (session is ready), start the stream
 		if msg.StartStreaming && m.ActiveLogJob != nil && msg.LogFilePath != "" {
-			// Only start streaming if we're not already streaming for this job
-			if m.StreamingJobID != m.ActiveLogJob.ID {
+			// Only start streaming if we're not already streaming for this job,
+			// OR if our cancel function is nil (meaning we don't control the active stream)
+			if m.StreamingJobID != m.ActiveLogJob.ID || m.StreamCancel == nil {
 				logger.WithFields(map[string]interface{}{
 					"job_id":        m.ActiveLogJob.ID,
 					"log_file_path": msg.LogFilePath,
 					"was_streaming": m.StreamingJobID,
 				}).Info("Starting agent log streaming")
+
+				// Cancel any existing stream to prevent leaks
+				if m.StreamCancel != nil {
+					m.StreamCancel()
+				}
+
+				ctx, cancel := context.WithCancel(context.Background())
+				m.StreamCancel = cancel
 				m.StreamingJobID = m.ActiveLogJob.ID
-				cmds = append(cmds, streamAgentLogsCmd(m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
+
+				cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
 			} else {
 				logger.WithFields(map[string]interface{}{
 					"job_id": m.ActiveLogJob.ID,
 				}).Debug("Skipping duplicate stream start - already streaming for this job")
+			}
+		} else {
+			// Current job doesn't need streaming (e.g., non-agent job, or agent job not ready).
+			// Stop any active stream to prevent leaks from previous jobs.
+			if m.StreamCancel != nil {
+				m.StreamCancel()
+				m.StreamCancel = nil
+				m.StreamingJobID = ""
 			}
 		}
 
@@ -1260,6 +1279,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// If any pane is open, close it
 				m.LogViewer.Stop()
+				if m.StreamCancel != nil {
+					m.StreamCancel()
+					m.StreamCancel = nil
+				}
+				m.StreamingJobID = ""
 				m.ShowLogs = false
 				m.Focus = JobsPane
 				m.ActiveLogJob = nil
@@ -1269,7 +1293,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.CloseDetailPane):
+			// For agent jobs (isolated_agent, interactive_agent), Esc should only blur
+			// the input (handled above), not close the detail pane. Users can close
+			// with 'v' (CycleDetailPane) instead.
+			isAgentJob := m.ActiveLogJob != nil &&
+				(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
+					m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
+			if isAgentJob {
+				// Absorb the Esc keypress without closing the detail pane
+				return m, nil
+			}
 			m.LogViewer.Stop()
+			if m.StreamCancel != nil {
+				m.StreamCancel()
+				m.StreamCancel = nil
+			}
+			m.StreamingJobID = ""
 			m.ShowLogs = false
 			m.LogPaneFullscreen = false
 			m.Focus = JobsPane
