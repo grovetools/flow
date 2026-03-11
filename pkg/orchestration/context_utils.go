@@ -67,6 +67,13 @@ func ScopeToSubProject(workDir string, job *Job) string {
 		return workDir
 	}
 
+	// If the working directory already ends with the repository name,
+	// we're already scoped to the sub-project (e.g., when GetProjectGitRoot
+	// returned a notebook-resolved project path that is itself the sub-project).
+	if filepath.Base(workDir) == job.Repository {
+		return workDir
+	}
+
 	subProjectPath := filepath.Join(workDir, job.Repository)
 	if info, err := os.Stat(subProjectPath); err == nil && info.IsDir() {
 		return subProjectPath
