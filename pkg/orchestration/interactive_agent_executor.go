@@ -425,6 +425,11 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()
 
+	p.log.WithFields(logrus.Fields{
+		"job_id":        job.ID,
+		"daemon_running": daemonClient.IsRunning(),
+	}).Info("Registering session intent with daemon")
+
 	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
 		JobID:       job.ID,
 		Provider:    "claude",
@@ -435,6 +440,8 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}); err != nil {
 		// Log warning but continue - agent can still run, just tracking may be impaired
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
+	} else {
+		p.log.Info("Session intent registered successfully")
 	}
 
 	// Create tmux client
