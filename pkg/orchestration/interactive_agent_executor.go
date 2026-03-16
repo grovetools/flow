@@ -17,6 +17,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
@@ -418,9 +419,23 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// NOTE: Session registration now happens AFTER the agent is launched and PID is discovered
-	// to avoid the race condition where PID 0 is registered before the actual process starts.
-	// See discoverAndRegisterSessionSync() called after tmux window creation.
+	// Register session intent with the daemon BEFORE launching the agent.
+	// This eliminates the PID race condition by pre-registering the session.
+	// The daemon will track this session and wait for confirmation with the actual PID.
+	daemonClient := daemon.NewWithAutoStart()
+	defer daemonClient.Close()
+
+	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
+		JobID:       job.ID,
+		Provider:    "claude",
+		JobFilePath: job.FilePath,
+		PlanName:    plan.Name,
+		Title:       job.Title,
+		WorkDir:     workDir,
+	}); err != nil {
+		// Log warning but continue - agent can still run, just tracking may be impaired
+		p.log.WithError(err).Warn("Failed to register session intent with daemon")
+	}
 
 	// Create tmux client
 	tmuxClient, err := tmux.NewClient()
@@ -766,11 +781,10 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 	return projInfo.Identifier(), nil
 }
 
-// discoverAndRegisterSessionAsync discovers the Claude Code PID and registers the session.
+// discoverAndRegisterSessionAsync discovers the Claude Code PID and confirms the session with the daemon.
 // This function is designed to be called from a goroutine - it blocks internally but
 // does not block the caller. It waits until a valid PID is found or the timeout is reached.
-// This prevents the race condition where PID 0 was registered before the actual Claude process started,
-// while also not blocking the TUI during agent launch.
+// The session intent should already be registered via RegisterSessionIntent() before this is called.
 func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane string) error {
 	logger := grovelogging.NewLogger("flow-claude-session-discovery")
 
@@ -778,7 +792,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		"job_id":      job.ID,
 		"plan":        plan.Name,
 		"target_pane": targetPane,
-	}).Debug("Starting async Claude Code PID discovery and registration")
+	}).Debug("Starting async Claude Code PID discovery and confirmation")
 
 	// Record the job start time for session file discovery
 	jobStartTime := job.StartTime
@@ -813,15 +827,6 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	if claudePID == 0 {
 		return fmt.Errorf("failed to find Claude Code PID after %d seconds: %w", maxPIDRetries, pidErr)
 	}
-
-	// Get user info
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "unknown"
-	}
-
-	// Get git info
-	repo, branch := getGitInfo(workDir)
 
 	// Build the transcript path for Claude
 	homeDir, err := os.UserHomeDir()
@@ -862,38 +867,57 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		}
 	}
 
-	// Create metadata with the discovered PID
-	metadata := sessions.SessionMetadata{
-		SessionID:        job.ID,
-		ClaudeSessionID:  claudeSessionID,
-		Provider:         "claude",
-		PID:              claudePID,
-		WorkingDirectory: workDir,
-		User:             user,
-		Repo:             repo,
-		Branch:           branch,
-		StartedAt:        time.Now(),
-		JobTitle:         job.Title,
-		PlanName:         plan.Name,
-		JobFilePath:      job.FilePath,
-		Type:             "interactive_agent",
-		TranscriptPath:   transcriptPath,
-	}
+	// Confirm the session with the daemon using the discovered PID
+	// This links the pre-registered intent with the actual running process
+	daemonClient := daemon.NewWithAutoStart()
+	defer daemonClient.Close()
 
-	// Register using the FileSystemRegistry
-	registry, err := sessions.NewFileSystemRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to create session registry: %w", err)
-	}
+	if err := daemonClient.ConfirmSession(context.Background(), daemon.SessionConfirmation{
+		JobID:          job.ID,
+		NativeID:       claudeSessionID,
+		PID:            claudePID,
+		TranscriptPath: transcriptPath,
+	}); err != nil {
+		logger.WithError(err).Warn("Failed to confirm session with daemon, falling back to filesystem registry")
 
-	if err := registry.Register(metadata); err != nil {
-		return fmt.Errorf("failed to register session: %w", err)
+		// Fallback: Register with filesystem registry for backwards compatibility
+		user := os.Getenv("USER")
+		if user == "" {
+			user = "unknown"
+		}
+		repo, branch := getGitInfo(workDir)
+
+		metadata := sessions.SessionMetadata{
+			SessionID:        job.ID,
+			ClaudeSessionID:  claudeSessionID,
+			Provider:         "claude",
+			PID:              claudePID,
+			WorkingDirectory: workDir,
+			User:             user,
+			Repo:             repo,
+			Branch:           branch,
+			StartedAt:        time.Now(),
+			JobTitle:         job.Title,
+			PlanName:         plan.Name,
+			JobFilePath:      job.FilePath,
+			Type:             "interactive_agent",
+			TranscriptPath:   transcriptPath,
+		}
+
+		registry, regErr := sessions.NewFileSystemRegistry()
+		if regErr != nil {
+			return fmt.Errorf("failed to create session registry: %w", regErr)
+		}
+
+		if regErr := registry.Register(metadata); regErr != nil {
+			return fmt.Errorf("failed to register session: %w", regErr)
+		}
 	}
 
 	logger.WithFields(logrus.Fields{
 		"session_id": job.ID,
 		"pid":        claudePID,
-	}).Info("Registered Claude session")
+	}).Info("Confirmed Claude session")
 
 	return nil
 }
