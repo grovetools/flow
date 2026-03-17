@@ -172,33 +172,18 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	// enrich the session with the native session ID when it starts.
 	// We no longer need the async discoverAndRegisterSession call.
 
-	if os.Getenv("TMUX") != "" && !isTUIMode {
-		currentSessionCmd := tmux.Command("display-message", "-p", "#S")
-		currentSessionOutput, err := currentSessionCmd.Output()
-		if err == nil {
-			currentSession := strings.TrimSpace(string(currentSessionOutput))
-			if currentSession == sessionName {
-				if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
-					p.log.WithError(err).Warn("Failed to switch to agent window")
-				}
-			} else {
-				p.ulog.Info("Agent started in session").
-					Field("session", sessionName).
-					Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
-					Log(ctx)
-			}
-		} else {
-			p.log.WithError(err).Warn("Could not get current tmux session")
+	if !isTUIMode {
+		if os.Getenv("TMUX") != "" {
 			p.ulog.Info("Agent started in session").
 				Field("session", sessionName).
-				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux select-window -t %s", sessionName, targetPane)).
+				Log(ctx)
+		} else {
+			p.ulog.Info("Agent session ready").
+				Field("session", sessionName).
+				Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
 				Log(ctx)
 		}
-	} else if !isTUIMode {
-		p.ulog.Info("Agent session ready").
-			Field("session", sessionName).
-			Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
-			Log(ctx)
 	}
 
 	if !isTUIMode {

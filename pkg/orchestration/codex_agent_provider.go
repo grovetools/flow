@@ -240,40 +240,18 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	}
 	// --- End Synchronous PID Discovery and Session Registration ---
 
-	// Conditionally switch to the agent window (but not when running from TUI)
-	// Note: isTUIMode already declared above when building new-window args
-	if os.Getenv("TMUX") != "" && !isTUIMode {
-		// Check if we are in the correct session before trying to select window
-		currentSessionCmd := tmux.Command("display-message", "-p", "#S")
-		currentSessionOutput, err := currentSessionCmd.Output()
-		if err == nil {
-			currentSession := strings.TrimSpace(string(currentSessionOutput))
-			if currentSession == sessionName {
-				// We are in the correct session, just switch to the window
-				if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
-					p.log.WithError(err).Warn("Failed to switch to agent window")
-				}
-			} else {
-				// In a different session, print instructions
-				p.ulog.Info("Agent started in session").
-					Field("session", sessionName).
-					Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
-					Log(ctx)
-			}
-		} else {
-			// Couldn't determine current session, print instructions
-			p.log.WithError(err).Warn("Could not get current tmux session")
+	if !isTUIMode {
+		if os.Getenv("TMUX") != "" {
 			p.ulog.Info("Agent started in session").
 				Field("session", sessionName).
-				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux switch-client -t %s", sessionName, sessionName)).
+				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux select-window -t %s", sessionName, targetPane)).
+				Log(ctx)
+		} else {
+			p.ulog.Info("Agent session ready").
+				Field("session", sessionName).
+				Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
 				Log(ctx)
 		}
-	} else if !isTUIMode {
-		// Not in tmux, print instructions (unless in TUI mode where it's shown in logs)
-		p.ulog.Info("Agent session ready").
-			Field("session", sessionName).
-			Pretty(fmt.Sprintf("   Attach with: tmux attach -t %s", sessionName)).
-			Log(ctx)
 	}
 
 	if os.Getenv("GROVE_FLOW_TUI_MODE") != "true" {
