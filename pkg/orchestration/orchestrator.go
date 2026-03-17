@@ -114,6 +114,8 @@ func (o *Orchestrator) ValidatePrerequisites() error {
 
 // RunJob executes a specific job by filename.
 func (o *Orchestrator) RunJob(ctx context.Context, jobFile string) error {
+	ulog := grovelogging.NewUnifiedLogger("flow.orchestrator.runjob")
+
 	// Find job by filename or full path
 	var job *Job
 	for _, j := range o.Plan.Jobs {
@@ -127,27 +129,54 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobFile string) error {
 		return fmt.Errorf("job not found: %s", jobFile)
 	}
 
+	ulog.Debug("Found job").
+		Field("job_id", job.ID).
+		Field("job_file", jobFile).
+		Field("status", string(job.Status)).
+		Field("type", string(job.Type)).
+		Field("dep_count", len(job.Dependencies)).
+		Log(ctx)
+
 	// Check if job is already completed
 	if job.Status == JobStatusCompleted {
 		return fmt.Errorf("job already completed: %s", jobFile)
 	}
 
-	// Validate job is runnable or can be retried
-	runnable := o.dependencyGraph.GetRunnableJobs()
-	isRunnable := false
-	for _, r := range runnable {
-		if r.ID == job.ID {
-			isRunnable = true
-			break
+	// If job is already running (e.g., CLI pre-transitioned status before daemon submission),
+	// allow execution — the caller explicitly targeted this job.
+	if job.Status == JobStatusRunning {
+		ulog.Debug("Job already in running status, proceeding").
+			Field("job_id", job.ID).
+			Log(ctx)
+	} else {
+		// Validate job is runnable or can be retried
+		runnable := o.dependencyGraph.GetRunnableJobs()
+		isRunnable := false
+		for _, r := range runnable {
+			if r.ID == job.ID {
+				isRunnable = true
+				break
+			}
 		}
-	}
 
-	// If not in the runnable list, check if it's a failed job that can be retried
-	if !isRunnable {
-		if job.CanBeRetried() {
-			isRunnable = true
-		} else {
-			return fmt.Errorf("job %s is not runnable (dependencies not met or in wrong status)", job.ID)
+		// If not in the runnable list, check if it's a failed job that can be retried
+		if !isRunnable {
+			if job.CanBeRetried() {
+				isRunnable = true
+			} else {
+				runnableIDs := make([]string, len(runnable))
+				for i, r := range runnable {
+					runnableIDs[i] = r.ID
+				}
+				ulog.Error("Job not runnable").
+					Field("job_id", job.ID).
+					Field("status", string(job.Status)).
+					Field("type", string(job.Type)).
+					Field("dep_count", len(job.Dependencies)).
+					Field("runnable_ids", runnableIDs).
+					Log(ctx)
+				return fmt.Errorf("job %s is not runnable (dependencies not met or in wrong status)", job.ID)
+			}
 		}
 	}
 

@@ -88,6 +88,11 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 			r.updater.UpdateJobStatus(job, JobStatusCompleted)
 		}
 		return nil
+	case "pending_user":
+		if r.updater != nil {
+			r.updater.UpdateJobStatus(job, JobStatusPendingUser)
+		}
+		return nil
 	case "failed":
 		if r.updater != nil {
 			r.updater.UpdateJobStatus(job, JobStatusFailed)
