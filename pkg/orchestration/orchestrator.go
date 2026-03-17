@@ -9,10 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/grovetools/core/command"
 	grovelogging "github.com/grovetools/core/logging"
-	"github.com/grovetools/grove-gemini/pkg/gemini"
 )
 
 // Logger defines the logging interface.
@@ -31,12 +29,12 @@ type OrchestratorConfig struct {
 	MaxConsecutiveSteps int              // Maximum consecutive steps before halting
 	SkipInteractive     bool             // Skip interactive agent jobs
 	CommandExecutor     command.Executor // For dependency injection
+	Runtime             Runtime          // Defines how jobs are executed; defaults to LocalRuntime
 }
 
 // Orchestrator coordinates job execution and manages state.
 type Orchestrator struct {
 	Plan            *Plan
-	executors       map[JobType]Executor
 	dependencyGraph *DependencyGraph
 	config          *OrchestratorConfig
 	logger          Logger
@@ -81,15 +79,24 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig) (*Orchestrator, err
 
 	orch := &Orchestrator{
 		Plan:            plan,
-		executors:       make(map[JobType]Executor),
 		dependencyGraph: graph,
 		config:          config,
 		logger:          NewDefaultLogger(),
 		stateManager:    stateManager,
 	}
 
-	// Register executors
-	orch.registerExecutors()
+	// Initialize LocalRuntime if no runtime is provided
+	if orch.config.Runtime == nil {
+		execConfig := &ExecutorConfig{
+			MaxPromptLength: 1000000,
+			Timeout:         30 * time.Minute,
+			RetryCount:      2,
+			Model:           "default",
+			ModelOverride:   orch.config.ModelOverride,
+			SkipInteractive: orch.config.SkipInteractive,
+		}
+		orch.config.Runtime = NewLocalRuntime(execConfig, orch.config.CommandExecutor, orch, orch.logger)
+	}
 
 	// Validate prerequisites
 	if err := orch.ValidatePrerequisites(); err != nil {
@@ -103,51 +110,6 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig) (*Orchestrator, err
 func (o *Orchestrator) ValidatePrerequisites() error {
 	// Agent jobs now run directly on the host without Docker dependencies
 	return nil
-}
-
-// registerExecutors sets up the available executors.
-func (o *Orchestrator) registerExecutors() {
-	// Create shared config for executors
-	execConfig := &ExecutorConfig{
-		MaxPromptLength: 1000000,
-		Timeout:         30 * time.Minute,
-		RetryCount:      2,
-		Model:           "default",
-		ModelOverride:   o.config.ModelOverride,
-		SkipInteractive: o.config.SkipInteractive,
-	}
-
-	// Create shared LLM clients for executors
-	var llmClient LLMClient
-	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
-		llmClient = NewMockLLMClient()
-	} else {
-		llmClient = NewCommandLLMClient(o.config.CommandExecutor)
-	}
-	geminiRunner := gemini.NewRequestRunner()
-
-	// Register oneshot executor (also handles chat jobs)
-	oneshotExecutor := NewOneShotExecutor(llmClient, execConfig)
-	o.executors[JobTypeOneshot] = oneshotExecutor
-	o.executors[JobTypeChat] = oneshotExecutor
-
-	// Register headless agent executor
-	o.executors[JobTypeHeadlessAgent] = NewHeadlessAgentExecutor(llmClient, execConfig)
-
-	// Register interactive agent executor for both agent and interactive_agent types
-	interactiveExecutor := NewInteractiveAgentExecutor(llmClient, geminiRunner, o.config.SkipInteractive)
-	o.executors[JobTypeAgent] = interactiveExecutor
-	o.executors[JobTypeInteractiveAgent] = interactiveExecutor
-
-	// Register isolated agent executor
-	isolatedExecutor := NewIsolatedAgentExecutor(llmClient, geminiRunner, o.config.SkipInteractive)
-	o.executors[JobTypeIsolatedAgent] = isolatedExecutor
-
-	// Register shell executor
-	o.executors[JobTypeShell] = NewShellExecutor(execConfig)
-
-	// Register generate-recipe executor
-	o.executors[JobTypeGenerateRecipe] = NewGenerateRecipeExecutor(execConfig)
 }
 
 // RunJob executes a specific job by filename.
@@ -394,118 +356,20 @@ func logFieldsToKeyVals(fields map[string]interface{}) []interface{} {
 // ExecuteJobWithWriter runs a single job and streams its output to the provided writer.
 // This is primarily for TUI integration where output needs to be captured and displayed.
 func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, output io.Writer) error {
-	// Generate a unique request ID for tracing this execution
-	requestID := "req-" + uuid.New().String()[:8]
-	ctx = context.WithValue(ctx, "request_id", requestID)
-
-	// Attach the job-specific output writer to the context for thread-safe logging.
+	// Attach the provided writer (e.g., TUI writer) to the context
 	ctx = grovelogging.WithWriter(ctx, output)
 
-	// Log job execution with full frontmatter details
-	logFields := map[string]interface{}{
-		"request_id": requestID,
-		"job_id":     job.ID,
-		"job_type":   job.Type,
-		"job_title":  job.Title,
-		"job_file":   job.FilePath,
-		"plan_name":  o.Plan.Name,
-		"plan_dir":   o.Plan.Directory,
-		"status":     job.Status,
-	}
-
-	// Add optional fields if present
-	if job.Model != "" {
-		logFields["model"] = job.Model
-	}
-	if job.Template != "" {
-		logFields["template"] = job.Template
-	}
-	if job.RulesFile != "" {
-		logFields["rules_file"] = job.RulesFile
-	}
-	if job.Repository != "" {
-		logFields["repository"] = job.Repository
-	}
-	if job.Worktree != "" {
-		logFields["worktree"] = job.Worktree
-	}
-	if len(job.Dependencies) > 0 {
-		depFiles := make([]string, len(job.Dependencies))
-		for i, dep := range job.Dependencies {
-			if dep != nil {
-				depFiles[i] = dep.Filename
-			}
-		}
-		logFields["dependencies"] = depFiles
-		logFields["dependency_count"] = len(job.Dependencies)
-	}
-	if job.PrependDependencies {
-		logFields["prepend_dependencies"] = job.PrependDependencies
-	}
-
-	// Special logging for interactive jobs
-	if job.Type == JobTypeInteractiveAgent {
-		o.logger.Info("Starting interactive job", logFieldsToKeyVals(logFields)...)
-	} else {
-		o.logger.Info("Executing job", logFieldsToKeyVals(logFields)...)
-	}
-
-	// Update status to running
-	if err := o.UpdateJobStatus(job, JobStatusRunning); err != nil {
-		return fmt.Errorf("update status to running: %w", err)
-	}
-
-	// Get executor
-	executor, ok := o.executors[job.Type]
-	if !ok {
-		return fmt.Errorf("no executor for job type: %s", job.Type)
-	}
-
-	// Execute job. The writer is already attached to the context.
-	execErr := executor.Execute(ctx, job, o.Plan)
-
-	// Update final status (skip for chat and interactive agent jobs - they manage their own status)
-	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
-		finalStatus := JobStatusCompleted
-		if execErr != nil {
-			finalStatus = JobStatusFailed
-			o.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
-		}
-
-		if err := o.UpdateJobStatus(job, finalStatus); err != nil {
-			return fmt.Errorf("update final status: %w", err)
-		}
-	} else if execErr != nil {
-		// For chat jobs, only update status on error
-		o.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
-		if err := o.UpdateJobStatus(job, JobStatusFailed); err != nil {
-			return fmt.Errorf("update final status: %w", err)
-		}
-	}
-
-	return execErr
+	// Delegate entirely to the runtime
+	return o.config.Runtime.ExecuteJob(ctx, job, o.Plan)
 }
 
-// executeJob runs a single job with the appropriate executor.
+// executeJob runs a single job using standard output.
 func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
-	// Set up logging for this job
-	logFilePath, err := GetJobLogPath(o.Plan, job)
-	if err != nil {
-		return fmt.Errorf("failed to get log path: %w", err)
-	}
+	// Attach os.Stdout to the context (file logging is handled by the Runtime)
+	ctx = grovelogging.WithWriter(ctx, os.Stdout)
 
-	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
-	}
-	defer logFile.Close()
-
-	// Create a MultiWriter to output to both stdout and the log file
-	multiWriter := io.MultiWriter(os.Stdout, logFile)
-	jobCtx := grovelogging.WithWriter(ctx, multiWriter)
-
-	// Execute job with writer
-	return o.ExecuteJobWithWriter(jobCtx, job, multiWriter)
+	// Delegate entirely to the runtime
+	return o.config.Runtime.ExecuteJob(ctx, job, o.Plan)
 }
 
 // UpdateJobStatus updates a job's status with proper synchronization.

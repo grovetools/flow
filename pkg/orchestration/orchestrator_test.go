@@ -53,8 +53,8 @@ func TestNewOrchestrator(t *testing.T) {
 		t.Errorf("Plan not set correctly")
 	}
 
-	if len(orch.executors) == 0 {
-		t.Errorf("No executors registered")
+	if orch.config.Runtime == nil {
+		t.Errorf("No runtime initialized")
 	}
 
 	if orch.dependencyGraph == nil {
@@ -128,7 +128,7 @@ func TestOrchestrator_RunJob(t *testing.T) {
 			return nil
 		},
 	}
-	orch.executors[JobTypeOneshot] = mockExec
+	orch.config.Runtime.(*LocalRuntime).SetExecutor(JobTypeOneshot, mockExec)
 
 	ctx := context.Background()
 
@@ -178,7 +178,7 @@ func TestOrchestrator_RunNext(t *testing.T) {
 			return nil
 		},
 	}
-	orch.executors[JobTypeOneshot] = mockExec
+	orch.config.Runtime.(*LocalRuntime).SetExecutor(JobTypeOneshot, mockExec)
 
 	ctx := context.Background()
 
@@ -228,7 +228,7 @@ func TestOrchestrator_RunAll(t *testing.T) {
 			return nil
 		},
 	}
-	orch.executors[JobTypeOneshot] = mockExec
+	orch.config.Runtime.(*LocalRuntime).SetExecutor(JobTypeOneshot, mockExec)
 
 	ctx := context.Background()
 
@@ -325,7 +325,7 @@ func TestOrchestrator_HandleFailures(t *testing.T) {
 			return fmt.Errorf("simulated failure")
 		},
 	}
-	orch.executors[JobTypeOneshot] = mockExec
+	orch.config.Runtime.(*LocalRuntime).SetExecutor(JobTypeOneshot, mockExec)
 
 	ctx := context.Background()
 
