@@ -424,6 +424,11 @@ func (o *Orchestrator) UpdateJobMetadata(job *Job, meta JobMetadata) error {
 	return nil
 }
 
+// Logger returns the orchestrator's logger.
+func (o *Orchestrator) Logger() Logger {
+	return o.logger
+}
+
 // SetLogger sets a custom logger.
 func (o *Orchestrator) SetLogger(logger Logger) {
 	o.logger = logger

@@ -14,6 +14,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/components/logviewer"
@@ -547,6 +549,111 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 
 		// This command manages its own lifecycle in the background.
 		return nil
+	}
+}
+
+// JobSubmittedMsg is sent when jobs have been submitted to the daemon.
+type JobSubmittedMsg struct {
+	Jobs   []*orchestration.Job
+	JobIDs []string // Daemon-assigned job IDs
+	Err    error
+}
+
+// submitJobsViaDaemonCmd submits jobs to the daemon for execution.
+// Unlike runJobsWithOrchestrator, this returns immediately — the daemon handles execution.
+func submitJobsViaDaemonCmd(client daemon.Client, plan *orchestration.Plan, jobs []*orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		var jobIDs []string
+		for _, job := range jobs {
+			info, err := client.SubmitJob(context.Background(), models.JobSubmitRequest{
+				PlanDir: plan.Directory,
+				JobFile: job.Filename,
+			})
+			if err != nil {
+				return JobSubmittedMsg{Jobs: jobs, Err: fmt.Errorf("submit %s: %w", job.Filename, err)}
+			}
+			jobIDs = append(jobIDs, info.ID)
+		}
+		return JobSubmittedMsg{Jobs: jobs, JobIDs: jobIDs}
+	}
+}
+
+// DaemonLogLineMsg wraps a log line received from the daemon SSE stream.
+type DaemonLogLineMsg struct {
+	JobID string
+	Line  string
+}
+
+// DaemonJobStatusMsg is sent when the daemon reports a job status change.
+type DaemonJobStatusMsg struct {
+	JobID  string
+	Status string
+	Error  string
+}
+
+// streamDaemonLogsCmd subscribes to the daemon's SSE log stream for a job
+// and sends log lines to the TUI via program.Send().
+func streamDaemonLogsCmd(ctx context.Context, client daemon.Client, jobID string, program *tea.Program) tea.Cmd {
+	return func() tea.Msg {
+		ch, err := client.StreamJobLogs(ctx, jobID)
+		if err != nil {
+			return LogContentLoadedMsg{
+				Err:   fmt.Errorf("stream daemon logs: %w", err),
+				JobID: jobID,
+			}
+		}
+
+		// Stream in background goroutine
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// TUI may have shut down
+				}
+			}()
+
+			for event := range ch {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				switch event.Event {
+				case "log":
+					if event.Line != nil {
+						func() {
+							defer func() { recover() }()
+							program.Send(logviewer.LogLineMsg{
+								Workspace: jobID,
+								Line:      event.Line.Line,
+								NoPrefix:  true,
+							})
+						}()
+					}
+				case "status":
+					func() {
+						defer func() { recover() }()
+						program.Send(DaemonJobStatusMsg{
+							JobID:  jobID,
+							Status: event.Status,
+							Error:  event.Error,
+						})
+					}()
+				}
+			}
+		}()
+
+		return nil
+	}
+}
+
+// cancelJobViaDaemonCmd cancels a running job via the daemon.
+func cancelJobViaDaemonCmd(client daemon.Client, jobID string) tea.Cmd {
+	return func() tea.Msg {
+		if err := client.CancelJob(context.Background(), jobID); err != nil {
+			return StatusUpdateMsg(fmt.Sprintf("Failed to cancel job: %v", err))
+		}
+		return StatusUpdateMsg("Job cancellation requested.")
 	}
 }
 

@@ -405,6 +405,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh the plan to show updated statuses
 		return m, refreshPlan(m.PlanDir)
 
+	case JobSubmittedMsg:
+		// Jobs have been submitted to the daemon
+		if msg.Err != nil {
+			m.IsRunningJob = false
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to submit jobs: %v", msg.Err))
+			return m, refreshPlan(m.PlanDir)
+		}
+
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Submitted %d job(s) to daemon", len(msg.Jobs)))
+
+		// Start streaming logs for the first agent job (or first job)
+		var cmds []tea.Cmd
+		if m.Program != nil && m.DaemonClient != nil && len(msg.JobIDs) > 0 {
+			// Cancel any existing stream
+			if m.StreamCancel != nil {
+				m.StreamCancel()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			m.StreamCancel = cancel
+			m.StreamingJobID = msg.JobIDs[0]
+
+			cmds = append(cmds, streamDaemonLogsCmd(ctx, m.DaemonClient, msg.JobIDs[0], m.Program))
+		}
+		cmds = append(cmds, refreshPlan(m.PlanDir))
+		return m, tea.Batch(cmds...)
+
+	case DaemonJobStatusMsg:
+		// Daemon reported a job status change via SSE
+		logger := logging.NewLogger("flow-tui")
+		logger.WithFields(map[string]interface{}{
+			"job_id": msg.JobID,
+			"status": msg.Status,
+		}).Info("Received daemon job status update")
+
+		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" {
+			m.IsRunningJob = false
+
+			if msg.Status == "completed" {
+				m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job completed successfully.")
+			} else if msg.Status == "failed" {
+				errMsg := "Job failed"
+				if msg.Error != "" {
+					errMsg = fmt.Sprintf("Job failed: %s", msg.Error)
+				}
+				m.StatusSummary = theme.DefaultTheme.Error.Render(errMsg)
+			} else {
+				m.StatusSummary = theme.DefaultTheme.Warning.Render("Job cancelled.")
+			}
+
+			// Stop following, keep viewer open
+			m.LogViewer.Stop()
+			m.Focus = JobsPane
+		}
+
+		return m, refreshPlan(m.PlanDir)
+
 	case EditFileInTmuxMsg:
 		if msg.Err != nil {
 			m.Err = msg.Err
@@ -1388,14 +1444,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Check if this is a double-Esc (within threshold of last Esc press)
 				if !m.LastEscPress.IsZero() && now.Sub(m.LastEscPress) < doubleEscThreshold {
-					// Double-Esc detected - interrupt the agent if it's running
+					m.LastEscPress = time.Time{} // Reset to prevent triple-Esc triggering again
+
+					// Use daemon cancel if available and streaming a daemon job
+					if m.DaemonClient != nil && m.DaemonClient.IsRunning() && m.StreamingJobID != "" {
+						m.StatusSummary = theme.DefaultTheme.Warning.Render("Cancelling job via daemon...")
+						return m, cancelJobViaDaemonCmd(m.DaemonClient, m.StreamingJobID)
+					}
+
+					// Fall back to tmux-based interrupt
 					if m.CurrentAgentStatus != nil && m.CurrentAgentStatus.State == "running" {
 						m.StatusSummary = theme.DefaultTheme.Warning.Render("Interrupting agent...")
-						m.LastEscPress = time.Time{} // Reset to prevent triple-Esc triggering again
 						return m, interruptAgentCmd(m.Plan, m.ActiveLogJob)
 					}
 					// Agent not running, reset and show message
-					m.LastEscPress = time.Time{}
 					m.StatusSummary = theme.DefaultTheme.Muted.Render("Agent not running - nothing to interrupt")
 					return m, nil
 				}
@@ -1566,10 +1628,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Running %d job(s)...", jobCount))
 				}
 
-				// Run the jobs using the orchestrator with direct output streaming
+				// Run the jobs: prefer daemon, fall back to orchestrator, then subprocess
 				var runCmd tea.Cmd
 				logger := logging.NewLogger("flow-tui")
-				if m.Orchestrator != nil && m.Program != nil {
+				if m.DaemonClient != nil && m.DaemonClient.IsRunning() && m.Program != nil {
+					logger.WithFields(map[string]interface{}{
+						"num_jobs":   len(jobsToRun),
+						"use_method": "daemon",
+					}).Info("Submitting jobs via daemon")
+					runCmd = submitJobsViaDaemonCmd(m.DaemonClient, m.Plan, jobsToRun)
+				} else if m.Orchestrator != nil && m.Program != nil {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":   len(jobsToRun),
 						"use_method": "orchestrator",

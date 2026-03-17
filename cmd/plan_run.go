@@ -12,13 +12,11 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/mattn/go-isatty"
 	grovelogging "github.com/grovetools/core/logging"
-	"github.com/grovetools/core/pkg/tmux"
-	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/core/util/sanitize"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -183,127 +181,6 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	}
 	// Note: if planRunAll is true, we don't check because we want to avoid the prompt for batch runs
 
-	// If plan uses a single worktree and we're not already in that session, create/switch to it
-	// Only do this for interactive_agent job type
-	if len(worktrees) == 1 && !hasMainRepo {
-		// Check if the jobs we're about to run include any interactive_agent jobs
-		hasInteractiveJobs := false
-		if len(jobsToRun) > 0 {
-			// Check only the specific jobs we're about to run
-			for _, job := range jobsToRun {
-				// Only interactive_agent jobs need tmux sessions
-				// headless_agent, agent, oneshot, chat, shell all run directly
-				if job.Type == orchestration.JobTypeInteractiveAgent {
-					hasInteractiveJobs = true
-					break
-				}
-			}
-		}
-
-		// Only prompt for tmux session if we have interactive_agent jobs to run
-		if !hasInteractiveJobs {
-			// Skip tmux session management for all other job types
-		} else {
-			worktreeName := ""
-			for wt := range worktrees {
-				worktreeName = wt
-				break
-			}
-
-			// Get project git root to check if we're already in the worktree (notebook-aware)
-		gitRoot, err := orchestration.GetProjectGitRoot(plan.Directory)
-		if err != nil {
-			gitRoot = ""
-		}
-
-		// Defensive check: prevent creating worktrees in notebook repos
-		if gitRoot != "" && workspace.IsNotebookRepo(gitRoot) {
-			return fmt.Errorf("cannot run plan with worktree: the plan is located in a notebook git repository at %s. Please run this command from your project directory", gitRoot)
-		}
-
-		// If gitRoot is itself a worktree, resolve to the parent repository
-		if gitRoot != "" {
-			gitRootInfo, err := workspace.GetProjectByPath(gitRoot)
-			if err == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
-				gitRoot = gitRootInfo.ParentProjectPath
-			}
-		}
-
-		// Check if we're already in the worktree directory
-		currentDir, _ := os.Getwd()
-		expectedWorktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-		alreadyInWorktree := gitRoot != "" && currentDir != "" && strings.HasPrefix(currentDir, expectedWorktreePath)
-
-		// Check if we're already in the correct tmux session
-		currentTmuxSession := ""
-		if os.Getenv("TMUX") != "" {
-			// We're in tmux, get the current session name
-			cmd := tmux.Command("display-message", "-p", "#S")
-			output, err := cmd.Output()
-			if err == nil {
-				currentTmuxSession = strings.TrimSpace(string(output))
-			}
-		}
-
-		// Use the same session naming logic as the rest of the system (notebook-aware)
-		var expectedSessionName string
-		if gitRoot != "" {
-			worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-			if projInfo, err := orchestration.ResolveProjectForSessionNaming(worktreePath); err == nil {
-				expectedSessionName = projInfo.Identifier()
-			} else {
-				// Fallback to old logic if we can't get project info
-				expectedSessionName = sanitize.SanitizeForTmuxSession(worktreeName)
-			}
-		} else {
-			expectedSessionName = sanitize.SanitizeForTmuxSession(worktreeName)
-		}
-		alreadyInCorrectSession := currentTmuxSession == expectedSessionName
-
-		// Only prompt if we're not already in the worktree or the correct session
-		if !alreadyInWorktree && !alreadyInCorrectSession {
-			// Check if user wants to use tmux session for this worktree
-			if !planRunYes && os.Getenv("TERM") != "" {
-				// Check if we have a TTY before trying to prompt
-				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
-					// No TTY available, skip the prompt and continue without tmux
-					fmt.Println("No TTY available, continuing without tmux session...")
-				} else {
-					fmt.Printf("This plan uses worktree '%s'. Launch in dedicated tmux session? [Y/n]: ", color.CyanString(worktreeName))
-					reader := bufio.NewReader(os.Stdin)
-					response, _ := reader.ReadString('\n')
-					response = strings.ToLower(strings.TrimSpace(response))
-					
-					// If user says no, continue with normal execution
-					if response == "n" || response == "no" {
-						fmt.Println("Continuing without tmux session...")
-					} else {
-						// User said yes or just pressed enter (default yes)
-						reconstructedCmd := buildRunCommandForTmux(cmd, args)
-						if err := CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeName, reconstructedCmd); err != nil {
-							// If error, just continue with normal execution
-							fmt.Printf("Note: Could not create/switch to tmux session: %v\n", err)
-						} else {
-							// Successfully launched in tmux session, exit
-							return nil
-						}
-					}
-				}
-			} else if planRunYes {
-				// Auto-yes mode, create/switch to session
-				reconstructedCmd := buildRunCommandForTmux(cmd, args)
-				if err := CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeName, reconstructedCmd); err != nil {
-					// If error, just continue with normal execution
-					fmt.Printf("Note: Could not create/switch to tmux session: %v\n", err)
-				} else {
-					// Successfully launched in tmux session, exit
-					return nil
-				}
-			}
-		}
-		}
-	}
-
 	// Inject the loaded configuration into the plan object
 	plan.Orchestration = &orchestration.Config{
 		OneshotModel:        flowCfg.OneshotModel,
@@ -342,10 +219,37 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		SkipInteractive:     planRunSkipInteractive || planRunYes, // --yes implies skip interactive
 	}
 
-	// Create orchestrator
+	// Configure runtime: DaemonRuntime by default, LocalRuntime with --local
+	var daemonClient daemon.Client
+	if !planRunLocal {
+		daemonClient = daemon.NewWithAutoStart()
+		if daemonClient.IsRunning() {
+			// Daemon is available — create orchestrator first, then set DaemonRuntime
+			// (DaemonRuntime needs the orchestrator as StatusUpdater)
+		} else {
+			// Daemon not available, fall back to local
+			ulog.Info("Daemon not available, falling back to local execution").Log(ctx)
+			daemonClient = nil
+		}
+	}
+
+	// Create orchestrator (uses LocalRuntime by default)
 	orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
+	}
+
+	// If daemon is available, override with DaemonRuntime
+	if daemonClient != nil {
+		orchConfig.Runtime = orchestration.NewDaemonRuntime(daemonClient, orch, orch.Logger())
+	}
+
+	// Handle --background mode: submit jobs to daemon and exit
+	if planRunBackground {
+		if daemonClient == nil {
+			return fmt.Errorf("--background requires the daemon; start it with 'grove daemon start' or remove --local flag")
+		}
+		return submitJobsBackground(ctx, daemonClient, plan, targetJobs, jobsToRun)
 	}
 
 	// Handle different run modes
@@ -700,37 +604,44 @@ var (
 	planRunSkipInteractive bool
 )
 
-// buildRunCommandForTmux reconstructs the flow plan run command with its flags for execution inside tmux.
-func buildRunCommandForTmux(cmd *cobra.Command, args []string) []string {
-	flowCmd := []string{"flow", "plan", "run"}
-
-	// Add all the original flags only if they were explicitly set
-	if cmd.Flags().Changed("all") && planRunAll {
-		flowCmd = append(flowCmd, "--all")
-	}
-	if cmd.Flags().Changed("next") && planRunNext {
-		flowCmd = append(flowCmd, "--next")
-	}
-	if cmd.Flags().Changed("yes") && planRunYes {
-		flowCmd = append(flowCmd, "--yes")
-	}
-	if cmd.Flags().Changed("watch") && planRunWatch {
-		flowCmd = append(flowCmd, "--watch")
-	}
-	if cmd.Flags().Changed("skip-interactive") && planRunSkipInteractive {
-		flowCmd = append(flowCmd, "--skip-interactive")
-	}
-	if cmd.Flags().Changed("parallel") {
-		flowCmd = append(flowCmd, "--parallel", fmt.Sprintf("%d", planRunParallel))
-	}
-	if cmd.Flags().Changed("model") && planRunModel != "" {
-		flowCmd = append(flowCmd, "--model", planRunModel)
+// submitJobsBackground submits jobs to the daemon and exits without waiting.
+func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orchestration.Plan, targetJobs []string, jobsToRun []*orchestration.Job) error {
+	jobs := jobsToRun
+	if len(jobs) == 0 && len(targetJobs) > 0 {
+		for _, jf := range targetJobs {
+			if job, found := plan.GetJobByFilename(jf); found {
+				jobs = append(jobs, job)
+			}
+		}
 	}
 
-	// Add the original arguments
-	flowCmd = append(flowCmd, args...)
-	return flowCmd
+	if len(jobs) == 0 {
+		// Submit next runnable jobs
+		graph, _ := orchestration.BuildDependencyGraph(plan)
+		jobs = graph.GetRunnableJobs()
+	}
+
+	if len(jobs) == 0 {
+		return fmt.Errorf("no jobs to submit")
+	}
+
+	fmt.Printf("Submitting %d job(s) to daemon in background...\n", len(jobs))
+	for _, job := range jobs {
+		info, err := client.SubmitJob(ctx, models.JobSubmitRequest{
+			PlanDir: plan.Directory,
+			JobFile: job.Filename,
+		})
+		if err != nil {
+			fmt.Printf("  %s %s: %v\n", color.RedString(theme.IconError), job.Filename, err)
+			continue
+		}
+		fmt.Printf("  %s %s → %s (id: %s)\n", color.GreenString(theme.IconSuccess), job.Filename, info.Status, info.ID)
+	}
+
+	fmt.Println("\nJobs submitted. Use 'flow plan status' to monitor progress.")
+	return nil
 }
+
 
 // looksLikeFilePath returns true if the string appears to be a file path rather than a title.
 // A string is considered a file path if it contains "/" or ends with ".md".

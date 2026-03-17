@@ -101,6 +101,8 @@ var (
 	planRunAll             bool
 	planRunNext            bool
 	planRunModel           string
+	planRunLocal           bool // Force local execution (skip daemon)
+	planRunBackground      bool // Submit to daemon and exit without waiting
 
 	// Add flags
 	planAddTemplate            string
@@ -156,6 +158,8 @@ func NewPlanCmd() *cobra.Command {
 	planRunCmd.Flags().BoolVarP(&planRunYes, "yes", "y", false, "Skip confirmation prompts")
 	planRunCmd.Flags().StringVar(&planRunModel, "model", "", "Override model for jobs (e.g., claude-3-5-sonnet-20240620, gpt-4)")
 	planRunCmd.Flags().BoolVar(&planRunSkipInteractive, "skip-interactive", false, "Skip interactive agent jobs (useful for CI/automation)")
+	planRunCmd.Flags().BoolVar(&planRunLocal, "local", false, "Force local execution (bypass daemon)")
+	planRunCmd.Flags().BoolVar(&planRunBackground, "background", false, "Submit to daemon and exit without waiting")
 
 	// Add-step command flags
 	planAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")

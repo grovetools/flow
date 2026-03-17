@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/logviewer"
 	"github.com/grovetools/core/tui/keymap"
@@ -140,6 +141,9 @@ type Model struct {
 	CurrentAgentStatus      *AgentStatus // Parsed agent status from tmux pane output
 	LastEscPress            time.Time    // Track last ESC press for double-ESC interrupt
 	PendingIdleConfirmation bool         // True if we saw idle once and need another poll to confirm
+
+	// Daemon client for job submission, log streaming, and cancellation
+	DaemonClient daemon.Client
 }
 
 // New creates a new Model
@@ -221,6 +225,9 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	isolatedInput.CharLimit = 4096
 	isolatedInput.Width = 60
 
+	// Initialize daemon client for job submission and log streaming
+	daemonClient := daemon.NewWithAutoStart()
+
 	return Model{
 		Plan:             plan,
 		Graph:            graph,
@@ -256,6 +263,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		editViewport:             editVp,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
+		DaemonClient:             daemonClient,
 	}
 }
 
