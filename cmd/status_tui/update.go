@@ -1631,7 +1631,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Run the jobs: prefer daemon, fall back to orchestrator, then subprocess
 				var runCmd tea.Cmd
 				logger := logging.NewLogger("flow-tui")
-				if m.DaemonClient != nil && m.DaemonClient.IsRunning() && m.Program != nil {
+				usingDaemon := m.DaemonClient != nil && m.DaemonClient.IsRunning() && m.Program != nil
+				if usingDaemon {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":   len(jobsToRun),
 						"use_method": "daemon",
@@ -1654,31 +1655,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					runCmd = runJobsCmd(m.RunLogFile, m.PlanDir, jobsToRun)
 				}
 
-				// For interactive agent jobs, also start agent log streaming
 				var cmds []tea.Cmd
 				cmds = append(cmds, runCmd)
 
-				// Check if any of the jobs being run are agent jobs
-				for _, job := range jobsToRun {
-					isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
-
-					logger.WithFields(map[string]interface{}{
-						"job_id":       job.ID,
-						"job_type":     job.Type,
-						"is_agent_job": isAgentJob,
-					}).Debug("Checking if job is agent type")
-
-					if isAgentJob {
-						// Set this as the active log job
-						m.ActiveLogJob = job
+				// For non-daemon paths, also start agent log streaming via aglogs.
+				// When using daemon, log streaming starts after JobSubmittedMsg via streamDaemonLogsCmd.
+				if !usingDaemon {
+					for _, job := range jobsToRun {
+						isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
 
 						logger.WithFields(map[string]interface{}{
-							"job_id": job.ID,
-						}).Info("Starting agent log streaming for running job")
+							"job_id":       job.ID,
+							"job_type":     job.Type,
+							"is_agent_job": isAgentJob,
+						}).Debug("Checking if job is agent type")
 
-						// Start streaming agent logs (with retry for when session starts)
-						cmds = append(cmds, loadAndStreamAgentLogsCmd(m.Plan, job))
-						break // Only handle the first agent job
+						if isAgentJob {
+							// Set this as the active log job
+							m.ActiveLogJob = job
+
+							logger.WithFields(map[string]interface{}{
+								"job_id": job.ID,
+							}).Info("Starting agent log streaming for running job")
+
+							// Start streaming agent logs (with retry for when session starts)
+							cmds = append(cmds, loadAndStreamAgentLogsCmd(m.Plan, job))
+							break // Only handle the first agent job
+						}
 					}
 				}
 

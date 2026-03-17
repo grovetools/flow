@@ -114,10 +114,10 @@ func (o *Orchestrator) ValidatePrerequisites() error {
 
 // RunJob executes a specific job by filename.
 func (o *Orchestrator) RunJob(ctx context.Context, jobFile string) error {
-	// Find job by filename
+	// Find job by filename or full path
 	var job *Job
 	for _, j := range o.Plan.Jobs {
-		if j.FilePath == jobFile {
+		if j.FilePath == jobFile || j.Filename == jobFile {
 			job = j
 			break
 		}
