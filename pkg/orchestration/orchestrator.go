@@ -365,8 +365,13 @@ func (o *Orchestrator) ExecuteJobWithWriter(ctx context.Context, job *Job, outpu
 
 // executeJob runs a single job using standard output.
 func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
-	// Attach os.Stdout to the context (file logging is handled by the Runtime)
-	ctx = grovelogging.WithWriter(ctx, os.Stdout)
+	// Attach a writer to the context for the runtime's MultiWriter.
+	// If no writer is already on the context, use os.Stdout (CLI mode).
+	// When running inside the daemon's JobRunner, the caller should set
+	// io.Discard on the context to prevent output leaking to the daemon's terminal.
+	if grovelogging.GetWriter(ctx) == nil {
+		ctx = grovelogging.WithWriter(ctx, os.Stdout)
+	}
 
 	// Delegate entirely to the runtime
 	return o.config.Runtime.ExecuteJob(ctx, job, o.Plan)

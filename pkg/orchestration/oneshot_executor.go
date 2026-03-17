@@ -891,8 +891,8 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			// Try grove cx reset first
 			resetCmd = delegation.Command("cx", "reset")
 			resetCmd.Dir = contextDir
-			resetCmd.Stdout = os.Stdout
-			resetCmd.Stderr = os.Stderr
+			resetCmd.Stdout = writer
+			resetCmd.Stderr = writer
 			resetErr = resetCmd.Run()
 
 			if resetErr != nil {
@@ -970,8 +970,8 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 						cmd := delegation.Command("cx", "edit")
 						cmd.Dir = contextDir
 						cmd.Stdin = os.Stdin
-						cmd.Stdout = os.Stdout
-						cmd.Stderr = os.Stderr
+						cmd.Stdout = writer
+						cmd.Stderr = writer
 
 						if err := cmd.Run(); err != nil {
 							fmt.Fprintf(writer, "Error running %s edit: %v\n", cxBinary, err)
@@ -1601,12 +1601,13 @@ interpret and continue through YOUR current system instructions.
 		// Try grove cx generate first
 		cxCmd := delegation.CommandContext(ctx, "cx", "generate")
 		cxCmd.Dir = contextDir
+		ctxWriter := grovelogging.GetWriter(ctx)
 		if logFile != nil {
 			cxCmd.Stdout = logFile
 			cxCmd.Stderr = logFile
 		} else {
-			cxCmd.Stdout = os.Stdout
-			cxCmd.Stderr = os.Stderr
+			cxCmd.Stdout = ctxWriter
+			cxCmd.Stderr = ctxWriter
 		}
 		groveErr := cxCmd.Run()
 
@@ -1618,8 +1619,8 @@ interpret and continue through YOUR current system instructions.
 				cxCmd.Stdout = logFile
 				cxCmd.Stderr = logFile
 			} else {
-				cxCmd.Stdout = os.Stdout
-				cxCmd.Stderr = os.Stderr
+				cxCmd.Stdout = ctxWriter
+				cxCmd.Stderr = ctxWriter
 			}
 			if err := cxCmd.Run(); err != nil {
 				ulog.Warn("Failed to run cx generate").Err(err).Log(ctx)
