@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -195,14 +197,32 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 						"provider":       provider,
 					}).Debug("Opencode job remains running - session is idle/active")
 				}
-			} else if !process.IsProcessAlive(pid) {
-				// For other providers (claude, codex), use PID liveness
+			} else if pid == 0 {
+				// PID=0 means session intent registered but not yet confirmed
+				// Keep job as running - it's still starting up
 				log.WithFields(logrus.Fields{
 					"job_id": job.ID,
-					"pid":    pid,
-					"reason": "process_not_alive",
-				}).Info("Marking job as interrupted - process is dead")
-				job.Status = JobStatusInterrupted
+					"reason": "pending_confirmation",
+				}).Debug("Job session pending confirmation, status remains running")
+			} else if !process.IsProcessAlive(pid) {
+				// Stored PID is dead, but Claude may have forked/respawned
+				// Try to find a process with this job ID in its command line
+				actualPID := findProcessByJobID(job.ID)
+				if actualPID > 0 && process.IsProcessAlive(actualPID) {
+					log.WithFields(logrus.Fields{
+						"job_id":     job.ID,
+						"stored_pid": pid,
+						"actual_pid": actualPID,
+					}).Debug("Found alive process via pgrep, status remains running")
+				} else {
+					log.WithFields(logrus.Fields{
+						"job_id":     job.ID,
+						"stored_pid": pid,
+						"actual_pid": actualPID,
+						"reason":     "process_not_alive",
+					}).Info("Marking job as interrupted - process is dead")
+					job.Status = JobStatusInterrupted
+				}
 			} else {
 				log.WithFields(logrus.Fields{
 					"job_id": job.ID,
@@ -224,6 +244,27 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 			}
 		}
 	}
+}
+
+// findProcessByJobID uses pgrep to find a process with the job ID in its command line.
+// This handles cases where Claude's node process forks/respawns with a new PID.
+// Returns 0 if no process found.
+func findProcessByJobID(jobID string) int {
+	cmd := exec.Command("pgrep", "-f", jobID)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	// pgrep may return multiple PIDs, take the first one
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) > 0 && lines[0] != "" {
+		pid, err := strconv.Atoi(lines[0])
+		if err == nil {
+			return pid
+		}
+	}
+	return 0
 }
 
 // findRootJobs returns jobs with no dependencies.

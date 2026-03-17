@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/fatih/color"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
@@ -117,6 +119,13 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 		if err := persister.UpdateJobStatus(job, orchestration.JobStatusCompleted); err != nil {
 			return fmt.Errorf("update job status: %w", err)
 		}
+
+		// Notify the daemon that the session has ended
+		daemonClient := daemon.NewWithAutoStart()
+		if err := daemonClient.EndSession(context.Background(), job.ID, "completed"); err != nil {
+			logger.WithError(err).Debug("Failed to notify daemon of session end")
+		}
+		daemonClient.Close()
 
 		// Archive session artifacts if it's an agent job
 		if job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent {
@@ -311,10 +320,53 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 }
 
 // findAgentSessionInfo finds the PID and session directory for an agent session associated with a job ID.
+// It first queries the daemon (which has the correct PID from ConfirmSession), then falls back to
+// scanning the filesystem if the daemon is unavailable.
 func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) {
 	log := grovelogging.NewLogger("flow.session.lookup")
 	log.WithField("job_id", jobID).Debug("Starting session lookup for job")
 
+	// First try daemon - it has the correct PID from ConfirmSession
+	// The filesystem pid.lock can have stale PIDs due to process forking
+	daemonClient := daemon.NewWithAutoStart()
+	if daemonClient != nil {
+		daemonRunning := daemonClient.IsRunning()
+		log.WithFields(logrus.Fields{
+			"job_id":         jobID,
+			"daemon_running": daemonRunning,
+		}).Debug("Attempting daemon session lookup")
+
+		session, daemonErr := daemonClient.GetSession(context.Background(), jobID)
+		if daemonErr == nil && session != nil && session.PID > 0 {
+			log.WithFields(logrus.Fields{
+				"job_id": jobID,
+				"pid":    session.PID,
+				"source": "daemon",
+			}).Debug("Found session info from daemon")
+
+			// Find sessionDir for backwards compatibility (callers may read metadata from it)
+			foundSessionDir := findSessionDirByJobID(jobID)
+			daemonClient.Close()
+			return session.PID, foundSessionDir, nil
+		} else if daemonErr != nil {
+			log.WithFields(logrus.Fields{
+				"job_id": jobID,
+				"error":  daemonErr.Error(),
+			}).Debug("Daemon session lookup failed, falling back to filesystem")
+		} else if session == nil {
+			log.WithFields(logrus.Fields{
+				"job_id": jobID,
+			}).Debug("Daemon returned nil session, falling back to filesystem")
+		} else {
+			log.WithFields(logrus.Fields{
+				"job_id": jobID,
+				"pid":    session.PID,
+			}).Debug("Daemon returned session with PID=0, falling back to filesystem")
+		}
+		daemonClient.Close()
+	}
+
+	// Fallback to filesystem scanning
 	sessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
 	log.WithField("sessions_dir", sessionsDir).Debug("Scanning sessions directory")
 
@@ -428,6 +480,43 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 	}).Warn("No session found for job ID after checking all entries")
 
 	return 0, "", fmt.Errorf("no session found for job ID: %s", jobID)
+}
+
+// findSessionDirByJobID scans the sessions directory to find the session directory
+// for a given job ID. Returns empty string if not found.
+func findSessionDirByJobID(jobID string) string {
+	sessionsDir := filepath.Join(paths.StateDir(), "hooks", "sessions")
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		currentSessionDir := filepath.Join(sessionsDir, entry.Name())
+		metadataFile := filepath.Join(currentSessionDir, "metadata.json")
+
+		metadataBytes, err := os.ReadFile(metadataFile)
+		if err != nil {
+			continue
+		}
+
+		var metadata struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			continue
+		}
+
+		if metadata.SessionID == jobID {
+			return currentSessionDir
+		}
+	}
+
+	return ""
 }
 
 // getWorktreePathFromSession reads the working_directory from the session metadata.
