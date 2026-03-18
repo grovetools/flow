@@ -164,6 +164,12 @@ type LogContentLoadedMsg struct {
 	JobID          string // The ID of the job this message belongs to
 }
 
+// StreamEndedMsg is sent when an aglogs stream process exits, allowing the TUI
+// to clear StreamingJobID so streaming can be restarted if needed.
+type StreamEndedMsg struct {
+	JobID string
+}
+
 // loadLogContentCmd creates a command to asynchronously read a job's log file.
 func loadLogContentCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
@@ -335,6 +341,16 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 								}).Debug("Found direct transcript path from session registry for streaming")
 								logSpec = metadata.TranscriptPath
 							}
+						}
+
+						// Fetch historical transcript via aglogs read to show full history.
+						// Don't use job.log content — it only has orchestrator launch output.
+						readCmd := delegation.Command("aglogs", "read", logSpec)
+						readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+						if readOutput, readErr := readCmd.Output(); readErr == nil && len(readOutput) > 0 {
+							contentStr = string(readOutput)
+						} else {
+							contentStr = "[...] Waiting for agent transcript...\n"
 						}
 
 						return LogContentLoadedMsg{
@@ -532,11 +548,19 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 		stdout, err := streamCmd.StdoutPipe()
 		if err != nil {
 			logFile.Close()
+			go func() {
+				defer func() { recover() }()
+				program.Send(StreamEndedMsg{JobID: job.ID})
+			}()
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to create stdout pipe: %w", err), JobID: job.ID}
 		}
 
 		if err := streamCmd.Start(); err != nil {
 			logFile.Close()
+			go func() {
+				defer func() { recover() }()
+				program.Send(StreamEndedMsg{JobID: job.ID})
+			}()
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start aglogs stream: %w", err), JobID: job.ID}
 		}
 
@@ -560,6 +584,14 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 			defer logFile.Close()
 			defer stdout.Close()
 			defer close(doneCh) // Signal monitor goroutine to exit
+
+			// Notify the TUI that streaming ended so it can clear StreamingJobID
+			defer func() {
+				func() {
+					defer func() { recover() }()
+					program.Send(StreamEndedMsg{JobID: job.ID})
+				}()
+			}()
 
 			// Recover from any panics in the streaming goroutine
 			// This can happen if program.Send() is called after the TUI is shutting down
@@ -685,6 +717,10 @@ func streamDaemonLogsCmd(ctx context.Context, client daemon.Client, jobID string
 	return func() tea.Msg {
 		ch, err := client.StreamJobLogs(ctx, jobID)
 		if err != nil {
+			go func() {
+				defer func() { recover() }()
+				program.Send(StreamEndedMsg{JobID: jobID})
+			}()
 			return LogContentLoadedMsg{
 				Err:   fmt.Errorf("stream daemon logs: %w", err),
 				JobID: jobID,
@@ -697,6 +733,11 @@ func streamDaemonLogsCmd(ctx context.Context, client daemon.Client, jobID string
 				if r := recover(); r != nil {
 					// TUI may have shut down
 				}
+				// Ensure streaming state clears when SSE channel closes
+				func() {
+					defer func() { recover() }()
+					program.Send(StreamEndedMsg{JobID: jobID})
+				}()
 			}()
 
 			for event := range ch {

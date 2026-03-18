@@ -53,14 +53,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activeJobID = m.ActiveLogJob.ID
 		}
 		logger.WithFields(map[string]interface{}{
-			"msg_job_id":      msg.JobID,
-			"active_job_id":   activeJobID,
-			"has_error":       msg.Err != nil,
-			"should_retry":    msg.ShouldRetry,
-			"start_streaming": msg.StartStreaming,
-			"content_length":  len(msg.Content),
-			"show_logs":       m.ShowLogs,
-			"active_log_job":  m.ActiveLogJob != nil,
+			"msg_job_id":        msg.JobID,
+			"active_job_id":     activeJobID,
+			"has_error":         msg.Err != nil,
+			"should_retry":      msg.ShouldRetry,
+			"start_streaming":   msg.StartStreaming,
+			"content_length":    len(msg.Content),
+			"show_logs":         m.ShowLogs,
+			"active_log_job":    m.ActiveLogJob != nil,
+			"log_file_path":     msg.LogFilePath,
+			"streaming_job_id":  m.StreamingJobID,
+			"has_stream_cancel": m.StreamCancel != nil,
 		}).Info("Received LogContentLoadedMsg")
 
 		// Discard messages for jobs we're not currently viewing
@@ -149,6 +152,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		logger.Info("No commands to return")
+		return m, nil
+
+	case StreamEndedMsg:
+		// The aglogs stream process exited — clear streaming state so it can be restarted
+		if m.StreamingJobID == msg.JobID {
+			logger := logging.NewLogger("flow-tui")
+			logger.WithFields(map[string]interface{}{
+				"job_id": msg.JobID,
+			}).Info("Stream ended, clearing streaming state")
+			m.StreamingJobID = ""
+			if m.StreamCancel != nil {
+				m.StreamCancel()
+				m.StreamCancel = nil
+			}
+			// If the job is still running, schedule a retry to restart streaming
+			if m.ActiveLogJob != nil && m.ActiveLogJob.ID == msg.JobID &&
+				(m.ActiveLogJob.Status == orchestration.JobStatusRunning || m.ActiveLogJob.Status == orchestration.JobStatusIdle) {
+				logger.Info("Job still running after stream ended, scheduling retry")
+				return m, retryLoadAgentLogsAfterDelay()
+			}
+		}
 		return m, nil
 
 	case FrontmatterContentLoadedMsg:
