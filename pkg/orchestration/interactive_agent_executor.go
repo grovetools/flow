@@ -1158,14 +1158,14 @@ func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, work
 // Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
 // worktree session.
 func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
-	// Get the git root from the plan directory
-	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	// Determine the working directory (worktree-aware)
+	workDir, err := DetermineWorkingDirectory(plan, job)
 	if err != nil {
-		return "", fmt.Errorf("could not find project git root: %w", err)
+		return "", fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Resolve project info for session naming
-	projInfo, err := ResolveProjectForSessionNaming(gitRoot)
+	// Resolve project info for session naming using the working directory
+	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve project for session naming: %w", err)
 	}
@@ -1203,14 +1203,14 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 // targeting the correct tmux server.
 // Uses the same key sequence as isolated agents that works in both vim mode and normal mode.
 func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
-	// Get the git root from the plan directory
-	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	// Determine the working directory (worktree-aware)
+	workDir, err := DetermineWorkingDirectory(plan, job)
 	if err != nil {
-		return fmt.Errorf("could not find project git root: %w", err)
+		return fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Resolve project info for session naming
-	projInfo, err := ResolveProjectForSessionNaming(gitRoot)
+	// Resolve project info for session naming using the working directory
+	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve project for session naming: %w", err)
 	}
@@ -1252,14 +1252,14 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 // Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
 // worktree session.
 func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
-	// Get the git root from the plan directory
-	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	// Determine the working directory (worktree-aware)
+	workDir, err := DetermineWorkingDirectory(plan, job)
 	if err != nil {
-		return fmt.Errorf("could not find project git root: %w", err)
+		return fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Resolve project info for session naming
-	projInfo, err := ResolveProjectForSessionNaming(gitRoot)
+	// Resolve project info for session naming using the working directory
+	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve project for session naming: %w", err)
 	}
