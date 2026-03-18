@@ -1655,11 +1655,19 @@ func fetchAgentStatusCmd(plan *orchestration.Plan, job *orchestration.Job) tea.C
 		}
 
 		status := ParseAgentPane(output)
+
+		var stateStr string
+		var tokens int
+		if status != nil {
+			stateStr = status.State
+			tokens = status.TotalTokens
+		}
+
 		logger.WithFields(map[string]interface{}{
-			"job_id":      job.ID,
-			"state":       status.State,
-			"tokens":      status.TotalTokens,
-			"output_len":  len(output),
+			"job_id":     job.ID,
+			"state":      stateStr,
+			"tokens":     tokens,
+			"output_len": len(output),
 		}).Debug("Agent status captured")
 		return AgentStatusMsg{Status: status, JobID: job.ID, Err: nil}
 	}
