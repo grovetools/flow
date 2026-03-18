@@ -59,6 +59,94 @@ type EditContentLoadedMsg struct {
 	Err     error
 }
 
+// daemonStreamState holds the state for the daemon SSE stream subscription.
+var daemonStreamState struct {
+	mu      sync.Mutex
+	ch      <-chan daemon.StateUpdate
+	cancel  context.CancelFunc
+	started bool
+}
+
+// daemonStreamStartedMsg is sent after the daemon stream subscription is established.
+type daemonStreamStartedMsg struct{}
+
+// daemonStateUpdateMsg is sent when the daemon pushes a state update via SSE.
+type daemonStateUpdateMsg struct {
+	update daemon.StateUpdate
+}
+
+// daemonStreamErrorMsg is sent when the daemon stream encounters an error or closes.
+type daemonStreamErrorMsg struct {
+	err error
+}
+
+// subscribeToDaemonCmd starts listening to daemon state updates via SSE.
+func subscribeToDaemonCmd() tea.Cmd {
+	return func() tea.Msg {
+		daemonStreamState.mu.Lock()
+		defer daemonStreamState.mu.Unlock()
+
+		if daemonStreamState.started {
+			return daemonStreamStartedMsg{}
+		}
+
+		client := daemon.New()
+
+		if !client.IsRunning() {
+			client.Close()
+			return nil
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		ch, err := client.StreamState(ctx)
+		if err != nil {
+			cancel()
+			client.Close()
+			return daemonStreamErrorMsg{err: err}
+		}
+
+		daemonStreamState.ch = ch
+		daemonStreamState.cancel = cancel
+		daemonStreamState.started = true
+
+		return daemonStreamStartedMsg{}
+	}
+}
+
+// listenToDaemonCmd waits for the next update from the daemon stream.
+func listenToDaemonCmd() tea.Cmd {
+	return func() tea.Msg {
+		daemonStreamState.mu.Lock()
+		ch := daemonStreamState.ch
+		started := daemonStreamState.started
+		daemonStreamState.mu.Unlock()
+
+		if !started || ch == nil {
+			return nil
+		}
+
+		update, ok := <-ch
+		if !ok {
+			return daemonStreamErrorMsg{err: nil}
+		}
+
+		return daemonStateUpdateMsg{update: update}
+	}
+}
+
+// stopDaemonStream stops the daemon SSE stream subscription.
+func stopDaemonStream() {
+	daemonStreamState.mu.Lock()
+	defer daemonStreamState.mu.Unlock()
+
+	if daemonStreamState.cancel != nil {
+		daemonStreamState.cancel()
+	}
+	daemonStreamState.ch = nil
+	daemonStreamState.cancel = nil
+	daemonStreamState.started = false
+}
+
 // retryLoadAgentLogsAfterDelay creates a command that waits and then triggers a retry
 func retryLoadAgentLogsAfterDelay() tea.Cmd {
 	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {

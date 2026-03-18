@@ -144,6 +144,9 @@ type Model struct {
 
 	// Daemon client for job submission, log streaming, and cancellation
 	DaemonClient daemon.Client
+
+	// DaemonConnected is true when streaming real-time updates from the daemon
+	DaemonConnected bool
 }
 
 // New creates a new Model
@@ -285,6 +288,7 @@ func (m Model) Init() tea.Cmd {
 		func() tea.Msg { return InitProgramMsg{} },
 		blink(),
 		refreshTick(),
+		subscribeToDaemonCmd(),
 	)
 }
 

@@ -261,6 +261,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case daemonStreamStartedMsg:
+		m.DaemonConnected = true
+		return m, listenToDaemonCmd()
+
+	case daemonStateUpdateMsg:
+		// Only trigger refresh for session updates (job state changes)
+		if msg.update.UpdateType == "session" {
+			return m, tea.Batch(
+				refreshPlan(m.PlanDir),
+				listenToDaemonCmd(),
+			)
+		}
+		return m, listenToDaemonCmd()
+
+	case daemonStreamErrorMsg:
+		m.DaemonConnected = false
+		// Fall back to polling (already running)
+		return m, nil
+
 	case RetryLoadAgentLogsMsg:
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
@@ -1208,6 +1227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.KeyMap.Quit):
+			stopDaemonStream()
 			return m, tea.Quit
 
 		case key.Matches(msg, m.KeyMap.Help):
