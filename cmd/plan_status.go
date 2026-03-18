@@ -121,7 +121,21 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 				// Give agent jobs a grace period to register with grove-hooks
 				// Agents don't register until their first hook call, which can take 5-30 seconds
 				gracePeriod := 30 * time.Second
-				timeSinceUpdate := time.Since(job.UpdatedAt)
+				// If UpdatedAt is zero (not set in frontmatter), fall back to file mod time
+				// or treat as just-started to avoid immediately marking as interrupted
+				updatedAt := job.UpdatedAt
+				if updatedAt.IsZero() {
+					if job.FilePath != "" {
+						if fi, statErr := os.Stat(job.FilePath); statErr == nil {
+							updatedAt = fi.ModTime()
+						}
+					}
+					// If still zero (no file path or stat failed), assume just started
+					if updatedAt.IsZero() {
+						updatedAt = time.Now()
+					}
+				}
+				timeSinceUpdate := time.Since(updatedAt)
 
 				log.WithFields(logrus.Fields{
 					"job_id":             job.ID,
@@ -129,6 +143,7 @@ func VerifyRunningJobStatus(plan *orchestration.Plan) {
 					"time_since_update":  timeSinceUpdate.String(),
 					"grace_period":       gracePeriod.String(),
 					"within_grace_period": timeSinceUpdate < gracePeriod,
+					"updated_at_zero":    job.UpdatedAt.IsZero(),
 				}).Debug("Session lookup failed for job")
 
 				if timeSinceUpdate < gracePeriod {

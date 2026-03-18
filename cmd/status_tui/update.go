@@ -252,6 +252,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if msg.Err != nil {
+			logger := logging.NewLogger("flow-tui")
+			logger.WithFields(map[string]interface{}{
+				"job_id": msg.JobID,
+				"error":  msg.Err.Error(),
+			}).Debug("Agent status poll failed")
+		}
+
 		// Update status with anti-flicker debounce for idle state
 		// Requires two consecutive "idle" polls before showing idle (prevents flicker between turns)
 		if msg.Err == nil && msg.Status != nil {
@@ -560,8 +568,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Verify running jobs (check PIDs, clear stale "running" statuses)
-		// This needs to be imported from cmd package
-		verifyRunningJobStatusHelper(plan)
+		// Skip when daemon is connected — the daemon handles session liveness
+		if !m.DaemonConnected {
+			verifyRunningJobStatusHelper(plan)
+		}
 
 		// Log any jobs that were marked as interrupted
 		var interruptedJobs []string

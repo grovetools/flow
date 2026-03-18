@@ -980,6 +980,7 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 
 	var latestFile string
 	var latestTime time.Time
+	skippedOld := 0
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -1013,11 +1014,7 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 		// Only consider files with timestamps after the job started
 		// This prevents reusing old session files from previous jobs
 		if !contentTime.After(jobStartTime) {
-			logger.WithFields(map[string]interface{}{
-				"file":           entry.Name(),
-				"content_time":   contentTime,
-				"job_start_time": jobStartTime,
-			}).Debug("Skipping old session file")
+			skippedOld++
 			continue
 		}
 
@@ -1025,6 +1022,13 @@ func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime t
 			latestTime = contentTime
 			latestFile = entry.Name()
 		}
+	}
+
+	if skippedOld > 0 {
+		logger.WithFields(map[string]interface{}{
+			"skipped_count":  skippedOld,
+			"job_start_time": jobStartTime,
+		}).Debug("Skipped session files predating job start")
 	}
 
 	if latestFile == "" {

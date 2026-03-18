@@ -1634,26 +1634,33 @@ func pollAgentStatusAfterDelay() tea.Cmd {
 // fetchAgentStatusCmd fetches the current agent status by capturing tmux pane output
 func fetchAgentStatusCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
+		logger := logging.NewLogger("flow-tui")
 		var output string
 		var err error
 
 		if job.Type == orchestration.JobTypeIsolatedAgent {
-			// For isolated agents, use dedicated socket
 			output, err = orchestration.CaptureIsolatedAgentOutput(job.ID)
 		} else if job.Type == orchestration.JobTypeInteractiveAgent {
-			// For interactive agents, capture from the worktree tmux session
 			output, err = orchestration.CaptureInteractiveAgentOutput(plan, job)
 		} else {
-			// Not an agent job that supports status polling
 			return AgentStatusMsg{JobID: job.ID, Err: fmt.Errorf("job type %s does not support status polling", job.Type)}
 		}
 
 		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"job_id": job.ID,
+				"error":  err.Error(),
+			}).Debug("Agent tmux capture failed")
 			return AgentStatusMsg{JobID: job.ID, Err: err}
 		}
 
-		// Parse the pane output to extract status
 		status := ParseAgentPane(output)
+		logger.WithFields(map[string]interface{}{
+			"job_id":      job.ID,
+			"state":       status.State,
+			"tokens":      status.TotalTokens,
+			"output_len":  len(output),
+		}).Debug("Agent status captured")
 		return AgentStatusMsg{Status: status, JobID: job.ID, Err: nil}
 	}
 }
