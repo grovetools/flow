@@ -12,7 +12,10 @@ import (
 	"strings"
 	"text/template"
 
+	"time"
+
 	"github.com/google/uuid"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
@@ -303,6 +306,15 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		result.WriteString("1. Add your first job: flow plan add\n")
 		result.WriteString("2. Check status: flow plan status\n")
 	}
+
+	// Notify daemon to re-scan workspaces so it picks up the new plan immediately
+	client := daemon.New()
+	if client.IsRunning() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.Refresh(ctx)
+		cancel()
+	}
+	client.Close()
 
 	return result.String(), nil
 }
