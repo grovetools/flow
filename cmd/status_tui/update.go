@@ -128,7 +128,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				isAgentWithStatus := m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 					m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent
 				if isAgentWithStatus {
-					cmds = append(cmds, func() tea.Msg { return PollAgentStatusMsg{} })
+					cmds = append(cmds, pollAgentStatusAfterDelay())
 				}
 			} else {
 				logger.WithFields(map[string]interface{}{
@@ -298,8 +298,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listenToDaemonCmd()
 
 	case daemonStateUpdateMsg:
-		// Only trigger refresh for session updates (job state changes)
-		if msg.update.UpdateType == "session" {
+		// Trigger refresh for session updates and all job lifecycle events.
+		// Job events (job_submitted, job_started, job_completed, job_failed,
+		// job_cancelled, job_pending_user) must trigger a plan refresh so the
+		// TUI's dependency graph stays in sync with the daemon.
+		switch msg.update.UpdateType {
+		case "session",
+			"job_submitted", "job_started", "job_completed",
+			"job_failed", "job_cancelled", "job_pending_user":
 			return m, tea.Batch(
 				refreshPlan(m.PlanDir),
 				listenToDaemonCmd(),
@@ -490,7 +496,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"status": msg.Status,
 		}).Info("Received daemon job status update")
 
-		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" {
+		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" || msg.Status == "pending_user" {
 			m.IsRunningJob = false
 
 			if msg.Status == "completed" {
@@ -501,6 +507,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					errMsg = fmt.Sprintf("Job failed: %s", msg.Error)
 				}
 				m.StatusSummary = theme.DefaultTheme.Error.Render(errMsg)
+			} else if msg.Status == "pending_user" {
+				m.StatusSummary = theme.DefaultTheme.Info.Render("Job awaiting user input.")
 			} else {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Job cancelled.")
 			}
@@ -649,31 +657,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Selected = newSelected
 
-		// Autorun logic: if autorunning, check for next runnable jobs from the original selection
-		// Only trigger autorun if no jobs are currently running
-		if m.isAutorunning && !m.IsRunningJob && m.originalSelection != nil {
-			// Get the next set of runnable jobs that were in the original selection
-			allRunnable := m.Graph.GetRunnableJobs()
-			var selectedRunnable []*orchestration.Job
-			for _, job := range allRunnable {
+		// Autorun logic: if autorunning, check for next runnable jobs from the original selection.
+		// Instead of relying solely on m.IsRunningJob, verify no originally-selected jobs
+		// are still running — this handles the case where multiple parallel jobs finish at
+		// different times.
+		if m.isAutorunning && m.originalSelection != nil {
+			// Check if any originally-selected jobs are still running
+			anyStillRunning := false
+			anyFailed := false
+			for _, job := range m.Jobs {
 				if m.originalSelection[job.ID] {
-					selectedRunnable = append(selectedRunnable, job)
+					if job.Status == orchestration.JobStatusRunning {
+						anyStillRunning = true
+						break
+					}
+					if job.Status == orchestration.JobStatusFailed {
+						anyFailed = true
+					}
 				}
 			}
 
-			if len(selectedRunnable) > 0 {
-				m.StatusSummary = theme.DefaultTheme.Info.Render("Starting next stage...")
-				// Select only the runnable jobs that were in the original selection
-				for _, job := range selectedRunnable {
-					m.Selected[job.ID] = true
+			if !anyStillRunning {
+				// If any originally-selected job failed, halt autorun
+				if anyFailed {
+					m.isAutorunning = false
+					m.originalSelection = nil
+					m.IsRunningJob = false
+					m.StatusSummary = theme.DefaultTheme.Error.Render("Autorun halted: a job failed.")
+				} else {
+					// Get the next set of runnable jobs that were in the original selection
+					allRunnable := m.Graph.GetRunnableJobs()
+					var selectedRunnable []*orchestration.Job
+					for _, job := range allRunnable {
+						if m.originalSelection[job.ID] {
+							selectedRunnable = append(selectedRunnable, job)
+						}
+					}
+
+					if len(selectedRunnable) > 0 {
+						m.StatusSummary = theme.DefaultTheme.Info.Render("Starting next stage...")
+						// Clear old selections and select only the newly runnable jobs
+						m.Selected = make(map[string]bool)
+						for _, job := range selectedRunnable {
+							m.Selected[job.ID] = true
+						}
+						// Trigger the run by sending a 'r' key message
+						return m, func() tea.Msg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}} }
+					} else {
+						// No more runnable jobs from the selection, autorun is complete
+						m.isAutorunning = false
+						m.originalSelection = nil
+						m.IsRunningJob = false
+						m.StatusSummary = theme.DefaultTheme.Success.Render("All jobs completed successfully.")
+					}
 				}
-				// Trigger the run by sending a 'r' key message
-				return m, func() tea.Msg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}} }
-			} else {
-				// No more runnable jobs from the selection, autorun is complete
-				m.isAutorunning = false
-				m.originalSelection = nil
-				m.StatusSummary = theme.DefaultTheme.Success.Render("All jobs completed successfully.")
 			}
 		}
 
@@ -1593,7 +1630,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"num_candidates": len(candidateJobs),
 			}).Info("Filtering candidate jobs by status")
 
-			// Filter out jobs that are not runnable
+			// Determine if we're using the daemon (which has a blocked queue
+			// and handles DAG traversal itself).
+			usingDaemon := m.DaemonClient != nil && m.DaemonClient.IsRunning() && m.Program != nil
+
+			// Filter out jobs that are not submittable.
+			// When using the daemon, accept any pending/blocked/failed job — the
+			// daemon will hold blocked ones and promote them as deps complete.
+			// For non-daemon paths, keep the strict IsRunnable() check.
 			var jobsToRun []*orchestration.Job
 			var skippedReasons []string
 			for _, job := range candidateJobs {
@@ -1603,7 +1647,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					"job_status": job.Status,
 				}).Debug("Checking if job is runnable")
 
-				if job.IsRunnable() {
+				submittable := false
+				if usingDaemon {
+					// For daemon: accept pending, blocked, failed (retriable), and pending_user chats
+					submittable = job.Status == orchestration.JobStatusPending ||
+						job.Status == orchestration.JobStatusBlocked ||
+						job.Status == orchestration.JobStatusFailed ||
+						(job.Type == orchestration.JobTypeChat && job.Status == orchestration.JobStatusPendingUser)
+				} else {
+					submittable = job.IsRunnable()
+				}
+
+				if submittable {
 					jobsToRun = append(jobsToRun, job)
 				} else {
 					var reason string
@@ -1615,7 +1670,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					case orchestration.JobStatusAbandoned, orchestration.JobStatusHold:
 						reason = "is on hold/abandoned."
 					case orchestration.JobStatusPending, orchestration.JobStatusBlocked, orchestration.JobStatusFailed:
-						// Since IsRunnable() returned false, it must be because dependencies are not met.
 						reason = "is blocked by unmet dependencies."
 					default:
 						reason = fmt.Sprintf("is not in a runnable state (status: %s).", job.Status)
@@ -1684,8 +1738,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Run the jobs: prefer daemon, fall back to orchestrator, then subprocess
 				var runCmd tea.Cmd
-				logger := logging.NewLogger("flow-tui")
-				usingDaemon := m.DaemonClient != nil && m.DaemonClient.IsRunning() && m.Program != nil
 				if usingDaemon {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":   len(jobsToRun),
@@ -2062,6 +2114,12 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		if isAgentJob {
 			// Reset current agent status when switching jobs
 			m.CurrentAgentStatus = nil
+			// Start status polling for running/idle agent jobs
+			isRunningOrIdle := job.Status == orchestration.JobStatusRunning || job.Status == orchestration.JobStatusIdle
+			isPollingType := job.Type == orchestration.JobTypeIsolatedAgent || job.Type == orchestration.JobTypeInteractiveAgent
+			if isRunningOrIdle && isPollingType {
+				return m, tea.Batch(loadAndStreamAgentLogsCmd(m.Plan, job), pollAgentStatusAfterDelay())
+			}
 			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
 		}
 		return m, loadLogContentCmd(m.Plan, job)
