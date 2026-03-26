@@ -14,7 +14,6 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
-	"github.com/grovetools/flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
 
@@ -98,7 +97,6 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	}
 
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
-	executor := &exec.RealCommandExecutor{}
 
 	if !sessionExists {
 		opts := tmux.LaunchOptions{
@@ -139,14 +137,15 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		Pretty(theme.IconWorktree + " Launching OpenCode agent in worktree session").
 		Log(ctx)
 
+	// Use tmuxClient to ensure correct tmux server targeting when the daemon
+	// runs on a separate tmux server (e.g., tmux -L groved).
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-	newWindowArgs := []string{"new-window"}
-	if isTUIMode {
-		newWindowArgs = append(newWindowArgs, "-d")
-	}
-	newWindowArgs = append(newWindowArgs, "-t", sessionName, "-n", agentWindowName, "-c", workDir)
-
-	if err := executor.Execute("tmux", newWindowArgs...); err != nil {
+	if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
+		Target:     sessionName,
+		WindowName: agentWindowName,
+		WorkingDir: workDir,
+		Detached:   isTUIMode,
+	}); err != nil {
 		p.log.WithError(err).Warn("Failed to create agent window, may already exist.")
 	}
 
@@ -154,7 +153,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	envCommand := fmt.Sprintf("export GROVE_AGENT_PROVIDER='opencode'; export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to set environment variables: %w", err)
@@ -162,7 +161,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 
 	time.Sleep(100 * time.Millisecond)
 
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)

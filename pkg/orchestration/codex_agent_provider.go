@@ -15,7 +15,6 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
-	"github.com/grovetools/flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
 
@@ -61,7 +60,6 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 
 	// Check if session already exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
-	executor := &exec.RealCommandExecutor{}
 
 	if !sessionExists {
 		// Create new session with a blank "workspace" window
@@ -111,17 +109,16 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		Pretty(theme.IconWorktree + " Launching Codex agent in worktree session").
 		Log(ctx)
 
-	// Build new-window command args - add -d flag if in TUI mode to prevent auto-select
+	// Create new window - use tmuxClient to ensure correct tmux server targeting
+	// when the daemon runs on a separate tmux server (e.g., tmux -L groved).
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-	newWindowArgs := []string{"new-window"}
-	if isTUIMode {
-		newWindowArgs = append(newWindowArgs, "-d") // Create window in background (don't select it)
-	}
-	newWindowArgs = append(newWindowArgs, "-t", sessionName, "-n", agentWindowName, "-c", workDir)
-
-	if err := executor.Execute("tmux", newWindowArgs...); err != nil {
+	if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
+		Target:     sessionName,
+		WindowName: agentWindowName,
+		WorkingDir: workDir,
+		Detached:   isTUIMode,
+	}); err != nil {
 		p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
-		// Don't return error, just log and proceed.
 	}
 
 	// Set environment variables in the window's shell so they're available to the codex process
@@ -133,7 +130,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to set environment variables")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -144,7 +141,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	time.Sleep(100 * time.Millisecond)
 
 	// Send the agent command to the new window
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()

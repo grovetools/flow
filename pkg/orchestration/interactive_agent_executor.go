@@ -23,7 +23,6 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
-	flowexec "github.com/grovetools/flow/pkg/exec"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -464,7 +463,6 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 		// Check if session already exists
 		sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
-		executor := &flowexec.RealCommandExecutor{}
 
 		if !sessionExists {
 			// Create new session with a blank "workspace" window
@@ -514,11 +512,17 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			Pretty(theme.IconWorktree + " Launching agent in worktree session").
 			Log(ctx)
 
-		// Build new-window command args - always use -d to avoid stealing focus
 		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-		newWindowArgs := []string{"new-window", "-d", "-t", sessionName, "-n", agentWindowName, "-c", workDir}
 
-		if err := executor.Execute("tmux", newWindowArgs...); err != nil {
+		// Create new window - always use Detached to avoid stealing focus.
+		// Use tmuxClient (not RealCommandExecutor) to ensure correct tmux server targeting
+		// when the daemon runs on a separate tmux server (e.g., tmux -L groved).
+		if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
+			Target:     sessionName,
+			WindowName: agentWindowName,
+			WorkingDir: workDir,
+			Detached:   true,
+		}); err != nil {
 			p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
 		}
 
@@ -531,7 +535,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
 			job.ID, job.FilePath, plan.Name, escapedTitle)
-		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
+		if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to set environment variables")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -542,7 +546,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		time.Sleep(100 * time.Millisecond)
 
 		// Send the agent command to the new window
-		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+		if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -639,20 +643,28 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		Pretty(theme.IconRepo + " Launching agent in project session").
 		Log(ctx)
 
-	executor := &flowexec.RealCommandExecutor{}
-
-	// Build new-window command args - always use -d to avoid stealing focus
-	newWindowArgsNonWorktree := []string{"new-window", "-d", "-t", sessionName, "-n", windowName, "-c", workDir}
-
-	if err := executor.Execute("tmux", newWindowArgsNonWorktree...); err != nil {
+	// Create new window - use tmuxClient (not RealCommandExecutor) to ensure correct
+	// tmux server targeting when the daemon runs on a separate tmux server.
+	windowTarget := fmt.Sprintf("%s:%s", sessionName, windowName)
+	if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
+		Target:     sessionName,
+		WindowName: windowName,
+		WorkingDir: workDir,
+		Detached:   true,
+	}); err != nil {
 		if strings.Contains(err.Error(), "duplicate window") {
 			p.ulog.Info("Window already exists, attempting to kill it first").
 				Field("window", windowName).
 				Log(ctx)
-			executor.Execute("tmux", "kill-window", "-t", fmt.Sprintf("%s:%s", sessionName, windowName))
+			tmuxClient.KillWindow(ctx, windowTarget)
 			time.Sleep(100 * time.Millisecond)
 
-			if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workDir); err != nil {
+			if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
+				Target:     sessionName,
+				WindowName: windowName,
+				WorkingDir: workDir,
+				Detached:   true,
+			}); err != nil {
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()
 				return fmt.Errorf("failed to create new tmux window after killing existing: %w", err)
@@ -674,14 +686,14 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	time.Sleep(300 * time.Millisecond)
 
-	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
+	targetPane := windowTarget
 
 	// Use separate export commands for shell compatibility (bash/zsh/fish)
 	// and properly quote the title to handle spaces and special characters.
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to set environment variables")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -693,7 +705,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
@@ -1156,7 +1168,7 @@ func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, work
 
 // CaptureInteractiveAgentOutput captures the visible output from an interactive agent's pane.
 // Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
-// worktree session.
+// project's tmux session on the default tmux server.
 func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 	// Determine the working directory (worktree-aware)
 	workDir, err := DetermineWorkingDirectory(plan, job)
@@ -1174,33 +1186,20 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	// Extract tmux socket from TMUX env var if available
-	// Format: /path/to/socket,pid,pane (e.g., /private/tmp/tmux-501/default,12345,0)
-	tmuxEnv := os.Getenv("TMUX")
-	var tmuxArgs []string
-	if tmuxEnv != "" {
-		parts := strings.Split(tmuxEnv, ",")
-		if len(parts) >= 1 && parts[0] != "" {
-			// Use the socket path with -S flag
-			tmuxArgs = []string{"-S", parts[0]}
-		}
-	}
-
-	// Capture the pane output
-	captureArgs := append(tmuxArgs, "capture-pane", "-t", targetPane, "-p")
-	cmd := tmux.Command(captureArgs...)
-	output, err := cmd.Output()
+	// Use the tmux Client to ensure correct server targeting.
+	// This avoids inheriting the TMUX env var which may point to a different
+	// tmux server (e.g., when the daemon runs on tmux -L groved).
+	tmuxClient, err := tmux.NewClient()
 	if err != nil {
-		return "", fmt.Errorf("failed to capture pane output: %w", err)
+		return "", fmt.Errorf("tmux not available: %w", err)
 	}
 
-	return string(output), nil
+	return tmuxClient.CapturePane(context.Background(), targetPane)
 }
 
 // SendInputToInteractiveAgent sends input text to an interactive agent via tmux send-keys.
-// Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
-// worktree session. We extract the tmux socket from the TMUX env var to ensure we're
-// targeting the correct tmux server.
+// Uses the tmux Client to ensure correct server targeting regardless of which tmux server
+// the calling process runs on.
 // Uses the same key sequence as isolated agents that works in both vim mode and normal mode.
 func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	// Determine the working directory (worktree-aware)
@@ -1219,29 +1218,21 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	executor := &flowexec.RealCommandExecutor{}
-
-	// Extract tmux socket from TMUX env var if available
-	// Format: /path/to/socket,pid,pane (e.g., /private/tmp/tmux-501/default,12345,0)
-	tmuxEnv := os.Getenv("TMUX")
-	var tmuxArgs []string
-	if tmuxEnv != "" {
-		parts := strings.Split(tmuxEnv, ",")
-		if len(parts) >= 1 && parts[0] != "" {
-			// Use the socket path with -S flag
-			tmuxArgs = []string{"-S", parts[0]}
-		}
+	// Use the tmux Client to ensure correct server targeting.
+	tmuxClient, err := tmux.NewClient()
+	if err != nil {
+		return fmt.Errorf("tmux not available: %w", err)
 	}
 
+	ctx := context.Background()
+
 	// First: Escape to ensure clean state, i to enter insert mode, then the text
-	sendKeysArgs := append(tmuxArgs, "send-keys", "-t", targetPane, "Escape", "i", input)
-	if err := executor.Execute("tmux", sendKeysArgs...); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
 		return fmt.Errorf("failed to send input text: %w", err)
 	}
 
 	// Second: C-Enter to submit (must be separate call)
-	submitArgs := append(tmuxArgs, "send-keys", "-t", targetPane, "C-m")
-	if err := executor.Execute("tmux", submitArgs...); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, "C-m"); err != nil {
 		return fmt.Errorf("failed to send submit key: %w", err)
 	}
 
@@ -1249,8 +1240,7 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 }
 
 // SendInterruptToInteractiveAgent sends Ctrl+C to interrupt an interactive agent.
-// Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
-// worktree session.
+// Uses the tmux Client to ensure correct server targeting.
 func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 	// Determine the working directory (worktree-aware)
 	workDir, err := DetermineWorkingDirectory(plan, job)
@@ -1268,19 +1258,12 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	executor := &flowexec.RealCommandExecutor{}
-
-	// Extract tmux socket from TMUX env var if available
-	tmuxEnv := os.Getenv("TMUX")
-	var tmuxArgs []string
-	if tmuxEnv != "" {
-		parts := strings.Split(tmuxEnv, ",")
-		if len(parts) >= 1 && parts[0] != "" {
-			tmuxArgs = []string{"-S", parts[0]}
-		}
+	// Use the tmux Client to ensure correct server targeting.
+	tmuxClient, err := tmux.NewClient()
+	if err != nil {
+		return fmt.Errorf("tmux not available: %w", err)
 	}
 
 	// Send Ctrl+C to interrupt the agent
-	interruptArgs := append(tmuxArgs, "send-keys", "-t", targetPane, "C-c")
-	return executor.Execute("tmux", interruptArgs...)
+	return tmuxClient.SendKeys(context.Background(), targetPane, "C-c")
 }
