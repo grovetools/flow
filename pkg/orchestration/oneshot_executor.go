@@ -16,6 +16,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattn/go-isatty"
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/workspace"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 	anthropicconfig "github.com/grovetools/grove-anthropic/pkg/config"
@@ -549,7 +551,18 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 		if contextDir != "" {
 			// When using a worktree/context dir, ONLY use context from that directory
+			node, _ := workspace.GetProjectByPath(contextDir)
+			cfg, _ := config.LoadFrom(contextDir)
+			if cfg == nil {
+				cfg, _ = config.LoadDefault()
+			}
+			locator := workspace.NewNotebookLocator(cfg)
+
 			contextPath := filepath.Join(contextDir, ".grove", "context")
+			if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
+				contextPath = filepath.Join(genDir, "context")
+			}
+
 			if _, err := os.Stat(contextPath); err == nil {
 				contextFiles = append(contextFiles, contextPath)
 			}
@@ -624,7 +637,18 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 		if contextDir != "" {
 			// When using a worktree/context dir, ONLY use context from that directory
+			node, _ := workspace.GetProjectByPath(contextDir)
+			cfg, _ := config.LoadFrom(contextDir)
+			if cfg == nil {
+				cfg, _ = config.LoadDefault()
+			}
+			locator := workspace.NewNotebookLocator(cfg)
+
 			contextPath := filepath.Join(contextDir, ".grove", "context")
+			if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
+				contextPath = filepath.Join(genDir, "context")
+			}
+
 			if _, err := os.Stat(contextPath); err == nil {
 				contextFiles = append(contextFiles, contextPath)
 			}
@@ -889,8 +913,13 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		return e.displayContextInfo(ctx, contextDir)
 	}
 
-	// Check if .grove/rules exists for default context generation
+	// Check if rules file exists for default context generation
 	rulesPath := filepath.Join(contextDir, ".grove", "rules")
+	if node, nodeErr := workspace.GetProjectByPath(contextDir); nodeErr == nil {
+		if rp, rpErr := ctxMgr.Locator().GetContextRulesFile(node); rpErr == nil {
+			rulesPath = rp
+		}
+	}
 	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
 			// Try to create default rules file using cx reset
@@ -1105,8 +1134,18 @@ func (e *OneShotExecutor) displayContextInfo(ctx context.Context, worktreePath s
 	var contextFiles []string
 	var totalSize int64
 
-	// Check for .grove/context
+	// Check for context file (notebook-resolved or .grove/context)
 	groveContextPath := filepath.Join(worktreePath, ".grove", "context")
+	if node, nodeErr := workspace.GetProjectByPath(worktreePath); nodeErr == nil {
+		cfg, _ := config.LoadFrom(worktreePath)
+		if cfg == nil {
+			cfg, _ = config.LoadDefault()
+		}
+		locator := workspace.NewNotebookLocator(cfg)
+		if genDir, genErr := locator.GetContextGeneratedDir(node); genErr == nil {
+			groveContextPath = filepath.Join(genDir, "context")
+		}
+	}
 	if info, err := os.Stat(groveContextPath); err == nil && !info.IsDir() {
 		contextFiles = append(contextFiles, groveContextPath)
 		totalSize += info.Size()
@@ -1400,8 +1439,18 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	if contextDir != "" {
 		// When using a worktree/context dir, ONLY use context from that directory
-		// Check for .grove/context
+		node, _ := workspace.GetProjectByPath(contextDir)
+		cfg, _ := config.LoadFrom(contextDir)
+		if cfg == nil {
+			cfg, _ = config.LoadDefault()
+		}
+		locator := workspace.NewNotebookLocator(cfg)
+
+		// Check for context file (notebook-resolved or .grove/context)
 		contextPath := filepath.Join(contextDir, ".grove", "context")
+		if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
+			contextPath = filepath.Join(genDir, "context")
+		}
 		if _, err := os.Stat(contextPath); err == nil {
 			contextPaths = append(contextPaths, contextPath)
 			log.WithField("file", contextPath).Debug("Found context file")

@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/exec"
@@ -450,7 +451,19 @@ func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 	contextDir := ScopeToSubProject(workDir, job)
 
 	if contextDir != "" {
+		// Resolve context path via notebook locator
+		node, _ := workspace.GetProjectByPath(contextDir)
+		cfg, _ := config.LoadFrom(contextDir)
+		if cfg == nil {
+			cfg, _ = config.LoadDefault()
+		}
+		locator := workspace.NewNotebookLocator(cfg)
+
 		contextPath := filepath.Join(contextDir, ".grove", "context")
+		if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
+			contextPath = filepath.Join(genDir, "context")
+		}
+
 		if _, err := os.Stat(contextPath); err == nil {
 			contextFiles = append(contextFiles, contextPath)
 		}

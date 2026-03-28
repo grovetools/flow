@@ -328,7 +328,18 @@ func (e *HeadlessAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 
 	if contextDir != "" {
 		// When using a worktree/context dir, ONLY use context from that directory
+		node, _ := workspace.GetProjectByPath(contextDir)
+		cfg, _ := config.LoadFrom(contextDir)
+		if cfg == nil {
+			cfg, _ = config.LoadDefault()
+		}
+		locator := workspace.NewNotebookLocator(cfg)
+
 		contextPath := filepath.Join(contextDir, ".grove", "context")
+		if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
+			contextPath = filepath.Join(genDir, "context")
+		}
+
 		if _, err := os.Stat(contextPath); err == nil {
 			contextFiles = append(contextFiles, contextPath)
 		}

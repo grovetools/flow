@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/fs"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
@@ -57,10 +58,33 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 		}
 	}
 
+	// Resolve centralized notebook presets if applicable
+	node, _ := workspace.GetProjectByPath(gitRoot)
+	cfg, _ := config.LoadFrom(gitRoot)
+	if cfg == nil {
+		cfg, _ = config.LoadDefault()
+	}
+	locator := workspace.NewNotebookLocator(cfg)
+
 	// Copy directories
 	for _, dir := range dirsToCopy {
 		srcPath := filepath.Join(gitRoot, dir)
 		destPath := filepath.Join(worktreePath, dir)
+
+		// If looking for .cx or .cx.work, try resolving via notebook locator first
+		if dir == ".cx" {
+			if presetsDir, err := locator.GetContextPresetsDir(node); err == nil {
+				if _, statErr := os.Stat(presetsDir); statErr == nil {
+					srcPath = presetsDir
+				}
+			}
+		} else if dir == ".cx.work" {
+			if presetsWorkDir, err := locator.GetContextPresetsWorkDir(node); err == nil {
+				if _, statErr := os.Stat(presetsWorkDir); statErr == nil {
+					srcPath = presetsWorkDir
+				}
+			}
+		}
 
 		if _, err := os.Stat(srcPath); err == nil {
 			if err := fs.CopyDir(srcPath, destPath); err != nil {

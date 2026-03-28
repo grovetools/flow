@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
@@ -188,6 +189,12 @@ func ResolveLogDirectory(plan *Plan, job *Job) string {
 	// Try to use project root first
 	if cwd, err := os.Getwd(); err == nil {
 		logDir := filepath.Join(cwd, ".grove", "logs", plan.Name)
+		if node, err := workspace.GetProjectByPath(cwd); err == nil {
+			locator := grovecontext.NewManager(cwd).Locator()
+			if ctxDir, locErr := locator.GetContextDir(node); locErr == nil {
+				logDir = filepath.Join(ctxDir, "logs", plan.Name)
+			}
+		}
 		if err := os.MkdirAll(logDir, 0755); err == nil {
 			return logDir
 		}
@@ -231,17 +238,36 @@ func ResolvePromptSource(source string, plan *Plan) (string, error) {
 // FindContextFiles looks for context files in multiple locations
 func FindContextFiles(plan *Plan) []string {
 	var contextFiles []string
-	
+
+	// Resolve context path using notebook locator
+	node, _ := workspace.GetProjectByPath(plan.Directory)
+	cfg, _ := config.LoadFrom(plan.Directory)
+	if cfg == nil {
+		cfg, _ = config.LoadDefault()
+	}
+	locator := workspace.NewNotebookLocator(cfg)
+
+	contextPath := filepath.Join(plan.Directory, ".grove", "context")
+	if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
+		contextPath = filepath.Join(genDir, "context")
+	}
+
 	candidates := []string{
-		// In plan directory
-		filepath.Join(plan.Directory, ".grove", "context"),
+		contextPath,
 		filepath.Join(plan.Directory, "CLAUDE.md"),
 	}
 	
 	// Also check current working directory / project root
 	if cwd, err := os.Getwd(); err == nil {
+		cwdContextPath := filepath.Join(cwd, ".grove", "context")
+		cwdNode, _ := workspace.GetProjectByPath(cwd)
+		if cwdNode != nil {
+			if genDir, genErr := locator.GetContextGeneratedDir(cwdNode); genErr == nil {
+				cwdContextPath = filepath.Join(genDir, "context")
+			}
+		}
 		candidates = append(candidates,
-			filepath.Join(cwd, ".grove", "context"),
+			cwdContextPath,
 			filepath.Join(cwd, "CLAUDE.md"),
 		)
 	}

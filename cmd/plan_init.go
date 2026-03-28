@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
@@ -1166,10 +1167,16 @@ func executeShellAction(action orchestration.InitAction, workDir string, templat
 
 // executeDockerComposeAction handles the 'docker_compose' init action type
 func executeDockerComposeAction(action orchestration.InitAction, workDir string, templateData interface{}) error {
-	// 1. Create .grove/docker/ directory
+	// 1. Create docker directory (notebook-aware)
 	groveDockerDir := filepath.Join(workDir, ".grove", "docker")
+	if node, err := workspace.GetProjectByPath(workDir); err == nil {
+		locator := grovecontext.NewManager(workDir).Locator()
+		if ctxDir, locErr := locator.GetContextDir(node); locErr == nil {
+			groveDockerDir = filepath.Join(ctxDir, "docker")
+		}
+	}
 	if err := os.MkdirAll(groveDockerDir, 0755); err != nil {
-		return fmt.Errorf("creating .grove/docker directory: %w", err)
+		return fmt.Errorf("creating docker directory: %w", err)
 	}
 
 	// 2. Render the overlay

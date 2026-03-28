@@ -3,9 +3,11 @@ package orchestration
 import (
 	"os"
 	"path/filepath"
-	
+
+	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/workspace"
 )
 
 // ExecutionContext provides context about where jobs are being executed from
@@ -105,12 +107,30 @@ func (ctx *ExecutionContext) ResolvePromptSource(source string) string {
 
 // ResolveContextFile resolves a context file path
 func (ctx *ExecutionContext) ResolveContextFile() []string {
+	cfg, _ := config.LoadFrom(ctx.ProjectRoot)
+	if cfg == nil {
+		cfg, _ = config.LoadDefault()
+	}
+	locator := workspace.NewNotebookLocator(cfg)
+
+	planContextPath := filepath.Join(ctx.PlanDirectory, ".grove", "context")
+	if node, err := workspace.GetProjectByPath(ctx.PlanDirectory); err == nil {
+		if genDir, genErr := locator.GetContextGeneratedDir(node); genErr == nil {
+			planContextPath = filepath.Join(genDir, "context")
+		}
+	}
+
+	projectContextPath := filepath.Join(ctx.ProjectRoot, ".grove", "context")
+	if node, err := workspace.GetProjectByPath(ctx.ProjectRoot); err == nil {
+		if genDir, genErr := locator.GetContextGeneratedDir(node); genErr == nil {
+			projectContextPath = filepath.Join(genDir, "context")
+		}
+	}
+
 	candidates := []string{
-		// In plan directory
-		filepath.Join(ctx.PlanDirectory, ".grove", "context"),
+		planContextPath,
 		filepath.Join(ctx.PlanDirectory, "CLAUDE.md"),
-		// In project root
-		filepath.Join(ctx.ProjectRoot, ".grove", "context"),
+		projectContextPath,
 		filepath.Join(ctx.ProjectRoot, "CLAUDE.md"),
 	}
 	
@@ -126,9 +146,16 @@ func (ctx *ExecutionContext) ResolveContextFile() []string {
 
 // LogDirectory returns where logs should be written
 func (ctx *ExecutionContext) LogDirectory() string {
-	// Prefer project root for logs
+	// Prefer project root for logs, with notebook locator override
 	if ctx.ProjectRoot != "" {
-		return filepath.Join(ctx.ProjectRoot, ".grove", "logs")
+		logDir := filepath.Join(ctx.ProjectRoot, ".grove", "logs")
+		if node, err := workspace.GetProjectByPath(ctx.ProjectRoot); err == nil {
+			locator := grovecontext.NewManager(ctx.ProjectRoot).Locator()
+			if ctxDir, locErr := locator.GetContextDir(node); locErr == nil {
+				logDir = filepath.Join(ctxDir, "logs")
+			}
+		}
+		return logDir
 	}
 	// Fall back to plan directory
 	return filepath.Join(ctx.PlanDirectory, ".logs")
