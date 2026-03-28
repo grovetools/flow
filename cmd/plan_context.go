@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	grovecontext "github.com/grovetools/cx/pkg/context"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 )
@@ -63,13 +62,8 @@ func runPlanContextSet(cmd *cobra.Command, args []string) error {
 
 	ctxMgr := grovecontext.NewManager(cwd)
 
-	// Find active rules - we need to check manually since findActiveRulesFile is private
-	activeRulesPath := filepath.Join(cwd, ".grove", "rules")
-	if node, err := workspace.GetProjectByPath(cwd); err == nil {
-		if nbRulesFile, err := ctxMgr.Locator().GetContextRulesFile(node); err == nil {
-			activeRulesPath = nbRulesFile
-		}
-	}
+	// Find active rules path
+	activeRulesPath := ctxMgr.ResolveRulesPath()
 	if _, err := os.Stat(activeRulesPath); os.IsNotExist(err) {
 		// Try old location for backward compatibility
 		activeRulesPath = filepath.Join(cwd, ".grovectx")

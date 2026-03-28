@@ -16,7 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattn/go-isatty"
-	"github.com/grovetools/core/pkg/workspace"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 	anthropicconfig "github.com/grovetools/grove-anthropic/pkg/config"
@@ -895,12 +894,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 	}
 
 	// Check if rules file exists for default context generation
-	rulesPath := filepath.Join(contextDir, ".grove", "rules")
-	if node, nodeErr := workspace.GetProjectByPath(contextDir); nodeErr == nil {
-		if rp, rpErr := ctxMgr.Locator().GetContextRulesFile(node); rpErr == nil {
-			rulesPath = rp
-		}
-	}
+	rulesPath := ctxMgr.ResolveRulesPath()
 	if _, err := os.Stat(rulesPath); err != nil {
 		if os.IsNotExist(err) {
 			// Try to create default rules file using cx reset
