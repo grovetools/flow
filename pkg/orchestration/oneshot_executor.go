@@ -21,6 +21,7 @@ import (
 	anthropicconfig "github.com/grovetools/grove-anthropic/pkg/config"
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	"github.com/grovetools/core/git"
+	groveplan "github.com/grovetools/core/pkg/plan"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/delegation"
@@ -778,10 +779,10 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 			Err(err).
 			Log(ctx)
 	} else {
+		// Use a flat map with the plan state key to match how state.Set works.
 		planName := filepath.Base(plan.Directory)
-		// Use a flat map with the key "flow.active_plan" to match how state.Set works.
 		stateData := map[string]string{
-			"flow.active_plan": planName,
+			groveplan.StateKey: planName,
 		}
 		yamlBytes, err := yaml.Marshal(stateData)
 		if err == nil {

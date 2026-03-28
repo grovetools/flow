@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
@@ -62,10 +63,10 @@ func GetPlanStatistics(plan *orchestration.Plan) PlanStatistics {
 func FlowStatusProvider(s state.State) (string, error) {
 	// Get the active plan from state (with backwards compatibility)
 	// Try new namespaced key first, then fall back to old key
-	activePlan, ok := s["flow.active_plan"]
+	activePlan, ok := s[plan.StateKey]
 	if !ok {
 		// Fall back to old key for backwards compatibility
-		activePlan, ok = s["active_plan"]
+		activePlan, ok = s[plan.LegacyStateKey]
 		if !ok {
 			return "", nil // No active plan
 		}

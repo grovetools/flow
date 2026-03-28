@@ -18,6 +18,7 @@ import (
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -196,7 +197,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	// If a new session is opened, the active plan will be set inside that session.
 	// Also skip setting the active plan in the parent if a worktree was created.
 	if !cmd.OpenSession && worktreeToSet == "" {
-		if err := state.Set("flow.active_plan", planName); err != nil {
+		if err := state.Set(plan.StateKey, planName); err != nil {
 			result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
 		} else {
 			result.WriteString(fmt.Sprintf("* Set active plan to: %s\n", planName))
@@ -756,7 +757,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	// If a new session is opened, the active plan will be set inside that session.
 	// Also skip setting the active plan in the parent if a worktree was created.
 	if !cmd.OpenSession && finalWorktree == "" {
-		if err := state.Set("flow.active_plan", planName); err != nil {
+		if err := state.Set(plan.StateKey, planName); err != nil {
 			fmt.Printf("Warning: failed to set active job: %v\n", err)
 		} else {
 			fmt.Printf("* Set active plan to: %s\n", planName)
@@ -1464,9 +1465,9 @@ func setWorktreeActivePlan(worktreePath, planName string) error {
 		return fmt.Errorf("failed to create .grove directory in worktree: %w", err)
 	}
 
-	// Use a flat map with the key "flow.active_plan" to match how state.Set works.
+	// Use a flat map with the key plan.StateKey to match how state.Set works.
 	stateData := map[string]string{
-		"flow.active_plan": planName,
+		plan.StateKey: planName,
 	}
 
 	yamlBytes, err := yaml.Marshal(stateData)

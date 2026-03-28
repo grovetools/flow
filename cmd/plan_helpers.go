@@ -10,8 +10,8 @@ import (
 	"github.com/grovetools/core/command"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/core/state"
 )
 
 // expandFlowPath expands path variables like {{REPO}} and {{BRANCH}} correctly,
@@ -149,37 +149,11 @@ func resolveChatsDir() (string, error) {
 	return filepath.Abs(chatsDir)
 }
 
-// getActivePlanWithMigration gets the active plan and automatically migrates old state format to new format.
+// getActivePlanWithMigration gets the active plan using the shared core/pkg/plan detection.
+// This handles state lookup, legacy key migration, and branch-to-plan matching.
 func getActivePlanWithMigration() (string, error) {
-	// Try new key first
-	activePlan, err := state.GetString("flow.active_plan")
-	if err != nil {
-		return "", err
-	}
-
-	if activePlan != "" {
-		return activePlan, nil
-	}
-
-	// Check for old key
-	oldActivePlan, err := state.GetString("active_plan")
-	if err != nil {
-		return "", err
-	}
-
-	if oldActivePlan != "" {
-		// Migrate: set new key and delete old key
-		if err := state.Set("flow.active_plan", oldActivePlan); err != nil {
-			return "", fmt.Errorf("migrate state: %w", err)
-		}
-		if err := state.Delete("active_plan"); err != nil {
-			// Log but don't fail - the new key is set
-			fmt.Fprintf(os.Stderr, "Warning: failed to delete old state key: %v\n", err)
-		}
-		return oldActivePlan, nil
-	}
-
-	return "", nil
+	name := plan.ActivePlan(".")
+	return name, nil
 }
 
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.

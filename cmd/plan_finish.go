@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/fs"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
+	groveplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/util/sanitize"
 	gexec "github.com/grovetools/flow/pkg/exec"
@@ -1253,11 +1254,11 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	// Check if the finished plan was the active plan and unset it
 	activePlan, err := getActivePlanWithMigration()
 	if err == nil && activePlan == planName {
-		if err := state.Delete("flow.active_plan"); err != nil {
+		if err := state.Delete(groveplan.StateKey); err != nil {
 			fmt.Printf("Warning: could not unset active plan: %v\n", err)
 		} else {
 			// Also delete legacy key
-			_ = state.Delete("active_plan")
+			_ = state.Delete(groveplan.LegacyStateKey)
 			fmt.Println("\n* Unset active plan")
 		}
 	}

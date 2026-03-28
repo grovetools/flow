@@ -15,6 +15,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -47,7 +48,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		if !strings.Contains(target, "/") {
 			if strings.HasSuffix(target, ".md") {
 				// It's a filename - try to find in active plan directory
-				activePlan, _ := state.GetString("flow.active_plan")
+				activePlan, _ := state.GetString(plan.StateKey)
 				if activePlan != "" {
 					if planPath, err := resolvePlanPath(activePlan); err == nil {
 						candidatePath := filepath.Join(planPath, target)
@@ -94,7 +95,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// No target specified, try to use active job
-		activeJob, err := state.GetString("flow.active_plan")
+		activeJob, err := state.GetString(plan.StateKey)
 		if err != nil {
 			return fmt.Errorf("get active job: %w", err)
 		}
@@ -670,7 +671,7 @@ func resolveJobByTitle(title string) (string, error) {
 // findJobInActivePlan searches for a job with the given title in the active plan.
 func findJobInActivePlan(title string) (string, error) {
 	// Get active plan directory
-	activeJob, err := state.GetString("flow.active_plan")
+	activeJob, err := state.GetString(plan.StateKey)
 	if err != nil || activeJob == "" {
 		return "", nil // No active plan, not an error
 	}
