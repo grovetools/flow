@@ -23,6 +23,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
+	grovecontext "github.com/grovetools/cx/pkg/context"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -1145,17 +1146,8 @@ func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, work
 
 	if contextDir != "" {
 		// When using a worktree/context dir, ONLY use context from that directory
-		node, _ := workspace.GetProjectByPath(contextDir)
-		cfg, _ := config.LoadFrom(contextDir)
-		if cfg == nil {
-			cfg, _ = config.LoadDefault()
-		}
-		locator := workspace.NewNotebookLocator(cfg)
-
-		contextPath := filepath.Join(contextDir, ".grove", "context")
-		if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
-			contextPath = filepath.Join(genDir, "context")
-		}
+		ctxMgr := grovecontext.NewManager(contextDir)
+		contextPath := ctxMgr.ResolveContextPath()
 
 		if _, err := os.Stat(contextPath); err == nil {
 			contextFiles = append(contextFiles, contextPath)

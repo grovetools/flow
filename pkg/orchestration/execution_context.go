@@ -107,25 +107,11 @@ func (ctx *ExecutionContext) ResolvePromptSource(source string) string {
 
 // ResolveContextFile resolves a context file path
 func (ctx *ExecutionContext) ResolveContextFile() []string {
-	cfg, _ := config.LoadFrom(ctx.ProjectRoot)
-	if cfg == nil {
-		cfg, _ = config.LoadDefault()
-	}
-	locator := workspace.NewNotebookLocator(cfg)
+	planCtxMgr := grovecontext.NewManager(ctx.PlanDirectory)
+	planContextPath := planCtxMgr.ResolveContextPath()
 
-	planContextPath := filepath.Join(ctx.PlanDirectory, ".grove", "context")
-	if node, err := workspace.GetProjectByPath(ctx.PlanDirectory); err == nil {
-		if genDir, genErr := locator.GetContextGeneratedDir(node); genErr == nil {
-			planContextPath = filepath.Join(genDir, "context")
-		}
-	}
-
-	projectContextPath := filepath.Join(ctx.ProjectRoot, ".grove", "context")
-	if node, err := workspace.GetProjectByPath(ctx.ProjectRoot); err == nil {
-		if genDir, genErr := locator.GetContextGeneratedDir(node); genErr == nil {
-			projectContextPath = filepath.Join(genDir, "context")
-		}
-	}
+	projectCtxMgr := grovecontext.NewManager(ctx.ProjectRoot)
+	projectContextPath := projectCtxMgr.ResolveContextPath()
 
 	candidates := []string{
 		planContextPath,
@@ -133,14 +119,14 @@ func (ctx *ExecutionContext) ResolveContextFile() []string {
 		projectContextPath,
 		filepath.Join(ctx.ProjectRoot, "CLAUDE.md"),
 	}
-	
+
 	var found []string
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {
 			found = append(found, candidate)
 		}
 	}
-	
+
 	return found
 }
 

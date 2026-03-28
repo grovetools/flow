@@ -239,45 +239,31 @@ func ResolvePromptSource(source string, plan *Plan) (string, error) {
 func FindContextFiles(plan *Plan) []string {
 	var contextFiles []string
 
-	// Resolve context path using notebook locator
-	node, _ := workspace.GetProjectByPath(plan.Directory)
-	cfg, _ := config.LoadFrom(plan.Directory)
-	if cfg == nil {
-		cfg, _ = config.LoadDefault()
-	}
-	locator := workspace.NewNotebookLocator(cfg)
-
-	contextPath := filepath.Join(plan.Directory, ".grove", "context")
-	if genDir, err := locator.GetContextGeneratedDir(node); err == nil {
-		contextPath = filepath.Join(genDir, "context")
-	}
+	// Resolve context path using centralized manager
+	planCtxMgr := grovecontext.NewManager(plan.Directory)
+	contextPath := planCtxMgr.ResolveContextPath()
 
 	candidates := []string{
 		contextPath,
 		filepath.Join(plan.Directory, "CLAUDE.md"),
 	}
-	
+
 	// Also check current working directory / project root
 	if cwd, err := os.Getwd(); err == nil {
-		cwdContextPath := filepath.Join(cwd, ".grove", "context")
-		cwdNode, _ := workspace.GetProjectByPath(cwd)
-		if cwdNode != nil {
-			if genDir, genErr := locator.GetContextGeneratedDir(cwdNode); genErr == nil {
-				cwdContextPath = filepath.Join(genDir, "context")
-			}
-		}
+		cwdCtxMgr := grovecontext.NewManager(cwd)
+		cwdContextPath := cwdCtxMgr.ResolveContextPath()
 		candidates = append(candidates,
 			cwdContextPath,
 			filepath.Join(cwd, "CLAUDE.md"),
 		)
 	}
-	
+
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {
 			contextFiles = append(contextFiles, candidate)
 		}
 	}
-	
+
 	return contextFiles
 }
 
