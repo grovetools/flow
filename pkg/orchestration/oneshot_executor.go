@@ -862,8 +862,20 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			}
 		}
 		
+		// 5. Try as a named preset (resolves via notebook presets, .cx/, .cx.work/)
 		if !foundPath {
-			return fmt.Errorf("rules file '%s' not found in plan directory, current directory, or git root", job.RulesFile)
+			// Strip .rules extension if present to get the preset name
+			presetName := job.RulesFile
+			presetName = strings.TrimSuffix(presetName, ".rules")
+			ctxMgrForLookup := grovecontext.NewManager(contextDir)
+			if resolved, err := ctxMgrForLookup.FindRulesetFile(contextDir, presetName); err == nil {
+				rulesFilePath = resolved
+				foundPath = true
+			}
+		}
+
+		if !foundPath {
+			return fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
 		}
 		
 		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
