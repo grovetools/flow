@@ -1033,6 +1033,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 	ulog.Info("Found context rules file, regenerating context").
 		Field("rules_file", absRulesPath).
 		Icon(theme.IconChecklist).
+		Pretty(fmt.Sprintf("%s Using rules: %s", theme.IconChecklist, absRulesPath)).
 		Log(ctx)
 
 	// Update context from rules
