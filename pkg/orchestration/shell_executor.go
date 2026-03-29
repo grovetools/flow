@@ -87,13 +87,18 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 
 	// Always regenerate context to ensure shell job has latest view, similar to oneshot executor
 	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(nil), e.config) // Pass config for SkipInteractive
-	if err := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan); err != nil {
+	usedRulesPath, ctxErr := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan)
+	if ctxErr != nil {
 		// Warn but do not fail the job for a context error
 		ulog.Warn("Failed to generate context for shell job").
-			Err(err).
+			Err(ctxErr).
 			Field("request_id", requestID).
 			Field("job_id", job.ID).
 			Log(ctx)
+	} else if usedRulesPath != "" {
+		if archiveErr := ArchiveContextRules(job, plan, usedRulesPath); archiveErr != nil {
+			ulog.Warn("Failed to archive context rules").Err(archiveErr).Log(ctx)
+		}
 	}
 
 	// The PromptBody contains the shell command to run

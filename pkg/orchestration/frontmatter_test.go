@@ -72,6 +72,28 @@ Complex body.`,
 			wantErr:  false,
 		},
 		{
+			name: "frontmatter with rules fields",
+			content: `---
+id: rules-test-123
+title: Rules Test
+status: completed
+type: oneshot
+rules_file: my-preset.rules
+used_rules_file: .artifacts/rules-test-123/context.rules
+---
+Job body with rules.`,
+			want: map[string]interface{}{
+				"id":              "rules-test-123",
+				"title":           "Rules Test",
+				"status":          "completed",
+				"type":            "oneshot",
+				"rules_file":      "my-preset.rules",
+				"used_rules_file": ".artifacts/rules-test-123/context.rules",
+			},
+			wantBody: "Job body with rules.",
+			wantErr:  false,
+		},
+		{
 			name: "malformed YAML",
 			content: `---
 id: test

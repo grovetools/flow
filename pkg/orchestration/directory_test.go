@@ -305,6 +305,63 @@ func TestCreateJobFromTemplate(t *testing.T) {
 	}
 }
 
+func TestGenerateJobContent_RulesFields(t *testing.T) {
+	tests := []struct {
+		name          string
+		rulesFile     string
+		usedRulesFile string
+		wantContains  []string
+		wantMissing   []string
+	}{
+		{
+			name:          "both rules fields set",
+			rulesFile:     "my-preset.rules",
+			usedRulesFile: ".artifacts/job-id/context.rules",
+			wantContains:  []string{"rules_file: my-preset.rules", "used_rules_file: .artifacts/job-id/context.rules"},
+		},
+		{
+			name:         "only rules_file set",
+			rulesFile:    "custom.rules",
+			wantContains: []string{"rules_file: custom.rules"},
+			wantMissing:  []string{"used_rules_file"},
+		},
+		{
+			name:        "neither set",
+			wantMissing: []string{"rules_file", "used_rules_file"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &Job{
+				ID:            "test-id",
+				Title:         "Test Job",
+				Status:        JobStatusPending,
+				Type:          JobTypeOneshot,
+				RulesFile:     tt.rulesFile,
+				UsedRulesFile: tt.usedRulesFile,
+			}
+
+			content, err := generateJobContent(job)
+			if err != nil {
+				t.Fatalf("generateJobContent() error = %v", err)
+			}
+
+			contentStr := string(content)
+			for _, want := range tt.wantContains {
+				if !strings.Contains(contentStr, want) {
+					t.Errorf("content missing %q:\n%s", want, contentStr)
+				}
+			}
+			for _, notWant := range tt.wantMissing {
+				if strings.Contains(contentStr, notWant) {
+					t.Errorf("content should not contain %q:\n%s", notWant, contentStr)
+				}
+			}
+		})
+	}
+}
+
 func TestListJobs(t *testing.T) {
 	tmpDir := t.TempDir()
 

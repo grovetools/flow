@@ -11,6 +11,71 @@ import (
 	coresessions "github.com/grovetools/core/pkg/sessions"
 )
 
+// ArchiveContextRules copies the active rules file to the job's artifact directory
+// and updates the job's frontmatter to track it.
+// For oneshot/shell jobs this creates a single context.rules artifact.
+func ArchiveContextRules(job *Job, plan *Plan, usedRulesPath string) error {
+	if usedRulesPath == "" {
+		return nil
+	}
+
+	relPath, err := archiveRulesFile(plan, job.ID, "context.rules", usedRulesPath)
+	if err != nil {
+		return err
+	}
+
+	// Update job struct
+	job.UsedRulesFile = relPath
+
+	// Update job file frontmatter directly
+	jobContent, err := os.ReadFile(job.FilePath)
+	if err == nil {
+		updates := map[string]interface{}{
+			"used_rules_file": relPath,
+		}
+		newContent, err := UpdateFrontmatter(jobContent, updates)
+		if err == nil {
+			os.WriteFile(job.FilePath, newContent, 0644)
+		}
+	}
+
+	return nil
+}
+
+// ArchiveContextRulesForTurn copies the active rules file to a per-turn artifact
+// within the job's artifact directory. Returns the relative artifact path for
+// inclusion in the turn's <!-- grove: {} --> metadata tag.
+// Returns "" if usedRulesPath is empty (no rules to archive).
+func ArchiveContextRulesForTurn(plan *Plan, jobID string, turnID string, usedRulesPath string) (string, error) {
+	if usedRulesPath == "" {
+		return "", nil
+	}
+
+	filename := turnID + "-context.rules"
+	return archiveRulesFile(plan, jobID, filename, usedRulesPath)
+}
+
+// archiveRulesFile copies usedRulesPath into .artifacts/{jobID}/{filename}
+// and returns the relative artifact path.
+func archiveRulesFile(plan *Plan, jobID string, filename string, usedRulesPath string) (string, error) {
+	content, err := os.ReadFile(usedRulesPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read used rules file: %w", err)
+	}
+
+	destArtifactDir := filepath.Join(plan.Directory, ".artifacts", jobID)
+	if err := os.MkdirAll(destArtifactDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create artifact directory: %w", err)
+	}
+
+	destRulesPath := filepath.Join(destArtifactDir, filename)
+	if err := os.WriteFile(destRulesPath, content, 0644); err != nil {
+		return "", fmt.Errorf("failed to write archived rules file: %w", err)
+	}
+
+	return filepath.Join(".artifacts", jobID, filename), nil
+}
+
 // ArchiveInteractiveSession copies session metadata and the transcript to the plan's artifacts.
 func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 	ctx := context.Background()

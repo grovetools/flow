@@ -135,6 +135,10 @@
       "type": "string",
       "description": "Path to rules file for agent behavior"
     },
+    "used_rules_file": {
+      "type": "string",
+      "description": "Archived rules file used during last execution"
+    },
     "note_ref": {
       "type": "string",
       "description": "Reference to a notebook entry for context"

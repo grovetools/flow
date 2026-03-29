@@ -80,6 +80,10 @@ func main() {
 		scenarios.PlanStatusTUIBatchChangeTypeScenario,
 		scenarios.PlanStatusTUIBatchChangeTemplateScenario,
 
+		// Rules archiving and inheritance tests
+		scenarios.RulesArchivingWorkflowScenario,
+		scenarios.XMLJobRulesInheritanceScenario,
+
 		// File job type tests
 		scenarios.FileJobTypeScenario,
 		scenarios.FileJobTypeTUIScenario,

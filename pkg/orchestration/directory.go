@@ -253,6 +253,12 @@ func generateJobContent(job *Job) ([]byte, error) {
 	if job.Model != "" {
 		frontmatter["model"] = job.Model
 	}
+	if job.RulesFile != "" {
+		frontmatter["rules_file"] = job.RulesFile
+	}
+	if job.UsedRulesFile != "" {
+		frontmatter["used_rules_file"] = job.UsedRulesFile
+	}
 	if job.NoteRef != "" {
 		frontmatter["note_ref"] = job.NoteRef
 	}
@@ -291,7 +297,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 	if job.Template != "" {
 		return generateJobContent(job)
 	}
-	
+
 	tmpl, err := template.New("agent").Parse(AgentJobTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("parsing agent job template: %w", err)
@@ -344,7 +350,7 @@ func generateAgentJobContent(job *Job) ([]byte, error) {
 // formatYAML formats a map as YAML with proper indentation.
 func formatYAML(data map[string]interface{}) string {
 	var buf bytes.Buffer
-	
+
 	// Sort keys for consistent output
 	keys := make([]string, 0, len(data))
 	for k := range data {

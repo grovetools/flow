@@ -108,12 +108,12 @@ const (
 // Job represents a single orchestration job.
 type Job struct {
 	// Core fields
-	ID        string    `yaml:"id" json:"id" jsonschema:"description=Unique identifier for the job"`
-	Title     string    `yaml:"title" json:"title" jsonschema:"description=Human-readable title for the job"`
-	Status    JobStatus `yaml:"status" json:"status" jsonschema:"description=Current execution status (pending/running/completed/failed)"`
-	Type      JobType   `yaml:"type" json:"type" jsonschema:"description=Job type determining execution behavior (oneshot/chat/interactive_agent/headless_agent/shell/file)"`
-	Model     string    `yaml:"model,omitempty" json:"model,omitempty" jsonschema:"description=LLM model to use for this job"`
-	Template  string    `yaml:"template,omitempty" json:"template,omitempty" jsonschema:"description=Template name for generating the job prompt"`
+	ID       string    `yaml:"id" json:"id" jsonschema:"description=Unique identifier for the job"`
+	Title    string    `yaml:"title" json:"title" jsonschema:"description=Human-readable title for the job"`
+	Status   JobStatus `yaml:"status" json:"status" jsonschema:"description=Current execution status (pending/running/completed/failed)"`
+	Type     JobType   `yaml:"type" json:"type" jsonschema:"description=Job type determining execution behavior (oneshot/chat/interactive_agent/headless_agent/shell/file)"`
+	Model    string    `yaml:"model,omitempty" json:"model,omitempty" jsonschema:"description=LLM model to use for this job"`
+	Template string    `yaml:"template,omitempty" json:"template,omitempty" jsonschema:"description=Template name for generating the job prompt"`
 
 	// Dependencies and context
 	DependsOn   []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`
@@ -149,6 +149,7 @@ type Job struct {
 	GatherConceptNotes bool   `yaml:"gather_concept_notes,omitempty" json:"gather_concept_notes,omitempty" jsonschema:"description=Include related concept notes in context"`
 	GatherConceptPlans bool   `yaml:"gather_concept_plans,omitempty" json:"gather_concept_plans,omitempty" jsonschema:"description=Include related concept plans in context"`
 	RulesFile          string `yaml:"rules_file,omitempty" json:"rules_file,omitempty" jsonschema:"description=Path to rules file for agent behavior"`
+	UsedRulesFile      string `yaml:"used_rules_file,omitempty" json:"used_rules_file,omitempty" jsonschema:"description=Archived rules file used during last execution"`
 	NoteRef            string `yaml:"note_ref,omitempty" json:"note_ref,omitempty" jsonschema:"description=Reference to a notebook entry for context"`
 
 	// Derived fields (excluded from schema - these are runtime/internal fields)
