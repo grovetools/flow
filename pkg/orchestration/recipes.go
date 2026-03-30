@@ -23,13 +23,10 @@ var builtinRecipeFS embed.FS
 // InitAction defines a single action to be performed during plan initialization.
 // These are defined in a recipe's `workspace_init.yml`.
 type InitAction struct {
-	Type        string                 `yaml:"type"` // "shell" or "docker_compose"
-	Description string                 `yaml:"description,omitempty"`
-	Repo        string                 `yaml:"repo,omitempty"`         // Optional sub-repo for ecosystem worktrees
-	Command     string                 `yaml:"command,omitempty"`      // For 'shell' type
-	Files       []string               `yaml:"files,omitempty"`        // For 'docker_compose': list of user's compose files
-	ProjectName string                 `yaml:"project_name,omitempty"` // For 'docker_compose' --project-name flag
-	Overlay     map[string]interface{} `yaml:"overlay,omitempty"`      // For 'docker_compose': the generic overlay
+	Type        string `yaml:"type"` // "shell"
+	Description string `yaml:"description,omitempty"`
+	Repo        string `yaml:"repo,omitempty"`    // Optional sub-repo for ecosystem worktrees
+	Command     string `yaml:"command,omitempty"` // For 'shell' type
 }
 
 // loadRecipeMetadata parses a workspace_init.yml (or recipe.yml for backward compatibility)

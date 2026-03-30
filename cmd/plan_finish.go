@@ -11,9 +11,13 @@ import (
 	"strings"
 	"text/template"
 
+	"encoding/json"
+
 	"github.com/fatih/color"
 	"github.com/grovetools/core/fs"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/workspace"
 	groveplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
@@ -276,6 +280,64 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	// Use a shared variable for repo details that the Check function can populate
 	var sharedRepoDetails []repoStatus
 
+	envTeardownItem := &cleanupItem{
+		Name: "Teardown environment resources",
+		Check: func() (string, error) {
+			statePath := filepath.Join(planPath, ".env_state.json")
+			if _, err := os.Stat(statePath); os.IsNotExist(err) {
+				return "N/A", nil
+			}
+			return color.YellowString("Active"), nil
+		},
+		Action: func() error {
+			statePath := filepath.Join(planPath, ".env_state.json")
+			data, err := os.ReadFile(statePath)
+			if err != nil {
+				return nil // Nothing to teardown
+			}
+
+			var stateFile env.EnvStateFile
+			if err := json.Unmarshal(data, &stateFile); err != nil {
+				return fmt.Errorf("failed to parse .env_state.json: %w", err)
+			}
+
+			fmt.Printf("    Tearing down %s environment...\n", stateFile.Provider)
+
+			// Build the worktree path
+			var worktreePath string
+			if worktreeName != "" && gitRoot != "" {
+				worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+			}
+
+			req := env.EnvRequest{
+				Provider: stateFile.Provider,
+				PlanDir:  planPath,
+				Config:   make(map[string]interface{}),
+			}
+
+			// Attach workspace context if available
+			if provider != nil && worktreePath != "" {
+				if node := provider.FindByPath(worktreePath); node != nil {
+					req.Workspace = node
+				}
+			}
+
+			client := daemon.New()
+			prov := env.ResolveProvider(stateFile.Provider, client, stateFile.Command)
+			if err := prov.Down(context.Background(), req); err != nil {
+				return fmt.Errorf("environment teardown failed: %w", err)
+			}
+
+			// Cleanup state files
+			os.Remove(statePath)
+			if worktreePath != "" {
+				os.Remove(filepath.Join(worktreePath, ".env.local"))
+			}
+
+			return nil
+		},
+	}
+
 	mergeItem := &cleanupItem{
 		Name: "Merge/fast-forward submodules to main",
 		Check: func() (string, error) {
@@ -532,140 +594,8 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	}
 
 	items := []*cleanupItem{
+		envTeardownItem,
 		mergeItem,
-		{
-			Name: "Cleanup Docker Compose environment",
-			Check: func() (string, error) {
-				// Check if plan was created from a recipe with Docker Compose actions
-				if plan.Config == nil || plan.Config.Recipe == "" {
-					return "N/A (no recipe)", nil
-				}
-
-				// Load the recipe
-				flowCfg, _ := loadFlowConfig()
-				var getRecipeCmd string
-				if flowCfg != nil {
-					_, getRecipeCmd, _ = loadFlowConfigWithDynamicRecipes()
-				}
-
-				recipe, err := orchestration.GetRecipe(plan.Config.Recipe, getRecipeCmd)
-				if err != nil {
-					return "N/A (recipe not found)", nil
-				}
-
-				// Check for docker_compose actions in init and named actions
-				var dockerComposeProjects []string
-				allActions := recipe.InitActions
-				for _, namedActionList := range recipe.NamedActions {
-					allActions = append(allActions, namedActionList...)
-				}
-
-				for _, action := range allActions {
-					if action.Type == "docker_compose" && action.ProjectName != "" {
-						// Render the project name template
-						tmpl, err := template.New("project-name").Parse(action.ProjectName)
-						if err != nil {
-							continue
-						}
-						templateData := struct {
-							PlanName string
-						}{
-							PlanName: planName,
-						}
-						var renderedProjectName bytes.Buffer
-						if err := tmpl.Execute(&renderedProjectName, templateData); err != nil {
-							continue
-						}
-						projectName := renderedProjectName.String()
-						if projectName != "" {
-							dockerComposeProjects = append(dockerComposeProjects, projectName)
-						}
-					}
-				}
-
-				if len(dockerComposeProjects) == 0 {
-					return "N/A (no Docker services)", nil
-				}
-
-				// Check if any of the projects have running containers
-				hasRunning := false
-				for _, projectName := range dockerComposeProjects {
-					cmd := exec.Command("docker", "ps", "--filter", fmt.Sprintf("label=com.docker.compose.project=%s", projectName), "--format", "{{.Names}}")
-					output, err := cmd.Output()
-					if err == nil && strings.TrimSpace(string(output)) != "" {
-						hasRunning = true
-						break
-					}
-				}
-
-				if hasRunning {
-					return color.YellowString("Running containers found"), nil
-				}
-				// Return Available even if no containers running, so item shows in TUI
-				return color.YellowString("Available"), nil
-			},
-			Action: func() error {
-				// Load the recipe
-				flowCfg, _ := loadFlowConfig()
-				var getRecipeCmd string
-				if flowCfg != nil {
-					_, getRecipeCmd, _ = loadFlowConfigWithDynamicRecipes()
-				}
-
-				recipe, err := orchestration.GetRecipe(plan.Config.Recipe, getRecipeCmd)
-				if err != nil {
-					return fmt.Errorf("failed to load recipe: %w", err)
-				}
-
-				// Collect all docker_compose actions
-				allActions := recipe.InitActions
-				for _, namedActionList := range recipe.NamedActions {
-					allActions = append(allActions, namedActionList...)
-				}
-
-				// Tear down each Docker Compose project
-				foundAny := false
-				for _, action := range allActions {
-					if action.Type == "docker_compose" && action.ProjectName != "" {
-						// Render the project name template
-						tmpl, err := template.New("project-name").Parse(action.ProjectName)
-						if err != nil {
-							continue
-						}
-						templateData := struct {
-							PlanName string
-						}{
-							PlanName: planName,
-						}
-						var renderedProjectName bytes.Buffer
-						if err := tmpl.Execute(&renderedProjectName, templateData); err != nil {
-							continue
-						}
-						projectName := renderedProjectName.String()
-
-						if projectName == "" {
-							continue
-						}
-
-						foundAny = true
-						fmt.Printf("    Stopping Docker Compose project: %s\n", projectName)
-						cmd := exec.Command("docker", "compose", "-p", projectName, "down", "--volumes", "--remove-orphans")
-						cmd.Stdout = os.Stdout
-						cmd.Stderr = os.Stderr
-						if err := cmd.Run(); err != nil {
-							fmt.Printf("    Warning: failed to stop project %s: %v\n", projectName, err)
-						} else {
-							fmt.Printf("    * Stopped and removed Docker Compose project: %s\n", projectName)
-						}
-					}
-				}
-
-				if !foundAny {
-					fmt.Println("    No Docker Compose projects to clean up")
-				}
-				return nil
-			},
-		},
 		{
 			Name: "Mark plan as finished in .grove-plan.yml",
 			Check: func() (string, error) {
@@ -1100,6 +1030,7 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 
 		// Mark as available if it's a positive state (yellow/green) or warning state (red) that can still be attempted
 		if status == color.YellowString("Available") ||
+		   status == color.YellowString("Active") ||
 		   status == color.YellowString("Exists") ||
 		   status == color.YellowString("Exists on origin") ||
 		   status == color.YellowString("Running") ||
@@ -1149,9 +1080,9 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
-		// Always enable merging submodules, docker cleanup, marking as finished, and closing tmux
-		items[0].IsEnabled = items[0].IsAvailable                                          // Merge/fast-forward submodules to main
-		items[1].IsEnabled = items[1].IsAvailable                                          // Cleanup Docker Compose environment
+		// Always enable env teardown, merging submodules, marking as finished, and closing tmux
+		items[0].IsEnabled = items[0].IsAvailable                                          // Teardown environment resources
+		items[1].IsEnabled = items[1].IsAvailable                                          // Merge/fast-forward submodules to main
 		items[2].IsEnabled = items[2].IsAvailable                                          // Mark plan as finished
 		items[3].IsEnabled = planFinishCloseSession && items[3].IsAvailable               // Close tmux session (before worktree removal!)
 		items[4].IsEnabled = planFinishPruneWorktree && items[4].IsAvailable              // Prune git worktree

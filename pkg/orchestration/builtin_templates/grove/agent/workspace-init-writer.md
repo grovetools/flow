@@ -28,10 +28,29 @@ A `workspace_init.yml` file defines **init actions** (one-time setup) and **name
 4. **Named actions**: `flow plan action <name>` - Execute specific tasks (restart, logs, etc.)
 
 **Why this change?**
-- ✅ No surprise Docker containers starting automatically
-- ✅ Full control over when services start/stop
-- ✅ Clean separation between plan creation and environment setup
-- ✅ Automatic cleanup with `flow plan finish`
+- Full control over when services start/stop
+- Clean separation between plan creation and environment setup
+- Automatic cleanup with `flow plan finish`
+
+## Infrastructure via grove.yml (Not Recipes!)
+
+**Important**: Infrastructure (databases, services, containers) is configured in `grove.yml` using the `environment` block, **not** in recipes. Recipes should only use `shell` actions.
+
+```yaml
+# grove.yml - Infrastructure configuration
+environment:
+  provider: native    # or: docker, cloud, custom
+  config:
+    services:
+      web:
+        command: "npm run dev"
+        port_env: "PORT"
+      api:
+        command: "go run main.go"
+        port_env: "API_PORT"
+```
+
+The environment provider is automatically invoked during `flow plan init` when configured. See the environment provider documentation for details on `native`, `docker`, and `cloud` providers.
 
 ## File Structure
 
@@ -39,28 +58,22 @@ A `workspace_init.yml` file defines **init actions** (one-time setup) and **name
 description: Brief description of what this recipe provides
 
 init:
-  - type: shell|docker_compose
+  - type: shell
     description: One-time setup action
-    # ... action-specific fields
+    command: npm install
 
 actions:
   action-name:
-    - type: shell|docker_compose
+    - type: shell
       description: What this action does
-      # ... action-specific fields
-
-  another-action:
-    - type: shell|docker_compose
-      description: Another on-demand action
+      command: npm run dev
 ```
 
 **Key sections:**
 - `init:` - One-time setup actions (run with `--init` flag or `flow plan action init`)
 - `actions:` - Named action groups (run with `flow plan action <name>`)
 
-## Init Action Types
-
-### 1. Shell Actions (`type: shell`)
+## Shell Actions (`type: shell`)
 
 Execute shell commands in the worktree directory (or a specific repo for ecosystem projects).
 
@@ -89,171 +102,7 @@ init:
 - Support multi-line commands with `|`
 - Support template variables (see below)
 
-### 2. Docker Compose Actions (`type: docker_compose`)
-
-Start docker compose services with plan-specific isolation.
-
-```yaml
-init:
-  - type: docker_compose
-    description: Start development environment
-    project_name: "myapp-{{ .PlanName }}"    # Isolates services per plan
-    files:
-      - docker-compose.yml
-      - docker-compose.dev.yml
-    overlay:                                   # Plan-specific overrides
-      services:
-        postgres:
-          ports: []  # NEW: Remove port bindings to avoid conflicts!
-          environment:
-            - DB_NAME={{ .PlanName }}
-            - PLAN_NAME={{ .PlanName }}
-          networks:
-            - grove-network
-```
-
-**What happens**:
-1. If `ports: []` is in overlay, creates a sanitized base file with ports removed
-2. Generates a `docker-compose.override.yml` file in `.grove/docker/` with the overlay content
-3. Runs: `docker compose --project-name myapp-{plan-name} -f base.yml -f override.yml up -d`
-4. Each plan gets isolated docker services (different project name)
-
-**Key points**:
-- `project_name` should include `{{ .PlanName }}` for isolation
-- `files` lists base compose files (from project root)
-- `overlay` merges with base config (rendered with templates)
-- Auto-generates override file in worktree's `.grove/docker/` directory
-- **NEW**: Use `ports: []` to remove port bindings and avoid conflicts!
-
-### 2a. Port Conflict Resolution (NEW!)
-
-The biggest improvement: **`ports: []` in the overlay removes port bindings from base files**.
-
-**Problem**: Multiple plans can't run if they all bind to the same ports (e.g., `5432:5432`)
-
-**Solution**: Use `ports: []` in overlay + Traefik routing
-
-```yaml
-init:
-  - type: docker_compose
-    description: Start services without port conflicts
-    project_name: "myapp-{{ .PlanName }}"
-    files:
-      - docker-compose.yml
-    overlay:
-      services:
-        postgres:
-          ports: []  # Removes port bindings from base file!
-          labels:
-            - "grove.managed=true"
-            - "grove.workspace={{ .PlanName }}"
-          networks:
-            - grove-network
-
-        frontend:
-          ports: []  # Removes port bindings from base file!
-          labels:
-            # Traefik routing
-            - "traefik.enable=true"
-            - "traefik.http.routers.frontend-{{ .PlanName }}.rule=Host(`frontend.{{ .PlanName }}.localhost`)"
-            - "traefik.http.services.frontend-{{ .PlanName }}.loadbalancer.server.port=80"
-            # Grove discovery
-            - "grove.managed=true"
-            - "grove.workspace={{ .PlanName }}"
-          networks:
-            - grove-network
-
-      networks:
-        grove-network:
-          external: true
-```
-
-**What happens behind the scenes:**
-1. Grove Flow detects `ports: []` in the overlay
-2. Creates a sanitized copy of the base file with ports removed
-3. Uses the sanitized file instead of the original
-4. No more port conflicts between plans!
-
-**Your base docker-compose.yml can still have ports** (for standalone use):
-```yaml
-services:
-  postgres:
-    image: postgres:15
-    ports:
-      - "5432:5432"  # This will be removed by ports: []
-```
-
-When the recipe runs, Grove Flow strips the ports automatically!
-
-### 2b. Traefik Integration with Grove Proxy
-
-For projects using **grove-proxy** (`px`), configure hostname-based routing through Traefik:
-
-```yaml
-init:
-  - type: docker_compose
-    description: Start services with Traefik routing
-    project_name: "myapp-{{ .PlanName }}"
-    files:
-      - docker-compose.yml
-    overlay:
-      services:
-        frontend:
-          ports: []  # Remove port bindings!
-          labels:
-            # Traefik routing
-            - "traefik.enable=true"
-            - "traefik.http.routers.frontend-{{ .PlanName }}.rule=Host(`frontend.{{ .PlanName }}.localhost`)"
-            - "traefik.http.routers.frontend-{{ .PlanName }}.service=frontend-{{ .PlanName }}"
-            - "traefik.http.services.frontend-{{ .PlanName }}.loadbalancer.server.port=80"
-            # Grove discovery (for px view)
-            - "grove.managed=true"
-            - "grove.workspace={{ .PlanName }}"
-            - "grove.project=myapp"
-            - "grove.service=frontend"
-          networks:
-            - grove-network
-
-      networks:
-        grove-network:
-          external: true
-```
-
-**Result**:
-- **plan-a**: Services at `http://frontend.plan-a.localhost`
-- **plan-b**: Services at `http://frontend.plan-b.localhost`
-- Both running concurrently without conflicts!
-
-**Prerequisites**:
-- Grove-proxy running: `px up`
-- Services connect to `grove-network`
-
-### 2c. Grove Labels for `px view` Discovery
-
-To make services visible in `px view`, add grove labels:
-
-```yaml
-labels:
-  - "grove.managed=true"              # Marks as grove-managed
-  - "grove.workspace={{ .PlanName }}" # Associates with plan
-  - "grove.project=myproject"         # Project name
-  - "grove.service=frontend"          # Service name
-```
-
-**Result in `px view`**:
-```
-Grove Services
-
-󰱒 myapp
-  ├─ plan-a
-  │   ├─ frontend  Running -> http://frontend.plan-a.localhost
-  │   └─ postgres  Running
-  └─ plan-b
-      ├─ frontend  Running -> http://frontend.plan-b.localhost
-      └─ postgres  Running
-```
-
-## Named Actions (NEW!)
+## Named Actions
 
 Define reusable action groups that users can run on-demand:
 
@@ -262,30 +111,20 @@ actions:
   restart:
     - type: shell
       description: Restart development services
-      command: docker compose -p myapp-{{ .PlanName }} restart
+      command: npm run dev:restart
 
   logs:
     - type: shell
       description: View service logs
-      command: docker compose -p myapp-{{ .PlanName }} logs -f
-
-  stop:
-    - type: shell
-      description: Stop services
-      command: docker compose -p myapp-{{ .PlanName }} stop
-
-  start:
-    - type: shell
-      description: Start services
-      command: docker compose -p myapp-{{ .PlanName }} start
+      command: tail -f logs/*.log
 
   db-reset:
     - type: shell
       description: Reset database
       command: |
-        docker compose -p myapp-{{ .PlanName }} exec postgres psql -U user -c "DROP DATABASE IF EXISTS myapp"
-        docker compose -p myapp-{{ .PlanName }} exec postgres psql -U user -c "CREATE DATABASE myapp"
-        npm run migrate
+        npm run db:drop
+        npm run db:create
+        npm run db:migrate
 ```
 
 **Users run these with**:
@@ -307,17 +146,6 @@ All actions support Go template syntax:
 ```yaml
 # In shell command:
 command: echo "Setting up {{ .PlanName }}" > setup.log
-
-# In docker compose project name:
-project_name: "myapp-{{ .PlanName }}"
-
-# In docker compose overlay:
-overlay:
-  services:
-    api:
-      environment:
-        - PLAN_NAME={{ .PlanName }}
-        - CUSTOM_VAR={{ .Vars.api_version }}
 ```
 
 ## Your Task
@@ -327,21 +155,13 @@ When a user asks to create workspace init actions, follow this process:
 ### 1. Gather Information
 
 Ask clarifying questions:
-- What development services need to run? (databases, caches, frontend servers, etc.)
-- Do they use docker compose? If yes, get the file names
 - What setup commands need to run? (install deps, create config files, run migrations, etc.)
 - Is this a single repo or ecosystem (multiple repos)?
 - What environment variables or config files are needed?
 - Do they want named actions for common tasks? (restart, logs, etc.)
+- Do they have infrastructure needs? (If so, point them to `grove.yml` environment config)
 
-### 2. Determine Action Types
-
-Choose the right action types:
-
-**Use `docker_compose` if**:
-- User has a docker-compose.yml file
-- They need databases, caches, or other containerized services
-- They want service isolation per plan
+### 2. Determine Actions
 
 **Use `shell` for**:
 - Installing dependencies (`npm install`, `pip install`, `go mod download`)
@@ -355,85 +175,34 @@ Choose the right action types:
 - Database operations (reset, seed, migrate)
 - Build operations (rebuild, clean)
 
+**For infrastructure** (databases, services, containers):
+- Point users to the `grove.yml` `environment` block
+- Use `native` provider for bare processes, `docker` for containers, `cloud` for managed hosting
+
 ### 3. Create the workspace_init.yml File
 
-**Structure** (NEW FORMAT):
+**Structure**:
 ```yaml
 description: Brief description of what these actions do
 
 init:
-  - type: shell|docker_compose
+  - type: shell
     description: What this action does (shown during init)
-    # ... action-specific fields
+    command: the command to run
 
 actions:
   action-name:
-    - type: shell|docker_compose
+    - type: shell
       description: What this action does
-      # ... action-specific fields
+      command: the command to run
 ```
-
-**Best Practices**:
-
-1. **Use ports: [] for Docker Compose**: Avoid port conflicts between plans
-   ```yaml
-   overlay:
-     services:
-       postgres:
-         ports: []  # Always use this!
-   ```
-
-2. **Create frontend directory for volume mounts** (if needed):
-   ```yaml
-   init:
-     - type: shell
-       description: Create frontend directory
-       command: mkdir -p frontend && echo '<h1>{{ .PlanName }}</h1>' > frontend/index.html
-   ```
-
-3. **Fix volume paths in overlay** (relative to .grove/docker/):
-   ```yaml
-   overlay:
-     services:
-       frontend:
-         volumes:
-           - ../../frontend:/usr/share/nginx/html:ro
-   ```
-
-4. **Add helpful named actions**:
-   ```yaml
-   actions:
-     restart:
-       - type: shell
-         description: Restart services
-         command: docker compose -p myapp-{{ .PlanName }} restart
-
-     logs:
-       - type: shell
-         description: View logs
-         command: docker compose -p myapp-{{ .PlanName }} logs -f
-   ```
-
-5. **Display connection info**:
-   ```yaml
-   init:
-     - type: shell
-       description: Display connection info
-       command: |
-         echo ""
-         echo "✅ Development environment ready!"
-         echo "🌐 Frontend: http://frontend.{{ .PlanName }}.localhost"
-         echo ""
-         echo "Run 'flow plan action logs' to view logs"
-         echo "Run 'flow plan finish' to cleanup when done"
-   ```
 
 ### 4. Output the File
 
-Write the `workspace_init.yml` file and explain the new workflow:
+Write the `workspace_init.yml` file and explain the workflow:
 
 1. Show the complete `workspace_init.yml` content
-2. Explain the new workflow:
+2. Explain the workflow:
    ```
    # Create plan (no actions run automatically)
    flow plan init my-plan --recipe {recipe-name}
@@ -445,66 +214,36 @@ Write the `workspace_init.yml` file and explain the new workflow:
    flow plan action restart
    flow plan action logs
 
-   # Cleanup when done (auto-removes Docker containers!)
+   # Cleanup when done
    flow plan finish
    ```
 
 ## Complete Example
 
-Here's a full example showing the new format:
+Here's a full example:
 
 ```yaml
-description: Full stack development with PostgreSQL and frontend
+description: Full stack development setup
 
 init:
   - type: shell
-    description: Create frontend directory for volume mount
-    command: mkdir -p frontend && echo '<h1>{{ .PlanName }}</h1>' > frontend/index.html
+    description: Install frontend dependencies
+    command: npm install
 
-  - type: docker_compose
-    description: Start development environment
-    project_name: "myapp-{{ .PlanName }}"
-    files:
-      - docker-compose.yml
-    overlay:
-      services:
-        postgres:
-          ports: []  # Remove port bindings!
-          labels:
-            - "grove.managed=true"
-            - "grove.workspace={{ .PlanName }}"
-            - "grove.project=myapp"
-            - "grove.service=postgres"
-          networks:
-            - grove-network
+  - type: shell
+    description: Install backend dependencies
+    repo: backend
+    command: go mod download
 
-        frontend:
-          ports: []  # Remove port bindings!
-          volumes:
-            - ../../frontend:/usr/share/nginx/html:ro
-          labels:
-            - "traefik.enable=true"
-            - "traefik.http.routers.frontend-{{ .PlanName }}.rule=Host(`frontend.{{ .PlanName }}.localhost`)"
-            - "traefik.http.services.frontend-{{ .PlanName }}.loadbalancer.server.port=80"
-            - "grove.managed=true"
-            - "grove.workspace={{ .PlanName }}"
-            - "grove.project=myapp"
-            - "grove.service=frontend"
-          networks:
-            - grove-network
-
-      networks:
-        grove-network:
-          external: true
+  - type: shell
+    description: Run database migrations
+    command: npm run migrate
 
   - type: shell
     description: Display connection info
     command: |
       echo ""
-      echo "✅ Development environment ready!"
-      echo "🌐 Frontend: http://frontend.{{ .PlanName }}.localhost"
-      echo "📊 Database: Connected via grove-network"
-      echo ""
+      echo "Development environment ready!"
       echo "Run 'flow plan action logs' to view service logs"
       echo "Run 'flow plan finish' to cleanup when done"
 
@@ -512,49 +251,32 @@ actions:
   restart:
     - type: shell
       description: Restart development services
-      command: docker compose -p myapp-{{ .PlanName }} restart
+      command: npm run dev:restart
 
   logs:
     - type: shell
       description: View service logs
-      command: docker compose -p myapp-{{ .PlanName }} logs -f
+      command: npm run dev:logs
 
-  stop:
+  db-reset:
     - type: shell
-      description: Stop development services
-      command: docker compose -p myapp-{{ .PlanName }} stop
-
-  start:
-    - type: shell
-      description: Start development services
-      command: docker compose -p myapp-{{ .PlanName }} start
+      description: Reset and reseed database
+      command: |
+        npm run db:drop
+        npm run db:create
+        npm run db:migrate
+        npm run db:seed
 ```
 
-## Automatic Cleanup (NEW!)
+## Automatic Cleanup
 
-When users run `flow plan finish`, Docker Compose environments are **automatically cleaned up**:
-
-1. Grove Flow detects the recipe used to create the plan
-2. Finds all `docker_compose` actions (in both `init` and named `actions`)
-3. Runs `docker compose down --volumes --remove-orphans` for each project
-4. No manual cleanup needed!
-
-**Tell users**:
-```
-When you're done, run:
-  flow plan finish
-
-This will automatically:
-- Remove all Docker containers for this plan
-- Delete volumes
-- Clean up resources
-```
+When users run `flow plan finish`, environment resources are **automatically cleaned up** if an environment provider was configured in `grove.yml`. The provider's `Down()` method handles all teardown.
 
 ## Important Reminders
 
-- **Actions are opt-in** - nothing runs automatically anymore
-- **Use `ports: []`** in overlays to avoid port conflicts
-- **Fix volume paths** - use `../../` prefix if relative to .grove/docker/
+- **Actions are opt-in** - nothing runs automatically
+- **Infrastructure goes in `grove.yml`**, not recipes - same recipe works across all infra backends
+- **Only `shell` type** is supported for recipe actions
 - **Create named actions** for common tasks
 - **Test with** `flow plan action init` after creating the recipe
 - **Cleanup is automatic** with `flow plan finish`

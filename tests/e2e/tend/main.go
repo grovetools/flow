@@ -49,14 +49,12 @@ func main() {
 		scenarios.PlanAddRecipeAliasScenario,
 		scenarios.PlanAddRecipeWithVariablesScenario,
 		scenarios.RecipeInitActionsShellScenario,
-		scenarios.RecipeInitActionsDockerComposeScenario,
 		scenarios.RecipeInitActionsNotebookScenario,
 		// scenarios.RecipeInitActionsEcosystemScenario,
 		scenarios.RecipeInitActionsFailureHandlingScenario,
 		scenarios.PlanDomainFilteringScenario,
 		scenarios.RecipeInitFlagScenario,
 		scenarios.RecipePlanActionCommandScenario,
-		scenarios.RecipeDockerComposePortRemovalScenario,
 		scenarios.HoistedCommandsScenario,
 		scenarios.HoistedCommandsWithActiveJobScenario,
 		scenarios.RollingPlanWorkflowScenario,
@@ -98,6 +96,10 @@ func main() {
 
 		// Session registration tests (verify synchronous registration for all providers)
 		scenarios.OpencodeSessionRegistrationScenario,
+
+		// Environment provisioning lifecycle
+		scenarios.EnvLifecycleScenario,
+		scenarios.EnvNoConfigScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
