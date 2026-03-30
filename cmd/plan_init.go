@@ -1303,9 +1303,9 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		}
 	}
 
-	// Resolve the provider. Only built-in providers (native/docker) need a daemon client.
+	// Resolve the provider. Built-in providers (native/docker/terraform) need a daemon client.
 	var client env.DaemonEnvClient
-	if envCfg.Provider == "native" || envCfg.Provider == "docker" {
+	if envCfg.Provider == "native" || envCfg.Provider == "docker" || envCfg.Provider == "terraform" {
 		client = daemon.New()
 	}
 	provider := env.ResolveProvider(envCfg.Provider, client, envCfg.Command)
