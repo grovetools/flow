@@ -197,7 +197,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	result.WriteString("* Created .grove-plan.yml with default configuration\n")
 
 	// Environment provisioning: if the config has an environment provider, spin it up.
-	if envResult := provisionEnvironment(worktreeToSet, planPath, provider); envResult != "" {
+	if envResult := provisionEnvironment(worktreeToSet, planPath, provider, cmd.EnvProfile); envResult != "" {
 		result.WriteString(envResult)
 	}
 
@@ -1232,7 +1232,7 @@ func setWorktreeActivePlan(worktreePath, planName string) error {
 
 // provisionEnvironment checks the layered config for an environment provider and
 // provisions it if configured. Returns a string with status messages to append to the result.
-func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.Provider) string {
+func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.Provider, envProfile string) string {
 	// Determine the config load path: worktree if available, otherwise CWD
 	var loadPath string
 	if worktreeName != "" {
@@ -1247,17 +1247,41 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	}
 
 	layeredCfg, err := config.LoadLayered(loadPath)
-	if err != nil || layeredCfg.Final == nil || layeredCfg.Final.Environment == nil {
+	if err != nil || layeredCfg.Final == nil {
 		return ""
 	}
 
-	envCfg := layeredCfg.Final.Environment
+	// Determine active environment profile: --env flag > sticky state > default
+	activeProfile := envProfile
+	if activeProfile == "" {
+		activeProfile, _ = state.GetString("environment")
+	}
+
+	// Validate that the named profile exists before resolving
+	if activeProfile != "" {
+		if layeredCfg.Final.Environments == nil {
+			return fmt.Sprintf("%s  Error: environment profile %q not found (no environments defined)\n", theme.IconWarning, activeProfile)
+		}
+		if _, exists := layeredCfg.Final.Environments[activeProfile]; !exists {
+			return fmt.Sprintf("%s  Error: environment profile %q not found\n", theme.IconWarning, activeProfile)
+		}
+	}
+
+	// Resolve the environment profile (merges default + named overlay)
+	envCfg, resolveErr := config.ResolveEnvironment(layeredCfg.Final, activeProfile)
+	if resolveErr != nil {
+		return fmt.Sprintf("%s  Warning: %v\n", theme.IconWarning, resolveErr)
+	}
 	if envCfg.Provider == "" {
 		return ""
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("* Provisioning environment via provider: %s\n", envCfg.Provider))
+	if activeProfile != "" {
+		result.WriteString(fmt.Sprintf("* Provisioning environment %q via provider: %s\n", activeProfile, envCfg.Provider))
+	} else {
+		result.WriteString(fmt.Sprintf("* Provisioning environment via provider: %s\n", envCfg.Provider))
+	}
 
 	// Build request
 	req := env.EnvRequest{
@@ -1317,9 +1341,10 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 
 	// Write .env_state.json to plan directory
 	stateFile := env.EnvStateFile{
-		Provider: envCfg.Provider,
-		Command:  envCfg.Command,
-		State:    resp.State,
+		Provider:    envCfg.Provider,
+		Command:     envCfg.Command,
+		Environment: activeProfile,
+		State:       resp.State,
 	}
 	stateBytes, _ := json.MarshalIndent(stateFile, "", "  ")
 	if err := os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644); err != nil {

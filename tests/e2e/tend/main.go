@@ -100,6 +100,11 @@ func main() {
 		// Environment provisioning lifecycle
 		scenarios.EnvLifecycleScenario,
 		scenarios.EnvNoConfigScenario,
+
+		// Named environment profile tests
+		scenarios.EnvNamedProfileScenario,
+		scenarios.EnvInvalidProfileScenario,
+		scenarios.EnvStickyDefaultScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

@@ -88,6 +88,7 @@ var (
 	planInitWorktree       string
 	planInitExtractAllFrom string
 	planInitOpenSession     bool
+	planInitEnvProfile     string
 	planInitRecipe          string
 	planInitTUI             bool
 	planInitRecipeVars     []string
@@ -139,6 +140,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().Lookup("worktree").NoOptDefVal = "__AUTO__" // Special marker for auto-naming
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
+	planInitCmd.Flags().StringVar(&planInitEnvProfile, "env", "", "Named environment profile to use (e.g., docker, cloud)")
 	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature). When using --recipe-cmd, this can be omitted if the command provides only one recipe")
 	planInitCmd.Flags().StringArrayVar(&planInitRecipeVars, "recipe-vars", nil, "Variables to pass to recipe templates. Can be used multiple times or comma-delimited (e.g., --recipe-vars model=gpt-4 --recipe-vars rules_file=docs.rules OR --recipe-vars \"model=gpt-4,rules_file=docs.rules,output_dir=docs\")")
 	planInitCmd.Flags().StringVar(&planInitRecipeCmd, "recipe-cmd", "", "Command that outputs JSON recipe definitions (overrides grove.yml's get_recipe_cmd)")
@@ -254,6 +256,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		Worktree:       planInitWorktree,
 		ExtractAllFrom: planInitExtractAllFrom,
 		OpenSession:    planInitOpenSession,
+		EnvProfile:     planInitEnvProfile,
 		Recipe:         planInitRecipe,
 		RecipeVars:     planInitRecipeVars,
 		RecipeCmd:      planInitRecipeCmd,
@@ -337,6 +340,7 @@ type PlanInitCmd struct {
 	Worktree       string
 	ExtractAllFrom string
 	OpenSession    bool
+	EnvProfile     string // Named environment profile (--env flag)
 	Recipe         string
 	RecipeVars     []string
 	RecipeCmd      string
