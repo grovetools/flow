@@ -471,6 +471,11 @@ func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 		}
 	}
 
+	// Resolve and append skill content if a skill is defined on the job
+	if skillPath := ResolveJobSkill(job, workDir); skillPath != "" {
+		contextFiles = append(contextFiles, skillPath)
+	}
+
 	return contextFiles
 }
 

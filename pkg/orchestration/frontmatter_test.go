@@ -94,6 +94,26 @@ Job body with rules.`,
 			wantErr:  false,
 		},
 		{
+			name: "frontmatter with skill field",
+			content: `---
+id: skill-test-123
+title: Skill Test
+status: pending
+type: oneshot
+skill: chef
+---
+Job body with skill.`,
+			want: map[string]interface{}{
+				"id":     "skill-test-123",
+				"title":  "Skill Test",
+				"status": "pending",
+				"type":   "oneshot",
+				"skill":  "chef",
+			},
+			wantBody: "Job body with skill.",
+			wantErr:  false,
+		},
+		{
 			name: "malformed YAML",
 			content: `---
 id: test

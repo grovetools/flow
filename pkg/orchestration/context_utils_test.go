@@ -3,6 +3,7 @@ package orchestration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,4 +62,69 @@ func TestScopeToSubProject(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveJobSkill(t *testing.T) {
+	t.Run("empty skill returns empty string", func(t *testing.T) {
+		job := &Job{Skill: ""}
+		result := ResolveJobSkill(job, t.TempDir())
+		if result != "" {
+			t.Errorf("expected empty string for empty skill, got %q", result)
+		}
+	})
+
+	t.Run("nonexistent skill returns empty string", func(t *testing.T) {
+		job := &Job{Skill: "nonexistent-skill-that-does-not-exist-xyz"}
+		result := ResolveJobSkill(job, t.TempDir())
+		if result != "" {
+			t.Errorf("expected empty string for nonexistent skill, got %q", result)
+		}
+	})
+
+	t.Run("builtin skill resolves and writes file", func(t *testing.T) {
+		workDir := t.TempDir()
+		job := &Job{Skill: "grove-skill-guide"}
+
+		result := ResolveJobSkill(job, workDir)
+		if result == "" {
+			t.Fatal("expected non-empty path for builtin skill")
+		}
+
+		expectedPath := filepath.Join(workDir, ".grove", "skills", "skill-grove-skill-guide.md")
+		if result != expectedPath {
+			t.Errorf("expected path %q, got %q", expectedPath, result)
+		}
+
+		// Verify file exists and has content
+		content, err := os.ReadFile(result)
+		if err != nil {
+			t.Fatalf("failed to read resolved skill file: %v", err)
+		}
+		if len(content) == 0 {
+			t.Error("expected skill file to have content")
+		}
+		// SKILL.md should contain frontmatter
+		if !strings.HasPrefix(string(content), "---") {
+			t.Error("expected skill content to start with frontmatter delimiter '---'")
+		}
+		if !strings.Contains(string(content), "grove-skill-guide") {
+			t.Error("expected skill content to contain the skill name")
+		}
+	})
+
+	t.Run("creates .grove/skills directory", func(t *testing.T) {
+		workDir := t.TempDir()
+		job := &Job{Skill: "grove-skill-guide"}
+
+		ResolveJobSkill(job, workDir)
+
+		skillDir := filepath.Join(workDir, ".grove", "skills")
+		info, err := os.Stat(skillDir)
+		if err != nil {
+			t.Fatalf("expected .grove/skills directory to exist: %v", err)
+		}
+		if !info.IsDir() {
+			t.Error("expected .grove/skills to be a directory")
+		}
+	})
 }

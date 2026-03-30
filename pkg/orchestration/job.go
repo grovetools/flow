@@ -114,6 +114,7 @@ type Job struct {
 	Type     JobType   `yaml:"type" json:"type" jsonschema:"description=Job type determining execution behavior (oneshot/chat/interactive_agent/headless_agent/shell/file)"`
 	Model    string    `yaml:"model,omitempty" json:"model,omitempty" jsonschema:"description=LLM model to use for this job"`
 	Template string    `yaml:"template,omitempty" json:"template,omitempty" jsonschema:"description=Template name for generating the job prompt"`
+	Skill    string    `yaml:"skill,omitempty" json:"skill,omitempty" jsonschema:"description=Skill name to inject into the agent context (resolved via skills package)"`
 
 	// Dependencies and context
 	DependsOn   []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`

@@ -42,6 +42,10 @@
       "type": "string",
       "description": "Template name for generating the job prompt"
     },
+    "skill": {
+      "type": "string",
+      "description": "Skill name to inject into the agent context (resolved via skills package)"
+    },
     "depends_on": {
       "items": {
         "type": "string"

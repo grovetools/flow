@@ -11,6 +11,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
+	"github.com/grovetools/skills/pkg/skills"
 )
 
 // DetermineWorkingDirectory determines the working directory for a job based on
@@ -294,4 +295,40 @@ func ResolveTemplate(templateName string, plan *Plan) (string, error) {
 	}
 	
 	return "", fmt.Errorf("template not found: %s", templateName)
+}
+
+// ResolveJobSkill resolves a job's skill field and returns the path to a temporary
+// SKILL.md file that can be included as context. Returns empty string if no skill
+// is configured or if resolution fails.
+func ResolveJobSkill(job *Job, workDir string) string {
+	if job.Skill == "" {
+		return ""
+	}
+
+	skillFiles, err := skills.GetSkill(job.Skill)
+	if err != nil {
+		ulog.Warn("failed to resolve skill").Field("skill", job.Skill).Err(err).Emit()
+		return ""
+	}
+
+	skillContent, ok := skillFiles["SKILL.md"]
+	if !ok || len(skillContent) == 0 {
+		ulog.Warn("skill has no SKILL.md content").Field("skill", job.Skill).Emit()
+		return ""
+	}
+
+	// Write skill content to a temp file in the work directory's .grove directory
+	skillDir := filepath.Join(workDir, ".grove", "skills")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		ulog.Warn("failed to create skills directory").Field("dir", skillDir).Err(err).Emit()
+		return ""
+	}
+
+	skillPath := filepath.Join(skillDir, "skill-"+job.Skill+".md")
+	if err := os.WriteFile(skillPath, skillContent, 0644); err != nil {
+		ulog.Warn("failed to write skill file").Field("path", skillPath).Err(err).Emit()
+		return ""
+	}
+
+	return skillPath
 }

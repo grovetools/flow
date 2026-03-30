@@ -484,6 +484,41 @@ Use the context file to implement.`,
 	}
 }
 
+func TestLoadJobWithSkillField(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	content := `---
+id: skill-job-123
+title: Skill Job
+status: pending
+type: oneshot
+skill: test-skill
+---
+Job that uses a skill.`
+
+	path := filepath.Join(tmpDir, "01-skill-job.md")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	plan, err := LoadPlan(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadPlan() error = %v", err)
+	}
+
+	if len(plan.Jobs) != 1 {
+		t.Fatalf("Plan has %d jobs, want 1", len(plan.Jobs))
+	}
+
+	job := plan.Jobs[0]
+	if job.Skill != "test-skill" {
+		t.Errorf("Job.Skill = %q, want %q", job.Skill, "test-skill")
+	}
+	if job.ID != "skill-job-123" {
+		t.Errorf("Job.ID = %q, want %q", job.ID, "skill-job-123")
+	}
+}
+
 // Helper function
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
