@@ -58,12 +58,26 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 					}
 				}
 			} else {
-				// Try title-based lookup
-				resolvedPath, err := resolveJobByTitle(target)
-				if err != nil {
-					return fmt.Errorf("could not find job by title %q: %w", target, err)
+				// Try plan name first, then fall back to title-based lookup
+				if planPath, err := resolvePlanPath(target); err == nil {
+					if info, statErr := os.Stat(planPath); statErr == nil && info.IsDir() {
+						target = planPath
+					} else {
+						// Not a valid plan directory, try title-based lookup
+						resolvedPath, err := resolveJobByTitle(target)
+						if err != nil {
+							return fmt.Errorf("could not find job by title %q: %w", target, err)
+						}
+						target = resolvedPath
+					}
+				} else {
+					// resolvePlanPath failed, try title-based lookup
+					resolvedPath, err := resolveJobByTitle(target)
+					if err != nil {
+						return fmt.Errorf("could not find job by title %q: %w", target, err)
+					}
+					target = resolvedPath
 				}
-				target = resolvedPath
 			}
 		}
 

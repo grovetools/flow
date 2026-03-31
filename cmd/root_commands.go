@@ -67,7 +67,8 @@ func NewAddCmd() *cobra.Command {
    • headless_agent   - Autonomous agent without user interaction
    • interactive_agent - Agent with user interaction (default)
    • isolated_agent   - Background agent in isolated tmux server with TUI input
-   • file             - Static file content, no execution`)
+   • file             - Static file content, no execution
+   • claw             - Delegate a task to the global claw daemon`)
 	addCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	addCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	addCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
@@ -154,7 +155,8 @@ func NewJobCmd() *cobra.Command {
    • headless_agent   - Autonomous agent without user interaction
    • interactive_agent - Agent with user interaction (default)
    • isolated_agent   - Background agent in isolated tmux server with TUI input
-   • file             - Static file content, no execution`)
+   • file             - Static file content, no execution
+   • claw             - Delegate a task to the global claw daemon`)
 	jobAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	jobAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
 	jobAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")

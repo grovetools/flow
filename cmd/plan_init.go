@@ -175,8 +175,13 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		}
 	}
 
-	// Only use the model if explicitly provided via --model flag
+	// Determine model: CLI flag takes precedence, then workspace config
 	effectiveModel := cmd.Model
+	if effectiveModel == "" {
+		if flowCfg, err := loadFlowConfig(); err == nil && flowCfg != nil && flowCfg.OneshotModel != "" {
+			effectiveModel = flowCfg.OneshotModel
+		}
+	}
 
 	// Create directory using the resolved path
 	if err := createPlanDirectory(planPath, cmd.Force); err != nil {
@@ -488,9 +493,11 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		}
 	}
 
-	// Override model from CLI if provided
+	// Override model from CLI if provided, otherwise fall back to workspace config
 	if cmd.Model != "" {
 		recipeVars["model"] = cmd.Model
+	} else if recipeVars["model"] == "" && flowCfg != nil && flowCfg.OneshotModel != "" {
+		recipeVars["model"] = flowCfg.OneshotModel
 	}
 
 	// Data for templating
@@ -735,7 +742,9 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	finalWorktree := worktreeOverride
 
 	// Create a default .grove-plan.yml, using the determined worktree and recipe name
-	if err := createDefaultPlanConfig(planPath, cmd.Model, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Repos); err != nil {
+	// Use recipeVars["model"] which includes workspace config fallback
+	effectiveModel := recipeVars["model"]
+	if err := createDefaultPlanConfig(planPath, effectiveModel, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("* Created .grove-plan.yml")

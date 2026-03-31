@@ -222,8 +222,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		return nil, fmt.Errorf("title is required (use --title or -i for interactive mode)")
 	}
 
-	if cmd.Type != "oneshot" && cmd.Type != "chat" && cmd.Type != "shell" && cmd.Type != "interactive_agent" && cmd.Type != "headless_agent" && cmd.Type != "file" {
-		return nil, fmt.Errorf("invalid job type: must be oneshot, chat, shell, interactive_agent, headless_agent, or file")
+	if cmd.Type != "oneshot" && cmd.Type != "chat" && cmd.Type != "shell" && cmd.Type != "interactive_agent" && cmd.Type != "headless_agent" && cmd.Type != "file" && cmd.Type != "claw" {
+		return nil, fmt.Errorf("invalid job type: must be oneshot, chat, shell, interactive_agent, headless_agent, file, or claw")
 	}
 
 	// Validate dependencies

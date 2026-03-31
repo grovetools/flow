@@ -78,6 +78,10 @@ func runPlanJobsList(cmd *cobra.Command, args []string) error {
 			Type:        string(orchestration.JobTypeFile),
 			Description: "Static file for context/reference only, not executed",
 		},
+		{
+			Type:        string(orchestration.JobTypeClaw),
+			Description: "Delegate a task to the global claw daemon",
+		},
 	}
 
 	// Check if JSON output is requested

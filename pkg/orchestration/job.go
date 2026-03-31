@@ -103,6 +103,7 @@ const (
 	JobTypeIsolatedAgent    JobType = "isolated_agent"
 	JobTypeGenerateRecipe   JobType = "generate-recipe"
 	JobTypeFile             JobType = "file" // Non-executable job for storing context/reference content
+	JobTypeClaw             JobType = "claw"
 )
 
 // Job represents a single orchestration job.

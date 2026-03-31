@@ -198,6 +198,7 @@ func (m Model) renderTableView() string {
 				case "oneshot": jobTypeSymbol = theme.IconOneshot
 				case "shell": jobTypeSymbol = theme.IconShell
 				case "file": jobTypeSymbol = theme.IconFile
+				case "claw": jobTypeSymbol = theme.IconClaw
 				default: jobTypeSymbol = ""
 				}
 				var typeCol string
@@ -291,6 +292,8 @@ func getJobIcon(job *orchestration.Job) string {
 		return theme.IconShell
 	case "file":
 		return theme.IconFile
+	case "claw":
+		return theme.IconClaw
 	default:
 		return theme.IconChat // Default fallback
 	}
@@ -424,6 +427,7 @@ func (m Model) renderTypePicker() string {
 		{orchestration.JobTypeHeadlessAgent, "Headless Agent"},
 		{orchestration.JobTypeGenerateRecipe, "Generate Recipe"},
 		{orchestration.JobTypeFile, "File"},
+		{orchestration.JobTypeClaw, "Claw"},
 	}
 
 	var lines []string
@@ -882,6 +886,8 @@ func renderProperty(builder *strings.Builder, k string, v interface{}, keyStyle,
 				icon = theme.IconShell + " "
 			case "file":
 				icon = theme.IconFile + " "
+			case "claw":
+				icon = theme.IconClaw + " "
 			}
 		case "git_changes":
 			if val == "true" {

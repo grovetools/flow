@@ -268,6 +268,7 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 		item("shell"),
 		item("chat"),
 		item("file"),
+		item("claw"),
 	}
 	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 7)
 	m.jobTypeList.Title = ""
@@ -344,8 +345,8 @@ func (m tuiModel) buildTemplateList(jobType string) list.Model {
 		case "oneshot", "chat":
 			// Show oneshot templates (Type == "oneshot", which includes chat.md)
 			includeTemplate = t.Type == "oneshot"
-		case "shell", "file":
-			// Shell and file jobs don't use templates
+		case "shell", "file", "claw":
+			// Shell, file, and claw jobs don't use templates
 			includeTemplate = false
 		default:
 			// If no job type selected, show all templates

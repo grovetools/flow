@@ -308,20 +308,47 @@ func ReplaceFrontmatter(content []byte, newFrontmatter string) []byte {
 	return result.Bytes()
 }
 
+// SanitizeFrontmatter removes empty values from frontmatter fields that would
+// otherwise serialize as empty arrays (e.g., `branch: []`) due to template
+// variables evaluating to empty strings during recipe rendering.
+func SanitizeFrontmatter(fm map[string]interface{}) {
+	for _, key := range []string{"branch", "worktree", "repository"} {
+		val, ok := fm[key]
+		if !ok {
+			continue
+		}
+		switch v := val.(type) {
+		case string:
+			if v == "" {
+				delete(fm, key)
+			}
+		case []interface{}:
+			if len(v) == 0 {
+				delete(fm, key)
+			}
+		case nil:
+			delete(fm, key)
+		}
+	}
+}
+
 // RebuildMarkdownWithFrontmatter rebuilds a markdown file with new frontmatter data
 func RebuildMarkdownWithFrontmatter(frontmatter map[string]interface{}, body []byte) ([]byte, error) {
+	// Sanitize before marshaling to prevent empty arrays in YAML output
+	SanitizeFrontmatter(frontmatter)
+
 	// Marshal the frontmatter to YAML
 	yamlBytes, err := yaml.Marshal(frontmatter)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling frontmatter: %w", err)
 	}
-	
+
 	// Build the complete markdown file
 	var result bytes.Buffer
 	result.WriteString("---\n")
 	result.Write(yamlBytes)
 	result.WriteString("---\n")
 	result.Write(body)
-	
+
 	return result.Bytes(), nil
 }
