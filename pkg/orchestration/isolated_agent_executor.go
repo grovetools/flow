@@ -75,13 +75,25 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	var briefingFilePath string
 
 	// Gather context files (.grove/context, CLAUDE.md, etc.)
-	contextFiles := e.gatherContextFiles(job, plan, workDir)
+	contextFiles, err := e.gatherContextFiles(job, plan, workDir)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		updateJobFile(job)
+		return fmt.Errorf("failed to gather context files: %w", err)
+	}
 
 	// Build the XML prompt and get the list of files to upload.
 	promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
+		ulog.Error("Failed to build prompt for job").
+			Field("job_id", job.ID).
+			Field("job_file", job.FilePath).
+			Err(err).
+			Pretty(" " + err.Error()).
+			Log(ctx)
 		return fmt.Errorf("failed to build agent XML prompt: %w", err)
 	}
 
@@ -444,7 +456,7 @@ func (e *IsolatedAgentExecutor) determineWorkDir(ctx context.Context, job *Job, 
 }
 
 // gatherContextFiles collects context files for the job.
-func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) []string {
+func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) ([]string, error) {
 	var contextFiles []string
 
 	contextDir := ScopeToSubProject(workDir, job)
@@ -470,12 +482,7 @@ func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 		}
 	}
 
-	// Resolve and append skill content if a skill is defined on the job
-	if skillPath := ResolveJobSkill(job, workDir); skillPath != "" {
-		contextFiles = append(contextFiles, skillPath)
-	}
-
-	return contextFiles
+	return contextFiles, nil
 }
 
 // SendInputToIsolatedAgent sends input text to an isolated agent via tmux send-keys.

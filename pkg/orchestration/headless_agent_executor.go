@@ -118,11 +118,21 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	workDir = ScopeToSubProject(workDir, job)
 
 	// Gather context files (.grove/context, CLAUDE.md, etc.)
-	contextFiles := e.gatherContextFiles(job, plan, workDir)
+	contextFiles, err := e.gatherContextFiles(job, plan, workDir)
+	if err != nil {
+		execErr = err
+		return execErr
+	}
 
 	// Build the XML prompt
 	promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
 	if err != nil {
+		ulog.Error("Failed to build prompt for job").
+			Field("job_id", job.ID).
+			Field("job_file", job.FilePath).
+			Err(err).
+			Pretty(" " + err.Error()).
+			Log(ctx)
 		execErr = fmt.Errorf("building XML prompt: %w", err)
 		return execErr
 	}
@@ -321,7 +331,7 @@ func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree string, prom
 }
 
 // gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
-func (e *HeadlessAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) []string {
+func (e *HeadlessAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) ([]string, error) {
 	var contextFiles []string
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
@@ -349,10 +359,5 @@ func (e *HeadlessAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 		}
 	}
 
-	// Resolve and append skill content if a skill is defined on the job
-	if skillPath := ResolveJobSkill(job, workDir); skillPath != "" {
-		contextFiles = append(contextFiles, skillPath)
-	}
-
-	return contextFiles
+	return contextFiles, nil
 }

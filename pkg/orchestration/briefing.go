@@ -68,7 +68,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 
 	b.WriteString("<prompt>\n")
 
-	// 1. Add system instructions from the job's template, if available.
+	// 1. Add system instructions from the job's template or skill, if available.
 	if job.Template != "" {
 		templateManager := NewTemplateManager()
 		template, err := templateManager.FindTemplate(job.Template)
@@ -78,6 +78,19 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 		b.WriteString(fmt.Sprintf("    <system_instructions template=\"%s\">\n", job.Template))
 		b.WriteString(template.Prompt)
 		b.WriteString("\n    </system_instructions>\n")
+	}
+
+	// 1b. Add skill instructions (inlined, same as template).
+	if job.Skill != "" {
+		skillContent, err := ResolveJobSkillContent(job, workDir)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolving skill for job %s: %w", job.ID, err)
+		}
+		if skillContent != "" {
+			b.WriteString(fmt.Sprintf("    <system_instructions skill=\"%s\">\n", job.Skill))
+			b.WriteString(skillContent)
+			b.WriteString("\n    </system_instructions>\n")
+		}
 	}
 
 	b.WriteString("\n    <context>\n")

@@ -297,38 +297,73 @@ func ResolveTemplate(templateName string, plan *Plan) (string, error) {
 	return "", fmt.Errorf("template not found: %s", templateName)
 }
 
-// ResolveJobSkill resolves a job's skill field and returns the path to a temporary
-// SKILL.md file that can be included as context. Returns empty string if no skill
-// is configured or if resolution fails.
-func ResolveJobSkill(job *Job, workDir string) string {
+// ResolveJobSkillContent resolves a job's skill field and returns the raw SKILL.md
+// content for inlining into the prompt. Returns ("", nil) if no skill is configured.
+// Returns an error if a skill is declared but cannot be resolved, since running a
+// job without its declared skill produces silently wrong results.
+//
+// Uses the skills package's full resolution chain: notebook > user > embedded.
+// workDir is used to resolve the workspace context for notebook skill discovery.
+func ResolveJobSkillContent(job *Job, workDir string) (string, error) {
 	if job.Skill == "" {
-		return ""
+		return "", nil
 	}
 
+	// Try notebook skill resolution first using the workDir context.
+	// findNotebookSkills in the skills package uses os.Getwd() which may not
+	// be the worktree, so we resolve the notebook skill path directly here.
+	if content, err := resolveSkillFromWorkDir(job.Skill, workDir); err == nil {
+		return content, nil
+	}
+
+	// Fall back to skills package (user skills, then embedded)
 	skillFiles, err := skills.GetSkill(job.Skill)
 	if err != nil {
-		ulog.Warn("failed to resolve skill").Field("skill", job.Skill).Err(err).Emit()
-		return ""
+		return "", fmt.Errorf("skill %q not found: %w", job.Skill, err)
 	}
 
 	skillContent, ok := skillFiles["SKILL.md"]
 	if !ok || len(skillContent) == 0 {
-		ulog.Warn("skill has no SKILL.md content").Field("skill", job.Skill).Emit()
-		return ""
+		return "", fmt.Errorf("skill %q has no SKILL.md content", job.Skill)
 	}
 
-	// Write skill content to a temp file in the work directory's .grove directory
-	skillDir := filepath.Join(workDir, ".grove", "skills")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		ulog.Warn("failed to create skills directory").Field("dir", skillDir).Err(err).Emit()
-		return ""
+	return stripSkillFrontmatter(skillContent), nil
+}
+
+// resolveSkillFromWorkDir resolves a skill using the workspace context at workDir.
+// This handles the case where flow is running from a worktree and needs to find
+// notebook workspace skills via the NotebookLocator.
+func resolveSkillFromWorkDir(name string, workDir string) (string, error) {
+	node, err := workspace.GetProjectByPath(workDir)
+	if err != nil {
+		return "", err
 	}
 
-	skillPath := filepath.Join(skillDir, "skill-"+job.Skill+".md")
-	if err := os.WriteFile(skillPath, skillContent, 0644); err != nil {
-		ulog.Warn("failed to write skill file").Field("path", skillPath).Err(err).Emit()
-		return ""
+	coreCfg, err := config.LoadDefault()
+	if err != nil {
+		coreCfg = &config.Config{}
 	}
 
-	return skillPath
+	locator := workspace.NewNotebookLocator(coreCfg)
+	skillsDir, err := locator.GetSkillsDir(node)
+	if err != nil || skillsDir == "" {
+		return "", fmt.Errorf("no skills directory found")
+	}
+
+	skillPath := filepath.Join(skillsDir, name, "SKILL.md")
+	content, err := os.ReadFile(skillPath)
+	if err != nil {
+		return "", fmt.Errorf("skill %q not found at %s: %w", name, skillPath, err)
+	}
+
+	return stripSkillFrontmatter(content), nil
+}
+
+// stripSkillFrontmatter removes YAML frontmatter from skill content, returning only the body.
+func stripSkillFrontmatter(content []byte) string {
+	_, body, err := ParseFrontmatter(content)
+	if err != nil {
+		return string(content)
+	}
+	return strings.TrimSpace(string(body))
 }

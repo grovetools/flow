@@ -611,7 +611,81 @@ User message with inlined dependency using array syntax.
 			return nil
 		}),
 
-		// Test Case 8: Chat Job with prepend_dependencies=true (backwards compatibility)
+		// Test Case 8: Oneshot Job with skill: field
+		harness.NewStep("Create oneshot job with skill field", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Create a oneshot job with skill: grove-skill-guide (builtin skill)
+			jobContent := "---\nid: skill-oneshot\ntitle: test-oneshot-skill\ntype: oneshot\nstatus: pending\nskill: grove-skill-guide\n---\nWrite a skill following the guide."
+			if err := fs.WriteString(filepath.Join(planPath, "16-skill-oneshot.md"), jobContent); err != nil {
+				return err
+			}
+
+			_ = projectDir
+			return nil
+		}),
+		harness.NewStep("Run oneshot with skill and verify briefing inlines skill content", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "16-skill-oneshot.md"), "--yes")
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			if err := runCmd.Run().AssertSuccess(); err != nil {
+				return err
+			}
+
+			// Verify briefing file
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "skill-oneshot")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found for skill oneshot job in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			// Skill content should be inlined as system_instructions, just like templates
+			if !strings.Contains(content, `<system_instructions skill="grove-skill-guide">`) {
+				return fmt.Errorf("briefing missing <system_instructions skill=\"grove-skill-guide\"> tag — skill not inlined")
+			}
+			// Verify the skill body is present (not just a file reference)
+			if !strings.Contains(content, "skill") {
+				return fmt.Errorf("briefing missing skill content body")
+			}
+			if !strings.Contains(content, "Write a skill following the guide") {
+				return fmt.Errorf("briefing missing user request prompt")
+			}
+			return nil
+		}),
+
+		// Test Case 9: Oneshot Job with nonexistent skill should fail
+		harness.NewStep("Create oneshot job with nonexistent skill", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+
+			jobContent := "---\nid: bad-skill\ntitle: test-bad-skill\ntype: oneshot\nstatus: pending\nskill: nonexistent-skill-xyz\n---\nThis should fail."
+			return fs.WriteString(filepath.Join(planPath, "17-bad-skill.md"), jobContent)
+		}),
+		harness.NewStep("Run oneshot with bad skill and verify it fails", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "17-bad-skill.md"), "--yes")
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			result := runCmd.Run()
+
+			// The job should fail because the skill doesn't exist
+			if result.ExitCode == 0 {
+				return fmt.Errorf("expected job to fail with nonexistent skill, but it succeeded")
+			}
+			return nil
+		}),
+
+		// Test Case 10: Chat Job with prepend_dependencies=true (backwards compatibility)
 		harness.NewStep("Create chat job with prepend_dependencies", func(ctx *harness.Context) error {
 			planPath := ctx.GetString("plan_path")
 

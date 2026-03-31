@@ -205,6 +205,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		updateJobFile(job)
+		ulog.Error("Failed to build prompt for job").
+			Field("job_id", job.ID).
+			Field("job_file", job.FilePath).
+			Err(err).
+			Pretty(theme.IconError + " " + err.Error()).
+			Log(ctx)
 		execErr = fmt.Errorf("building XML prompt: %w", err)
 		return execErr
 	}

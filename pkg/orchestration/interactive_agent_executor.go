@@ -112,7 +112,13 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			Log(ctx)
 	} else {
 		// Gather context files (.grove/context, CLAUDE.md, etc.)
-		contextFiles := e.gatherContextFiles(job, plan, workDir)
+		contextFiles, err := e.gatherContextFiles(job, plan, workDir)
+		if err != nil {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			updateJobFile(job)
+			return fmt.Errorf("failed to gather context files: %w", err)
+		}
 
 		// Build the XML prompt and get the list of files to upload.
 		// NOTE: interactive agents currently don't support separate file uploads, so filesToUpload is ignored.
@@ -120,6 +126,13 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
+			updateJobFile(job)
+			e.ulog.Error("Failed to build prompt for job").
+				Field("job_id", job.ID).
+				Field("job_file", job.FilePath).
+				Err(err).
+				Pretty(" " + err.Error()).
+				Log(ctx)
 			return fmt.Errorf("failed to build agent XML prompt: %w", err)
 		}
 
@@ -1130,7 +1143,7 @@ func (p *ClaudeAgentProvider) findDescendantPID(parentPID int, targetComm string
 }
 
 // gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
-func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) []string {
+func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) ([]string, error) {
 	var contextFiles []string
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
@@ -1158,12 +1171,7 @@ func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, work
 		}
 	}
 
-	// Resolve and append skill content if a skill is defined on the job
-	if skillPath := ResolveJobSkill(job, workDir); skillPath != "" {
-		contextFiles = append(contextFiles, skillPath)
-	}
-
-	return contextFiles
+	return contextFiles, nil
 }
 
 // CaptureInteractiveAgentOutput captures the visible output from an interactive agent's pane.
