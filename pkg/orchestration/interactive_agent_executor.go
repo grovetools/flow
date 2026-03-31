@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/agentlogs/pkg/agentstream"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
@@ -546,8 +547,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Small delay to ensure environment variables are set
 		time.Sleep(100 * time.Millisecond)
 
+		// Wrap agent command with deterministic PID capture
+		wrappedCommand := agentstream.BuildAgentCommand(job.ID, agentCommand)
 		// Send the agent command to the new window
-		if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
+		if err := tmuxClient.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -703,10 +706,12 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	time.Sleep(100 * time.Millisecond)
 
+	// Wrap agent command with deterministic PID capture
+	wrappedCommand := agentstream.BuildAgentCommand(job.ID, agentCommand)
 	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)
-	if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
@@ -773,7 +778,7 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 
 // discoverAndRegisterSessionAsync discovers the Claude Code PID and confirms the session with the daemon.
 // This function is designed to be called from a goroutine - it blocks internally but
-// does not block the caller. It waits until a valid PID is found or the timeout is reached.
+// does not block the caller. It uses agentstream for deterministic PID capture via pidfile.
 // The session intent should already be registered via RegisterSessionIntent() before this is called.
 func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane string) error {
 	logger := grovelogging.NewLogger("flow-claude-session-discovery")
@@ -790,79 +795,67 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		jobStartTime = time.Now()
 	}
 
-	// Wait a brief moment for the Claude process to start
-	time.Sleep(500 * time.Millisecond)
+	ctx := context.Background()
 
-	// Synchronous PID discovery with retry loop (up to 30 seconds)
-	var claudePID int
-	var pidErr error
-	maxPIDRetries := 30
-	for i := 0; i < maxPIDRetries; i++ {
-		claudePID, pidErr = p.findClaudePIDForPane(targetPane, logger)
-		if pidErr == nil && claudePID > 0 {
-			logger.WithFields(logrus.Fields{
-				"pid":         claudePID,
-				"retry_count": i,
-			}).Debug("Discovered Claude Code PID")
-			break
-		}
-		logger.WithFields(logrus.Fields{
-			"error":       pidErr,
-			"retry_count": i,
-			"max_retries": maxPIDRetries,
-		}).Debug("Claude PID not found yet, retrying...")
-		time.Sleep(1 * time.Second)
-	}
-
-	if claudePID == 0 {
-		return fmt.Errorf("failed to find Claude Code PID after %d seconds: %w", maxPIDRetries, pidErr)
-	}
-
-	// Build the transcript path for Claude
-	homeDir, err := os.UserHomeDir()
+	// Wait for PID via deterministic pidfile (written by BuildAgentCommand)
+	claudePID, err := agentstream.WaitForPID(ctx, job.ID)
 	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %w", err)
+		// Fallback to legacy process tree traversal
+		logger.WithError(err).Warn("Pidfile-based PID discovery failed, falling back to process tree traversal")
+		var pidErr error
+		time.Sleep(500 * time.Millisecond)
+		maxPIDRetries := 30
+		for i := 0; i < maxPIDRetries; i++ {
+			claudePID, pidErr = p.findClaudePIDForPane(targetPane, logger)
+			if pidErr == nil && claudePID > 0 {
+				break
+			}
+			time.Sleep(1 * time.Second)
+		}
+		if claudePID == 0 {
+			return fmt.Errorf("failed to find Claude Code PID: %w", pidErr)
+		}
+	} else {
+		logger.WithField("pid", claudePID).Debug("Discovered Claude Code PID via pidfile")
+		agentstream.CleanupPIDFile(job.ID)
 	}
-	sanitizedPath := sanitizePathForClaude(workDir)
 
-	// Try to find Claude session ID with retries (Claude may take a few seconds to create its session file)
-	var claudeSessionID string
-	var transcriptPath string
-	maxSessionRetries := 10
-	for i := 0; i < maxSessionRetries; i++ {
-		if foundSessionID, err := p.findClaudeSessionID(workDir, jobStartTime, logger); err == nil {
-			claudeSessionID = foundSessionID
-			transcriptPath = filepath.Join(homeDir, ".claude", "projects", sanitizedPath, claudeSessionID+".jsonl")
-			logger.WithFields(logrus.Fields{
-				"claude_session_id": claudeSessionID,
-				"transcript_path":   transcriptPath,
-				"retry_count":       i,
-			}).Debug("Found Claude session ID")
-			break
-		} else {
-			if i == maxSessionRetries-1 {
-				// Don't use job ID as fallback for claude_session_id since it creates
-				// a non-existent transcript path. Leave empty and let aglogs scan for it.
-				logger.WithFields(logrus.Fields{
-					"error":       err,
-					"retry_count": i,
-				}).Warn("Claude session ID not found after retries, transcript path will be empty")
-			} else {
-				logger.WithFields(logrus.Fields{
-					"error":       err,
-					"retry_count": i,
-				}).Debug("Claude session ID not found yet, retrying...")
-				time.Sleep(1 * time.Second)
+	// Discover transcript path using agentstream
+	transcriptPath, err := agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+		Provider:  "claude",
+		WorkDir:   workDir,
+		AfterTime: jobStartTime,
+	})
+	if err != nil {
+		logger.WithError(err).Warn("Failed to discover transcript via agentstream, retrying...")
+		// Retry with backoff
+		for i := 0; i < 10; i++ {
+			time.Sleep(1 * time.Second)
+			transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+				Provider:  "claude",
+				WorkDir:   workDir,
+				AfterTime: jobStartTime,
+			})
+			if err == nil {
+				break
 			}
 		}
+		if err != nil {
+			logger.WithError(err).Warn("Transcript path discovery failed, continuing without it")
+		}
+	}
+
+	// Extract Claude session ID from transcript path for backwards compatibility
+	var claudeSessionID string
+	if transcriptPath != "" {
+		claudeSessionID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
 	}
 
 	// Confirm the session with the daemon using the discovered PID
-	// This links the pre-registered intent with the actual running process
 	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()
 
-	if err := daemonClient.ConfirmSession(context.Background(), daemon.SessionConfirmation{
+	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
 		JobID:          job.ID,
 		NativeID:       claudeSessionID,
 		PID:            claudePID,
@@ -870,7 +863,6 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	}); err != nil {
 		logger.WithError(err).Warn("Failed to confirm session with daemon, falling back to filesystem registry")
 
-		// Fallback: Register with filesystem registry for backwards compatibility
 		user := os.Getenv("USER")
 		if user == "" {
 			user = "unknown"

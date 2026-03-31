@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/fatih/color v1.18.0
 	github.com/google/uuid v1.6.0
+	github.com/grovetools/agentlogs v0.6.1
 	github.com/grovetools/core v0.6.3
 	github.com/grovetools/cx v0.6.0
 	github.com/grovetools/grove-anthropic v0.6.1

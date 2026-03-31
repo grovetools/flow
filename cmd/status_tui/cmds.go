@@ -1,7 +1,6 @@
 package status_tui
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/agentlogs/pkg/agentstream"
+	"github.com/grovetools/agentlogs/pkg/display"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
@@ -534,56 +535,28 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 		}
 
 		// Open the log file in append mode for writing streamed content
-		// Note: We don't write historical logs here - loadAndStreamAgentLogsCmd already
-		// displayed the initial content. We only capture NEW content from this point.
 		logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err), JobID: job.ID}
 		}
 
-		// Start streaming new content using the direct file path
-		streamCmd := delegation.Command("aglogs", "stream", logFilePath)
-		streamCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
-
-		stdout, err := streamCmd.StdoutPipe()
+		// Stream transcript entries in-process via agentstream
+		entries, err := agentstream.Stream(ctx, agentstream.StreamOptions{
+			TranscriptPath: logFilePath,
+		})
 		if err != nil {
 			logFile.Close()
 			go func() {
 				defer func() { recover() }()
 				program.Send(StreamEndedMsg{JobID: job.ID})
 			}()
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to create stdout pipe: %w", err), JobID: job.ID}
+			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start agentstream: %w", err), JobID: job.ID}
 		}
 
-		if err := streamCmd.Start(); err != nil {
-			logFile.Close()
-			go func() {
-				defer func() { recover() }()
-				program.Send(StreamEndedMsg{JobID: job.ID})
-			}()
-			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start aglogs stream: %w", err), JobID: job.ID}
-		}
-
-		// Channel to signal that the stream finished normally
-		doneCh := make(chan struct{})
-
-		// Monitor for context cancellation to kill the leaked process
-		go func() {
-			select {
-			case <-ctx.Done():
-				if streamCmd.Process != nil {
-					streamCmd.Process.Kill()
-				}
-			case <-doneCh:
-			}
-		}()
-
-		// Stream output line by line back to the TUI and write to log file
+		// Stream formatted entries to TUI and log file
 		go func() {
 			logger := logging.NewLogger("flow-tui")
 			defer logFile.Close()
-			defer stdout.Close()
-			defer close(doneCh) // Signal monitor goroutine to exit
 
 			// Notify the TUI that streaming ended so it can clear StreamingJobID
 			defer func() {
@@ -593,8 +566,6 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 				}()
 			}()
 
-			// Recover from any panics in the streaming goroutine
-			// This can happen if program.Send() is called after the TUI is shutting down
 			defer func() {
 				if r := recover(); r != nil {
 					logger.WithFields(map[string]interface{}{
@@ -603,35 +574,17 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 				}
 			}()
 
-			scanner := bufio.NewScanner(stdout)
+			toolFmts := display.DefaultToolFormatters()
 			lineCount := 0
-			for scanner.Scan() {
-				// Check if context was cancelled - stop sending to TUI
-				select {
-				case <-ctx.Done():
-					logger.Info("Stream context cancelled, stopping message send")
-					return
-				default:
-				}
-
-				line := scanner.Text()
+			for entry := range entries {
 				lineCount++
+				formatted := display.FormatUnifiedEntry(entry, "normal", toolFmts)
 
-				// Strip the [job-id] prefix from streamed lines for cleaner display and storage
-				displayLine := line
-				if strings.HasPrefix(line, "[") {
-					if endIdx := strings.Index(line, "] "); endIdx > 0 {
-						displayLine = line[endIdx+2:]
-					}
-				}
+				// Write to log file
+				fmt.Fprintln(logFile, formatted)
+				logFile.Sync()
 
-				// Write to log file (without job-id prefix)
-				fmt.Fprintln(logFile, displayLine)
-				logFile.Sync() // Ensure it's written immediately
-
-				// Send to TUI as a LogLineMsg with job.ID to tag the source
-				// NoPrefix=true prevents the logviewer from adding [job-id] prefix
-				// Wrapped in a func to allow recover() to catch any panics from program.Send()
+				// Send to TUI
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
@@ -643,31 +596,17 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 					}()
 					program.Send(logviewer.LogLineMsg{
 						Workspace: job.ID,
-						Line:      displayLine,
+						Line:      formatted,
 						NoPrefix:  true,
 					})
 				}()
 			}
-			if err := scanner.Err(); err != nil {
-				logger.WithFields(map[string]interface{}{
-					"error":      err,
-					"line_count": lineCount,
-				}).Error("Scanner error in agent log stream")
-			} else {
-				logger.WithFields(map[string]interface{}{
-					"line_count": lineCount,
-				}).Info("Agent log stream ended normally")
-			}
-			if err := streamCmd.Wait(); err != nil {
-				logger.WithFields(map[string]interface{}{
-					"error": err,
-				}).Error("aglogs stream command exited with error")
-			} else {
-				logger.Info("aglogs stream command exited successfully")
-			}
+
+			logger.WithFields(map[string]interface{}{
+				"line_count": lineCount,
+			}).Info("Agent log stream ended")
 		}()
 
-		// This command manages its own lifecycle in the background.
 		return nil
 	}
 }

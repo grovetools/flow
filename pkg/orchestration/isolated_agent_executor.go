@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/agentlogs/pkg/agentstream"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
@@ -238,8 +239,10 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	// Small delay to ensure environment variables are set
 	time.Sleep(100 * time.Millisecond)
 
+	// Wrap agent command with deterministic PID capture
+	wrappedCommand := agentstream.BuildAgentCommand(job.ID, agentCommand)
 	// Send the agent command to the isolated pane
-	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, agentCommand, "C-m"); err != nil {
+	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, wrappedCommand, "C-m"); err != nil {
 		e.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -305,32 +308,28 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 		"provider":   providerName,
 	}).Debug("Starting isolated agent PID discovery and registration")
 
-	// Wait for the agent process to start
-	time.Sleep(500 * time.Millisecond)
-
-	// Try to discover the agent PID
-	var agentPID int
-	var pidErr error
-	maxPIDRetries := 30
-	for i := 0; i < maxPIDRetries; i++ {
-		agentPID, pidErr = e.findAgentPIDForIsolatedPane(socketName, targetPane, providerName, logger)
-		if pidErr == nil && agentPID > 0 {
-			logger.WithFields(logrus.Fields{
-				"pid":         agentPID,
-				"retry_count": i,
-			}).Debug("Discovered agent PID")
-			break
+	// Wait for PID via deterministic pidfile (written by BuildAgentCommand)
+	ctx := context.Background()
+	agentPID, err := agentstream.WaitForPID(ctx, job.ID)
+	if err != nil {
+		// Fallback to legacy process tree traversal
+		logger.WithError(err).Warn("Pidfile-based PID discovery failed, falling back to process tree traversal")
+		time.Sleep(500 * time.Millisecond)
+		var pidErr error
+		maxPIDRetries := 30
+		for i := 0; i < maxPIDRetries; i++ {
+			agentPID, pidErr = e.findAgentPIDForIsolatedPane(socketName, targetPane, providerName, logger)
+			if pidErr == nil && agentPID > 0 {
+				break
+			}
+			time.Sleep(1 * time.Second)
 		}
-		logger.WithFields(logrus.Fields{
-			"error":       pidErr,
-			"retry_count": i,
-			"max_retries": maxPIDRetries,
-		}).Debug("Agent PID not found yet, retrying...")
-		time.Sleep(1 * time.Second)
-	}
-
-	if agentPID == 0 {
-		return fmt.Errorf("failed to find agent PID after %d seconds: %w", maxPIDRetries, pidErr)
+		if agentPID == 0 {
+			return fmt.Errorf("failed to find agent PID: %w", pidErr)
+		}
+	} else {
+		logger.WithField("pid", agentPID).Debug("Discovered agent PID via pidfile")
+		agentstream.CleanupPIDFile(job.ID)
 	}
 
 	// Update lock file with actual PID
