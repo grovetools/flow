@@ -50,7 +50,7 @@ func (e *ClawExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error 
 		Role    string `json:"role,omitempty"`
 	}{
 		ChatID:  job.ID,
-		Content: fmt.Sprintf("[flow job: %s]\n\n%s\n\nWhen this task is complete, remind the user to run `flow plan complete %s` to unblock downstream jobs.", job.Filename, job.PromptBody, job.Filename),
+		Content: fmt.Sprintf("[flow job: %s]\n\n%s\n\n---\n**Flow job instructions:**\n- Job file: %s\n- When you have addressed this task, append a brief summary of what you did (or why you couldn't) to the job file under an \"## Output\" heading.\n- Ask the user if the work looks good. If they approve, mark the job completed by running: flow plan complete %s\n- If they want changes, continue working and repeat the above when done.", job.Filename, job.PromptBody, job.FilePath, job.Filename),
 		Role:    "user",
 	}
 
