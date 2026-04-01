@@ -309,15 +309,10 @@ func ResolveJobSkillContent(job *Job, workDir string) (string, error) {
 		return "", nil
 	}
 
-	// Try notebook skill resolution first using the workDir context.
-	// findNotebookSkills in the skills package uses os.Getwd() which may not
-	// be the worktree, so we resolve the notebook skill path directly here.
-	if content, err := resolveSkillFromWorkDir(job.Skill, workDir); err == nil {
-		return content, nil
-	}
-
-	// Fall back to skills package (user skills, then embedded)
-	skillFiles, err := skills.GetSkill(job.Skill)
+	// Use workspace-aware skill resolution with the explicit workDir.
+	// This handles project, ecosystem, user, and builtin skills without
+	// depending on os.Getwd().
+	skillFiles, err := skills.GetSkillByWorkDir(job.Skill, workDir)
 	if err != nil {
 		return "", fmt.Errorf("skill %q not found: %w", job.Skill, err)
 	}
@@ -328,35 +323,6 @@ func ResolveJobSkillContent(job *Job, workDir string) (string, error) {
 	}
 
 	return stripSkillFrontmatter(skillContent), nil
-}
-
-// resolveSkillFromWorkDir resolves a skill using the workspace context at workDir.
-// This handles the case where flow is running from a worktree and needs to find
-// notebook workspace skills via the NotebookLocator.
-func resolveSkillFromWorkDir(name string, workDir string) (string, error) {
-	node, err := workspace.GetProjectByPath(workDir)
-	if err != nil {
-		return "", err
-	}
-
-	coreCfg, err := config.LoadDefault()
-	if err != nil {
-		coreCfg = &config.Config{}
-	}
-
-	locator := workspace.NewNotebookLocator(coreCfg)
-	skillsDir, err := locator.GetSkillsDir(node)
-	if err != nil || skillsDir == "" {
-		return "", fmt.Errorf("no skills directory found")
-	}
-
-	skillPath := filepath.Join(skillsDir, name, "SKILL.md")
-	content, err := os.ReadFile(skillPath)
-	if err != nil {
-		return "", fmt.Errorf("skill %q not found at %s: %w", name, skillPath, err)
-	}
-
-	return stripSkillFrontmatter(content), nil
 }
 
 // stripSkillFrontmatter removes YAML frontmatter from skill content, returning only the body.
