@@ -471,6 +471,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Submitted %d job(s) to daemon", len(msg.Jobs)))
+		m.Selected = make(map[string]bool) // Clear selection after submission
 
 		// Start streaming logs for the first agent job (or first job)
 		var cmds []tea.Cmd
@@ -708,6 +709,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.isAutorunning = false
 						m.originalSelection = nil
 						m.IsRunningJob = false
+						m.Selected = make(map[string]bool) // Clear selection when autorun is complete
 						m.StatusSummary = theme.DefaultTheme.Success.Render("All jobs completed successfully.")
 					}
 				}
@@ -1693,7 +1695,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Check if this is an autorun trigger (user selected multiple jobs)
 			// Store the original selection so we only run jobs that were selected
-			if len(candidateJobs) > 1 {
+			if len(candidateJobs) > 1 && !usingDaemon {
 				m.isAutorunning = true
 				m.originalSelection = make(map[string]bool)
 				for _, job := range candidateJobs {
