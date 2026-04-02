@@ -309,15 +309,13 @@ func ResolveJobSkillContent(job *Job, workDir string) (string, error) {
 		return "", nil
 	}
 
-	// Use workspace-aware skill resolution with the explicit workDir.
-	// This handles project, ecosystem, user, and builtin skills without
-	// depending on os.Getwd().
-	skillFiles, err := skills.GetSkillByWorkDir(job.Skill, workDir)
+	// Use workspace-aware, access-controlled skill resolution.
+	loadedSkill, err := skills.LoadAuthorizedSkill(workDir, job.Skill)
 	if err != nil {
-		return "", fmt.Errorf("skill %q not found: %w", job.Skill, err)
+		return "", fmt.Errorf("skill resolution failed for %q: %w", job.Skill, err)
 	}
 
-	skillContent, ok := skillFiles["SKILL.md"]
+	skillContent, ok := loadedSkill.Files["SKILL.md"]
 	if !ok || len(skillContent) == 0 {
 		return "", fmt.Errorf("skill %q has no SKILL.md content", job.Skill)
 	}
