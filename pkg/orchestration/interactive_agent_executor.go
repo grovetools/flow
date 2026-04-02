@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/grovetools/agentlogs/pkg/agentstream"
+	flowexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
@@ -480,19 +481,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
 
 		if !sessionExists {
-			// Create new session with a blank "workspace" window
-			opts := tmux.LaunchOptions{
-				SessionName:      sessionName,
-				WorkingDirectory: workDir,
-				WindowName:       "workspace",
-				Panes: []tmux.PaneOptions{
-					{
-						Command: "", // Empty command = default shell
-					},
-				},
-			}
 			p.log.WithField("session", sessionName).Info("Creating new tmux session for interactive job")
-			if err := tmuxClient.Launch(ctx, opts); err != nil {
+			executor := &flowexec.RealCommandExecutor{}
+			if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-n", "workspace", "-c", workDir); err != nil {
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()
 				return fmt.Errorf("failed to create tmux session: %w", err)
@@ -633,11 +624,9 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			Field("session", sessionName).
 			Pretty(fmt.Sprintf("Tmux session '%s' not found, creating it...", sessionName)).
 			Log(ctx)
-		opts := tmux.LaunchOptions{
-			SessionName:      sessionName,
-			WorkingDirectory: gitRoot,
-		}
-		if err := tmuxClient.Launch(ctx, opts); err != nil {
+
+		executor := &flowexec.RealCommandExecutor{}
+		if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-n", "workspace", "-c", gitRoot); err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			return fmt.Errorf("failed to create tmux session: %w", err)

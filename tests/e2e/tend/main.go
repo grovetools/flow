@@ -105,6 +105,12 @@ func main() {
 		scenarios.EnvNamedProfileScenario,
 		scenarios.EnvInvalidProfileScenario,
 		scenarios.EnvStickyDefaultScenario,
+
+		// Non-TTY interactive agent tests (verifies detached tmux session creation)
+		scenarios.ClaudeInteractiveNonTTYScenario,
+		scenarios.CodexInteractiveNonTTYScenario,
+		scenarios.OpencodeInteractiveNonTTYScenario,
+		scenarios.MultiJobNonTTYRegressionScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

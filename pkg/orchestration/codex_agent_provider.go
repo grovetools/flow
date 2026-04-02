@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	flowexec "github.com/grovetools/flow/pkg/exec"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
@@ -62,19 +63,9 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
 
 	if !sessionExists {
-		// Create new session with a blank "workspace" window
-		opts := tmux.LaunchOptions{
-			SessionName:      sessionName,
-			WorkingDirectory: workDir,
-			WindowName:       "workspace",
-			Panes: []tmux.PaneOptions{
-				{
-					Command: "", // Empty command = default shell
-				},
-			},
-		}
 		p.log.WithField("session", sessionName).Info("Creating new tmux session for interactive job")
-		if err := tmuxClient.Launch(ctx, opts); err != nil {
+		executor := &flowexec.RealCommandExecutor{}
+		if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-n", "workspace", "-c", workDir); err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			return fmt.Errorf("failed to create tmux session: %w", err)
@@ -116,7 +107,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		Target:     sessionName,
 		WindowName: agentWindowName,
 		WorkingDir: workDir,
-		Detached:   isTUIMode,
+		Detached:   true,
 	}); err != nil {
 		p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
 	}
