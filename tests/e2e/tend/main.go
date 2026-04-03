@@ -85,6 +85,9 @@ func main() {
 		scenarios.RulesArchivingWorkflowScenario,
 		scenarios.XMLJobRulesInheritanceScenario,
 
+		// Memory search integration into XML briefings
+		scenarios.MemoryIntegrationScenario,
+
 		// File job type tests
 		scenarios.FileJobTypeScenario,
 		scenarios.FileJobTypeTUIScenario,

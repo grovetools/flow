@@ -122,6 +122,7 @@ type Job struct {
 	Include     []string `yaml:"include,omitempty" json:"include,omitempty" jsonschema:"description=Files or globs to include as context in the job prompt"`
 	SourceBlock string   `yaml:"source_block,omitempty" json:"source_block,omitempty" jsonschema:"description=Reference to a named block in another job to use as input"`
 	SourceFile  string   `yaml:"source_file,omitempty" json:"source_file,omitempty" jsonschema:"description=Path to source file for context"`
+	Memory      *bool    `yaml:"memory,omitempty" json:"memory,omitempty" jsonschema:"description=Whether to inject related memories into the prompt (default: true)"`
 
 	// Worktree configuration
 	Repository string `yaml:"repository,omitempty" json:"repository,omitempty" jsonschema:"description=Git repository URL for worktree creation"`
@@ -179,6 +180,12 @@ type JobOptions struct {
 	Prompt              string
 	Inline              InlineConfig // New field: controls which file types are inlined
 	PrependDependencies bool         // Deprecated: use Inline instead
+}
+
+// IsMemoryEnabled determines whether this job should have related memories injected
+// into its prompt. Memory injection is enabled by default unless explicitly opted-out.
+func (j *Job) IsMemoryEnabled() bool {
+	return j.Memory == nil || *j.Memory
 }
 
 // ShouldInline checks if a specific category should be inlined in the prompt.

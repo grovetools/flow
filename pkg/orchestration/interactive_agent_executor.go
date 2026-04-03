@@ -121,9 +121,12 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			return fmt.Errorf("failed to gather context files: %w", err)
 		}
 
+		// Query memory database for related memories
+		memories := FetchRelatedMemories(ctx, job)
+
 		// Build the XML prompt and get the list of files to upload.
 		// NOTE: interactive agents currently don't support separate file uploads, so filesToUpload is ignored.
-		promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
+		promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles, memories)
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()

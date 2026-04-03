@@ -124,8 +124,11 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return execErr
 	}
 
+	// Query memory database for related memories
+	memories := FetchRelatedMemories(ctx, job)
+
 	// Build the XML prompt
-	promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
+	promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles, memories)
 	if err != nil {
 		ulog.Error("Failed to build prompt for job").
 			Field("job_id", job.ID).

@@ -83,8 +83,11 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return fmt.Errorf("failed to gather context files: %w", err)
 	}
 
+	// Query memory database for related memories
+	memories := FetchRelatedMemories(ctx, job)
+
 	// Build the XML prompt and get the list of files to upload.
-	promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
+	promptXML, _, err := BuildXMLPrompt(job, plan, workDir, contextFiles, memories)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()

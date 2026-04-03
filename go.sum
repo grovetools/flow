@@ -92,6 +92,8 @@ github.com/grovetools/grove-anthropic v0.6.1 h1:2zdkXY1lkYjzJQVZhYJ7I3uvbQGjNvtS
 github.com/grovetools/grove-anthropic v0.6.1/go.mod h1:WrUWjUF2vBmVEGQEZe9m6JuWA0lasZxVEFelOh/p8Ss=
 github.com/grovetools/grove-gemini v0.6.1 h1:/y4GgIqmMYsRjIk+lidS3HwXD/z6LSXPWVYlAgQm5I0=
 github.com/grovetools/grove-gemini v0.6.1/go.mod h1:jLe/byHbL1Cni3j2pRGyq9gwj6cVsFtNW8BtOP32PpQ=
+github.com/grovetools/memory v0.6.3 h1:Lwxnm4Vfy7/YUmAcCwtOfnchfr1BVMT7M6WSz9ALj4Q=
+github.com/grovetools/memory v0.6.3/go.mod h1:VT+TTKucW4CyWVK2hw/dxeKPbpun6Bs7iRVWY9DwqIw=
 github.com/grovetools/skills v0.6.0 h1:cv4pdHmSOv3parhhIhBd5Gt/TM0b55xAaaultZXasng=
 github.com/grovetools/skills v0.6.0/go.mod h1:OVEvY6X8ULojfWxW8qKUbg26cL2rgBir3pzHjqxWgr4=
 github.com/grovetools/tend v0.6.0 h1:LGz8CK3pPQC5RLw7BIaQcqHU66UqAYte39Ojlxo2GCk=
@@ -128,6 +130,8 @@ github.com/mattn/go-localereader v0.0.1/go.mod h1:8fBrzywKY7BI3czFoHkuzRoWE9C+Ei
 github.com/mattn/go-runewidth v0.0.2/go.mod h1:LwmH8dsx7+W8Uxz3IHJYH5QSwggIsqBzpuz5H//U1FU=
 github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
+github.com/mattn/go-sqlite3 v1.14.40 h1:f7+saIsbq4EF86mUqe0uiecQOJYMOdfi5uATADmUG94=
+github.com/mattn/go-sqlite3 v1.14.40/go.mod h1:pjEuOr8IwzLJP2MfGeTb0A35jauH+C2kbHKBr7yXKVQ=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 h1:ZK8zHtRHOkbHy6Mmr5D264iyp3TiX5OmNcI5cIARiQI=

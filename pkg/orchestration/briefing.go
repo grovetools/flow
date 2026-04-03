@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/grovetools/memory/pkg/memory"
 )
 
 // countLines efficiently counts the number of lines in a file.
@@ -62,7 +64,7 @@ func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (str
 // BuildXMLPrompt assembles a structured XML prompt for oneshot and interactive_agent jobs.
 // It returns the final XML string and a list of file paths that should be uploaded separately.
 // contextFiles should include paths to .grove/context, CLAUDE.md, and other project context files.
-func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string) (promptXML string, filesToUpload []string, err error) {
+func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string, memories []memory.SearchResult) (promptXML string, filesToUpload []string, err error) {
 	var b strings.Builder
 	filesToUpload = []string{}
 
@@ -190,7 +192,16 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string)
 		b.WriteString("\n        </inlined_source_block>\n")
 	}
 
-	// 6. Handle context files (.grove/context, CLAUDE.md, etc.)
+	// 6. Inject related memories from hybrid semantic search.
+	if len(memories) > 0 {
+		b.WriteString("\n        <related_memories>\n")
+		for _, mem := range memories {
+			b.WriteString(fmt.Sprintf("            <memory path=\"%s\">\n%s\n            </memory>\n", mem.Path, mem.Content))
+		}
+		b.WriteString("        </related_memories>\n")
+	}
+
+	// 7. Handle context files (.grove/context, CLAUDE.md, etc.)
 	// For interactive_agent and headless_agent jobs, use local_context_file tags since files are read locally.
 	// For oneshot jobs, files are uploaded as separate attachments.
 	for _, contextFile := range contextFiles {

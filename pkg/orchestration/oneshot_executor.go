@@ -199,8 +199,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		log.WithError(err).Warn("Could not determine context files")
 	}
 
+	// Query memory database for related memories
+	memories := FetchRelatedMemories(ctx, job)
+
 	// Build the XML prompt and get the list of files to upload
-	prompt, promptSourceFiles, err := BuildXMLPrompt(job, plan, workDir, contextFiles)
+	prompt, promptSourceFiles, err := BuildXMLPrompt(job, plan, workDir, contextFiles, memories)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
