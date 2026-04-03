@@ -345,7 +345,7 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 	}
 
 	if planName != "" {
-		resolvedPath, err := resolvePlanPath(planName)
+		resolvedPath, err := resolvePlanPath(planName, ".")
 		if err != nil {
 			// If resolution fails, try using planName directly as a path
 			planDir = planName
