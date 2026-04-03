@@ -22,4 +22,5 @@ type Runtime interface {
 // to keep the in-memory state and dependency graph synchronized.
 type StatusUpdater interface {
 	UpdateJobStatus(job *Job, status JobStatus) error
+	UpdateJobMetadata(job *Job, meta JobMetadata) error
 }

@@ -143,6 +143,19 @@ func LoadJob(filepath string) (*Job, error) {
 		return nil, fmt.Errorf("unmarshaling to job struct: %w", err)
 	}
 
+	// Read flat metadata fields that UpdateJobMetadata persists at the top level of frontmatter.
+	// These are stored flat (not nested under "metadata:") for simplicity.
+	if lastErr, ok := frontmatter["last_error"]; ok {
+		if s, ok := lastErr.(string); ok {
+			job.Metadata.LastError = s
+		}
+	}
+	if rc, ok := frontmatter["retry_count"]; ok {
+		if n, ok := rc.(int); ok {
+			job.Metadata.RetryCount = n
+		}
+	}
+
 	// Validate job type first - only job types are processed
 	if job.Type != JobTypeOneshot && job.Type != JobTypeAgent && job.Type != JobTypeHeadlessAgent && job.Type != JobTypeShell && job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeIsolatedAgent && job.Type != JobTypeGenerateRecipe && job.Type != JobTypeFile && job.Type != JobTypeClaw {
 		return nil, ErrNotAJob{Reason: fmt.Sprintf("not a job type: %s", job.Type)}

@@ -3,6 +3,7 @@ package scenarios
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -130,11 +131,11 @@ var JobFailureAndRecoveryScenario = harness.NewScenario(
 				return err
 			}
 
-			// Replace "exit 1" with "exit 0"
-			fixedContent := strings.Replace(content, "exit 1", "exit 0", 1)
-
-			// Also reset the status from 'failed' back to 'pending' to allow re-running.
-			fixedContent = strings.Replace(fixedContent, "status: failed", "status: pending", 1)
+			// After UpdateJobMetadata rewrites frontmatter, the prompt may have
+			// been moved to the body (YAML round-trip can strip quotes from values
+			// containing special chars). Replace "exit 1" in both frontmatter and body.
+			fixedContent := strings.Replace(content, "status: failed", "status: pending", 1)
+			fixedContent = strings.ReplaceAll(fixedContent, "&& exit 1", "&& exit 0")
 
 			return fs.WriteString(jobBPath, fixedContent)
 		}),
@@ -248,9 +249,10 @@ var FailedJobRerunnableScenario = harness.NewScenario(
 				return err
 			}
 
-			// Replace the failing command with a successful one
-			// Importantly, do NOT reset the status - leave it as 'failed'
-			fixedContent := strings.Replace(content, "exit 1", "exit 0", 1)
+			// Replace "exit 1" with "exit 0" everywhere (prompt may be in body
+			// after YAML round-trip from UpdateJobMetadata).
+			// Importantly, do NOT reset the status - leave it as 'failed'.
+			fixedContent := strings.ReplaceAll(content, "&& exit 1", "&& exit 0")
 
 			return fs.WriteString(jobPath, fixedContent)
 		}),
@@ -327,7 +329,8 @@ var FailedJobRerunnableScenario = harness.NewScenario(
 			if err != nil {
 				return err
 			}
-			fixedContent := strings.Replace(content, "exit 1", "exit 0", 1)
+			// Replace "exit 1" everywhere (prompt may be in body after YAML round-trip)
+			fixedContent := strings.ReplaceAll(content, "&& exit 1", "&& exit 0")
 			if err := fs.WriteString(jobPath, fixedContent); err != nil {
 				return err
 			}
@@ -626,6 +629,169 @@ var ExplicitTargetStatusHandlingScenario = harness.NewScenario(
 			}
 
 			return nil
+		}),
+	},
+)
+
+
+// StatusErrorDetailsScenario tests that failed jobs include last_error and log_path in JSON status output.
+var StatusErrorDetailsScenario = harness.NewScenario(
+	"status-error-details",
+	"Tests that plan status --json includes last_error and log_path for failed jobs.",
+	[]string{"core", "orchestration", "failure", "status", "json"},
+	[]harness.Step{
+		// Step 1: Setup a plan with a successful and a failing job.
+		harness.NewStep("Setup plan with success and failure jobs", func(ctx *harness.Context) error {
+			projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "error-details-project")
+			if err != nil {
+				return err
+			}
+
+			initCmd := ctx.Bin("plan", "init", "error-details-plan")
+			initCmd.Dir(projectDir)
+			if result := initCmd.Run(); result.Error != nil {
+				return fmt.Errorf("plan init failed: %w", result.Error)
+			}
+
+			planPath := filepath.Join(notebooksRoot, "workspaces", "error-details-project", "plans", "error-details-plan")
+			ctx.Set("plan_path", planPath)
+
+			// Job A: Succeeds
+			jobA := ctx.Bin("plan", "add", "error-details-plan", "--type", "shell", "--title", "success-job", "-p", "echo 'all good'")
+			jobA.Dir(projectDir)
+			if result := jobA.Run(); result.Error != nil {
+				return fmt.Errorf("failed to add success job: %w", result.Error)
+			}
+
+			// Job B: Fails
+			jobB := ctx.Bin("plan", "add", "error-details-plan", "--type", "shell", "--title", "failing-job", "-p", "echo 'about to fail' && exit 1")
+			jobB.Dir(projectDir)
+			if result := jobB.Run(); result.Error != nil {
+				return fmt.Errorf("failed to add failing job: %w", result.Error)
+			}
+
+			return nil
+		}),
+
+		// Step 2: Run the plan (expecting failure).
+		harness.NewStep("Run plan and expect failure", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+
+			cmd := ctx.Bin("plan", "run", "--all", "--yes")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+			if err := result.AssertFailure(); err != nil {
+				return fmt.Errorf("expected plan run to fail: %w", err)
+			}
+
+			return nil
+		}),
+
+		// Step 3: Verify JSON status output contains error details for failing job and not for success.
+		harness.NewStep("Verify JSON status has error details", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			statusCmd := ctx.Bin("plan", "status", planPath, "--json")
+			statusCmd.Dir(projectDir)
+			result := statusCmd.Run()
+			ctx.ShowCommandOutput(statusCmd.String(), result.Stdout, result.Stderr)
+
+			if result.Error != nil {
+				return fmt.Errorf("status command failed: %w", result.Error)
+			}
+
+			var status struct {
+				Jobs []struct {
+					Title     string `json:"title"`
+					Status    string `json:"status"`
+					LastError string `json:"last_error"`
+					LogPath   string `json:"log_path"`
+				} `json:"jobs"`
+			}
+			if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
+				return fmt.Errorf("failed to parse JSON: %w", err)
+			}
+
+			if err := assert.Equal(2, len(status.Jobs)); err != nil {
+				return fmt.Errorf("expected 2 jobs: %w", err)
+			}
+
+			// Build a map for easier lookup
+			jobsByTitle := make(map[string]struct {
+				Status    string
+				LastError string
+				LogPath   string
+			})
+			for _, j := range status.Jobs {
+				jobsByTitle[j.Title] = struct {
+					Status    string
+					LastError string
+					LogPath   string
+				}{j.Status, j.LastError, j.LogPath}
+			}
+
+			successJob := jobsByTitle["success-job"]
+			failingJob := jobsByTitle["failing-job"]
+
+			return ctx.Verify(func(v *verify.Collector) {
+				// Successful job should not have error fields
+				v.Equal("success job has completed status", string(orchestration.JobStatusCompleted), successJob.Status)
+				v.Equal("success job has no last_error", "", successJob.LastError)
+				v.Equal("success job has no log_path", "", successJob.LogPath)
+
+				// Failing job should have error details
+				v.Equal("failing job has failed status", string(orchestration.JobStatusFailed), failingJob.Status)
+				v.Contains("failing job last_error mentions exit status", failingJob.LastError, "exit status 1")
+				v.NotEqual("failing job has log_path", "", failingJob.LogPath)
+			})
+		}),
+
+		// Step 4: Verify the log file referenced by log_path actually exists.
+		harness.NewStep("Verify log file exists on disk", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			statusCmd := ctx.Bin("plan", "status", planPath, "--json")
+			statusCmd.Dir(projectDir)
+			result := statusCmd.Run()
+
+			if result.Error != nil {
+				return fmt.Errorf("status command failed: %w", result.Error)
+			}
+
+			var status struct {
+				Jobs []struct {
+					Title   string `json:"title"`
+					Status  string `json:"status"`
+					LogPath string `json:"log_path"`
+				} `json:"jobs"`
+			}
+			if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
+				return fmt.Errorf("failed to parse JSON: %w", err)
+			}
+
+			for _, job := range status.Jobs {
+				if job.Status != "failed" || job.LogPath == "" {
+					continue
+				}
+
+				// log_path is relative to cwd (where the status command ran), resolve it
+				logAbsPath := job.LogPath
+				if !filepath.IsAbs(logAbsPath) {
+					logAbsPath = filepath.Join(projectDir, logAbsPath)
+				}
+
+				if _, err := os.Stat(logAbsPath); err != nil {
+					return fmt.Errorf("log file %s does not exist: %w", logAbsPath, err)
+				}
+
+				return nil // Found and verified at least one log file
+			}
+
+			return fmt.Errorf("no failed job with log_path found in status output")
 		}),
 	},
 )

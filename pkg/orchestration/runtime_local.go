@@ -172,6 +172,12 @@ func (r *LocalRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) err
 		if execErr != nil {
 			finalStatus = JobStatusFailed
 			r.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
+
+			// Record the error in metadata
+			job.Metadata.LastError = execErr.Error()
+			if err := r.updater.UpdateJobMetadata(job, job.Metadata); err != nil {
+				r.logger.Error("Failed to update job metadata", "error", err)
+			}
 		}
 
 		if err := r.updater.UpdateJobStatus(job, finalStatus); err != nil {
@@ -180,6 +186,13 @@ func (r *LocalRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) err
 	} else if execErr != nil {
 		// For chat jobs, only update status on error
 		r.logger.Error("Job execution failed", "request_id", requestID, "id", job.ID, "error", execErr)
+
+		// Record the error in metadata
+		job.Metadata.LastError = execErr.Error()
+		if err := r.updater.UpdateJobMetadata(job, job.Metadata); err != nil {
+			r.logger.Error("Failed to update job metadata", "error", err)
+		}
+
 		if err := r.updater.UpdateJobStatus(job, JobStatusFailed); err != nil {
 			return fmt.Errorf("update final status: %w", err)
 		}

@@ -22,6 +22,7 @@ func main() {
 		scenarios.JobFailureAndRecoveryScenario,
 		scenarios.FailedJobRerunnableScenario,
 		scenarios.ExplicitTargetStatusHandlingScenario,
+		scenarios.StatusErrorDetailsScenario,
 		scenarios.JobLogCaptureScenario,
 		scenarios.TitleBasedRunScenario,
 		scenarios.PlanLifecycleScenario,

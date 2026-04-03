@@ -48,6 +48,8 @@ func (r *DaemonRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) er
 	})
 	if err != nil {
 		if r.updater != nil {
+			job.Metadata.LastError = fmt.Sprintf("submit job to daemon: %s", err)
+			_ = r.updater.UpdateJobMetadata(job, job.Metadata)
 			r.updater.UpdateJobStatus(job, JobStatusFailed)
 		}
 		return fmt.Errorf("submit job to daemon: %w", err)
@@ -95,6 +97,12 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 		return nil
 	case "failed":
 		if r.updater != nil {
+			if errMsg != "" {
+				job.Metadata.LastError = errMsg
+			} else {
+				job.Metadata.LastError = "job failed"
+			}
+			_ = r.updater.UpdateJobMetadata(job, job.Metadata)
 			r.updater.UpdateJobStatus(job, JobStatusFailed)
 		}
 		if errMsg != "" {
@@ -103,6 +111,8 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 		return fmt.Errorf("job failed")
 	case "cancelled":
 		if r.updater != nil {
+			job.Metadata.LastError = "job cancelled"
+			_ = r.updater.UpdateJobMetadata(job, job.Metadata)
 			r.updater.UpdateJobStatus(job, JobStatusFailed)
 		}
 		return fmt.Errorf("job cancelled")

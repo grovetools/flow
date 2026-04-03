@@ -465,17 +465,55 @@ func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
 	return status, nil
 }
 
+// JobOutput wraps orchestration.Job for JSON serialization, adding failure details.
+type JobOutput struct {
+	*orchestration.Job
+	LastError string `json:"last_error,omitempty"`
+	LogPath   string `json:"log_path,omitempty"`
+}
+
 // formatStatusJSON creates JSON output.
 func formatStatusJSON(plan *orchestration.Plan) (string, error) {
+	// Create wrapper jobs with error details for failed/interrupted jobs
+	jobOutputs := make([]JobOutput, 0, len(plan.Jobs))
+	for _, job := range plan.Jobs {
+		jo := JobOutput{Job: job}
+
+		if job.Status == orchestration.JobStatusFailed || job.Status == "interrupted" {
+			// Set error message
+			if job.Metadata.LastError != "" {
+				jo.LastError = job.Metadata.LastError
+			} else if job.Status == "interrupted" {
+				jo.LastError = "Job was interrupted (process died or session ended unexpectedly)"
+			} else {
+				jo.LastError = "Job execution failed without recording a specific error"
+			}
+
+			// Set log path (relative to cwd when possible)
+			if logPath, err := orchestration.GetJobLogPath(plan, job); err == nil {
+				if cwd, err := os.Getwd(); err == nil {
+					if relPath, err := filepath.Rel(cwd, logPath); err == nil {
+						jo.LogPath = relPath
+					} else {
+						jo.LogPath = logPath
+					}
+				} else {
+					jo.LogPath = logPath
+				}
+			}
+		}
+		jobOutputs = append(jobOutputs, jo)
+	}
+
 	// Create a structure for JSON output with git/worktree info
 	output := struct {
-		Plan         string               `json:"plan"`
-		Jobs         []*orchestration.Job `json:"jobs"`
-		Stats        map[string]int       `json:"statistics"`
-		Worktree     *WorktreeStatus      `json:"worktree,omitempty"`
+		Plan     string           `json:"plan"`
+		Jobs     []JobOutput      `json:"jobs"`
+		Stats    map[string]int   `json:"statistics"`
+		Worktree *WorktreeStatus  `json:"worktree,omitempty"`
 	}{
 		Plan:  plan.Name,
-		Jobs:  plan.Jobs,
+		Jobs:  jobOutputs,
 		Stats: make(map[string]int),
 	}
 

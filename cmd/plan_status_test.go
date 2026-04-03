@@ -246,6 +246,75 @@ func TestFormatStatusJSON(t *testing.T) {
 	assert.Equal(t, float64(1), stats["pending"])
 }
 
+func TestFormatStatusJSON_ErrorDetails(t *testing.T) {
+	// Create a temporary directory for the plan so GetJobLogPath can create artifact dirs
+	tmpDir, err := os.MkdirTemp("", "grove-error-details-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	plan := &orchestration.Plan{
+		Name:      "error-details-plan",
+		Directory: tmpDir,
+		Jobs: []*orchestration.Job{
+			{
+				ID:       "job1",
+				Filename: "01_success.md",
+				Title:    "Successful Job",
+				Status:   orchestration.JobStatusCompleted,
+			},
+			{
+				ID:       "job2",
+				Filename: "02_failed_with_error.md",
+				Title:    "Failed With Error",
+				Status:   orchestration.JobStatusFailed,
+				Metadata: orchestration.JobMetadata{LastError: "exit code 1"},
+			},
+			{
+				ID:       "job3",
+				Filename: "03_failed_no_error.md",
+				Title:    "Failed No Error",
+				Status:   orchestration.JobStatusFailed,
+			},
+			{
+				ID:       "job4",
+				Filename: "04_interrupted.md",
+				Title:    "Interrupted Job",
+				Status:   "interrupted",
+			},
+		},
+	}
+
+	output, err := formatStatusJSON(plan)
+	require.NoError(t, err)
+
+	// Parse into raw map to inspect keys
+	var result map[string]interface{}
+	err = json.Unmarshal([]byte(output), &result)
+	require.NoError(t, err)
+
+	jobs, ok := result["jobs"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, jobs, 4)
+
+	// Job 1 (Completed): should NOT have last_error or log_path
+	job1 := jobs[0].(map[string]interface{})
+	assert.Nil(t, job1["last_error"], "completed job should not have last_error")
+	assert.Nil(t, job1["log_path"], "completed job should not have log_path")
+
+	// Job 2 (Failed + recorded error): should have the specific error
+	job2 := jobs[1].(map[string]interface{})
+	assert.Equal(t, "exit code 1", job2["last_error"])
+	assert.NotNil(t, job2["log_path"], "failed job should have log_path")
+
+	// Job 3 (Failed + no recorded error): should have default message
+	job3 := jobs[2].(map[string]interface{})
+	assert.Equal(t, "Job execution failed without recording a specific error", job3["last_error"])
+
+	// Job 4 (Interrupted): should have interrupted default message
+	job4 := jobs[3].(map[string]interface{})
+	assert.Equal(t, "Job was interrupted (process died or session ended unexpectedly)", job4["last_error"])
+}
+
 func TestJSONOutputSuppressesHumanReadableText(t *testing.T) {
 	// Create a temporary directory
 	tmpDir, err := os.MkdirTemp("", "grove-json-test")

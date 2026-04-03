@@ -362,6 +362,49 @@ Job content`)
 	}
 }
 
+func TestStatePersister_UpdateJobMetadata(t *testing.T) {
+	dir := t.TempDir()
+
+	job := &Job{
+		ID:       "meta-job",
+		Title:    "Metadata Test Job",
+		Status:   JobStatusFailed,
+		FilePath: filepath.Join(dir, "meta-job.md"),
+	}
+
+	// Write initial job file
+	content := createJobFile(job)
+	if err := os.WriteFile(job.FilePath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sp := NewStatePersister()
+
+	// Update metadata with a last_error
+	err := sp.UpdateJobMetadata(job, JobMetadata{LastError: "dependency failed"})
+	if err != nil {
+		t.Fatalf("UpdateJobMetadata() error = %v", err)
+	}
+
+	// Read updated file content
+	updatedContent, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	contentStr := string(updatedContent)
+
+	// Verify last_error is persisted in the frontmatter
+	if !strings.Contains(contentStr, "last_error: dependency failed") {
+		t.Errorf("Expected 'last_error: dependency failed' in frontmatter, got:\n%s", contentStr)
+	}
+
+	// Verify in-memory state was also updated
+	if job.Metadata.LastError != "dependency failed" {
+		t.Errorf("Expected in-memory LastError to be 'dependency failed', got '%s'", job.Metadata.LastError)
+	}
+}
+
 // Helper function to create job file content
 func createJobFile(job *Job) []byte {
 	return []byte(fmt.Sprintf(`---
