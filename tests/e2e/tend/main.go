@@ -58,6 +58,7 @@ func main() {
 		scenarios.RecipePlanActionCommandScenario,
 		scenarios.HoistedCommandsScenario,
 		scenarios.HoistedCommandsWithActiveJobScenario,
+		scenarios.CompleteOneCmdScenario,
 		scenarios.RollingPlanWorkflowScenario,
 		scenarios.SessionArchivingScenario,
 		scenarios.RecipeConceptUpdateScenario,
