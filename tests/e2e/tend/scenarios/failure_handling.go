@@ -10,6 +10,7 @@ import (
 	"github.com/grovetools/tend/pkg/assert"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/harness"
+	"github.com/grovetools/tend/pkg/verify"
 )
 
 // JobFailureAndRecoveryScenario tests how the orchestrator handles job failures and recovery.
@@ -282,6 +283,11 @@ var FailedJobRerunnableScenario = harness.NewScenario(
 				return fmt.Errorf("expected job to succeed after fix, but it failed: %w", err)
 			}
 
+			// Verify the auto-reset message was shown
+			if err := assert.Contains(result.Stdout, "Auto-resetting job"); err != nil {
+				return fmt.Errorf("expected auto-reset message in output: %w", err)
+			}
+
 			// Verify job status is now completed
 			job, err := orchestration.LoadJob(filepath.Join(planPath, "01-failing-task.md"))
 			if err != nil {
@@ -342,6 +348,281 @@ var FailedJobRerunnableScenario = harness.NewScenario(
 			}
 			if job.Status != orchestration.JobStatusCompleted {
 				return fmt.Errorf("expected job status to be 'completed', but got '%s'", job.Status)
+			}
+
+			return nil
+		}),
+	},
+)
+
+// ExplicitTargetStatusHandlingScenario tests edge cases when explicitly targeting
+// jobs with various statuses: completed (skip), abandoned (auto-reset), mixed targets,
+// and verifying --all does NOT auto-reset.
+var ExplicitTargetStatusHandlingScenario = harness.NewScenario(
+	"explicit-target-status-handling",
+	"Tests completed-skip, abandoned-reset, mixed targets, and --all behavior.",
+	[]string{"core", "orchestration", "failure", "rerun"},
+	[]harness.Step{
+		// Step 1: Set up a plan with jobs in diverse statuses.
+		harness.NewStep("Setup plan with diverse job statuses", func(ctx *harness.Context) error {
+			projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "status-project")
+			if err != nil {
+				return err
+			}
+
+			// Initialize the plan
+			initCmd := ctx.Bin("plan", "init", "status-plan")
+			initCmd.Dir(projectDir)
+			if result := initCmd.Run(); result.Error != nil {
+				return fmt.Errorf("plan init failed: %w", result.Error)
+			}
+
+			planPath := filepath.Join(notebooksRoot, "workspaces", "status-project", "plans", "status-plan")
+			ctx.Set("plan_path", planPath)
+
+			// Job A: will succeed → completed
+			jobA := ctx.Bin("plan", "add", "status-plan", "--type", "shell", "--title", "job-a", "-p", "echo 'job a done'")
+			jobA.Dir(projectDir)
+			if result := jobA.Run(); result.Error != nil {
+				return fmt.Errorf("failed to add job A: %w", result.Error)
+			}
+
+			// Job B: will fail → failed
+			jobB := ctx.Bin("plan", "add", "status-plan", "--type", "shell", "--title", "job-b", "-p", "echo 'failing' && exit 1")
+			jobB.Dir(projectDir)
+			if result := jobB.Run(); result.Error != nil {
+				return fmt.Errorf("failed to add job B: %w", result.Error)
+			}
+
+			// Job C: will be manually set to abandoned
+			jobC := ctx.Bin("plan", "add", "status-plan", "--type", "shell", "--title", "job-c", "-p", "echo 'job c done'")
+			jobC.Dir(projectDir)
+			if result := jobC.Run(); result.Error != nil {
+				return fmt.Errorf("failed to add job C: %w", result.Error)
+			}
+
+			// Job D: stays pending
+			jobD := ctx.Bin("plan", "add", "status-plan", "--type", "shell", "--title", "job-d", "-p", "echo 'job d done'")
+			jobD.Dir(projectDir)
+			if result := jobD.Run(); result.Error != nil {
+				return fmt.Errorf("failed to add job D: %w", result.Error)
+			}
+
+			// Run --all to get A completed and B failed (C and D will also run)
+			runCmd := ctx.Bin("plan", "run", "--all", "--yes")
+			runCmd.Dir(projectDir)
+			result := runCmd.Run()
+			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
+
+			// Verify Job A completed, Job B failed
+			jobAObj, err := orchestration.LoadJob(filepath.Join(planPath, "01-job-a.md"))
+			if err != nil {
+				return fmt.Errorf("loading job A: %w", err)
+			}
+			if jobAObj.Status != orchestration.JobStatusCompleted {
+				return fmt.Errorf("expected job A completed, got %s", jobAObj.Status)
+			}
+
+			jobBObj, err := orchestration.LoadJob(filepath.Join(planPath, "02-job-b.md"))
+			if err != nil {
+				return fmt.Errorf("loading job B: %w", err)
+			}
+			if jobBObj.Status != orchestration.JobStatusFailed {
+				return fmt.Errorf("expected job B failed, got %s", jobBObj.Status)
+			}
+
+			// Manually set Job C to abandoned status
+			jobCPath := filepath.Join(planPath, "03-job-c.md")
+			content, err := fs.ReadString(jobCPath)
+			if err != nil {
+				return fmt.Errorf("reading job C: %w", err)
+			}
+			content = strings.Replace(content, "status: completed", "status: abandoned", 1)
+			content = strings.Replace(content, "status: pending", "status: abandoned", 1)
+			if err := fs.WriteString(jobCPath, content); err != nil {
+				return fmt.Errorf("writing job C: %w", err)
+			}
+
+			return nil
+		}),
+
+		// Step 2: Target a completed job → should skip with warning.
+		harness.NewStep("Target completed job is skipped", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			cmd := ctx.Bin("plan", "run", filepath.Join(planPath, "01-job-a.md"), "--yes")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+			// Should succeed (skipping is not an error)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("expected success when targeting completed job: %w", err)
+			}
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Contains("skip warning shown", result.Stdout, "Skipping job")
+				v.Contains("already completed reason", result.Stdout, "already completed")
+				v.Contains("no valid jobs message", result.Stdout, "No valid jobs to run.")
+			})
+		}),
+
+		// Step 3: Target an abandoned job → should auto-reset and run.
+		harness.NewStep("Target abandoned job is auto-reset", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			cmd := ctx.Bin("plan", "run", filepath.Join(planPath, "03-job-c.md"), "--yes")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("expected abandoned job to run after auto-reset: %w", err)
+			}
+
+			// Verify auto-reset message
+			if err := assert.Contains(result.Stdout, "Auto-resetting job"); err != nil {
+				return fmt.Errorf("expected auto-reset message: %w", err)
+			}
+			if err := assert.Contains(result.Stdout, "from abandoned to pending"); err != nil {
+				return fmt.Errorf("expected 'from abandoned to pending' in output: %w", err)
+			}
+
+			// Verify on-disk status is now completed
+			job, err := orchestration.LoadJob(filepath.Join(planPath, "03-job-c.md"))
+			if err != nil {
+				return err
+			}
+			if job.Status != orchestration.JobStatusCompleted {
+				return fmt.Errorf("expected job C completed after run, got %s", job.Status)
+			}
+
+			return nil
+		}),
+
+		// Step 4: Target mixed jobs (completed + failed) → skip completed, auto-reset failed.
+		harness.NewStep("Mixed targets: skip completed, reset failed", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Fix job B so it will succeed when retried
+			jobBPath := filepath.Join(planPath, "02-job-b.md")
+			content, err := fs.ReadString(jobBPath)
+			if err != nil {
+				return err
+			}
+			fixedContent := strings.Replace(content, "exit 1", "exit 0", 1)
+			if err := fs.WriteString(jobBPath, fixedContent); err != nil {
+				return err
+			}
+
+			cmd := ctx.Bin("plan", "run", filepath.Join(planPath, "01-job-a.md"), filepath.Join(planPath, "02-job-b.md"), "--yes")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("expected mixed target run to succeed: %w", err)
+			}
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Contains("completed job skipped", result.Stdout, "Skipping job")
+				v.Contains("failed job auto-reset", result.Stdout, "Auto-resetting job")
+			})
+		}),
+
+		// Step 5: Verify --all does NOT auto-reset failed jobs.
+		harness.NewStep("--all flag does not auto-reset failed jobs", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Add a new job that will fail
+			jobE := ctx.Bin("plan", "add", "status-plan", "--type", "shell", "--title", "job-e-fail", "-p", "echo 'will fail' && exit 1")
+			jobE.Dir(projectDir)
+			if result := jobE.Run(); result.Error != nil {
+				return fmt.Errorf("failed to add job E: %w", result.Error)
+			}
+
+			// Run --all to execute pending jobs (job E will fail)
+			runCmd := ctx.Bin("plan", "run", "--all", "--yes")
+			runCmd.Dir(projectDir)
+			result := runCmd.Run()
+			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
+
+			// Should fail because job E fails
+			if err := result.AssertFailure(); err != nil {
+				return fmt.Errorf("expected plan run --all to fail due to job E: %w", err)
+			}
+
+			// Verify no auto-reset message (--all doesn't target specific jobs)
+			if err := assert.NotContains(result.Stdout, "Auto-resetting job"); err != nil {
+				return fmt.Errorf("--all should not auto-reset jobs: %w", err)
+			}
+
+			// Verify job E is in failed status on disk
+			jobEPath, err := findJobByPrefix(planPath, "05-job-e")
+			if err != nil {
+				return err
+			}
+			job, err := orchestration.LoadJob(jobEPath)
+			if err != nil {
+				return err
+			}
+			if job.Status != orchestration.JobStatusFailed {
+				return fmt.Errorf("expected job E to remain failed, got %s", job.Status)
+			}
+
+			return nil
+		}),
+
+		// Step 6: Verify disk persistence of auto-reset.
+		harness.NewStep("Verify auto-reset persists to disk", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+
+			// Find job E and fix it so it won't fail again
+			jobEPath, err := findJobByPrefix(planPath, "05-job-e")
+			if err != nil {
+				return err
+			}
+
+			content, err := fs.ReadString(jobEPath)
+			if err != nil {
+				return err
+			}
+			fixedContent := strings.Replace(content, "exit 1", "exit 0", 1)
+			if err := fs.WriteString(jobEPath, fixedContent); err != nil {
+				return err
+			}
+
+			// Before running, verify it's still failed on disk
+			job, err := orchestration.LoadJob(jobEPath)
+			if err != nil {
+				return err
+			}
+			if err := assert.Equal(orchestration.JobStatusFailed, job.Status); err != nil {
+				return fmt.Errorf("precondition: job E should be failed: %w", err)
+			}
+
+			// Run targeting job E → should auto-reset
+			projectDir := ctx.GetString("project_dir")
+			cmd := ctx.Bin("plan", "run", jobEPath, "--yes")
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("expected auto-reset + run to succeed: %w", err)
+			}
+
+			// Verify disk status is now completed (auto-reset persisted, then ran successfully)
+			job, err = orchestration.LoadJob(jobEPath)
+			if err != nil {
+				return err
+			}
+			if job.Status != orchestration.JobStatusCompleted {
+				return fmt.Errorf("expected job E completed after auto-reset and run, got %s", job.Status)
 			}
 
 			return nil

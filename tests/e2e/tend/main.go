@@ -21,6 +21,7 @@ func main() {
 		scenarios.ChatAndExtractWorkflowScenario,
 		scenarios.JobFailureAndRecoveryScenario,
 		scenarios.FailedJobRerunnableScenario,
+		scenarios.ExplicitTargetStatusHandlingScenario,
 		scenarios.JobLogCaptureScenario,
 		scenarios.TitleBasedRunScenario,
 		scenarios.PlanLifecycleScenario,

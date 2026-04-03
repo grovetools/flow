@@ -164,10 +164,35 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	var jobsToRun []*orchestration.Job
 	if len(targetJobs) > 0 {
 		// Specific jobs were requested
+		var validTargetJobs []string
+		persister := orchestration.NewStatePersister()
+
 		for _, jobFile := range targetJobs {
 			job, found := plan.GetJobByFilename(jobFile)
 			if found {
-				jobsToRun = append(jobsToRun, job)
+				if job.Status == orchestration.JobStatusFailed || job.Status == orchestration.JobStatusAbandoned {
+					fmt.Printf("%s Auto-resetting job '%s' from %s to %s\n",
+						color.CyanString("↺"),
+						job.Title,
+						job.Status,
+						orchestration.JobStatusPending)
+
+					// Sync the reset to disk immediately so the daemon can evaluate it properly
+					if err := job.UpdateStatus(persister, orchestration.JobStatusPending); err != nil {
+						return fmt.Errorf("auto-resetting job %s: %w", jobFile, err)
+					}
+
+					jobsToRun = append(jobsToRun, job)
+					validTargetJobs = append(validTargetJobs, jobFile)
+				} else if job.Status == orchestration.JobStatusCompleted {
+					fmt.Printf("%s Skipping job '%s' (already completed)\n",
+						color.YellowString(theme.IconWarning),
+						job.Title)
+					continue
+				} else {
+					jobsToRun = append(jobsToRun, job)
+					validTargetJobs = append(validTargetJobs, jobFile)
+				}
 			} else {
 				// Check if the file exists but wasn't loaded (e.g. missing frontmatter)
 				// If so, try to initialize it as a chat job automatically
@@ -185,9 +210,18 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 							plan.JobsByID[initializedJob.ID] = initializedJob
 						}
 						jobsToRun = append(jobsToRun, initializedJob)
+						validTargetJobs = append(validTargetJobs, jobFile)
 					}
 				}
 			}
+		}
+
+		// Update target jobs to reflect only the validated and potentially reset jobs
+		targetJobs = validTargetJobs
+
+		if len(targetJobs) == 0 {
+			fmt.Println("\nNo valid jobs to run.")
+			return nil
 		}
 	} else if !planRunAll {
 		// Running next jobs - get runnable jobs
@@ -388,12 +422,6 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 
 	if job.Status == orchestration.JobStatusRunning {
 		return fmt.Errorf("job already running: %s", jobFile)
-	}
-
-	if job.Status == orchestration.JobStatusFailed {
-		// Allow re-running failed jobs by resetting status to pending
-		job.Status = orchestration.JobStatusPending
-		// Note: The orchestrator will handle updating the job file when it runs
 	}
 
 	// Check dependencies
