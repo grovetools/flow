@@ -211,6 +211,7 @@ func (o *Orchestrator) RunAll(ctx context.Context) error {
 		limit = 20 // Default if not configured
 	}
 
+	waitingForInteractive := false
 	for {
 		// Check if we're done
 		status := o.GetStatus()
@@ -218,7 +219,7 @@ func (o *Orchestrator) RunAll(ctx context.Context) error {
 			if status.Failed > 0 {
 				return fmt.Errorf("orchestration completed with %d failed jobs", status.Failed)
 			}
-			o.logger.Info("Orchestration completed successfully", 
+			o.logger.Info("Orchestration completed successfully",
 				"total", status.Total,
 				"completed", status.Completed)
 			return nil
@@ -229,21 +230,37 @@ func (o *Orchestrator) RunAll(ctx context.Context) error {
 		if err := o.reloadJobStatusesFromDisk(); err != nil {
 			o.logger.Error("Failed to reload job statuses", "error", err)
 		}
-		
+
 		// Get runnable jobs
 		runnable := o.dependencyGraph.GetRunnableJobs()
-		
+
 		if len(runnable) == 0 {
 			if status.Running > 0 {
 				// Wait for running jobs to complete
-				o.logger.Debug("No runnable jobs, waiting for running jobs to complete",
-					"running", status.Running)
-				time.Sleep(o.config.CheckInterval)
+				if !waitingForInteractive {
+					o.logger.Info("All runnable jobs submitted. Waiting for running jobs to complete...",
+						"running", status.Running)
+					o.logger.Info("Run 'flow plan status' to monitor progress, and 'flow plan complete <job>' when done.")
+					waitingForInteractive = true
+				} else {
+					o.logger.Debug("Still waiting for running jobs",
+						"running", status.Running)
+				}
+				select {
+				case <-time.After(o.config.CheckInterval):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				continue
 			} else {
 				// No running jobs and no runnable jobs - we're blocked
 				return fmt.Errorf("no runnable jobs and no jobs running - possible circular dependency or all remaining jobs depend on failed jobs")
 			}
+		}
+
+		if waitingForInteractive {
+			o.logger.Info("Resuming orchestration — new jobs are now runnable", "count", len(runnable))
+			waitingForInteractive = false
 		}
 
 		// Limit to max parallel jobs

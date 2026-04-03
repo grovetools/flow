@@ -467,10 +467,19 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 		return err
 	}
 
-	ulog.Success("Job completed").
-		Field("job", job.Title).
-		Pretty(fmt.Sprintf("%s Job completed: %s", color.GreenString(theme.IconSuccess), job.Title)).
-		Log(ctx)
+	// Check final status — interactive jobs stay "running" after the executor returns
+	if job.Status == orchestration.JobStatusRunning {
+		ulog.Info("Job launched").
+			Field("job", job.Title).
+			Pretty(fmt.Sprintf("%s Job running: %s", color.BlueString(theme.IconInfo), job.Title)).
+			Log(ctx)
+		fmt.Println("Use 'flow plan status' to monitor progress, and 'flow plan complete' when done.")
+	} else {
+		ulog.Success("Job completed").
+			Field("job", job.Title).
+			Pretty(fmt.Sprintf("%s Job completed: %s", color.GreenString(theme.IconSuccess), job.Title)).
+			Log(ctx)
+	}
 	return nil
 }
 
@@ -494,7 +503,10 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 
 	if len(runnable) == 0 {
 		if status.Running > 0 {
-			return fmt.Errorf("no runnable jobs - %d jobs are still running", status.Running)
+			fmt.Printf("\n%s All runnable jobs submitted. %d job(s) still running (e.g. interactive agents).\n",
+				color.BlueString(theme.IconInfo), status.Running)
+			fmt.Println("Use 'flow plan status' to monitor progress.")
+			return nil
 		}
 		return fmt.Errorf("no runnable jobs - check for failed dependencies")
 	}
@@ -526,7 +538,15 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 		return fmt.Errorf("execution failed: %w", err)
 	}
 
-	fmt.Printf("%s All jobs completed\n", color.GreenString(theme.IconSuccess))
+	// Check if any jobs are still running (e.g. interactive agents)
+	postStatus := orch.GetStatus()
+	if postStatus.Running > 0 {
+		fmt.Printf("\n%s %d job(s) launched and still running (e.g. interactive agents).\n",
+			color.BlueString(theme.IconInfo), postStatus.Running)
+		fmt.Println("Use 'flow plan status' to monitor progress.")
+	} else {
+		fmt.Printf("%s All jobs completed\n", color.GreenString(theme.IconSuccess))
+	}
 	return nil
 }
 

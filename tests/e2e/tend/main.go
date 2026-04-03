@@ -109,6 +109,10 @@ func main() {
 		scenarios.EnvInvalidProfileScenario,
 		scenarios.EnvStickyDefaultScenario,
 
+		// Graceful wait for interactive agents (verifies exit code 0 and proper messaging)
+		scenarios.GracefulWaitRunNextScenario,
+		scenarios.GracefulWaitSingleJobScenario,
+
 		// Non-TTY interactive agent tests (verifies detached tmux session creation)
 		scenarios.ClaudeInteractiveNonTTYScenario,
 		scenarios.CodexInteractiveNonTTYScenario,

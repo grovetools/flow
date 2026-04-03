@@ -90,6 +90,11 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 			r.updater.UpdateJobStatus(job, JobStatusCompleted)
 		}
 		return nil
+	case "running":
+		// Interactive agent jobs stay in "running" after the executor returns.
+		// The job was already set to running before submission; preserve that state
+		// so the orchestrator knows to keep polling for completion.
+		return nil
 	case "pending_user":
 		if r.updater != nil {
 			r.updater.UpdateJobStatus(job, JobStatusPendingUser)
