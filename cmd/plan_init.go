@@ -102,8 +102,10 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Resolve the full path for the new plan directory.
+	// Use resolvePlanPathInWorkspace (not resolvePlanPath) because the plan
+	// doesn't exist yet — resolvePlanPath requires the directory to already exist.
 	planDirArg := cmd.Dir
-	planPath, err := resolvePlanPath(planDirArg, ".")
+	planPath, err := resolvePlanPathInWorkspace(planDirArg, ".")
 	if err != nil {
 		return "", fmt.Errorf("could not resolve plan path: %w", err)
 	}
