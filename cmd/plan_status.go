@@ -24,24 +24,32 @@ import (
 
 // Command flags
 var (
-	statusTUI bool // Kept for backwards compatibility; TUI is now always used unless --json is specified
+	statusTUI     bool   // Kept for backwards compatibility; TUI is now always used unless --json is specified
+	planStatusDir string // Workspace or plan directory context
 )
 
 // InitPlanStatusFlags initializes the flags for the status command
 func InitPlanStatusFlags() {
 	// Keep --tui flag for backwards compatibility, but it's now a no-op (TUI is the default)
 	planStatusCmd.Flags().BoolVarP(&statusTUI, "tui", "t", false, "Launch interactive TUI (default behavior, kept for backwards compatibility)")
+	planStatusCmd.Flags().StringVarP(&planStatusDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 }
 
 // RunPlanStatus implements the status command.
 func RunPlanStatus(cmd *cobra.Command, args []string) error {
-	var dir string
+	var planName string
 	if len(args) > 0 {
-		dir = args[0]
+		planName = args[0]
 	}
 
-	// Resolve the plan path with active job support
-	planPath, err := resolvePlanPathWithActiveJob(dir)
+	// Use --dir flag value, defaulting to current directory
+	contextDir := planStatusDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+
+	// Resolve the plan path with active job support and context directory
+	planPath, err := resolvePlanPathWithActiveJob(planName, contextDir)
 	if err != nil {
 		// Smart Redirect: If no active plan is set, redirect to the plan list TUI.
 		isNoActiveJobError := strings.Contains(err.Error(), "no active job set")

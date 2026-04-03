@@ -35,7 +35,9 @@ Examples:
   flow plan action init
 
 Available actions are defined in the recipe's workspace_init.yml under the 'actions' key.
-The special action 'init' runs the actions defined under the 'init' key.`,
+The special action 'init' runs the actions defined under the 'init' key.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.`,
 	Args: cobra.RangeArgs(0, 2),
 	RunE: runPlanAction,
 }
@@ -74,7 +76,11 @@ func runPlanAction(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve the plan directory
-	planPath, err := resolvePlanPath(planName)
+	contextDir := planContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	planPath, err := resolvePlanPath(planName, contextDir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

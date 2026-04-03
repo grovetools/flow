@@ -17,21 +17,35 @@ var planReviewCmd = &cobra.Command{
 	Use:   "review [directory]",
 	Short: "Mark a plan as ready for review and execute completion hooks (use: flow review)",
 	Long: `Marks a plan as ready for review, executes on-review hooks, and prepares it for final cleanup.
-This is the intermediary step before using 'flow plan finish'.`,
+This is the intermediary step before using 'flow plan finish'.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow plan review my-feature                     # from any directory
+  flow plan review my-feature --dir ~/Code/myapp  # explicit workspace`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanReview,
 }
 
 // NewReviewCmd creates the top-level `review` command.
 func NewReviewCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "review [directory]",
 		Short: "Mark a plan as ready for review and execute completion hooks",
 		Long: `Marks a plan as ready for review, executes on-review hooks, and prepares it for final cleanup.
-This is the intermediary step before using 'flow finish'.`,
+This is the intermediary step before using 'flow finish'.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow review my-feature                     # from any directory
+  flow review my-feature --dir ~/Code/myapp  # explicit workspace`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanReview,
 	}
+	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	return cmd
 }
 
 // runPlanReview implements the review command.
@@ -41,7 +55,11 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 		dir = args[0]
 	}
 
-	planPath, err := resolvePlanPathWithActiveJob(dir)
+	contextDir := planContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	planPath, err := resolvePlanPathWithActiveJob(dir, contextDir)
 	if err != nil {
 		return err
 	}

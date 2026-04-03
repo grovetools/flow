@@ -19,7 +19,10 @@ var planInitCmd = &cobra.Command{
 	Short: "Initialize a new plan directory, interactively or via flags",
 	Long: `Initialize a new orchestration plan in the specified directory.
 Creates a .grove-plan.yml file with default configuration options.
-If no directory is provided, an interactive TUI will be launched.`,
+If no directory is provided, an interactive TUI will be launched.
+
+Note: if you run this from inside a git worktree, a warning will be shown.
+Plans should typically be initialized from the main repository directory.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanInit,
 }
@@ -28,7 +31,16 @@ var planStatusCmd = &cobra.Command{
 	Use:   "status [directory]",
 	Short: "Show plan status in an interactive TUI (use: flow status)",
 	Long: `Show the status of all jobs in an orchestration plan in an interactive TUI.
-If no directory is specified, uses the active job if set.`,
+If no directory is specified, uses the active job if set.
+
+Plans can be referenced by slug from any directory. If the slug is globally
+unique, it will be resolved automatically. Use --dir to disambiguate or to
+specify the workspace context explicitly.
+
+Examples:
+  flow plan status my-feature                    # from any directory (global lookup)
+  flow plan status my-feature --dir ~/Code/myapp # explicit workspace
+  flow plan status my-feature --json             # JSON output`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanStatus,
 }
@@ -56,7 +68,14 @@ var planGraphCmd = &cobra.Command{
 	Short: "Visualize job dependency graph (use: flow graph)",
 	Long: `Generate a visualization of the job dependency graph.
 Supports multiple output formats including Mermaid, DOT, and ASCII.
-If no directory is specified, uses the active job if set.`,
+If no directory is specified, uses the active job if set.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow plan graph my-feature                     # from any directory
+  flow plan graph my-feature --dir ~/Code/myapp  # explicit workspace
+  flow plan graph my-feature -f dot -o graph.dot # DOT output to file`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanGraph,
 }
@@ -66,7 +85,13 @@ var planStepCmd = &cobra.Command{
 	Short: "Step through plan execution interactively (use: flow step)",
 	Long: `Provides an interactive wizard for executing a plan step by step.
 Shows runnable jobs and allows you to run, launch, skip, or quit.
-If no directory is specified, uses the current directory.`,
+If no directory is specified, uses the current directory.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow plan step my-feature                     # from any directory
+  flow plan step my-feature --dir ~/Code/myapp  # explicit workspace`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanStep,
 }
@@ -76,7 +101,13 @@ var planOpenCmd = &cobra.Command{
 	Short: "Open a plan's worktree in a dedicated tmux session (use: flow open)",
 	Long: `Switches to or creates a tmux session for the plan's worktree and opens the interactive status TUI.
 This provides a one-command entry point into a plan's interactive environment.
-If no directory is specified, uses the active job if set.`,
+If no directory is specified, uses the active job if set.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow plan open my-feature                     # from any directory
+  flow plan open my-feature --dir ~/Code/myapp  # explicit workspace`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanOpen,
 }
@@ -129,6 +160,9 @@ var (
 	planGraphServe  bool
 	planGraphPort   int
 	planGraphOutput string
+
+	// Shared --dir flag for subcommands that support workspace context override
+	planContextDir string
 )
 
 // NewPlanCmd returns the plan command with all subcommands configured.
@@ -200,6 +234,13 @@ func NewPlanCmd() *cobra.Command {
 	planGraphCmd.Flags().BoolVarP(&planGraphServe, "serve", "s", false, "Serve interactive HTML visualization")
 	planGraphCmd.Flags().IntVarP(&planGraphPort, "port", "p", 8080, "Port for web server")
 	planGraphCmd.Flags().StringVarP(&planGraphOutput, "output", "o", "", "Output file (stdout if not specified)")
+	planGraphCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+
+	// Shared --dir flag on subcommands
+	planStepCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	planOpenCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	planReviewCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	planActionCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 
 	// Initialize status command flags
 	InitPlanStatusFlags()
@@ -321,10 +362,11 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 
 func runPlanGraph(cmd *cobra.Command, args []string) error {
 	graphCmd := &PlanGraphCmd{
-		Format: planGraphFormat,
-		Serve:  planGraphServe,
-		Port:   planGraphPort,
-		Output: planGraphOutput,
+		Format:     planGraphFormat,
+		Serve:      planGraphServe,
+		Port:       planGraphPort,
+		Output:     planGraphOutput,
+		ContextDir: planContextDir,
 	}
 	if len(args) > 0 {
 		graphCmd.Directory = args[0]

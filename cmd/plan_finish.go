@@ -176,7 +176,13 @@ func NewPlanFinishCmd() *cobra.Command {
 		Use:   "finish [directory]",
 		Short: "Finish and clean up a plan and its associated worktree (use: flow finish)",
 		Long: `Guides through the process of cleaning up a completed plan.
-This can include removing the git worktree, deleting the branch, closing tmux sessions, and archiving the plan.`,
+This can include removing the git worktree, deleting the branch, closing tmux sessions, and archiving the plan.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow finish my-feature                     # from any directory
+  flow finish my-feature --dir ~/Code/myapp  # explicit workspace`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanFinish,
 	}
@@ -190,6 +196,7 @@ This can include removing the git worktree, deleting the branch, closing tmux se
 	cmd.Flags().BoolVar(&planFinishRebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
 	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
 	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
+	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 
 	return cmd
 }
@@ -200,7 +207,13 @@ func NewFinishCmd() *cobra.Command {
 		Use:   "finish [directory]",
 		Short: "Finish and clean up a plan and its associated worktree",
 		Long: `Guides through the process of cleaning up a completed plan.
-This can include removing the git worktree, deleting the branch, closing tmux sessions, and archiving the plan.`,
+This can include removing the git worktree, deleting the branch, closing tmux sessions, and archiving the plan.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow finish my-feature                     # from any directory
+  flow finish my-feature --dir ~/Code/myapp  # explicit workspace`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanFinish,
 	}
@@ -214,6 +227,7 @@ This can include removing the git worktree, deleting the branch, closing tmux se
 	cmd.Flags().BoolVar(&planFinishRebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
 	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
 	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
+	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 	return cmd
 }
 
@@ -223,7 +237,11 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 		dir = args[0]
 	}
 
-	planPath, err := resolvePlanPathWithActiveJob(dir)
+	contextDir := planContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	planPath, err := resolvePlanPathWithActiveJob(dir, contextDir)
 	if err != nil {
 		return err
 	}

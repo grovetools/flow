@@ -78,7 +78,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 	}
 
 	// Resolve the plan path
-	planPath, err := resolvePlanPathWithActiveJob(activePlanStr)
+	planPath, err := resolvePlanPathWithActiveJob(activePlanStr, ".")
 	if err != nil {
 		// Can't resolve path, just show the plan name
 		return activePlanStr, nil

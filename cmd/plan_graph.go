@@ -13,11 +13,12 @@ import (
 )
 
 type PlanGraphCmd struct {
-	Directory string `arg:"" help:"Plan directory"`
-	Format    string `flag:"f" default:"mermaid" help:"Output format: mermaid, dot, ascii"`
-	Serve     bool   `flag:"s" help:"Serve interactive HTML visualization"`
-	Port      int    `flag:"p" default:"8080" help:"Port for web server"`
-	Output    string `flag:"o" help:"Output file (stdout if not specified)"`
+	Directory  string `arg:"" help:"Plan directory"`
+	Format     string `flag:"f" default:"mermaid" help:"Output format: mermaid, dot, ascii"`
+	Serve      bool   `flag:"s" help:"Serve interactive HTML visualization"`
+	Port       int    `flag:"p" default:"8080" help:"Port for web server"`
+	Output     string `flag:"o" help:"Output file (stdout if not specified)"`
+	ContextDir string `flag:"d" help:"Workspace or plan directory context"`
 }
 
 func (c *PlanGraphCmd) Run() error {
@@ -29,7 +30,16 @@ func NewGraphCmd() *cobra.Command {
 	graphCmd := &cobra.Command{
 		Use:   "graph [directory]",
 		Short: "Visualize job dependency graph",
-		Long:  `Generate a visualization of the job dependency graph. Supports multiple output formats including Mermaid, DOT, and ASCII. If no directory is specified, uses the active job if set.`,
+		Long: `Generate a visualization of the job dependency graph.
+Supports multiple output formats including Mermaid, DOT, and ASCII.
+If no directory is specified, uses the active job if set.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow graph my-feature                     # from any directory
+  flow graph my-feature --dir ~/Code/myapp  # explicit workspace
+  flow graph my-feature -f dot -o graph.dot # DOT output to file`,
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runPlanGraph,
 	}
@@ -37,12 +47,17 @@ func NewGraphCmd() *cobra.Command {
 	graphCmd.Flags().BoolVarP(&planGraphServe, "serve", "s", false, "Serve interactive HTML visualization")
 	graphCmd.Flags().IntVarP(&planGraphPort, "port", "p", 8080, "Port for web server")
 	graphCmd.Flags().StringVarP(&planGraphOutput, "output", "o", "", "Output file (stdout if not specified)")
+	graphCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 	return graphCmd
 }
 
 func RunPlanGraph(cmd *PlanGraphCmd) error {
 	// Resolve the plan path with active job support
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Directory)
+	contextDir := cmd.ContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	planPath, err := resolvePlanPathWithActiveJob(cmd.Directory, contextDir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

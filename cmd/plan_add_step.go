@@ -83,7 +83,7 @@ func parseInlineFlag(values []string) orchestration.InlineConfig {
 
 func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	// Resolve the plan path with active job support
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir)
+	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir, ".")
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

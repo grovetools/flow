@@ -50,7 +50,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 				// It's a filename - try to find in active plan directory
 				activePlan, _ := state.GetString(plan.StateKey)
 				if activePlan != "" {
-					if planPath, err := resolvePlanPath(activePlan); err == nil {
+					if planPath, err := resolvePlanPath(activePlan, planRunDir); err == nil {
 						candidatePath := filepath.Join(planPath, target)
 						if _, err := os.Stat(candidatePath); err == nil {
 							target = candidatePath
@@ -59,7 +59,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 				}
 			} else {
 				// Try plan name first, then fall back to title-based lookup
-				if planPath, err := resolvePlanPath(target); err == nil {
+				if planPath, err := resolvePlanPath(target, planRunDir); err == nil {
 					if info, statErr := os.Stat(planPath); statErr == nil && info.IsDir() {
 						target = planPath
 					} else {
@@ -85,7 +85,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		info, err := os.Stat(target)
 		if err != nil {
 			// It might be a plan name in a configured plans_directory, try resolving it.
-			resolvedPath, resolveErr := resolvePlanPath(target)
+			resolvedPath, resolveErr := resolvePlanPath(target, planRunDir)
 			if resolveErr != nil {
 				return fmt.Errorf("target not found: %s", target)
 			}
@@ -115,7 +115,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 		if activeJob != "" {
 			// Use active job
-			resolvedPath, err := resolvePlanPath(activeJob)
+			resolvedPath, err := resolvePlanPath(activeJob, planRunDir)
 			if err != nil {
 				return fmt.Errorf("could not resolve active job path: %w", err)
 			}
@@ -718,7 +718,7 @@ func findJobInActivePlan(title string) (string, error) {
 		return "", nil // No active plan, not an error
 	}
 
-	planDir, err := resolvePlanPath(activeJob)
+	planDir, err := resolvePlanPath(activeJob, ".")
 	if err != nil {
 		return "", nil // Can't resolve, not an error
 	}

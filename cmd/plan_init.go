@@ -77,6 +77,21 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Auto-detect worktree context when running inside a sub-project of an ecosystem worktree.
 	currentNode, err := workspace.GetProjectByPath(".")
+	if err == nil && currentNode.IsWorktree() {
+		// Guard: warn the user when running plan init from inside a worktree.
+		// Plans should typically be initialized from the main repository, not from
+		// within a worktree, as the plan will be created relative to the worktree's
+		// notebook location rather than the main repo's.
+		cwd, _ := os.Getwd()
+		parentPath := currentNode.ParentProjectPath
+		if parentPath == "" {
+			parentPath = currentNode.RootEcosystemPath
+		}
+		fmt.Fprintf(os.Stderr, "Warning: you are inside a git worktree (%s).\n", filepath.Base(cwd))
+		fmt.Fprintf(os.Stderr, "Plans are typically created from the main repository at: %s\n", parentPath)
+		fmt.Fprintf(os.Stderr, "Continuing will create the plan relative to this worktree's workspace context.\n\n")
+	}
+
 	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
 		// If we are in this context, the worktree for any new plan should
 		// automatically be the parent ecosystem worktree.
@@ -88,7 +103,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Resolve the full path for the new plan directory.
 	planDirArg := cmd.Dir
-	planPath, err := resolvePlanPath(planDirArg)
+	planPath, err := resolvePlanPath(planDirArg, ".")
 	if err != nil {
 		return "", fmt.Errorf("could not resolve plan path: %w", err)
 	}

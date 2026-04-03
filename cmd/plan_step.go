@@ -17,15 +17,23 @@ import (
 
 // NewStepCmd creates the top-level `step` command.
 func NewStepCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "step [directory]",
 		Short: "Step through plan execution interactively",
 		Long: `Provides an interactive wizard for executing a plan step by step.
 Shows runnable jobs and allows you to run, launch, skip, or quit.
-If no directory is specified, uses the current directory.`,
+If no directory is specified, uses the current directory.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow step my-feature                     # from any directory
+  flow step my-feature --dir ~/Code/myapp  # explicit workspace`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanStep,
 	}
+	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	return cmd
 }
 
 // runPlanStep implements the step command for guided plan execution.
@@ -48,7 +56,11 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve the plan path
-	resolvedPath, err := resolvePlanPath(planDir)
+	contextDir := planContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	resolvedPath, err := resolvePlanPath(planDir, contextDir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

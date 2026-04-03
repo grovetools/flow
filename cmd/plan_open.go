@@ -10,14 +10,22 @@ import (
 
 // NewOpenCmd creates the top-level `open` command.
 func NewOpenCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "open [directory]",
 		Short: "Open a plan's worktree in a dedicated tmux session",
 		Long: `Switches to or creates a tmux session for the plan's worktree and opens the interactive status TUI.
-This provides a one-command entry point into a plan's interactive environment.`,
+This provides a one-command entry point into a plan's interactive environment.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow open my-feature                     # from any directory
+  flow open my-feature --dir ~/Code/myapp  # explicit workspace`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanOpen,
 	}
+	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	return cmd
 }
 
 // runPlanOpen implements the open command.
@@ -28,7 +36,11 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve the plan path
-	resolvedPath, err := resolvePlanPathWithActiveJob(planDir)
+	contextDir := planContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	resolvedPath, err := resolvePlanPathWithActiveJob(planDir, contextDir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

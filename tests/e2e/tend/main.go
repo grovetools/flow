@@ -113,6 +113,14 @@ func main() {
 		scenarios.CodexInteractiveNonTTYScenario,
 		scenarios.OpencodeInteractiveNonTTYScenario,
 		scenarios.MultiJobNonTTYRegressionScenario,
+
+		// Plan status from any directory (--dir flag and global resolution)
+		scenarios.PlanStatusDirFlagScenario,
+		scenarios.PlanStatusGlobalResolutionScenario,
+		scenarios.PlanStatusNotFoundErrorScenario,
+		scenarios.PlanStatusAmbiguousErrorScenario,
+		scenarios.PlanStatusBackwardCompatibilityScenario,
+		scenarios.PlanStatusDirFlagOverrideScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

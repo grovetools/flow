@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/sirupsen/logrus"
 )
 
 // expandFlowPath expands path variables like {{REPO}} and {{BRANCH}} correctly,
@@ -89,37 +90,53 @@ func getRepositoryName(dir string) (string, error) {
 }
 
 // resolvePlanPath determines the absolute path for a plan directory.
-// It uses the new NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).
-func resolvePlanPath(planName string) (string, error) {
+// It uses the NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).
+// It falls back to a global search if the plan is not found in the current context.
+func resolvePlanPath(planName string, contextDir string) (string, error) {
 	// If planName is already an absolute path, use it directly.
 	if filepath.IsAbs(planName) {
 		return planName, nil
 	}
 
-	// 1. Get the current workspace node.
-	node, err := workspace.GetProjectByPath(".")
-	if err != nil {
-		// Fallback: if we can't determine workspace, use local directory
-		return filepath.Abs(planName)
+	// 1. Try direct path relative to the context directory
+	directPath := filepath.Join(contextDir, planName)
+	if info, err := os.Stat(directPath); err == nil && info.IsDir() {
+		return filepath.Abs(directPath)
 	}
 
-	// 2. Load config and initialize the locator.
-	coreCfg, err := config.LoadDefault()
-	if err != nil {
-		// Proceed with default config if none exists (Local Mode).
-		coreCfg = &config.Config{}
-	}
-	locator := workspace.NewNotebookLocator(coreCfg)
+	// 2. Try resolving via the workspace context
+	node, err := workspace.GetProjectByPath(contextDir)
+	if err == nil && node != nil {
+		coreCfg, err := config.LoadDefault()
+		if err != nil {
+			coreCfg = &config.Config{}
+		}
+		locator := workspace.NewNotebookLocator(coreCfg)
 
-	// 3. Get the base plans directory for the current workspace using NotebookLocator.
-	plansDir, err := locator.GetPlansDir(node)
-	if err != nil {
-		return "", fmt.Errorf("could not resolve plans directory: %w", err)
+		plansDir, err := locator.GetPlansDir(node)
+		if err == nil {
+			fullPath := filepath.Join(plansDir, planName)
+			if info, err := os.Stat(fullPath); err == nil && info.IsDir() {
+				return filepath.Abs(fullPath)
+			}
+		}
 	}
 
-	// 5. Join with the specific plan name.
-	fullPath := filepath.Join(plansDir, planName)
-	return filepath.Abs(fullPath)
+	// 3. Fallback: Global search across all workspaces
+	matches, err := findPlanGlobally(planName)
+	if err != nil {
+		return "", fmt.Errorf("error searching globally for plan: %w", err)
+	}
+
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("multiple plans found named '%s'. Please specify the absolute path or use --dir to specify the workspace", planName)
+	}
+
+	// 4. Provide a clear, actionable error message if not found
+	return "", fmt.Errorf("plan '%s' not found.\nHint: run from the project directory, or use --dir /path/to/workspace", planName)
 }
 
 // resolveChatsDir determines the absolute path to the chats directory for the current workspace.
@@ -158,7 +175,7 @@ func getActivePlanWithMigration() (string, error) {
 
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.
 // If no active job is set, it falls back to the rolling plan, creating it if necessary.
-func resolvePlanPathWithActiveJob(planName string) (string, error) {
+func resolvePlanPathWithActiveJob(planName string, contextDir string) (string, error) {
 	usingRollingPlan := false
 
 	// If no plan name provided, try to use active job
@@ -179,7 +196,7 @@ func resolvePlanPathWithActiveJob(planName string) (string, error) {
 	// For the rolling plan, we need to ensure we have a valid workspace context.
 	// Don't create "rolling/" in random directories if workspace detection fails.
 	if usingRollingPlan {
-		resolvedPath, err := resolvePlanPathInWorkspace(planName)
+		resolvedPath, err := resolvePlanPathInWorkspace(planName, contextDir)
 		if err != nil {
 			return "", fmt.Errorf("cannot use rolling plan: %w", err)
 		}
@@ -189,21 +206,21 @@ func resolvePlanPathWithActiveJob(planName string) (string, error) {
 		return resolvedPath, nil
 	}
 
-	return resolvePlanPath(planName)
+	return resolvePlanPath(planName, contextDir)
 }
 
 // resolvePlanPathInWorkspace resolves a plan path but returns an error if workspace detection fails.
-// Unlike resolvePlanPath, it does not fall back to the local directory.
-func resolvePlanPathInWorkspace(planName string) (string, error) {
+// Unlike resolvePlanPath, it does not fall back to the local directory or global search.
+func resolvePlanPathInWorkspace(planName string, contextDir string) (string, error) {
 	// If planName is already an absolute path, use it directly.
 	if filepath.IsAbs(planName) {
 		return planName, nil
 	}
 
-	// Get the current workspace node - required for this function
-	node, err := workspace.GetProjectByPath(".")
+	// Get the workspace node for the context directory
+	node, err := workspace.GetProjectByPath(contextDir)
 	if err != nil {
-		return "", fmt.Errorf("not in a workspace (no git repository found): %w", err)
+		return "", fmt.Errorf("not in a workspace (no git repository found at %s): %w", contextDir, err)
 	}
 
 	// Load config and initialize the locator.
@@ -284,4 +301,43 @@ func loadFlowConfigWithDynamicRecipes() (*FlowConfig, string, error) {
 	}
 	
 	return &flowCfg, getRecipeCmd, nil
+}
+
+// findPlanGlobally searches all known workspaces on the system for a plan matching the given slug.
+// It returns a list of absolute paths to all matching plan directories.
+func findPlanGlobally(slug string) ([]string, error) {
+	var matches []string
+	logger := logrus.New()
+	logger.SetLevel(logrus.WarnLevel) // Suppress debug output
+
+	// Discover all workspaces
+	discoverer := workspace.NewDiscoveryService(logger)
+	result, err := discoverer.DiscoverAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	provider := workspace.NewProvider(result)
+
+	// Load global config
+	coreCfg, err := config.LoadDefault()
+	if err != nil {
+		coreCfg = &config.Config{}
+	}
+	locator := workspace.NewNotebookLocator(coreCfg)
+
+	// Scan all workspaces for their plan directories
+	scannedDirs, err := locator.ScanForAllPlans(provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan for plans: %w", err)
+	}
+
+	// Check if the slug exists inside any of the discovered plan base directories
+	for _, scannedDir := range scannedDirs {
+		planPath := filepath.Join(scannedDir.Path, slug)
+		if info, err := os.Stat(planPath); err == nil && info.IsDir() {
+			matches = append(matches, planPath)
+		}
+	}
+
+	return matches, nil
 }

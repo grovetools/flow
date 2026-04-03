@@ -71,7 +71,7 @@ Examples:
 // RunPlanConfig executes the plan config command
 func RunPlanConfig(cmd *PlanConfigCmd) error {
 	// Resolve the plan path
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir)
+	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir, ".")
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

@@ -25,12 +25,18 @@ The command will:
 2. Fast-forward merge the worktree branch into main
 3. Synchronize the worktree branch with the updated main
 
-If no plan name is provided, uses the active plan.`,
+If no plan name is provided, uses the active plan.
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow plan merge-worktree my-feature                     # from any directory
+  flow plan merge-worktree my-feature --dir ~/Code/myapp  # explicit workspace`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanMergeWorktree,
 }
 
 func init() {
+	planMergeWorktreeCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 	planCmd.AddCommand(planMergeWorktreeCmd)
 }
 
@@ -41,7 +47,11 @@ func runPlanMergeWorktree(cmd *cobra.Command, args []string) error {
 		dir = args[0]
 	}
 
-	planPath, err := resolvePlanPathWithActiveJob(dir)
+	contextDir := planContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	planPath, err := resolvePlanPathWithActiveJob(dir, contextDir)
 	if err != nil {
 		return err
 	}

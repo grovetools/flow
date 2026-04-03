@@ -122,11 +122,21 @@ func NewStatusCmd() *cobra.Command {
 		Short: "Show plan status in an interactive TUI",
 		Long: `Show the status of all jobs in an orchestration plan within an interactive TUI.
 If no directory is specified, uses the active job if set.
-If no active job is set, it will launch the plan browser.`,
+If no active job is set, it will launch the plan browser.
+
+Plans can be referenced by slug from any directory. If the slug is globally
+unique, it will be resolved automatically. Use --dir to disambiguate or to
+specify the workspace context explicitly.
+
+Examples:
+  flow status my-feature                    # from any directory (global lookup)
+  flow status my-feature --dir ~/Code/myapp # explicit workspace
+  flow status my-feature --json             # JSON output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanStatus,
 	}
 	statusCmd.Flags().BoolVarP(&statusTUI, "tui", "t", false, "Launch interactive TUI (default behavior, kept for backwards compatibility)")
+	statusCmd.Flags().StringVarP(&planStatusDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 	return statusCmd
 }
 
@@ -207,10 +217,16 @@ Examples:
   flow action init
 
 Available actions are defined in the recipe's workspace_init.yml under the 'actions' key.
-The special action 'init' runs the actions defined under the 'init' key.`,
+The special action 'init' runs the actions defined under the 'init' key.
+
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+  # Run an action from any directory with --dir
+  flow action start-dev my-plan --dir ~/Code/myapp`,
 		Args: cobra.RangeArgs(0, 2),
 		RunE: runPlanAction,
 	}
 	actionCmd.Flags().BoolVar(&planActionList, "list", false, "List available actions for the plan")
+	actionCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 	return actionCmd
 }

@@ -20,12 +20,18 @@ var planUpdateWorktreeCmd = &cobra.Command{
 	Long: `Update the plan's worktree branch by rebasing it on top of the main branch.
 This is equivalent to pressing 'U' in the plan TUI.
 
-If no plan name is provided, uses the active plan.`,
+If no plan name is provided, uses the active plan.
+Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+
+Examples:
+  flow plan update-worktree my-feature                     # from any directory
+  flow plan update-worktree my-feature --dir ~/Code/myapp  # explicit workspace`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanUpdateWorktree,
 }
 
 func init() {
+	planUpdateWorktreeCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 	planCmd.AddCommand(planUpdateWorktreeCmd)
 }
 
@@ -36,7 +42,11 @@ func runPlanUpdateWorktree(cmd *cobra.Command, args []string) error {
 		dir = args[0]
 	}
 
-	planPath, err := resolvePlanPathWithActiveJob(dir)
+	contextDir := planContextDir
+	if contextDir == "" {
+		contextDir = "."
+	}
+	planPath, err := resolvePlanPathWithActiveJob(dir, contextDir)
 	if err != nil {
 		return err
 	}

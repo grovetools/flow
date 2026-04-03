@@ -75,7 +75,7 @@ Examples:
 
 func runJobsExtract(title string, file string, blockIDs []string, dependsOn []string, worktree string, model string, outputType string) error {
 	// Get the current plan directory
-	currentPlanPath, err := resolvePlanPathWithActiveJob("")
+	currentPlanPath, err := resolvePlanPathWithActiveJob("", ".")
 	if err != nil {
 		// If we can't resolve from active job, check if we're in a plan directory
 		if _, err := os.Stat(".grove-plan.yml"); err == nil {
@@ -263,7 +263,7 @@ func runJobsExtractList(file string, jsonOutput bool) error {
 		chatFilePath = file
 	} else {
 		// Try to resolve from current plan directory
-		currentPlanPath, err := resolvePlanPathWithActiveJob("")
+		currentPlanPath, err := resolvePlanPathWithActiveJob("", ".")
 		if err != nil {
 			// If we can't resolve from active job, check if we're in a plan directory
 			if _, err := os.Stat(".grove-plan.yml"); err == nil {
