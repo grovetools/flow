@@ -34,6 +34,7 @@ type PlanAddStepCmd struct {
 	SourceFile          string   `flag:"" help:"Origin file path for tracking job provenance (e.g., Claude plan file)"`
 	RulesFile           string   `flag:"" help:"Path to a custom rules file for this job"`
 	GitChanges          bool     `flag:"" help:"Include git changes as context for this job"`
+	SkillSequence       []string `flag:"" sep:"," help:"List of skills to execute in sequence"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -299,6 +300,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			SourceFile:          cmd.SourceFile,
 			RulesFile:           cmd.RulesFile,
 			GitChanges:          cmd.GitChanges,
+			SkillSequence:       cmd.SkillSequence,
 		}
 
 		// Initialize empty prompt body - no comments needed since info is in frontmatter
@@ -422,6 +424,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		SourceFile:          cmd.SourceFile,
 		RulesFile:           cmd.RulesFile,
 		GitChanges:          cmd.GitChanges,
+		SkillSequence:       cmd.SkillSequence,
 	}
 
 	// Set worktree only if explicitly provided
@@ -605,6 +608,13 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if gitChanges, ok := template.Frontmatter["git_changes"].(bool); ok && !job.GitChanges {
 		job.GitChanges = gitChanges
 	}
+	if seq, ok := template.Frontmatter["skill_sequence"].([]interface{}); ok {
+		for _, s := range seq {
+			if str, ok := s.(string); ok {
+				job.SkillSequence = append(job.SkillSequence, str)
+			}
+		}
+	}
 	// Handle inline field from template (can be string or array)
 	if inlineVal, ok := template.Frontmatter["inline"]; ok {
 		switch v := inlineVal.(type) {
@@ -646,6 +656,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// Backwards compat: prepend_dependencies flag
 	if cmd.PrependDependencies {
 		job.PrependDependencies = true
+	}
+	if len(cmd.SkillSequence) > 0 {
+		job.SkillSequence = cmd.SkillSequence
 	}
 
 	// If the job type is chat, set the status to pending_user

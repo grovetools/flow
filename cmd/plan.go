@@ -154,6 +154,7 @@ var (
 	planAddModel               string
 	planAddRulesFile           string
 	planAddGitChanges          bool
+	planAddSkillSequence       []string
 
 	// Graph flags
 	planGraphFormat string
@@ -228,6 +229,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringVarP(&planAddModel, "model", "m", "", "LLM model to use for this job (e.g., gemini-3-pro-preview, claude-sonnet-4-20250514)")
 	planAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
 	planAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
+	planAddCmd.Flags().StringSliceVar(&planAddSkillSequence, "skill-sequence", nil, "Comma-separated list of skills to execute in sequence")
 
 	// Graph command flags
 	planGraphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
@@ -356,6 +358,7 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		Model:               planAddModel,
 		RulesFile:           planAddRulesFile,
 		GitChanges:          planAddGitChanges,
+		SkillSequence:       planAddSkillSequence,
 	}
 	return RunPlanAddStep(addStepCmd)
 }

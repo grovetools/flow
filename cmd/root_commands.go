@@ -90,6 +90,7 @@ func NewAddCmd() *cobra.Command {
 	addCmd.Flags().StringVarP(&planAddModel, "model", "m", "", "LLM model to use for this job (e.g., gemini-3-pro-preview, claude-sonnet-4-20250514)")
 	addCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
 	addCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
+	addCmd.Flags().StringSliceVar(&planAddSkillSequence, "skill-sequence", nil, "Comma-separated list of skills to execute in sequence")
 	return addCmd
 }
 
@@ -188,6 +189,7 @@ func NewJobCmd() *cobra.Command {
 	jobAddCmd.Flags().StringVarP(&planAddModel, "model", "m", "", "LLM model to use for this job (e.g., gemini-3-pro-preview, claude-sonnet-4-20250514)")
 	jobAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
 	jobAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
+	jobAddCmd.Flags().StringSliceVar(&planAddSkillSequence, "skill-sequence", nil, "Comma-separated list of skills to execute in sequence")
 
 	jobCmd.AddCommand(jobAddCmd)
 	return jobCmd

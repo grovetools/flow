@@ -95,6 +95,29 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 		}
 	}
 
+	// 1c. Add skill sequence instructions.
+	if len(job.SkillSequence) > 0 {
+		sequenceMeta, err := ResolveSkillSequenceMetadata(job.SkillSequence, workDir)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolving skill sequence: %w", err)
+		}
+
+		if len(sequenceMeta) > 0 {
+			b.WriteString("\n    <skill_sequence>\n")
+			b.WriteString("        You have a sequence of skills to work through in order.\n")
+			b.WriteString("        Before starting, create a TODO list with these exact items:\n\n")
+
+			for _, meta := range sequenceMeta {
+				b.WriteString(fmt.Sprintf("        - Invoke Skill(%s)\n", meta.Name))
+				b.WriteString(fmt.Sprintf("        - Execute %s — %s\n", meta.Name, meta.Description))
+			}
+
+			b.WriteString("\n        Work through the list in order. For each pair: first invoke the skill using the Skill tool, then follow its instructions to completion. Mark each item done as you go.\n")
+			b.WriteString(fmt.Sprintf("\n        Start by invoking Skill(\"%s\") now.\n", sequenceMeta[0].Name))
+			b.WriteString("    </skill_sequence>\n")
+		}
+	}
+
 	b.WriteString("\n    <context>\n")
 
 	// 2. Handle git_changes if enabled for the job.

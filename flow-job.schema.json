@@ -46,6 +46,13 @@
       "type": "string",
       "description": "Skill name to inject into the agent context (resolved via skills package)"
     },
+    "skill_sequence": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "List of skills to execute in sequence"
+    },
     "depends_on": {
       "items": {
         "type": "string"

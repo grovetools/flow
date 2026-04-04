@@ -331,3 +331,31 @@ func stripSkillFrontmatter(content []byte) string {
 	}
 	return strings.TrimSpace(string(body))
 }
+
+// ResolveSkillSequenceMetadata retrieves metadata (name, description) for a list of skills.
+// It enforces authorization via LoadAuthorizedSkill, so the job fails fast if a skill
+// in the sequence is not permitted in grove.toml.
+func ResolveSkillSequenceMetadata(skillNames []string, workDir string) ([]skills.SkillMetadata, error) {
+	var sequence []skills.SkillMetadata
+
+	for _, skillName := range skillNames {
+		loadedSkill, err := skills.LoadAuthorizedSkill(workDir, skillName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load skill '%s' for sequence: %w", skillName, err)
+		}
+
+		content, ok := loadedSkill.Files["SKILL.md"]
+		if !ok {
+			return nil, fmt.Errorf("skill '%s' is missing SKILL.md", skillName)
+		}
+
+		meta, err := skills.ParseSkillFrontmatter(content)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse frontmatter for skill '%s': %w", skillName, err)
+		}
+
+		sequence = append(sequence, *meta)
+	}
+
+	return sequence, nil
+}

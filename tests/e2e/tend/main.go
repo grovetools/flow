@@ -129,6 +129,9 @@ func main() {
 		scenarios.PlanStatusAmbiguousErrorScenario,
 		scenarios.PlanStatusBackwardCompatibilityScenario,
 		scenarios.PlanStatusDirFlagOverrideScenario,
+
+		// Skill sequence briefing injection
+		scenarios.SkillSequenceBriefingScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
