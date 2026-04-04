@@ -15,6 +15,9 @@ BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # If VERSION is not set, default to a dev version string
 VERSION ?= $(GIT_BRANCH)-$(GIT_COMMIT)$(GIT_DIRTY)
 
+# Build tags: fts5 enables SQLite FTS5 in mattn/go-sqlite3 (required by memory package)
+GO_TAGS = -tags "fts5"
+
 # Go LDFLAGS to inject version info at compile time
 LDFLAGS = -ldflags="\
 -X '$(VERSION_PKG).Version=$(VERSION)' \
@@ -35,11 +38,11 @@ schema:
 build: schema
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
-	@go build $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
+	@go build $(GO_TAGS) $(LDFLAGS) -o $(BIN_DIR)/$(BINARY_NAME) .
 
 test:
 	@echo "Running tests..."
-	@go test -v ./...
+	@go test $(GO_TAGS) -v ./...
 
 # --- Grove-tend E2E Testing ---
 # Mocks are built automatically by tend from tests/e2e/tend/mocks/src/
