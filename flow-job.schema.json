@@ -68,6 +68,10 @@
       "type": "string",
       "description": "Path to source file for context"
     },
+    "memory": {
+      "type": "boolean",
+      "description": "Whether to inject related memories into the prompt (default: true)"
+    },
     "repository": {
       "type": "string",
       "description": "Git repository URL for worktree creation"
