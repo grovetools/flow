@@ -78,7 +78,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	if err != nil {
 		return fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
-	sessionName := projInfo.Identifier()
+	sessionName := projInfo.Identifier("_")
 
 	// Check if session already exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
@@ -240,7 +240,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 		return fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
 	sessionTitle := fmt.Sprintf("plan-%s", sanitize.SanitizeForTmuxSession(planName))
-	sessionName := fmt.Sprintf("%s__%s", projInfo.Identifier(), sessionTitle)
+	sessionName := fmt.Sprintf("%s__%s", projInfo.Identifier("_"), sessionTitle)
 
 	// Check if session already exists
 	executor := &groveexec.RealCommandExecutor{}

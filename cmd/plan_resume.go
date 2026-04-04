@@ -145,7 +145,7 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 		return fmt.Errorf("failed to get workspace info for %s: %w", workingDir, err)
 	}
 
-	sessionName := projInfo.Identifier()
+	sessionName := projInfo.Identifier("_")
 
 	// Check if session already exists
 	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)

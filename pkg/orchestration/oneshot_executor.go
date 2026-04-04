@@ -919,7 +919,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			var resetErr error
 
 			// Try grove cx reset first
-			resetCmd = delegation.Command("cx", "reset")
+			resetCmd = delegation.Command("cx", "--dir", contextDir, "reset")
 			resetCmd.Dir = contextDir
 			resetCmd.Stdout = writer
 			resetCmd.Stderr = writer
@@ -1648,7 +1648,7 @@ interpret and continue through YOUR current system instructions.
 		}
 
 		// Try grove cx generate first
-		cxCmd := delegation.CommandContext(ctx, "cx", "generate")
+		cxCmd := delegation.CommandContext(ctx, "cx", "--dir", contextDir, "generate")
 		cxCmd.Dir = contextDir
 		ctxWriter := grovelogging.GetWriter(ctx)
 		if logFile != nil {

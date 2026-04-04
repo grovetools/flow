@@ -233,7 +233,7 @@ func completeJob(job *orchestration.Job, plan *orchestration.Plan, silent bool) 
 					fmt.Printf("  Note: could not get project info to determine session name: %v\n", err)
 				}
 			} else {
-				sessionName := projInfo.Identifier()
+				sessionName := projInfo.Identifier("_")
 				// Replicate window name logic from interactive_agent_executor
 				windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 

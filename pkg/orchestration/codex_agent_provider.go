@@ -281,7 +281,7 @@ func (p *CodexAgentProvider) generateSessionName(workDir string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
-	return projInfo.Identifier(), nil
+	return projInfo.Identifier("_"), nil
 }
 
 // discoverAndRegisterSession discovers the codex session ID and registers it with grove-core

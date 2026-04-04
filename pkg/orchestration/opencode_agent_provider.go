@@ -219,7 +219,7 @@ func (p *OpencodeAgentProvider) generateSessionName(workDir string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("failed to get project info: %w", err)
 	}
-	return projInfo.Identifier(), nil
+	return projInfo.Identifier("_"), nil
 }
 
 func (p *OpencodeAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, workDir, targetPane string) {

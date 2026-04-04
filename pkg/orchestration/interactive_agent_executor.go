@@ -778,7 +778,7 @@ func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
 	}
-	return projInfo.Identifier(), nil
+	return projInfo.Identifier("_"), nil
 }
 
 // discoverAndRegisterSessionAsync discovers the Claude Code PID and confirms the session with the daemon.
@@ -1182,7 +1182,7 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 		return "", fmt.Errorf("failed to resolve project for session naming: %w", err)
 	}
 
-	sessionName := projInfo.Identifier()
+	sessionName := projInfo.Identifier("_")
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
@@ -1214,7 +1214,7 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 		return fmt.Errorf("failed to resolve project for session naming: %w", err)
 	}
 
-	sessionName := projInfo.Identifier()
+	sessionName := projInfo.Identifier("_")
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
@@ -1254,7 +1254,7 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 		return fmt.Errorf("failed to resolve project for session naming: %w", err)
 	}
 
-	sessionName := projInfo.Identifier()
+	sessionName := projInfo.Identifier("_")
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
