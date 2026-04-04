@@ -132,6 +132,7 @@ func main() {
 
 		// Skill sequence briefing injection
 		scenarios.SkillSequenceBriefingScenario,
+		scenarios.NestedSkillSequenceScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

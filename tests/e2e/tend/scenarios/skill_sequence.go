@@ -11,7 +11,7 @@ import (
 
 var SkillSequenceBriefingScenario = harness.NewScenario(
 	"skill-sequence-briefing",
-	"Verifies skill_sequence injection into briefing XML, including descriptions and authorization enforcement.",
+	"Verifies skill_sequence injection into briefing XML, including descriptions, authorization enforcement, and artifact production.",
 	[]string{"core", "briefing", "skill-sequence"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment with mock skills", func(ctx *harness.Context) error {
@@ -38,7 +38,7 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 
 			// Authorize the skills in grove.toml
 			groveToml := filepath.Join(projectDir, "grove.toml")
-			tomlContent := "[skills]\nuse = [\"prep\", \"sear\", \"plate\"]\n"
+			tomlContent := "[skills]\nuse = [\"prep\", \"sear\", \"plate\", \"prep-artifact\", \"sear-artifact\"]\n"
 			if err := fs.WriteString(groveToml, tomlContent); err != nil {
 				return err
 			}
@@ -93,22 +93,22 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			if !strings.Contains(content, "<skill_sequence>") {
 				return fmt.Errorf("missing <skill_sequence> block in briefing")
 			}
-			if !strings.Contains(content, "1. prep") {
+			if !strings.Contains(content, "Invoke Skill(prep)") {
 				return fmt.Errorf("missing prep skill in sequence")
 			}
-			if !strings.Contains(content, "2. sear") {
+			if !strings.Contains(content, "Invoke Skill(sear)") {
 				return fmt.Errorf("missing sear skill in sequence")
 			}
-			if !strings.Contains(content, "3. plate") {
+			if !strings.Contains(content, "Invoke Skill(plate)") {
 				return fmt.Errorf("missing plate skill in sequence")
 			}
-			if !strings.Contains(content, ".claude/skills/prep/SKILL.md") {
-				return fmt.Errorf("missing file path for prep skill")
+			if !strings.Contains(content, "Execute prep") {
+				return fmt.Errorf("missing execute line for prep skill")
 			}
 			if !strings.Contains(content, "Mise en place and ingredient prep") {
 				return fmt.Errorf("missing prep skill description")
 			}
-			if !strings.Contains(content, "Start by reading the file for the first skill now.") {
+			if !strings.Contains(content, "Start by invoking Skill(\"prep\") now.") {
 				return fmt.Errorf("missing sequence start instruction")
 			}
 			return nil
@@ -150,11 +150,11 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			if !strings.Contains(content, "<skill_sequence>") {
 				return fmt.Errorf("missing <skill_sequence> block")
 			}
-			if !strings.Contains(content, "1. sear") {
-				return fmt.Errorf("sear should be first in the sequence block")
+			if !strings.Contains(content, "Invoke Skill(sear)") {
+				return fmt.Errorf("sear should be in the sequence block")
 			}
-			if !strings.Contains(content, "2. plate") {
-				return fmt.Errorf("plate should be second in the sequence block")
+			if !strings.Contains(content, "Invoke Skill(plate)") {
+				return fmt.Errorf("plate should be in the sequence block")
 			}
 			return nil
 		}),
@@ -213,6 +213,71 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			if strings.Contains(content, "<skill_sequence>") {
 				return fmt.Errorf("briefing should not contain <skill_sequence> block when no sequence is defined")
 			}
+			return nil
+		}),
+
+		// Case 5: Skill Sequence with Artifacts
+		harness.NewStep("Create skills with produces field", func(ctx *harness.Context) error {
+			notebooksRoot := ctx.GetString("notebooks_root")
+			skillsDir := filepath.Join(notebooksRoot, "workspaces", "sequence-project", "skills")
+
+			prepDir := filepath.Join(skillsDir, "prep-artifact")
+			if err := fs.CreateDir(prepDir); err != nil {
+				return err
+			}
+			if err := fs.WriteString(filepath.Join(prepDir, "SKILL.md"), "---\nname: prep-artifact\ndescription: Prep ingredients\nproduces:\n  - prep-log.md\n---\n# Prep"); err != nil {
+				return err
+			}
+
+			searDir := filepath.Join(skillsDir, "sear-artifact")
+			if err := fs.CreateDir(searDir); err != nil {
+				return err
+			}
+			return fs.WriteString(filepath.Join(searDir, "SKILL.md"), "---\nname: sear-artifact\ndescription: Sear ingredients\nproduces:\n  - sear-log.md\n---\n# Sear")
+		}),
+		harness.NewStep("Create and run artifacts job", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+			projectDir := ctx.GetString("project_dir")
+
+			jobContent := "---\nid: job-artifacts\ntitle: Cook with Artifacts\ntype: oneshot\nstatus: pending\nskill_sequence:\n  - prep-artifact\n  - sear-artifact\n---\nExecute sequence."
+			jobFile := filepath.Join(planPath, "05-job-artifacts.md")
+			if err := fs.WriteString(jobFile, jobContent); err != nil {
+				return err
+			}
+
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+			runCmd := ctx.Bin("plan", "run", jobFile, "--yes")
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			return runCmd.Run().AssertSuccess()
+		}),
+		harness.NewStep("Verify artifact paths in briefing", func(ctx *harness.Context) error {
+			planPath := ctx.GetString("plan_path")
+
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "job-artifacts")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found for job-artifacts")
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			// Compute exactly what the XML briefing paths should look like
+			prepArtifactPath := filepath.Join(planPath, ".artifacts", "job-artifacts", "prep-log.md")
+			searArtifactPath := filepath.Join(planPath, ".artifacts", "job-artifacts", "sear-log.md")
+
+			expectedPrep := fmt.Sprintf("Execute prep-artifact — write output to %s, verify it exists", prepArtifactPath)
+			expectedSear := fmt.Sprintf("Execute sear-artifact — read %s, write %s, verify it exists", prepArtifactPath, searArtifactPath)
+
+			if !strings.Contains(content, expectedPrep) {
+				return fmt.Errorf("briefing missing expected prep instruction.\nExpected: %s\nGot:\n%s", expectedPrep, content)
+			}
+			if !strings.Contains(content, expectedSear) {
+				return fmt.Errorf("briefing missing expected sear instruction.\nExpected: %s\nGot:\n%s", expectedSear, content)
+			}
+
 			return nil
 		}),
 	},

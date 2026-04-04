@@ -97,23 +97,23 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 
 	// 1c. Add skill sequence instructions.
 	if len(job.SkillSequence) > 0 {
-		sequenceMeta, err := ResolveSkillSequenceMetadata(job.SkillSequence, workDir)
+		sequenceNodes, err := ResolveSkillSequenceMetadata(job.SkillSequence, workDir)
 		if err != nil {
 			return "", nil, fmt.Errorf("resolving skill sequence: %w", err)
 		}
 
-		if len(sequenceMeta) > 0 {
+		if len(sequenceNodes) > 0 {
 			b.WriteString("\n    <skill_sequence>\n")
 			b.WriteString("        You have a sequence of skills to work through in order.\n")
 			b.WriteString("        Before starting, create a TODO list with these exact items:\n\n")
 
-			for _, meta := range sequenceMeta {
-				b.WriteString(fmt.Sprintf("        - Invoke Skill(%s)\n", meta.Name))
-				b.WriteString(fmt.Sprintf("        - Execute %s — %s\n", meta.Name, meta.Description))
-			}
+			// Base path for all artifacts produced by this job's skills
+			artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
+
+			renderSequenceNodes(&b, sequenceNodes, "        ", false, artifactDir)
 
 			b.WriteString("\n        Work through the list in order. For each pair: first invoke the skill using the Skill tool, then follow its instructions to completion. Mark each item done as you go.\n")
-			b.WriteString(fmt.Sprintf("\n        Start by invoking Skill(\"%s\") now.\n", sequenceMeta[0].Name))
+			b.WriteString(fmt.Sprintf("\n        Start by invoking Skill(\"%s\") now.\n", sequenceNodes[0].Metadata.Name))
 			b.WriteString("    </skill_sequence>\n")
 		}
 	}
@@ -260,6 +260,55 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 	b.WriteString("</prompt>\n")
 
 	return b.String(), filesToUpload, nil
+}
+
+// renderSequenceNodes recursively renders a skill sequence tree as a TODO list.
+// It handles both nested sub-skills and artifact production/consumption.
+func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep bool, artifactDir string) {
+	var previousArtifacts []string
+
+	for _, node := range nodes {
+		if len(node.Children) > 0 {
+			// Parent skill with sub-sequence: render as parent with indented children
+			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
+			renderSequenceNodes(b, node.Children, indent+"  ", true, artifactDir)
+		} else {
+			// Leaf skill: render invoke + execute pair
+			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
+
+			var actions []string
+
+			// Downstream skills read previous artifacts for context
+			if len(previousArtifacts) > 0 {
+				actions = append(actions, fmt.Sprintf("read %s", strings.Join(previousArtifacts, ", ")))
+			}
+
+			// Resolve absolute paths for the current skill's artifacts
+			var currentArtifacts []string
+			for _, prod := range node.Metadata.Produces {
+				currentArtifacts = append(currentArtifacts, filepath.Join(artifactDir, prod))
+			}
+
+			if len(currentArtifacts) > 0 {
+				if len(previousArtifacts) > 0 {
+					actions = append(actions, fmt.Sprintf("write %s", strings.Join(currentArtifacts, ", ")))
+				} else {
+					actions = append(actions, fmt.Sprintf("write output to %s", strings.Join(currentArtifacts, ", ")))
+				}
+				actions = append(actions, "verify it exists")
+			}
+
+			// Build the execute line
+			if len(actions) > 0 {
+				b.WriteString(fmt.Sprintf("%s- Execute %s — %s\n", indent, node.Metadata.Name, strings.Join(actions, ", ")))
+			} else {
+				b.WriteString(fmt.Sprintf("%s- Execute %s — %s\n", indent, node.Metadata.Name, node.Metadata.Description))
+			}
+
+			// Accumulate current artifacts for the next skill's "read" action
+			previousArtifacts = append(previousArtifacts, currentArtifacts...)
+		}
+	}
 }
 
 // resolveSourceBlock reads and extracts content from a source_block reference

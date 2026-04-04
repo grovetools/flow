@@ -332,29 +332,75 @@ func stripSkillFrontmatter(content []byte) string {
 	return strings.TrimSpace(string(body))
 }
 
-// ResolveSkillSequenceMetadata retrieves metadata (name, description) for a list of skills.
-// It enforces authorization via LoadAuthorizedSkill, so the job fails fast if a skill
-// in the sequence is not permitted in grove.toml.
-func ResolveSkillSequenceMetadata(skillNames []string, workDir string) ([]skills.SkillMetadata, error) {
-	var sequence []skills.SkillMetadata
+// MaxSequenceDepth is the maximum nesting depth for recursive skill sequences.
+const MaxSequenceDepth = 3
 
+// SkillSequenceNode represents a skill in a sequence tree, with optional children
+// for skills that declare their own skill_sequence in frontmatter.
+type SkillSequenceNode struct {
+	Metadata skills.SkillMetadata
+	Children []SkillSequenceNode
+}
+
+// ResolveSkillSequenceMetadata builds a recursive tree of skills to execute.
+// Root-level skills are authorized via LoadAuthorizedSkill; nested sub-skills
+// are implicitly authorized by the parent via LoadSkillBypassingAccess.
+func ResolveSkillSequenceMetadata(skillNames []string, workDir string) ([]SkillSequenceNode, error) {
+	return resolveSequenceRecursive(skillNames, workDir, 0, make(map[string]bool))
+}
+
+func resolveSequenceRecursive(skillNames []string, workDir string, depth int, visited map[string]bool) ([]SkillSequenceNode, error) {
+	if depth > MaxSequenceDepth {
+		return nil, fmt.Errorf("skill sequence max depth (%d) exceeded", MaxSequenceDepth)
+	}
+
+	var sequence []SkillSequenceNode
 	for _, skillName := range skillNames {
-		loadedSkill, err := skills.LoadAuthorizedSkill(workDir, skillName)
+		if visited[skillName] {
+			return nil, fmt.Errorf("circular skill sequence dependency detected: %s", skillName)
+		}
+
+		// Track visited state for this branch to prevent false positives across siblings
+		branchVisited := make(map[string]bool)
+		for k, v := range visited {
+			branchVisited[k] = v
+		}
+		branchVisited[skillName] = true
+
+		var loadedSkill *skills.LoadedSkill
+		var err error
+
+		// Root skills must be explicitly authorized; nested sub-skills are implicitly authorized
+		if depth == 0 {
+			loadedSkill, err = skills.LoadAuthorizedSkill(workDir, skillName)
+		} else {
+			loadedSkill, err = skills.LoadSkillBypassingAccess(workDir, skillName)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to load skill '%s' for sequence: %w", skillName, err)
+			return nil, fmt.Errorf("resolving skill '%s' for sequence: %w", skillName, err)
 		}
 
 		content, ok := loadedSkill.Files["SKILL.md"]
 		if !ok {
-			return nil, fmt.Errorf("skill '%s' is missing SKILL.md", skillName)
+			return nil, fmt.Errorf("skill '%s' missing SKILL.md", skillName)
 		}
 
 		meta, err := skills.ParseSkillFrontmatter(content)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse frontmatter for skill '%s': %w", skillName, err)
+			return nil, fmt.Errorf("parsing metadata for skill '%s': %w", skillName, err)
 		}
 
-		sequence = append(sequence, *meta)
+		node := SkillSequenceNode{Metadata: *meta}
+
+		if len(meta.SkillSequence) > 0 {
+			children, err := resolveSequenceRecursive(meta.SkillSequence, workDir, depth+1, branchVisited)
+			if err != nil {
+				return nil, err
+			}
+			node.Children = children
+		}
+
+		sequence = append(sequence, node)
 	}
 
 	return sequence, nil
