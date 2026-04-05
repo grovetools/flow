@@ -86,12 +86,16 @@ func parseInlineFlag(values []string) orchestration.InlineConfig {
 
 // inheritSkillSequence sets job.SkillSequence from the skill's frontmatter
 // when a skill is set but no explicit skill_sequence was provided.
-func inheritSkillSequence(job *orchestration.Job) {
+func inheritSkillSequence(job *orchestration.Job, workDir string) {
 	if job.Skill == "" || len(job.SkillSequence) > 0 {
 		return
 	}
-	loaded, err := skills.LoadSkillBypassingAccess(".", job.Skill)
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+	loaded, err := skills.LoadSkillBypassingAccess(workDir, job.Skill)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not inherit skill_sequence from %q (workDir=%s): %v\n", job.Skill, workDir, err)
 		return
 	}
 	content, ok := loaded.Files["SKILL.md"]
@@ -108,6 +112,9 @@ func inheritSkillSequence(job *orchestration.Job) {
 }
 
 func RunPlanAddStep(cmd *PlanAddStepCmd) error {
+	// Capture CWD early before any directory changes (needed for skill resolution)
+	startingDir, _ := os.Getwd()
+
 	// Resolve the plan path with active job support
 	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir, ".")
 	if err != nil {
@@ -204,8 +211,9 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		return fmt.Errorf("failed to create job: no job details collected")
 	}
 
-	// If a skill is set but no skill_sequence, inherit from the skill's frontmatter
-	inheritSkillSequence(job)
+	// If a skill is set but no skill_sequence, inherit from the skill's frontmatter.
+	// Use the CWD captured at function entry (before flow changes directories)
+	inheritSkillSequence(job, startingDir)
 
 	// Generate job file
 	filename, err := orchestration.AddJob(plan, job)

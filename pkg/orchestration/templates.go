@@ -15,7 +15,11 @@ repository: {{ .Repository }}{{ end }}{{ if .Branch }}
 branch: {{ .Branch }}{{ end }}{{ if .Worktree }}
 worktree: {{ .Worktree }}{{ end }}{{ if .NoteRef }}
 note_ref: {{ .NoteRef }}{{ end }}{{ if .SourceFile }}
-source_file: {{ .SourceFile }}{{ end }}{{ if .Inline }}
+source_file: {{ .SourceFile }}{{ end }}{{ if .Skill }}
+skill: {{ .Skill }}{{ end }}{{ if .SkillSequence }}
+skill_sequence:{{ range .SkillSequence }}
+  - {{ . }}{{ end }}{{ end }}{{ if .GitChanges }}
+git_changes: true{{ end }}{{ if .Inline }}
 inline:{{ range .Inline }}
   - {{ . }}{{ end }}{{ end }}{{ if .PrependDependencies }}
 prepend_dependencies: true{{ end }}
