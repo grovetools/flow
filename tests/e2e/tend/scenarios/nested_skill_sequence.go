@@ -22,8 +22,8 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 
 			skillsDir := filepath.Join(notebooksRoot, "workspaces", "nested-sequence-project", "skills")
 
-			writeSkill := func(name, desc string, seq []string, produces []string) error {
-				dir := filepath.Join(skillsDir, name)
+			writeSkill := func(relPath, name, desc string, seq []string, produces []string) error {
+				dir := filepath.Join(skillsDir, relPath)
 				if err := fs.CreateDir(dir); err != nil {
 					return err
 				}
@@ -45,21 +45,21 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 				return fs.WriteString(filepath.Join(dir, "SKILL.md"), content)
 			}
 
-			// Normal nested skill: parent-skill -> child-a, child-b
-			writeSkill("parent-skill", "The Parent", []string{"child-a", "child-b"}, nil)
-			writeSkill("child-a", "First Child", nil, nil)
-			writeSkill("child-b", "Second Child", nil, nil)
+			// Normal nested skill: parent-skill -> child-a, child-b (children nested under parent)
+			writeSkill("parent-skill", "parent-skill", "The Parent", []string{"child-a", "child-b"}, nil)
+			writeSkill("parent-skill/child-a", "child-a", "First Child", nil, nil)
+			writeSkill("parent-skill/child-b", "child-b", "Second Child", nil, nil)
 
 			// Circular dependency: circular-a -> circular-b -> circular-a
-			writeSkill("circular-a", "Circ A", []string{"circular-b"}, nil)
-			writeSkill("circular-b", "Circ B", []string{"circular-a"}, nil)
+			writeSkill("circular-a", "circular-a", "Circ A", []string{"circular-b"}, nil)
+			writeSkill("circular-b", "circular-b", "Circ B", []string{"circular-a"}, nil)
 
 			// Depth limit: depth-1 -> depth-2 -> depth-3 -> depth-4 -> depth-5
-			writeSkill("depth-1", "D1", []string{"depth-2"}, nil)
-			writeSkill("depth-2", "D2", []string{"depth-3"}, nil)
-			writeSkill("depth-3", "D3", []string{"depth-4"}, nil)
-			writeSkill("depth-4", "D4", []string{"depth-5"}, nil)
-			writeSkill("depth-5", "D5", nil, nil)
+			writeSkill("depth-1", "depth-1", "D1", []string{"depth-2"}, nil)
+			writeSkill("depth-2", "depth-2", "D2", []string{"depth-3"}, nil)
+			writeSkill("depth-3", "depth-3", "D3", []string{"depth-4"}, nil)
+			writeSkill("depth-4", "depth-4", "D4", []string{"depth-5"}, nil)
+			writeSkill("depth-5", "depth-5", "D5", nil, nil)
 
 			// Authorize only root-level skills in grove.toml
 			groveToml := filepath.Join(projectDir, "grove.toml")
