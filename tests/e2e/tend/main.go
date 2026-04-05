@@ -134,6 +134,9 @@ func main() {
 		scenarios.SkillSequenceBriefingScenario,
 		scenarios.NestedSkillSequenceScenario,
 
+		// Skill flag and skill_sequence inheritance
+		scenarios.SkillInheritFlagScenario,
+
 		// Skill fidelity observability
 		scenarios.SkillFidelityTrackingScenario,
 
