@@ -118,6 +118,14 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 				return fmt.Errorf("briefing missing failure protocol for prep")
 			}
 
+			// Verify feedback protocol block
+			if !strings.Contains(content, "<feedback_protocol>") {
+				return fmt.Errorf("briefing missing <feedback_protocol> block")
+			}
+			if !strings.Contains(content, "--feedback") {
+				return fmt.Errorf("briefing missing --feedback flag example in feedback_protocol")
+			}
+
 			return nil
 		}),
 
@@ -127,7 +135,7 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 			jobArtifactDir := filepath.Join(planPath, ".artifacts", "cook-fidelity")
 
 			// Write mock status.json files as the agent would
-			prepStatus := `{"skill":"prep","status":"completed","artifacts_expected":["prep-log.md"],"artifacts_produced":["prep-log.md"],"error":null,"diagnostic_path":null}`
+			prepStatus := `{"skill":"prep","status":"completed","artifacts_expected":["prep-log.md"],"artifacts_produced":["prep-log.md"],"error":null,"diagnostic_path":null,"feedback":"Prep instructions were clear"}`
 			if err := fs.WriteString(filepath.Join(jobArtifactDir, "prep-status.json"), prepStatus); err != nil {
 				return err
 			}
@@ -166,6 +174,7 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 						ArtifactsExpected []string `json:"artifacts_expected"`
 						ArtifactsProduced []string `json:"artifacts_produced"`
 						Error             *string  `json:"error"`
+						Feedback          *string  `json:"feedback"`
 					} `json:"skill_fidelity"`
 				} `json:"jobs"`
 			}
@@ -182,6 +191,7 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 					ArtifactsExpected []string `json:"artifacts_expected"`
 					ArtifactsProduced []string `json:"artifacts_produced"`
 					Error             *string  `json:"error"`
+					Feedback          *string  `json:"feedback"`
 				} `json:"skill_fidelity"`
 			}
 			for i := range output.Jobs {
@@ -217,6 +227,15 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 			}
 			if statusMap["plate"] != "skipped" {
 				return fmt.Errorf("expected plate status 'skipped', got '%s'", statusMap["plate"])
+			}
+
+			// Verify feedback field is present for prep
+			for _, sf := range fidelityJob.SkillFidelity {
+				if sf.Skill == "prep" {
+					if sf.Feedback == nil || *sf.Feedback != "Prep instructions were clear" {
+						return fmt.Errorf("expected prep feedback 'Prep instructions were clear', got: %v", sf.Feedback)
+					}
+				}
 			}
 
 			return nil

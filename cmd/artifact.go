@@ -167,7 +167,7 @@ Subcommands:
 	listCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output as JSON array")
 
 	// COMPLETE
-	var statusFlag, errorFlag, diagFlag string
+	var statusFlag, errorFlag, diagFlag, feedbackFlag string
 	completeCmd := &cobra.Command{
 		Use:   "complete <skill-name>",
 		Short: "Mark a skill as complete and write its fidelity status",
@@ -213,12 +213,15 @@ Writes a <skill-name>-status.json file for TUI consumption.`,
 			}
 
 			// Build optional pointers for JSON output
-			var errPtr, diagPtr *string
+			var errPtr, diagPtr, feedbackPtr *string
 			if errorFlag != "" {
 				errPtr = &errorFlag
 			}
 			if diagFlag != "" {
 				diagPtr = &diagFlag
+			}
+			if feedbackFlag != "" {
+				feedbackPtr = &feedbackFlag
 			}
 
 			state := orchestration.SkillFidelityState{
@@ -228,6 +231,7 @@ Writes a <skill-name>-status.json file for TUI consumption.`,
 				ArtifactsProduced: produced,
 				Error:             errPtr,
 				DiagnosticPath:    diagPtr,
+				Feedback:          feedbackPtr,
 			}
 
 			// Ensure empty arrays instead of null in JSON output
@@ -251,6 +255,7 @@ Writes a <skill-name>-status.json file for TUI consumption.`,
 	completeCmd.Flags().StringVar(&statusFlag, "status", "completed", "Status: completed, failed, or skipped")
 	completeCmd.Flags().StringVar(&errorFlag, "error", "", "Error message (used with --status failed)")
 	completeCmd.Flags().StringVar(&diagFlag, "diagnostic-file", "", "Diagnostic artifact filename (used with --status failed)")
+	completeCmd.Flags().StringVar(&feedbackFlag, "feedback", "", "Brief feedback about the skill execution")
 
 	cmd.AddCommand(writeCmd, readCmd, listCmd, completeCmd)
 	return cmd

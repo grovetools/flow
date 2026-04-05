@@ -41,6 +41,9 @@
         },
         "diagnostic_path": {
           "type": "string"
+        },
+        "feedback": {
+          "type": "string"
         }
       },
       "type": "object",

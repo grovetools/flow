@@ -111,6 +111,9 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			if !strings.Contains(content, "Start by invoking Skill(\"prep\") now.") {
 				return fmt.Errorf("missing sequence start instruction")
 			}
+			if !strings.Contains(content, "<feedback_protocol>") {
+				return fmt.Errorf("missing <feedback_protocol> block in briefing")
+			}
 			return nil
 		}),
 

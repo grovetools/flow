@@ -17,6 +17,7 @@ type SkillFidelityState struct {
 	ArtifactsProduced []string `json:"artifacts_produced" yaml:"artifacts_produced"`
 	Error             *string  `json:"error" yaml:"error,omitempty"`
 	DiagnosticPath    *string  `json:"diagnostic_path" yaml:"diagnostic_path,omitempty"`
+	Feedback          *string  `json:"feedback" yaml:"feedback,omitempty"`
 }
 
 // SkillFidelityReport aggregates fidelity states for a job's skill sequence.

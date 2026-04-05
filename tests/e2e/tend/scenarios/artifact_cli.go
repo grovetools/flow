@@ -296,7 +296,46 @@ var ArtifactCLIScenario = harness.NewScenario(
 			return nil
 		}),
 
-		// Case 9: flow artifact complete with skipped status for no-produces skill
+		// Case 9: flow artifact complete with --feedback flag
+		harness.NewStep("Complete skill with feedback flag", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			jobFilePath := ctx.GetString("job_file_path")
+			artifactDir := ctx.GetString("artifact_dir")
+
+			// Re-write sear-log.md so completion succeeds
+			ctx.Bin("artifact", "write", "sear-log.md", "--content", "# Sear Log\nSeared.").
+				Dir(projectDir).
+				Env("GROVE_FLOW_JOB_PATH=" + jobFilePath).
+				Env("GROVE_FLOW_JOB_ID=cook-art").
+				Run()
+
+			result := ctx.Bin("artifact", "complete", "sear", "--status", "completed", "--feedback", "Sear instructions were clear").
+				Dir(projectDir).
+				Env("GROVE_FLOW_JOB_PATH=" + jobFilePath).
+				Env("GROVE_FLOW_JOB_ID=cook-art").
+				Run()
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("artifact complete with feedback failed: %w\nStdout: %s\nStderr: %s", err, result.Stdout, result.Stderr)
+			}
+
+			// Verify the status file contains feedback
+			statusContent, err := fs.ReadString(filepath.Join(artifactDir, "sear-status.json"))
+			if err != nil {
+				return fmt.Errorf("reading sear-status.json: %w", err)
+			}
+
+			var state map[string]interface{}
+			if err := json.Unmarshal([]byte(statusContent), &state); err != nil {
+				return fmt.Errorf("parsing status JSON: %w", err)
+			}
+
+			if state["feedback"] != "Sear instructions were clear" {
+				return fmt.Errorf("expected feedback 'Sear instructions were clear', got: %v", state["feedback"])
+			}
+			return nil
+		}),
+
+		// Case 10: flow artifact complete with skipped status for no-produces skill
 		harness.NewStep("Complete skill with no produces (plate) as skipped", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			jobFilePath := ctx.GetString("job_file_path")
@@ -328,7 +367,7 @@ var ArtifactCLIScenario = harness.NewScenario(
 			return nil
 		}),
 
-		// Case 10: Error when env vars are missing
+		// Case 11: Error when env vars are missing
 		harness.NewStep("Fails gracefully without env vars", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 

@@ -155,6 +155,12 @@ func renderFidelityNode(b *strings.Builder, node *SkillDisplayNode, stateMap map
 
 	b.WriteString(line + "\n")
 
+	// Show feedback if present
+	if state.Feedback != nil && *state.Feedback != "" {
+		feedbackLine := fmt.Sprintf("  %s  %s", indent, theme.DefaultTheme.Muted.Render(fmt.Sprintf("Feedback: %s", *state.Feedback)))
+		b.WriteString(feedbackLine + "\n")
+	}
+
 	// Recurse children
 	for _, child := range node.Children {
 		renderFidelityNode(b, child, stateMap)

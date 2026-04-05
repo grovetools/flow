@@ -112,6 +112,24 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 			b.WriteString("\n        Work through the list in order. For each pair: first invoke the skill using the Skill tool, then follow its instructions to completion. Mark each item done as you go.\n")
 			b.WriteString(fmt.Sprintf("\n        Start by invoking Skill(\"%s\") now.\n", sequenceNodes[0].Metadata.Name))
 			b.WriteString("    </skill_sequence>\n")
+
+			b.WriteString("\n    <feedback_protocol>\n")
+			b.WriteString("        When completing each skill, provide brief feedback via the --feedback flag:\n")
+			b.WriteString("        flow artifact complete <skill> --status completed --feedback \"your feedback\"\n\n")
+			b.WriteString("        Your feedback helps improve the system. Examples of useful feedback:\n\n")
+			b.WriteString("        Prompt improvements:\n")
+			b.WriteString("        - \"The cx alias format examples were unclear, had to guess @a: syntax\"\n")
+			b.WriteString("        - \"Step 3 says run make test but should be make build first\"\n")
+			b.WriteString("        - \"Missing context about which directory to run commands from\"\n\n")
+			b.WriteString("        Tool/system issues:\n")
+			b.WriteString("        - \"flow artifact write silently overwrites without warning\"\n")
+			b.WriteString("        - \"cx stats --json returned non-JSON when no rules file exists\"\n")
+			b.WriteString("        - \"tend run hangs if the binary wasnt built first\"\n\n")
+			b.WriteString("        Process observations:\n")
+			b.WriteString("        - \"This skill would work better split into two separate skills\"\n")
+			b.WriteString("        - \"The artifact from the previous skill was missing info I needed\"\n")
+			b.WriteString("        - \"This step took 5 minutes but could be automated\"\n")
+			b.WriteString("    </feedback_protocol>\n")
 		}
 	}
 
