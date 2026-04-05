@@ -13,6 +13,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/skills/pkg/skills"
 )
 
 type PlanAddStepCmd struct {
@@ -34,6 +35,7 @@ type PlanAddStepCmd struct {
 	SourceFile          string   `flag:"" help:"Origin file path for tracking job provenance (e.g., Claude plan file)"`
 	RulesFile           string   `flag:"" help:"Path to a custom rules file for this job"`
 	GitChanges          bool     `flag:"" help:"Include git changes as context for this job"`
+	Skill               string   `flag:"" help:"Skill name to inject into the agent context"`
 	SkillSequence       []string `flag:"" sep:"," help:"List of skills to execute in sequence"`
 }
 
@@ -80,6 +82,29 @@ func parseInlineFlag(values []string) orchestration.InlineConfig {
 		}
 	}
 	return orchestration.InlineConfig{Categories: categories}
+}
+
+// inheritSkillSequence sets job.SkillSequence from the skill's frontmatter
+// when a skill is set but no explicit skill_sequence was provided.
+func inheritSkillSequence(job *orchestration.Job) {
+	if job.Skill == "" || len(job.SkillSequence) > 0 {
+		return
+	}
+	loaded, err := skills.LoadSkillBypassingAccess(".", job.Skill)
+	if err != nil {
+		return
+	}
+	content, ok := loaded.Files["SKILL.md"]
+	if !ok {
+		return
+	}
+	meta, err := skills.ParseSkillFrontmatter(content)
+	if err != nil {
+		return
+	}
+	if len(meta.SkillSequence) > 0 {
+		job.SkillSequence = meta.SkillSequence
+	}
 }
 
 func RunPlanAddStep(cmd *PlanAddStepCmd) error {
@@ -178,6 +203,9 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	if job == nil {
 		return fmt.Errorf("failed to create job: no job details collected")
 	}
+
+	// If a skill is set but no skill_sequence, inherit from the skill's frontmatter
+	inheritSkillSequence(job)
 
 	// Generate job file
 	filename, err := orchestration.AddJob(plan, job)
@@ -300,6 +328,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			SourceFile:          cmd.SourceFile,
 			RulesFile:           cmd.RulesFile,
 			GitChanges:          cmd.GitChanges,
+			Skill:               cmd.Skill,
 			SkillSequence:       cmd.SkillSequence,
 		}
 
@@ -424,6 +453,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		SourceFile:          cmd.SourceFile,
 		RulesFile:           cmd.RulesFile,
 		GitChanges:          cmd.GitChanges,
+		Skill:               cmd.Skill,
 		SkillSequence:       cmd.SkillSequence,
 	}
 
@@ -608,6 +638,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if gitChanges, ok := template.Frontmatter["git_changes"].(bool); ok && !job.GitChanges {
 		job.GitChanges = gitChanges
 	}
+	if skill, ok := template.Frontmatter["skill"].(string); ok {
+		job.Skill = skill
+	}
 	if seq, ok := template.Frontmatter["skill_sequence"].([]interface{}); ok {
 		for _, s := range seq {
 			if str, ok := s.(string); ok {
@@ -656,6 +689,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// Backwards compat: prepend_dependencies flag
 	if cmd.PrependDependencies {
 		job.PrependDependencies = true
+	}
+	if cmd.Skill != "" {
+		job.Skill = cmd.Skill
 	}
 	if len(cmd.SkillSequence) > 0 {
 		job.SkillSequence = cmd.SkillSequence
