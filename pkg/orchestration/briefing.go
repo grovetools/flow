@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/grovetools/memory/pkg/memory"
+	"github.com/grovetools/skills/pkg/skills"
 )
 
 // countLines efficiently counts the number of lines in a file.
@@ -103,33 +104,15 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 		}
 
 		if len(sequenceNodes) > 0 {
-			b.WriteString("\n    <skill_sequence>\n")
-			b.WriteString("        You have a sequence of skills to work through in order.\n")
-			b.WriteString("        Before starting, create a TODO list with these exact items:\n\n")
-
-			renderSequenceNodes(&b, sequenceNodes, "        ", false)
-
-			b.WriteString("\n        Work through the list in order. For each pair: first invoke the skill using the Skill tool, then follow its instructions to completion. Mark each item done as you go.\n")
-			b.WriteString(fmt.Sprintf("\n        Start by invoking Skill(\"%s\") now.\n", sequenceNodes[0].Metadata.Name))
-			b.WriteString("    </skill_sequence>\n")
-
-			b.WriteString("\n    <feedback_protocol>\n")
-			b.WriteString("        When completing each skill, provide brief feedback via the --feedback flag:\n")
-			b.WriteString("        flow artifact complete <skill> --status completed --feedback \"your feedback\"\n\n")
-			b.WriteString("        Your feedback helps improve the system. Examples of useful feedback:\n\n")
-			b.WriteString("        Prompt improvements:\n")
-			b.WriteString("        - \"The cx alias format examples were unclear, had to guess @a: syntax\"\n")
-			b.WriteString("        - \"Step 3 says run make test but should be make build first\"\n")
-			b.WriteString("        - \"Missing context about which directory to run commands from\"\n\n")
-			b.WriteString("        Tool/system issues:\n")
-			b.WriteString("        - \"flow artifact write silently overwrites without warning\"\n")
-			b.WriteString("        - \"cx stats --json returned non-JSON when no rules file exists\"\n")
-			b.WriteString("        - \"tend run hangs if the binary wasnt built first\"\n\n")
-			b.WriteString("        Process observations:\n")
-			b.WriteString("        - \"This skill would work better split into two separate skills\"\n")
-			b.WriteString("        - \"The artifact from the previous skill was missing info I needed\"\n")
-			b.WriteString("        - \"This step took 5 minutes but could be automated\"\n")
-			b.WriteString("    </feedback_protocol>\n")
+			// Jobs always have artifact dirs; use the plan's artifact directory
+			artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
+			sequenceXML, err := GenerateSkillSequenceXML(sequenceNodes, artifactDir, false, workDir)
+			if err != nil {
+				return "", nil, fmt.Errorf("generating skill sequence XML: %w", err)
+			}
+			b.WriteString("\n    ")
+			b.WriteString(strings.ReplaceAll(sequenceXML, "\n", "\n    "))
+			b.WriteString("\n")
 		}
 	}
 
@@ -277,31 +260,148 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 	return b.String(), filesToUpload, nil
 }
 
+// GenerateSkillSequenceXML produces the <skill_sequence> and optional <skill_content>
+// XML blocks for a resolved sequence of skills.
+//
+// If artifactDir is non-empty, the output includes `flow artifact` CLI protocols for
+// reading/writing artifacts and marking completion. If empty, a plain TODO-list style
+// protocol is emitted instead.
+//
+// If includeSkillContent is true, each leaf skill's SKILL.md body is appended inside
+// a <skill_content> block so the consuming agent doesn't need secondary lookups.
+func GenerateSkillSequenceXML(nodes []SkillSequenceNode, artifactDir string, includeSkillContent bool, workDir string) (string, error) {
+	useArtifacts := artifactDir != ""
+
+	var b strings.Builder
+	b.WriteString("<skill_sequence>\n")
+	b.WriteString("    You have a sequence of skills to work through in order.\n")
+	b.WriteString("    Before starting, create a TODO list with these exact items:\n\n")
+
+	renderSequenceNodes(&b, nodes, "    ", false, useArtifacts)
+
+	if useArtifacts {
+		b.WriteString("\n    Work through the list in order. For each pair: first invoke the skill using the Skill tool, then follow its instructions to completion. Mark each item done as you go.\n")
+	} else {
+		b.WriteString("\n    Work through the list in order. For each skill: invoke it using the Skill tool, follow its instructions to completion, then mark the item done on your TODO list.\n")
+	}
+	b.WriteString(fmt.Sprintf("\n    Start by invoking Skill(\"%s\") now.\n", nodes[0].Metadata.Name))
+	b.WriteString("</skill_sequence>\n")
+
+	if useArtifacts {
+		b.WriteString("\n<feedback_protocol>\n")
+		b.WriteString("    When completing each skill, provide brief feedback via the --feedback flag:\n")
+		b.WriteString("    flow artifact complete <skill> --status completed --feedback \"your feedback\"\n\n")
+		b.WriteString("    Your feedback helps improve the system. Examples of useful feedback:\n\n")
+		b.WriteString("    Prompt improvements:\n")
+		b.WriteString("    - \"The cx alias format examples were unclear, had to guess @a: syntax\"\n")
+		b.WriteString("    - \"Step 3 says run make test but should be make build first\"\n")
+		b.WriteString("    - \"Missing context about which directory to run commands from\"\n\n")
+		b.WriteString("    Tool/system issues:\n")
+		b.WriteString("    - \"flow artifact write silently overwrites without warning\"\n")
+		b.WriteString("    - \"cx stats --json returned non-JSON when no rules file exists\"\n")
+		b.WriteString("    - \"tend run hangs if the binary wasnt built first\"\n\n")
+		b.WriteString("    Process observations:\n")
+		b.WriteString("    - \"This skill would work better split into two separate skills\"\n")
+		b.WriteString("    - \"The artifact from the previous skill was missing info I needed\"\n")
+		b.WriteString("    - \"This step took 5 minutes but could be automated\"\n")
+		b.WriteString("</feedback_protocol>\n")
+	}
+
+	if includeSkillContent {
+		skillContentXML, err := generateSkillContentXML(nodes, workDir)
+		if err != nil {
+			return "", fmt.Errorf("generating skill content: %w", err)
+		}
+		if skillContentXML != "" {
+			b.WriteString("\n")
+			b.WriteString(skillContentXML)
+		}
+	}
+
+	return b.String(), nil
+}
+
+// generateSkillContentXML recursively collects SKILL.md bodies and wraps them in XML.
+func generateSkillContentXML(nodes []SkillSequenceNode, workDir string) (string, error) {
+	var b strings.Builder
+	b.WriteString("<skill_content>\n")
+
+	hasContent := false
+	if err := collectSkillContent(&b, nodes, workDir, &hasContent); err != nil {
+		return "", err
+	}
+
+	if !hasContent {
+		return "", nil
+	}
+
+	b.WriteString("</skill_content>\n")
+	return b.String(), nil
+}
+
+func collectSkillContent(b *strings.Builder, nodes []SkillSequenceNode, workDir string, hasContent *bool) error {
+	for _, node := range nodes {
+		if len(node.Children) > 0 {
+			if err := collectSkillContent(b, node.Children, workDir, hasContent); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Load the skill content for leaf nodes
+		loadedSkill, err := skills.LoadSkillBypassingAccess(workDir, node.Metadata.Name)
+		if err != nil {
+			// Non-fatal: skip skills we can't load
+			continue
+		}
+		content, ok := loadedSkill.Files["SKILL.md"]
+		if !ok {
+			continue
+		}
+		body := stripSkillFrontmatter(content)
+		if body == "" {
+			continue
+		}
+
+		b.WriteString(fmt.Sprintf("    <system_instructions skill=\"%s\">\n", node.Metadata.Name))
+		b.WriteString(body)
+		b.WriteString("\n    </system_instructions>\n")
+		*hasContent = true
+	}
+	return nil
+}
+
 // renderSequenceNodes recursively renders a skill sequence tree as a TODO list.
-// It uses the `flow artifact` CLI to guarantee correct paths and validation.
-// Each skill gets an execution protocol using CLI commands instead of raw paths.
-func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep bool) {
+// When useArtifacts is true, it includes `flow artifact` CLI protocols.
+// When false, it uses plain TODO-list completion instructions.
+func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep bool, useArtifacts bool) {
 	var previousArtifacts []string
 
 	for _, node := range nodes {
 		if len(node.Children) > 0 {
 			// Parent skill with sub-sequence
 			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
-			renderSequenceNodes(b, node.Children, indent+"  ", true)
-			b.WriteString(fmt.Sprintf("%s- Mark complete: `flow artifact complete %s --status completed`\n", indent, node.Metadata.Name))
+			renderSequenceNodes(b, node.Children, indent+"  ", true, useArtifacts)
+			if useArtifacts {
+				b.WriteString(fmt.Sprintf("%s- Mark complete: `flow artifact complete %s --status completed`\n", indent, node.Metadata.Name))
+			} else {
+				b.WriteString(fmt.Sprintf("%s- Mark complete: %s done\n", indent, node.Metadata.Name))
+			}
 		} else {
 			// Leaf skill: render invoke + execute pair
 			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
 
 			var actions []string
 
-			// Downstream skills read previous artifacts using the CLI
-			if len(previousArtifacts) > 0 {
-				actions = append(actions, fmt.Sprintf("read prior context using `flow artifact read <file>` for: %s", strings.Join(previousArtifacts, ", ")))
-			}
+			if useArtifacts {
+				// Downstream skills read previous artifacts using the CLI
+				if len(previousArtifacts) > 0 {
+					actions = append(actions, fmt.Sprintf("read prior context using `flow artifact read <file>` for: %s", strings.Join(previousArtifacts, ", ")))
+				}
 
-			if len(node.Metadata.Produces) > 0 {
-				actions = append(actions, fmt.Sprintf("write output using `flow artifact write <filename>` for: %s", strings.Join(node.Metadata.Produces, ", ")))
+				if len(node.Metadata.Produces) > 0 {
+					actions = append(actions, fmt.Sprintf("write output using `flow artifact write <filename>` for: %s", strings.Join(node.Metadata.Produces, ", ")))
+				}
 			}
 
 			// Build the execute line
@@ -311,10 +411,15 @@ func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent s
 				b.WriteString(fmt.Sprintf("%s- Execute %s — %s\n", indent, node.Metadata.Name, node.Metadata.Description))
 			}
 
-			// CLI completion protocol
-			b.WriteString(fmt.Sprintf("%s  When finished successfully: `flow artifact complete %s --status completed`\n", indent, node.Metadata.Name))
-			b.WriteString(fmt.Sprintf("%s  If you get stuck or fail: write a diagnostic via `flow artifact write %s-diag.md`, then run `flow artifact complete %s --status failed --error \"<reason>\" --diagnostic-file %s-diag.md`\n",
-				indent, node.Metadata.Name, node.Metadata.Name, node.Metadata.Name))
+			// Completion protocol
+			if useArtifacts {
+				b.WriteString(fmt.Sprintf("%s  When finished successfully: `flow artifact complete %s --status completed`\n", indent, node.Metadata.Name))
+				b.WriteString(fmt.Sprintf("%s  If you get stuck or fail: write a diagnostic via `flow artifact write %s-diag.md`, then run `flow artifact complete %s --status failed --error \"<reason>\" --diagnostic-file %s-diag.md`\n",
+					indent, node.Metadata.Name, node.Metadata.Name, node.Metadata.Name))
+			} else {
+				b.WriteString(fmt.Sprintf("%s  When finished successfully: mark %s as done on your TODO list\n", indent, node.Metadata.Name))
+				b.WriteString(fmt.Sprintf("%s  If you get stuck or fail: note the failure reason and proceed to the next skill\n", indent))
+			}
 
 			// Accumulate current artifacts for the next skill's "read" action
 			previousArtifacts = append(previousArtifacts, node.Metadata.Produces...)

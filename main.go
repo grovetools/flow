@@ -45,6 +45,9 @@ func main() {
 	// Add the artifact command (for use inside job sessions)
 	rootCmd.AddCommand(cmd.NewArtifactCmd())
 
+	// Add the skill command (skill management utilities)
+	rootCmd.AddCommand(cmd.NewSkillCmd())
+
 	// Add other top-level commands
 	rootCmd.AddCommand(cmd.GetChatCommand())
 	rootCmd.AddCommand(cmd.NewVersionCmd())
