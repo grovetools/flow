@@ -8,11 +8,22 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	markdown "github.com/grovetools/core/tui/components/markdown"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
-// SkillDisplayNode represents a skill in the skill pane tree for rendering.
+// SkillPaneNode represents either a skill or an artifact in the skill pane tree.
+type SkillPaneNode struct {
+	Name           string
+	IsArtifact     bool
+	ParentSkill    string // Skill name this artifact belongs to
+	FilePath       string // Relative file path for artifacts
+	ArtifactStatus string // "expected", "produced", "extra"
+	Depth          int
+}
+
+// SkillDisplayNode represents a skill in the skill pane tree for rendering (internal).
 type SkillDisplayNode struct {
 	Name     string
 	Depth    int
@@ -95,123 +106,237 @@ func resolveSkillDisplayNodes(plan *orchestration.Plan, job *orchestration.Job) 
 	return tree, flat
 }
 
-// renderInteractiveSkillPane builds the skill pane with cursor highlight and artifact detail.
-func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job, cursor int, width, height int) (string, []*SkillDisplayNode, map[string]orchestration.SkillFidelityState) {
+// resolveSkillPaneNodes builds a mixed tree of SkillPaneNodes (skills + artifact children).
+func resolveSkillPaneNodes(plan *orchestration.Plan, job *orchestration.Job, stateMap map[string]orchestration.SkillFidelityState) []*SkillPaneNode {
+	_, flatDisplayNodes := resolveSkillDisplayNodes(plan, job)
+
+	var paneNodes []*SkillPaneNode
+	for _, dn := range flatDisplayNodes {
+		// Add the skill node
+		paneNodes = append(paneNodes, &SkillPaneNode{
+			Name:  dn.Name,
+			Depth: dn.Depth,
+		})
+
+		// Add artifact children from state map
+		state, exists := stateMap[dn.Name]
+		if !exists {
+			continue
+		}
+
+		producedSet := make(map[string]bool, len(state.ArtifactsProduced))
+		for _, p := range state.ArtifactsProduced {
+			producedSet[p] = true
+		}
+
+		// Expected artifacts
+		for _, art := range state.ArtifactsExpected {
+			status := "expected"
+			if producedSet[art] {
+				status = "produced"
+			}
+			paneNodes = append(paneNodes, &SkillPaneNode{
+				Name:           art,
+				IsArtifact:     true,
+				ParentSkill:    dn.Name,
+				FilePath:       art,
+				ArtifactStatus: status,
+				Depth:          dn.Depth + 1,
+			})
+		}
+
+		// Extra artifacts (produced but not expected)
+		for _, art := range state.ArtifactsProduced {
+			if !contains(state.ArtifactsExpected, art) {
+				paneNodes = append(paneNodes, &SkillPaneNode{
+					Name:           art,
+					IsArtifact:     true,
+					ParentSkill:    dn.Name,
+					FilePath:       art,
+					ArtifactStatus: "extra",
+					Depth:          dn.Depth + 1,
+				})
+			}
+		}
+	}
+
+	return paneNodes
+}
+
+func contains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// skillPaneResult holds the output of renderInteractiveSkillPane.
+type skillPaneResult struct {
+	treeContent   string                                      // Tree view (top half)
+	detailContent string                                      // Detail view (bottom half)
+	nodes         []*SkillPaneNode                            // Flat node list
+	stateMap      map[string]orchestration.SkillFidelityState // Cached state
+}
+
+// renderInteractiveSkillPane builds the skill pane tree view and detail content separately.
+func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job, cursor int, _, height int) skillPaneResult {
+	empty := skillPaneResult{}
 	if len(job.SkillSequence) == 0 {
-		return theme.DefaultTheme.Muted.Render("No skill sequence defined for this job."), nil, nil
+		empty.treeContent = theme.DefaultTheme.Muted.Render("No skill sequence defined for this job.")
+		return empty
 	}
 
 	artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
 	stateMap := readSkillStateMap(artifactDir)
 
-	_, flatNodes := resolveSkillDisplayNodes(plan, job)
+	paneNodes := resolveSkillPaneNodes(plan, job, stateMap)
 
-	if len(flatNodes) == 0 {
-		return theme.DefaultTheme.Muted.Render("No skills resolved."), nil, stateMap
+	if len(paneNodes) == 0 {
+		empty.treeContent = theme.DefaultTheme.Muted.Render("No skills resolved.")
+		empty.stateMap = stateMap
+		return empty
 	}
 
 	// Clamp cursor
 	if cursor < 0 {
 		cursor = 0
 	}
-	if cursor >= len(flatNodes) {
-		cursor = len(flatNodes) - 1
+	if cursor >= len(paneNodes) {
+		cursor = len(paneNodes) - 1
 	}
 
-	detailHeight := height - len(flatNodes) - 6 // Reserve space for header, summary, separator
-	if detailHeight < 5 {
-		detailHeight = 5
-	}
-
-	var b strings.Builder
+	// === Build tree content (top half) ===
+	var tree strings.Builder
 
 	// Header
-	b.WriteString(theme.DefaultTheme.Info.Bold(true).Render("Skill Sequence"))
-	b.WriteString("\n\n")
+	tree.WriteString(theme.DefaultTheme.Info.Bold(true).Render("Skill Sequence"))
+	tree.WriteString("\n\n")
 
 	// Render tree with cursor
-	for i, node := range flatNodes {
-		renderSkillNodeLine(&b, node, stateMap, i == cursor)
+	for i, node := range paneNodes {
+		isLastChild := isLastArtifactChild(paneNodes, i)
+		renderPaneNodeLine(&tree, node, stateMap, i == cursor, isLastChild)
 	}
 
-	// Summary
-	b.WriteString("\n")
-	renderSkillSummary(&b, flatNodes, stateMap)
+	// Summary (count only skill nodes)
+	tree.WriteString("\n")
+	renderPaneSkillSummary(&tree, paneNodes, stateMap)
 
-	// Separator
-	b.WriteString("\n")
-	sepWidth := width - 4
-	if sepWidth < 10 {
-		sepWidth = 10
+	tree.WriteString("\n")
+
+	// === Build detail content (bottom half) ===
+	var detail strings.Builder
+
+	selectedNode := paneNodes[cursor]
+	if selectedNode.IsArtifact {
+		artPath := filepath.Join(artifactDir, selectedNode.FilePath)
+		renderArtifactDetailContent(&detail, artPath, selectedNode)
+	} else {
+		renderSkillArtifactDetail(&detail, selectedNode, stateMap, plan, job, height)
 	}
-	b.WriteString(theme.DefaultTheme.Muted.Render(strings.Repeat("─", sepWidth)))
-	b.WriteString("\n")
 
-	// Artifact detail for selected skill
-	selectedNode := flatNodes[cursor]
-	renderSkillArtifactDetail(&b, selectedNode, stateMap, plan, job, detailHeight)
-
-	return b.String(), flatNodes, stateMap
+	return skillPaneResult{
+		treeContent:   tree.String(),
+		detailContent: detail.String(),
+		nodes:         paneNodes,
+		stateMap:      stateMap,
+	}
 }
 
-// renderSkillNodeLine renders a single skill node line with optional cursor highlight.
-func renderSkillNodeLine(b *strings.Builder, node *SkillDisplayNode, stateMap map[string]orchestration.SkillFidelityState, isCursor bool) {
+// isLastArtifactChild checks if the node at index i is the last artifact child of its parent skill.
+func isLastArtifactChild(nodes []*SkillPaneNode, i int) bool {
+	node := nodes[i]
+	if !node.IsArtifact {
+		return false
+	}
+	// Check if the next node is NOT an artifact of the same parent
+	if i+1 >= len(nodes) {
+		return true
+	}
+	next := nodes[i+1]
+	return !next.IsArtifact || next.ParentSkill != node.ParentSkill
+}
+
+// renderPaneNodeLine renders a single node line (skill or artifact) with optional cursor highlight.
+func renderPaneNodeLine(b *strings.Builder, node *SkillPaneNode, stateMap map[string]orchestration.SkillFidelityState, isCursor bool, isLastChild bool) {
+	t := theme.DefaultTheme
+
+	// Cursor indicator
+	cursorStr := "  "
+	if isCursor {
+		cursorStr = t.Highlight.Render(theme.IconArrowRightBold + " ")
+	}
+
+	if node.IsArtifact {
+		// Render artifact node with tree connector
+		parentIndent := strings.Repeat("  ", node.Depth-1)
+		connector := t.Muted.Render("├─")
+		if isLastChild {
+			connector = t.Muted.Render("└─")
+		}
+
+		var icon string
+		var style lipgloss.Style
+		switch node.ArtifactStatus {
+		case "produced":
+			icon = theme.IconStatusCompleted
+			style = t.Success
+		case "extra":
+			icon = theme.IconStatusCompleted
+			style = t.Info
+		default: // expected but not produced
+			icon = theme.IconPending
+			style = t.Muted
+		}
+		line := fmt.Sprintf("%s%s  %s %s %s", cursorStr, parentIndent, connector, style.Render(icon), t.Muted.Render(node.Name))
+		b.WriteString(line + "\n")
+		return
+	}
+
+	// Render skill node
+	indent := strings.Repeat("  ", node.Depth)
 	state, exists := stateMap[node.Name]
 	if !exists {
 		state = orchestration.SkillFidelityState{Status: "pending"}
 	}
 
-	indent := strings.Repeat("  ", node.Depth)
-
-	// Icon and color based on status
 	icon, color := skillStatusStyle(state.Status)
 	styledIcon := lipgloss.NewStyle().Foreground(color).Render(icon)
-
-	// Status label
 	statusLabel := fmt.Sprintf("[%s]", capitalizeFirst(state.Status))
 	styledStatus := lipgloss.NewStyle().Foreground(color).Render(statusLabel)
 
-	// Cursor indicator
-	cursorStr := "  "
-	if isCursor {
-		cursorStr = theme.DefaultTheme.Highlight.Render(theme.IconArrowRightBold + " ")
-	}
-
-	// Base line
 	line := fmt.Sprintf("%s%s%s %-18s %s", cursorStr, indent, styledIcon, node.Name, styledStatus)
 
-	// Supplementary info
+	// Supplementary info — compact, no feedback inline
 	switch state.Status {
 	case "completed", "running":
 		if len(state.ArtifactsExpected) > 0 {
-			artifactInfo := fmt.Sprintf("Artifacts: %d/%d", len(state.ArtifactsProduced), len(state.ArtifactsExpected))
+			artifactInfo := fmt.Sprintf("%d/%d", len(state.ArtifactsProduced), len(state.ArtifactsExpected))
 			if len(state.ArtifactsProduced) == len(state.ArtifactsExpected) {
-				line += "  " + theme.DefaultTheme.Success.Render(artifactInfo)
+				line += "  " + t.Success.Render(artifactInfo)
 			} else {
-				line += "  " + theme.DefaultTheme.Warning.Render(artifactInfo)
+				line += "  " + t.Warning.Render(artifactInfo)
 			}
 		}
 	case "failed":
 		if state.Error != nil && *state.Error != "" {
-			line += "  " + theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %s", *state.Error))
-		}
-		if state.DiagnosticPath != nil && *state.DiagnosticPath != "" {
-			line += "  " + theme.DefaultTheme.Muted.Render(fmt.Sprintf("Diag: %s", filepath.Base(*state.DiagnosticPath)))
+			line += "  " + t.Error.Render(*state.Error)
 		}
 	}
 
 	b.WriteString(line + "\n")
-
-	// Show feedback if present
-	if state.Feedback != nil && *state.Feedback != "" {
-		feedbackLine := fmt.Sprintf("  %s  %s", indent, theme.DefaultTheme.Muted.Render(fmt.Sprintf("Feedback: %s", *state.Feedback)))
-		b.WriteString(feedbackLine + "\n")
-	}
 }
 
-// renderSkillSummary renders the progress summary line.
-func renderSkillSummary(b *strings.Builder, flatNodes []*SkillDisplayNode, stateMap map[string]orchestration.SkillFidelityState) {
-	total := len(flatNodes)
+// renderPaneSkillSummary renders the progress summary line (only counting skill nodes).
+func renderPaneSkillSummary(b *strings.Builder, paneNodes []*SkillPaneNode, stateMap map[string]orchestration.SkillFidelityState) {
+	total := 0
+	for _, n := range paneNodes {
+		if !n.IsArtifact {
+			total++
+		}
+	}
 	completed := 0
 	failed := 0
 	for _, state := range stateMap {
@@ -232,7 +357,7 @@ func renderSkillSummary(b *strings.Builder, flatNodes []*SkillDisplayNode, state
 }
 
 // renderSkillArtifactDetail renders the artifact detail for the selected skill.
-func renderSkillArtifactDetail(b *strings.Builder, node *SkillDisplayNode, stateMap map[string]orchestration.SkillFidelityState, plan *orchestration.Plan, job *orchestration.Job, maxHeight int) {
+func renderSkillArtifactDetail(b *strings.Builder, node *SkillPaneNode, stateMap map[string]orchestration.SkillFidelityState, plan *orchestration.Plan, job *orchestration.Job, maxHeight int) {
 	state, exists := stateMap[node.Name]
 	if !exists {
 		b.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("  %s — no status data yet", node.Name)))
@@ -266,7 +391,6 @@ func renderSkillArtifactDetail(b *strings.Builder, node *SkillDisplayNode, state
 			}
 			if produced {
 				b.WriteString(fmt.Sprintf("  %s %s\n", t.Success.Render(theme.IconStatusCompleted), art))
-				// Show artifact content preview
 				renderArtifactPreview(b, filepath.Join(artifactDir, art), t, maxHeight)
 			} else {
 				b.WriteString(fmt.Sprintf("  %s %s\n", t.Muted.Render(theme.IconPending), art))
@@ -301,7 +425,6 @@ func renderSkillArtifactDetail(b *strings.Builder, node *SkillDisplayNode, state
 		b.WriteString("\n")
 		b.WriteString("  " + t.Muted.Render(*state.DiagnosticPath) + "\n")
 
-		// Try to read and show diagnostic content preview
 		artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
 		diagPath := filepath.Join(artifactDir, *state.DiagnosticPath)
 		if data, err := os.ReadFile(diagPath); err == nil {
@@ -330,7 +453,48 @@ func renderSkillArtifactDetail(b *strings.Builder, node *SkillDisplayNode, state
 	}
 }
 
-// renderArtifactPreview reads an artifact file and renders a content preview.
+// renderArtifactDetailContent renders a full artifact content preview when an artifact node is selected.
+func renderArtifactDetailContent(b *strings.Builder, path string, node *SkillPaneNode) {
+	t := theme.DefaultTheme
+
+	// Artifact header
+	var statusIcon string
+	var statusStyle lipgloss.Style
+	switch node.ArtifactStatus {
+	case "produced":
+		statusIcon = theme.IconStatusCompleted
+		statusStyle = t.Success
+	case "extra":
+		statusIcon = theme.IconStatusCompleted
+		statusStyle = t.Info
+	default:
+		statusIcon = theme.IconPending
+		statusStyle = t.Muted
+	}
+
+	b.WriteString(statusStyle.Render(statusIcon + " " + node.Name))
+	b.WriteString("  ")
+	b.WriteString(t.Muted.Render(fmt.Sprintf("(from %s)", node.ParentSkill)))
+	b.WriteString("\n\n")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.WriteString(t.Muted.Render("  File not yet produced."))
+		b.WriteString("\n")
+		return
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		b.WriteString(t.Muted.Render("  (empty file)"))
+		b.WriteString("\n")
+		return
+	}
+
+	// Apply markdown rendering to the content
+	b.WriteString(markdown.Render(content, t))
+}
+
+// renderArtifactPreview reads an artifact file and renders a content preview with markdown styling.
 func renderArtifactPreview(b *strings.Builder, path string, t *theme.Theme, maxLines int) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -341,6 +505,7 @@ func renderArtifactPreview(b *strings.Builder, path string, t *theme.Theme, maxL
 		return
 	}
 
+	// Truncate to preview limit
 	lines := strings.Split(content, "\n")
 	previewLimit := maxLines / 2
 	if previewLimit < 5 {
@@ -350,14 +515,23 @@ func renderArtifactPreview(b *strings.Builder, path string, t *theme.Theme, maxL
 		previewLimit = 20
 	}
 
-	b.WriteString("\n")
 	truncated := false
 	if len(lines) > previewLimit {
 		lines = lines[:previewLimit]
 		truncated = true
 	}
-	for _, line := range lines {
-		b.WriteString("    " + t.Muted.Render(line) + "\n")
+	previewContent := strings.Join(lines, "\n")
+
+	b.WriteString("\n")
+	// Apply markdown rendering
+	rendered := markdown.Render(previewContent, t)
+	// Indent the rendered content
+	for _, line := range strings.Split(rendered, "\n") {
+		if line != "" {
+			b.WriteString("    " + line + "\n")
+		} else {
+			b.WriteString("\n")
+		}
 	}
 	if truncated {
 		b.WriteString("    " + t.Muted.Render(fmt.Sprintf("... (%d more lines)", len(strings.Split(content, "\n"))-previewLimit)) + "\n")

@@ -32,6 +32,7 @@ type RefreshMsg struct{}
 type ArchiveConfirmedMsg struct{ Job *orchestration.Job }
 type EditFileAndQuitMsg struct{ FilePath string }
 type EditFileInTmuxMsg struct{ Err error }
+type editorFinishedMsg struct{ Err error }
 type TickMsg time.Time
 type StatusUpdateMsg string
 type RefreshTickMsg time.Time
@@ -1663,4 +1664,44 @@ func addJobsFromRecipeCmd(plan *orchestration.Plan, recipeName string, externalD
 		_, err = orchestration.AddJobsFromRecipe(plan, recipe, externalDeps, templateData)
 		return recipeAddedMsg{err: err}
 	}
+}
+
+// editSkillOrArtifactCmd opens $EDITOR on a skill or artifact file via tea.ExecProcess.
+func editSkillOrArtifactCmd(plan *orchestration.Plan, job *orchestration.Job, node *SkillPaneNode) tea.Cmd {
+	var targetPath string
+	if node.IsArtifact {
+		targetPath = filepath.Join(plan.Directory, ".artifacts", job.ID, node.FilePath)
+	} else {
+		// For skill nodes, open the SKILL.md from the skills directory
+		// Try to find the skill file in the workspace
+		workDir := plan.Directory
+		if plan.Config != nil && plan.Config.Worktree != "" {
+			if wd, err := os.Getwd(); err == nil {
+				workDir = wd
+			}
+		}
+		skillPath := filepath.Join(workDir, ".grove", "skills", node.Name, "SKILL.md")
+		if _, err := os.Stat(skillPath); err != nil {
+			// Fall back to artifact directory status file
+			targetPath = filepath.Join(plan.Directory, ".artifacts", job.ID, node.Name+"-status.json")
+		} else {
+			targetPath = skillPath
+		}
+	}
+
+	if targetPath == "" {
+		return func() tea.Msg {
+			return editorFinishedMsg{Err: fmt.Errorf("could not resolve path for %s", node.Name)}
+		}
+	}
+
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi"
+	}
+
+	c := exec.Command(editor, targetPath)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return editorFinishedMsg{Err: err}
+	})
 }

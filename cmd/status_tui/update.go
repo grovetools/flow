@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	markdown "github.com/grovetools/core/tui/components/markdown"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/logging/logutil"
 	"github.com/grovetools/core/pkg/workspace"
@@ -456,7 +456,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// They can press 'v' to close it when ready
 
 			// Return focus to jobs pane
-			m.Focus = JobsPane
+			m.Focus = FocusJobs
 		}
 
 		// Refresh the plan to show updated statuses
@@ -516,7 +516,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Stop following, keep viewer open
 			m.LogViewer.Stop()
-			m.Focus = JobsPane
+			m.Focus = FocusJobs
 		}
 
 		return m, refreshPlan(m.PlanDir)
@@ -527,6 +527,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, tea.Quit
+
+	case editorFinishedMsg:
+		if msg.Err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render("Editor error: " + msg.Err.Error())
+		} else {
+			m.StatusSummary = theme.DefaultTheme.Success.Render("Editor closed")
+		}
+		// Refresh the skill pane to reflect any edits
+		m.refreshSkillPane()
+		return m, nil
 
 	case IsolatedAgentInputSentMsg:
 		// Handle response from sending input to isolated agent
@@ -640,11 +650,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Auto-refresh skill pane if it's active
 		if m.ActiveDetailPane == SkillPane && m.ActiveLogJob != nil {
-			content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
-			m.skillPaneNodes = flatNodes
-			m.skillPaneStateMap = stateMap
-			m.skillPaneRawContent = content
-			m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
+			m.refreshSkillPane()
 		}
 
 		// Adjust cursor if needed
@@ -759,8 +765,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 		m.editViewport.Width = m.LogViewerWidth
 		m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-		m.skillPaneViewport.Width = m.LogViewerWidth
-		m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
+		m.updateSkillViewportSizes()
 
 		// Re-wrap content for all detail viewports to adapt to the new size
 		if m.frontmatterRawContent != "" {
@@ -866,7 +871,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Unfocus the input but keep it visible (for isolated agents, it's always visible)
 				m.IsolatedAgentInputActive = false
 				m.IsolatedAgentInput.Blur()
-				m.Focus = LogsPane
+				m.Focus = FocusDetailPrimary
 				m.StatusSummary = ""
 				// Don't call updateLayoutDimensions - the chat box visibility is based on job type, not focus
 				return m, nil
@@ -1242,79 +1247,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// If log viewer is showing and focused, delegate most keys to it first.
-		if m.ShowLogs && m.Focus == LogsPane {
+		// Dispatch to focused pane handlers for detail and secondary panes
+		if m.ShowLogs && (m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary) {
+			// Global keys that should pass through to the main switch
 			switch msg.String() {
-			case "q", "ctrl+c":
-				// Let 'q' and 'ctrl+c' be handled by the main logic to quit.
-			case "?":
-				// Let '?' be handled by the main logic to show help.
-			case "F":
-				// Let 'F' (ViewSkillPane) be handled by the main logic.
-			case "l", "f", "b", "m", "p", "v":
-				// Let pane switching keys be handled by the main logic.
-			case "tab", "shift+tab":
-				// Let 'tab' and 'shift+tab' be handled by the main logic to switch focus.
-			case "V":
-				// Let 'V' be handled by the main logic to toggle layout.
-			case "z":
-				// Let 'z' be handled by the main logic to toggle fullscreen.
-			case "i", "s":
-				// Let 'i' and 's' (SendInput) be handled by main logic to focus isolated agent input.
-			case "esc":
-				// 'esc' closes the detail pane (handled by main logic below)
-			case "g":
-				// Process sequence for gg
-				result, _ := m.Sequence.Process(msg, m.KeyMap.Top)
-				if result == keymap.SequenceMatch {
-					// gg - jump to top of logs
-					m.LogViewer.GotoTop()
-					m.Sequence.Clear()
-					return m, nil
-				}
-				// First 'g' - sequence is tracking it
-				return m, nil
-			case "G":
-				// Jump to bottom of logs
-				m.LogViewer.GotoBottom()
-				m.Sequence.Clear() // Clear any pending sequence
-				return m, nil
+			case "q", "ctrl+c", "?", "F", "l", "f", "b", "m", "p", "v",
+				"tab", "shift+tab", "V", "z", "i", "s", "esc":
+				// Let these be handled by the main logic below
 			default:
-				// Clear sequence for any other key
-				m.Sequence.Clear()
-
-				// Handle skill pane cursor navigation
-				if m.ActiveDetailPane == SkillPane && len(m.skillPaneNodes) > 0 {
-					switch msg.String() {
-					case "j", "down":
-						if m.skillPaneCursor < len(m.skillPaneNodes)-1 {
-							m.skillPaneCursor++
-							m.refreshSkillPane()
-						}
-						return m, nil
-					case "k", "up":
-						if m.skillPaneCursor > 0 {
-							m.skillPaneCursor--
-							m.refreshSkillPane()
-						}
-						return m, nil
-					}
+				if m.Focus == FocusDetailPrimary {
+					return m.handleDetailPrimaryKey(msg)
 				}
-
-				// Delegate other keys to the active viewport for scrolling, etc.
-				switch m.ActiveDetailPane {
-				case LogsPaneDetail:
-					m.LogViewer, cmd = m.LogViewer.Update(msg)
-				case FrontmatterPane:
-					m.frontmatterViewport, cmd = m.frontmatterViewport.Update(msg)
-				case BriefingPane:
-					m.briefingViewport, cmd = m.briefingViewport.Update(msg)
-				case EditPane:
-					m.editViewport, cmd = m.editViewport.Update(msg)
-				case SkillPane:
-					m.skillPaneViewport, cmd = m.skillPaneViewport.Update(msg)
-				}
-				return m, cmd
+				return m.handleDetailSecondaryKey(msg)
 			}
 		}
 
@@ -1344,10 +1288,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.SwitchFocus):
 			if m.ShowLogs && !m.LogPaneFullscreen {
-				if m.Focus == JobsPane {
-					m.Focus = LogsPane
+				isShiftTab := msg.Type == tea.KeyShiftTab
+
+				if m.ActiveDetailPane == SkillPane {
+					// 3-way cycle: Jobs <-> Tree <-> ArtifactViewport
+					if !isShiftTab {
+						switch m.Focus {
+						case FocusJobs:
+							m.Focus = FocusDetailPrimary
+						case FocusDetailPrimary:
+							m.Focus = FocusDetailSecondary
+						default:
+							m.Focus = FocusJobs
+						}
+					} else {
+						switch m.Focus {
+						case FocusJobs:
+							m.Focus = FocusDetailSecondary
+						case FocusDetailSecondary:
+							m.Focus = FocusDetailPrimary
+						default:
+							m.Focus = FocusJobs
+						}
+					}
+					// Re-render skill pane to update separator highlight
+					m.refreshSkillPane()
 				} else {
-					m.Focus = JobsPane
+					// 2-way cycle: Jobs <-> Detail
+					if m.Focus == FocusJobs {
+						m.Focus = FocusDetailPrimary
+					} else {
+						m.Focus = FocusJobs
+					}
 				}
 			}
 
@@ -1367,8 +1339,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 				m.editViewport.Width = m.LogViewerWidth
 				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.skillPaneViewport.Width = m.LogViewerWidth
-				m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.updateSkillViewportSizes()
 
 				// Re-wrap content for all detail viewports to adapt to the new layout
 				if m.frontmatterRawContent != "" {
@@ -1402,7 +1373,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// When entering fullscreen, force focus to logs pane
 				if m.LogPaneFullscreen {
-					m.Focus = LogsPane
+					m.Focus = FocusDetailPrimary
 				}
 
 				// Centralized layout calculation
@@ -1415,8 +1386,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 				m.editViewport.Width = m.LogViewerWidth
 				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.skillPaneViewport.Width = m.LogViewerWidth
-				m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.updateSkillViewportSizes()
 
 				// Re-wrap content for all detail viewports to adapt to the new layout
 				if m.frontmatterRawContent != "" {
@@ -1564,7 +1534,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.StreamingJobID = ""
 				m.ShowLogs = false
-				m.Focus = JobsPane
+				m.Focus = FocusJobs
 				m.ActiveLogJob = nil
 				m.ActiveDetailPane = NoPane
 				m.CurrentAgentStatus = nil // Clear agent status when closing pane
@@ -1617,7 +1587,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StreamingJobID = ""
 			m.ShowLogs = false
 			m.LogPaneFullscreen = false
-			m.Focus = JobsPane
+			m.Focus = FocusJobs
 			m.ActiveLogJob = nil
 			m.ActiveDetailPane = NoPane
 			m.CurrentAgentStatus = nil // Clear agent status when closing pane
@@ -1643,7 +1613,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Focus the input
 				m.IsolatedAgentInputActive = true
 				m.IsolatedAgentInput.Focus()
-				m.Focus = InputPane
+				m.Focus = FocusInput
 				m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for agent (Enter to send, Esc to cancel)")
 				return m, nil
 			}
@@ -1763,7 +1733,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.IsRunningJob = true
 				m.ActiveDetailPane = LogsPaneDetail // Switch to log viewer pane
 				m.ShowLogs = true
-				m.Focus = LogsPane
+				m.Focus = FocusDetailPrimary
 
 				// Set the active job for the log pane header. If multiple jobs, use the first.
 				// This might be overridden later if an agent job is found.
@@ -2184,11 +2154,12 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		return m, loadJobFileContentCmd(job)
 	case SkillPane:
 		m.skillPaneCursor = 0
-		content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
-		m.skillPaneNodes = flatNodes
-		m.skillPaneStateMap = stateMap
-		m.skillPaneRawContent = content
-		m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
+		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+		m.skillPaneNodes = result.nodes
+		m.skillPaneStateMap = result.stateMap
+		m.skillPaneRawContent = result.treeContent
+		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
+		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
 		return m, nil
 	}
 
@@ -2199,7 +2170,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.ActiveDetailPane = pane
 	m.ShowLogs = true
-	// Don't auto-focus the detail pane - keep current focus
+	// Auto-focus the detail pane when opening it
+	m.Focus = FocusDetailPrimary
 
 	if m.Cursor >= len(m.Jobs) {
 		return m, nil
@@ -2220,8 +2192,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-	m.skillPaneViewport.Width = m.LogViewerWidth
-	m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.updateSkillViewportSizes()
 
 	// Trigger content loading for the active pane
 	switch pane {
@@ -2244,32 +2215,21 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	case SkillPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading skills for %s...", job.Title))
 		m.skillPaneCursor = 0
-		content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
-		m.skillPaneNodes = flatNodes
-		m.skillPaneStateMap = stateMap
-		m.skillPaneRawContent = content
-		m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
+		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+		m.skillPaneNodes = result.nodes
+		m.skillPaneStateMap = result.stateMap
+		m.skillPaneRawContent = result.treeContent
+		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
+		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
 		return m, nil
 	}
 
 	return m, nil
 }
 
-// wrapContentForViewport wraps content lines to fit within the given width.
+// wrapContentForViewport delegates to the shared markdown package.
 func wrapContentForViewport(content string, width int) string {
-	if width <= 0 {
-		return content
-	}
-
-	lines := strings.Split(content, "\n")
-	wrapStyle := lipgloss.NewStyle().Width(width)
-
-	var wrappedLines []string
-	for _, line := range lines {
-		wrappedLines = append(wrappedLines, wrapStyle.Render(line))
-	}
-
-	return strings.Join(wrappedLines, "\n")
+	return markdown.WrapForViewport(content, width)
 }
 
 // addScrollbarToViewport overlays a scrollbar on viewport content.
@@ -2277,14 +2237,219 @@ func addScrollbarToViewport(vp *viewport.Model) string {
 	return scrollbar.Overlay(vp)
 }
 
+// updateSkillViewportSizes sets the dimensions for both skill pane viewports (tree + artifact).
+func (m *Model) updateSkillViewportSizes() {
+	vpWidth := m.LogViewerWidth
+	if vpWidth < 10 {
+		vpWidth = 10
+	}
+	m.skillPaneViewport.Width = vpWidth
+	m.skillArtifactViewport.Width = vpWidth
+	// 1 separator line + 2 newlines between the two viewports
+	totalHeight := m.LogViewerHeight - logHeaderHeight - 3
+	if totalHeight < 4 {
+		totalHeight = 4
+	}
+	m.skillPaneViewport.Height = totalHeight / 2
+	m.skillArtifactViewport.Height = totalHeight - totalHeight/2
+}
+
 // refreshSkillPane re-renders the skill pane with the current cursor position.
 func (m *Model) refreshSkillPane() {
 	if m.ActiveLogJob == nil {
 		return
 	}
-	content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
-	m.skillPaneNodes = flatNodes
-	m.skillPaneStateMap = stateMap
-	m.skillPaneRawContent = content
-	m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
+	result := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+	m.skillPaneNodes = result.nodes
+	m.skillPaneStateMap = result.stateMap
+	// Tree goes into the main skill pane viewport
+	m.skillPaneRawContent = result.treeContent
+	m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
+	// Detail goes into the artifact viewport
+	m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
+}
+
+// handleDetailPrimaryKey dispatches key messages for the primary detail pane.
+// When the SkillPane is active, it routes to tree navigation; otherwise to the active viewport.
+func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.ActiveDetailPane == SkillPane {
+		return m.handleSkillTreeKey(msg)
+	}
+	return m.handleViewportKey(msg, m.ActiveDetailPane)
+}
+
+// handleDetailSecondaryKey dispatches key messages for the secondary detail pane (artifact viewport).
+func (m Model) handleDetailSecondaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.ActiveDetailPane == SkillPane {
+		return m.handleArtifactViewportKey(msg)
+	}
+	return m, nil
+}
+
+// handleViewportKey handles navigation keys for viewport-based detail panes (Logs, Frontmatter, Briefing, Edit).
+func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, tea.Cmd) {
+	// Handle gg/G sequences for jumping to top/bottom
+	result, idx := m.Sequence.Process(msg, m.KeyMap.Top, m.KeyMap.Bottom)
+	switch result {
+	case keymap.SequenceMatch:
+		m.Sequence.Clear()
+		switch pane {
+		case LogsPaneDetail:
+			if idx == 0 {
+				m.LogViewer.GotoTop()
+			} else {
+				m.LogViewer.GotoBottom()
+			}
+		case FrontmatterPane:
+			if idx == 0 {
+				m.frontmatterViewport.GotoTop()
+			} else {
+				m.frontmatterViewport.GotoBottom()
+			}
+		case BriefingPane:
+			if idx == 0 {
+				m.briefingViewport.GotoTop()
+			} else {
+				m.briefingViewport.GotoBottom()
+			}
+		case EditPane:
+			if idx == 0 {
+				m.editViewport.GotoTop()
+			} else {
+				m.editViewport.GotoBottom()
+			}
+		case SkillPane:
+			if idx == 0 {
+				m.skillPaneViewport.GotoTop()
+			} else {
+				m.skillPaneViewport.GotoBottom()
+			}
+		}
+		return m, nil
+	case keymap.SequencePending:
+		return m, nil
+	}
+
+	// No sequence match — clear and delegate to the active viewport
+	m.Sequence.Clear()
+
+	var cmd tea.Cmd
+	switch pane {
+	case LogsPaneDetail:
+		m.LogViewer, cmd = m.LogViewer.Update(msg)
+	case FrontmatterPane:
+		m.frontmatterViewport, cmd = m.frontmatterViewport.Update(msg)
+	case BriefingPane:
+		m.briefingViewport, cmd = m.briefingViewport.Update(msg)
+	case EditPane:
+		m.editViewport, cmd = m.editViewport.Update(msg)
+	case SkillPane:
+		m.skillPaneViewport, cmd = m.skillPaneViewport.Update(msg)
+	}
+	return m, cmd
+}
+
+// handleSkillTreeKey handles navigation keys for the skill pane tree view.
+func (m Model) handleSkillTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle gg/G sequences
+	result, idx := m.Sequence.Process(msg, m.KeyMap.Top, m.KeyMap.Bottom)
+	switch result {
+	case keymap.SequenceMatch:
+		m.Sequence.Clear()
+		if idx == 0 {
+			m.skillPaneCursor = 0
+		} else {
+			m.skillPaneCursor = len(m.skillPaneNodes) - 1
+		}
+		m.refreshSkillPane()
+		return m, nil
+	case keymap.SequencePending:
+		return m, nil
+	}
+
+	m.Sequence.Clear()
+
+	if len(m.skillPaneNodes) == 0 {
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "j", "down":
+		if m.skillPaneCursor < len(m.skillPaneNodes)-1 {
+			m.skillPaneCursor++
+			m.refreshSkillPane()
+		}
+		return m, nil
+	case "k", "up":
+		if m.skillPaneCursor > 0 {
+			m.skillPaneCursor--
+			m.refreshSkillPane()
+		}
+		return m, nil
+	case "ctrl+d":
+		// Half-page down
+		halfPage := len(m.skillPaneNodes) / 4
+		if halfPage < 1 {
+			halfPage = 1
+		}
+		m.skillPaneCursor += halfPage
+		if m.skillPaneCursor >= len(m.skillPaneNodes) {
+			m.skillPaneCursor = len(m.skillPaneNodes) - 1
+		}
+		m.refreshSkillPane()
+		return m, nil
+	case "ctrl+u":
+		// Half-page up
+		halfPage := len(m.skillPaneNodes) / 4
+		if halfPage < 1 {
+			halfPage = 1
+		}
+		m.skillPaneCursor -= halfPage
+		if m.skillPaneCursor < 0 {
+			m.skillPaneCursor = 0
+		}
+		m.refreshSkillPane()
+		return m, nil
+	case "/":
+		// Enter search mode
+		m.skillSearchActive = true
+		m.skillSearchInput.Focus()
+		return m, nil
+	case "e", "enter":
+		// Open editor on the selected skill/artifact node
+		if m.ActiveLogJob != nil && m.skillPaneCursor < len(m.skillPaneNodes) {
+			node := m.skillPaneNodes[m.skillPaneCursor]
+			return m, editSkillOrArtifactCmd(m.Plan, m.ActiveLogJob, node)
+		}
+		return m, nil
+	}
+
+	// Delegate remaining keys to the skill pane viewport for scrolling
+	var cmd tea.Cmd
+	m.skillPaneViewport, cmd = m.skillPaneViewport.Update(msg)
+	return m, cmd
+}
+
+// handleArtifactViewportKey handles navigation keys for the artifact detail viewport.
+func (m Model) handleArtifactViewportKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle gg/G sequences
+	result, idx := m.Sequence.Process(msg, m.KeyMap.Top, m.KeyMap.Bottom)
+	switch result {
+	case keymap.SequenceMatch:
+		m.Sequence.Clear()
+		if idx == 0 {
+			m.skillArtifactViewport.GotoTop()
+		} else {
+			m.skillArtifactViewport.GotoBottom()
+		}
+		return m, nil
+	case keymap.SequencePending:
+		return m, nil
+	}
+
+	m.Sequence.Clear()
+
+	var cmd tea.Cmd
+	m.skillArtifactViewport, cmd = m.skillArtifactViewport.Update(msg)
+	return m, cmd
 }

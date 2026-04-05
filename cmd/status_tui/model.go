@@ -47,9 +47,10 @@ const (
 type ViewFocus int
 
 const (
-	JobsPane ViewFocus = iota
-	LogsPane
-	InputPane // For isolated agents: allows typing input to send to the agent
+	FocusJobs            ViewFocus = iota // The main left/top job table
+	FocusDetailPrimary                    // Logs, Frontmatter, Briefing, Edit, or Skill Tree
+	FocusDetailSecondary                  // Artifact Viewport (active ONLY in SkillPane)
+	FocusInput                            // Isolated agent chat input
 )
 
 type DetailPane int
@@ -116,10 +117,14 @@ type Model struct {
 	frontmatterViewport viewport.Model
 	briefingViewport    viewport.Model
 	editViewport        viewport.Model
-	skillPaneViewport    viewport.Model
-	skillPaneCursor      int                    // Cursor position in the skill pane tree
-	skillPaneNodes       []*SkillDisplayNode    // Flattened skill nodes for cursor navigation
-	skillPaneStateMap    map[string]orchestration.SkillFidelityState // Cached state map
+	skillPaneViewport      viewport.Model
+	skillArtifactViewport  viewport.Model         // Scrollable artifact detail viewport
+	skillPaneCursor        int                     // Cursor position in the skill pane tree
+	skillPaneNodes         []*SkillPaneNode        // Flattened skill/artifact nodes for cursor navigation
+	skillPaneStateMap      map[string]orchestration.SkillFidelityState // Cached state map
+	skillSearchActive      bool                    // Whether search mode is active in skill pane
+	skillSearchInput       textinput.Model         // Text input for skill pane search
+	skillFilterText        string                  // Current filter text for skill pane
 	frontmatterRawContent string
 	briefingRawContent    string
 	editRawContent        string
@@ -134,7 +139,7 @@ type Model struct {
 	Program            *tea.Program // Reference to the tea.Program for sending messages
 	LogViewerWidth     int       // Cached log viewer width
 	LogViewerHeight    int       // Cached log viewer height
-	JobsPaneWidth      int       // Cached jobs pane width for vertical split
+	FocusJobsWidth      int       // Cached jobs pane width for vertical split
 
 	// Isolated agent input support
 	IsolatedAgentInput       textinput.Model // Text input for sending to isolated agents
@@ -179,6 +184,12 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	briefingVp := viewport.New(80, 20)
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
+	skillArtifactVp := viewport.New(80, 10)
+
+	// Initialize search input for skill pane
+	skillSearch := textinput.New()
+	skillSearch.Placeholder = "Search skills..."
+	skillSearch.CharLimit = 256
 
 	// Create orchestrator for direct job execution
 	orchConfig := &orchestration.OrchestratorConfig{
@@ -263,7 +274,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		columnList:          columnList,
 		availableColumns:    availableColumns,
 		columnVisibility:    columnVisibility,
-		Focus:            JobsPane,
+		Focus:            FocusJobs,
 		LogSplitVertical: state.LogSplitVertical, // Apply loaded state
 		IsRunningJob:        false,
 		RunLogFile:          "", // No longer creating TUI-specific log files
@@ -272,6 +283,8 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		briefingViewport:    briefingVp,
 		editViewport:             editVp,
 		skillPaneViewport:         skillPaneVp,
+		skillArtifactViewport:     skillArtifactVp,
+		skillSearchInput:          skillSearch,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
 		DaemonClient:             daemonClient,
@@ -304,8 +317,8 @@ func (m Model) Init() tea.Cmd {
 // This constant is duplicated here to avoid import cycles with cmd package.
 const RollingPlanName = "rolling"
 
-// renderJobsPane renders the top (or left) pane containing the plan header and jobs list.
-func (m Model) renderJobsPane(contentWidth int) string {
+// renderFocusJobs renders the top (or left) pane containing the plan header and jobs list.
+func (m Model) renderFocusJobs(contentWidth int) string {
 	// 1. Create Header
 	headerLabel := theme.DefaultTheme.Bold.Render(theme.IconPlan + " Plan Status: ")
 	var planName string
@@ -348,9 +361,9 @@ func (m Model) renderJobsPane(contentWidth int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, styledHeader, mainContent, scrollIndicator)
 }
 
-// renderLogsPane renders the bottom (or right) pane containing the detail view.
+// renderFocusDetailPrimary renders the bottom (or right) pane containing the detail view.
 // chatBoxHeight should be passed to account for chat input box in vertical split separator calculation.
-func (m Model) renderLogsPane(contentWidth int, paneContent string, chatBoxHeight int) (string, string) {
+func (m Model) renderFocusDetailPrimary(contentWidth int, paneContent string, chatBoxHeight int) (string, string) {
 	// Create log section header
 	var logHeader string
 	if m.Cursor < len(m.Jobs) {
@@ -405,24 +418,19 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string, chatBoxHeigh
 		var separatorLines []string
 		separatorLines = append(separatorLines, "", "", "") // Top spacing
 		halfHeight := separatorHeight / 2
+		dimStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border)
+		highlightStyle := theme.DefaultTheme.Highlight
 		for i := 0; i < separatorHeight; i++ {
-			style := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border)
-			if (i < halfHeight && m.Focus == JobsPane) || (i >= halfHeight && m.Focus == LogsPane) {
-				style = theme.DefaultTheme.Highlight
+			if (i < halfHeight && m.Focus == FocusDetailPrimary) ||
+				(i >= halfHeight && m.Focus == FocusDetailSecondary) {
+				separatorLines = append(separatorLines, highlightStyle.Render("│"))
+			} else {
+				separatorLines = append(separatorLines, dimStyle.Render("│"))
 			}
-			separatorLines = append(separatorLines, style.Render("│"))
 		}
 		separator = strings.Join(separatorLines, "\n")
 	} else {
-		halfWidth := contentWidth / 2
-		leftHalf := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", halfWidth))
-		rightHalf := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", contentWidth-halfWidth))
-		if m.Focus == JobsPane {
-			leftHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", halfWidth))
-		} else {
-			rightHalf = theme.DefaultTheme.Highlight.Render(strings.Repeat("─", contentWidth-halfWidth))
-		}
-		separator = leftHalf + rightHalf
+		separator = lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", contentWidth))
 	}
 
 	// Render log content - the viewport handles wrapping and scrollbar
@@ -478,7 +486,7 @@ func (m Model) renderAgentInputBox(rightAligned bool) string {
 
 	// Add left margin to align with log pane in vertical split
 	if rightAligned {
-		leftMargin := m.JobsPaneWidth + 3 // +3 for separator
+		leftMargin := m.FocusJobsWidth + 3 // +3 for separator
 		marginStyle := lipgloss.NewStyle().MarginLeft(leftMargin)
 		result = marginStyle.Render(result)
 	}
@@ -561,13 +569,13 @@ func (m Model) View() string {
 	// Calculate jobs pane width for proper rendering
 	var jobsContentWidth int
 	if m.ShowLogs && m.LogSplitVertical {
-		jobsContentWidth = m.JobsPaneWidth
+		jobsContentWidth = m.FocusJobsWidth
 	} else {
 		jobsContentWidth = contentWidth
 	}
 
 	// Render the main components
-	jobsPane := m.renderJobsPane(jobsContentWidth)
+	jobsPane := m.renderFocusJobs(jobsContentWidth)
 
 	// Handle confirmation dialog or regular footer
 	var footer string
@@ -599,7 +607,10 @@ func (m Model) View() string {
 		case EditPane:
 			detailContent = addScrollbarToViewport(&m.editViewport)
 		case SkillPane:
-			detailContent = addScrollbarToViewport(&m.skillPaneViewport)
+			treeView := addScrollbarToViewport(&m.skillPaneViewport)
+			artifactView := addScrollbarToViewport(&m.skillArtifactViewport)
+			sepLine := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", m.LogViewerWidth))
+			detailContent = treeView + "\n" + sepLine + "\n" + artifactView
 		}
 
 
@@ -630,7 +641,7 @@ func (m Model) View() string {
 		// Check if fullscreen mode is active
 		if m.LogPaneFullscreen {
 			// Fullscreen: render only the logs pane at full width
-			logsPane, _ := m.renderLogsPane(contentWidth, detailContent, chatBoxHeight)
+			logsPane, _ := m.renderFocusDetailPrimary(contentWidth, detailContent, chatBoxHeight)
 			contentHeight := m.Height - topMargin - bottomMargin - footerHeight - chatBoxHeight
 			logsPaneStyled := lipgloss.NewStyle().Height(contentHeight).Render(logsPane)
 			// Account for chat input box if visible
@@ -646,15 +657,15 @@ func (m Model) View() string {
 				finalView = lipgloss.JoinVertical(lipgloss.Left, logsPaneStyled, footer)
 			}
 		} else {
-			// Use the existing renderLogsPane structure but pass in the dynamic content
-			logsPane, separator := m.renderLogsPane(contentWidth, detailContent, chatBoxHeight)
+			// Use the existing renderFocusDetailPrimary structure but pass in the dynamic content
+			logsPane, separator := m.renderFocusDetailPrimary(contentWidth, detailContent, chatBoxHeight)
 			if m.LogSplitVertical {
 				// Vertical split: constrain jobs pane height
-				maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + chatBoxHeight)
-				if maxJobsPaneHeight < 10 {
-					maxJobsPaneHeight = 10
+				maxFocusJobsHeight := m.Height - (footerHeight + topMargin + bottomMargin + chatBoxHeight)
+				if maxFocusJobsHeight < 10 {
+					maxFocusJobsHeight = 10
 				}
-				jobsPaneStyled := lipgloss.NewStyle().Width(m.JobsPaneWidth).MaxWidth(m.JobsPaneWidth).MaxHeight(maxJobsPaneHeight).Render(jobsPane)
+				jobsPaneStyled := lipgloss.NewStyle().Width(m.FocusJobsWidth).MaxWidth(m.FocusJobsWidth).MaxHeight(maxFocusJobsHeight).Render(jobsPane)
 
 				combinedPanes := lipgloss.JoinHorizontal(lipgloss.Top, jobsPaneStyled, separator, logsPane)
 				// Add chat input box if visible (right-aligned to match log pane)
@@ -663,7 +674,7 @@ func (m Model) View() string {
 					if showStatusBar {
 						statusBar := m.renderAgentStatusBar(m.LogViewerWidth)
 						// Apply margin to status bar to align with chat box
-						leftMargin := m.JobsPaneWidth + 3 // +3 for separator
+						leftMargin := m.FocusJobsWidth + 3 // +3 for separator
 						statusBarStyled := lipgloss.NewStyle().MarginLeft(leftMargin).Render(statusBar)
 						finalView = lipgloss.JoinVertical(lipgloss.Left, combinedPanes, statusBarStyled, chatBox, footer)
 					} else {
@@ -674,11 +685,11 @@ func (m Model) View() string {
 				}
 			} else {
 				// Horizontal split: account for log viewer height
-				maxJobsPaneHeight := m.Height - m.LogViewerHeight - (horizontalDividerHeight + footerHeight + topMargin + bottomMargin + chatBoxHeight)
-				if maxJobsPaneHeight < 10 {
-					maxJobsPaneHeight = 10
+				maxFocusJobsHeight := m.Height - m.LogViewerHeight - (horizontalDividerHeight + footerHeight + topMargin + bottomMargin + chatBoxHeight)
+				if maxFocusJobsHeight < 10 {
+					maxFocusJobsHeight = 10
 				}
-				jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxJobsPaneHeight).Render(jobsPane)
+				jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxFocusJobsHeight).Render(jobsPane)
 
 				// Push footer to bottom by setting height on combined content
 				contentHeight := m.Height - topMargin - bottomMargin - footerHeight - chatBoxHeight
@@ -700,11 +711,11 @@ func (m Model) View() string {
 		}
 	} else {
 		// No logs: use same calculation as vertical split
-		maxJobsPaneHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
-		if maxJobsPaneHeight < 10 {
-			maxJobsPaneHeight = 10
+		maxFocusJobsHeight := m.Height - (footerHeight + topMargin + bottomMargin + 2) // +2 for newline and spacing
+		if maxFocusJobsHeight < 10 {
+			maxFocusJobsHeight = 10
 		}
-		jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxJobsPaneHeight).Render(jobsPane)
+		jobsPaneStyled := lipgloss.NewStyle().MaxHeight(maxFocusJobsHeight).Render(jobsPane)
 		finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, "\n", footer)
 	}
 
@@ -759,9 +770,9 @@ func (m *Model) calculateOptimalLogHeight() int {
 	return logHeight
 }
 
-// calculateJobsPaneWidth calculates the optimal width for the jobs pane
+// calculateFocusJobsWidth calculates the optimal width for the jobs pane
 // based on the content of the currently visible columns.
-func (m *Model) calculateJobsPaneWidth() int {
+func (m *Model) calculateFocusJobsWidth() int {
 	if len(m.Jobs) == 0 {
 		return 60 // Default minimum
 	}
@@ -857,8 +868,8 @@ func (m *Model) calculateJobsPaneWidth() int {
 // updateLayoutDimensions centralizes the logic for calculating pane sizes.
 func (m *Model) updateLayoutDimensions() {
 	if m.LogSplitVertical {
-		m.JobsPaneWidth = m.calculateJobsPaneWidth()
-		if m.Width < m.JobsPaneWidth+minLogsWidth+verticalSeparatorWidth {
+		m.FocusJobsWidth = m.calculateFocusJobsWidth()
+		if m.Width < m.FocusJobsWidth+minLogsWidth+verticalSeparatorWidth {
 			m.LogSplitVertical = false
 			m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
 		}
@@ -891,7 +902,7 @@ func (m *Model) updateLayoutDimensions() {
 			// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
 			// So the content width is LogViewerWidth - 2
 			// The header is inside the jobs pane, not separate, so don't subtract headerHeight
-			m.LogViewerWidth = m.Width - m.JobsPaneWidth - verticalSeparatorWidth - 2
+			m.LogViewerWidth = m.Width - m.FocusJobsWidth - verticalSeparatorWidth - 2
 			m.LogViewerHeight = m.Height - (footerHeight + topMargin + chatInputHeight)
 		} else {
 			// In horizontal split, only PaddingLeft(1) is applied
