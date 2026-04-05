@@ -39,6 +39,8 @@ var (
 	planFinishCleanDevLinks   bool
 	planFinishRebuildBinaries bool
 	planFinishForce           bool
+	planFinishKeepEnv         bool
+	planFinishKeepWorktree    bool
 )
 
 // repoStatus represents the merge status of a single repository
@@ -196,6 +198,8 @@ Examples:
 	cmd.Flags().BoolVar(&planFinishRebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
 	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
 	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
+	cmd.Flags().BoolVar(&planFinishKeepEnv, "keep-env", false, "Skip environment teardown during cleanup")
+	cmd.Flags().BoolVar(&planFinishKeepWorktree, "keep-worktree", false, "Skip worktree removal during cleanup")
 	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 
 	return cmd
@@ -227,6 +231,8 @@ Examples:
 	cmd.Flags().BoolVar(&planFinishRebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
 	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
 	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
+	cmd.Flags().BoolVar(&planFinishKeepEnv, "keep-env", false, "Skip environment teardown during cleanup")
+	cmd.Flags().BoolVar(&planFinishKeepWorktree, "keep-worktree", false, "Skip worktree removal during cleanup")
 	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 	return cmd
 }
@@ -298,39 +304,89 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	// Use a shared variable for repo details that the Check function can populate
 	var sharedRepoDetails []repoStatus
 
+	// Determine worktree path for state lookups
+	var worktreePath string
+	if worktreeName != "" && gitRoot != "" {
+		worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	}
+
+	// Helper: find the active env state file (new location first, then legacy)
+	findEnvState := func() (data []byte, statePath string, worktreeStateDir string) {
+		// Check new location: .grove/env/state.json in worktree
+		if worktreePath != "" {
+			wsStateDir := filepath.Join(worktreePath, ".grove", "env")
+			wsStatePath := filepath.Join(wsStateDir, "state.json")
+			if d, err := os.ReadFile(wsStatePath); err == nil {
+				return d, wsStatePath, wsStateDir
+			}
+		}
+		// Fallback to legacy: .env_state.json in plan dir
+		legacyPath := filepath.Join(planPath, ".env_state.json")
+		if d, err := os.ReadFile(legacyPath); err == nil {
+			return d, legacyPath, ""
+		}
+		return nil, "", ""
+	}
+
+	planSlug := filepath.Base(planPath)
+
 	envTeardownItem := &cleanupItem{
 		Name: "Teardown environment resources",
 		Check: func() (string, error) {
-			statePath := filepath.Join(planPath, ".env_state.json")
-			if _, err := os.Stat(statePath); os.IsNotExist(err) {
+			if planFinishKeepEnv {
+				return "Skipped (--keep-env)", nil
+			}
+			data, _, _ := findEnvState()
+			if data == nil {
 				return "N/A", nil
 			}
-			return color.YellowString("Active"), nil
+			var stateFile env.EnvStateFile
+			if err := json.Unmarshal(data, &stateFile); err != nil {
+				return "N/A", nil
+			}
+			// Check ownership
+			expectedOwner := fmt.Sprintf("plan:%s", planSlug)
+			if stateFile.ManagedBy == "user" {
+				return color.YellowString("Active (user-managed, skipping)"), nil
+			}
+			if stateFile.ManagedBy != "" && stateFile.ManagedBy != expectedOwner {
+				return color.YellowString("Active (managed by %s, skipping)", stateFile.ManagedBy), nil
+			}
+			return color.YellowString("Active (%s)", stateFile.Provider), nil
 		},
 		Action: func() error {
-			statePath := filepath.Join(planPath, ".env_state.json")
-			data, err := os.ReadFile(statePath)
-			if err != nil {
+			if planFinishKeepEnv {
+				return nil
+			}
+			data, statePath, wsStateDir := findEnvState()
+			if data == nil {
 				return nil // Nothing to teardown
 			}
 
 			var stateFile env.EnvStateFile
 			if err := json.Unmarshal(data, &stateFile); err != nil {
-				return fmt.Errorf("failed to parse .env_state.json: %w", err)
+				return fmt.Errorf("failed to parse env state: %w", err)
+			}
+
+			// Check ownership — only tear down what this plan started
+			expectedOwner := fmt.Sprintf("plan:%s", planSlug)
+			if stateFile.ManagedBy == "user" {
+				fmt.Println("    Environment is user-managed, skipping teardown")
+				return nil
+			}
+			if stateFile.ManagedBy != "" && stateFile.ManagedBy != expectedOwner {
+				fmt.Printf("    Environment managed by %s, skipping teardown\n", stateFile.ManagedBy)
+				return nil
 			}
 
 			fmt.Printf("    Tearing down %s environment...\n", stateFile.Provider)
 
-			// Build the worktree path
-			var worktreePath string
-			if worktreeName != "" && gitRoot != "" {
-				worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-			}
-
 			req := env.EnvRequest{
-				Provider: stateFile.Provider,
-				PlanDir:  planPath,
-				Config:   make(map[string]interface{}),
+				Provider:  stateFile.Provider,
+				PlanDir:   planPath,
+				StateDir:  wsStateDir,
+				Config:    make(map[string]interface{}),
+				ManagedBy: stateFile.ManagedBy,
 			}
 
 			// Attach workspace context if available
@@ -348,6 +404,13 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 
 			// Cleanup state files
 			os.Remove(statePath)
+			// Also clean up the other location
+			if wsStateDir != "" {
+				os.Remove(filepath.Join(wsStateDir, "state.json"))
+				os.Remove(filepath.Join(wsStateDir, ".env.local"))
+				os.Remove(wsStateDir) // remove empty dir
+			}
+			os.Remove(filepath.Join(planPath, ".env_state.json"))
 			if worktreePath != "" {
 				os.Remove(filepath.Join(worktreePath, ".env.local"))
 			}

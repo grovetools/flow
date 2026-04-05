@@ -1303,17 +1303,64 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	}
 
 	var result strings.Builder
+
+	// Determine the plan slug for ManagedBy tracking
+	planSlug := filepath.Base(planPath)
+
+	// Check if an environment is already running at the worktree level
+	worktreeStateDir := filepath.Join(loadPath, ".grove", "env")
+	worktreeStatePath := filepath.Join(worktreeStateDir, "state.json")
+	if existingData, err := os.ReadFile(worktreeStatePath); err == nil {
+		var existingState env.EnvStateFile
+		if err := json.Unmarshal(existingData, &existingState); err == nil {
+			// Environment already exists — attach to it instead of provisioning
+			result.WriteString(fmt.Sprintf("* Attaching to existing %s environment (managed by: %s)\n",
+				existingState.Provider, existingState.ManagedBy))
+
+			// Write .env.local from existing state if it has env vars
+			if len(existingState.EnvVars) > 0 {
+				keys := make([]string, 0, len(existingState.EnvVars))
+				for k := range existingState.EnvVars {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				var envContent strings.Builder
+				for _, k := range keys {
+					envContent.WriteString(fmt.Sprintf("%s=%s\n", k, existingState.EnvVars[k]))
+				}
+				envPath := filepath.Join(loadPath, ".env.local")
+				if err := os.WriteFile(envPath, []byte(envContent.String()), 0644); err != nil {
+					result.WriteString(fmt.Sprintf("%s  Warning: could not write .env.local: %v\n", theme.IconWarning, err))
+				}
+			}
+
+			// Write legacy .env_state.json to plan dir for backward compat
+			stateBytes, _ := json.MarshalIndent(existingState, "", "  ")
+			os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644)
+
+			return result.String()
+		}
+	}
+
 	if activeProfile != "" {
 		result.WriteString(fmt.Sprintf("* Provisioning environment %q via provider: %s\n", activeProfile, envCfg.Provider))
 	} else {
 		result.WriteString(fmt.Sprintf("* Provisioning environment via provider: %s\n", envCfg.Provider))
 	}
 
+	// Create state directory
+	if err := os.MkdirAll(worktreeStateDir, 0755); err != nil {
+		result.WriteString(fmt.Sprintf("%s  Warning: could not create .grove/env directory: %v\n", theme.IconWarning, err))
+	}
+
 	// Build request
+	managedBy := fmt.Sprintf("plan:%s", planSlug)
 	req := env.EnvRequest{
-		Provider: envCfg.Provider,
-		PlanDir:  planPath,
-		Config:   envCfg.Config,
+		Provider:  envCfg.Provider,
+		PlanDir:   planPath,
+		StateDir:  worktreeStateDir,
+		Config:    envCfg.Config,
+		ManagedBy: managedBy,
 	}
 
 	// Attach workspace node context if available
@@ -1365,14 +1412,23 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		}
 	}
 
-	// Write .env_state.json to plan directory
+	// Build state file with new fields
 	stateFile := env.EnvStateFile{
 		Provider:    envCfg.Provider,
 		Command:     envCfg.Command,
 		Environment: activeProfile,
+		ManagedBy:   managedBy,
+		EnvVars:     resp.EnvVars,
 		State:       resp.State,
 	}
 	stateBytes, _ := json.MarshalIndent(stateFile, "", "  ")
+
+	// Write to .grove/env/state.json (primary location)
+	if err := os.WriteFile(worktreeStatePath, stateBytes, 0644); err != nil {
+		result.WriteString(fmt.Sprintf("%s  Warning: could not write .grove/env/state.json: %v\n", theme.IconWarning, err))
+	}
+
+	// Write legacy .env_state.json to plan directory for backward compat
 	if err := os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644); err != nil {
 		result.WriteString(fmt.Sprintf("%s  Warning: could not write .env_state.json: %v\n", theme.IconWarning, err))
 	}
