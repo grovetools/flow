@@ -36,6 +36,18 @@ type InteractiveAgentProvider interface {
 	Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error
 }
 
+// FlowProviderConfig holds per-provider configuration from grove.toml.
+type FlowProviderConfig struct {
+	Args      []string `yaml:"args"`
+	InputMode string   `yaml:"input_mode"` // "vim" or "standard"
+}
+
+// FlowConfig holds the flow extension configuration from grove.toml.
+type FlowConfig struct {
+	InteractiveProvider string                          `yaml:"interactive_provider,omitempty"`
+	Providers           map[string]FlowProviderConfig   `yaml:"providers"`
+}
+
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
 type InteractiveAgentExecutor struct {
 	skipInteractive bool
@@ -190,14 +202,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	}
 
 	// Unmarshal flow configuration (agent settings moved to flow extension)
-	type flowProviderConfig struct {
-		Args []string `yaml:"args"`
-	}
-	type flowConfig struct {
-		InteractiveProvider string                          `yaml:"interactive_provider,omitempty"`
-		Providers           map[string]flowProviderConfig   `yaml:"providers"`
-	}
-	var flowCfg flowConfig
+	var flowCfg FlowConfig
 	coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	// Determine which provider to use
@@ -1166,6 +1171,24 @@ func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, work
 	return contextFiles, nil
 }
 
+// ResolveInteractiveAgentPane returns the tmux target pane string (session:window)
+// for an interactive agent job, using the same resolution logic as send/capture.
+func ResolveInteractiveAgentPane(plan *Plan, job *Job) (string, error) {
+	workDir, err := DetermineWorkingDirectory(plan, job)
+	if err != nil {
+		return "", fmt.Errorf("could not determine working directory: %w", err)
+	}
+
+	projInfo, err := ResolveProjectForSessionNaming(workDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve project for session naming: %w", err)
+	}
+
+	sessionName := projInfo.Identifier("_")
+	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+	return fmt.Sprintf("%s:%s", sessionName, windowName), nil
+}
+
 // CaptureInteractiveAgentOutput captures the visible output from an interactive agent's pane.
 // Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
 // project's tmux session on the default tmux server.
@@ -1218,6 +1241,23 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
+	// Read flow config for input_mode
+	coreCfg, cfgErr := config.LoadFrom(workDir)
+	if cfgErr != nil {
+		coreCfg = &config.Config{}
+	}
+	var flowCfg FlowConfig
+	coreCfg.UnmarshalExtension("flow", &flowCfg)
+
+	inputMode := "vim" // default
+	providerName := "claude"
+	if flowCfg.InteractiveProvider != "" {
+		providerName = flowCfg.InteractiveProvider
+	}
+	if providerCfg, ok := flowCfg.Providers[providerName]; ok && providerCfg.InputMode != "" {
+		inputMode = providerCfg.InputMode
+	}
+
 	// Use the tmux Client to ensure correct server targeting.
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {
@@ -1226,9 +1266,16 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 
 	ctx := context.Background()
 
-	// First: Escape to ensure clean state, i to enter insert mode, then the text
-	if err := tmuxClient.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
-		return fmt.Errorf("failed to send input text: %w", err)
+	// Handle input mode: vim requires Escape+i to enter insert mode first
+	if inputMode == "vim" {
+		if err := tmuxClient.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
+			return fmt.Errorf("failed to send input text: %w", err)
+		}
+	} else {
+		// Standard mode: just send the text directly
+		if err := tmuxClient.SendKeys(ctx, targetPane, input); err != nil {
+			return fmt.Errorf("failed to send input text: %w", err)
+		}
 	}
 
 	// Second: C-Enter to submit (must be separate call)

@@ -48,6 +48,9 @@ func main() {
 	// Add the skill command (skill management utilities)
 	rootCmd.AddCommand(cmd.NewSkillCmd())
 
+	// Add the agent command (interactive agent management)
+	rootCmd.AddCommand(cmd.NewAgentCmd())
+
 	// Add other top-level commands
 	rootCmd.AddCommand(cmd.GetChatCommand())
 	rootCmd.AddCommand(cmd.NewVersionCmd())
