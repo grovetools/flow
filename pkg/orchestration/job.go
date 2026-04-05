@@ -128,7 +128,7 @@ type Job struct {
 	// Worktree configuration
 	Repository string `yaml:"repository,omitempty" json:"repository,omitempty" jsonschema:"description=Git repository URL for worktree creation"`
 	Branch     string `yaml:"branch,omitempty" json:"branch,omitempty" jsonschema:"description=Git branch name for worktree"`
-	Worktree   string `yaml:"worktree" json:"worktree,omitempty" jsonschema:"description=Worktree name for isolated execution"`
+	Worktree   string `yaml:"worktree,omitempty" json:"worktree,omitempty" jsonschema:"description=Worktree name for isolated execution"`
 
 	// Inlining configuration
 	Inline              InlineConfig `yaml:"inline,omitempty" json:"inline,omitempty" jsonschema:"description=Controls which content types are inlined vs uploaded"`
@@ -159,14 +159,14 @@ type Job struct {
 	// Skill fidelity tracking (populated post-execution from status.json files)
 	SkillFidelity []SkillFidelityState `yaml:"skill_fidelity,omitempty" json:"skill_fidelity,omitempty" jsonschema:"description=Skill sequence execution fidelity records"`
 
-	// Derived fields (excluded from schema - these are runtime/internal fields)
-	Filename     string      `json:"filename,omitempty" jsonschema:"-"`
-	FilePath     string      `json:"file_path,omitempty" jsonschema:"-"`
-	PromptBody   string      `json:"-" jsonschema:"-"`
-	Dependencies []*Job      `json:"-" jsonschema:"-"`
-	StartTime    time.Time   `json:"start_time,omitempty" jsonschema:"-"`
-	EndTime      time.Time   `json:"end_time,omitempty" jsonschema:"-"`
-	Metadata     JobMetadata `json:"metadata,omitempty" jsonschema:"-"`
+	// Derived fields (excluded from schema and YAML serialization - these are runtime/internal fields)
+	Filename     string      `yaml:"-" json:"filename,omitempty" jsonschema:"-"`
+	FilePath     string      `yaml:"-" json:"file_path,omitempty" jsonschema:"-"`
+	PromptBody   string      `yaml:"-" json:"-" jsonschema:"-"`
+	Dependencies []*Job      `yaml:"-" json:"-" jsonschema:"-"`
+	StartTime    time.Time   `yaml:"-" json:"start_time,omitempty" jsonschema:"-"`
+	EndTime      time.Time   `yaml:"-" json:"end_time,omitempty" jsonschema:"-"`
+	Metadata     JobMetadata `yaml:"-" json:"metadata,omitempty" jsonschema:"-"`
 }
 
 // JobMetadata holds additional job metadata.

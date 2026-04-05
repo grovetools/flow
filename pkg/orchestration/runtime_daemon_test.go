@@ -21,6 +21,10 @@ func (m *mockStatusUpdater) UpdateJobStatus(job *Job, status JobStatus) error {
 	return nil
 }
 
+func (m *mockStatusUpdater) UpdateJobMetadata(job *Job, meta JobMetadata) error {
+	return nil
+}
+
 type noopLogger struct{}
 
 func (l *noopLogger) Info(msg string, keysAndValues ...interface{})  {}

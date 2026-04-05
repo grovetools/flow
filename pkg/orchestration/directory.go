@@ -9,12 +9,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
+	"gopkg.in/yaml.v3"
 )
 
 // sanitizeForFilename sanitizes a string for use in a filename (kebab-case).
@@ -64,13 +64,18 @@ func GenerateUniqueJobID(plan *Plan, title string) string {
 	return uniqueID
 }
 
-// getWorkspaceContext retrieves repository and branch information from the current directory.
-func getWorkspaceContext() (repository, branch, worktree string) {
+// getWorkspaceContext retrieves repository and branch information from the given directory.
+// If dir is empty, falls back to the current working directory.
+func getWorkspaceContext(dir string) (repository, branch, worktree string) {
+	if dir == "" {
+		dir = "."
+	}
+
 	// Get repository name and branch from git
-	repoName, branchName, _ := git.GetRepoInfo(".")
+	repoName, branchName, _ := git.GetRepoInfo(dir)
 
 	// Get workspace node to check if we're in a worktree
-	node, err := workspace.GetProjectByPath(".")
+	node, err := workspace.GetProjectByPath(dir)
 	if err == nil && node.IsWorktree() {
 		// If we're in a worktree, extract the worktree name from the path
 		worktree = filepath.Base(node.Path)
@@ -95,9 +100,15 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 		job.Status = JobStatusPending
 	}
 
-	// Populate workspace context if not already set
+	// Populate workspace context if not already set.
+	// Use the plan's execution context working directory if available,
+	// otherwise fall back to CWD via getWorkspaceContext("").
 	if job.Repository == "" || job.Branch == "" {
-		repo, branch, worktree := getWorkspaceContext()
+		contextDir := ""
+		if plan.Context != nil && plan.Context.WorkingDirectory != "" {
+			contextDir = plan.Context.WorkingDirectory
+		}
+		repo, branch, worktree := getWorkspaceContext(contextDir)
 		if job.Repository == "" {
 			job.Repository = repo
 		}
@@ -124,12 +135,7 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 	filepath := filepath.Join(plan.Directory, filename)
 
 	// Generate job content
-	var content []byte
-	if job.Type == JobTypeAgent || job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
-		content, err = generateAgentJobContent(job)
-	} else {
-		content, err = generateJobContent(job)
-	}
+	content, err := generateJobContent(job)
 	if err != nil {
 		return "", fmt.Errorf("generating job content: %w", err)
 	}
@@ -205,211 +211,37 @@ func generateJobID(title string) string {
 	return fmt.Sprintf("%s-%s", timestamp, slug)
 }
 
-// generateJobContent creates the markdown content for a job.
+// generateJobContent creates the markdown content for a job using yaml.Marshal.
+// The Job struct's yaml tags with omitempty handle conditional field inclusion automatically.
 func generateJobContent(job *Job) ([]byte, error) {
-	// Create frontmatter
-	frontmatter := map[string]interface{}{
-		"id":     job.ID,
-		"title":  job.Title,
-		"status": job.Status,
-		"type":   job.Type,
+	var yamlBuf bytes.Buffer
+	encoder := yaml.NewEncoder(&yamlBuf)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(job); err != nil {
+		return nil, fmt.Errorf("marshaling job frontmatter: %w", err)
 	}
+	encoder.Close()
 
-	if len(job.DependsOn) > 0 {
-		frontmatter["depends_on"] = job.DependsOn
-	}
-	if len(job.Include) > 0 {
-		frontmatter["include"] = job.Include
-	}
-	if job.SourceBlock != "" {
-		frontmatter["source_block"] = job.SourceBlock
-	}
-	if job.Template != "" {
-		frontmatter["template"] = job.Template
-	}
-	if !job.Inline.IsEmpty() {
-		// Convert InlineConfig to string array for YAML output
-		inlineStrings := make([]string, len(job.Inline.Categories))
-		for i, cat := range job.Inline.Categories {
-			inlineStrings[i] = string(cat)
-		}
-		frontmatter["inline"] = inlineStrings
-	}
-	if job.PrependDependencies {
-		frontmatter["prepend_dependencies"] = job.PrependDependencies
-	}
-	if job.GeneratePlanFrom {
-		frontmatter["generate_plan_from"] = job.GeneratePlanFrom
-	}
-	if job.Repository != "" {
-		frontmatter["repository"] = job.Repository
-	}
-	if job.Branch != "" {
-		frontmatter["branch"] = job.Branch
-	}
-	if job.Worktree != "" {
-		frontmatter["worktree"] = job.Worktree
-	}
-	if job.Model != "" {
-		frontmatter["model"] = job.Model
-	}
-	if job.RulesFile != "" {
-		frontmatter["rules_file"] = job.RulesFile
-	}
-	if job.UsedRulesFile != "" {
-		frontmatter["used_rules_file"] = job.UsedRulesFile
-	}
-	if job.NoteRef != "" {
-		frontmatter["note_ref"] = job.NoteRef
-	}
-	if job.SourceFile != "" {
-		frontmatter["source_file"] = job.SourceFile
-	}
-	if job.Skill != "" {
-		frontmatter["skill"] = job.Skill
-	}
-	if len(job.SkillSequence) > 0 {
-		frontmatter["skill_sequence"] = job.SkillSequence
-	}
-	if job.GitChanges {
-		frontmatter["git_changes"] = job.GitChanges
-	}
-
-	// Create YAML
-	yamlContent := "---\n"
-	yamlContent += formatYAML(frontmatter)
-	yamlContent += "---\n"
+	var buf bytes.Buffer
+	buf.WriteString("---\n")
+	buf.Write(yamlBuf.Bytes())
+	buf.WriteString("---\n")
 
 	// For chat-type jobs, add the template directive right after frontmatter
 	if job.Type == JobTypeChat {
-		yamlContent += "\n<!-- grove: {\"template\": \"chat\"} -->\n"
-		// Add the prompt body after the directive if present
+		buf.WriteString("\n<!-- grove: {\"template\": \"chat\"} -->\n")
 		if job.PromptBody != "" {
-			yamlContent += "\n" + job.PromptBody
+			buf.WriteString("\n")
+			buf.WriteString(job.PromptBody)
 		} else {
-			// Add two blank lines: one after directive, one for the prompt text
-			yamlContent += "\n\n"
+			buf.WriteString("\n\n")
 		}
 	} else {
-		// For non-chat jobs, add prompt body with standard spacing
-		yamlContent += "\n"
-		yamlContent += job.PromptBody
-	}
-
-	return []byte(yamlContent), nil
-}
-
-// generateAgentJobContent creates content using the agent job template.
-func generateAgentJobContent(job *Job) ([]byte, error) {
-	// For agent jobs with templates, use the regular generateJobContent
-	// which handles the template field properly
-	if job.Template != "" {
-		return generateJobContent(job)
-	}
-
-	tmpl, err := template.New("agent").Parse(AgentJobTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("parsing agent job template: %w", err)
-	}
-
-	// Convert InlineConfig categories to string slice for template
-	var inlineCategories []string
-	for _, cat := range job.Inline.Categories {
-		inlineCategories = append(inlineCategories, string(cat))
-	}
-
-	data := struct {
-		ID                  string
-		Title               string
-		Type                string
-		DependsOn           []string
-		Include             []string
-		Repository          string
-		Branch              string
-		Worktree            string
-		NoteRef             string
-		SourceFile          string
-		Skill               string
-		SkillSequence       []string
-		GitChanges          bool
-		Prompt              string
-		Inline              []string
-		PrependDependencies bool
-	}{
-		ID:                  job.ID,
-		Title:               job.Title,
-		Type:                string(job.Type),
-		DependsOn:           job.DependsOn,
-		Include:             job.Include,
-		Repository:          job.Repository,
-		Branch:              job.Branch,
-		Worktree:            job.Worktree,
-		NoteRef:             job.NoteRef,
-		SourceFile:          job.SourceFile,
-		Skill:               job.Skill,
-		SkillSequence:       job.SkillSequence,
-		GitChanges:          job.GitChanges,
-		Prompt:              job.PromptBody,
-		Inline:              inlineCategories,
-		PrependDependencies: job.PrependDependencies,
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("executing agent job template: %w", err)
+		buf.WriteString("\n")
+		buf.WriteString(job.PromptBody)
 	}
 
 	return buf.Bytes(), nil
-}
-
-// formatYAML formats a map as YAML with proper indentation.
-func formatYAML(data map[string]interface{}) string {
-	var buf bytes.Buffer
-
-	// Sort keys for consistent output
-	keys := make([]string, 0, len(data))
-	for k := range data {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		value := data[key]
-		formatYAMLValue(&buf, key, value, 0)
-	}
-
-	return buf.String()
-}
-
-// formatYAMLValue formats a single YAML value with proper indentation.
-func formatYAMLValue(buf *bytes.Buffer, key string, value interface{}, indent int) {
-	indentStr := ""
-	for i := 0; i < indent; i++ {
-		indentStr += "  "
-	}
-
-	switch v := value.(type) {
-	case string:
-		buf.WriteString(fmt.Sprintf("%s%s: %s\n", indentStr, key, v))
-	case []string:
-		buf.WriteString(fmt.Sprintf("%s%s:\n", indentStr, key))
-		for _, item := range v {
-			buf.WriteString(fmt.Sprintf("%s  - %s\n", indentStr, item))
-		}
-	case map[string]interface{}:
-		buf.WriteString(fmt.Sprintf("%s%s:\n", indentStr, key))
-		// Sort nested keys
-		nestedKeys := make([]string, 0, len(v))
-		for k := range v {
-			nestedKeys = append(nestedKeys, k)
-		}
-		sort.Strings(nestedKeys)
-		for _, k := range nestedKeys {
-			formatYAMLValue(buf, k, v[k], indent+1)
-		}
-	default:
-		buf.WriteString(fmt.Sprintf("%s%s: %v\n", indentStr, key, v))
-	}
 }
 
 // ListJobs returns all job files in the directory sorted by filename.

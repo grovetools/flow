@@ -725,12 +725,7 @@ func AddJobsFromRecipe(plan *Plan, recipe *Recipe, externalDeps []string, templa
 		newJob := oldFilenameToNewJob[oldFilename]
 
 		// Generate the full file content
-		var content []byte
-		if newJob.Type == JobTypeAgent || newJob.Type == JobTypeInteractiveAgent || newJob.Type == JobTypeHeadlessAgent {
-			content, err = generateAgentJobContent(newJob)
-		} else {
-			content, err = generateJobContent(newJob)
-		}
+		content, err := generateJobContent(newJob)
 		if err != nil {
 			return nil, fmt.Errorf("generating content for job %s: %w", newJob.Filename, err)
 		}
