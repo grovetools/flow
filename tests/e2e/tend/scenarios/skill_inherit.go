@@ -3,6 +3,7 @@ package scenarios
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/tend/pkg/fs"
@@ -47,9 +48,10 @@ var SkillInheritFlagScenario = harness.NewScenario(
 				return err
 			}
 
-			// Authorize skills in grove.toml
+			// Authorize skills in grove.toml — note: step-a and step-b are NOT listed,
+			// they should be implicitly authorized via parent-skill's skill_sequence.
 			groveToml := filepath.Join(projectDir, "grove.toml")
-			tomlContent := "[skills]\nuse = [\"parent-skill\", \"step-a\", \"step-b\", \"simple-skill\"]\n"
+			tomlContent := "[skills]\nuse = [\"parent-skill\", \"simple-skill\"]\n"
 			if err := fs.WriteString(groveToml, tomlContent); err != nil {
 				return err
 			}
@@ -174,6 +176,94 @@ var SkillInheritFlagScenario = harness.NewScenario(
 					v.Equal("second sequence entry is other-b (explicit)", "other-b", job.SkillSequence[1])
 				}
 			})
+		}),
+		// Case 4: Implicit authorization — parent skill's sub-skills don't need explicit auth
+		harness.NewStep("Implicit auth: inherited sequence resolves without explicit auth", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+			if err := fs.WriteString(responseFile, "Mock response."); err != nil {
+				return err
+			}
+
+			// The parent-skill has skill_sequence: [step-a, step-b].
+			// Only parent-skill is in grove.toml use — step-a, step-b are implicitly authorized.
+			// Create a job with --skill parent-skill (which inherits the sequence).
+			jobContent := "---\nid: implicit-auth\ntitle: test-implicit-auth\ntype: oneshot\nstatus: pending\nskill: parent-skill\nskill_sequence:\n  - step-a\n  - step-b\n---\nTest implicit auth."
+			if err := fs.WriteString(filepath.Join(planPath, "04-implicit-auth.md"), jobContent); err != nil {
+				return err
+			}
+
+			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "04-implicit-auth.md"), "--yes")
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			result := runCmd.Run()
+
+			if result.ExitCode != 0 {
+				return fmt.Errorf("expected implicit auth to succeed, but got exit code %d: %s", result.ExitCode, result.Stderr)
+			}
+
+			// Verify the briefing contains both sub-skills
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "implicit-auth")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			if !strings.Contains(content, "Invoke Skill(step-a)") {
+				return fmt.Errorf("missing step-a in briefing sequence")
+			}
+			if !strings.Contains(content, "Invoke Skill(step-b)") {
+				return fmt.Errorf("missing step-b in briefing sequence")
+			}
+			return nil
+		}),
+
+		// Case 5: Transitive auth at registry level — standalone sequence with
+		// transitively authorized skills (via parent-skill's skill_sequence) succeeds
+		harness.NewStep("Transitive registry auth: standalone sequence with parent's sub-skills succeeds", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
+			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
+
+			// step-a/step-b are transitively authorized via parent-skill's skill_sequence,
+			// even without the parent being set on this job.
+			jobContent := "---\nid: transitive-seq\ntitle: test-transitive-seq\ntype: oneshot\nstatus: pending\nskill_sequence:\n  - step-a\n  - step-b\n---\nTransitive auth test."
+			if err := fs.WriteString(filepath.Join(planPath, "05-transitive-seq.md"), jobContent); err != nil {
+				return err
+			}
+
+			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "05-transitive-seq.md"), "--yes")
+			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
+			result := runCmd.Run()
+
+			if result.ExitCode != 0 {
+				return fmt.Errorf("expected transitive auth to succeed for standalone sequence, but got exit code %d: %s", result.ExitCode, result.Stderr)
+			}
+
+			// Verify the briefing was generated with both sub-skills
+			jobArtifactDir := filepath.Join(planPath, ".artifacts", "transitive-seq")
+			briefings, _ := filepath.Glob(filepath.Join(jobArtifactDir, "briefing-*.xml"))
+			if len(briefings) == 0 {
+				return fmt.Errorf("no briefing file found in %s", jobArtifactDir)
+			}
+
+			content, err := fs.ReadString(briefings[0])
+			if err != nil {
+				return err
+			}
+
+			if !strings.Contains(content, "Invoke Skill(step-a)") {
+				return fmt.Errorf("missing step-a in briefing sequence")
+			}
+			if !strings.Contains(content, "Invoke Skill(step-b)") {
+				return fmt.Errorf("missing step-b in briefing sequence")
+			}
+			return nil
 		}),
 	},
 )

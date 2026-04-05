@@ -97,8 +97,15 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 	}
 
 	// 1c. Add skill sequence instructions.
+	// If a parent skill is set, treat the sequence as implicitly authorized (depth 1).
 	if len(job.SkillSequence) > 0 {
-		sequenceNodes, err := ResolveSkillSequenceMetadata(job.SkillSequence, workDir)
+		var sequenceNodes []SkillSequenceNode
+		var err error
+		if job.Skill != "" {
+			sequenceNodes, err = ResolveSkillSequenceWithParent(job.SkillSequence, workDir, job.Skill)
+		} else {
+			sequenceNodes, err = ResolveSkillSequenceMetadata(job.SkillSequence, workDir)
+		}
 		if err != nil {
 			return "", nil, fmt.Errorf("resolving skill sequence: %w", err)
 		}

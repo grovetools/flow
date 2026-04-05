@@ -349,6 +349,18 @@ func ResolveSkillSequenceMetadata(skillNames []string, workDir string) ([]SkillS
 	return resolveSequenceRecursive(skillNames, workDir, 0, make(map[string]bool))
 }
 
+// ResolveSkillSequenceWithParent builds a recursive tree of skills to execute,
+// treating the sequence as implicitly authorized by the given parent skill.
+// When parentSkill is non-empty, resolution starts at depth 1 (bypassing access
+// control), since the parent skill is already authorized and its sub-skills
+// inherit that authorization.
+func ResolveSkillSequenceWithParent(skillNames []string, workDir string, parentSkill string) ([]SkillSequenceNode, error) {
+	if parentSkill != "" {
+		return resolveSequenceRecursive(skillNames, workDir, 1, make(map[string]bool))
+	}
+	return resolveSequenceRecursive(skillNames, workDir, 0, make(map[string]bool))
+}
+
 func resolveSequenceRecursive(skillNames []string, workDir string, depth int, visited map[string]bool) ([]SkillSequenceNode, error) {
 	if depth > MaxSequenceDepth {
 		return nil, fmt.Errorf("skill sequence max depth (%d) exceeded", MaxSequenceDepth)
