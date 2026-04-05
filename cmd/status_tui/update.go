@@ -638,6 +638,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StatusSummary = formatStatusSummaryHelper(plan)
 		}
 
+		// Auto-refresh fidelity pane if it's active
+		if m.ActiveDetailPane == FidelityPane && m.ActiveLogJob != nil {
+			content := renderSkillFidelityContent(m.Plan, m.ActiveLogJob, m.LogViewerWidth)
+			m.fidelityRawContent = content
+			m.fidelityViewport.SetContent(content)
+		}
+
 		// Adjust cursor if needed
 		if m.Cursor >= len(m.Jobs) {
 			m.Cursor = len(m.Jobs) - 1
