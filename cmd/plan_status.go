@@ -468,8 +468,9 @@ func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
 // JobOutput wraps orchestration.Job for JSON serialization, adding failure details.
 type JobOutput struct {
 	*orchestration.Job
-	LastError string `json:"last_error,omitempty"`
-	LogPath   string `json:"log_path,omitempty"`
+	LastError      string                              `json:"last_error,omitempty"`
+	LogPath        string                              `json:"log_path,omitempty"`
+	SkillFidelity  []orchestration.SkillFidelityState   `json:"skill_fidelity,omitempty"`
 }
 
 // formatStatusJSON creates JSON output.
@@ -502,6 +503,14 @@ func formatStatusJSON(plan *orchestration.Plan) (string, error) {
 				}
 			}
 		}
+		// Populate skill fidelity from status.json files if job has a skill sequence
+		if len(job.SkillSequence) > 0 {
+			artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
+			if states, err := orchestration.ReadSkillFidelityStates(artifactDir); err == nil && len(states) > 0 {
+				jo.SkillFidelity = states
+			}
+		}
+
 		jobOutputs = append(jobOutputs, jo)
 	}
 

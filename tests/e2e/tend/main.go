@@ -133,6 +133,9 @@ func main() {
 		// Skill sequence briefing injection
 		scenarios.SkillSequenceBriefingScenario,
 		scenarios.NestedSkillSequenceScenario,
+
+		// Skill fidelity observability
+		scenarios.SkillFidelityTrackingScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

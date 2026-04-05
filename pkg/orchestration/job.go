@@ -156,6 +156,9 @@ type Job struct {
 	UsedRulesFile      string `yaml:"used_rules_file,omitempty" json:"used_rules_file,omitempty" jsonschema:"description=Archived rules file used during last execution"`
 	NoteRef            string `yaml:"note_ref,omitempty" json:"note_ref,omitempty" jsonschema:"description=Reference to a notebook entry for context"`
 
+	// Skill fidelity tracking (populated post-execution from status.json files)
+	SkillFidelity []SkillFidelityState `yaml:"skill_fidelity,omitempty" json:"skill_fidelity,omitempty" jsonschema:"description=Skill sequence execution fidelity records"`
+
 	// Derived fields (excluded from schema - these are runtime/internal fields)
 	Filename     string      `json:"filename,omitempty" jsonschema:"-"`
 	FilePath     string      `json:"file_path,omitempty" jsonschema:"-"`

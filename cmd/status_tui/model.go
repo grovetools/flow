@@ -60,6 +60,7 @@ const (
 	FrontmatterPane
 	BriefingPane
 	EditPane
+	FidelityPane
 )
 
 // Model represents the state of the TUI
@@ -115,9 +116,11 @@ type Model struct {
 	frontmatterViewport viewport.Model
 	briefingViewport    viewport.Model
 	editViewport        viewport.Model
+	fidelityViewport    viewport.Model
 	frontmatterRawContent string
 	briefingRawContent    string
 	editRawContent        string
+	fidelityRawContent    string
 	Focus               ViewFocus // Track which pane is active
 	LogSplitVertical    bool      // Track log viewer layout
 	LogPaneFullscreen   bool      // Track if logs pane is fullscreen
@@ -172,6 +175,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	frontmatterVp := viewport.New(80, 20)
 	briefingVp := viewport.New(80, 20)
 	editVp := viewport.New(80, 20)
+	fidelityVp := viewport.New(80, 20)
 
 	// Create orchestrator for direct job execution
 	orchConfig := &orchestration.OrchestratorConfig{
@@ -264,6 +268,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		frontmatterViewport: frontmatterVp,
 		briefingViewport:    briefingVp,
 		editViewport:             editVp,
+		fidelityViewport:         fidelityVp,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
 		DaemonClient:             daemonClient,
@@ -358,6 +363,8 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string, chatBoxHeigh
 			paneTitle = "Briefing"
 		case EditPane:
 			paneTitle = "Edit"
+		case FidelityPane:
+			paneTitle = "Skill Fidelity"
 		}
 
 		jobIcon := getJobIcon(currentJob)
@@ -588,6 +595,8 @@ func (m Model) View() string {
 			detailContent = addScrollbarToViewport(&m.briefingViewport)
 		case EditPane:
 			detailContent = addScrollbarToViewport(&m.editViewport)
+		case FidelityPane:
+			detailContent = addScrollbarToViewport(&m.fidelityViewport)
 		}
 
 

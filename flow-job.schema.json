@@ -15,6 +15,41 @@
       "required": [
         "Categories"
       ]
+    },
+    "SkillFidelityState": {
+      "properties": {
+        "skill": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "artifacts_expected": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "artifacts_produced": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "error": {
+          "type": "string"
+        },
+        "diagnostic_path": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "skill",
+        "status",
+        "artifacts_expected",
+        "artifacts_produced"
+      ]
     }
   },
   "properties": {
@@ -157,6 +192,13 @@
     "note_ref": {
       "type": "string",
       "description": "Reference to a notebook entry for context"
+    },
+    "skill_fidelity": {
+      "items": {
+        "$ref": "#/$defs/SkillFidelityState"
+      },
+      "type": "array",
+      "description": "Skill sequence execution fidelity records"
     }
   },
   "type": "object",

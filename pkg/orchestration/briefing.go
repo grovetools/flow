@@ -264,14 +264,20 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 
 // renderSequenceNodes recursively renders a skill sequence tree as a TODO list.
 // It handles both nested sub-skills and artifact production/consumption.
+// Each skill gets an execution protocol with status file and diagnostic instructions.
 func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep bool, artifactDir string) {
 	var previousArtifacts []string
 
 	for _, node := range nodes {
+		statusFile := filepath.Join(artifactDir, node.Metadata.Name+"-status.json")
+		diagFile := filepath.Join(artifactDir, node.Metadata.Name+"-diagnostic.md")
+
 		if len(node.Children) > 0 {
 			// Parent skill with sub-sequence: render as parent with indented children
 			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
 			renderSequenceNodes(b, node.Children, indent+"  ", true, artifactDir)
+			// Parent status file is written after all children complete
+			b.WriteString(fmt.Sprintf("%s- Write status to %s after all sub-skills complete\n", indent, statusFile))
 		} else {
 			// Leaf skill: render invoke + execute pair
 			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
@@ -304,6 +310,10 @@ func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent s
 			} else {
 				b.WriteString(fmt.Sprintf("%s- Execute %s — %s\n", indent, node.Metadata.Name, node.Metadata.Description))
 			}
+
+			// Execution protocol: status file and diagnostic instructions
+			b.WriteString(fmt.Sprintf("%s  If this skill fails, write a diagnostic to %s\n", indent, diagFile))
+			b.WriteString(fmt.Sprintf("%s  After completing (success or failure), write status to %s with JSON: {\"skill\": \"%s\", \"status\": \"completed|failed\", \"artifacts_expected\": [...], \"artifacts_produced\": [...], \"error\": null, \"diagnostic_path\": null}\n", indent, statusFile, node.Metadata.Name))
 
 			// Accumulate current artifacts for the next skill's "read" action
 			previousArtifacts = append(previousArtifacts, currentArtifacts...)
