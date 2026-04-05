@@ -419,10 +419,18 @@ func (m Model) renderFocusDetailPrimary(contentWidth int, paneContent string, ch
 		separatorLines = append(separatorLines, "", "", "") // Top spacing
 		halfHeight := separatorHeight / 2
 		dimStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border)
-		highlightStyle := theme.DefaultTheme.Highlight
+		highlightStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue)
 		for i := 0; i < separatorHeight; i++ {
-			if (i < halfHeight && m.Focus == FocusDetailPrimary) ||
-				(i >= halfHeight && m.Focus == FocusDetailSecondary) {
+			if m.ActiveDetailPane == SkillPane {
+				// Skill pane: upper half for tree, lower half for artifact viewport
+				if (i < halfHeight && m.Focus == FocusDetailPrimary) ||
+					(i >= halfHeight && m.Focus == FocusDetailSecondary) {
+					separatorLines = append(separatorLines, highlightStyle.Render("│"))
+				} else {
+					separatorLines = append(separatorLines, dimStyle.Render("│"))
+				}
+			} else if m.Focus == FocusDetailPrimary {
+				// Non-skill panes: whole divider lights up
 				separatorLines = append(separatorLines, highlightStyle.Render("│"))
 			} else {
 				separatorLines = append(separatorLines, dimStyle.Render("│"))

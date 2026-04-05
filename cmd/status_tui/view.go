@@ -283,7 +283,11 @@ func (m Model) renderTableView() string {
 		return "\n" + t.Muted.Render("No jobs to display.") + "\n\n" + t.Muted.Render("Press 'A' to add a job.")
 	}
 
-	tableStr := gtable.SelectableTable(headers, rows, m.Cursor-m.ScrollOffset)
+	opts := gtable.SelectableTableOptions{}
+	if m.Focus == FocusJobs {
+		opts.BorderColor = theme.DefaultColors.Blue
+	}
+	tableStr := gtable.SelectableTableWithOptions(headers, rows, m.Cursor-m.ScrollOffset, opts)
 	return tableStr
 }
 
