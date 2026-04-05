@@ -36,6 +36,7 @@ func defaultColumnVisibility() map[string]bool {
 		"PREPEND":    false,
 		"UPDATED":    false,
 		"COMPLETED":  false,
+		"SKILL":      false,
 		"DURATION":   false,
 	}
 }

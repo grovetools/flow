@@ -17,7 +17,10 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/skills/pkg/service"
+	"github.com/grovetools/skills/pkg/skills"
 )
 
 // Custom keymap extending the base
@@ -138,17 +141,27 @@ type tuiModel struct {
 	depList      list.Model
 	selectedDeps map[string]bool // Track selected dependencies
 	templateList list.Model
+	skillList    list.Model
 	promptInput  textarea.Model
+
+	// Slot 2 mode: skills for agent types, templates for chat/oneshot
+	slot2IsSkills bool
+
+	// Skills service for loading skill metadata
+	skillService *service.Service
+	workspaceNode *workspace.WorkspaceNode
 
 	// All available templates (for filtering)
 	allTemplates []*orchestration.JobTemplate
 
 	// Fields to store the final job data
-	jobTitle        string
-	jobType         string
-	jobDependencies []string
-	jobTemplate     string
-	jobPrompt       string
+	jobTitle         string
+	jobType          string
+	jobDependencies  []string
+	jobTemplate      string
+	jobSkill         string
+	jobSkillSequence []string
+	jobPrompt        string
 }
 
 type item string
@@ -164,6 +177,16 @@ type dependencyItem struct {
 func (d dependencyItem) FilterValue() string { return d.job.Filename + " " + d.job.Title }
 func (d dependencyItem) Title() string       { return d.job.Filename }
 func (d dependencyItem) Description() string { return d.job.Title }
+
+// skillItem represents a skill in the picker list
+type skillItem struct {
+	name        string
+	workspace   string
+	description string
+	authorized  bool
+}
+
+func (s skillItem) FilterValue() string { return s.name }
 
 type itemDelegate struct{}
 
@@ -184,6 +207,13 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	case modelItem:
 		// Model items
 		str = fmt.Sprintf("%s%s", cursor, i.ID)
+	case skillItem:
+		// Skill items with source and auth badge
+		authBadge := theme.DefaultTheme.Muted.Render("○")
+		if i.authorized {
+			authBadge = theme.DefaultTheme.Success.Render("✓")
+		}
+		str = fmt.Sprintf("%s%s %s", cursor, i.name, authBadge)
 	default:
 		return
 	}
@@ -232,6 +262,50 @@ func (d dependencyDelegate) Render(w io.Writer, m list.Model, index int, listIte
 	} else {
 		fmt.Fprint(w, theme.DefaultTheme.Muted.Render(str))
 	}
+}
+
+// buildSkillList creates a list of available skills for the picker.
+func buildSkillList(svc *service.Service, node *workspace.WorkspaceNode) list.Model {
+	var items []list.Item
+
+	// Always add a "none" option first
+	items = append(items, item("none"))
+
+	// Get all discoverable skill sources (works with nil service for project/ecosystem skills)
+	sources := skills.ListSkillSources(svc, node)
+	for name, src := range sources {
+		// Skip sub-skills (nested paths contain "/")
+		if strings.Contains(src.RelPath, "/") {
+			continue
+		}
+		// Get description from metadata
+		desc := ""
+		if loaded, err := skills.LoadSkillFromSource(name, src); err == nil {
+			if content, ok := loaded.Files["SKILL.md"]; ok {
+				if meta, parseErr := skills.ParseSkillFrontmatter(content); parseErr == nil {
+					desc = meta.Description
+				}
+			}
+		}
+		items = append(items, skillItem{
+			name:        name,
+			description: desc,
+			authorized:  true, // All discovered skills are accessible
+		})
+	}
+
+	skillList := list.New(items, itemDelegate{}, 20, 7)
+	skillList.Title = ""
+	skillList.SetShowTitle(false)
+	skillList.SetShowStatusBar(false)
+	skillList.SetFilteringEnabled(true)
+	skillList.SetShowHelp(false)
+	skillList.SetShowPagination(true)
+	skillList.FilterInput.Prompt = " "
+	skillList.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	skillList.FilterInput.TextStyle = theme.DefaultTheme.Selected
+
+	return skillList
 }
 
 func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
@@ -316,6 +390,10 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 
 	// Initially show all templates (no job type selected yet)
 	m.templateList = m.buildTemplateList("")
+
+	// 4b. Skills list (shown for agent types instead of templates)
+	m.skillList = buildSkillList(m.skillService, m.workspaceNode)
+	m.slot2IsSkills = true // Default job type is interactive_agent, which uses skills
 
 	// 5. Prompt Input (textarea)
 	m.promptInput = textarea.New()
@@ -698,12 +776,22 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if job type selection changed
 		newSelection := m.jobTypeList.SelectedItem()
 		if prevSelection != newSelection && newSelection != nil {
-			// Update template list based on new job type
 			selectedJobType := string(newSelection.(item))
-			m.templateList = m.buildTemplateList(selectedJobType)
+			// Switch slot 2 between skills (agent types) and templates (chat/oneshot)
+			switch selectedJobType {
+			case "interactive_agent", "isolated_agent", "headless_agent":
+				m.slot2IsSkills = true
+			default:
+				m.slot2IsSkills = false
+				m.templateList = m.buildTemplateList(selectedJobType)
+			}
 		}
-	case 2: // Template list
-		m.templateList, cmd = m.templateList.Update(msg)
+	case 2: // Slot 2: Skills or Template list
+		if m.slot2IsSkills {
+			m.skillList, cmd = m.skillList.Update(msg)
+		} else {
+			m.templateList, cmd = m.templateList.Update(msg)
+		}
 	case 3: // Dependency list
 		// Toggle is handled via key.Matches above, just delegate other keys to list
 		m.depList, cmd = m.depList.Update(msg)
@@ -757,11 +845,33 @@ func (m *tuiModel) extractValues() {
 	}
 	m.jobDependencies = deps
 
-	// Get selected template
-	if selected := m.templateList.SelectedItem(); selected != nil {
-		template := string(selected.(item))
-		if template != "none" {
-			m.jobTemplate = template
+	// Get selected template or skill based on slot 2 mode
+	if m.slot2IsSkills {
+		if selected := m.skillList.SelectedItem(); selected != nil {
+			switch s := selected.(type) {
+			case skillItem:
+				m.jobSkill = s.name
+				// Resolve skill_sequence from skill metadata
+				if m.skillService != nil {
+					if loaded, err := skills.LoadSkillBypassingAccessWithService(m.skillService, m.workspaceNode, s.name); err == nil {
+						if content, ok := loaded.Files["SKILL.md"]; ok {
+							if meta, err := skills.ParseSkillFrontmatter(content); err == nil {
+								m.jobSkillSequence = meta.SkillSequence
+							}
+						}
+					}
+				}
+			case item:
+				// "none" selected
+				m.jobSkill = ""
+			}
+		}
+	} else {
+		if selected := m.templateList.SelectedItem(); selected != nil {
+			template := string(selected.(item))
+			if template != "none" {
+				m.jobTemplate = template
+			}
 		}
 	}
 
@@ -857,20 +967,26 @@ func (m tuiModel) View() string {
 	jobTypeView := m.jobTypeList.View()
 	jobTypeField := renderField(1, "Job Type:", jobTypeView, 0)
 
-	// Determine template label based on selected job type
-	templateLabel := "Template:"
-	if selected := m.jobTypeList.SelectedItem(); selected != nil {
-		jobType := string(selected.(item))
-		switch jobType {
-		case "interactive_agent", "headless_agent", "agent":
-			templateLabel = "Agent templates:"
-		case "oneshot", "chat":
-			templateLabel = "Prompt templates:"
+	// Slot 2: Skills picker for agent types, templates for chat/oneshot
+	var slot2Label string
+	var slot2View string
+	if m.slot2IsSkills {
+		slot2Label = "Skills:"
+		slot2View = m.skillList.View()
+	} else {
+		slot2Label = "Template:"
+		if selected := m.jobTypeList.SelectedItem(); selected != nil {
+			jobType := string(selected.(item))
+			switch jobType {
+			case "interactive_agent", "headless_agent", "agent":
+				slot2Label = "Agent templates:"
+			case "oneshot", "chat":
+				slot2Label = "Prompt templates:"
+			}
 		}
+		slot2View = m.templateList.View()
 	}
-
-	templateView := m.templateList.View()
-	templateField := renderField(2, templateLabel, templateView, 0)
+	templateField := renderField(2, slot2Label, slot2View, 0)
 
 	row2 := lipgloss.JoinHorizontal(lipgloss.Top, jobTypeField, "  ", templateField)
 	row2WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row2)
@@ -938,13 +1054,15 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 	}
 
 	return &orchestration.Job{
-		ID:         jobID,
-		Title:      m.jobTitle,
-		Type:       orchestration.JobType(jobType),
-		Status:     jobStatus,
-		DependsOn:  m.jobDependencies,
-		PromptBody: promptBody,
-		Template:   m.jobTemplate,
+		ID:            jobID,
+		Title:         m.jobTitle,
+		Type:          orchestration.JobType(jobType),
+		Status:        jobStatus,
+		DependsOn:     m.jobDependencies,
+		PromptBody:    promptBody,
+		Template:      m.jobTemplate,
+		Skill:         m.jobSkill,
+		SkillSequence: m.jobSkillSequence,
 	}
 }
 

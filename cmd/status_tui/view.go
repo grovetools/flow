@@ -188,6 +188,17 @@ func (m Model) renderTableView() string {
 						cell = titleText
 					}
 				}
+			case "SKILL":
+				skillName := job.Skill
+				if skillName == "" {
+					cell = t.Muted.Render("-")
+				} else {
+					if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+						cell = t.Muted.Render(skillName)
+					} else {
+						cell = skillName
+					}
+				}
 			case "TYPE":
 				var jobTypeSymbol string
 				switch job.Type {
@@ -763,6 +774,7 @@ func renderStyledFrontmatter(rawYAML string) string {
 	sections := []section{
 		{title: "Identity", properties: []string{"id", "title", "filename"}},
 		{title: "Execution", properties: []string{"status", "type", "template", "model"}},
+		{title: "Skills", properties: []string{"skill", "skill_sequence", "produces"}},
 		{title: "Context", properties: []string{"repository", "worktree", "depends_on", "prepend_dependencies", "git_changes"}},
 		{title: "Timestamps", properties: []string{"duration", "completed_at", "updated_at", "created_at"}},
 	}

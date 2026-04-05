@@ -10,9 +10,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
+	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
+	skillservice "github.com/grovetools/skills/pkg/service"
 	"github.com/grovetools/skills/pkg/skills"
 )
 
@@ -492,6 +494,18 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orchestration.Job, error) {
 	// Create the initial TUI model
 	model := initialModel(plan, cmd.DependsOn)
+
+	// Set up skills for the skill picker
+	if node, err := workspace.GetProjectByPath(plan.Directory); err == nil && node != nil {
+		model.workspaceNode = node
+	}
+	// Create a minimal skills service for listing skills (needs config for notebook discovery)
+	cfg, _ := coreconfig.LoadDefault()
+	if cfg != nil {
+		svc, _ := skillservice.New(nil, cfg, nil)
+		model.skillService = svc
+	}
+	model.skillList = buildSkillList(model.skillService, model.workspaceNode)
 
 	// Note: worktree is no longer configurable in the TUI
 	// The explicitWorktree parameter is now part of the cmd struct and is ignored.

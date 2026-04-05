@@ -33,7 +33,7 @@ type KeyMap struct {
 	ViewFrontmatter  key.Binding
 	ViewBriefing     key.Binding
 	ViewEdit         key.Binding
-	ViewFidelity     key.Binding
+	ViewSkillPane    key.Binding
 	CycleDetailPane  key.Binding
 	CloseDetailPane  key.Binding
 	SwitchFocus      key.Binding
@@ -126,9 +126,9 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("m", "p"),
 			key.WithHelp("m/p", "preview markdown"),
 		),
-		ViewFidelity: key.NewBinding(
+		ViewSkillPane: key.NewBinding(
 			key.WithKeys("F"),
-			key.WithHelp("F", "skill fidelity"),
+			key.WithHelp("F", "skills"),
 		),
 		CycleDetailPane: key.NewBinding(
 			key.WithKeys("v"),
@@ -175,7 +175,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
 			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-			k.ViewBriefing, k.ViewEdit, k.ViewFidelity, k.TogglePreview, k.CycleDetailPane,
+			k.ViewBriefing, k.ViewEdit, k.ViewSkillPane, k.TogglePreview, k.CycleDetailPane,
 			k.CloseDetailPane, k.SwitchFocus, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(

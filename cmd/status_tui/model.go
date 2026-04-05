@@ -60,7 +60,7 @@ const (
 	FrontmatterPane
 	BriefingPane
 	EditPane
-	FidelityPane
+	SkillPane
 )
 
 // Model represents the state of the TUI
@@ -116,11 +116,14 @@ type Model struct {
 	frontmatterViewport viewport.Model
 	briefingViewport    viewport.Model
 	editViewport        viewport.Model
-	fidelityViewport    viewport.Model
+	skillPaneViewport    viewport.Model
+	skillPaneCursor      int                    // Cursor position in the skill pane tree
+	skillPaneNodes       []*SkillDisplayNode    // Flattened skill nodes for cursor navigation
+	skillPaneStateMap    map[string]orchestration.SkillFidelityState // Cached state map
 	frontmatterRawContent string
 	briefingRawContent    string
 	editRawContent        string
-	fidelityRawContent    string
+	skillPaneRawContent    string
 	Focus               ViewFocus // Track which pane is active
 	LogSplitVertical    bool      // Track log viewer layout
 	LogPaneFullscreen   bool      // Track if logs pane is fullscreen
@@ -175,7 +178,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	frontmatterVp := viewport.New(80, 20)
 	briefingVp := viewport.New(80, 20)
 	editVp := viewport.New(80, 20)
-	fidelityVp := viewport.New(80, 20)
+	skillPaneVp := viewport.New(80, 20)
 
 	// Create orchestrator for direct job execution
 	orchConfig := &orchestration.OrchestratorConfig{
@@ -193,7 +196,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	}
 
 	// Column Visibility Setup
-	availableColumns := []string{"JOB", "TITLE", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "PREPEND", "UPDATED", "COMPLETED", "DURATION"}
+	availableColumns := []string{"JOB", "TITLE", "SKILL", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "PREPEND", "UPDATED", "COMPLETED", "DURATION"}
 	state, err := loadState()
 	if err != nil {
 		// On error, use defaults
@@ -268,7 +271,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		frontmatterViewport: frontmatterVp,
 		briefingViewport:    briefingVp,
 		editViewport:             editVp,
-		fidelityViewport:         fidelityVp,
+		skillPaneViewport:         skillPaneVp,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
 		DaemonClient:             daemonClient,
@@ -363,8 +366,8 @@ func (m Model) renderLogsPane(contentWidth int, paneContent string, chatBoxHeigh
 			paneTitle = "Briefing"
 		case EditPane:
 			paneTitle = "Edit"
-		case FidelityPane:
-			paneTitle = "Skill Fidelity"
+		case SkillPane:
+			paneTitle = "Skills"
 		}
 
 		jobIcon := getJobIcon(currentJob)
@@ -595,8 +598,8 @@ func (m Model) View() string {
 			detailContent = addScrollbarToViewport(&m.briefingViewport)
 		case EditPane:
 			detailContent = addScrollbarToViewport(&m.editViewport)
-		case FidelityPane:
-			detailContent = addScrollbarToViewport(&m.fidelityViewport)
+		case SkillPane:
+			detailContent = addScrollbarToViewport(&m.skillPaneViewport)
 		}
 
 

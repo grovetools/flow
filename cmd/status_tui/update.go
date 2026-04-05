@@ -638,11 +638,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StatusSummary = formatStatusSummaryHelper(plan)
 		}
 
-		// Auto-refresh fidelity pane if it's active
-		if m.ActiveDetailPane == FidelityPane && m.ActiveLogJob != nil {
-			content := renderSkillFidelityContent(m.Plan, m.ActiveLogJob, m.LogViewerWidth)
-			m.fidelityRawContent = content
-			m.fidelityViewport.SetContent(content)
+		// Auto-refresh skill pane if it's active
+		if m.ActiveDetailPane == SkillPane && m.ActiveLogJob != nil {
+			content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+			m.skillPaneNodes = flatNodes
+			m.skillPaneStateMap = stateMap
+			m.skillPaneRawContent = content
+			m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
 		}
 
 		// Adjust cursor if needed
@@ -757,8 +759,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 		m.editViewport.Width = m.LogViewerWidth
 		m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-		m.fidelityViewport.Width = m.LogViewerWidth
-		m.fidelityViewport.Height = m.LogViewerHeight - logHeaderHeight
+		m.skillPaneViewport.Width = m.LogViewerWidth
+		m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
 
 		// Re-wrap content for all detail viewports to adapt to the new size
 		if m.frontmatterRawContent != "" {
@@ -776,8 +778,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
 			m.editViewport.SetContent(wrappedContent)
 		}
-		if m.fidelityRawContent != "" {
-			m.fidelityViewport.SetContent(m.fidelityRawContent)
+		if m.skillPaneRawContent != "" {
+			m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
 		}
 
 		// Start log viewer on first window size message if we have jobs and logs are enabled
@@ -1247,6 +1249,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let 'q' and 'ctrl+c' be handled by the main logic to quit.
 			case "?":
 				// Let '?' be handled by the main logic to show help.
+			case "F":
+				// Let 'F' (ViewSkillPane) be handled by the main logic.
 			case "l", "f", "b", "m", "p", "v":
 				// Let pane switching keys be handled by the main logic.
 			case "tab", "shift+tab":
@@ -1279,6 +1283,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Clear sequence for any other key
 				m.Sequence.Clear()
 
+				// Handle skill pane cursor navigation
+				if m.ActiveDetailPane == SkillPane && len(m.skillPaneNodes) > 0 {
+					switch msg.String() {
+					case "j", "down":
+						if m.skillPaneCursor < len(m.skillPaneNodes)-1 {
+							m.skillPaneCursor++
+							m.refreshSkillPane()
+						}
+						return m, nil
+					case "k", "up":
+						if m.skillPaneCursor > 0 {
+							m.skillPaneCursor--
+							m.refreshSkillPane()
+						}
+						return m, nil
+					}
+				}
+
 				// Delegate other keys to the active viewport for scrolling, etc.
 				switch m.ActiveDetailPane {
 				case LogsPaneDetail:
@@ -1289,8 +1311,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.briefingViewport, cmd = m.briefingViewport.Update(msg)
 				case EditPane:
 					m.editViewport, cmd = m.editViewport.Update(msg)
-				case FidelityPane:
-					m.fidelityViewport, cmd = m.fidelityViewport.Update(msg)
+				case SkillPane:
+					m.skillPaneViewport, cmd = m.skillPaneViewport.Update(msg)
 				}
 				return m, cmd
 			}
@@ -1345,8 +1367,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 				m.editViewport.Width = m.LogViewerWidth
 				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.fidelityViewport.Width = m.LogViewerWidth
-				m.fidelityViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.skillPaneViewport.Width = m.LogViewerWidth
+				m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
 
 				// Re-wrap content for all detail viewports to adapt to the new layout
 				if m.frontmatterRawContent != "" {
@@ -1364,8 +1386,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
 					m.editViewport.SetContent(wrappedContent)
 				}
-				if m.fidelityRawContent != "" {
-					m.fidelityViewport.SetContent(m.fidelityRawContent)
+				if m.skillPaneRawContent != "" {
+					m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
 				}
 
 				// Update log viewer with new dimensions
@@ -1393,8 +1415,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 				m.editViewport.Width = m.LogViewerWidth
 				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.fidelityViewport.Width = m.LogViewerWidth
-				m.fidelityViewport.Height = m.LogViewerHeight - logHeaderHeight
+				m.skillPaneViewport.Width = m.LogViewerWidth
+				m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
 
 				// Re-wrap content for all detail viewports to adapt to the new layout
 				if m.frontmatterRawContent != "" {
@@ -1412,8 +1434,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
 					m.editViewport.SetContent(wrappedContent)
 				}
-				if m.fidelityRawContent != "" {
-					m.fidelityViewport.SetContent(m.fidelityRawContent)
+				if m.skillPaneRawContent != "" {
+					m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
 				}
 
 				// Update log viewer with new dimensions
@@ -1525,8 +1547,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.ViewEdit):
 			return m.openDetailPane(EditPane)
 
-		case key.Matches(msg, m.KeyMap.ViewFidelity):
-			return m.openDetailPane(FidelityPane)
+		case key.Matches(msg, m.KeyMap.ViewSkillPane):
+			return m.openDetailPane(SkillPane)
 
 		case key.Matches(msg, m.KeyMap.CycleDetailPane):
 			// Toggle detail pane visibility (show/hide)
@@ -2134,8 +2156,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.briefingViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading briefing for %s...", job.Title)))
 	case EditPane:
 		m.editViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading file content for %s...", job.Title)))
-	case FidelityPane:
-		m.fidelityViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading fidelity for %s...", job.Title)))
+	case SkillPane:
+		m.skillPaneViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading skills for %s...", job.Title)))
 	}
 
 	// Trigger the actual content loading
@@ -2160,10 +2182,13 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		return m, loadBriefingCmd(m.Plan, job)
 	case EditPane:
 		return m, loadJobFileContentCmd(job)
-	case FidelityPane:
-		content := renderSkillFidelityContent(m.Plan, job, m.LogViewerWidth)
-		m.fidelityRawContent = content
-		m.fidelityViewport.SetContent(content)
+	case SkillPane:
+		m.skillPaneCursor = 0
+		content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+		m.skillPaneNodes = flatNodes
+		m.skillPaneStateMap = stateMap
+		m.skillPaneRawContent = content
+		m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
 		return m, nil
 	}
 
@@ -2195,8 +2220,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-	m.fidelityViewport.Width = m.LogViewerWidth
-	m.fidelityViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.skillPaneViewport.Width = m.LogViewerWidth
+	m.skillPaneViewport.Height = m.LogViewerHeight - logHeaderHeight
 
 	// Trigger content loading for the active pane
 	switch pane {
@@ -2216,11 +2241,14 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	case EditPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
 		return m, loadJobFileContentCmd(job)
-	case FidelityPane:
-		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading skill fidelity for %s...", job.Title))
-		content := renderSkillFidelityContent(m.Plan, job, m.LogViewerWidth)
-		m.fidelityRawContent = content
-		m.fidelityViewport.SetContent(content)
+	case SkillPane:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading skills for %s...", job.Title))
+		m.skillPaneCursor = 0
+		content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+		m.skillPaneNodes = flatNodes
+		m.skillPaneStateMap = stateMap
+		m.skillPaneRawContent = content
+		m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
 		return m, nil
 	}
 
@@ -2247,4 +2275,16 @@ func wrapContentForViewport(content string, width int) string {
 // addScrollbarToViewport overlays a scrollbar on viewport content.
 func addScrollbarToViewport(vp *viewport.Model) string {
 	return scrollbar.Overlay(vp)
+}
+
+// refreshSkillPane re-renders the skill pane with the current cursor position.
+func (m *Model) refreshSkillPane() {
+	if m.ActiveLogJob == nil {
+		return
+	}
+	content, flatNodes, stateMap := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+	m.skillPaneNodes = flatNodes
+	m.skillPaneStateMap = stateMap
+	m.skillPaneRawContent = content
+	m.skillPaneViewport.SetContent(wrapContentForViewport(content, m.skillPaneViewport.Width-1))
 }
