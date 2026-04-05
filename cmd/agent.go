@@ -226,6 +226,43 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 	return cmd
 }
 
+// buildSenderHeader constructs a [from: ...] header identifying the sender.
+// It reads GROVE_FLOW_JOB_ID and GROVE_FLOW_JOB_TITLE env vars first.
+// If those aren't set, falls back to the current tmux session:window.
+func buildSenderHeader() string {
+	jobID := os.Getenv("GROVE_FLOW_JOB_ID")
+	jobTitle := os.Getenv("GROVE_FLOW_JOB_TITLE")
+	planName := os.Getenv("GROVE_FLOW_PLAN_NAME")
+
+	if jobID != "" {
+		// Build tmux address from plan/job info
+		var tmuxAddr string
+		if planName != "" && jobTitle != "" {
+			// Reconstruct the likely tmux target
+			tmuxAddr = planName + ":job-" + jobTitle
+		}
+		label := jobID
+		if jobTitle != "" {
+			label = jobTitle
+		}
+		if tmuxAddr != "" {
+			return fmt.Sprintf("[from: %s (%s)]", label, tmuxAddr)
+		}
+		return fmt.Sprintf("[from: %s]", label)
+	}
+
+	// Fallback: try to get current tmux session:window via display-message
+	out, err := tmux.Command("display-message", "-p", "#S:#W").Output()
+	if err == nil {
+		sessionWindow := strings.TrimSpace(string(out))
+		if sessionWindow != "" && sessionWindow != ":" {
+			return fmt.Sprintf("[from: %s]", sessionWindow)
+		}
+	}
+
+	return ""
+}
+
 func newAgentSendCmd() *cobra.Command {
 	var fileFlag string
 	var waitFlag bool
@@ -236,6 +273,9 @@ func newAgentSendCmd() *cobra.Command {
 		Short: "Send a message to an interactive agent",
 		Long: `Sends a message or instruction to an interactive agent via tmux.
 The message can be provided as an argument or read from a file.
+
+A [from: ...] header is automatically prepended to identify the sender,
+using the GROVE_FLOW_JOB_ID env var or the current tmux pane identity.
 
 By default, the command returns immediately after sending (fire-and-forget).
 Use --wait to block until the agent becomes idle again.
@@ -295,6 +335,11 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 				} else {
 					return fmt.Errorf("must provide either a message argument or --file")
 				}
+			}
+
+			// Prepend sender header
+			if header := buildSenderHeader(); header != "" {
+				input = header + "\n" + input
 			}
 
 			if err := sendToPane(targetPane, input); err != nil {
