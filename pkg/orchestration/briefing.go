@@ -107,10 +107,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 			b.WriteString("        You have a sequence of skills to work through in order.\n")
 			b.WriteString("        Before starting, create a TODO list with these exact items:\n\n")
 
-			// Base path for all artifacts produced by this job's skills
-			artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
-
-			renderSequenceNodes(&b, sequenceNodes, "        ", false, artifactDir)
+			renderSequenceNodes(&b, sequenceNodes, "        ", false)
 
 			b.WriteString("\n        Work through the list in order. For each pair: first invoke the skill using the Skill tool, then follow its instructions to completion. Mark each item done as you go.\n")
 			b.WriteString(fmt.Sprintf("\n        Start by invoking Skill(\"%s\") now.\n", sequenceNodes[0].Metadata.Name))
@@ -263,60 +260,46 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 }
 
 // renderSequenceNodes recursively renders a skill sequence tree as a TODO list.
-// It handles both nested sub-skills and artifact production/consumption.
-// Each skill gets an execution protocol with status file and diagnostic instructions.
-func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep bool, artifactDir string) {
+// It uses the `flow artifact` CLI to guarantee correct paths and validation.
+// Each skill gets an execution protocol using CLI commands instead of raw paths.
+func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep bool) {
 	var previousArtifacts []string
 
 	for _, node := range nodes {
-		statusFile := filepath.Join(artifactDir, node.Metadata.Name+"-status.json")
-		diagFile := filepath.Join(artifactDir, node.Metadata.Name+"-diagnostic.md")
-
 		if len(node.Children) > 0 {
-			// Parent skill with sub-sequence: render as parent with indented children
+			// Parent skill with sub-sequence
 			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
-			renderSequenceNodes(b, node.Children, indent+"  ", true, artifactDir)
-			// Parent status file is written after all children complete
-			b.WriteString(fmt.Sprintf("%s- Write status to %s after all sub-skills complete\n", indent, statusFile))
+			renderSequenceNodes(b, node.Children, indent+"  ", true)
+			b.WriteString(fmt.Sprintf("%s- Mark complete: `flow artifact complete %s --status completed`\n", indent, node.Metadata.Name))
 		} else {
 			// Leaf skill: render invoke + execute pair
 			b.WriteString(fmt.Sprintf("%s- Invoke Skill(%s)\n", indent, node.Metadata.Name))
 
 			var actions []string
 
-			// Downstream skills read previous artifacts for context
+			// Downstream skills read previous artifacts using the CLI
 			if len(previousArtifacts) > 0 {
-				actions = append(actions, fmt.Sprintf("read %s", strings.Join(previousArtifacts, ", ")))
+				actions = append(actions, fmt.Sprintf("read prior context using `flow artifact read <file>` for: %s", strings.Join(previousArtifacts, ", ")))
 			}
 
-			// Resolve absolute paths for the current skill's artifacts
-			var currentArtifacts []string
-			for _, prod := range node.Metadata.Produces {
-				currentArtifacts = append(currentArtifacts, filepath.Join(artifactDir, prod))
-			}
-
-			if len(currentArtifacts) > 0 {
-				if len(previousArtifacts) > 0 {
-					actions = append(actions, fmt.Sprintf("write %s", strings.Join(currentArtifacts, ", ")))
-				} else {
-					actions = append(actions, fmt.Sprintf("write output to %s", strings.Join(currentArtifacts, ", ")))
-				}
-				actions = append(actions, "verify it exists")
+			if len(node.Metadata.Produces) > 0 {
+				actions = append(actions, fmt.Sprintf("write output using `flow artifact write <filename>` for: %s", strings.Join(node.Metadata.Produces, ", ")))
 			}
 
 			// Build the execute line
 			if len(actions) > 0 {
-				b.WriteString(fmt.Sprintf("%s- Execute %s — %s\n", indent, node.Metadata.Name, strings.Join(actions, ", ")))
+				b.WriteString(fmt.Sprintf("%s- Execute %s — %s\n", indent, node.Metadata.Name, strings.Join(actions, " AND ")))
 			} else {
 				b.WriteString(fmt.Sprintf("%s- Execute %s — %s\n", indent, node.Metadata.Name, node.Metadata.Description))
 			}
 
-			// Execution protocol: status file and diagnostic instructions
-			b.WriteString(fmt.Sprintf("%s  If this skill fails, write a diagnostic to %s\n", indent, diagFile))
-			b.WriteString(fmt.Sprintf("%s  After completing (success or failure), write status to %s with JSON: {\"skill\": \"%s\", \"status\": \"completed|failed\", \"artifacts_expected\": [...], \"artifacts_produced\": [...], \"error\": null, \"diagnostic_path\": null}\n", indent, statusFile, node.Metadata.Name))
+			// CLI completion protocol
+			b.WriteString(fmt.Sprintf("%s  When finished successfully: `flow artifact complete %s --status completed`\n", indent, node.Metadata.Name))
+			b.WriteString(fmt.Sprintf("%s  If you get stuck or fail: write a diagnostic via `flow artifact write %s-diag.md`, then run `flow artifact complete %s --status failed --error \"<reason>\" --diagnostic-file %s-diag.md`\n",
+				indent, node.Metadata.Name, node.Metadata.Name, node.Metadata.Name))
 
 			// Accumulate current artifacts for the next skill's "read" action
-			previousArtifacts = append(previousArtifacts, currentArtifacts...)
+			previousArtifacts = append(previousArtifacts, node.Metadata.Produces...)
 		}
 	}
 }

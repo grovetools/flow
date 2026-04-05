@@ -83,7 +83,7 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 			return runCmd.Run().AssertSuccess()
 		}),
 
-		harness.NewStep("Verify briefing contains status file and diagnostic paths", func(ctx *harness.Context) error {
+		harness.NewStep("Verify briefing contains flow artifact CLI commands", func(ctx *harness.Context) error {
 			planPath := ctx.GetString("plan_path")
 
 			jobArtifactDir := filepath.Join(planPath, ".artifacts", "cook-fidelity")
@@ -97,33 +97,25 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify status file paths are in the briefing
-			prepStatusPath := filepath.Join(jobArtifactDir, "prep-status.json")
-			searStatusPath := filepath.Join(jobArtifactDir, "sear-status.json")
-			plateStatusPath := filepath.Join(jobArtifactDir, "plate-status.json")
-
-			if !strings.Contains(content, prepStatusPath) {
-				return fmt.Errorf("briefing missing prep status file path.\nExpected path: %s\nContent:\n%s", prepStatusPath, content)
+			// Verify CLI completion commands for each skill
+			if !strings.Contains(content, "flow artifact complete prep --status completed") {
+				return fmt.Errorf("briefing missing 'flow artifact complete prep' command.\nContent:\n%s", content)
 			}
-			if !strings.Contains(content, searStatusPath) {
-				return fmt.Errorf("briefing missing sear status file path.\nExpected path: %s", searStatusPath)
+			if !strings.Contains(content, "flow artifact complete sear --status completed") {
+				return fmt.Errorf("briefing missing 'flow artifact complete sear' command")
 			}
-			if !strings.Contains(content, plateStatusPath) {
-				return fmt.Errorf("briefing missing plate status file path.\nExpected path: %s", plateStatusPath)
+			if !strings.Contains(content, "flow artifact complete plate --status completed") {
+				return fmt.Errorf("briefing missing 'flow artifact complete plate' command")
 			}
 
-			// Verify diagnostic paths are in the briefing
-			prepDiagPath := filepath.Join(jobArtifactDir, "prep-diagnostic.md")
-			if !strings.Contains(content, prepDiagPath) {
-				return fmt.Errorf("briefing missing prep diagnostic path.\nExpected: %s", prepDiagPath)
+			// Verify diagnostic instructions use flow artifact write
+			if !strings.Contains(content, "flow artifact write prep-diag.md") {
+				return fmt.Errorf("briefing missing 'flow artifact write prep-diag.md' diagnostic instruction")
 			}
 
-			// Verify execution protocol instructions
-			if !strings.Contains(content, "write status to") {
-				return fmt.Errorf("briefing missing 'write status to' instruction")
-			}
-			if !strings.Contains(content, "write a diagnostic to") {
-				return fmt.Errorf("briefing missing diagnostic instruction")
+			// Verify failure protocol
+			if !strings.Contains(content, "flow artifact complete prep --status failed") {
+				return fmt.Errorf("briefing missing failure protocol for prep")
 			}
 
 			return nil

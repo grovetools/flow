@@ -264,18 +264,23 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 				return err
 			}
 
-			// Compute exactly what the XML briefing paths should look like
-			prepArtifactPath := filepath.Join(planPath, ".artifacts", "job-artifacts", "prep-log.md")
-			searArtifactPath := filepath.Join(planPath, ".artifacts", "job-artifacts", "sear-log.md")
-
-			expectedPrep := fmt.Sprintf("Execute prep-artifact — write output to %s, verify it exists", prepArtifactPath)
-			expectedSear := fmt.Sprintf("Execute sear-artifact — read %s, write %s, verify it exists", prepArtifactPath, searArtifactPath)
+			// Verify the briefing uses flow artifact CLI commands instead of raw paths
+			expectedPrep := "Execute prep-artifact — write output using `flow artifact write <filename>` for: prep-log.md"
+			expectedSear := "Execute sear-artifact — read prior context using `flow artifact read <file>` for: prep-log.md AND write output using `flow artifact write <filename>` for: sear-log.md"
 
 			if !strings.Contains(content, expectedPrep) {
 				return fmt.Errorf("briefing missing expected prep instruction.\nExpected: %s\nGot:\n%s", expectedPrep, content)
 			}
 			if !strings.Contains(content, expectedSear) {
 				return fmt.Errorf("briefing missing expected sear instruction.\nExpected: %s\nGot:\n%s", expectedSear, content)
+			}
+
+			// Verify CLI completion protocol
+			if !strings.Contains(content, "flow artifact complete prep-artifact --status completed") {
+				return fmt.Errorf("briefing missing flow artifact complete command for prep-artifact")
+			}
+			if !strings.Contains(content, "flow artifact complete sear-artifact --status failed") {
+				return fmt.Errorf("briefing missing flow artifact complete failure command for sear-artifact")
 			}
 
 			return nil

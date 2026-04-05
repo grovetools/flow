@@ -42,6 +42,9 @@ func main() {
 	rootCmd.AddCommand(cmd.NewUnholdCmd())
 	rootCmd.AddCommand(cmd.NewResumeCmd())
 
+	// Add the artifact command (for use inside job sessions)
+	rootCmd.AddCommand(cmd.NewArtifactCmd())
+
 	// Add other top-level commands
 	rootCmd.AddCommand(cmd.GetChatCommand())
 	rootCmd.AddCommand(cmd.NewVersionCmd())

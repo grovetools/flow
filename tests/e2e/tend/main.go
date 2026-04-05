@@ -136,6 +136,9 @@ func main() {
 
 		// Skill fidelity observability
 		scenarios.SkillFidelityTrackingScenario,
+
+		// Artifact CLI
+		scenarios.ArtifactCLIScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
