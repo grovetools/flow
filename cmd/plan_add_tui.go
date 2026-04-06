@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
@@ -162,7 +163,12 @@ type tuiModel struct {
 	jobSkill         string
 	jobSkillSequence []string
 	jobPrompt        string
+
+	// Claw (channel + autonomous) toggle
+	clawEnabled bool
 }
+
+var clawToggleKey = key.NewBinding(key.WithKeys("ctrl+g"))
 
 type item string
 
@@ -342,7 +348,6 @@ func initialModel(plan *orchestration.Plan, initialDeps []string) tuiModel {
 		item("shell"),
 		item("chat"),
 		item("file"),
-		item("claw"),
 	}
 	m.jobTypeList = list.New(jobTypes, itemDelegate{}, 20, 7)
 	m.jobTypeList.Title = ""
@@ -423,8 +428,8 @@ func (m tuiModel) buildTemplateList(jobType string) list.Model {
 		case "oneshot", "chat":
 			// Show oneshot templates (Type == "oneshot", which includes chat.md)
 			includeTemplate = t.Type == "oneshot"
-		case "shell", "file", "claw":
-			// Shell, file, and claw jobs don't use templates
+		case "shell", "file":
+			// Shell and file jobs don't use templates
 			includeTemplate = false
 		default:
 			// If no job type selected, show all templates
@@ -499,6 +504,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.extractValues()
 			m.quitting = true
 			return m, tea.Quit
+
+		case key.Matches(msg, clawToggleKey):
+			// Toggle claw — only for interactive_agent
+			if selected := m.jobTypeList.SelectedItem(); selected != nil && string(selected.(item)) == "interactive_agent" {
+				m.clawEnabled = !m.clawEnabled
+			}
+			return m, nil
 
 		case key.Matches(msg, m.keys.Next):
 			// Tab moves to next field, preserving unfocused state if already unfocused
@@ -1016,7 +1028,7 @@ func (m tuiModel) View() string {
 		MarginLeft(2)
 
 	helpText := m.helpModel.View()
-	
+
 	// Add mode indicator
 	var modeIndicator string
 	if m.unfocused {
@@ -1024,9 +1036,20 @@ func (m tuiModel) View() string {
 	} else {
 		modeIndicator = theme.DefaultTheme.Muted.Render(" [INSERT] esc normal")
 	}
-	
-	// Combine help text with mode indicator
-	fullHelpText := helpText + modeIndicator
+
+	// Claw indicator — only shown for interactive_agent
+	var clawSuffix string
+	if selected := m.jobTypeList.SelectedItem(); selected != nil && string(selected.(item)) == "interactive_agent" {
+		if m.clawEnabled {
+			clawSuffix = "  " + lipgloss.NewStyle().Foreground(theme.DefaultColors.Green).Render(" claw: signal+auto")
+		} else {
+			clawSuffix = "  " + lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText).Render(" claw: off")
+		}
+		clawSuffix += lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText).Render(" ctrl+g")
+	}
+
+	// Combine: help • mode | claw toggle
+	fullHelpText := helpText + modeIndicator + clawSuffix
 	b.WriteString(helpStyle.Render(fullHelpText))
 
 	return b.String()
@@ -1053,7 +1076,7 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 		jobStatus = orchestration.JobStatusCompleted
 	}
 
-	return &orchestration.Job{
+	job := &orchestration.Job{
 		ID:            jobID,
 		Title:         m.jobTitle,
 		Type:          orchestration.JobType(jobType),
@@ -1064,6 +1087,16 @@ func (m tuiModel) toJob(plan *orchestration.Plan) *orchestration.Job {
 		Skill:         m.jobSkill,
 		SkillSequence: m.jobSkillSequence,
 	}
+
+	if m.clawEnabled {
+		job.Channels = []string{"signal"}
+		job.Autonomous = &models.AutonomousConfig{
+			Enabled:     true,
+			IdleMinutes: 15,
+		}
+	}
+
+	return job
 }
 
 // The helper functions findRootJobs and findDependents are already defined in plan_status.go

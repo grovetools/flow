@@ -40,6 +40,7 @@ type KeyMap struct {
 	ToggleLayout     key.Binding
 	ToggleFullscreen key.Binding
 	SendInput        key.Binding // For isolated agents: toggle input mode
+	ToggleClaw       key.Binding // Enable/disable claw (channels + autonomous)
 }
 
 // NewKeyMap creates a new KeyMap with user configuration applied.
@@ -154,6 +155,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("i"),
 			key.WithHelp("i", "input to agent"),
 		),
+		ToggleClaw: key.NewBinding(
+			key.WithKeys("C"),
+			key.WithHelp("C", "toggle claw"),
+		),
 	}
 
 	// Apply TUI-specific overrides from config
@@ -181,7 +186,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.ActionsSection(
 			k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
 			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
-			k.Resume, k.EditDeps, k.Archive, k.SendInput, k.CopyPath, k.Help, k.Quit,
+			k.Resume, k.EditDeps, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath, k.Help, k.Quit,
 		),
 	}
 }

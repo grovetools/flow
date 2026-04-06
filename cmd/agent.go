@@ -47,6 +47,10 @@ Commands that target a specific agent accept either:
 	cmd.AddCommand(newAgentStatusCmd())
 	cmd.AddCommand(newAgentListCmd())
 	cmd.AddCommand(newAgentTranscriptCmd())
+	cmd.AddCommand(newAgentClawCmd())
+	cmd.AddCommand(newAgentUnclawCmd())
+	cmd.AddCommand(newAgentDetachCmd())
+	cmd.AddCommand(newAgentAttachCmd())
 
 	return cmd
 }

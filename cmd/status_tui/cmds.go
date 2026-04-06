@@ -23,6 +23,8 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/flow/pkg/orchestration"
+	notifications "github.com/grovetools/notify"
+	notifyconfig "github.com/grovetools/notify/pkg/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1704,4 +1706,125 @@ func editSkillOrArtifactCmd(plan *orchestration.Plan, job *orchestration.Job, no
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return editorFinishedMsg{Err: err}
 	})
+}
+
+// --- Claw (channels + autonomous) commands ---
+
+type clawResultMsg struct {
+	JobID   string
+	Enabled bool
+	Err     error
+}
+
+func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes int, prompt string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		client := daemon.NewWithAutoStart()
+		defer client.Close()
+
+		// Enable signal channel
+		if err := client.UpdateSessionChannels(ctx, job.ID, []string{"signal"}); err != nil {
+			return clawResultMsg{JobID: job.ID, Err: fmt.Errorf("enable channels: %w", err)}
+		}
+
+		// Enable autonomous pinger
+		if err := client.UpdateSessionAutonomous(ctx, job.ID, &models.AutonomousConfig{
+			Enabled:     true,
+			IdleMinutes: idleMinutes,
+			Prompt:      prompt,
+		}); err != nil {
+			return clawResultMsg{JobID: job.ID, Err: fmt.Errorf("enable autonomous: %w", err)}
+		}
+
+		// Resolve tmux target and notify the agent
+		targetPane, err := orchestration.ResolveInteractiveAgentPane(plan, job)
+		if err == nil && targetPane != "" {
+			_ = client.UpdateSessionTmuxTarget(ctx, job.ID, targetPane)
+
+			notifyCfg := notifyconfig.Load()
+			instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"})
+			if instructions != "" {
+				msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
+				if tmuxClient, err := tmux.NewClient(); err == nil {
+					_ = tmuxClient.SendKeys(ctx, targetPane, msg, "C-m")
+				}
+			}
+		}
+
+		// Update job frontmatter so TUI indicator shows correctly
+		if job.FilePath != "" {
+			content, err := os.ReadFile(job.FilePath)
+			if err == nil {
+				// Channels (simple array — UpdateFrontmatter handles fine)
+				updates := map[string]any{"channels": []string{"signal"}}
+				if newContent, err := orchestration.UpdateFrontmatter(content, updates); err == nil {
+					// Autonomous (nested struct — insert manually before closing ---)
+					s := string(newContent)
+					// Remove existing autonomous block first
+					if idx := strings.Index(s, "autonomous:\n"); idx >= 0 {
+						end := idx + len("autonomous:\n")
+						remaining := s[end:]
+						for _, line := range strings.SplitAfter(remaining, "\n") {
+							if strings.HasPrefix(line, "  ") {
+								end += len(line)
+							} else {
+								break
+							}
+						}
+						s = s[:idx] + s[end:]
+					}
+					autoYAML := fmt.Sprintf("autonomous:\n  enabled: true\n  idle_minutes: %d", idleMinutes)
+					if prompt != "" {
+						autoYAML += fmt.Sprintf("\n  prompt: %q", prompt)
+					}
+					if idx := strings.LastIndex(s, "\n---\n"); idx >= 0 {
+						s = s[:idx] + "\n" + autoYAML + s[idx:]
+					}
+					_ = os.WriteFile(job.FilePath, []byte(s), 0o644)
+				}
+			}
+		}
+
+		return clawResultMsg{JobID: job.ID, Enabled: true}
+	}
+}
+
+func unclawJobCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		client := daemon.NewWithAutoStart()
+		defer client.Close()
+
+		_ = client.UpdateSessionChannels(ctx, job.ID, nil)
+		_ = client.UpdateSessionAutonomous(ctx, job.ID, &models.AutonomousConfig{Enabled: false})
+
+		// Remove from frontmatter — set channels to empty and remove autonomous block
+		if job.FilePath != "" {
+			content, err := os.ReadFile(job.FilePath)
+			if err == nil {
+				updates := map[string]any{"channels": []string{}}
+				if newContent, err := orchestration.UpdateFrontmatter(content, updates); err == nil {
+					// Remove autonomous block (simple string removal)
+					s := string(newContent)
+					// Remove "autonomous:\n  enabled: ...\n  idle_minutes: ...\n  prompt: ...\n" block
+					if idx := strings.Index(s, "autonomous:\n"); idx >= 0 {
+						end := idx
+						lines := strings.Split(s[idx:], "\n")
+						end += len(lines[0]) + 1 // "autonomous:\n"
+						for i := 1; i < len(lines); i++ {
+							if strings.HasPrefix(lines[i], "  ") {
+								end += len(lines[i]) + 1
+							} else {
+								break
+							}
+						}
+						s = s[:idx] + s[end:]
+					}
+					_ = os.WriteFile(job.FilePath, []byte(s), 0o644)
+				}
+			}
+		}
+
+		return clawResultMsg{JobID: job.ID, Enabled: false}
+	}
 }

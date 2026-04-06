@@ -3,6 +3,8 @@ package orchestration
 import (
 	"strings"
 	"time"
+
+	"github.com/grovetools/core/pkg/models"
 )
 
 // InlineCategory represents a category of files that can be inlined.
@@ -103,7 +105,6 @@ const (
 	JobTypeIsolatedAgent    JobType = "isolated_agent"
 	JobTypeGenerateRecipe   JobType = "generate-recipe"
 	JobTypeFile             JobType = "file" // Non-executable job for storing context/reference content
-	JobTypeClaw             JobType = "claw"
 )
 
 // Job represents a single orchestration job.
@@ -155,6 +156,10 @@ type Job struct {
 	RulesFile          string `yaml:"rules_file,omitempty" json:"rules_file,omitempty" jsonschema:"description=Path to rules file for agent behavior"`
 	UsedRulesFile      string `yaml:"used_rules_file,omitempty" json:"used_rules_file,omitempty" jsonschema:"description=Archived rules file used during last execution"`
 	NoteRef            string `yaml:"note_ref,omitempty" json:"note_ref,omitempty" jsonschema:"description=Reference to a notebook entry for context"`
+
+	// Channel & Autonomous support (for interactive_agent jobs)
+	Channels   []string                 `yaml:"channels,omitempty" json:"channels,omitempty" jsonschema:"description=External channels to enable (e.g. signal)"`
+	Autonomous *models.AutonomousConfig `yaml:"autonomous,omitempty" json:"autonomous,omitempty" jsonschema:"description=Autonomous idle pinger configuration"`
 
 	// Skill fidelity tracking (populated post-execution from status.json files)
 	SkillFidelity []SkillFidelityState `yaml:"skill_fidelity,omitempty" json:"skill_fidelity,omitempty" jsonschema:"description=Skill sequence execution fidelity records"`

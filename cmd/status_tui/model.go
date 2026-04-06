@@ -122,6 +122,14 @@ type Model struct {
 	skillPaneCursor        int                     // Cursor position in the skill pane tree
 	skillPaneNodes         []*SkillPaneNode        // Flattened skill/artifact nodes for cursor navigation
 	skillPaneStateMap      map[string]orchestration.SkillFidelityState // Cached state map
+
+	// Claw dialog
+	ClawDialogActive   bool
+	ClawDialogJobIndex int
+	ClawIdleInput      textinput.Model
+	ClawPromptInput    textinput.Model
+	ClawDialogFocus    int // 0=idle, 1=prompt
+	ClawDisabling      bool // true when disabling (unclaw)
 	skillSearchActive      bool                    // Whether search mode is active in skill pane
 	skillSearchInput       textinput.Model         // Text input for skill pane search
 	skillFilterText        string                  // Current filter text for skill pane
@@ -536,6 +544,11 @@ func (m Model) View() string {
 	// If creating a job, show the creation dialog
 	if m.CreatingJob {
 		return m.renderJobCreationDialog()
+	}
+
+	// If claw dialog is active, show it
+	if m.ClawDialogActive {
+		return m.renderClawDialog()
 	}
 
 	// If editing dependencies, show the edit deps view

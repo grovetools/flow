@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/grovetools/memory/pkg/memory"
+	notifications "github.com/grovetools/notify"
+	notifyconfig "github.com/grovetools/notify/pkg/config"
 	"github.com/grovetools/skills/pkg/skills"
 )
 
@@ -260,6 +262,28 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 		b.WriteString("\n    <user_request priority=\"high\">\n")
 		b.WriteString(job.PromptBody)
 		b.WriteString("\n    </user_request>\n")
+	}
+
+	// 7. Add channel instructions if the job has channels enabled.
+	if len(job.Channels) > 0 {
+		notifyCfg := notifyconfig.Load()
+		channelInstructions := notifications.AgentInstructions(notifyCfg, job.Channels)
+		if channelInstructions != "" {
+			b.WriteString("\n    <channel_instructions>\n")
+			b.WriteString(channelInstructions)
+			b.WriteString("\n    </channel_instructions>\n")
+		}
+	}
+
+	// 8. Add autonomous instructions if configured.
+	if job.Autonomous != nil && job.Autonomous.Enabled {
+		b.WriteString("\n    <autonomous_mode>\n")
+		b.WriteString("You are running in autonomous mode. When you have been idle and receive an idle ping,\n")
+		b.WriteString("check for new work, report your status, or continue any in-progress tasks.\n")
+		if job.Autonomous.Prompt != "" {
+			b.WriteString(fmt.Sprintf("Custom idle instruction: %s\n", job.Autonomous.Prompt))
+		}
+		b.WriteString("    </autonomous_mode>\n")
 	}
 
 	b.WriteString("</prompt>\n")

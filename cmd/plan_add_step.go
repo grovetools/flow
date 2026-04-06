@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 	coreconfig "github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -39,6 +40,9 @@ type PlanAddStepCmd struct {
 	GitChanges          bool     `flag:"" help:"Include git changes as context for this job"`
 	Skill               string   `flag:"" help:"Skill name to inject into the agent context"`
 	SkillSequence       []string `flag:"" sep:"," help:"List of skills to execute in sequence"`
+	Channels            []string `flag:"" sep:"," help:"External channels to enable (e.g., signal)"`
+	Autonomous          bool     `flag:"" help:"Enable autonomous idle pinging"`
+	IdleMinutes         int      `flag:"" default:"15" help:"Minutes of inactivity before idle ping"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -261,8 +265,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		return nil, fmt.Errorf("title is required (use --title or -i for interactive mode)")
 	}
 
-	if cmd.Type != "oneshot" && cmd.Type != "chat" && cmd.Type != "shell" && cmd.Type != "interactive_agent" && cmd.Type != "headless_agent" && cmd.Type != "file" && cmd.Type != "claw" {
-		return nil, fmt.Errorf("invalid job type: must be oneshot, chat, shell, interactive_agent, headless_agent, file, or claw")
+	if cmd.Type != "oneshot" && cmd.Type != "chat" && cmd.Type != "shell" && cmd.Type != "interactive_agent" && cmd.Type != "headless_agent" && cmd.Type != "file" {
+		return nil, fmt.Errorf("invalid job type: must be oneshot, chat, shell, interactive_agent, headless_agent, or file")
 	}
 
 	// Validate dependencies
@@ -340,6 +344,13 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			GitChanges:          cmd.GitChanges,
 			Skill:               cmd.Skill,
 			SkillSequence:       cmd.SkillSequence,
+			Channels:            cmd.Channels,
+		}
+		if cmd.Autonomous {
+			job.Autonomous = &models.AutonomousConfig{
+				Enabled:     true,
+				IdleMinutes: cmd.IdleMinutes,
+			}
 		}
 
 		// Initialize empty prompt body - no comments needed since info is in frontmatter

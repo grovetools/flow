@@ -460,6 +460,8 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		PlanName:    plan.Name,
 		Title:       job.Title,
 		WorkDir:     workDir,
+		Channels:    job.Channels,
+		Autonomous:  job.Autonomous,
 	}); err != nil {
 		// Log warning but continue - agent can still run, just tracking may be impaired
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
@@ -542,6 +544,11 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 		// Set environment variables in the window's shell
 		targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
+
+		// Update the daemon with the tmux target so channels/pinger can route to this session
+		if err := daemonClient.UpdateSessionTmuxTarget(ctx, job.ID, targetPane); err != nil {
+			p.log.WithError(err).Warn("Failed to update tmux target on daemon")
+		}
 
 		// Export environment variables in the window's shell
 		// Use separate export commands for shell compatibility (bash/zsh/fish)

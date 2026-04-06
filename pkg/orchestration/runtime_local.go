@@ -58,7 +58,6 @@ func NewLocalRuntime(config *ExecutorConfig, commandExecutor command.Executor, u
 
 	r.executors[JobTypeShell] = NewShellExecutor(config)
 	r.executors[JobTypeGenerateRecipe] = NewGenerateRecipeExecutor(config)
-	r.executors[JobTypeClaw] = NewClawExecutor()
 
 	return r
 }
@@ -167,7 +166,7 @@ func (r *LocalRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) err
 	execErr := executor.Execute(jobCtx, job, plan)
 
 	// 5. Update final status (skip for chat and interactive agent jobs - they manage their own status)
-	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent && job.Type != JobTypeClaw {
+	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
 		finalStatus := JobStatusCompleted
 		if execErr != nil {
 			finalStatus = JobStatusFailed

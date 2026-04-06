@@ -157,7 +157,7 @@ func LoadJob(filepath string) (*Job, error) {
 	}
 
 	// Validate job type first - only job types are processed
-	if job.Type != JobTypeOneshot && job.Type != JobTypeAgent && job.Type != JobTypeHeadlessAgent && job.Type != JobTypeShell && job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeIsolatedAgent && job.Type != JobTypeGenerateRecipe && job.Type != JobTypeFile && job.Type != JobTypeClaw {
+	if job.Type != JobTypeOneshot && job.Type != JobTypeAgent && job.Type != JobTypeHeadlessAgent && job.Type != JobTypeShell && job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeIsolatedAgent && job.Type != JobTypeGenerateRecipe && job.Type != JobTypeFile {
 		return nil, ErrNotAJob{Reason: fmt.Sprintf("not a job type: %s", job.Type)}
 	}
 

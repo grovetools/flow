@@ -3,6 +3,7 @@ package status_tui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -360,6 +361,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger.Info("Not retrying - logs not shown or no active job")
 		}
 		return m, nil
+
+	case clawResultMsg:
+		if msg.Err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error toggling claw: %v", msg.Err))
+		} else if msg.Enabled {
+			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Claw enabled (signal + autonomous)")
+		} else {
+			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Claw disabled")
+		}
+		return m, refreshPlan(m.PlanDir)
 
 	case RenameCompleteMsg:
 		if msg.Err != nil {
@@ -832,6 +843,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle claw dialog
+		if m.ClawDialogActive {
+			switch msg.String() {
+			case "enter":
+				m.ClawDialogActive = false
+				if m.ClawDisabling {
+					// Unclaw
+					return m, unclawJobCmd(m.Plan, m.Jobs[m.ClawDialogJobIndex])
+				}
+				// Enable claw
+				idleStr := m.ClawIdleInput.Value()
+				idleMinutes := 15
+				if n, err := strconv.Atoi(idleStr); err == nil && n > 0 {
+					idleMinutes = n
+				}
+				prompt := m.ClawPromptInput.Value()
+				return m, clawJobCmd(m.Plan, m.Jobs[m.ClawDialogJobIndex], idleMinutes, prompt)
+			case "esc":
+				m.ClawDialogActive = false
+				return m, nil
+			case "tab", "shift+tab":
+				if !m.ClawDisabling {
+					m.ClawDialogFocus = 1 - m.ClawDialogFocus
+					if m.ClawDialogFocus == 0 {
+						m.ClawIdleInput.Focus()
+						m.ClawPromptInput.Blur()
+					} else {
+						m.ClawIdleInput.Blur()
+						m.ClawPromptInput.Focus()
+					}
+				}
+				return m, nil
+			}
+			if !m.ClawDisabling {
+				if m.ClawDialogFocus == 0 {
+					m.ClawIdleInput, cmd = m.ClawIdleInput.Update(msg)
+				} else {
+					m.ClawPromptInput, cmd = m.ClawPromptInput.Update(msg)
+				}
+			}
+			return m, cmd
+		}
+
 		// Handle renaming mode
 		if m.Renaming {
 			switch msg.String() {
@@ -2044,6 +2098,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ti.Width = 50
 				m.RenameInput = ti
 				return m, textinput.Blink
+			}
+
+		case key.Matches(msg, m.KeyMap.ToggleClaw):
+			if m.Cursor >= 0 && m.Cursor < len(m.Jobs) {
+				job := m.Jobs[m.Cursor]
+				// Only for interactive_agent jobs
+				if job.Type == orchestration.JobTypeInteractiveAgent {
+					// Check if already clawed (has channels)
+					if len(job.Channels) > 0 {
+						// Unclaw: show confirmation
+						m.ClawDialogActive = true
+						m.ClawDialogJobIndex = m.Cursor
+						m.ClawDisabling = true
+						return m, nil
+					}
+					// Claw: show config dialog
+					m.ClawDialogActive = true
+					m.ClawDialogJobIndex = m.Cursor
+					m.ClawDisabling = false
+
+					idleInput := textinput.New()
+					idleInput.SetValue("15")
+					idleInput.Focus()
+					idleInput.CharLimit = 4
+					idleInput.Width = 6
+					m.ClawIdleInput = idleInput
+
+					promptInput := textinput.New()
+					promptInput.Placeholder = "optional idle prompt"
+					promptInput.CharLimit = 200
+					promptInput.Width = 40
+					m.ClawPromptInput = promptInput
+
+					m.ClawDialogFocus = 0
+					return m, textinput.Blink
+				}
 			}
 
 		case key.Matches(msg, m.KeyMap.Resume):

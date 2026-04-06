@@ -202,19 +202,30 @@ func (m Model) renderTableView() string {
 				}
 			case "TYPE":
 				var jobTypeSymbol string
-				switch job.Type {
-				case "interactive_agent": jobTypeSymbol = theme.IconInteractiveAgent
-				case "isolated_agent": jobTypeSymbol = theme.IconInteractiveAgent // Uses same icon as interactive_agent
-				case "headless_agent": jobTypeSymbol = theme.IconHeadlessAgent
-				case "chat": jobTypeSymbol = theme.IconChat
-				case "oneshot": jobTypeSymbol = theme.IconOneshot
-				case "shell": jobTypeSymbol = theme.IconShell
-				case "file": jobTypeSymbol = theme.IconFile
-				case "claw": jobTypeSymbol = theme.IconClaw
-				default: jobTypeSymbol = ""
+				var typeLabel string
+				var isClaw bool
+				// Check if this is a claw-enabled agent
+				if len(job.Channels) > 0 && job.Type == orchestration.JobTypeInteractiveAgent {
+					jobTypeSymbol = theme.IconClaw
+					typeLabel = "claw"
+					isClaw = true
+				} else {
+					switch job.Type {
+					case "interactive_agent": jobTypeSymbol = theme.IconInteractiveAgent
+					case "isolated_agent": jobTypeSymbol = theme.IconInteractiveAgent
+					case "headless_agent": jobTypeSymbol = theme.IconHeadlessAgent
+					case "chat": jobTypeSymbol = theme.IconChat
+					case "oneshot": jobTypeSymbol = theme.IconOneshot
+					case "shell": jobTypeSymbol = theme.IconShell
+					case "file": jobTypeSymbol = theme.IconFile
+					default: jobTypeSymbol = ""
+					}
+					typeLabel = string(job.Type)
 				}
 				var typeCol string
-				if jobTypeSymbol != "" { typeCol = fmt.Sprintf("%s %s", jobTypeSymbol, job.Type) } else { typeCol = string(job.Type) }
+				if jobTypeSymbol != "" { typeCol = fmt.Sprintf("%s %s", jobTypeSymbol, typeLabel) } else { typeCol = typeLabel }
+				if isClaw { typeCol = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet).Render(typeCol) }
+				_ = isClaw
 				if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
 					cell = t.Muted.Render(typeCol)
 				} else {
@@ -308,8 +319,6 @@ func getJobIcon(job *orchestration.Job) string {
 		return theme.IconShell
 	case "file":
 		return theme.IconFile
-	case "claw":
-		return theme.IconClaw
 	default:
 		return theme.IconChat // Default fallback
 	}
@@ -443,7 +452,6 @@ func (m Model) renderTypePicker() string {
 		{orchestration.JobTypeHeadlessAgent, "Headless Agent"},
 		{orchestration.JobTypeGenerateRecipe, "Generate Recipe"},
 		{orchestration.JobTypeFile, "File"},
-		{orchestration.JobTypeClaw, "Claw"},
 	}
 
 	var lines []string
@@ -621,6 +629,51 @@ func (m Model) renderJobCreationDialog() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultColors.Orange).
 		Padding(1, 2).
+		Render(b.String())
+
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
+func (m Model) renderClawDialog() string {
+	if m.ClawDialogJobIndex < 0 || m.ClawDialogJobIndex >= len(m.Jobs) {
+		return "Error: Invalid job selected."
+	}
+	job := m.Jobs[m.ClawDialogJobIndex]
+
+	var b strings.Builder
+
+	if m.ClawDisabling {
+		b.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Disable Claw: %s", job.Title)))
+		b.WriteString("\n\n")
+		b.WriteString("This will disable Signal channels and autonomous pinging.\n\n")
+		b.WriteString(theme.DefaultTheme.Muted.Render("Press Enter to confirm, Esc to cancel"))
+	} else {
+		b.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Enable Claw: %s", job.Title)))
+		b.WriteString("\n\n")
+
+		idleLabel := "Idle minutes: "
+		promptLabel := "Idle prompt:  "
+		if m.ClawDialogFocus == 0 {
+			idleLabel = lipgloss.NewStyle().Foreground(theme.DefaultColors.Orange).Render(idleLabel)
+		}
+		if m.ClawDialogFocus == 1 {
+			promptLabel = lipgloss.NewStyle().Foreground(theme.DefaultColors.Orange).Render(promptLabel)
+		}
+
+		b.WriteString(idleLabel)
+		b.WriteString(m.ClawIdleInput.View())
+		b.WriteString("\n")
+		b.WriteString(promptLabel)
+		b.WriteString(m.ClawPromptInput.View())
+		b.WriteString("\n\n")
+		b.WriteString(theme.DefaultTheme.Muted.Render("Tab to switch fields • Enter to enable • Esc to cancel"))
+	}
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Orange).
+		Padding(1, 2).
+		Width(60).
 		Render(b.String())
 
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, dialog)
@@ -903,8 +956,6 @@ func renderProperty(builder *strings.Builder, k string, v interface{}, keyStyle,
 				icon = theme.IconShell + " "
 			case "file":
 				icon = theme.IconFile + " "
-			case "claw":
-				icon = theme.IconClaw + " "
 			}
 		case "git_changes":
 			if val == "true" {
