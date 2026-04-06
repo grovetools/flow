@@ -2,6 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/grovetools/flow/pkg/orchestration/job",
   "$defs": {
+    "AutonomousConfig": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "idle_minutes": {
+          "type": "integer"
+        },
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "enabled",
+        "idle_minutes"
+      ]
+    },
     "InlineConfig": {
       "properties": {
         "Categories": {
@@ -195,6 +213,17 @@
     "note_ref": {
       "type": "string",
       "description": "Reference to a notebook entry for context"
+    },
+    "channels": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "External channels to enable (e.g. signal)"
+    },
+    "autonomous": {
+      "$ref": "#/$defs/AutonomousConfig",
+      "description": "Autonomous idle pinger configuration"
     },
     "skill_fidelity": {
       "items": {
