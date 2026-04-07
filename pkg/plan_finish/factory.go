@@ -48,7 +48,10 @@ import (
 // it constructs.
 type Options struct {
 	// Force causes destructive git operations (worktree remove,
-	// branch delete) to use --force equivalents.
+	// branch delete) to use --force equivalents. When false, the
+	// factory's Action closures refuse to fall back to destructive
+	// commands even if the safe variant fails — callers must re-run
+	// with Force=true (or toggle it in the wizard) to confirm.
 	Force bool
 	// KeepEnv skips environment teardown entirely — the env-teardown
 	// item reports "Skipped" and its Action is a no-op.
@@ -58,6 +61,52 @@ type Options struct {
 	// want to suppress the prune-worktree item should leave its
 	// IsEnabled at false.
 	KeepWorktree bool
+	// Yes enables every available item by default. Hosts still
+	// choose whether to present a confirmation prompt. Used by the
+	// CLI --yes flag.
+	Yes bool
+	// DeleteBranch enables the "delete local git branch" and
+	// "delete submodule branches" items when they are available.
+	DeleteBranch bool
+	// DeleteRemote enables the "delete remote git branch" item.
+	DeleteRemote bool
+	// PruneWorktree enables the "prune git worktree" item.
+	PruneWorktree bool
+	// CloseSession enables the "close tmux session" item.
+	CloseSession bool
+	// Archive enables the "archive plan directory" item.
+	Archive bool
+	// CleanDevLinks enables the "clean up dev binaries" item.
+	CleanDevLinks bool
+	// RebuildBinaries enables the "rebuild main repo binaries" item.
+	RebuildBinaries bool
+}
+
+// Stable item identifiers. Hosts look items up by these constants
+// via Items.ByID instead of depending on slice indexes.
+const (
+	ItemEnvTeardown            = "env_teardown"
+	ItemMergeSubmodules        = "merge_submodules"
+	ItemMarkFinished           = "mark_finished"
+	ItemCloseSession           = "close_session"
+	ItemPruneWorktree          = "prune_worktree"
+	ItemCleanDevLinks          = "clean_dev_links"
+	ItemDeleteSubmoduleBranches = "delete_submodule_branches"
+	ItemDeleteLocalBranch      = "delete_local_branch"
+	ItemDeleteRemoteBranch     = "delete_remote_branch"
+	ItemRebuildBinaries        = "rebuild_binaries"
+	ItemArchivePlan            = "archive_plan"
+)
+
+// ItemsByID returns the first item matching the given ID, or nil if
+// no such item exists in the slice.
+func ItemsByID(items []*finish.Item, id string) *finish.Item {
+	for _, it := range items {
+		if it != nil && it.ID == id {
+			return it
+		}
+	}
+	return nil
 }
 
 // BuildContext bundles the explicit dependencies the cleanup closures
@@ -193,6 +242,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 	planSlug := filepath.Base(planPath)
 
 	envTeardownItem := &finish.Item{
+		ID:   ItemEnvTeardown,
 		Name: "Teardown environment resources",
 		Check: func() (string, error) {
 			if opts.KeepEnv {
@@ -269,6 +319,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 	}
 
 	mergeItem := &finish.Item{
+		ID:   ItemMergeSubmodules,
 		Name: "Merge/fast-forward submodules to main",
 		Check: func() (string, error) {
 			if worktreeName == "" || gitRoot == "" {
@@ -468,6 +519,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		envTeardownItem,
 		mergeItem,
 		{
+			ID:   ItemMarkFinished,
 			Name: "Mark plan as finished in .grove-plan.yml",
 			Check: func() (string, error) {
 				configPath := filepath.Join(planPath, ".grove-plan.yml")
@@ -508,6 +560,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
+			ID:   ItemCloseSession,
 			Name: "Close tmux session",
 			Check: func() (string, error) {
 				if sessionName == "" {
@@ -524,6 +577,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
+			ID:   ItemPruneWorktree,
 			Name: "Prune git worktree",
 			Check: func() (string, error) {
 				if worktreeName == "" || gitRoot == "" {
@@ -589,14 +643,16 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					fmt.Printf("    * Worktree removed successfully\n")
 					return nil
 				}
-				if err != nil && !opts.Force && strings.Contains(err.Error(), "contains modified or untracked files") {
-					fmt.Printf("    Retrying with --force due to modified files...\n")
-					return executor.Execute("git", "worktree", "remove", "--force", wPath)
-				}
+				// Do NOT auto-retry with --force when the user did
+				// not explicitly request force. Surfacing the
+				// original error lets the user re-run with --force
+				// (or toggle the force option in the wizard) if
+				// they really want to discard uncommitted work.
 				return err
 			},
 		},
 		{
+			ID:   ItemCleanDevLinks,
 			Name: "Clean up dev binaries from worktree",
 			Check: func() (string, error) {
 				if _, err := exec.LookPath("grove"); err != nil {
@@ -613,6 +669,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
+			ID:   ItemDeleteSubmoduleBranches,
 			Name: "Delete submodule branches",
 			Check: func() (string, error) {
 				if branchName == "" || gitRoot == "" {
@@ -673,6 +730,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
+			ID:   ItemDeleteLocalBranch,
 			Name: "Delete local git branch",
 			Check: func() (string, error) {
 				if branchName == "" || gitRoot == "" {
@@ -716,9 +774,18 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				err := executor.Execute("git", "-C", gitRoot, "branch", "-d", branchName)
 				if err != nil {
 					if strings.Contains(err.Error(), "checked out at") {
+						// Worktree was pruned earlier in the cleanup
+						// sequence; the branch ref just has a stale
+						// worktree pointer, so -D here does not lose
+						// work.
 						fmt.Printf("    Using -D (force) to delete branch that was in worktree...\n")
 						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
 					} else if strings.Contains(err.Error(), "not fully merged") {
+						// Destroys unmerged commits. Only allowed
+						// when the user explicitly asked for force.
+						if !opts.Force {
+							return err
+						}
 						fmt.Printf("    Using -D (force) due to unmerged commits...\n")
 						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
 					}
@@ -727,6 +794,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
+			ID:   ItemDeleteRemoteBranch,
 			Name: "Delete remote git branch",
 			Check: func() (string, error) {
 				if branchName == "" || gitRoot == "" {
@@ -746,6 +814,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
+			ID:   ItemRebuildBinaries,
 			Name: "Rebuild main repo binaries",
 			Check: func() (string, error) {
 				if gitRoot == "" {
@@ -774,6 +843,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
+			ID:   ItemArchivePlan,
 			Name: "Archive plan directory",
 			Check: func() (string, error) {
 				return color.YellowString("Available"), nil

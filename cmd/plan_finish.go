@@ -15,22 +15,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var (
-	planFinishYes             bool
-	planFinishDeleteBranch    bool
-	planFinishDeleteRemote    bool
-	planFinishPruneWorktree   bool
-	planFinishCloseSession    bool
-	planFinishArchive         bool
-	planFinishCleanDevLinks   bool
-	planFinishRebuildBinaries bool
-	planFinishForce           bool
-	planFinishKeepEnv         bool
-	planFinishKeepWorktree    bool
-)
-
 // NewPlanFinishCmd creates the `plan finish` command.
 func NewPlanFinishCmd() *cobra.Command {
+	opts := &plan_finish.Options{}
 	cmd := &cobra.Command{
 		Use:   "finish [directory]",
 		Short: "Finish and clean up a plan and its associated worktree (use: flow finish)",
@@ -43,14 +30,17 @@ Examples:
   flow finish my-feature                     # from any directory
   flow finish my-feature --dir ~/Code/myapp  # explicit workspace`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: runPlanFinish,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPlanFinish(cmd, args, opts)
+		},
 	}
-	registerFinishFlags(cmd)
+	registerFinishFlags(cmd, opts)
 	return cmd
 }
 
 // NewFinishCmd creates the top-level `finish` command.
 func NewFinishCmd() *cobra.Command {
+	opts := &plan_finish.Options{}
 	cmd := &cobra.Command{
 		Use:   "finish [directory]",
 		Short: "Finish and clean up a plan and its associated worktree",
@@ -63,28 +53,30 @@ Examples:
   flow finish my-feature                     # from any directory
   flow finish my-feature --dir ~/Code/myapp  # explicit workspace`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: runPlanFinish,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPlanFinish(cmd, args, opts)
+		},
 	}
-	registerFinishFlags(cmd)
+	registerFinishFlags(cmd, opts)
 	return cmd
 }
 
-func registerFinishFlags(cmd *cobra.Command) {
-	cmd.Flags().BoolVarP(&planFinishYes, "yes", "y", false, "Automatically confirm all cleanup actions")
-	cmd.Flags().BoolVar(&planFinishDeleteBranch, "delete-branch", false, "Delete the local git branch")
-	cmd.Flags().BoolVar(&planFinishDeleteRemote, "delete-remote", false, "Delete the remote git branch")
-	cmd.Flags().BoolVar(&planFinishPruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
-	cmd.Flags().BoolVar(&planFinishCloseSession, "close-session", false, "Close the associated tmux session")
-	cmd.Flags().BoolVar(&planFinishCleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
-	cmd.Flags().BoolVar(&planFinishRebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
-	cmd.Flags().BoolVar(&planFinishArchive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
-	cmd.Flags().BoolVar(&planFinishForce, "force", false, "Force git operations (use with caution)")
-	cmd.Flags().BoolVar(&planFinishKeepEnv, "keep-env", false, "Skip environment teardown during cleanup")
-	cmd.Flags().BoolVar(&planFinishKeepWorktree, "keep-worktree", false, "Skip worktree removal during cleanup")
+func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
+	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Automatically confirm all cleanup actions")
+	cmd.Flags().BoolVar(&opts.DeleteBranch, "delete-branch", false, "Delete the local git branch")
+	cmd.Flags().BoolVar(&opts.DeleteRemote, "delete-remote", false, "Delete the remote git branch")
+	cmd.Flags().BoolVar(&opts.PruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
+	cmd.Flags().BoolVar(&opts.CloseSession, "close-session", false, "Close the associated tmux session")
+	cmd.Flags().BoolVar(&opts.CleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
+	cmd.Flags().BoolVar(&opts.RebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
+	cmd.Flags().BoolVar(&opts.Archive, "archive", false, "Archive the plan directory to a local .archive subdirectory")
+	cmd.Flags().BoolVar(&opts.Force, "force", false, "Force git operations (use with caution)")
+	cmd.Flags().BoolVar(&opts.KeepEnv, "keep-env", false, "Skip environment teardown during cleanup")
+	cmd.Flags().BoolVar(&opts.KeepWorktree, "keep-worktree", false, "Skip worktree removal during cleanup")
 	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 }
 
-func runPlanFinish(cmd *cobra.Command, args []string) error {
+func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options) error {
 	var dir string
 	if len(args) > 0 {
 		dir = args[0]
@@ -117,36 +109,38 @@ func runPlanFinish(cmd *cobra.Command, args []string) error {
 	}
 
 	bctx := plan_finish.NewBuildContext(plan, planPath)
-	opts := plan_finish.Options{
-		Force:        planFinishForce,
-		KeepEnv:      planFinishKeepEnv,
-		KeepWorktree: planFinishKeepWorktree,
-	}
-	result, err := plan_finish.BuildItems(bctx, opts)
+	result, err := plan_finish.BuildItems(bctx, *opts)
 	if err != nil {
 		return err
 	}
 	items := result.Items
 
-	// Determine which items to enable based on flags.
-	anyExplicitFlags := planFinishDeleteBranch || planFinishDeleteRemote || planFinishPruneWorktree || planFinishCloseSession || planFinishCleanDevLinks || planFinishRebuildBinaries || planFinishArchive || planFinishForce
-	if planFinishYes {
+	// Determine which items to enable based on flags. Item lookup
+	// is by stable ID so re-ordering in the factory can't silently
+	// rewire CLI flags to the wrong action.
+	enable := func(id string, on bool) {
+		if it := plan_finish.ItemsByID(items, id); it != nil {
+			it.IsEnabled = on && it.IsAvailable
+		}
+	}
+	anyExplicitFlags := opts.DeleteBranch || opts.DeleteRemote || opts.PruneWorktree || opts.CloseSession || opts.CleanDevLinks || opts.RebuildBinaries || opts.Archive || opts.Force
+	if opts.Yes {
 		for _, item := range items {
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
-		// Always enable env teardown, merging submodules, marking as finished, and closing tmux.
-		items[0].IsEnabled = items[0].IsAvailable                             // Teardown environment resources
-		items[1].IsEnabled = items[1].IsAvailable                             // Merge/fast-forward submodules to main
-		items[2].IsEnabled = items[2].IsAvailable                             // Mark plan as finished
-		items[3].IsEnabled = planFinishCloseSession && items[3].IsAvailable   // Close tmux session
-		items[4].IsEnabled = planFinishPruneWorktree && items[4].IsAvailable  // Prune git worktree
-		items[5].IsEnabled = planFinishCleanDevLinks && items[5].IsAvailable  // Clean up dev binaries
-		items[6].IsEnabled = planFinishDeleteBranch && items[6].IsAvailable   // Delete submodule branches
-		items[7].IsEnabled = planFinishDeleteBranch && items[7].IsAvailable   // Delete local git branch
-		items[8].IsEnabled = planFinishDeleteRemote && items[8].IsAvailable   // Delete remote git branch
-		items[9].IsEnabled = planFinishRebuildBinaries && items[9].IsAvailable // Rebuild main repo binaries
-		items[10].IsEnabled = planFinishArchive && items[10].IsAvailable      // Archive plan directory
+		// Always enable env teardown, submodule merge, mark-finished.
+		enable(plan_finish.ItemEnvTeardown, true)
+		enable(plan_finish.ItemMergeSubmodules, true)
+		enable(plan_finish.ItemMarkFinished, true)
+		enable(plan_finish.ItemCloseSession, opts.CloseSession)
+		enable(plan_finish.ItemPruneWorktree, opts.PruneWorktree)
+		enable(plan_finish.ItemCleanDevLinks, opts.CleanDevLinks)
+		enable(plan_finish.ItemDeleteSubmoduleBranches, opts.DeleteBranch)
+		enable(plan_finish.ItemDeleteLocalBranch, opts.DeleteBranch)
+		enable(plan_finish.ItemDeleteRemoteBranch, opts.DeleteRemote)
+		enable(plan_finish.ItemRebuildBinaries, opts.RebuildBinaries)
+		enable(plan_finish.ItemArchivePlan, opts.Archive)
 	} else {
 		// Interactive TUI mode
 		err := runFinishTUI(planName, items, result.BranchIsMerged, result.BranchExists)

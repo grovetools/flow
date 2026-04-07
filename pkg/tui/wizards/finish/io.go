@@ -18,6 +18,11 @@ type RepoStatus struct {
 // meta-panel) are responsible for running any Action closures on
 // enabled items after the wizard emits DoneMsg.
 type Item struct {
+	// ID is a stable identifier used by hosts to look up items by
+	// kind (e.g. "delete_local_branch") without depending on the
+	// order the factory returned them. The wizard itself does not
+	// read this field.
+	ID          string
 	Name        string
 	Status      string
 	IsAvailable bool
