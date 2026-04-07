@@ -9,6 +9,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/planutil"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -98,7 +99,7 @@ func updateWorktreeSingleRepo(worktreeName string) error {
 	fmt.Printf("Updating worktree '%s' from '%s'...\n", worktreeName, defaultBranch)
 
 	// Rebase worktree branch on default branch
-	if err := rebaseWorktreeBranch(worktreePath, defaultBranch); err != nil {
+	if err := planutil.RebaseWorktreeBranch(worktreePath, defaultBranch); err != nil {
 		return fmt.Errorf("failed to update: %w", err)
 	}
 
@@ -145,7 +146,7 @@ func updateWorktreeEcosystem(plan *orchestration.Plan, worktreeName string) erro
 		}
 
 		fmt.Printf("Updating %s worktree from %s...\n", repoName, defaultBranch)
-		if err := rebaseWorktreeBranch(worktreePath, defaultBranch); err != nil {
+		if err := planutil.RebaseWorktreeBranch(worktreePath, defaultBranch); err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", repoName, err))
 		} else {
 			results = append(results, repoName)

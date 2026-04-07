@@ -1,4 +1,4 @@
-package cmd
+package planutil
 
 import (
 	"os"
@@ -74,7 +74,7 @@ func TestGetMergeStatus(t *testing.T) {
 		branchName := "synced-branch"
 		createBranch(t, tempDir, branchName)
 
-		status := getMergeStatus(tempDir, branchName)
+		status := MergeStatus(tempDir, branchName)
 		if status != "Synced" {
 			t.Errorf("Expected 'Synced', got '%s'", status)
 		}
@@ -93,7 +93,7 @@ func TestGetMergeStatus(t *testing.T) {
 		// Switch back to main for the status check
 		checkout(t, tempDir, "main")
 
-		status := getMergeStatus(tempDir, branchName)
+		status := MergeStatus(tempDir, branchName)
 		if status != "Ready" {
 			t.Errorf("Expected 'Ready', got '%s'", status)
 		}
@@ -111,7 +111,7 @@ func TestGetMergeStatus(t *testing.T) {
 		addFile(t, tempDir, "update.txt", "update")
 		commit(t, tempDir, "Update main")
 
-		status := getMergeStatus(tempDir, branchName)
+		status := MergeStatus(tempDir, branchName)
 		if status != "Behind" {
 			t.Errorf("Expected 'Behind', got '%s'", status)
 		}
@@ -132,31 +132,31 @@ func TestGetMergeStatus(t *testing.T) {
 		addFile(t, tempDir, "main-diverged.txt", "main diverged")
 		commit(t, tempDir, "Main diverged commit")
 
-		status := getMergeStatus(tempDir, branchName)
+		status := MergeStatus(tempDir, branchName)
 		if status != "Needs Rebase" {
 			t.Errorf("Expected 'Needs Rebase', got '%s'", status)
 		}
 	})
 
 	t.Run("no branch - branch doesn't exist", func(t *testing.T) {
-		status := getMergeStatus(tempDir, "nonexistent-branch")
+		status := MergeStatus(tempDir, "nonexistent-branch")
 		if status != "no branch" {
 			t.Errorf("Expected 'no branch', got '%s'", status)
 		}
 	})
 
 	t.Run("empty inputs", func(t *testing.T) {
-		status := getMergeStatus("", "")
+		status := MergeStatus("", "")
 		if status != "-" {
 			t.Errorf("Expected '-', got '%s'", status)
 		}
 
-		status = getMergeStatus(tempDir, "")
+		status = MergeStatus(tempDir, "")
 		if status != "-" {
 			t.Errorf("Expected '-', got '%s'", status)
 		}
 
-		status = getMergeStatus("", "branch")
+		status = MergeStatus("", "branch")
 		if status != "-" {
 			t.Errorf("Expected '-', got '%s'", status)
 		}
@@ -191,13 +191,13 @@ func TestGetCommitCount(t *testing.T) {
 	}
 
 	// test-branch should be 3 commits ahead of main
-	count := getCommitCount(tempDir, "main..test-branch")
+	count := CommitCount(tempDir, "main..test-branch")
 	if count != 3 {
 		t.Errorf("Expected 3 commits ahead, got %d", count)
 	}
 
 	// main should be 0 commits ahead of test-branch
-	count = getCommitCount(tempDir, "test-branch..main")
+	count = CommitCount(tempDir, "test-branch..main")
 	if count != 0 {
 		t.Errorf("Expected 0 commits ahead, got %d", count)
 	}
@@ -208,13 +208,13 @@ func TestGetCommitCount(t *testing.T) {
 	commit(t, tempDir, "Main commit")
 
 	// main should be 1 commit ahead of test-branch
-	count = getCommitCount(tempDir, "test-branch..main")
+	count = CommitCount(tempDir, "test-branch..main")
 	if count != 1 {
 		t.Errorf("Expected 1 commit ahead on main, got %d", count)
 	}
 
 	// test-branch should still be 3 commits ahead
-	count = getCommitCount(tempDir, "main..test-branch")
+	count = CommitCount(tempDir, "main..test-branch")
 	if count != 3 {
 		t.Errorf("Expected 3 commits ahead on test-branch, got %d", count)
 	}
@@ -252,18 +252,18 @@ func TestRebaseWorktreeBranch(t *testing.T) {
 	commit(t, tempDir, "Update main")
 
 	// Rebase the worktree branch
-	if err := rebaseWorktreeBranch(worktreePath, "main"); err != nil {
+	if err := RebaseWorktreeBranch(worktreePath, "main"); err != nil {
 		t.Fatalf("Failed to rebase worktree: %v", err)
 	}
 
 	// Verify the worktree has both commits
 	// The feature commit should be on top of the main update
-	count := getCommitCount(worktreePath, "main..HEAD")
+	count := CommitCount(worktreePath, "main..HEAD")
 	if count != 1 {
 		t.Errorf("Expected worktree to be 1 commit ahead after rebase, got %d", count)
 	}
 
-	count = getCommitCount(worktreePath, "HEAD..main")
+	count = CommitCount(worktreePath, "HEAD..main")
 	if count != 0 {
 		t.Errorf("Expected worktree to not be behind main after rebase, got %d", count)
 	}

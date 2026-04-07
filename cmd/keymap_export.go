@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/flow/pkg/tui/browser"
 )
 
 // PlanListKeymapInfo returns the keymap metadata for the flow plan list TUI.
@@ -11,7 +12,7 @@ func PlanListKeymapInfo() keymap.TUIInfo {
 		"flow-plan-list",
 		"flow",
 		"Plan browser and manager",
-		newPlanListKeyMap(nil),
+		browser.NewKeyMap(nil),
 	)
 }
 

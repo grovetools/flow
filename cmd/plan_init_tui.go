@@ -494,12 +494,15 @@ func (m planInitTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "q":
-			// Only quit on 'q' if not in text input or if in normal mode
+			// Only quit on 'q' if not in text input or if in normal mode.
+			// The old behavior was to navigate back to the plan list TUI
+			// in-process, but that required cmd-level coupling with the
+			// plan_tui.go file. Now that the plan browser lives in
+			// flow/pkg/tui/browser, we just quit; the user can re-run
+			// `flow plan tui` to return to the list.
 			if !inTextInput || m.unfocused {
-				// Go back to the plan list view
-				// Note: cwdGitRoot will be determined by the list model's Init function
-				listModel := newPlanListTUIModel(m.plansDirectory, "")
-				return listModel, loadPlansListCmd(m.plansDirectory, "", false)
+				m.quitting = true
+				return m, tea.Quit
 			}
 
 		case "tab":

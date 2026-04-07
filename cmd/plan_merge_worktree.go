@@ -9,6 +9,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/planutil"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -108,7 +109,7 @@ func mergeWorktreeSingleRepo(worktreeName string) error {
 	fmt.Printf("Merging worktree '%s' into '%s'...\n", worktreeName, defaultBranch)
 
 	// Perform the merge
-	if err := rebaseAndMergeRepo(gitRoot, worktreeName, defaultBranch); err != nil {
+	if err := planutil.RebaseAndMergeRepo(gitRoot, worktreeName, defaultBranch); err != nil {
 		return fmt.Errorf("failed to merge: %w", err)
 	}
 
@@ -149,7 +150,7 @@ func mergeWorktreeEcosystem(plan *orchestration.Plan, worktreeName string) error
 		}
 
 		fmt.Printf("Merging %s worktree into %s...\n", repoName, defaultBranch)
-		if err := rebaseAndMergeRepo(repoPath, worktreeName, defaultBranch); err != nil {
+		if err := planutil.RebaseAndMergeRepo(repoPath, worktreeName, defaultBranch); err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", repoName, err))
 		} else {
 			results = append(results, repoName)

@@ -13,6 +13,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/planutil"
 	"github.com/spf13/cobra"
 )
 
@@ -217,8 +218,8 @@ func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
 	gitStatus, err := git.GetStatus(worktreePath)
 	if err == nil {
 		// Override ahead/behind counts to compare against local main, not upstream
-		gitStatus.AheadCount = getCommitCount(worktreePath, "main..HEAD")
-		gitStatus.BehindCount = getCommitCount(worktreePath, "HEAD..main")
+		gitStatus.AheadCount = planutil.CommitCount(worktreePath, "main..HEAD")
+		gitStatus.BehindCount = planutil.CommitCount(worktreePath, "HEAD..main")
 
 		status.GitStatus = &GitStatusInfo{
 			Clean:        !gitStatus.IsDirty,
@@ -230,7 +231,7 @@ func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
 		}
 
 		// Determine merge status
-		status.MergeStatus = getMergeStatus(gitRoot, worktreeName)
+		status.MergeStatus = planutil.MergeStatus(gitRoot, worktreeName)
 	}
 
 	// Determine review status based on plan config
