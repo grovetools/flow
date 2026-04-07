@@ -681,9 +681,24 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return color.YellowString("Available"), nil
 			},
 			Action: func() error {
-				foreachCmd := fmt.Sprintf("git branch -D %s 2>/dev/null || true", branchName)
+				// Select the safe variant (-d) by default; escalate
+				// to -D only when the user explicitly asked for
+				// --force. Destroying unmerged commits in submodules
+				// without opt-in is the same data-loss pattern the
+				// local-branch delete item already guards against.
+				deleteFlag := "-d"
+				if opts.Force {
+					deleteFlag = "-D"
+				}
+				foreachCmd := fmt.Sprintf("git branch %s %s 2>/dev/null || true", deleteFlag, branchName)
 				cmd := exec.Command("git", "-C", gitRoot, "submodule", "foreach", foreachCmd)
 				_ = cmd.Run()
+				var notMergedErr error
+				recordNotMerged := func(repoLabel string, err error) {
+					if notMergedErr == nil {
+						notMergedErr = fmt.Errorf("branch %q not fully merged in %s (re-run with --force to destroy unmerged commits): %w", branchName, repoLabel, err)
+					}
+				}
 				gitmodulesPath := filepath.Join(gitRoot, ".gitmodules")
 				if _, err := os.Stat(gitmodulesPath); err == nil {
 					submodulePaths, _ := parseGitmodules(gitmodulesPath)
@@ -703,9 +718,13 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 									fmt.Printf("    Note: could not remove worktree for %s from main checkout: %s\n", submoduleName, string(output))
 								}
 							}
-							deleteCmd := exec.Command("git", "-C", mainSubmodulePath, "branch", "-D", branchName)
+							deleteCmd := exec.Command("git", "-C", mainSubmodulePath, "branch", deleteFlag, branchName)
 							if output, err := deleteCmd.CombinedOutput(); err != nil {
-								if !strings.Contains(string(output), "not found") {
+								outputStr := string(output)
+								if !strings.Contains(outputStr, "not found") {
+									if !opts.Force && strings.Contains(outputStr, "not fully merged") {
+										recordNotMerged(submoduleName+" (main checkout)", err)
+									}
 									fmt.Printf("    Note: could not delete branch '%s' from %s main checkout: %v\n", branchName, submoduleName, err)
 								}
 							}
@@ -717,16 +736,20 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 									fmt.Printf("    Note: could not remove worktree for %s from local workspace: %s\n", submoduleName, string(output))
 								}
 							}
-							deleteCmd := exec.Command("git", "-C", localRepoPath, "branch", "-D", branchName)
+							deleteCmd := exec.Command("git", "-C", localRepoPath, "branch", deleteFlag, branchName)
 							if output, err := deleteCmd.CombinedOutput(); err != nil {
-								if !strings.Contains(string(output), "not found") {
+								outputStr := string(output)
+								if !strings.Contains(outputStr, "not found") {
+									if !opts.Force && strings.Contains(outputStr, "not fully merged") {
+										recordNotMerged(submoduleName+" (local workspace)", err)
+									}
 									fmt.Printf("    Warning: failed to delete branch '%s' from %s local workspace: %v\n", branchName, submoduleName, err)
 								}
 							}
 						}
 					}
 				}
-				return nil
+				return notMergedErr
 			},
 		},
 		{

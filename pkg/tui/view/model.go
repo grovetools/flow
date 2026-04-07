@@ -330,7 +330,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				plan = m.statusModel.Plan
 			}
 			if plan != nil {
-				plan_finish.RunOnFinishHook(plan, plan.Directory)
+				// Pass the plan slug (e.g. "my-feature") so hook
+				// templates that reference {{.PlanName}} receive the
+				// same value as the CLI path (filepath.Base(planPath))
+				// rather than the plan's absolute directory.
+				plan_finish.RunOnFinishHook(plan, plan.Name)
 			}
 			if err := state.Delete(groveplan.StateKey); err != nil {
 				actionErrs = append(actionErrs, finishActionError{itemTitle: "unset active plan", err: err})
@@ -364,10 +368,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.finishTransient != "" {
 			m.finishTransient = ""
 		}
-		// Intercept `F` (capital) in status mode to launch the finish
-		// wizard. Capital-F avoids shadowing the status sub-model's
-		// own lowercase `f` binding ("view frontmatter").
-		if m.mode == modeStatus && msg.String() == "F" && m.statusModel != nil {
+		// Intercept `ctrl+f` in status mode to launch the finish
+		// wizard. `f` is bound to "view frontmatter" on the status
+		// sub-model, `F` is bound to "skills" (ViewSkillPane), and
+		// no other status single-letter key is mnemonic for
+		// "finish" — ctrl+f is unused across the flow TUI so it
+		// avoids shadowing any status binding.
+		if m.mode == modeStatus && msg.String() == "ctrl+f" && m.statusModel != nil {
 			plan := m.statusModel.Plan
 			if plan != nil {
 				w, err := m.buildFinishWizard(plan)
