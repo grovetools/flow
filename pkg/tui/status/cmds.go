@@ -78,17 +78,6 @@ type EditContentLoadedMsg struct {
 	Err     error
 }
 
-// daemonStreamState holds the state for the daemon SSE stream subscription.
-var daemonStreamState struct {
-	mu      sync.Mutex
-	ch      <-chan daemon.StateUpdate
-	cancel  context.CancelFunc
-	started bool
-}
-
-// daemonStreamStartedMsg is sent after the daemon stream subscription is established.
-type daemonStreamStartedMsg struct{}
-
 // daemonStateUpdateMsg is sent when the daemon pushes a state update via SSE.
 type daemonStateUpdateMsg struct {
 	update daemon.StateUpdate
@@ -99,16 +88,21 @@ type daemonStreamErrorMsg struct {
 	err error
 }
 
-// subscribeToDaemonCmd starts listening to daemon state updates via SSE.
+// daemonStreamConnectedMsg is dispatched once subscribeToDaemonCmd has
+// successfully opened an SSE stream. The channel and cancel func are stored
+// on the Model so the stream can be torn down via Close(). Scoping the
+// state per-Model lets multiple embedded status.Model instances coexist
+// inside a single host (e.g. grove terminal) without sharing state.
+type daemonStreamConnectedMsg struct {
+	ch     <-chan daemon.StateUpdate
+	cancel context.CancelFunc
+}
+
+// subscribeToDaemonCmd opens an SSE stream to the daemon and returns the
+// channel + cancel function as a daemonStreamConnectedMsg. The Model owns
+// the lifecycle and tears it down via Close().
 func subscribeToDaemonCmd() tea.Cmd {
 	return func() tea.Msg {
-		daemonStreamState.mu.Lock()
-		defer daemonStreamState.mu.Unlock()
-
-		if daemonStreamState.started {
-			return daemonStreamStartedMsg{}
-		}
-
 		client := daemon.New()
 
 		if !client.IsRunning() {
@@ -124,46 +118,8 @@ func subscribeToDaemonCmd() tea.Cmd {
 			return daemonStreamErrorMsg{err: err}
 		}
 
-		daemonStreamState.ch = ch
-		daemonStreamState.cancel = cancel
-		daemonStreamState.started = true
-
-		return daemonStreamStartedMsg{}
+		return daemonStreamConnectedMsg{ch: ch, cancel: cancel}
 	}
-}
-
-// listenToDaemonCmd waits for the next update from the daemon stream.
-func listenToDaemonCmd() tea.Cmd {
-	return func() tea.Msg {
-		daemonStreamState.mu.Lock()
-		ch := daemonStreamState.ch
-		started := daemonStreamState.started
-		daemonStreamState.mu.Unlock()
-
-		if !started || ch == nil {
-			return nil
-		}
-
-		update, ok := <-ch
-		if !ok {
-			return daemonStreamErrorMsg{err: nil}
-		}
-
-		return daemonStateUpdateMsg{update: update}
-	}
-}
-
-// stopDaemonStream stops the daemon SSE stream subscription.
-func stopDaemonStream() {
-	daemonStreamState.mu.Lock()
-	defer daemonStreamState.mu.Unlock()
-
-	if daemonStreamState.cancel != nil {
-		daemonStreamState.cancel()
-	}
-	daemonStreamState.ch = nil
-	daemonStreamState.cancel = nil
-	daemonStreamState.started = false
 }
 
 // retryLoadAgentLogsAfterDelay creates a command that waits and then triggers a retry

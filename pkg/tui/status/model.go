@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -142,7 +143,21 @@ type Model struct {
 	RunLogFile         string    // Path to temporary log file for job output
 	// MsgCh is the channel used by background streaming goroutines to deliver
 	// messages into the Update loop. The Model's listenStream tea.Cmd drains it.
+	// Close() closes this channel (once) so the listener goroutine unblocks
+	// and the recursive listenStream cmd returns.
 	MsgCh              chan tea.Msg
+	// Daemon SSE stream state, owned per-Model so multiple embedded status
+	// instances can coexist inside a single host without sharing state. Set
+	// when daemonStreamConnectedMsg is delivered; cleared by Close().
+	streamCh     <-chan daemon.StateUpdate
+	streamCancel context.CancelFunc
+	// streamWg tracks in-flight listener goroutines (both the daemon SSE
+	// listener and the MsgCh dispatcher) so Close() can wait for them to
+	// exit before returning. Pointer so the shared WaitGroup is preserved
+	// across bubbletea's value-receiver Update copies of the Model.
+	streamWg *sync.WaitGroup
+	// msgChCloseOnce guards against double-closing MsgCh during Close().
+	msgChCloseOnce *sync.Once
 	LogViewerWidth     int       // Cached log viewer width
 	LogViewerHeight    int       // Cached log viewer height
 	FocusJobsWidth      int       // Cached jobs pane width for vertical split
@@ -314,6 +329,8 @@ func New(cfg Config) Model {
 		IsRunningJob:        false,
 		RunLogFile:          "", // No longer creating TUI-specific log files
 		MsgCh:               make(chan tea.Msg, 1024),
+		streamWg:            &sync.WaitGroup{},
+		msgChCloseOnce:      &sync.Once{},
 		frontmatterViewport: frontmatterVp,
 		briefingViewport:    briefingVp,
 		editViewport:             editVp,
@@ -333,15 +350,78 @@ type streamMsg struct{ Inner tea.Msg }
 
 // listenStream returns a tea.Cmd that blocks on m.MsgCh and wraps the next
 // delivered message in a streamMsg so the Update loop can re-arm itself.
+// The listener goroutine is tracked by streamWg so Close() can wait for
+// it to exit after closing MsgCh.
 func (m Model) listenStream() tea.Cmd {
 	ch := m.MsgCh
+	if ch == nil {
+		return nil
+	}
+	wg := m.streamWg
+	if wg != nil {
+		wg.Add(1)
+	}
 	return func() tea.Msg {
+		if wg != nil {
+			defer wg.Done()
+		}
 		msg, ok := <-ch
 		if !ok {
 			return nil
 		}
 		return streamMsg{Inner: msg}
 	}
+}
+
+// listenToDaemon returns a tea.Cmd that blocks on the Model's daemon SSE
+// stream channel for the next state update. The listener goroutine is
+// tracked by streamWg so Close() can wait for it to exit after the stream
+// context is cancelled.
+func (m Model) listenToDaemon() tea.Cmd {
+	ch := m.streamCh
+	if ch == nil {
+		return nil
+	}
+	wg := m.streamWg
+	if wg != nil {
+		wg.Add(1)
+	}
+	return func() tea.Msg {
+		if wg != nil {
+			defer wg.Done()
+		}
+		update, ok := <-ch
+		if !ok {
+			return daemonStreamErrorMsg{err: nil}
+		}
+		return daemonStateUpdateMsg{update: update}
+	}
+}
+
+// Close releases resources owned by the Model: it cancels the daemon SSE
+// stream (which causes the server to close the stream channel so the
+// listener goroutine unblocks), closes MsgCh so the Model's own message
+// dispatcher goroutine unblocks, and waits for both listener goroutines
+// to exit before returning. Hosts that embed the status Model (e.g.
+// grove terminal) must call Close() before discarding a Model instance
+// so background goroutines don't leak across instance lifetimes.
+func (m *Model) Close() error {
+	if m.streamCancel != nil {
+		m.streamCancel()
+		m.streamCancel = nil
+		m.streamCh = nil
+	}
+	if m.msgChCloseOnce != nil && m.MsgCh != nil {
+		ch := m.MsgCh
+		m.msgChCloseOnce.Do(func() {
+			defer func() { _ = recover() }()
+			close(ch)
+		})
+	}
+	if m.streamWg != nil {
+		m.streamWg.Wait()
+	}
+	return nil
 }
 
 // Init initializes the TUI

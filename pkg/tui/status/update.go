@@ -324,9 +324,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case daemonStreamStartedMsg:
+	case daemonStreamConnectedMsg:
+		// Daemon SSE stream is established: bind the channel + cancel to
+		// the model and start listening. Ownership of the stream lifetime
+		// now rests with the Model (torn down by Close()).
 		m.DaemonConnected = true
-		return m, listenToDaemonCmd()
+		m.streamCh = msg.ch
+		m.streamCancel = msg.cancel
+		return m, m.listenToDaemon()
 
 	case daemonStateUpdateMsg:
 		// Trigger refresh for session updates and all job lifecycle events.
@@ -339,10 +344,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"job_failed", "job_cancelled", "job_pending_user":
 			return m, tea.Batch(
 				refreshPlan(m.PlanDir),
-				listenToDaemonCmd(),
+				m.listenToDaemon(),
 			)
 		}
-		return m, listenToDaemonCmd()
+		return m, m.listenToDaemon()
 
 	case daemonStreamErrorMsg:
 		m.DaemonConnected = false
@@ -1364,7 +1369,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.KeyMap.Quit):
-			stopDaemonStream()
+			// Tear down the per-Model daemon stream and wait for listener
+			// goroutines to exit before handing control back to bubbletea.
+			_ = m.Close()
 			return m, tea.Quit
 
 		case key.Matches(msg, m.KeyMap.Help):
