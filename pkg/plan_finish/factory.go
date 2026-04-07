@@ -605,14 +605,14 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			Action: func() error {
 				wPath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 				if plan.Config != nil && len(plan.Config.Repos) > 0 {
-					return cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos, provider)
+					return cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos, provider, opts.Force)
 				}
 				hasSubmodules := false
 				if _, err := os.Stat(filepath.Join(wPath, ".gitmodules")); err == nil {
 					hasSubmodules = true
 				}
 				if hasSubmodules {
-					if err := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider); err != nil {
+					if err := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider, opts.Force); err != nil {
 						fmt.Printf("    Warning: failed to remove linked submodule worktrees: %v\n", err)
 					}
 				}
@@ -712,7 +712,12 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						wtPath := filepath.Join(gitRoot, ".grove-worktrees", branchName, submodulePath)
 						mainSubmodulePath := filepath.Join(gitRoot, submodulePath)
 						if _, err := os.Stat(filepath.Join(mainSubmodulePath, ".git")); err == nil {
-							removeWorktreeCmd := exec.Command("git", "-C", mainSubmodulePath, "worktree", "remove", "--force", wtPath)
+							removeWorktreeArgs := []string{"-C", mainSubmodulePath, "worktree", "remove"}
+							if opts.Force {
+								removeWorktreeArgs = append(removeWorktreeArgs, "--force")
+							}
+							removeWorktreeArgs = append(removeWorktreeArgs, wtPath)
+							removeWorktreeCmd := exec.Command("git", removeWorktreeArgs...)
 							if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
 								if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
 									fmt.Printf("    Note: could not remove worktree for %s from main checkout: %s\n", submoduleName, string(output))
@@ -730,7 +735,12 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 							}
 						}
 						if localRepoPath, hasLocal := localWorkspaces[submoduleName]; hasLocal {
-							removeWorktreeCmd := exec.Command("git", "-C", localRepoPath, "worktree", "remove", "--force", wtPath)
+							removeWorktreeArgs := []string{"-C", localRepoPath, "worktree", "remove"}
+							if opts.Force {
+								removeWorktreeArgs = append(removeWorktreeArgs, "--force")
+							}
+							removeWorktreeArgs = append(removeWorktreeArgs, wtPath)
+							removeWorktreeCmd := exec.Command("git", removeWorktreeArgs...)
 							if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
 								if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
 									fmt.Printf("    Note: could not remove worktree for %s from local workspace: %s\n", submoduleName, string(output))
@@ -1020,7 +1030,9 @@ func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
 }
 
 // removeLinkedSubmoduleWorktrees removes linked worktrees from submodule source repositories.
-func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string, provider *workspace.Provider) error {
+// When force is false, `git worktree remove` is run without --force so that
+// uncommitted submodule work is preserved (the failure surfaces to the caller).
+func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string, provider *workspace.Provider, force bool) error {
 	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 	gitmodulesPath := filepath.Join(worktreePath, ".gitmodules")
 	if _, err := os.Stat(gitmodulesPath); os.IsNotExist(err) {
@@ -1045,7 +1057,12 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 			output, err := cmd.Output()
 			if err == nil && strings.Contains(string(output), submoduleWorktreePath) {
 				fmt.Printf("    Removing linked worktree for %s\n", submoduleName)
-				removeCmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", submoduleWorktreePath)
+				removeArgs := []string{"worktree", "remove"}
+				if force {
+					removeArgs = append(removeArgs, "--force")
+				}
+				removeArgs = append(removeArgs, submoduleWorktreePath)
+				removeCmd := exec.CommandContext(ctx, "git", removeArgs...)
 				removeCmd.Dir = mainSubmodulePath
 				if err := removeCmd.Run(); err != nil {
 					fmt.Printf("      Warning: failed to remove worktree from main checkout: %v\n", err)
@@ -1066,7 +1083,12 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 		}
 		if strings.Contains(string(output), submoduleWorktreePath) {
 			fmt.Printf("    Removing linked worktree for %s\n", submoduleName)
-			removeCmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", submoduleWorktreePath)
+			removeArgs := []string{"worktree", "remove"}
+			if force {
+				removeArgs = append(removeArgs, "--force")
+			}
+			removeArgs = append(removeArgs, submoduleWorktreePath)
+			removeCmd := exec.CommandContext(ctx, "git", removeArgs...)
 			removeCmd.Dir = localRepoPath
 			if err := removeCmd.Run(); err != nil {
 				fmt.Printf("      Warning: failed to remove worktree: %v\n", err)
@@ -1077,7 +1099,10 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 }
 
 // cleanupEcosystemWorktree removes an ecosystem worktree by cleaning up individual repo worktrees.
-func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider) error {
+// When force is false, destructive git operations (worktree remove --force, branch -D)
+// are downgraded to their safe variants so that uncommitted work and unmerged commits
+// survive; failures surface to the caller instead of being papered over with os.RemoveAll.
+func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider, force bool) error {
 	ecosystemDir := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 	fmt.Printf("    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
 	var localWorkspaces map[string]string
@@ -1087,36 +1112,77 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		fmt.Printf("    Warning: workspace discovery failed, cannot clean up submodule branches\n")
 		localWorkspaces = make(map[string]string)
 	}
+	var firstErr error
+	recordErr := func(err error) {
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	branchDeleteFlag := "-d"
+	if force {
+		branchDeleteFlag = "-D"
+	}
 	for _, repo := range repos {
 		repoWorktreePath := filepath.Join(ecosystemDir, repo)
 		fmt.Printf("    • %s: removing worktree and branch\n", repo)
 		repoPath, exists := localWorkspaces[repo]
 		if !exists {
 			fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping branch cleanup\n", repo)
-			if err := os.RemoveAll(repoWorktreePath); err != nil {
-				fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+			if force {
+				if err := os.RemoveAll(repoWorktreePath); err != nil {
+					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+				}
+			} else if _, err := os.Stat(repoWorktreePath); err == nil {
+				// Without force we don't know if the orphaned
+				// directory holds uncommitted work, so refuse to
+				// blow it away.
+				fmt.Printf("      Refusing to remove %s without --force (repo not in workspaces, cannot verify clean state)\n", repoWorktreePath)
+				recordErr(fmt.Errorf("%s: orphaned worktree directory retained (re-run with --force to discard)", repo))
 			}
 			continue
 		}
-		removeWorktreeCmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", repoWorktreePath)
+		removeWorktreeArgs := []string{"worktree", "remove"}
+		if force {
+			removeWorktreeArgs = append(removeWorktreeArgs, "--force")
+		}
+		removeWorktreeArgs = append(removeWorktreeArgs, repoWorktreePath)
+		removeWorktreeCmd := exec.CommandContext(ctx, "git", removeWorktreeArgs...)
 		removeWorktreeCmd.Dir = repoPath
 		if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
-			if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
-				fmt.Printf("      Warning: git worktree remove failed, removing directory manually: %s\n", string(output))
-			}
-			if err := os.RemoveAll(repoWorktreePath); err != nil {
-				fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+			outputStr := string(output)
+			if strings.Contains(outputStr, "not a working tree") || strings.Contains(outputStr, "No such file") {
+				// Already gone; nothing to do.
+			} else if force {
+				fmt.Printf("      Warning: git worktree remove failed, removing directory manually: %s\n", outputStr)
+				if err := os.RemoveAll(repoWorktreePath); err != nil {
+					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+				}
+			} else {
+				fmt.Printf("      Error: git worktree remove failed for %s: %s\n", repo, outputStr)
+				recordErr(fmt.Errorf("%s: worktree remove failed (re-run with --force to discard uncommitted work): %w", repo, err))
+				continue
 			}
 		}
-		deleteBranchCmd := exec.CommandContext(ctx, "git", "branch", "-D", worktreeName)
+		deleteBranchCmd := exec.CommandContext(ctx, "git", "branch", branchDeleteFlag, worktreeName)
 		deleteBranchCmd.Dir = repoPath
 		if output, err := deleteBranchCmd.CombinedOutput(); err != nil {
-			if !strings.Contains(string(output), "not found") {
-				fmt.Printf("      Warning: failed to delete branch '%s' from %s: %s\n", worktreeName, repo, string(output))
+			outputStr := string(output)
+			if strings.Contains(outputStr, "not found") {
+				// Idempotent: nothing to delete.
+			} else if !force && strings.Contains(outputStr, "not fully merged") {
+				fmt.Printf("      Error: branch '%s' in %s has unmerged commits: %s\n", worktreeName, repo, outputStr)
+				recordErr(fmt.Errorf("%s: branch %q not fully merged (re-run with --force to destroy unmerged commits)", repo, worktreeName))
+			} else {
+				fmt.Printf("      Warning: failed to delete branch '%s' from %s: %s\n", worktreeName, repo, outputStr)
 			}
 		} else {
 			fmt.Printf("      * Deleted branch '%s'\n", worktreeName)
 		}
+	}
+	if firstErr != nil {
+		// Leave the ecosystem directory in place so the user can
+		// recover any preserved work.
+		return firstErr
 	}
 	if err := os.RemoveAll(ecosystemDir); err != nil {
 		return fmt.Errorf("failed to remove ecosystem directory: %w", err)
