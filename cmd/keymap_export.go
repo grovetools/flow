@@ -5,6 +5,7 @@ import (
 	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
 	"github.com/grovetools/flow/pkg/tui/wizards/finish"
+	planinit "github.com/grovetools/flow/pkg/tui/wizards/init"
 )
 
 // PlanListKeymapInfo returns the keymap metadata for the flow plan list TUI.
@@ -32,12 +33,11 @@ func PlanAddKeymapInfo() keymap.TUIInfo {
 // PlanInitKeymapInfo returns the keymap metadata for the flow plan init TUI.
 // Used by the grove keys registry generator to aggregate all TUI keybindings.
 func PlanInitKeymapInfo() keymap.TUIInfo {
-	km := newPlanInitTUIKeyMap(nil) // nil config = default keybindings
 	return keymap.MakeTUIInfo(
 		"flow-plan-init",
 		"flow",
 		"Create a new plan",
-		km,
+		planinit.NewKeyMap(nil),
 	)
 }
 
