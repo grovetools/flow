@@ -29,13 +29,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case InitProgramMsg:
-		// Set the program reference from the package-level variable
-		// This is called on the first update cycle after Init()
-		if initProgramRef != nil {
-			m.Program = initProgramRef
+	case streamMsg:
+		// A message arrived via the Model's MsgCh channel from a background
+		// streaming goroutine. Re-arm the listener, then dispatch the inner
+		// message through Update so it is handled by its normal case.
+		updated, innerCmd := m.Update(msg.Inner)
+		relisten := m.listenStream()
+		if innerCmd != nil {
+			return updated, tea.Batch(innerCmd, relisten)
 		}
-		return m, nil
+		return updated, relisten
 
 	case LogContentLoadedMsg:
 		// Guard clause: Discard stale messages for jobs that are no longer selected
@@ -123,7 +126,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StreamCancel = cancel
 				m.StreamingJobID = m.ActiveLogJob.ID
 
-				cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, m.Program))
+				cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, m.MsgCh))
 
 				// Start status polling for agent jobs that support it
 				isAgentWithStatus := m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
@@ -486,7 +489,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Start streaming logs for the first agent job (or first job)
 		var cmds []tea.Cmd
-		if m.Program != nil && m.DaemonClient != nil && len(msg.JobIDs) > 0 {
+		if m.DaemonClient != nil && len(msg.JobIDs) > 0 {
 			// Cancel any existing stream
 			if m.StreamCancel != nil {
 				m.StreamCancel()
@@ -495,7 +498,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.StreamCancel = cancel
 			m.StreamingJobID = msg.JobIDs[0]
 
-			cmds = append(cmds, streamDaemonLogsCmd(ctx, m.DaemonClient, msg.JobIDs[0], m.Program))
+			cmds = append(cmds, streamDaemonLogsCmd(ctx, m.DaemonClient, msg.JobIDs[0], m.MsgCh))
 		}
 		cmds = append(cmds, refreshPlan(m.PlanDir))
 		return m, tea.Batch(cmds...)
@@ -1707,7 +1710,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Determine if we're using the daemon (which has a blocked queue
 			// and handles DAG traversal itself).
-			usingDaemon := m.DaemonClient != nil && m.DaemonClient.IsRunning() && m.Program != nil
+			usingDaemon := m.DaemonClient != nil && m.DaemonClient.IsRunning()
 
 			// Filter out jobs that are not submittable.
 			// When using the daemon, accept any pending/blocked/failed job — the
@@ -1819,18 +1822,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						"use_method": "daemon",
 					}).Info("Submitting jobs via daemon")
 					runCmd = submitJobsViaDaemonCmd(m.DaemonClient, m.Plan, jobsToRun)
-				} else if m.Orchestrator != nil && m.Program != nil {
+				} else if m.Orchestrator != nil {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":   len(jobsToRun),
 						"use_method": "orchestrator",
 					}).Info("Running jobs via orchestrator")
-					runCmd = runJobsWithOrchestrator(m.Orchestrator, jobsToRun, m.Program)
+					runCmd = runJobsWithOrchestrator(m.Orchestrator, jobsToRun, m.MsgCh)
 				} else {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":         len(jobsToRun),
 						"use_method":       "subprocess",
 						"orchestrator_nil": m.Orchestrator == nil,
-						"program_nil":      m.Program == nil,
 					}).Warn("Falling back to subprocess job execution")
 					// Fallback to old method if orchestrator is not available
 					runCmd = runJobsCmd(m.RunLogFile, m.PlanDir, jobsToRun)

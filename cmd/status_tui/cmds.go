@@ -29,7 +29,22 @@ import (
 )
 
 // Message types
-type InitProgramMsg struct{}
+// sendToMsgCh performs a non-blocking send of a tea.Msg to the Model's stream
+// channel. If the channel is full or closed, the message is dropped; the
+// recover guards against sends on closed channels. Background streaming
+// goroutines use this to hand messages off to the Update loop without holding
+// a reference to the tea.Program.
+func sendToMsgCh(ch chan<- tea.Msg, msg tea.Msg) {
+	defer func() { _ = recover() }()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- msg:
+	default:
+		// channel full; drop the message rather than block the sender
+	}
+}
 type RefreshMsg struct{}
 type ArchiveConfirmedMsg struct{ Job *orchestration.Job }
 type EditFileAndQuitMsg struct{ FilePath string }
@@ -529,7 +544,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 }
 
 // streamAgentLogsCmd creates a background process to stream agent logs from a specific file.
-func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orchestration.Job, logFilePath string, program *tea.Program) tea.Cmd {
+func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orchestration.Job, logFilePath string, msgCh chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		// Get the log file path for this job (for writing streamed content)
 		jobLogPath, err := orchestration.GetJobLogPath(plan, job)
@@ -549,10 +564,7 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 		})
 		if err != nil {
 			logFile.Close()
-			go func() {
-				defer func() { recover() }()
-				program.Send(StreamEndedMsg{JobID: job.ID})
-			}()
+			go sendToMsgCh(msgCh, StreamEndedMsg{JobID: job.ID})
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to start agentstream: %w", err), JobID: job.ID}
 		}
 
@@ -562,12 +574,7 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 			defer logFile.Close()
 
 			// Notify the TUI that streaming ended so it can clear StreamingJobID
-			defer func() {
-				func() {
-					defer func() { recover() }()
-					program.Send(StreamEndedMsg{JobID: job.ID})
-				}()
-			}()
+			defer sendToMsgCh(msgCh, StreamEndedMsg{JobID: job.ID})
 
 			defer func() {
 				if r := recover(); r != nil {
@@ -587,22 +594,12 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 				fmt.Fprintln(logFile, formatted)
 				logFile.Sync()
 
-				// Send to TUI
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							logger.WithFields(map[string]interface{}{
-								"panic":      r,
-								"line_count": lineCount,
-							}).Warn("Recovered from panic when sending log line to TUI")
-						}
-					}()
-					program.Send(logviewer.LogLineMsg{
-						Workspace: job.ID,
-						Line:      formatted,
-						NoPrefix:  true,
-					})
-				}()
+				// Hand the log line to the Update loop via the Model's channel.
+				sendToMsgCh(msgCh, logviewer.LogLineMsg{
+					Workspace: job.ID,
+					Line:      formatted,
+					NoPrefix:  true,
+				})
 			}
 
 			logger.WithFields(map[string]interface{}{
@@ -654,15 +651,12 @@ type DaemonJobStatusMsg struct {
 }
 
 // streamDaemonLogsCmd subscribes to the daemon's SSE log stream for a job
-// and sends log lines to the TUI via program.Send().
-func streamDaemonLogsCmd(ctx context.Context, client daemon.Client, jobID string, program *tea.Program) tea.Cmd {
+// and sends log lines to the TUI via the Model's MsgCh channel.
+func streamDaemonLogsCmd(ctx context.Context, client daemon.Client, jobID string, msgCh chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		ch, err := client.StreamJobLogs(ctx, jobID)
 		if err != nil {
-			go func() {
-				defer func() { recover() }()
-				program.Send(StreamEndedMsg{JobID: jobID})
-			}()
+			go sendToMsgCh(msgCh, StreamEndedMsg{JobID: jobID})
 			return LogContentLoadedMsg{
 				Err:   fmt.Errorf("stream daemon logs: %w", err),
 				JobID: jobID,
@@ -672,14 +666,9 @@ func streamDaemonLogsCmd(ctx context.Context, client daemon.Client, jobID string
 		// Stream in background goroutine
 		go func() {
 			defer func() {
-				if r := recover(); r != nil {
-					// TUI may have shut down
-				}
+				_ = recover() // TUI may have shut down
 				// Ensure streaming state clears when SSE channel closes
-				func() {
-					defer func() { recover() }()
-					program.Send(StreamEndedMsg{JobID: jobID})
-				}()
+				sendToMsgCh(msgCh, StreamEndedMsg{JobID: jobID})
 			}()
 
 			for event := range ch {
@@ -692,24 +681,18 @@ func streamDaemonLogsCmd(ctx context.Context, client daemon.Client, jobID string
 				switch event.Event {
 				case "log":
 					if event.Line != nil {
-						func() {
-							defer func() { recover() }()
-							program.Send(logviewer.LogLineMsg{
-								Workspace: jobID,
-								Line:      event.Line.Line,
-								NoPrefix:  true,
-							})
-						}()
+						sendToMsgCh(msgCh, logviewer.LogLineMsg{
+							Workspace: jobID,
+							Line:      event.Line.Line,
+							NoPrefix:  true,
+						})
 					}
 				case "status":
-					func() {
-						defer func() { recover() }()
-						program.Send(DaemonJobStatusMsg{
-							JobID:  jobID,
-							Status: event.Status,
-							Error:  event.Error,
-						})
-					}()
+					sendToMsgCh(msgCh, DaemonJobStatusMsg{
+						JobID:  jobID,
+						Status: event.Status,
+						Error:  event.Error,
+					})
 				}
 			}
 		}()
@@ -759,7 +742,7 @@ func refreshTick() tea.Cmd {
 // runJobsWithOrchestrator executes jobs using the orchestrator and streams output to the TUI.
 // IMPORTANT: This function spawns a background goroutine and returns immediately to avoid
 // blocking the bubbletea event loop. The goroutine sends JobRunFinishedMsg when done.
-func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, program *tea.Program) tea.Cmd {
+func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*orchestration.Job, msgCh chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
@@ -778,20 +761,22 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 					logger.WithFields(map[string]interface{}{
 						"panic": r,
 					}).Error("Panic recovered in runJobsWithOrchestrator background goroutine")
-					program.Send(JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf("panic during job execution: %v", r)})
+					sendToMsgCh(msgCh, JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf("panic during job execution: %v", r)})
 				}
 			}()
 
 			ctx := context.Background()
 
-			// Create a StreamWriter for live TUI updates with smart tagging.
+			// Create a stream writer for live TUI updates with smart tagging.
+			// Uses the Model's channel rather than program.Send so this works
+			// when the status_tui is embedded inside a host program.
 			var writerTag string
 			if len(jobs) == 1 {
 				writerTag = jobs[0].ID
 			} else {
 				writerTag = "Job Output"
 			}
-			tuiWriter := logviewer.NewStreamWriter(program, writerTag)
+			tuiWriter := newChanStreamWriter(msgCh, writerTag)
 
 			if len(jobs) == 1 {
 				tuiWriter.NoWorkspacePrefix = true
@@ -873,10 +858,10 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 				for _, e := range execErrors {
 					errStrings = append(errStrings, e.Error())
 				}
-				program.Send(JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf("%s", strings.Join(errStrings, "\n"))})
+				sendToMsgCh(msgCh, JobRunFinishedMsg{Jobs: jobs, Err: fmt.Errorf("%s", strings.Join(errStrings, "\n"))})
 			} else {
 				logger.Info("All jobs completed successfully")
-				program.Send(JobRunFinishedMsg{Jobs: jobs, Err: nil})
+				sendToMsgCh(msgCh, JobRunFinishedMsg{Jobs: jobs, Err: nil})
 			}
 		}()
 

@@ -36,10 +36,6 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	logging.SetGlobalOutput(streamWriter)
 	defer logging.SetGlobalOutput(os.Stderr) // Ensure we reset on exit
 
-	// Set the program reference in the package-level variable
-	// The model's Init() method will read this and set m.Program
-	status_tui.SetProgramRef(program)
-
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
 	}

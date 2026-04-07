@@ -22,10 +22,6 @@ import (
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
-// initProgramRef is a package-level variable to store the program reference
-// so it can be set in the model's Init method
-var initProgramRef *tea.Program
-
 const (
 	// Heights
 	headerHeight            = 2 // Includes label and bottom margin
@@ -144,7 +140,9 @@ type Model struct {
 	isAutorunning       bool      // True when automatically running all stages
 	originalSelection   map[string]bool // Track the original user selection for autorun
 	RunLogFile         string    // Path to temporary log file for job output
-	Program            *tea.Program // Reference to the tea.Program for sending messages
+	// MsgCh is the channel used by background streaming goroutines to deliver
+	// messages into the Update loop. The Model's listenStream tea.Cmd drains it.
+	MsgCh              chan tea.Msg
 	LogViewerWidth     int       // Cached log viewer width
 	LogViewerHeight    int       // Cached log viewer height
 	FocusJobsWidth      int       // Cached jobs pane width for vertical split
@@ -286,7 +284,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		LogSplitVertical: state.LogSplitVertical, // Apply loaded state
 		IsRunningJob:        false,
 		RunLogFile:          "", // No longer creating TUI-specific log files
-		Program:             nil, // Will be set by SetProgram after creating the program
+		MsgCh:               make(chan tea.Msg, 1024),
 		frontmatterViewport: frontmatterVp,
 		briefingViewport:    briefingVp,
 		editViewport:             editVp,
@@ -299,25 +297,31 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	}
 }
 
-// SetProgramRef sets the package-level program reference
-// This is called by runStatusTUI before starting the program
-func SetProgramRef(program *tea.Program) {
-	initProgramRef = program
-}
+// streamMsg wraps a tea.Msg delivered via the Model's MsgCh channel. The Update
+// loop unwraps it, dispatches the inner message, and re-arms the listener so
+// subsequent messages continue to flow.
+type streamMsg struct{ Inner tea.Msg }
 
-// SetProgram sets the program reference in the model (deprecated - kept for compatibility)
-func (m *Model) SetProgram(program *tea.Program) {
-	m.Program = program
+// listenStream returns a tea.Cmd that blocks on m.MsgCh and wraps the next
+// delivered message in a streamMsg so the Update loop can re-arm itself.
+func (m Model) listenStream() tea.Cmd {
+	ch := m.MsgCh
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return streamMsg{Inner: msg}
+	}
 }
 
 // Init initializes the TUI
 func (m Model) Init() tea.Cmd {
-	// Return a command that will send the initProgramMsg after the program has started
 	return tea.Batch(
-		func() tea.Msg { return InitProgramMsg{} },
 		blink(),
 		refreshTick(),
 		subscribeToDaemonCmd(),
+		m.listenStream(),
 	)
 }
 
