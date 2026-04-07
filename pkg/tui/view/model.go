@@ -12,6 +12,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/daemon"
+	groveplan "github.com/grovetools/core/pkg/plan"
+	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/plan_finish"
@@ -20,6 +22,13 @@ import (
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
 	"github.com/grovetools/flow/pkg/tui/wizards/finish"
 )
+
+// finishActionError pairs a failed cleanup item with its error so the
+// meta-panel can surface which action failed after the wizard closes.
+type finishActionError struct {
+	itemTitle string
+	err       error
+}
 
 // mode enumerates which sub-model the meta-panel is currently routing
 // updates and render calls to.
@@ -87,6 +96,13 @@ type Model struct {
 	// constructed status models can be sized immediately.
 	width  int
 	height int
+
+	// finishTransient is a short status line overlayed on top of the
+	// active sub-model's View after a finish-wizard run, used to
+	// surface action errors (or a build error on wizard launch) that
+	// the user would otherwise never see. Cleared on the next
+	// keypress so it doesn't linger forever.
+	finishTransient string
 }
 
 // New constructs a Model from the given Config. The browser sub-model
@@ -292,16 +308,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeStatus
 				return m, nil
 			}
-			// Execute each enabled action inline. Errors are
-			// swallowed per-item so a failing cleanup step doesn't
-			// crash the host; a richer status-bar surface is left
-			// as follow-up work.
+			// Execute each enabled action sequentially, collecting
+			// per-item errors instead of dropping them. Errors are
+			// surfaced to the user via finishTransient so a failing
+			// step is visible rather than swallowed silently.
+			var actionErrs []finishActionError
 			for _, item := range items {
 				if item == nil || !item.IsEnabled || item.Action == nil {
 					continue
 				}
-				_ = item.Action()
+				if err := item.Action(); err != nil {
+					actionErrs = append(actionErrs, finishActionError{itemTitle: item.Name, err: err})
+				}
 			}
+			// Mirror the CLI path: run the user's on_finish hook and
+			// clear the active-plan state regardless of whether any
+			// actions errored. Hook failures are surfaced alongside
+			// action errors.
+			plan := (*orchestration.Plan)(nil)
+			if m.statusModel != nil {
+				plan = m.statusModel.Plan
+			}
+			if plan != nil {
+				plan_finish.RunOnFinishHook(plan, plan.Directory)
+			}
+			if err := state.Delete(groveplan.StateKey); err != nil {
+				actionErrs = append(actionErrs, finishActionError{itemTitle: "unset active plan", err: err})
+			} else {
+				_ = state.Delete(groveplan.LegacyStateKey)
+			}
+			m.finishTransient = formatFinishErrors(actionErrs)
 			// The active plan is either archived or marked finished
 			// at this point. Tear down the status model and switch
 			// back to the browser so the user sees the fresh plan
@@ -323,31 +359,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		// Intercept `f` in status mode to launch the finish wizard.
-		// Note: this shadows status mode's own `f` binding (view
-		// frontmatter) while embedded in the meta-panel.
-		if m.mode == modeStatus && msg.String() == "f" && m.statusModel != nil {
+		// Clear any lingering finish-wizard transient message on the
+		// next keypress so it behaves like a one-shot status line.
+		if m.finishTransient != "" {
+			m.finishTransient = ""
+		}
+		// Intercept `F` (capital) in status mode to launch the finish
+		// wizard. Capital-F avoids shadowing the status sub-model's
+		// own lowercase `f` binding ("view frontmatter").
+		if m.mode == modeStatus && msg.String() == "F" && m.statusModel != nil {
 			plan := m.statusModel.Plan
 			if plan != nil {
 				w, err := m.buildFinishWizard(plan)
-				if err == nil {
-					m.finishWizardModel = &w
-					m.mode = modeFinishWizard
-					var cmds []tea.Cmd
-					if m.width > 0 && m.height > 0 {
-						sized, c := m.finishWizardModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-						if fm, ok := sized.(finish.Model); ok {
-							*m.finishWizardModel = fm
-						}
-						if c != nil {
-							cmds = append(cmds, c)
-						}
+				if err != nil {
+					// Surface the build error so the user knows
+					// the keystroke was not a silent no-op.
+					m.finishTransient = fmt.Sprintf("finish wizard: %v", err)
+					return m, nil
+				}
+				m.finishWizardModel = &w
+				m.mode = modeFinishWizard
+				var cmds []tea.Cmd
+				if m.width > 0 && m.height > 0 {
+					sized, c := m.finishWizardModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+					if fm, ok := sized.(finish.Model); ok {
+						*m.finishWizardModel = fm
 					}
-					if c := m.finishWizardModel.Init(); c != nil {
+					if c != nil {
 						cmds = append(cmds, c)
 					}
-					return m, tea.Batch(cmds...)
 				}
+				if c := m.finishWizardModel.Init(); c != nil {
+					cmds = append(cmds, c)
+				}
+				return m, tea.Batch(cmds...)
 			}
 		}
 
@@ -400,6 +445,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.updateActive(msg)
+}
+
+// formatFinishErrors renders a list of finishActionError entries as
+// a single status-bar line: the first entry's item and error, with a
+// "(+N more)" suffix if additional errors were collected. Returns an
+// empty string when there are no errors.
+func formatFinishErrors(errs []finishActionError) string {
+	if len(errs) == 0 {
+		return ""
+	}
+	first := errs[0]
+	if len(errs) == 1 {
+		return fmt.Sprintf("finish: %s: %v", first.itemTitle, first.err)
+	}
+	return fmt.Sprintf("finish: %s: %v (+%d more)", first.itemTitle, first.err, len(errs)-1)
 }
 
 // buildFinishWizard constructs a finish.Model for the given plan by
@@ -469,30 +529,38 @@ func (m Model) updateActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 // renders a placeholder (should not normally happen, but guards against
 // any race where mode flipped before the lazy init finished).
 func (m Model) View() string {
+	var body string
 	switch m.mode {
 	case modeFinishWizard:
 		if m.finishWizardModel == nil {
-			return "Loading finish wizard..."
+			body = "Loading finish wizard..."
+			break
 		}
 		defer func() { _ = recover() }()
-		return m.finishWizardModel.View()
+		body = m.finishWizardModel.View()
 	case modeAddWizard:
 		if m.wizardModel == nil {
-			return "Loading wizard..."
+			body = "Loading wizard..."
+			break
 		}
 		defer func() { _ = recover() }()
-		return m.wizardModel.View()
+		body = m.wizardModel.View()
 	case modeStatus:
 		if m.statusModel == nil {
-			return "Loading plan..."
+			body = "Loading plan..."
+			break
 		}
 		// Protect against any panic inside the status View so a bad
 		// render doesn't kill the host process.
 		defer func() { _ = recover() }()
-		return m.statusModel.View()
+		body = m.statusModel.View()
 	default:
-		return m.browserModel.View()
+		body = m.browserModel.View()
 	}
+	if m.finishTransient != "" {
+		return m.finishTransient + "\n" + body
+	}
+	return body
 }
 
 // Close tears down any live sub-models. The browser's Close is a no-op
