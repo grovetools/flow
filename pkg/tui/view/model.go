@@ -9,18 +9,21 @@ package view
 
 import (
 	"fmt"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/daemon"
 	groveplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/plan_finish"
 	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/status"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
 	"github.com/grovetools/flow/pkg/tui/wizards/finish"
+	planinit "github.com/grovetools/flow/pkg/tui/wizards/init"
 )
 
 // finishActionError pairs a failed cleanup item with its error so the
@@ -28,6 +31,14 @@ import (
 type finishActionError struct {
 	itemTitle string
 	err       error
+}
+
+// initCompletedMsg is dispatched after the `flow plan init`
+// subprocess returns. It carries the error from the subprocess (nil
+// on success) so the meta-panel can decide whether to transition to
+// the new plan's status view or surface the failure.
+type initCompletedMsg struct {
+	err error
 }
 
 // mode enumerates which sub-model the meta-panel is currently routing
@@ -46,6 +57,14 @@ const (
 	// open on top of the status view. Constructed lazily when the
 	// user presses `f` in status mode and torn down on DoneMsg.
 	modeFinishWizard
+	// modeInitWizard is active while the plan-init wizard is open
+	// on top of the browser view. Constructed lazily when the user
+	// presses `n` in browser mode and torn down when it emits
+	// embed.DoneMsg. On submit the meta-panel launches the actual
+	// plan creation via tea.ExecProcess (mirroring the pre-embed
+	// browser's subprocess shellout) so the worktree/disk I/O
+	// never runs inside the bubbletea event loop.
+	modeInitWizard
 )
 
 // Config carries the dependencies the meta-panel needs to build its
@@ -91,6 +110,14 @@ type Model struct {
 	statusModel        *status.Model
 	wizardModel        *add.Model
 	finishWizardModel  *finish.Model
+	initWizardModel    *planinit.Model
+
+	// pendingInitPlanName is the plan slug captured from the init
+	// wizard's Request when the user submits. The meta-panel uses
+	// it after the `flow plan init` subprocess returns to locate
+	// the freshly-created plan on disk and switch the status view
+	// to it.
+	pendingInitPlanName string
 
 	// width/height are cached from the last WindowSizeMsg so lazily
 	// constructed status models can be sized immediately.
@@ -190,6 +217,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, fc)
 			}
 		}
+		if m.initWizardModel != nil {
+			iUpdated, ic := m.initWizardModel.Update(msg)
+			if im, ok := iUpdated.(planinit.Model); ok {
+				*m.initWizardModel = im
+			}
+			if ic != nil {
+				cmds = append(cmds, ic)
+			}
+		}
 		return m, tea.Batch(cmds...)
 
 	case embed.SetWorkspaceMsg:
@@ -207,6 +243,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = m.finishWizardModel.Close()
 			m.finishWizardModel = nil
 		}
+		if m.initWizardModel != nil {
+			_ = m.initWizardModel.Close()
+			m.initWizardModel = nil
+		}
+		m.pendingInitPlanName = ""
 		if m.statusModel != nil {
 			_ = m.statusModel.Close()
 			m.statusModel = nil
@@ -277,12 +318,76 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case initCompletedMsg:
+		// Clear pending name regardless of success/failure.
+		pendingName := m.pendingInitPlanName
+		m.pendingInitPlanName = ""
+		if msg.err != nil {
+			m.finishTransient = fmt.Sprintf("plan init: %v", msg.err)
+			// Stay in browser mode; refresh so the user sees any
+			// partial state.
+			return m, m.browserModel.Init()
+		}
+		// Subprocess succeeded. Try to locate and load the new plan
+		// directly so we can switch straight to its status view.
+		if pendingName != "" {
+			planPath := filepath.Join(m.cfg.PlansDir, pendingName)
+			if plan, err := orchestration.LoadPlan(planPath); err == nil && plan != nil {
+				if graph, gerr := orchestration.BuildDependencyGraph(plan); gerr == nil {
+					if m.statusModel != nil {
+						_ = m.statusModel.Close()
+						m.statusModel = nil
+					}
+					newStatus := status.New(status.Config{
+						Plan:         plan,
+						Graph:        graph,
+						DaemonClient: m.cfg.DaemonClient,
+					})
+					m.statusModel = &newStatus
+					m.mode = modeStatus
+					var cmds []tea.Cmd
+					if m.width > 0 && m.height > 0 {
+						sized, c := m.statusModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+						if sm, ok := sized.(status.Model); ok {
+							*m.statusModel = sm
+						}
+						if c != nil {
+							cmds = append(cmds, c)
+						}
+					}
+					if c := m.statusModel.Init(); c != nil {
+						cmds = append(cmds, c)
+					}
+					return m, tea.Batch(cmds...)
+				}
+			}
+		}
+		// Fallback: refresh browser.
+		return m, m.browserModel.Init()
+
 	case embed.DoneMsg:
 		// DoneMsg routing depends on which wizard is live. The add
 		// wizard emits a *orchestration.Job on submit; the finish
 		// wizard emits a []*finish.Item whose IsEnabled flags the
-		// user toggled. Both emit nil on cancel.
+		// user toggled. Both emit nil on cancel. The init wizard
+		// emits a *planinit.Request; on submit the meta-panel
+		// launches `flow plan init` as a subprocess and waits for
+		// initCompletedMsg.
 		switch m.mode {
+		case modeInitWizard:
+			m.initWizardModel = nil
+			if msg.Result == nil {
+				// Cancel: return to browser.
+				m.mode = modeBrowser
+				return m, nil
+			}
+			req, ok := msg.Result.(*planinit.Request)
+			if !ok || req == nil || req.Dir == "" {
+				m.mode = modeBrowser
+				return m, nil
+			}
+			m.pendingInitPlanName = req.Dir
+			return m, runInitSubprocess(req)
 		case modeAddWizard:
 			m.wizardModel = nil
 			m.mode = modeStatus
@@ -403,6 +508,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Intercept `n` in browser mode to launch the plan-init
+		// wizard in-process. The browser also binds `n` to "create
+		// new plan", which used to shell out via tea.ExecProcess;
+		// intercepting here replaces that subprocess path with the
+		// embedded wizard.
+		if m.mode == modeBrowser && msg.String() == "n" {
+			getRecipeCmd, runInitByDefault := planinit.LoadFlowDefaults()
+			w := planinit.New(planinit.Config{
+				PlansDir:         m.cfg.PlansDir,
+				GetRecipeCmd:     getRecipeCmd,
+				RunInitByDefault: runInitByDefault,
+				DaemonClient:     m.cfg.DaemonClient,
+				WorkspaceDir:     m.cfg.WorkspaceDir,
+			})
+			m.initWizardModel = &w
+			m.mode = modeInitWizard
+			var cmds []tea.Cmd
+			if m.width > 0 && m.height > 0 {
+				sized, c := m.initWizardModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+				if im, ok := sized.(planinit.Model); ok {
+					*m.initWizardModel = im
+				}
+				if c != nil {
+					cmds = append(cmds, c)
+				}
+			}
+			if c := m.initWizardModel.Init(); c != nil {
+				cmds = append(cmds, c)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Intercept `a` in status mode to launch the add-job wizard.
 		if m.mode == modeStatus && msg.String() == "a" && m.statusModel != nil {
 			plan := m.statusModel.Plan
@@ -492,10 +629,64 @@ func (m Model) buildFinishWizard(plan *orchestration.Plan) (finish.Model, error)
 	}), nil
 }
 
+// runInitSubprocess builds a `flow plan init` subprocess invocation
+// from the wizard's Request and returns a tea.Cmd that suspends the
+// bubbletea program via tea.ExecProcess while the subprocess runs.
+// The subprocess is allowed to do all the heavy disk I/O (worktree
+// creation, ecosystem bootstrap, editor invocations) without ever
+// blocking the TUI event loop.
+func runInitSubprocess(req *planinit.Request) tea.Cmd {
+	args := []string{"plan", "init", req.Dir}
+	if req.Recipe != "" {
+		args = append(args, "--recipe", req.Recipe)
+	}
+	if req.Model != "" {
+		args = append(args, "--model", req.Model)
+	}
+	if req.Worktree == "__AUTO__" {
+		args = append(args, "--worktree")
+	} else if req.Worktree != "" {
+		args = append(args, "--worktree", req.Worktree)
+	}
+	if req.FromNote != "" {
+		args = append(args, "--from-note", req.FromNote)
+	}
+	if req.NoteTargetFile != "" {
+		args = append(args, "--note-target-file", req.NoteTargetFile)
+	}
+	if req.OpenSession {
+		args = append(args, "--open-session")
+	}
+	if req.Force {
+		args = append(args, "--force")
+	}
+	if !req.RunInit {
+		// RunInit defaults to true; only pass the override when
+		// the user turned it off in the wizard.
+		args = append(args, "--init=false")
+	}
+	if req.EnvProfile != "" {
+		args = append(args, "--env", req.EnvProfile)
+	}
+	cmd := delegation.Command("flow", args...)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return initCompletedMsg{err: err}
+	})
+}
+
 // updateActive forwards a message to whichever sub-model is currently
 // active and returns the updated meta-Model + tea.Cmd.
 func (m Model) updateActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.mode {
+	case modeInitWizard:
+		if m.initWizardModel == nil {
+			return m, nil
+		}
+		updated, c := m.initWizardModel.Update(msg)
+		if im, ok := updated.(planinit.Model); ok {
+			*m.initWizardModel = im
+		}
+		return m, c
 	case modeFinishWizard:
 		if m.finishWizardModel == nil {
 			return m, nil
@@ -538,6 +729,13 @@ func (m Model) updateActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var body string
 	switch m.mode {
+	case modeInitWizard:
+		if m.initWizardModel == nil {
+			body = "Loading init wizard..."
+			break
+		}
+		defer func() { _ = recover() }()
+		body = m.initWizardModel.View()
 	case modeFinishWizard:
 		if m.finishWizardModel == nil {
 			body = "Loading finish wizard..."
@@ -575,6 +773,10 @@ func (m Model) View() string {
 // subscription goroutines that must be drained on shutdown.
 func (m *Model) Close() error {
 	var firstErr error
+	if m.initWizardModel != nil {
+		_ = m.initWizardModel.Close()
+		m.initWizardModel = nil
+	}
 	if m.finishWizardModel != nil {
 		_ = m.finishWizardModel.Close()
 		m.finishWizardModel = nil

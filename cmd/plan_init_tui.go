@@ -20,13 +20,7 @@ var ErrTUIQuit = errors.New("quit")
 // existing CLI flags and feeding the wizard's DoneMsg result through
 // the executePlanInit code path.
 func runPlanInitTUI(plansDir string, initialCmd *PlanInitCmd) (*PlanInitCmd, error) {
-	_, getRecipeCmd, _ := loadFlowConfigWithDynamicRecipes()
-
-	// Pull RunInitByDefault from the flow config (unset → true).
-	runInitByDefault := true
-	if flowCfg, err := loadFlowConfig(); err == nil && flowCfg != nil && flowCfg.RunInitByDefault != nil {
-		runInitByDefault = *flowCfg.RunInitByDefault
-	}
+	getRecipeCmd, runInitByDefault := planinit.LoadFlowDefaults()
 
 	cfg := planinit.Config{
 		PlansDir:         plansDir,
