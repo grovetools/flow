@@ -3,25 +3,31 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/grovetools/flow/pkg/tui/status"
+	"github.com/grovetools/flow/pkg/tui/browser"
+	"github.com/grovetools/flow/pkg/tui/view"
 )
 
 // runStatusTUI runs the interactive TUI for plan status.
-// This is a thin CLI wrapper around flow/pkg/tui/status: it constructs a
-// status.Config with the CLI's daemon client, creates a *tea.Program, pipes
-// global logging output into the program via logviewer.StreamWriter, and
-// hands off to bubbletea. Embedding hosts (e.g., terminal) bypass this file
-// entirely and instantiate status.New themselves with their own Config.
+//
+// As part of Phase 2.1 of the flow TUI embed, this now drives the
+// view meta-panel (flow/pkg/tui/view) instead of flow/pkg/tui/status
+// directly. That gives the standalone CLI the same browser/status
+// toggle as the terminal host: `flow plan status --tui` lands the
+// user on the status view for the active plan (via InitialPlan), and
+// `esc` pops back to the plan browser. Enter on a plan in the
+// browser re-targets the status view without launching a subprocess.
+//
+// Embedding hosts (terminal) bypass this file entirely and instantiate
+// view.New themselves with their own Config.
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
-	// Construct a daemon client owned by the CLI for the lifetime of this
-	// status session. The embedded case will pass its own multiplexed client
-	// via status.Config instead.
 	daemonClient := daemon.NewWithAutoStart()
 	defer func() {
 		if daemonClient != nil {
@@ -29,32 +35,72 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 		}
 	}()
 
-	model := status.New(status.Config{
-		Plan:         plan,
-		Graph:        graph,
+	// PlansDir is the parent directory of the active plan's directory.
+	// Used by the browser view to enumerate sibling plans.
+	plansDir := filepath.Dir(plan.Directory)
+	workspaceDir := filepath.Dir(plansDir)
+
+	metaModel := view.New(view.Config{
+		WorkspaceDir: workspaceDir,
+		PlansDir:     plansDir,
 		DaemonClient: daemonClient,
+		InitialPlan:  plan,
+		InitialGraph: graph,
 	})
 
-	// Use alt screen only when not in Neovim (to fix screen duplication)
-	// But disable it in Neovim to allow editor functionality
+	host := newStatusTUIHost(metaModel)
+
 	var opts []tea.ProgramOption
 	if os.Getenv("GROVE_NVIM_PLUGIN") != "true" {
 		opts = append(opts, tea.WithAltScreen())
 	}
 	opts = append(opts, tea.WithOutput(os.Stderr))
 
-	program := tea.NewProgram(model, opts...)
+	program := tea.NewProgram(host, opts...)
 
-	// Redirect all Grove loggers into the program so the logviewer pane
-	// captures them. The CLI owns the *tea.Program here, so using
-	// logviewer.StreamWriter directly is fine.
 	streamWriter := logviewer.NewStreamWriter(program, "System")
 	logging.SetGlobalOutput(streamWriter)
-	defer logging.SetGlobalOutput(os.Stderr) // Ensure we reset on exit
+	defer logging.SetGlobalOutput(os.Stderr)
 
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
 	}
-
 	return nil
 }
+
+// statusTUIHost wraps a view.Model for standalone CLI use. It intercepts
+// the embed lifecycle messages (DoneMsg, CloseRequestMsg) to quit and
+// otherwise forwards everything through. Kept here rather than in the
+// view package so the package stays free of CLI-specific concerns.
+type statusTUIHost struct {
+	model view.Model
+}
+
+func newStatusTUIHost(m view.Model) statusTUIHost {
+	return statusTUIHost{model: m}
+}
+
+func (h statusTUIHost) Init() tea.Cmd {
+	return h.model.Init()
+}
+
+func (h statusTUIHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case embed.DoneMsg, embed.CloseRequestMsg, embed.CloseConfirmMsg:
+		return h, tea.Quit
+	}
+	// Swallow any BrowserPlanSelectedMsg is handled inside view.Model
+	// already; nothing else to intercept here.
+	updated, cmd := h.model.Update(msg)
+	if vm, ok := updated.(view.Model); ok {
+		h.model = vm
+	}
+	return h, cmd
+}
+
+func (h statusTUIHost) View() string {
+	return h.model.View()
+}
+
+// unused import guard — browser is referenced indirectly via view.
+var _ = browser.BrowserPlanSelectedMsg{}

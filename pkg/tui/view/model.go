@@ -42,6 +42,15 @@ type Config struct {
 	// sub-model. May be nil, in which case the status model runs in
 	// orchestrator-only mode.
 	DaemonClient daemon.Client
+	// InitialPlan, if non-nil, causes the meta-panel to start in
+	// status mode targeting this plan instead of the default browser
+	// mode. Used by the flow plan status CLI wrapper so invoking
+	// `flow plan status -t` still lands the user directly on the
+	// status view.
+	InitialPlan *orchestration.Plan
+	// InitialGraph is the dependency graph for InitialPlan. Must be
+	// non-nil if InitialPlan is set.
+	InitialGraph *orchestration.DependencyGraph
 }
 
 // Model is the meta-panel model. It owns both sub-models and routes
@@ -68,22 +77,40 @@ type Model struct {
 
 // New constructs a Model from the given Config. The browser sub-model
 // is initialized immediately; the status sub-model is nil until the
-// first plan selection.
+// first plan selection — unless Config.InitialPlan is set, in which
+// case a status sub-model is built eagerly and the meta-panel starts
+// in status mode.
 func New(cfg Config) Model {
 	b := browser.New(browser.Config{
 		PlansDir:     cfg.PlansDir,
 		WorkspaceDir: cfg.WorkspaceDir,
 		DaemonClient: cfg.DaemonClient,
 	})
-	return Model{
+	m := Model{
 		cfg:          cfg,
 		mode:         modeBrowser,
 		browserModel: b,
 	}
+	if cfg.InitialPlan != nil && cfg.InitialGraph != nil {
+		s := status.New(status.Config{
+			Plan:         cfg.InitialPlan,
+			Graph:        cfg.InitialGraph,
+			DaemonClient: cfg.DaemonClient,
+		})
+		m.statusModel = &s
+		m.mode = modeStatus
+	}
+	return m
 }
 
-// Init forwards to the browser sub-model's Init (the starting mode).
+// Init forwards to whichever sub-model is currently active.
 func (m Model) Init() tea.Cmd {
+	if m.mode == modeStatus && m.statusModel != nil {
+		// Start both: status for the initial view, plus the browser
+		// so its plan list is already loaded when the user hits esc
+		// to switch modes.
+		return tea.Batch(m.statusModel.Init(), m.browserModel.Init())
+	}
 	return m.browserModel.Init()
 }
 
