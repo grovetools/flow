@@ -4,6 +4,7 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
+	"github.com/grovetools/flow/pkg/tui/wizards/finish"
 )
 
 // PlanListKeymapInfo returns the keymap metadata for the flow plan list TUI.
@@ -43,7 +44,7 @@ func PlanInitKeymapInfo() keymap.TUIInfo {
 // PlanFinishKeymapInfo returns the keymap metadata for the flow plan finish TUI.
 // Used by the grove keys registry generator to aggregate all TUI keybindings.
 func PlanFinishKeymapInfo() keymap.TUIInfo {
-	km := newFinishTUIKeyMap(nil)
+	km := finish.NewKeyMap(nil)
 	return keymap.MakeTUIInfo(
 		"flow-plan-finish",
 		"flow",
