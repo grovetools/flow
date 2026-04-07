@@ -1005,9 +1005,8 @@ func flattenJobTreeWithParents(plan *orchestration.Plan) ([]*orchestration.Job, 
 	parents := make(map[string]*orchestration.Job)
 	indents := make(map[string]int)
 
-	// Find root jobs - these need to be imported from cmd package
-	// We'll call them via the cmd package
-	roots := findRootJobsHelper(plan)
+	// Find root jobs via the orchestration package.
+	roots := orchestration.FindRootJobs(plan)
 
 	// Add each root and its dependents
 	for _, root := range roots {
@@ -1038,31 +1037,10 @@ func addJobAndDependentsWithParent(job *orchestration.Job, plan *orchestration.P
 
 	// Find and add dependents using the same logic as vanilla status
 	// This ensures jobs appear under their dependency with maximum height
-	dependents := findAllDependentsHelper(job, plan)
+	dependents := orchestration.FindAllDependents(job, plan)
 	for _, dep := range dependents {
 		addJobAndDependentsWithParent(dep, plan, result, visited, parents, indents, job, indent+1)
 	}
-}
-
-// Helper function type declarations - will be set by the cmd package
-var (
-	FindRootJobsFunc       func(*orchestration.Plan) []*orchestration.Job
-	FindAllDependentsFunc  func(*orchestration.Job, *orchestration.Plan) []*orchestration.Job
-)
-
-// Helper functions that call the injected functions
-func findRootJobsHelper(plan *orchestration.Plan) []*orchestration.Job {
-	if FindRootJobsFunc != nil {
-		return FindRootJobsFunc(plan)
-	}
-	return []*orchestration.Job{}
-}
-
-func findAllDependentsHelper(job *orchestration.Job, plan *orchestration.Plan) []*orchestration.Job {
-	if FindAllDependentsFunc != nil {
-		return FindAllDependentsFunc(job, plan)
-	}
-	return []*orchestration.Job{}
 }
 
 func formatStatusSummaryHelper(plan *orchestration.Plan) string {

@@ -13,12 +13,6 @@ import (
 
 // runStatusTUI runs the interactive TUI for plan status
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
-	// Inject the helper functions into the status_tui package
-	status_tui.FindRootJobsFunc = ExportedFindRootJobs
-	status_tui.FindAllDependentsFunc = ExportedFindAllDependents
-	status_tui.VerifyRunningJobStatusFunc = ExportedVerifyRunningJobStatus
-	status_tui.CompleteJobFunc = ExportedCompleteJob
-
 	// Create a TUI log writer that will receive all redirected output
 	// We'll set the program reference after creating it
 	var streamWriter *logviewer.StreamWriter

@@ -600,7 +600,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Verify running jobs (check PIDs, clear stale "running" statuses)
 		// Skip when daemon is connected — the daemon handles session liveness
 		if !m.DaemonConnected {
-			verifyRunningJobStatusHelper(plan)
+			orchestration.VerifyRunningJobStatus(plan)
 		}
 
 		// Log any jobs that were marked as interrupted
@@ -1894,7 +1894,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				return m, tea.Sequence(
-					setJobCompleted(job, m.Plan, completeJobHelper),
+					setJobCompleted(job, m.Plan, orchestration.CompleteJob),
 					refreshPlan(m.PlanDir),
 				)
 			}
@@ -2172,26 +2172,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-// Helper function type declarations - will be set by the cmd package
-var (
-	VerifyRunningJobStatusFunc func(*orchestration.Plan)
-	CompleteJobFunc            func(*orchestration.Job, *orchestration.Plan, bool) error
-)
-
-// Helper functions that call the injected functions
-func verifyRunningJobStatusHelper(plan *orchestration.Plan) {
-	if VerifyRunningJobStatusFunc != nil {
-		VerifyRunningJobStatusFunc(plan)
-	}
-}
-
-func completeJobHelper(job *orchestration.Job, plan *orchestration.Plan, silent bool) error {
-	if CompleteJobFunc != nil {
-		return CompleteJobFunc(job, plan, silent)
-	}
-	return nil
 }
 
 // reloadActiveDetailPane reloads content for the currently active detail pane

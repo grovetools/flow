@@ -209,7 +209,7 @@ func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummar
 			// If loading fails, log the error for visibility
 			logrus.Warnf("Could not load plan at %s: %v", basePath, err)
 		} else {
-			VerifyRunningJobStatus(plan)
+			orchestration.VerifyRunningJobStatus(plan)
 			if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
 				// Skip finished plan
 			} else if !planListShowHold && plan.Config != nil && plan.Config.Status == "hold" {
@@ -250,7 +250,7 @@ func findPlansInDir(basePath, workspaceName, workspacePath string) ([]PlanSummar
 					continue
 				}
 				// Perform liveness check on running jobs to report accurate status
-				VerifyRunningJobStatus(plan)
+				orchestration.VerifyRunningJobStatus(plan)
 
 				if !planListIncludeFinished && plan.Config != nil && plan.Config.Status == "finished" {
 					continue
