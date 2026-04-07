@@ -1,4 +1,4 @@
-package status_tui
+package status
 
 import (
 	"strings"

@@ -1,4 +1,4 @@
-package status_tui
+package status
 
 import (
 	"context"
@@ -166,18 +166,39 @@ type Model struct {
 	DaemonConnected bool
 }
 
-// New creates a new Model
-func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
+// Config carries the dependencies a status TUI Model needs. Callers construct
+// a Config and pass it to New. The CLI wrapper and the terminal embed panel
+// both supply their own Config so daemon clients, keymaps, and layout
+// preferences are injected from the host rather than rebuilt inside the TUI.
+type Config struct {
+	// Plan is the loaded plan whose jobs this TUI displays. Required.
+	Plan *orchestration.Plan
+	// Graph is the dependency graph for Plan. Required.
+	Graph *orchestration.DependencyGraph
+	// DaemonClient is an optional pre-constructed daemon client used for job
+	// submission, log streaming, and cancellation. If nil, the TUI runs in
+	// orchestrator-only mode (no daemon features).
+	DaemonClient daemon.Client
+	// LogSplitVertical sets the initial orientation of the log pane split.
+	// If false, the orientation is loaded from persisted tuiState.
+	LogSplitVertical bool
+}
+
+// New creates a new Model from the given Config.
+func New(cfg Config) Model {
 	// Set TUI mode env var early so loggers are configured correctly
 	os.Setenv("GROVE_FLOW_TUI_MODE", "true")
 
+	plan := cfg.Plan
+	graph := cfg.Graph
+
 	// Load user-configurable keybindings
-	cfg, _ := config.LoadDefault() // Ignore error - NewKeyMap handles nil config gracefully
+	cliCfg, _ := config.LoadDefault() // Ignore error - NewKeyMap handles nil config gracefully
 
 	// Flatten the job tree for navigation with parent tracking
 	jobs, parents, indents := flattenJobTreeWithParents(plan)
 
-	keyMap := NewKeyMap(cfg)
+	keyMap := NewKeyMap(cliCfg)
 	helpModel := help.NewBuilder().
 		WithKeys(keyMap).
 		WithTitle("Plan Status - Help").
@@ -252,8 +273,16 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 	isolatedInput.CharLimit = 4096
 	isolatedInput.Width = 60
 
-	// Initialize daemon client for job submission and log streaming
-	daemonClient := daemon.NewWithAutoStart()
+	// Daemon client is passed in via Config so the host (CLI wrapper or
+	// terminal panel) can share a single multiplexed client. May be nil.
+	daemonClient := cfg.DaemonClient
+
+	// Prefer the caller's LogSplitVertical preference; fall back to the
+	// value persisted in tuiState.
+	logSplitVertical := cfg.LogSplitVertical
+	if !logSplitVertical {
+		logSplitVertical = state.LogSplitVertical
+	}
 
 	return Model{
 		Plan:             plan,
@@ -281,7 +310,7 @@ func New(plan *orchestration.Plan, graph *orchestration.DependencyGraph) Model {
 		availableColumns:    availableColumns,
 		columnVisibility:    columnVisibility,
 		Focus:            FocusJobs,
-		LogSplitVertical: state.LogSplitVertical, // Apply loaded state
+		LogSplitVertical: logSplitVertical,
 		IsRunningJob:        false,
 		RunLogFile:          "", // No longer creating TUI-specific log files
 		MsgCh:               make(chan tea.Msg, 1024),

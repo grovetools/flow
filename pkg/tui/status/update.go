@@ -1,4 +1,4 @@
-package status_tui
+package status
 
 import (
 	"context"
@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/logging/logutil"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/tui/utils/scrollbar"
@@ -39,6 +40,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return updated, tea.Batch(innerCmd, relisten)
 		}
 		return updated, relisten
+
+	case embed.FocusMsg:
+		// Host gave this panel focus. Nothing additional to do — the model
+		// already routes keys through its own Focus state machine once the
+		// bubbletea program routes events here.
+		return m, nil
+
+	case embed.BlurMsg:
+		// Host withdrew focus. Cancel any active log stream so we don't keep
+		// spinning goroutines while off-screen.
+		if m.StreamCancel != nil {
+			m.StreamCancel()
+			m.StreamCancel = nil
+			m.StreamingJobID = ""
+		}
+		return m, nil
+
+	case embed.SetWorkspaceMsg:
+		// Host switched workspace context. The active plan for a workspace is
+		// resolved by the host and passed in via a custom message; the status
+		// TUI itself is plan-scoped, so we just clear any stale state and let
+		// the host re-initialize us via a fresh New() if the plan changed.
+		if msg.Node != nil {
+			m.PlanDir = msg.Node.Path
+		}
+		return m, refreshPlan(m.PlanDir)
 
 	case LogContentLoadedMsg:
 		// Guard clause: Discard stale messages for jobs that are no longer selected

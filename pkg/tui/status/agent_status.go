@@ -1,4 +1,4 @@
-package status_tui
+package status
 
 import (
 	"github.com/grovetools/agentlogs/pkg/agentstream"
