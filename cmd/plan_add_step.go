@@ -8,14 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
-	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
-	skillservice "github.com/grovetools/skills/pkg/service"
 	"github.com/grovetools/skills/pkg/skills"
 )
 
@@ -503,43 +500,12 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 }
 
 func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orchestration.Job, error) {
-	// Create the initial TUI model
-	model := initialModel(plan, cmd.DependsOn)
-
-	// Set up skills for the skill picker
-	if node, err := workspace.GetProjectByPath(plan.Directory); err == nil && node != nil {
-		model.workspaceNode = node
-	}
-	// Create a minimal skills service for listing skills (needs config for notebook discovery)
-	cfg, _ := coreconfig.LoadDefault()
-	if cfg != nil {
-		svc, _ := skillservice.New(nil, cfg, nil)
-		model.skillService = svc
-	}
-	model.skillList = buildSkillList(model.skillService, model.workspaceNode)
-
-	// Note: worktree is no longer configurable in the TUI
-	// The explicitWorktree parameter is now part of the cmd struct and is ignored.
-
-	// Run the TUI
-	p := tea.NewProgram(model)
-	finalModel, err := p.Run()
+	// Run the add-job wizard via its embeddable package. Note that
+	// worktree is no longer configurable in the TUI — cmd.Worktree is
+	// passed through via the outer code path only.
+	job, err := runAddJobWizard(plan, cmd.DependsOn)
 	if err != nil {
-		return nil, fmt.Errorf("error running TUI for job creation: %w", err)
-	}
-
-	// Cast the final model and check if the user quit
-	finalTUIModel := finalModel.(tuiModel)
-	if finalTUIModel.quitting && finalTUIModel.jobTitle == "" {
-		return nil, fmt.Errorf("job creation cancelled")
-	}
-
-	// Convert the final TUI state into a Job object
-	job := finalTUIModel.toJob(plan)
-
-	// Validate the job
-	if job.Title == "" {
-		return nil, fmt.Errorf("title cannot be empty")
+		return nil, err
 	}
 
 	// Apply plan defaults if not set by user

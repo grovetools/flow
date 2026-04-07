@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/flow/pkg/tui/browser"
+	"github.com/grovetools/flow/pkg/tui/wizards/add"
 )
 
 // PlanListKeymapInfo returns the keymap metadata for the flow plan list TUI.
@@ -23,7 +24,7 @@ func PlanAddKeymapInfo() keymap.TUIInfo {
 		"flow-plan-add",
 		"flow",
 		"Add new job to a plan",
-		addKeys,
+		add.NewKeyMap(nil),
 	)
 }
 
