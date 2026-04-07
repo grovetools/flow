@@ -14,9 +14,11 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/plan_finish"
 	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/status"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
+	"github.com/grovetools/flow/pkg/tui/wizards/finish"
 )
 
 // mode enumerates which sub-model the meta-panel is currently routing
@@ -31,6 +33,10 @@ const (
 	// the user presses `a` in status mode and torn down when it
 	// emits embed.DoneMsg.
 	modeAddWizard
+	// modeFinishWizard is active while the plan-finish wizard is
+	// open on top of the status view. Constructed lazily when the
+	// user presses `f` in status mode and torn down on DoneMsg.
+	modeFinishWizard
 )
 
 // Config carries the dependencies the meta-panel needs to build its
@@ -71,10 +77,11 @@ type Config struct {
 type Model struct {
 	cfg Config
 
-	mode         mode
-	browserModel browser.Model
-	statusModel  *status.Model
-	wizardModel  *add.Model
+	mode               mode
+	browserModel       browser.Model
+	statusModel        *status.Model
+	wizardModel        *add.Model
+	finishWizardModel  *finish.Model
 
 	// width/height are cached from the last WindowSizeMsg so lazily
 	// constructed status models can be sized immediately.
@@ -158,6 +165,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, wc)
 			}
 		}
+		if m.finishWizardModel != nil {
+			fUpdated, fc := m.finishWizardModel.Update(msg)
+			if fm, ok := fUpdated.(finish.Model); ok {
+				*m.finishWizardModel = fm
+			}
+			if fc != nil {
+				cmds = append(cmds, fc)
+			}
+		}
 		return m, tea.Batch(cmds...)
 
 	case embed.SetWorkspaceMsg:
@@ -170,6 +186,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.wizardModel != nil {
 			_ = m.wizardModel.Close()
 			m.wizardModel = nil
+		}
+		if m.finishWizardModel != nil {
+			_ = m.finishWizardModel.Close()
+			m.finishWizardModel = nil
 		}
 		if m.statusModel != nil {
 			_ = m.statusModel.Close()
@@ -242,30 +262,95 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case embed.DoneMsg:
-		// The add wizard has completed. A non-nil Result means the
-		// user submitted a new job; persist it to the active plan and
-		// refresh the status view. A nil Result means the user
-		// cancelled, so we just return to status mode without
-		// touching the plan.
-		if m.mode != modeAddWizard {
-			// DoneMsg from somewhere else — ignore. We don't forward
-			// to sub-models because neither browser nor status emit
-			// DoneMsg today.
+		// DoneMsg routing depends on which wizard is live. The add
+		// wizard emits a *orchestration.Job on submit; the finish
+		// wizard emits a []*finish.Item whose IsEnabled flags the
+		// user toggled. Both emit nil on cancel.
+		switch m.mode {
+		case modeAddWizard:
+			m.wizardModel = nil
+			m.mode = modeStatus
+			if msg.Result != nil && m.statusModel != nil {
+				if job, ok := msg.Result.(*orchestration.Job); ok && job != nil {
+					if _, err := orchestration.AddJob(m.statusModel.Plan, job); err == nil {
+						// Kick off a refresh so the new job appears.
+						return m, func() tea.Msg { return status.RefreshMsg{} }
+					}
+				}
+			}
+			return m, nil
+		case modeFinishWizard:
+			m.finishWizardModel = nil
+			// Cancel path: Result is nil, return to status view
+			// without touching the plan.
+			if msg.Result == nil {
+				m.mode = modeStatus
+				return m, nil
+			}
+			items, ok := msg.Result.([]*finish.Item)
+			if !ok || items == nil {
+				m.mode = modeStatus
+				return m, nil
+			}
+			// Execute each enabled action inline. Errors are
+			// swallowed per-item so a failing cleanup step doesn't
+			// crash the host; a richer status-bar surface is left
+			// as follow-up work.
+			for _, item := range items {
+				if item == nil || !item.IsEnabled || item.Action == nil {
+					continue
+				}
+				_ = item.Action()
+			}
+			// The active plan is either archived or marked finished
+			// at this point. Tear down the status model and switch
+			// back to the browser so the user sees the fresh plan
+			// list without the now-gone plan.
+			if m.statusModel != nil {
+				_ = m.statusModel.Close()
+				m.statusModel = nil
+			}
+			m.mode = modeBrowser
+			// Re-focus the browser and trigger a reload so the plan
+			// list reflects the cleanup.
+			updated, _ := m.browserModel.Update(embed.FocusMsg{})
+			if bm, ok := updated.(browser.Model); ok {
+				m.browserModel = bm
+			}
+			return m, m.browserModel.Init()
+		default:
 			return m, nil
 		}
-		m.wizardModel = nil
-		m.mode = modeStatus
-		if msg.Result != nil && m.statusModel != nil {
-			if job, ok := msg.Result.(*orchestration.Job); ok && job != nil {
-				if _, err := orchestration.AddJob(m.statusModel.Plan, job); err == nil {
-					// Kick off a refresh so the new job appears.
-					return m, func() tea.Msg { return status.RefreshMsg{} }
+
+	case tea.KeyMsg:
+		// Intercept `f` in status mode to launch the finish wizard.
+		// Note: this shadows status mode's own `f` binding (view
+		// frontmatter) while embedded in the meta-panel.
+		if m.mode == modeStatus && msg.String() == "f" && m.statusModel != nil {
+			plan := m.statusModel.Plan
+			if plan != nil {
+				w, err := m.buildFinishWizard(plan)
+				if err == nil {
+					m.finishWizardModel = &w
+					m.mode = modeFinishWizard
+					var cmds []tea.Cmd
+					if m.width > 0 && m.height > 0 {
+						sized, c := m.finishWizardModel.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+						if fm, ok := sized.(finish.Model); ok {
+							*m.finishWizardModel = fm
+						}
+						if c != nil {
+							cmds = append(cmds, c)
+						}
+					}
+					if c := m.finishWizardModel.Init(); c != nil {
+						cmds = append(cmds, c)
+					}
+					return m, tea.Batch(cmds...)
 				}
 			}
 		}
-		return m, nil
 
-	case tea.KeyMsg:
 		// Intercept `a` in status mode to launch the add-job wizard.
 		if m.mode == modeStatus && msg.String() == "a" && m.statusModel != nil {
 			plan := m.statusModel.Plan
@@ -317,10 +402,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.updateActive(msg)
 }
 
+// buildFinishWizard constructs a finish.Model for the given plan by
+// invoking the plan_finish factory with conservative default Options
+// (no --force, env teardown enabled, nothing pre-selected beyond what
+// the user toggles). The factory runs all Check closures to populate
+// Status/IsAvailable before the wizard renders.
+func (m Model) buildFinishWizard(plan *orchestration.Plan) (finish.Model, error) {
+	bctx := plan_finish.NewBuildContext(plan, plan.Directory)
+	opts := plan_finish.Options{}
+	result, err := plan_finish.BuildItems(bctx, opts)
+	if err != nil {
+		return finish.Model{}, err
+	}
+	return finish.New(finish.Config{
+		PlanName:       plan.Directory,
+		Items:          result.Items,
+		BranchIsMerged: result.BranchIsMerged,
+		BranchExists:   result.BranchExists,
+		Plan:           plan,
+		DaemonClient:   m.cfg.DaemonClient,
+		WorkspaceDir:   m.cfg.WorkspaceDir,
+	}), nil
+}
+
 // updateActive forwards a message to whichever sub-model is currently
 // active and returns the updated meta-Model + tea.Cmd.
 func (m Model) updateActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.mode {
+	case modeFinishWizard:
+		if m.finishWizardModel == nil {
+			return m, nil
+		}
+		updated, c := m.finishWizardModel.Update(msg)
+		if fm, ok := updated.(finish.Model); ok {
+			*m.finishWizardModel = fm
+		}
+		return m, c
 	case modeAddWizard:
 		if m.wizardModel == nil {
 			return m, nil
@@ -353,6 +470,12 @@ func (m Model) updateActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 // any race where mode flipped before the lazy init finished).
 func (m Model) View() string {
 	switch m.mode {
+	case modeFinishWizard:
+		if m.finishWizardModel == nil {
+			return "Loading finish wizard..."
+		}
+		defer func() { _ = recover() }()
+		return m.finishWizardModel.View()
 	case modeAddWizard:
 		if m.wizardModel == nil {
 			return "Loading wizard..."
@@ -377,6 +500,10 @@ func (m Model) View() string {
 // subscription goroutines that must be drained on shutdown.
 func (m *Model) Close() error {
 	var firstErr error
+	if m.finishWizardModel != nil {
+		_ = m.finishWizardModel.Close()
+		m.finishWizardModel = nil
+	}
 	if m.wizardModel != nil {
 		_ = m.wizardModel.Close()
 		m.wizardModel = nil
