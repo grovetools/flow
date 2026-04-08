@@ -143,6 +143,11 @@ func LoadJob(filepath string) (*Job, error) {
 		return nil, fmt.Errorf("unmarshaling to job struct: %w", err)
 	}
 
+	// Rewrite any reference to a deleted builtin template to its current
+	// replacement (either a skill or the default chat template). See
+	// template_shim.go for the mapping.
+	applyTemplateShim(job)
+
 	// Read flat metadata fields that UpdateJobMetadata persists at the top level of frontmatter.
 	// These are stored flat (not nested under "metadata:") for simplicity.
 	if lastErr, ok := frontmatter["last_error"]; ok {
