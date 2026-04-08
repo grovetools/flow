@@ -150,6 +150,8 @@ func main() {
 		scenarios.PlaybookOverviewXMLScenario,
 		scenarios.ArtifactCompleteNonSeqScenario,
 		scenarios.TemplateShimScenario,
+		scenarios.PlaybookListScenario,
+		scenarios.PlaybookRecipeResolutionScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
