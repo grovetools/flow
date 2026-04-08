@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -27,7 +26,7 @@ func runAddJobWizard(plan *orchestration.Plan, initialDeps []string) (*orchestra
 	// the skills picker is populated. The wizard falls back to its own
 	// derivation if these are nil, but the CLI path historically
 	// computed them here so keep the behavior identical.
-	if node, err := workspace.GetProjectByPath(plan.Directory); err == nil && node != nil {
+	if node, err := orchestration.ResolveProjectForSessionNaming(plan.Directory); err == nil && node != nil {
 		cfg.WorkspaceNode = node
 	}
 	if coreCfg, _ := coreconfig.LoadDefault(); coreCfg != nil {

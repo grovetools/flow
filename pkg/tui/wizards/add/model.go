@@ -116,7 +116,7 @@ func New(cfg Config) Model {
 	m.skillService = cfg.SkillService
 	m.workspaceNode = cfg.WorkspaceNode
 	if m.workspaceNode == nil && cfg.Plan != nil {
-		if node, err := workspace.GetProjectByPath(cfg.Plan.Directory); err == nil {
+		if node, err := orchestration.ResolveProjectForSessionNaming(cfg.Plan.Directory); err == nil {
 			m.workspaceNode = node
 		}
 	}

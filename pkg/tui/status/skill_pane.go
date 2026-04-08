@@ -84,10 +84,13 @@ func readSkillStateMap(artifactDir string) map[string]orchestration.SkillFidelit
 
 // resolveSkillDisplayNodes resolves job skill sequence into display nodes and flat list.
 func resolveSkillDisplayNodes(plan *orchestration.Plan, job *orchestration.Job) ([]*SkillDisplayNode, []*SkillDisplayNode) {
-	workDir := plan.Directory
-	if plan.Config != nil && plan.Config.Worktree != "" {
-		if wd, err := os.Getwd(); err == nil {
-			workDir = wd
+	workDir, err := orchestration.DetermineWorkingDirectory(plan, job)
+	if err != nil {
+		workDir = plan.Directory
+		if plan.Config != nil && plan.Config.Worktree != "" {
+			if wd, err := os.Getwd(); err == nil {
+				workDir = wd
+			}
 		}
 	}
 
