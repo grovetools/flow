@@ -299,6 +299,12 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
 	)
+	if pbName, pbRoot := resolvePlaybookRootForJob(job, plan); pbRoot != "" {
+		cmd.Env = append(cmd.Env,
+			"PLAYBOOK_ROOT="+pbRoot,
+			"PLAYBOOK_NAME="+pbName,
+		)
+	}
 
 	ulog.Debug("[HEADLESS] Starting Claude CLI with environment variables").
 		Field("job_id", job.ID).

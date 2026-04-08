@@ -556,6 +556,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
 			job.ID, job.FilePath, plan.Name, escapedTitle)
+		envCommand += playbookEnvExports(job, plan)
 		if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to set environment variables")
 			job.Status = JobStatusFailed
@@ -714,6 +715,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
+	envCommand += playbookEnvExports(job, plan)
 	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to set environment variables")
 		job.Status = JobStatusFailed
