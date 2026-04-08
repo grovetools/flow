@@ -479,7 +479,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// no other status single-letter key is mnemonic for
 		// "finish" — ctrl+f is unused across the flow TUI so it
 		// avoids shadowing any status binding.
-		if m.mode == modeStatus && msg.String() == "ctrl+f" && m.statusModel != nil {
+		// Match both lowercase and uppercase reporting of Ctrl+F.
+		// Some bubbletea + terminal combos report the chord as
+		// "ctrl+F" (the rune the SHIFT modifier produces) even when
+		// the user did not press shift; pass-2 testing showed
+		// "ctrl+f" being silently ignored as a result. Accept both
+		// so the binding is reachable from any terminal.
+		ks := msg.String()
+		if m.mode == modeStatus && (ks == "ctrl+f" || ks == "ctrl+F") && m.statusModel != nil {
 			plan := m.statusModel.Plan
 			if plan != nil {
 				w, err := m.buildFinishWizard(plan)
