@@ -48,6 +48,9 @@ func main() {
 	// Add the skill command (skill management utilities)
 	rootCmd.AddCommand(cmd.NewSkillCmd())
 
+	// Add the playbook command (playbook inspection)
+	rootCmd.AddCommand(cmd.NewPlaybookCmd())
+
 	// Add the agent command (interactive agent management)
 	rootCmd.AddCommand(cmd.NewAgentCmd())
 
