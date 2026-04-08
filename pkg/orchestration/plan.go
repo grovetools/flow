@@ -11,6 +11,10 @@ type PlanConfig struct {
 	PrependDependencies  bool              `yaml:"prepend_dependencies,omitempty"` // Deprecated: use inline instead
 	Hooks                map[string]string `yaml:"hooks,omitempty"`
 	Recipe               string            `yaml:"recipe,omitempty"` // Recipe used to create this plan
+	// Playbook is the name of the playbook this plan is scoped to. Jobs
+	// inherit this value unless they declare their own override. Primary
+	// source of truth for $PLAYBOOK_ROOT env injection at execution time.
+	Playbook string `yaml:"playbook,omitempty" json:"playbook,omitempty"`
 }
 
 // ShouldInline checks if a specific category should be inlined by default for jobs in this plan.

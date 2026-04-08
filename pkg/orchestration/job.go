@@ -119,6 +119,12 @@ type Job struct {
 	Skill         string   `yaml:"skill,omitempty" json:"skill,omitempty" jsonschema:"description=Skill name to inject into the agent context (resolved via skills package)"`
 	SkillSequence []string `yaml:"skill_sequence,omitempty" json:"skill_sequence,omitempty" jsonschema:"description=List of skills to execute in sequence"`
 
+	// Playbook is a per-job override for the plan-level playbook setting.
+	// Jobs normally inherit the playbook from the parent plan's
+	// .grove-plan.yml; setting this field here is an escape hatch for
+	// running a job under a different playbook's context (rare).
+	Playbook string `yaml:"playbook,omitempty" json:"playbook,omitempty" jsonschema:"description=Per-job playbook override (normally inherited from .grove-plan.yml)"`
+
 	// Dependencies and context
 	DependsOn   []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`
 	Include     []string `yaml:"include,omitempty" json:"include,omitempty" jsonschema:"description=Files or globs to include as context in the job prompt"`
