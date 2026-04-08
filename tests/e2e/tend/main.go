@@ -142,6 +142,9 @@ func main() {
 
 		// Artifact CLI
 		scenarios.ArtifactCLIScenario,
+
+		// Playbook coverage
+		scenarios.PlaybookShowScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {

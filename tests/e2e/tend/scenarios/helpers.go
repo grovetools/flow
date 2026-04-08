@@ -76,6 +76,78 @@ func setupDefaultEnvironment(ctx *harness.Context, projectName string) (projectD
 	return
 }
 
+// setupPlaybookEnvironment wraps setupDefaultEnvironment and materializes a
+// minimal playbook at `<notebooksRoot>/workspaces/<projectName>/playbooks/<playbookName>/`.
+// The playbook ships two skills (pb-hello, pb-goodbye), one prompt
+// (greet.md), and one recipe (test-recipe.md) — just enough surface
+// for the playbook CLI, briefing XML, and env injection scenarios to
+// exercise every field.
+//
+// Returns the project dir, the notebooks root, and the absolute path
+// to the generated playbook root.
+func setupPlaybookEnvironment(ctx *harness.Context, projectName, playbookName string) (projectDir, notebooksRoot, playbookDir string, err error) {
+	projectDir, notebooksRoot, err = setupDefaultEnvironment(ctx, projectName)
+	if err != nil {
+		return
+	}
+
+	playbookDir = filepath.Join(notebooksRoot, "workspaces", projectName, "playbooks", playbookName)
+	if err = fs.CreateDir(playbookDir); err != nil {
+		return
+	}
+
+	manifest := fmt.Sprintf(`name = "%s"
+version = "1.0.0"
+description = "Minimal test playbook"
+default_recipe = "test-recipe"
+`, playbookName)
+	if err = fs.WriteString(filepath.Join(playbookDir, "playbook.toml"), manifest); err != nil {
+		return
+	}
+
+	helloSkill := `---
+name: pb-hello
+description: Playbook hello skill used by e2e tests.
+---
+
+# Hello
+`
+	if err = fs.WriteString(filepath.Join(playbookDir, "skills", "pb-hello", "SKILL.md"), helloSkill); err != nil {
+		return
+	}
+
+	goodbyeSkill := `---
+name: pb-goodbye
+description: Playbook goodbye skill used by e2e tests.
+---
+
+# Goodbye
+`
+	if err = fs.WriteString(filepath.Join(playbookDir, "skills", "pb-goodbye", "SKILL.md"), goodbyeSkill); err != nil {
+		return
+	}
+
+	if err = fs.WriteString(filepath.Join(playbookDir, "prompts", "greet.md"), "<!-- purpose: greet the user -->\n\nHello.\n"); err != nil {
+		return
+	}
+
+	recipeContent := `---
+description: Trivial playbook recipe
+---
+
+# Test Recipe
+
+Body.
+`
+	if err = fs.WriteString(filepath.Join(playbookDir, "recipes", "test-recipe.md"), recipeContent); err != nil {
+		return
+	}
+
+	ctx.Set("playbook_dir", playbookDir)
+	ctx.Set("playbook_name", playbookName)
+	return
+}
+
 // findJobByPrefix finds a job file in the given plan directory that matches the prefix.
 // This helper is needed for the session_archiving test which uses specific job filename prefixes.
 func findJobByPrefix(planPath, prefix string) (string, error) {

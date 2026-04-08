@@ -109,6 +109,10 @@
       "type": "array",
       "description": "List of skills to execute in sequence"
     },
+    "playbook": {
+      "type": "string",
+      "description": "Per-job playbook override (normally inherited from .grove-plan.yml)"
+    },
     "depends_on": {
       "items": {
         "type": "string"
