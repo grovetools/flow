@@ -8,6 +8,19 @@ import (
 	"github.com/grovetools/skills/pkg/skills"
 )
 
+// planWorkDir returns the directory to use as the workDir argument when
+// resolving a playbook for a plan. Falls back to the empty string when
+// the plan is nil, which causes the resolver to skip the project and
+// ecosystem tiers and fall back to user-scoped and globally-registered
+// dirs — the correct behavior for ad-hoc callers without workspace
+// context.
+func planWorkDir(plan *Plan) string {
+	if plan == nil {
+		return ""
+	}
+	return plan.Directory
+}
+
 // renderPlaybookOverview builds the <playbook_overview> XML block that is
 // injected at the top of a briefing when the job belongs to a playbook-scoped
 // plan. Returns the empty string when no playbook is active or the playbook
@@ -17,7 +30,7 @@ func renderPlaybookOverview(job *Job, plan *Plan) string {
 	if name == "" {
 		return ""
 	}
-	pb, err := skills.LoadPlaybook(name)
+	pb, err := skills.LoadPlaybook(planWorkDir(plan), name)
 	if err != nil || pb == nil {
 		return ""
 	}
@@ -89,7 +102,7 @@ func resolvePlaybookRootForJob(job *Job, plan *Plan) (name, root string) {
 	if name == "" {
 		return "", ""
 	}
-	path, err := skills.ResolvePlaybookPath(name)
+	path, err := skills.ResolvePlaybookPath(planWorkDir(plan), name)
 	if err != nil {
 		return name, ""
 	}

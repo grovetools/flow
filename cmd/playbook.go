@@ -58,7 +58,8 @@ and its active playbook (if any) is shown.`,
 			if name == "" {
 				return fmt.Errorf("no playbook name given and no active playbook in .grove-plan.yml")
 			}
-			pb, err := skills.LoadPlaybook(name)
+			cwd, _ := os.Getwd()
+			pb, err := skills.LoadPlaybook(cwd, name)
 			if err != nil {
 				return err
 			}
@@ -79,7 +80,8 @@ func newPlaybookListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all discoverable playbooks",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			playbooks := discoverPlaybooks()
+			cwd, _ := os.Getwd()
+			playbooks := discoverPlaybooks(cwd)
 			if asJSON {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(playbooks)
 			}
@@ -129,15 +131,13 @@ func activePlaybookFromCWD() (string, error) {
 	}
 }
 
-// discoverPlaybooks walks the global user playbooks dir and any
-// search paths registered by the skills package.
-func discoverPlaybooks() []*skills.Playbook {
+// discoverPlaybooks walks all 4-tier playbook search directories
+// (project, ecosystem, user, builtin) plus any globally-registered
+// search paths and returns every playbook it finds. The cwd argument
+// provides the workspace context for the project/ecosystem tiers.
+func discoverPlaybooks(cwd string) []*skills.Playbook {
 	seen := make(map[string]*skills.Playbook)
-	var roots []string
-
-	if home, err := os.UserHomeDir(); err == nil {
-		roots = append(roots, filepath.Join(home, ".config", "grove", "playbooks"))
-	}
+	roots := skills.GetPlaybookSearchDirs(cwd)
 
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)

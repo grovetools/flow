@@ -18,11 +18,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// resolvePlaybookPath is a thin wrapper that delegates to the skills package's
-// 4-tier playbook resolver so the orchestration package does not duplicate
-// the search-path logic.
-func resolvePlaybookPath(name string) (string, error) {
-	return skills.ResolvePlaybookPath(name)
+// resolvePlaybookPath is a thin wrapper that delegates to the skills
+// package's 4-tier playbook resolver so the orchestration package does
+// not duplicate the search-path logic. An empty workDir skips the
+// project/ecosystem tiers.
+func resolvePlaybookPath(workDir, name string) (string, error) {
+	return skills.ResolvePlaybookPath(workDir, name)
 }
 
 //go:embed all:builtin_recipes
@@ -505,7 +506,11 @@ func GetNotebookRecipe(name string) (*Recipe, error) {
 // (mirroring the project/user/notebook recipe layout) or a single
 // `<name>.md` file when the playbook ships a flat, self-contained recipe.
 func GetPlaybookRecipe(playbookName, recipeName string) (*Recipe, error) {
-	pbPath, err := resolvePlaybookPath(playbookName)
+	// Use the current working directory so the 4-tier resolver can pick
+	// up the project/ecosystem notebook playbooks dirs. Empty on error
+	// falls back to user and globally-registered paths.
+	workDir, _ := os.Getwd()
+	pbPath, err := resolvePlaybookPath(workDir, playbookName)
 	if err != nil {
 		return nil, err
 	}
