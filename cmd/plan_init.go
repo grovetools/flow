@@ -206,7 +206,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.NoteRef, "", cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.NoteRef, "", cmd.Playbook, cmd.Repos); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -761,7 +761,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 	// Create a default .grove-plan.yml, using the determined worktree and recipe name
 	// Use recipeVars["model"] which includes workspace config fallback
 	effectiveModel := recipeVars["model"]
-	if err := createDefaultPlanConfig(planPath, effectiveModel, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Playbook, cmd.Repos); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("* Created .grove-plan.yml")
@@ -972,13 +972,20 @@ func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
 }
 
 // createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
-func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe string, repos []string) error {
+func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playbook string, repos []string) error {
 	var configContent strings.Builder
 
 	// Recipe field (if applicable)
 	if recipe != "" {
 		configContent.WriteString("# Recipe used to create this plan\n")
 		configContent.WriteString(fmt.Sprintf("recipe: %s\n", recipe))
+		configContent.WriteString("\n")
+	}
+
+	// Playbook scoping (if applicable)
+	if playbook != "" {
+		configContent.WriteString("# Playbook scoping: jobs in this plan inherit $PLAYBOOK_ROOT\n")
+		configContent.WriteString(fmt.Sprintf("playbook: %s\n", playbook))
 		configContent.WriteString("\n")
 	}
 

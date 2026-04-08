@@ -129,6 +129,7 @@ var (
 	planInitFromNote       string
 	planInitNoteTargetFile string
 	planInitRunInit        bool
+	planInitPlaybook       string
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -186,6 +187,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitFromNote, "from-note", "", "Path to a note file whose body will be used as the prompt for the first job")
 	planInitCmd.Flags().StringVar(&planInitNoteTargetFile, "note-target-file", "", "Filename of the job within the recipe to apply the --from-note content and reference to")
 	planInitCmd.Flags().BoolVar(&planInitRunInit, "init", false, "Execute init actions from the recipe's workspace_init.yml")
+	planInitCmd.Flags().StringVar(&planInitPlaybook, "playbook", "", "Name of a playbook whose skills, prompts, and recipes scope this plan (e.g., gdv2). Written to .grove-plan.yml; jobs in the plan inherit $PLAYBOOK_ROOT at execution time.")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -310,6 +312,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		FromNote:       planInitFromNote,
 		NoteTargetFile: planInitNoteTargetFile,
 		RunInit:        planInitRunInit,
+		Playbook:       planInitPlaybook,
 	}
 
 	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
@@ -397,4 +400,5 @@ type PlanInitCmd struct {
 	FromNote       string
 	NoteTargetFile string
 	RunInit        bool // Run init actions from workspace_init.yml
+	Playbook       string
 }
