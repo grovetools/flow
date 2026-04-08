@@ -145,6 +145,9 @@ func main() {
 
 		// Playbook coverage
 		scenarios.PlaybookShowScenario,
+		scenarios.PlanInitPlaybookScenario,
+		scenarios.PlaybookEnvInjectionScenario,
+		scenarios.PlaybookOverviewXMLScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
