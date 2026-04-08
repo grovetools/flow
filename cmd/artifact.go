@@ -189,22 +189,31 @@ Writes a <skill-name>-status.json file for TUI consumption.`,
 				return fmt.Errorf("invalid status: %s (must be completed, failed, or skipped)", statusFlag)
 			}
 
-			// Resolve skill sequence to verify expectations
-			workDir, _ := orchestration.DetermineWorkingDirectory(plan, job)
-			sequenceNodes, err := orchestration.ResolveSkillSequenceMetadata(job.SkillSequence, workDir)
-			if err != nil {
-				return fmt.Errorf("resolving skills: %w", err)
-			}
+			// Resolve skill sequence to verify expectations, but only for
+			// jobs that actually declare a skill_sequence. Ad-hoc
+			// interactive_agent jobs (e.g. fixup implementers) don't have
+			// a declared sequence and should be allowed to complete
+			// arbitrary skill names as loose markers without sequence
+			// validation. See 08-fixup-plan §4.
+			var expectedArtifacts []string
+			if len(job.SkillSequence) > 0 {
+				workDir, _ := orchestration.DetermineWorkingDirectory(plan, job)
+				sequenceNodes, err := orchestration.ResolveSkillSequenceMetadata(job.SkillSequence, workDir)
+				if err != nil {
+					return fmt.Errorf("resolving skills: %w", err)
+				}
 
-			targetNode := findSkillInSequence(sequenceNodes, skillName)
-			if targetNode == nil {
-				return fmt.Errorf("skill '%s' not found in job's skill sequence", skillName)
+				targetNode := findSkillInSequence(sequenceNodes, skillName)
+				if targetNode == nil {
+					return fmt.Errorf("skill '%s' not found in job's skill sequence", skillName)
+				}
+				expectedArtifacts = targetNode.Metadata.Produces
 			}
 
 			// Verify produced artifacts if status is completed
 			var produced []string
 			if statusFlag == "completed" {
-				for _, expected := range targetNode.Metadata.Produces {
+				for _, expected := range expectedArtifacts {
 					if _, statErr := os.Stat(filepath.Join(artifactDir, expected)); os.IsNotExist(statErr) {
 						return fmt.Errorf("verification failed: expected artifact '%s' was not written. Use `flow artifact write %s` first", expected, expected)
 					}
@@ -227,7 +236,7 @@ Writes a <skill-name>-status.json file for TUI consumption.`,
 			state := orchestration.SkillFidelityState{
 				Skill:             skillName,
 				Status:            statusFlag,
-				ArtifactsExpected: targetNode.Metadata.Produces,
+				ArtifactsExpected: expectedArtifacts,
 				ArtifactsProduced: produced,
 				Error:             errPtr,
 				DiagnosticPath:    diagPtr,
