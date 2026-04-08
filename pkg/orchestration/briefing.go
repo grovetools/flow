@@ -73,6 +73,14 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 
 	b.WriteString("<prompt>\n")
 
+	// 0. If this job belongs to a playbook-scoped plan, render a
+	// <playbook_overview> block summarizing the available skills,
+	// prompts, and recipes the agent can use. This is the "JIT
+	// inventory" so the agent doesn't have to grep the filesystem.
+	if overview := renderPlaybookOverview(job, plan); overview != "" {
+		b.WriteString(overview)
+	}
+
 	// 1. Add system instructions from the job's template or skill, if available.
 	if job.Template != "" {
 		templateManager := NewTemplateManager()
