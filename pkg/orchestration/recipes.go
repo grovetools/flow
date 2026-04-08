@@ -14,8 +14,16 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/skills/pkg/skills"
 	"gopkg.in/yaml.v3"
 )
+
+// resolvePlaybookPath is a thin wrapper that delegates to the skills package's
+// 4-tier playbook resolver so the orchestration package does not duplicate
+// the search-path logic.
+func resolvePlaybookPath(name string) (string, error) {
+	return skills.ResolvePlaybookPath(name)
+}
 
 //go:embed all:builtin_recipes
 var builtinRecipeFS embed.FS
@@ -492,18 +500,86 @@ func GetNotebookRecipe(name string) (*Recipe, error) {
 	return recipe, nil
 }
 
-// GetRecipe finds and returns a recipe by name with precedence: Project > Notebook > User > Dynamic > Built-in.
-func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
-	// Precedence: Project > Notebook > User > Dynamic > Built-in
+// GetPlaybookRecipe looks up a recipe inside a resolved playbook's recipes/
+// directory. The recipe may be either a subdirectory containing job .md files
+// (mirroring the project/user/notebook recipe layout) or a single
+// `<name>.md` file when the playbook ships a flat, self-contained recipe.
+func GetPlaybookRecipe(playbookName, recipeName string) (*Recipe, error) {
+	pbPath, err := resolvePlaybookPath(playbookName)
+	if err != nil {
+		return nil, err
+	}
+	recipesRoot := filepath.Join(pbPath, "recipes")
 
-	// 1. Try project recipes
+	// Case A: recipes/<name>/ as a directory with .md files
+	dirPath := filepath.Join(recipesRoot, recipeName)
+	if info, err := os.Stat(dirPath); err == nil && info.IsDir() {
+		entries, err := os.ReadDir(dirPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading playbook recipe dir: %w", err)
+		}
+		recipe := &Recipe{Name: recipeName, Jobs: make(map[string][]byte)}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			content, err := os.ReadFile(filepath.Join(dirPath, entry.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("reading playbook recipe file %s: %w", entry.Name(), err)
+			}
+			recipe.Jobs[entry.Name()] = content
+		}
+		if err := loadRecipeMetadata(recipe, dirPath, embed.FS{}); err != nil {
+			return nil, fmt.Errorf("loading metadata for playbook recipe '%s': %w", recipeName, err)
+		}
+		if len(recipe.Jobs) == 0 {
+			return nil, fmt.Errorf("playbook recipe '%s' contains no job files", recipeName)
+		}
+		return recipe, nil
+	}
+
+	// Case B: recipes/<name>.md as a flat single-file recipe
+	filePath := filepath.Join(recipesRoot, recipeName+".md")
+	if content, err := os.ReadFile(filePath); err == nil {
+		recipe := &Recipe{
+			Name: recipeName,
+			Jobs: map[string][]byte{filepath.Base(filePath): content},
+		}
+		return recipe, nil
+	}
+
+	return nil, fmt.Errorf("playbook recipe '%s/%s' not found", playbookName, recipeName)
+}
+
+// GetRecipe finds and returns a recipe by name with precedence: Project > Playbook > Notebook > User > Dynamic > Built-in.
+// When a playbook is active (e.g. --playbook gdv2), recipes defined in
+// that playbook's recipes/ directory are consulted after local .grove/recipes/
+// but before notebook/user/builtin sources.
+func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
+	return GetRecipeWithPlaybook(name, getRecipeCmd, "")
+}
+
+// GetRecipeWithPlaybook is like GetRecipe but also consults the given playbook's
+// recipes/ directory. An empty playbook name behaves identically to GetRecipe.
+func GetRecipeWithPlaybook(name, getRecipeCmd, playbook string) (*Recipe, error) {
+	// Precedence: Project > Playbook > Notebook > User > Dynamic > Built-in
+
+	// 1. Try project recipes (local .grove/recipes/)
 	recipe, err := GetProjectRecipe(name)
 	if err == nil {
 		recipe.Source = "[Project]"
 		return recipe, nil
 	}
 
-	// 2. Try notebook recipes
+	// 2. Try playbook recipes (playbooks/<active>/recipes/)
+	if playbook != "" {
+		if pbRecipe, err := GetPlaybookRecipe(playbook, name); err == nil {
+			pbRecipe.Source = "[Playbook: " + playbook + "]"
+			return pbRecipe, nil
+		}
+	}
+
+	// 3. Try notebook recipes
 	recipe, err = GetNotebookRecipe(name)
 	if err == nil {
 		recipe.Source = "[Notebook]"

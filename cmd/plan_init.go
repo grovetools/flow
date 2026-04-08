@@ -434,8 +434,8 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 		}
 	}
 
-	// Find the recipe (checks user recipes first, then dynamic, then built-in)
-	recipe, err := orchestration.GetRecipe(recipeName, getRecipeCmd)
+	// Find the recipe (checks project > playbook > notebook > user > dynamic > built-in)
+	recipe, err := orchestration.GetRecipeWithPlaybook(recipeName, getRecipeCmd, cmd.Playbook)
 	if err != nil {
 		return err
 	}
