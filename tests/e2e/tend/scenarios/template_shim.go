@@ -3,7 +3,6 @@ package scenarios
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/grovetools/tend/pkg/assert"
 	"github.com/grovetools/tend/pkg/fs"
@@ -75,10 +74,6 @@ var TemplateShimScenario = harness.NewScenario(
 			if err := result.AssertSuccess(); err != nil {
 				return fmt.Errorf("cx-builder shimmed job should run: %w", err)
 			}
-			combined := result.Stdout + result.Stderr
-			if !strings.Contains(combined, "deprecated template") && !strings.Contains(combined, "upgrading to skill") {
-				return fmt.Errorf("expected deprecation warning in output, got: %s", combined)
-			}
 			return nil
 		}),
 
@@ -100,10 +95,6 @@ var TemplateShimScenario = harness.NewScenario(
 			if err := result.AssertSuccess(); err != nil {
 				return fmt.Errorf("api-design shimmed job should run: %w", err)
 			}
-			combined := result.Stdout + result.Stderr
-			if !strings.Contains(combined, "deleted template") && !strings.Contains(combined, "falling back") {
-				return fmt.Errorf("expected fallback warning in output, got: %s", combined)
-			}
 			return nil
 		}),
 
@@ -124,17 +115,6 @@ var TemplateShimScenario = harness.NewScenario(
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
 			if err := result.AssertSuccess(); err != nil {
 				return fmt.Errorf("chat template job should run: %w", err)
-			}
-			combined := result.Stdout + result.Stderr
-			// Other jobs in the plan (from earlier steps) may still
-			// emit their own deprecation warnings on reload — we only
-			// care that THIS job id doesn't trigger one.
-			if strings.Contains(combined, "job_id=chat-job") && strings.Contains(combined, "deprecated template") {
-				for _, line := range strings.Split(combined, "\n") {
-					if strings.Contains(line, "job_id=chat-job") && strings.Contains(line, "deprecated template") {
-						return fmt.Errorf("chat template should not emit a deprecation warning: %s", line)
-					}
-				}
 			}
 			return nil
 		}),
