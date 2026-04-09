@@ -574,15 +574,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 
-	case editorFinishedMsg:
+	case embed.EditFinishedMsg:
 		if msg.Err != nil {
 			m.StatusSummary = theme.DefaultTheme.Error.Render("Editor error: " + msg.Err.Error())
 		} else {
 			m.StatusSummary = theme.DefaultTheme.Success.Render("Editor closed")
 		}
-		// Refresh the skill pane to reflect any edits
+		// Refresh both the skill pane and the plan itself to pick up edits
 		m.refreshSkillPane()
-		return m, nil
+		return m, refreshPlan(m.PlanDir)
 
 	case IsolatedAgentInputSentMsg:
 		// Handle response from sending input to isolated agent

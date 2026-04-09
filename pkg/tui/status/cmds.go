@@ -20,6 +20,7 @@ import (
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -49,7 +50,6 @@ type RefreshMsg struct{}
 type ArchiveConfirmedMsg struct{ Job *orchestration.Job }
 type EditFileAndQuitMsg struct{ FilePath string }
 type EditFileInTmuxMsg struct{ Err error }
-type editorFinishedMsg struct{ Err error }
 type TickMsg time.Time
 type StatusUpdateMsg string
 type RefreshTickMsg time.Time
@@ -989,19 +989,12 @@ func editJob(job *orchestration.Job) tea.Cmd {
 		}
 	}
 
-	// Original behavior: open editor in the current pane
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
+	// Embedded/standalone: emit embed.EditRequestMsg. groveterm intercepts
+	// this to spawn an ephemeral in-pane editor; standalone flow's
+	// StandaloneHost translates it into tea.ExecProcess transparently.
+	return func() tea.Msg {
+		return embed.EditRequestMsg{Path: job.FilePath}
 	}
-
-	// Use tea.ExecProcess to properly handle terminal control
-	return tea.ExecProcess(exec.Command(editor, job.FilePath), func(err error) tea.Msg {
-		if err != nil {
-			return err
-		}
-		return RefreshMsg{} // Refresh to show any changes
-	})
 }
 
 func executePlanResume(job *orchestration.Job) tea.Cmd {
@@ -1609,7 +1602,9 @@ func addJobsFromRecipeCmd(plan *orchestration.Plan, recipeName string, externalD
 	}
 }
 
-// editSkillOrArtifactCmd opens $EDITOR on a skill or artifact file via tea.ExecProcess.
+// editSkillOrArtifactCmd emits an embed.EditRequestMsg so the host
+// (groveterm in-pane editor or StandaloneHost's tea.ExecProcess)
+// opens $EDITOR on a skill or artifact file.
 func editSkillOrArtifactCmd(plan *orchestration.Plan, job *orchestration.Job, node *SkillPaneNode) tea.Cmd {
 	var targetPath string
 	if node.IsArtifact {
@@ -1634,19 +1629,13 @@ func editSkillOrArtifactCmd(plan *orchestration.Plan, job *orchestration.Job, no
 
 	if targetPath == "" {
 		return func() tea.Msg {
-			return editorFinishedMsg{Err: fmt.Errorf("could not resolve path for %s", node.Name)}
+			return embed.EditFinishedMsg{Err: fmt.Errorf("could not resolve path for %s", node.Name)}
 		}
 	}
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
+	return func() tea.Msg {
+		return embed.EditRequestMsg{Path: targetPath}
 	}
-
-	c := exec.Command(editor, targetPath)
-	return tea.ExecProcess(c, func(err error) tea.Msg {
-		return editorFinishedMsg{Err: err}
-	})
 }
 
 // --- Claw (channels + autonomous) commands ---
