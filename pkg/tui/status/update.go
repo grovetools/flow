@@ -95,7 +95,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"log_file_path":     msg.LogFilePath,
 			"streaming_job_id":  m.StreamingJobID,
 			"has_stream_cancel": m.StreamCancel != nil,
-		}).Info("Received LogContentLoadedMsg")
+		}).Debug("Received LogContentLoadedMsg")
 
 		// Discard messages for jobs we're not currently viewing
 		if m.ActiveLogJob == nil || (msg.JobID != "" && msg.JobID != m.ActiveLogJob.ID) {
@@ -129,7 +129,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// If we should retry (agent session hasn't started yet), schedule a retry
 		if msg.ShouldRetry {
-			logger.Info("Scheduling retry for agent log loading")
+			logger.Debug("Scheduling retry for agent log loading")
 			cmds = append(cmds, retryLoadAgentLogsAfterDelay())
 		}
 
@@ -142,7 +142,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					"job_id":        m.ActiveLogJob.ID,
 					"log_file_path": msg.LogFilePath,
 					"was_streaming": m.StreamingJobID,
-				}).Info("Starting agent log streaming")
+				}).Debug("Starting agent log streaming")
 
 				// Cancel any existing stream to prevent leaks
 				if m.StreamCancel != nil {
@@ -179,10 +179,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(cmds) > 0 {
 			logger.WithFields(map[string]interface{}{
 				"num_cmds": len(cmds),
-			}).Info("Returning batched commands")
+			}).Debug("Returning batched commands")
 			return m, tea.Batch(cmds...)
 		}
-		logger.Info("No commands to return")
+		logger.Debug("No commands to return")
 		return m, nil
 
 	case StreamEndedMsg:
@@ -191,7 +191,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger := logging.NewLogger("flow-tui")
 			logger.WithFields(map[string]interface{}{
 				"job_id": msg.JobID,
-			}).Info("Stream ended, clearing streaming state")
+			}).Debug("Stream ended, clearing streaming state")
 			m.StreamingJobID = ""
 			if m.StreamCancel != nil {
 				m.StreamCancel()
@@ -200,7 +200,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If the job is still running, schedule a retry to restart streaming
 			if m.ActiveLogJob != nil && m.ActiveLogJob.ID == msg.JobID &&
 				(m.ActiveLogJob.Status == orchestration.JobStatusRunning || m.ActiveLogJob.Status == orchestration.JobStatusIdle) {
-				logger.Info("Job still running after stream ended, scheduling retry")
+				logger.Debug("Job still running after stream ended, scheduling retry")
 				return m, retryLoadAgentLogsAfterDelay()
 			}
 		}
@@ -359,7 +359,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.WithFields(map[string]interface{}{
 			"show_logs":      m.ShowLogs,
 			"has_active_job": m.ActiveLogJob != nil,
-		}).Info("Received RetryLoadAgentLogsMsg")
+		}).Debug("Received RetryLoadAgentLogsMsg")
 
 		// Only retry if we're still showing logs for an agent job
 		if m.ShowLogs && m.ActiveLogJob != nil {
@@ -379,21 +379,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					"job_id":       currentJob.ID,
 					"is_agent_job": isAgentJob,
 					"job_status":   currentJob.Status,
-				}).Info("Retry conditions checked")
+				}).Debug("Retry conditions checked")
 
 				// Retry as long as it's an agent job, regardless of status
 				// This allows us to pick up logs even if the job completed quickly
 				if isAgentJob {
 					// Update the active log job reference and retry loading agent logs
 					m.ActiveLogJob = currentJob
-					logger.Info("Retrying agent log load")
+					logger.Debug("Retrying agent log load")
 					return m, loadAndStreamAgentLogsCmd(m.Plan, currentJob)
 				}
 			} else {
 				logger.Warn("Could not find current job for retry")
 			}
 		} else {
-			logger.Info("Not retrying - logs not shown or no active job")
+			logger.Debug("Not retrying - logs not shown or no active job")
 		}
 		return m, nil
 
@@ -541,7 +541,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		logger.WithFields(map[string]interface{}{
 			"job_id": msg.JobID,
 			"status": msg.Status,
-		}).Info("Received daemon job status update")
+		}).Debug("Received daemon job status update")
 
 		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" || msg.Status == "pending_user" {
 			m.IsRunningJob = false

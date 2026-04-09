@@ -250,7 +250,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 	logger.WithFields(map[string]interface{}{
 		"job_id": job.ID,
 		"plan":   plan.Name,
-	}).Info("loadAndStreamAgentLogsCmd called, creating command")
+	}).Debug("loadAndStreamAgentLogsCmd called, creating command")
 
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
