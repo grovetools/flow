@@ -69,6 +69,7 @@ func applyTemplateShim(job *Job) {
 			Field("job_id", job.ID).
 			Field("old_template", job.Template).
 			Field("new_skill", name).
+			StructuredOnly().
 			Log(ctx)
 		// Only set the skill if the job does not already declare one,
 		// so an explicit `skill:` in the frontmatter wins over the shim.
@@ -81,6 +82,7 @@ func applyTemplateShim(job *Job) {
 			Field("job_id", job.ID).
 			Field("old_template", job.Template).
 			Field("new_template", name).
+			StructuredOnly().
 			Log(ctx)
 		job.Template = name
 	}
