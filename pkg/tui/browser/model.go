@@ -99,6 +99,20 @@ type Model struct {
 	repoGitLogError      error
 }
 
+// CurrentPlan returns the *orchestration.Plan currently under the
+// browser's cursor, or nil if the list is empty or the cursor is
+// out of range. Hosts call this when they need to promote the
+// cursor-selected row without synthesizing a BrowserPlanSelectedMsg
+// — e.g. the flow meta-panel turning a "jump to Status tab" key
+// press into a plan activation when the user hasn't pressed Enter
+// yet.
+func (m Model) CurrentPlan() *orchestration.Plan {
+	if m.cursor < 0 || m.cursor >= len(m.plans) {
+		return nil
+	}
+	return m.plans[m.cursor].Plan
+}
+
 // BrowserPlanSelectedMsg is emitted when the user presses Enter on a plan
 // row. Hosts catch this message to decide how to open the plan. Standalone
 // CLI shims launch `flow plan status --tui`; the flow meta-panel at

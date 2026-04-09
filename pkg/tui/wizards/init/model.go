@@ -111,6 +111,22 @@ type Model struct {
 	help help.Model
 }
 
+// IsTextEntryActive reports whether one of the wizard's text input
+// fields currently has focus. Hosts embedding the wizard as a tab
+// consult this before intercepting single-character navigation keys
+// (e.g. the flow meta-panel's 1-5 tab jumps) so digits the user is
+// typing into a field aren't swallowed. Returns false in the
+// "unfocused" navigation mode (after ESC).
+func (m Model) IsTextEntryActive() bool {
+	if m.unfocused {
+		return false
+	}
+	return m.nameInput.Focused() ||
+		m.worktreeInput.Focused() ||
+		m.extractFromInput.Focused() ||
+		m.noteTargetFileInput.Focused()
+}
+
 // New constructs a Model from the given Config. Form defaults mirror
 // the legacy flow/cmd/plan_init_tui.go behavior.
 func New(cfg Config) Model {
@@ -118,11 +134,14 @@ func New(cfg Config) Model {
 		plansDirectory: cfg.PlansDir,
 		getRecipeCmd:   cfg.GetRecipeCmd,
 		runInit:        cfg.RunInitByDefault,
+		// Start in navigation mode so switching to the Add Plan tab
+		// doesn't drop the user straight into text input. They
+		// press "i" to enter insert mode when ready.
+		unfocused: true,
 	}
 
 	m.nameInput = textinput.New()
 	m.nameInput.Placeholder = "new-feature-plan"
-	m.nameInput.Focus()
 	m.nameInput.CharLimit = 156
 	m.nameInput.Width = 50
 
@@ -247,12 +266,13 @@ func (m *Model) prePopulate(initial *Request) {
 	}
 }
 
-// Init returns the initial tea.Cmd for the wizard.
+// Init returns the initial tea.Cmd for the wizard. Dropped the
+// prior tea.ClearScreen because, when embedded as a peer tab in
+// the flow meta-panel, it caused a visible flash + full host
+// redraw on every tab switch. Bubbletea's own render setup handles
+// the standalone CLI path fine without an explicit clear.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		tea.ClearScreen,
-		textinput.Blink,
-	)
+	return textinput.Blink
 }
 
 // Close is a no-op; the wizard holds no long-lived resources.

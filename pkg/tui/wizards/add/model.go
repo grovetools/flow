@@ -86,6 +86,19 @@ type Model struct {
 	clawEnabled bool
 }
 
+// IsTextEntryActive reports whether the wizard currently has a
+// text input or textarea focused. Hosts that want to intercept
+// single-character keys (e.g. the flow meta-panel's 1-4 tab jumps)
+// consult this so they don't swallow characters the user is typing
+// into a form field. Returns false when the wizard is in its
+// "unfocused" navigation mode (after pressing ESC).
+func (m Model) IsTextEntryActive() bool {
+	if m.unfocused {
+		return false
+	}
+	return m.titleInput.Focused() || m.promptInput.Focused()
+}
+
 // New constructs a Model from the given Config. It initializes all
 // form fields and attempts to derive SkillService / WorkspaceNode
 // from the default core config when Config leaves them nil.
@@ -102,9 +115,12 @@ func New(cfg Config) Model {
 	}
 
 	m := Model{
-		plan:      cfg.Plan,
-		keys:      keys,
-		unfocused: false, // Start in insert mode (focused)
+		plan: cfg.Plan,
+		keys: keys,
+		// Start in unfocused (navigation) mode so switching to the
+		// Add Job tab doesn't drop the user straight into text input
+		// — they press "i" to enter insert mode when ready.
+		unfocused: true,
 		helpModel: help.NewBuilder().
 			WithKeys(keys).
 			WithTitle("󰝒 Add New Job - Help").
@@ -128,10 +144,10 @@ func New(cfg Config) Model {
 		}
 	}
 
-	// 1. Title Input (textinput)
+	// 1. Title Input (textinput) — deliberately not focused; the
+	// wizard starts in navigation mode (see unfocused above).
 	m.titleInput = textinput.New()
 	m.titleInput.Placeholder = "New job title here"
-	m.titleInput.Focus()
 	m.titleInput.CharLimit = 156
 	m.titleInput.Width = 50
 
@@ -208,13 +224,14 @@ func New(cfg Config) Model {
 	return m
 }
 
-// Init returns the initial tea.Cmd for the wizard. It clears the
-// screen and blinks the focused text input.
+// Init returns the initial tea.Cmd for the wizard. It used to call
+// tea.ClearScreen here, but that wiped the host's whole terminal on
+// every tab-switch in the groveterm embedded view and caused a
+// visible flash/sluggish redraw. Bubbletea already clears its own
+// render region when the program starts, so the standalone CLI
+// path doesn't actually need the explicit clear either.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		tea.ClearScreen,
-		textinput.Blink,
-	)
+	return textinput.Blink
 }
 
 // Close releases resources owned by the wizard. The add wizard is

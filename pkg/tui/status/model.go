@@ -853,8 +853,10 @@ func (m Model) View() string {
 		finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, "\n", footer)
 	}
 
-	// Add overall margin - minimal vertical margin to maximize screen usage
-	return lipgloss.NewStyle().Margin(1, 2, 0, 2).Render(finalView)
+	// Zero top/bottom margin; horizontal padding only. The embedding
+	// meta-panel provides its own chrome, and standalone mode also
+	// looks fine without the extra top row.
+	return lipgloss.NewStyle().Margin(0, 2).Render(finalView)
 }
 
 // calculateOptimalLogHeight calculates the log viewer height for horizontal split
