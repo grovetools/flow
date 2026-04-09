@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/components/help"
@@ -526,6 +527,11 @@ func (m Model) renderFocusDetailPrimary(contentWidth int, paneContent string, ch
 		}
 		logHeader = fmt.Sprintf("%s: %s  %s%s • %s • %s%s", paneTitle, jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
 		logHeader = theme.DefaultTheme.Bold.Render(logHeader)
+		// Truncate so a long job title can't wrap onto the jobs
+		// pane on the left.
+		if m.LogViewerWidth > 0 {
+			logHeader = ansi.Truncate(logHeader, m.LogViewerWidth, "…")
+		}
 	}
 
 	// Create a separator

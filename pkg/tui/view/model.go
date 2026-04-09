@@ -28,16 +28,9 @@ import (
 	planinit "github.com/grovetools/flow/pkg/tui/wizards/init"
 )
 
-// Tab order: Jobs and Add Job come first because they're the most
-// frequent destinations once a plan is loaded. Plans lives at 3 as
-// the entry point for picking a different plan; Add Plan and Finish
-// Plan follow.
-//
-//	1. Jobs          (modeStatus)        — status view for the active plan
-//	2. Add Job       (modeAddWizard)     — the add-job wizard
-//	3. Plans         (modeBrowser)       — plan list browser
-//	4. Add Plan      (modeInitWizard)    — plan-init wizard
-//	5. Finish Plan   (modeFinishWizard)  — finish wizard
+// Tab order: 1=Jobs, 2=Add Job, 3=Plans, 4=Add Plan, 5=Finish Plan.
+// Jobs / Add Job lead because they're the most frequent destinations
+// once a plan is loaded.
 func tabIndexFor(md mode) int {
 	switch md {
 	case modeStatus:
@@ -88,36 +81,20 @@ type initCompletedMsg struct {
 	err error
 }
 
-// addWizardReadyMsg is dispatched once a freshly-built add.Model
-// (which synchronously loads config, skills service, templates, and
-// skill metadata on disk) finishes construction off the bubbletea
-// event loop. Routed to the meta-panel's Update, which installs the
-// model, sizes it, and fires its Init. generation is set to the
-// pager-generation counter at dispatch time so stale builds are
-// dropped if the user already navigated away before construction
-// finished.
+// *WizardReadyMsg messages carry a freshly-built wizard model from
+// the async build cmd back to the meta-panel. generation matches
+// wizardBuildGen at dispatch time so stale builds are dropped.
 type addWizardReadyMsg struct {
 	model      add.Model
 	generation uint64
 }
 
-// finishWizardReadyMsg is the finish-wizard analog of
-// addWizardReadyMsg. Construction runs plan_finish.BuildItems which
-// executes all Check closures (git merge / worktree / state file
-// probes) synchronously — we push that off the event loop so the
-// tab switch is instant.
 type finishWizardReadyMsg struct {
 	model      finish.Model
 	err        error
 	generation uint64
 }
 
-// initWizardReadyMsg is dispatched once a freshly-built planinit.Model
-// finishes construction off the bubbletea event loop. planinit.New
-// synchronously enumerates recipes (subprocess call to GetRecipeCmd),
-// scans available models, loads config, and probes workspace — all
-// disk/subprocess I/O we keep off the event loop so switching to the
-// Add Plan tab is instant.
 type initWizardReadyMsg struct {
 	model      planinit.Model
 	generation uint64
@@ -175,64 +152,41 @@ type Config struct {
 	InitialGraph *orchestration.DependencyGraph
 }
 
-// Model is the meta-panel model. It owns both sub-models and routes
-// messages, keys, and render calls to whichever is currently active.
-//
-// The browser is constructed eagerly in New so it can begin loading the
-// plan list. The status model is constructed lazily: only when the user
-// picks a plan (and we have a loaded *orchestration.Plan to hand it).
-// When the user navigates back to the browser the status model is
-// closed and discarded so its daemon SSE subscription and listener
-// goroutines don't leak.
+// Model is the flow meta-panel. The browser is built eagerly; status
+// and wizard sub-models are lazy. Closing the status model on
+// navigation prevents daemon SSE goroutine leaks.
 type Model struct {
 	cfg Config
 
-	mode               mode
-	browserModel       browser.Model
-	statusModel        *status.Model
-	wizardModel        *add.Model
-	finishWizardModel  *finish.Model
-	initWizardModel    *planinit.Model
+	mode              mode
+	browserModel      browser.Model
+	statusModel       *status.Model
+	wizardModel       *add.Model
+	finishWizardModel *finish.Model
+	initWizardModel   *planinit.Model
 
-	// pendingInitPlanName is the plan slug captured from the init
-	// wizard's Request when the user submits. The meta-panel uses
-	// it after the `flow plan init` subprocess returns to locate
-	// the freshly-created plan on disk and switch the status view
-	// to it.
+	// Set when the init wizard submits; consulted after the
+	// `flow plan init` subprocess returns to locate the new plan.
 	pendingInitPlanName string
 
-	// width/height are cached from the last WindowSizeMsg so lazily
-	// constructed status models can be sized immediately.
 	width  int
 	height int
 
-	// finishTransient is a short status line overlayed on top of the
-	// active sub-model's View after a finish-wizard run, used to
-	// surface action errors (or a build error on wizard launch) that
-	// the user would otherwise never see. Cleared on the next
-	// keypress so it doesn't linger forever.
+	// One-shot status line shown over the body after a finish-wizard
+	// run; cleared on the next keypress.
 	finishTransient string
 
-	// wizardBuildGen is a monotonic counter bumped every time the
-	// meta-panel kicks off a wizard construction tea.Cmd. The cmd
-	// closes over the generation value at dispatch time; when its
-	// *WizardReadyMsg arrives back in Update we compare against the
-	// current counter and drop the result if the user already
-	// switched away (e.g. hit `1` to go back to Browser) or if a
-	// newer build was dispatched in the meantime. Without this
-	// guard, a slow skill-service scan could slam a stale wizard
-	// into the active slot after the user moved on.
+	// wizardBuildGen + *Building flags guard async wizard
+	// construction. Stale ready msgs (after user navigates away or
+	// the workspace changes) are dropped by generation mismatch.
 	wizardBuildGen       uint64
 	addWizardBuilding    bool
 	finishWizardBuilding bool
 	initWizardBuilding   bool
 }
 
-// New constructs a Model from the given Config. The browser sub-model
-// is initialized immediately; the status sub-model is nil until the
-// first plan selection — unless Config.InitialPlan is set, in which
-// case a status sub-model is built eagerly and the meta-panel starts
-// in status mode.
+// New constructs a Model. Boots in browser mode unless InitialPlan
+// is set, in which case it boots straight into status.
 func New(cfg Config) Model {
 	b := browser.New(browser.Config{
 		PlansDir:     cfg.PlansDir,
@@ -256,16 +210,14 @@ func New(cfg Config) Model {
 	return m
 }
 
-// subSize returns the WindowSizeMsg that sub-models should receive.
-// It subtracts the meta-panel's own chrome (horizontal padding +
-// tab bar + mode title rows) from the cached terminal size. Used by
-// every lazy construction path that needs to size a freshly-built
-// sub-model immediately (status on plan select, wizards on tab
-// switch, etc.) so they don't briefly think they own the full
-// terminal.
+// subSize returns the WindowSizeMsg sub-models should receive after
+// subtracting meta-panel chrome: 4 cols (Padding(1,2,0,2)) + 3 rows
+// (1 top pad + 1 tab bar + 1 title-or-blank). Used by every lazy
+// construction site so freshly-built sub-models don't briefly think
+// they own the full terminal.
 func (m Model) subSize() tea.WindowSizeMsg {
 	w := m.width - 4
-	h := m.height - 2
+	h := m.height - 3
 	if w < 1 {
 		w = 1
 	}
@@ -275,41 +227,21 @@ func (m Model) subSize() tea.WindowSizeMsg {
 	return tea.WindowSizeMsg{Width: w, Height: h}
 }
 
-// Init forwards to whichever sub-model is currently active.
+// Init forwards to the active sub-model. When booting in status mode
+// also kicks the browser so its plan list is preloaded.
 func (m Model) Init() tea.Cmd {
 	if m.mode == modeStatus && m.statusModel != nil {
-		// Start both: status for the initial view, plus the browser
-		// so its plan list is already loaded when the user hits esc
-		// to switch modes.
 		return tea.Batch(m.statusModel.Init(), m.browserModel.Init())
 	}
 	return m.browserModel.Init()
 }
 
-// Update routes the message to the active sub-model, after handling the
-// small set of meta-panel concerns: window sizing, embed routing for
-// workspace switches, focus/blur fan-out, and the browser↔status mode
-// transitions driven by BrowserPlanSelectedMsg and the `esc` key.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Deduct the meta-panel's own chrome before forwarding to
-		// sub-models: 4 cols (Padding(0, 2)) + 2 rows (tab bar +
-		// mode title). Without this deduction the status view's
-		// log-pane math thinks it has the full terminal height and
-		// overflows when a running job opens its logs pane.
-		sub := tea.WindowSizeMsg{
-			Width:  msg.Width - 4,
-			Height: msg.Height - 2,
-		}
-		if sub.Width < 1 {
-			sub.Width = 1
-		}
-		if sub.Height < 1 {
-			sub.Height = 1
-		}
+		sub := m.subSize()
 		var cmds []tea.Cmd
 		updated, c := m.browserModel.Update(sub)
 		if bm, ok := updated.(browser.Model); ok {
@@ -357,12 +289,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case embed.SetWorkspaceMsg:
-		// Workspace changed. The browser re-targets via SetWorkspaceMsg;
-		// the status model, if alive, is plan-scoped and should be torn
-		// down because the active plan is about to change. We drop it
-		// here and switch back to the browser so the user sees the new
-		// workspace's plan list. Any open wizard is also plan-scoped
-		// and must be discarded along with the status model.
+		// Workspace changed: tear down all plan-scoped sub-models
+		// and return to browser for the new workspace's plan list.
 		if m.wizardModel != nil {
 			_ = m.wizardModel.Close()
 			m.wizardModel = nil
@@ -397,27 +325,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, c
 
 	case embed.FocusMsg, embed.BlurMsg:
-		// Focus/blur routes to the active sub-model only. The inactive
-		// one does not need to react to focus changes it can't see.
 		return m.updateActive(msg)
 
 	case addWizardReadyMsg:
-		// Drop stale builds the user navigated away from mid-
-		// construction. wizardBuildGen is bumped on every new
-		// build dispatch; a ready msg with a lower generation has
-		// been superseded.
 		if msg.generation != m.wizardBuildGen {
 			return m, nil
 		}
 		m.addWizardBuilding = false
 		local := msg.model
 		m.wizardModel = &local
-		// If the user already switched away from Add Plan while we
-		// were building, skip the sizing/init — the stale guard
-		// above handles navigation that bumped the generation, but
-		// a concurrent mode switch without a new build (e.g.
-		// switching to Status) should still install the model so
-		// a later return to Add is cheap. Size it either way.
 		var cmds []tea.Cmd
 		if m.width > 0 && m.height > 0 {
 			sized, c := m.wizardModel.Update(m.subSize())
@@ -461,9 +377,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.finishWizardBuilding = false
 		if msg.err != nil {
-			// Surface the build error and fall back to the status
-			// view so the user isn't stranded on a "Loading..."
-			// placeholder they can't dismiss.
+			// Surface the error and bail out of the loading
+			// placeholder so the user isn't stranded.
 			m.finishTransient = fmt.Sprintf("finish wizard: %v", msg.err)
 			if m.statusModel != nil {
 				m.mode = modeStatus
@@ -490,13 +405,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case embed.SwitchTabMsg:
-		// Auto-switch signal emitted by a sub-panel (wizard submit,
-		// browser enter, etc.). The flow meta-panel preserves its
-		// existing state machine for lifecycle management, so we
-		// translate the tab index back into a mode and run the same
-		// bookkeeping the manual key handler would. Invalid requests
-		// (e.g. switching to Status without a loaded plan) fall
-		// through to a no-op.
 		target, ok := modeForTabIndex(msg.TabIndex)
 		if !ok {
 			return m, nil
@@ -504,10 +412,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.switchToMode(target)
 
 	case browser.BrowserPlanSelectedMsg:
-		// User picked a plan in the browser. Tear down any existing
-		// status model, build a fresh one for the chosen plan, and
-		// switch to status mode. Errors building the status model fall
-		// back to staying in browser mode with no transition.
+		// Build a fresh status model for the selected plan and
+		// switch to status mode.
 		if m.statusModel != nil {
 			_ = m.statusModel.Close()
 			m.statusModel = nil
@@ -602,18 +508,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.browserModel.Init()
 
 	case embed.DoneMsg:
-		// DoneMsg routing depends on which wizard is live. The add
-		// wizard emits a *orchestration.Job on submit; the finish
-		// wizard emits a []*finish.Item whose IsEnabled flags the
-		// user toggled. Both emit nil on cancel. The init wizard
-		// emits a *planinit.Request; on submit the meta-panel
-		// launches `flow plan init` as a subprocess and waits for
-		// initCompletedMsg.
+		// Wizard payloads on submit: add → *orchestration.Job,
+		// finish → []*finish.Item, init → *planinit.Request.
+		// nil on cancel.
 		switch m.mode {
 		case modeInitWizard:
 			m.initWizardModel = nil
 			if msg.Result == nil {
-				// Cancel: return to browser.
 				m.mode = modeBrowser
 				return m, nil
 			}
@@ -630,7 +531,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Result != nil && m.statusModel != nil {
 				if job, ok := msg.Result.(*orchestration.Job); ok && job != nil {
 					if _, err := orchestration.AddJob(m.statusModel.Plan, job); err == nil {
-						// Kick off a refresh so the new job appears.
 						return m, func() tea.Msg { return status.RefreshMsg{} }
 					}
 				}
@@ -638,8 +538,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case modeFinishWizard:
 			m.finishWizardModel = nil
-			// Cancel path: Result is nil, return to status view
-			// without touching the plan.
 			if msg.Result == nil {
 				m.mode = modeStatus
 				return m, nil
@@ -649,10 +547,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeStatus
 				return m, nil
 			}
-			// Execute each enabled action sequentially, collecting
-			// per-item errors instead of dropping them. Errors are
-			// surfaced to the user via finishTransient so a failing
-			// step is visible rather than swallowed silently.
+			// Execute enabled actions sequentially, collecting errors.
 			var actionErrs []finishActionError
 			for _, item := range items {
 				if item == nil || !item.IsEnabled || item.Action == nil {
@@ -662,19 +557,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					actionErrs = append(actionErrs, finishActionError{itemTitle: item.Name, err: err})
 				}
 			}
-			// Mirror the CLI path: run the user's on_finish hook and
-			// clear the active-plan state regardless of whether any
-			// actions errored. Hook failures are surfaced alongside
-			// action errors.
+			// Run on_finish hook + clear active-plan state regardless
+			// of action errors.
 			plan := (*orchestration.Plan)(nil)
 			if m.statusModel != nil {
 				plan = m.statusModel.Plan
 			}
 			if plan != nil {
-				// Pass the plan slug (e.g. "my-feature") so hook
-				// templates that reference {{.PlanName}} receive the
-				// same value as the CLI path (filepath.Base(planPath))
-				// rather than the plan's absolute directory.
 				plan_finish.RunOnFinishHook(plan, plan.Name)
 			}
 			if err := state.Delete(groveplan.StateKey); err != nil {
@@ -683,17 +572,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = state.Delete(groveplan.LegacyStateKey)
 			}
 			m.finishTransient = formatFinishErrors(actionErrs)
-			// The active plan is either archived or marked finished
-			// at this point. Tear down the status model and switch
-			// back to the browser so the user sees the fresh plan
-			// list without the now-gone plan.
 			if m.statusModel != nil {
 				_ = m.statusModel.Close()
 				m.statusModel = nil
 			}
 			m.mode = modeBrowser
-			// Re-focus the browser and trigger a reload so the plan
-			// list reflects the cleanup.
 			updated, _ := m.browserModel.Update(embed.FocusMsg{})
 			if bm, ok := updated.(browser.Model); ok {
 				m.browserModel = bm
@@ -710,9 +593,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.finishTransient = ""
 		}
 
-		// Numeric tab jumps: 1=Jobs, 2=Add Job, 3=Plans, 4=Add Plan,
-		// 5=Finish Plan. Gated when a wizard text input has focus
-		// so digits don't get swallowed.
+		// Numeric tab jumps. Gated when a wizard text input has
+		// focus so typed digits aren't swallowed.
 		allowTabJump := true
 		switch m.mode {
 		case modeAddWizard:
@@ -738,55 +620,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.switchToMode(modeFinishWizard)
 			}
 		}
-		// Intercept `ctrl+f` in status mode to launch the finish
-		// wizard. `f` is bound to "view frontmatter" on the status
-		// sub-model, `F` is bound to "skills" (ViewSkillPane), and
-		// no other status single-letter key is mnemonic for
-		// "finish" — ctrl+f is unused across the flow TUI so it
-		// avoids shadowing any status binding.
-		// Match both lowercase and uppercase reporting of Ctrl+F.
-		// Some bubbletea + terminal combos report the chord as
-		// "ctrl+F" (the rune the SHIFT modifier produces) even when
-		// the user did not press shift; pass-2 testing showed
-		// "ctrl+f" being silently ignored as a result. Accept both
-		// so the binding is reachable from any terminal.
+		// Letter shortcuts (delegate to switchToMode for shared
+		// async-build path). ctrl+f reported as both "ctrl+f" and
+		// "ctrl+F" depending on terminal — accept both.
 		ks := msg.String()
-		if m.mode == modeStatus && (ks == "ctrl+f" || ks == "ctrl+F") && m.statusModel != nil {
-			plan := m.statusModel.Plan
-			if plan != nil {
-				// Delegate to the shared async switch path so
-				// ctrl+f behaves identically to pressing `4`.
-				return m.switchToMode(modeFinishWizard)
-			}
+		if m.mode == modeStatus && (ks == "ctrl+f" || ks == "ctrl+F") && m.statusModel != nil && m.statusModel.Plan != nil {
+			return m.switchToMode(modeFinishWizard)
 		}
-
-		// Intercept `n` in browser mode as a shortcut to the Add
-		// Plan tab (init wizard). Delegates to switchToMode so it
-		// shares the same async-build path as pressing `4`.
-		if m.mode == modeBrowser && msg.String() == "n" {
+		if m.mode == modeBrowser && ks == "n" {
 			return m.switchToMode(modeInitWizard)
 		}
-
-		// Intercept `a` in status mode to launch the add-job wizard.
-		// Delegates to the shared async switch path so `a` behaves
-		// identically to pressing `3`.
-		if m.mode == modeStatus && msg.String() == "a" && m.statusModel != nil {
-			if m.statusModel.Plan != nil {
-				return m.switchToMode(modeAddWizard)
-			}
+		if m.mode == modeStatus && ks == "a" && m.statusModel != nil && m.statusModel.Plan != nil {
+			return m.switchToMode(modeAddWizard)
 		}
 
-		// Intercept `esc` in status mode to pop back to the browser.
-		// All other keys route to the active sub-model.
-		if m.mode == modeStatus && msg.String() == "esc" {
+		// esc in status mode pops back to the browser.
+		if m.mode == modeStatus && ks == "esc" {
 			if m.statusModel != nil {
 				_ = m.statusModel.Close()
 				m.statusModel = nil
 			}
 			m.mode = modeBrowser
-			// Re-focus the browser and kick off a refresh so the plan
-			// list picks up any changes (status, worktree, etc.) made
-			// while the user was in status view.
 			updated, _ := m.browserModel.Update(embed.FocusMsg{})
 			if bm, ok := updated.(browser.Model); ok {
 				m.browserModel = bm
@@ -799,10 +653,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.updateActive(msg)
 }
 
-// formatFinishErrors renders a list of finishActionError entries as
-// a single status-bar line: the first entry's item and error, with a
-// "(+N more)" suffix if additional errors were collected. Returns an
-// empty string when there are no errors.
+// formatFinishErrors renders a list of action errors as one
+// status-bar line: first entry + "(+N more)" suffix if any.
 func formatFinishErrors(errs []finishActionError) string {
 	if len(errs) == 0 {
 		return ""
@@ -814,12 +666,8 @@ func formatFinishErrors(errs []finishActionError) string {
 	return fmt.Sprintf("finish: %s: %v (+%d more)", first.itemTitle, first.err, len(errs)-1)
 }
 
-// runInitSubprocess builds a `flow plan init` subprocess invocation
-// from the wizard's Request and returns a tea.Cmd that suspends the
-// bubbletea program via tea.ExecProcess while the subprocess runs.
-// The subprocess is allowed to do all the heavy disk I/O (worktree
-// creation, ecosystem bootstrap, editor invocations) without ever
-// blocking the TUI event loop.
+// runInitSubprocess shells out to `flow plan init` via tea.ExecProcess
+// so worktree creation / ecosystem bootstrap doesn't block the loop.
 func runInitSubprocess(req *planinit.Request) tea.Cmd {
 	args := []string{"plan", "init", req.Dir}
 	if req.Recipe != "" {
@@ -923,9 +771,6 @@ func (m Model) switchToMode(target mode) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(ensureCmd, c)
 
 	case modeAddWizard:
-		// Add wizard needs a plan to target. Same fallback as
-		// modeStatus: promote the browser's cursor-selected plan
-		// if we don't have one loaded yet.
 		if m.statusModel == nil {
 			_ = m.ensureStatusFromBrowser()
 		}
@@ -934,19 +779,12 @@ func (m Model) switchToMode(target mode) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeAddWizard
 		if m.wizardModel != nil || m.addWizardBuilding {
-			// Already built or already building — just switch the
-			// mode; the View will render the existing wizard or a
-			// "Loading wizard..." placeholder until addWizardReadyMsg
-			// lands.
 			return m, nil
 		}
 		return m, m.startAddWizardBuild(m.statusModel.Plan)
 
 	case modeInitWizard:
-		// Init wizard is a peer tab. No status model required — it
-		// creates a brand new plan. Construction runs orchestration.
-		// ListAllRecipes (subprocess!) and scans available models /
-		// config / workspace, so we push it off the event loop.
+		// Peer tab; no plan required.
 		m.mode = modeInitWizard
 		if m.initWizardModel != nil || m.initWizardBuilding {
 			return m, nil
@@ -954,10 +792,6 @@ func (m Model) switchToMode(target mode) (tea.Model, tea.Cmd) {
 		return m, m.startInitWizardBuild()
 
 	case modeFinishWizard:
-		// Finish wizard requires a BuildContext populated by running
-		// all Check closures (git / worktree / state probes). That is
-		// disk I/O so we defer it to a tea.Cmd and render a placeholder
-		// until finishWizardReadyMsg arrives.
 		if m.statusModel == nil {
 			_ = m.ensureStatusFromBrowser()
 		}
@@ -973,15 +807,10 @@ func (m Model) switchToMode(target mode) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// ensureStatusFromBrowser promotes the browser's cursor-selected
-// plan into a freshly-built status model when the meta-panel has
-// none yet. This is the fallback path for numeric tab jumps that
-// target Status / Add / Finish while the user is still on the
-// Browser tab and hasn't pressed Enter. Returns a tea.Cmd carrying
-// the new status model's Init + a focused WindowSizeMsg, or nil if
-// the browser has no plan under the cursor (list empty / still
-// loading). On success, m.statusModel is populated and m.mode is
-// NOT changed — the caller decides which mode to end up in.
+// ensureStatusFromBrowser builds a status model from the browser's
+// cursor-selected plan. Used when numeric jumps target Status/Add/
+// Finish before the user pressed Enter. m.mode is unchanged; the
+// caller decides which mode to end up in.
 func (m *Model) ensureStatusFromBrowser() tea.Cmd {
 	if m.statusModel != nil {
 		return nil
@@ -1205,6 +1034,12 @@ func (m Model) View() string {
 	}
 	if title != "" {
 		parts = append(parts, title)
+	} else if bar != "" {
+		// Modes without a dedicated title row (Jobs, whose status
+		// sub-model renders its own "Plan Status: X" header) still
+		// need a blank row between the tab bar and the body so the
+		// header isn't cramped right against the nav.
+		parts = append(parts, "")
 	}
 	parts = append(parts, body)
 	composed := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -1212,10 +1047,8 @@ func (m Model) View() string {
 	if m.finishTransient != "" {
 		composed = m.finishTransient + "\n" + composed
 	}
-	// Horizontal padding only — sub-models supply their own top
-	// margins. Matches cx/memory left-edge alignment without
-	// stacking redundant blank rows above the tab bar.
-	return lipgloss.NewStyle().Padding(0, 2).Render(composed)
+	// 1 row top margin, 0 bottom, 2 cols horizontal.
+	return lipgloss.NewStyle().Padding(1, 2, 0, 2).Render(composed)
 }
 
 // renderModeTitle returns a short heading rendered above the active
