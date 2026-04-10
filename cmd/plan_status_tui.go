@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -85,11 +86,24 @@ func (h statusTUIHost) Init() tea.Cmd {
 }
 
 func (h statusTUIHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case embed.DoneMsg, embed.CloseRequestMsg, embed.CloseConfirmMsg:
 		return h, tea.Quit
+
+	case embed.EditRequestMsg:
+		// Standalone CLI: translate to tea.ExecProcess so $EDITOR
+		// runs in the user's terminal. In groveterm this message is
+		// caught by the terminal host's WrapPanelCmd instead.
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vi"
+		}
+		c := exec.Command(editor, msg.Path)
+		return h, tea.ExecProcess(c, func(err error) tea.Msg {
+			return embed.EditFinishedMsg{Err: err}
+		})
 	}
-	// Swallow any BrowserPlanSelectedMsg is handled inside view.Model
+	// BrowserPlanSelectedMsg is handled inside view.Model
 	// already; nothing else to intercept here.
 	updated, cmd := h.model.Update(msg)
 	if vm, ok := updated.(view.Model); ok {
