@@ -192,9 +192,6 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}
 	}
 
-	// Note: SkipInteractive flag controls whether to prompt for user input during execution,
-	// not whether to run interactive_agent jobs. Interactive agents launch in tmux regardless.
-
 	// Load config to get agent settings
 	coreCfg, err := config.LoadFrom(".")
 	if err != nil {
@@ -211,16 +208,26 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		providerName = flowCfg.InteractiveProvider
 	}
 
+	// Check if groveterm is connected — if so, use native pane provider instead of tmux.
 	var provider InteractiveAgentProvider
-	switch providerName {
-	case "codex":
-		provider = NewCodexAgentProvider()
-	case "claude":
-		provider = NewClaudeAgentProvider()
-	case "opencode":
-		provider = NewOpencodeAgentProvider()
-	default:
-		return fmt.Errorf("unknown interactive_agent provider: '%s'", providerName)
+	daemonClient := daemon.NewWithAutoStart()
+	connected, _ := daemonClient.IsTerminalConnected(ctx)
+	daemonClient.Close()
+
+	if connected {
+		provider = NewGrovetermAgentProvider(providerName, true)
+	} else {
+		// Fallback to legacy tmux-based providers
+		switch providerName {
+		case "codex":
+			provider = NewCodexAgentProvider()
+		case "claude":
+			provider = NewClaudeAgentProvider()
+		case "opencode":
+			provider = NewOpencodeAgentProvider()
+		default:
+			return fmt.Errorf("unknown interactive_agent provider: '%s'", providerName)
+		}
 	}
 
 	// Get agent args for the selected provider

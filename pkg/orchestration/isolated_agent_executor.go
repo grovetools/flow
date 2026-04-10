@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/agentlogs/pkg/agentstream"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
@@ -186,7 +187,25 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 	}
 
-	// Launch the agent in an isolated tmux server
+	// Check if groveterm is connected — if so, use native pane provider instead of tmux.
+	daemonClient := daemon.NewWithAutoStart()
+	connected, _ := daemonClient.IsTerminalConnected(ctx)
+	daemonClient.Close()
+
+	if connected {
+		// Isolated agents launch silently into the groveterm icon rail (autoSplit=false)
+		provider := NewGrovetermAgentProvider(providerName, false)
+		provider.extraEnv = map[string]string{"GROVE_FLOW_ISOLATED": "true"}
+
+		// For isolated agents, inject --dangerously-skip-permissions for claude
+		if providerName == "claude" {
+			agentArgs = append([]string{"--dangerously-skip-permissions"}, agentArgs...)
+		}
+
+		return provider.Launch(ctx, job, plan, workDir, agentArgs, briefingFilePath)
+	}
+
+	// Fallback: launch the agent in an isolated tmux server
 	return e.launchIsolatedAgent(ctx, job, plan, workDir, providerName, agentArgs, briefingFilePath)
 }
 
