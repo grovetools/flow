@@ -494,7 +494,7 @@ func (m Model) renderFocusDetailPrimary(contentWidth int, paneContent string, ch
 		case BriefingPane:
 			paneTitle = "Briefing"
 		case EditPane:
-			paneTitle = "Edit"
+			paneTitle = "Preview"
 		case SkillPane:
 			paneTitle = "Skills"
 		}
