@@ -17,6 +17,7 @@ import (
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/plan_finish"
@@ -195,7 +196,7 @@ func New(cfg Config) Model {
 	if m.mode == modeStatus {
 		startTab = tabJobs
 	}
-	pg := pager.NewAt(pages, pager.DefaultKeyMap(), startTab)
+	pg := pager.NewAt(pages, pager.KeyMapFromBase(keymap.NewBase()), startTab)
 	pg.SetConfig(pager.Config{
 		OuterPadding: [4]int{1, 2, 0, 2},
 		ShowTitleRow: true,
