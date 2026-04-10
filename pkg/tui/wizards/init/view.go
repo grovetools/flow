@@ -50,9 +50,6 @@ func (m Model) View() string {
 func (m Model) renderMainScreen() string {
 	var b strings.Builder
 
-	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render("󰠡 Create New Plan"))
-	b.WriteString("\n")
-
 	borderStyle := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultColors.Border).

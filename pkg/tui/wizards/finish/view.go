@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/grovetools/core/tui/components"
 	"github.com/grovetools/core/tui/theme"
 )
 
@@ -23,7 +22,8 @@ func (m Model) View() string {
 	var b strings.Builder
 
 	// Header.
-	b.WriteString(components.RenderHeader("Finishing plan: " + m.planName))
+	b.WriteString("\n")
+	b.WriteString("Plan location: " + m.planName)
 	b.WriteString("\n")
 
 	// Branch merge status banner.

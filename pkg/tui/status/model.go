@@ -439,29 +439,23 @@ func (m Model) Init() tea.Cmd {
 // This constant is duplicated here to avoid import cycles with cmd package.
 const RollingPlanName = "rolling"
 
-// renderFocusJobs renders the top (or left) pane containing the plan header and jobs list.
-func (m Model) renderFocusJobs(contentWidth int) string {
-	// 1. Create Header
-	headerLabel := theme.DefaultTheme.Bold.Render(theme.IconPlan + " Plan Status: ")
-	var planName string
+// PlanTitle returns the styled plan name for use as a pager title row.
+// Exported so the view meta-panel's page adapter can surface it via
+// PageWithTitle without duplicating the rolling-plan logic.
+func (m Model) PlanTitle() string {
+	label := theme.IconPlan + " Plan Status: "
 	if m.Plan.Name == RollingPlanName {
-		// Style the rolling plan name with parens and dim styling, plus a description
-		planName = theme.DefaultTheme.Muted.Render("(rolling)") + "  " + theme.DefaultTheme.Muted.Italic(true).Render("auto-created for quick tasks")
-	} else {
-		planName = theme.DefaultTheme.Bold.Render(m.Plan.Name)
+		return label + theme.DefaultTheme.Muted.Render("(rolling)") + "  " + theme.DefaultTheme.Muted.Italic(true).Render("auto-created for quick tasks")
 	}
-	headerText := headerLabel + planName
-	styledHeader := lipgloss.NewStyle().
-		Background(theme.DefaultTheme.Header.GetBackground()).
-		Align(lipgloss.Left).
-		Width(contentWidth).
-		MarginBottom(1).
-		Render(headerText)
+	return label + m.Plan.Name
+}
 
-	// 2. Render Main Content (Table view only)
+// renderFocusJobs renders the top (or left) pane containing the jobs list.
+func (m Model) renderFocusJobs(contentWidth int) string {
+	// 1. Render Main Content (Table view only)
 	mainContent := m.renderTableViewWithWidth(contentWidth)
 
-	// 3. Add scroll indicators
+	// 2. Add scroll indicators
 	scrollIndicator := ""
 	if len(m.Jobs) > 0 {
 		visibleLines := m.getVisibleJobCount()
@@ -480,7 +474,7 @@ func (m Model) renderFocusJobs(contentWidth int) string {
 		}
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, styledHeader, mainContent, scrollIndicator)
+	return lipgloss.JoinVertical(lipgloss.Left, mainContent, scrollIndicator)
 }
 
 // renderFocusDetailPrimary renders the bottom (or right) pane containing the detail view.
