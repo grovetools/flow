@@ -507,22 +507,34 @@ func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 	return contextFiles, nil
 }
 
-// SendInputToIsolatedAgent sends input text to an isolated agent via tmux send-keys.
-// Uses a sequence that works in both vim mode and normal mode in claude code:
-// 1. Escape i <text> - ensures we're in insert mode (Escape is no-op in normal mode)
-// 2. C-Enter - submits the input (must be separate send-keys call)
+// SendInputToIsolatedAgent sends input text to an isolated agent.
+// Tries the daemon's native agent pane input API first (groveterm), falls back to tmux.
 func SendInputToIsolatedAgent(jobID, input string) error {
+	// Try daemon API first.
+	ctx := context.Background()
+	daemonClient := daemon.NewWithAutoStart()
+	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+		// Isolated agents always use vim mode for Claude.
+		payload := "\x1bi" + input + "\r"
+		err := daemonClient.SendAgentInput(ctx, jobID, payload)
+		daemonClient.Close()
+		if err == nil {
+			return nil
+		}
+	} else {
+		daemonClient.Close()
+	}
+
+	// Fallback: tmux send-keys on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
 	targetPane := TmuxTargetPane(jobID)
 
 	executor := &exec.RealCommandExecutor{}
 
-	// First: Escape to ensure clean state, i to enter insert mode, then the text
 	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "Escape", "i", input); err != nil {
 		return err
 	}
 
-	// Second: C-Enter to submit (must be separate call)
 	return executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "C-Enter")
 }
 
@@ -535,7 +547,22 @@ func KillIsolatedAgentServer(jobID string) error {
 }
 
 // SendInterruptToIsolatedAgent sends Ctrl+C to interrupt an isolated agent.
+// Tries the daemon's native agent pane input API first (groveterm), falls back to tmux.
 func SendInterruptToIsolatedAgent(jobID string) error {
+	// Try daemon API first.
+	ctx := context.Background()
+	daemonClient := daemon.NewWithAutoStart()
+	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+		err := daemonClient.SendAgentInput(ctx, jobID, "\x03")
+		daemonClient.Close()
+		if err == nil {
+			return nil
+		}
+	} else {
+		daemonClient.Close()
+	}
+
+	// Fallback: tmux send-keys C-c on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
 	targetPane := TmuxTargetPane(jobID)
 
@@ -544,7 +571,22 @@ func SendInterruptToIsolatedAgent(jobID string) error {
 }
 
 // CaptureIsolatedAgentOutput captures the visible output from an isolated agent's pane.
+// Tries the daemon's native agent pane capture API first (groveterm), falls back to tmux.
 func CaptureIsolatedAgentOutput(jobID string) (string, error) {
+	// Try daemon API first.
+	ctx := context.Background()
+	daemonClient := daemon.NewWithAutoStart()
+	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+		result, err := daemonClient.CaptureAgentPane(ctx, jobID)
+		daemonClient.Close()
+		if err == nil {
+			return result, nil
+		}
+	} else {
+		daemonClient.Close()
+	}
+
+	// Fallback: tmux capture-pane on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
 	targetPane := TmuxTargetPane(jobID)
 
@@ -557,8 +599,28 @@ func CaptureIsolatedAgentOutput(jobID string) (string, error) {
 	return string(output), nil
 }
 
-// IsIsolatedAgentRunning checks if an isolated agent's tmux server is still running.
+// IsIsolatedAgentRunning checks if an isolated agent is still running.
+// Tries the daemon's session store first (groveterm), falls back to tmux list-sessions.
 func IsIsolatedAgentRunning(jobID string) bool {
+	// Try daemon API first — check if a running session exists for this job.
+	ctx := context.Background()
+	daemonClient := daemon.NewWithAutoStart()
+	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+		sessions, err := daemonClient.GetSessions(ctx)
+		daemonClient.Close()
+		if err == nil {
+			for _, s := range sessions {
+				if s.ID == jobID && (s.Status == "running" || s.Status == "idle") {
+					return true
+				}
+			}
+			// Session not found or not running — could be a race, fall through to tmux.
+		}
+	} else {
+		daemonClient.Close()
+	}
+
+	// Fallback: tmux list-sessions on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
 	cmd := tmux.Command("-L", socketName, "list-sessions")
 	err := cmd.Run()

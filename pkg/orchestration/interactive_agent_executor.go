@@ -1206,16 +1206,28 @@ func ResolveInteractiveAgentPane(plan *Plan, job *Job) (string, error) {
 }
 
 // CaptureInteractiveAgentOutput captures the visible output from an interactive agent's pane.
-// Unlike isolated agents which use a dedicated tmux socket, interactive agents run in the
-// project's tmux session on the default tmux server.
+// Tries the daemon's native agent pane capture API first (groveterm), falls back to tmux.
 func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
-	// Determine the working directory (worktree-aware)
+	// Try daemon API first — works when agent runs in a native groveterm pane.
+	ctx := context.Background()
+	daemonClient := daemon.NewWithAutoStart()
+	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+		result, err := daemonClient.CaptureAgentPane(ctx, job.ID)
+		daemonClient.Close()
+		if err == nil {
+			return result, nil
+		}
+		// Daemon capture failed — fall through to tmux.
+	} else {
+		daemonClient.Close()
+	}
+
+	// Fallback: tmux capture-pane on the project's tmux session.
 	workDir, err := DetermineWorkingDirectory(plan, job)
 	if err != nil {
 		return "", fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Resolve project info for session naming using the working directory
 	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve project for session naming: %w", err)
@@ -1225,29 +1237,41 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	// Use the tmux Client to ensure correct server targeting.
-	// This avoids inheriting the TMUX env var which may point to a different
-	// tmux server (e.g., when the daemon runs on tmux -L groved).
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {
 		return "", fmt.Errorf("tmux not available: %w", err)
 	}
 
-	return tmuxClient.CapturePane(context.Background(), targetPane)
+	return tmuxClient.CapturePane(ctx, targetPane)
 }
 
-// SendInputToInteractiveAgent sends input text to an interactive agent via tmux send-keys.
-// Uses the tmux Client to ensure correct server targeting regardless of which tmux server
-// the calling process runs on.
-// Uses the same key sequence as isolated agents that works in both vim mode and normal mode.
+// SendInputToInteractiveAgent sends input text to an interactive agent.
+// Tries the daemon's native agent pane input API first (groveterm), falls back to tmux.
 func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
-	// Determine the working directory (worktree-aware)
+	ctx := context.Background()
+
+	// Try daemon API first — works when agent runs in a native groveterm pane.
+	daemonClient := daemon.NewWithAutoStart()
+	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+		// Build the payload with vim-mode handling and submit key.
+		workDir, _ := DetermineWorkingDirectory(plan, job)
+		payload := buildAgentInputPayload(workDir, input)
+		err := daemonClient.SendAgentInput(ctx, job.ID, payload)
+		daemonClient.Close()
+		if err == nil {
+			return nil
+		}
+		// Daemon send failed — fall through to tmux.
+	} else {
+		daemonClient.Close()
+	}
+
+	// Fallback: tmux send-keys on the project's tmux session.
 	workDir, err := DetermineWorkingDirectory(plan, job)
 	if err != nil {
 		return fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Resolve project info for session naming using the working directory
 	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve project for session naming: %w", err)
@@ -1257,7 +1281,41 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	// Read flow config for input_mode
+	inputMode := resolveInputMode(workDir)
+
+	tmuxClient, err := tmux.NewClient()
+	if err != nil {
+		return fmt.Errorf("tmux not available: %w", err)
+	}
+
+	if inputMode == "vim" {
+		if err := tmuxClient.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
+			return fmt.Errorf("failed to send input text: %w", err)
+		}
+	} else {
+		if err := tmuxClient.SendKeys(ctx, targetPane, input); err != nil {
+			return fmt.Errorf("failed to send input text: %w", err)
+		}
+	}
+
+	if err := tmuxClient.SendKeys(ctx, targetPane, "C-m"); err != nil {
+		return fmt.Errorf("failed to send submit key: %w", err)
+	}
+
+	return nil
+}
+
+// buildAgentInputPayload constructs the input string with vim-mode handling and trailing CR.
+func buildAgentInputPayload(workDir, input string) string {
+	inputMode := resolveInputMode(workDir)
+	if inputMode == "vim" {
+		return "\x1bi" + input + "\r"
+	}
+	return input + "\r"
+}
+
+// resolveInputMode reads the flow config to determine the input mode for the provider.
+func resolveInputMode(workDir string) string {
 	coreCfg, cfgErr := config.LoadFrom(workDir)
 	if cfgErr != nil {
 		coreCfg = &config.Config{}
@@ -1273,45 +1331,32 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	if providerCfg, ok := flowCfg.Providers[providerName]; ok && providerCfg.InputMode != "" {
 		inputMode = providerCfg.InputMode
 	}
-
-	// Use the tmux Client to ensure correct server targeting.
-	tmuxClient, err := tmux.NewClient()
-	if err != nil {
-		return fmt.Errorf("tmux not available: %w", err)
-	}
-
-	ctx := context.Background()
-
-	// Handle input mode: vim requires Escape+i to enter insert mode first
-	if inputMode == "vim" {
-		if err := tmuxClient.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
-			return fmt.Errorf("failed to send input text: %w", err)
-		}
-	} else {
-		// Standard mode: just send the text directly
-		if err := tmuxClient.SendKeys(ctx, targetPane, input); err != nil {
-			return fmt.Errorf("failed to send input text: %w", err)
-		}
-	}
-
-	// Second: C-Enter to submit (must be separate call)
-	if err := tmuxClient.SendKeys(ctx, targetPane, "C-m"); err != nil {
-		return fmt.Errorf("failed to send submit key: %w", err)
-	}
-
-	return nil
+	return inputMode
 }
 
 // SendInterruptToInteractiveAgent sends Ctrl+C to interrupt an interactive agent.
-// Uses the tmux Client to ensure correct server targeting.
+// Tries the daemon's native agent pane input API first (groveterm), falls back to tmux.
 func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
-	// Determine the working directory (worktree-aware)
+	ctx := context.Background()
+
+	// Try daemon API first — send Ctrl+C via native pane.
+	daemonClient := daemon.NewWithAutoStart()
+	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+		err := daemonClient.SendAgentInput(ctx, job.ID, "\x03")
+		daemonClient.Close()
+		if err == nil {
+			return nil
+		}
+	} else {
+		daemonClient.Close()
+	}
+
+	// Fallback: tmux send-keys C-c.
 	workDir, err := DetermineWorkingDirectory(plan, job)
 	if err != nil {
 		return fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Resolve project info for session naming using the working directory
 	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve project for session naming: %w", err)
@@ -1321,12 +1366,10 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	// Use the tmux Client to ensure correct server targeting.
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {
 		return fmt.Errorf("tmux not available: %w", err)
 	}
 
-	// Send Ctrl+C to interrupt the agent
-	return tmuxClient.SendKeys(context.Background(), targetPane, "C-c")
+	return tmuxClient.SendKeys(ctx, targetPane, "C-c")
 }
