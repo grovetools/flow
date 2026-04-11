@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/compositor"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/components/logviewer"
@@ -57,14 +58,19 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	}
 	opts = append(opts, tea.WithOutput(os.Stderr))
 
-	program := tea.NewProgram(host, opts...)
+	compModel := compositor.NewModel(host)
+	program := tea.NewProgram(compModel, opts...)
 
 	streamWriter := logviewer.NewStreamWriter(program, "System")
 	logging.SetGlobalOutput(streamWriter)
 	defer logging.SetGlobalOutput(os.Stderr)
 
-	if _, err := program.Run(); err != nil {
+	finalModel, err := program.Run()
+	if err != nil {
 		return fmt.Errorf("error running status TUI: %w", err)
+	}
+	if cm, ok := finalModel.(*compositor.Model); ok {
+		cm.Free()
 	}
 	return nil
 }

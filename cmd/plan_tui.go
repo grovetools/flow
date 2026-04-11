@@ -5,6 +5,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/compositor"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
@@ -84,9 +85,14 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 	})
 
 	host := newStandalonePlanTUIHost(model)
-	program := tea.NewProgram(host, tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
+	compModel := compositor.NewModel(host)
+	program := tea.NewProgram(compModel, tea.WithAltScreen())
+	finalModel, err := program.Run()
+	if err != nil {
 		return fmt.Errorf("error running plan list TUI: %w", err)
+	}
+	if cm, ok := finalModel.(*compositor.Model); ok {
+		cm.Free()
 	}
 	return nil
 }
