@@ -954,7 +954,7 @@ func doArchiveJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {
 	}
 }
 
-func editJob(job *orchestration.Job) tea.Cmd {
+func editJob(job *orchestration.Job, hosted bool) tea.Cmd {
 	// If running inside Neovim plugin, signal to quit and let plugin handle editing
 	if os.Getenv("GROVE_NVIM_PLUGIN") == "true" {
 		return func() tea.Msg {
@@ -989,9 +989,16 @@ func editJob(job *orchestration.Job) tea.Cmd {
 		}
 	}
 
-	// Embedded/standalone: emit embed.EditRequestMsg. groveterm intercepts
-	// this to spawn an ephemeral in-pane editor; standalone flow's
-	// StandaloneHost translates it into tea.ExecProcess transparently.
+	// Hosted in groveterm: emit SplitEditorRequestMsg so the host creates a
+	// BSP split with neovim alongside the plan panel.
+	if hosted {
+		return func() tea.Msg {
+			return embed.SplitEditorRequestMsg{Path: job.FilePath}
+		}
+	}
+
+	// Standalone: emit embed.EditRequestMsg. StandaloneHost translates it
+	// into tea.ExecProcess transparently.
 	return func() tea.Msg {
 		return embed.EditRequestMsg{Path: job.FilePath}
 	}

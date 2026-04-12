@@ -584,6 +584,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshSkillPane()
 		return m, refreshPlan(m.PlanDir)
 
+	case embed.SplitEditorClosedMsg:
+		m.StatusSummary = theme.DefaultTheme.Success.Render("Editor closed")
+		m.refreshSkillPane()
+		return m, refreshPlan(m.PlanDir)
+
 	case IsolatedAgentInputSentMsg:
 		// Handle response from sending input to isolated agent
 		if msg.Err != nil {
@@ -1587,7 +1592,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.Edit), key.Matches(msg, m.KeyMap.Confirm):
 			if m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
-				return m, editJob(job)
+				return m, editJob(job, m.Hosted)
 			}
 
 		case key.Matches(msg, m.KeyMap.CopyPath):
