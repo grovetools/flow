@@ -866,54 +866,9 @@ func (m Model) View() string {
 	parts = append(parts, footer)
 
 	finalView := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	return lipgloss.NewStyle().Margin(0, 2).Render(finalView)
-}
+	result := lipgloss.NewStyle().Margin(0, 2).Render(finalView)
 
-// calculateOptimalLogHeight calculates the log viewer height for horizontal split
-// It prioritizes log visibility while ensuring jobs section remains usable
-func (m *Model) calculateOptimalLogHeight() int {
-	// Total chrome height
-	chromeLines := topMargin + headerHeight + footerHeight + horizontalDividerHeight
-
-	// Total available for content (jobs list + log content)
-	availableHeight := m.Height - chromeLines
-	if availableHeight < 10 {
-		availableHeight = 10 // Ensure some minimum
-	}
-
-	// Calculate minimum jobs section height (table chrome + minimum visible rows)
-	minJobsHeight := 4 // Table headers and borders
-
-	// Add minimum visible job rows (ensure at least 5-8 jobs are visible)
-	minVisibleJobs := 5
-	if len(m.Jobs) > 8 {
-		minVisibleJobs = 8 // Show fewer jobs to give logs more space
-	}
-	if len(m.Jobs) < minVisibleJobs {
-		minVisibleJobs = len(m.Jobs) // Don't exceed actual job count
-	}
-	minJobsHeight += minVisibleJobs
-
-	// Add scroll indicator if needed
-	if len(m.Jobs) > minVisibleJobs {
-		minJobsHeight += 1 // Scroll indicator line
-	}
-
-	// Give logs most of the available space, but ensure jobs get their minimum
-	logHeight := availableHeight - minJobsHeight - 4 // Reserve 4 lines buffer
-
-	// Ensure jobs section has minimum space
-	if availableHeight - logHeight < minJobsHeight {
-		// Not enough room for both, give jobs minimum and logs get the rest
-		logHeight = availableHeight - minJobsHeight
-	}
-
-	// Ensure logs get at least some reasonable space
-	if logHeight < 8 {
-		logHeight = 8 // Absolute minimum for logs
-	}
-
-	return logHeight
+	return result
 }
 
 // calculateFocusJobsWidth calculates the optimal width for the jobs pane
@@ -1011,59 +966,38 @@ func (m *Model) calculateFocusJobsWidth() int {
 	return totalWidth
 }
 
-// updateLayoutDimensions centralizes the logic for calculating pane sizes.
+// updateLayoutDimensions recalculates pane sizes by redistributing
+// through the Manager so viewport widths always match what renderPaneContent
+// will constrain to. This prevents the scrollbar overlay (█) from wrapping
+// to its own line when content is pre-wrapped to a different width.
 func (m *Model) updateLayoutDimensions() {
 	if m.LogSplitVertical {
-		m.FocusJobsWidth = m.calculateFocusJobsWidth()
-		if m.Width < m.FocusJobsWidth+minLogsWidth+verticalSeparatorWidth {
+		fjw := m.calculateFocusJobsWidth()
+		if m.Width < fjw+minLogsWidth+verticalSeparatorWidth {
 			m.LogSplitVertical = false
+			m.Manager.Direction = panes.DirectionVertical
 			m.StatusSummary = theme.DefaultTheme.Muted.Render("Switched to horizontal split (terminal too narrow)")
 		}
 	}
 
-	if m.ShowLogs {
-		// Calculate chat input height based on what's actually shown
-		isAgentWithInput := m.ActiveLogJob != nil &&
-			(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
-				m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
-		jobIsCompleted := m.ActiveLogJob != nil && m.ActiveLogJob.Status == orchestration.JobStatusCompleted
-		chatInputHeight := 0
-		if isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail && !jobIsCompleted {
-			chatInputHeight = 3
-			// Add height for status bar if it's visible (no border, just content)
-			if m.CurrentAgentStatus != nil {
-				statusBarHeight := 1
-				if len(m.CurrentAgentStatus.TodoItems) > 0 {
-					statusBarHeight += len(m.CurrentAgentStatus.TodoItems)
-				}
-				chatInputHeight += statusBarHeight
-			}
-		}
-
-		if m.LogPaneFullscreen {
-			// Fullscreen: use full terminal dimensions minus margins
-			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
-			m.LogViewerHeight = m.Height - (footerHeight + topMargin + chatInputHeight)
-		} else if m.LogSplitVertical {
-			// In vertical split, the container has PaddingLeft(1) and PaddingRight(1)
-			// So the content width is LogViewerWidth - 2
-			// The header is inside the jobs pane, not separate, so don't subtract headerHeight
-			m.LogViewerWidth = m.Width - m.FocusJobsWidth - verticalSeparatorWidth - 2
-			m.LogViewerHeight = m.Height - (footerHeight + topMargin + chatInputHeight)
-		} else {
-			// In horizontal split, only PaddingLeft(1) is applied
-			m.LogViewerWidth = m.Width - (leftMargin + rightMargin) - 1
-			m.LogViewerHeight = m.calculateOptimalLogHeight() - chatInputHeight
-		}
-
-		// Ensure minimum dimensions
-		if m.LogViewerHeight < 8 { // Increased minimum height for usability
-			m.LogViewerHeight = 8
-		}
-		if m.LogViewerWidth < 20 {
-			m.LogViewerWidth = 20
-		}
+	if !m.ShowLogs {
+		return
 	}
+
+	// Update the Manager's pane layout (Fixed/Flex) from current state,
+	// then redistribute dimensions so inner models get accurate sizes.
+	m.syncPaneLayout()
+	chatInputHeight := m.calculateChatInputHeight()
+	contentWidth := m.Width - (leftMargin + rightMargin)
+	if contentWidth < 40 {
+		contentWidth = 40
+	}
+	mgrMsg := tea.WindowSizeMsg{
+		Width:  contentWidth,
+		Height: m.Height - footerHeight - chatInputHeight,
+	}
+	m.Manager, _ = m.Manager.Update(mgrMsg)
+	m.syncLayoutFromManager()
 }
 
 // getVisibleJobCount returns how many jobs can be displayed in the viewport
@@ -1097,12 +1031,6 @@ func (m *Model) getVisibleJobCount() int {
 }
 
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
 // adjustScrollOffset ensures the cursor is visible within the viewport
 func (m *Model) adjustScrollOffset() {
