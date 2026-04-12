@@ -45,6 +45,7 @@ type FlowProviderConfig struct {
 // FlowConfig holds the flow extension configuration from grove.toml.
 type FlowConfig struct {
 	InteractiveProvider string                          `yaml:"interactive_provider,omitempty"`
+	AgentRenderer       string                          `yaml:"agent_renderer,omitempty"` // "auto", "native", or "tmux"
 	Providers           map[string]FlowProviderConfig   `yaml:"providers"`
 }
 
@@ -208,14 +209,29 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		providerName = flowCfg.InteractiveProvider
 	}
 
-	// Check if groveterm is connected — if so, use native pane provider instead of tmux.
+	// Determine agent renderer: "auto" (default), "native", or "tmux"
 	var provider InteractiveAgentProvider
 	daemonClient := daemon.NewWithAutoStart()
 	connected, _ := daemonClient.IsTerminalConnected(ctx)
 	daemonClient.Close()
 
-	insideGroveterm := os.Getenv("GROVE_TERMINAL") == "1"
-	if connected && insideGroveterm {
+	renderer := "auto"
+	if flowCfg.AgentRenderer != "" {
+		renderer = flowCfg.AgentRenderer
+	}
+
+	useNative := false
+	switch renderer {
+	case "native":
+		useNative = true
+	case "tmux":
+		useNative = false
+	default:
+		// "auto": use native pane if groveterm is connected
+		useNative = connected
+	}
+
+	if useNative {
 		provider = NewGrovetermAgentProvider(providerName, false)
 	} else {
 		// Fallback to legacy tmux-based providers

@@ -151,6 +151,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	}
 	type flowConfig struct {
 		InteractiveProvider string                        `yaml:"interactive_provider,omitempty"`
+		AgentRenderer       string                        `yaml:"agent_renderer,omitempty"` // "auto", "native", or "tmux"
 		Providers           map[string]flowProviderConfig `yaml:"providers"`
 	}
 	var flowCfg flowConfig
@@ -187,13 +188,28 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 	}
 
-	// Check if groveterm is connected — if so, use native pane provider instead of tmux.
+	// Determine agent renderer: "auto" (default), "native", or "tmux"
 	daemonClient := daemon.NewWithAutoStart()
 	connected, _ := daemonClient.IsTerminalConnected(ctx)
 	daemonClient.Close()
 
-	insideGroveterm := os.Getenv("GROVE_TERMINAL") == "1"
-	if connected && insideGroveterm {
+	renderer := "auto"
+	if flowCfg.AgentRenderer != "" {
+		renderer = flowCfg.AgentRenderer
+	}
+
+	useNative := false
+	switch renderer {
+	case "native":
+		useNative = true
+	case "tmux":
+		useNative = false
+	default:
+		// "auto": use native pane if groveterm is connected
+		useNative = connected
+	}
+
+	if useNative {
 		// Isolated agents launch silently into the groveterm icon rail (autoSplit=false)
 		provider := NewGrovetermAgentProvider(providerName, false)
 		provider.extraEnv = map[string]string{"GROVE_FLOW_ISOLATED": "true"}
