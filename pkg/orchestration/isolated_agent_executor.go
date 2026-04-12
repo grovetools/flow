@@ -192,7 +192,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	connected, _ := daemonClient.IsTerminalConnected(ctx)
 	daemonClient.Close()
 
-	if connected && os.Getenv("TMUX") == "" {
+	if connected {
 		// Isolated agents launch silently into the groveterm icon rail (autoSplit=false)
 		provider := NewGrovetermAgentProvider(providerName, false)
 		provider.extraEnv = map[string]string{"GROVE_FLOW_ISOLATED": "true"}

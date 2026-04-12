@@ -144,7 +144,7 @@ func (p *GrovetermAgentProvider) buildCommand(agentArgs []string, briefingFilePa
 	switch p.providerName {
 	case "claude":
 		args := append([]string{}, agentArgs...)
-		args = append(args, "-p", instruction)
+		args = append(args, instruction)
 		return "claude", args
 	case "codex":
 		args := append([]string{}, agentArgs...)
