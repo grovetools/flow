@@ -76,14 +76,10 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 		p.log.Info("Session intent registered successfully")
 	}
 
-	// Build the command and args for the agent CLI
-	command, args := p.buildCommand(agentArgs, briefingFilePath)
+	// Build the full agent command string (already shell-quoted).
+	rawCommand := p.buildCommand(agentArgs, briefingFilePath)
 
-	// Wrap with agentstream to capture PID via deterministic pidfile
-	rawCommand := command
-	if len(args) > 0 {
-		rawCommand += " " + strings.Join(args, " ")
-	}
+	// Wrap with agentstream to capture PID via deterministic pidfile.
 	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
 
 	// Build environment variables for the agent pane
@@ -268,29 +264,24 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	return nil
 }
 
-// buildCommand constructs the command and args for the agent CLI based on the provider.
+// buildCommand constructs the full shell command string for the agent CLI.
+// The instruction is double-quoted so the shell preserves it as a single argument,
+// matching the quoting strategy used by ClaudeAgentProvider.buildAgentCommand
+// for tmux-based interactive agents.
 // agentArgs comes from grove.toml (may include --dangerously-skip-permissions, etc.).
-func (p *GrovetermAgentProvider) buildCommand(agentArgs []string, briefingFilePath string) (string, []string) {
+func (p *GrovetermAgentProvider) buildCommand(agentArgs []string, briefingFilePath string) string {
 	escapedPath := "'" + strings.ReplaceAll(briefingFilePath, "'", "'\\''") + "'"
 	instruction := fmt.Sprintf("Read the briefing file at %s and execute the task.", escapedPath)
 
+	// Build command parts: binary + agentArgs
+	cmdParts := []string{p.providerName}
+	cmdParts = append(cmdParts, agentArgs...)
+
 	switch p.providerName {
-	case "claude":
-		args := append([]string{}, agentArgs...)
-		args = append(args, instruction)
-		return "claude", args
-	case "codex":
-		args := append([]string{}, agentArgs...)
-		args = append(args, instruction)
-		return "codex", args
 	case "opencode":
-		args := append([]string{}, agentArgs...)
-		args = append(args, "--prompt", instruction)
-		return "opencode", args
+		return fmt.Sprintf("%s --prompt \"%s\"", strings.Join(cmdParts, " "), instruction)
 	default:
-		// Fallback: treat providerName as the command itself
-		args := append([]string{}, agentArgs...)
-		args = append(args, instruction)
-		return p.providerName, args
+		// claude, codex, and any other provider: instruction as last positional arg
+		return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), instruction)
 	}
 }
