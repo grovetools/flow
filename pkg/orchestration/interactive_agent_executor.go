@@ -216,7 +216,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 
 	insideGroveterm := os.Getenv("GROVE_TERMINAL") == "1"
 	if connected && insideGroveterm {
-		provider = NewGrovetermAgentProvider(providerName, true)
+		provider = NewGrovetermAgentProvider(providerName, false)
 	} else {
 		// Fallback to legacy tmux-based providers
 		switch providerName {

@@ -60,6 +60,7 @@ const (
 	BriefingPane
 	EditPane
 	SkillPane
+	NativeAgentPaneDetail
 )
 
 // Model represents the state of the TUI
@@ -180,6 +181,10 @@ type Model struct {
 
 	// DaemonConnected is true when streaming real-time updates from the daemon
 	DaemonConnected bool
+
+	// Hosted is true when running inside groveterm. Enables the native agent
+	// pane preview feature (p key).
+	Hosted bool
 }
 
 // IsTextEntryActive returns true when the user is focused on a text input,
@@ -207,6 +212,10 @@ type Config struct {
 	// LogSplitVertical sets the initial orientation of the log pane split.
 	// If false, the orientation is loaded from persisted tuiState.
 	LogSplitVertical bool
+	// Hosted is true when the TUI is embedded inside groveterm. When true,
+	// the 'p' key emits SplitAgentRequestMsg to preview native agent PTY
+	// panes alongside the plan. When false, the key shows a warning.
+	Hosted bool
 }
 
 // New creates a new Model from the given Config.
@@ -350,6 +359,7 @@ func New(cfg Config) Model {
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
 		DaemonClient:             daemonClient,
+		Hosted:                   cfg.Hosted,
 	}
 }
 
@@ -738,7 +748,14 @@ func (m Model) View() string {
 	}
 
 	var finalView string
-	if m.ActiveDetailPane != NoPane {
+	if m.ActiveDetailPane == NativeAgentPaneDetail {
+		// Native agent pane preview is active: the host has split the BSP
+		// pane and placed the agent PTY alongside us. Just render the job
+		// table at full width — no internal detail pane.
+		contentHeight := m.Height - topMargin - bottomMargin - footerHeight
+		jobsPaneStyled := lipgloss.NewStyle().MaxHeight(contentHeight).Render(jobsPane)
+		finalView = lipgloss.JoinVertical(lipgloss.Left, jobsPaneStyled, footer)
+	} else if m.ActiveDetailPane != NoPane {
 		var detailContent string
 		switch m.ActiveDetailPane {
 		case LogsPaneDetail:

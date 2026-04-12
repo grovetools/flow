@@ -1509,6 +1509,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor > 0 {
 				m.Cursor--
 				m.adjustScrollOffset()
+				if m.ActiveDetailPane == NativeAgentPaneDetail {
+					m.ActiveDetailPane = NoPane
+					m.ShowLogs = false
+					m.Focus = FocusJobs
+					return m, closeAgentSplitCmd()
+				}
 				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
 				}
@@ -1518,6 +1524,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
+				if m.ActiveDetailPane == NativeAgentPaneDetail {
+					m.ActiveDetailPane = NoPane
+					m.ShowLogs = false
+					m.Focus = FocusJobs
+					return m, closeAgentSplitCmd()
+				}
 				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
 				}
@@ -1527,6 +1539,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Jobs) > 0 {
 				m.Cursor = len(m.Jobs) - 1
 				m.adjustScrollOffset()
+				if m.ActiveDetailPane == NativeAgentPaneDetail {
+					m.ActiveDetailPane = NoPane
+					m.ShowLogs = false
+					m.Focus = FocusJobs
+					return m, closeAgentSplitCmd()
+				}
 				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
 				}
@@ -1608,6 +1626,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.ViewEdit):
 			return m.openDetailPane(EditPane)
 
+		case key.Matches(msg, m.KeyMap.ViewNativeAgent):
+			if !m.Hosted {
+				m.StatusSummary = theme.DefaultTheme.Warning.Render("Native agent preview requires groveterm host")
+				return m, nil
+			}
+			if m.Cursor < len(m.Jobs) {
+				job := m.Jobs[m.Cursor]
+				isAgent := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeIsolatedAgent
+				if isAgent {
+					m.ActiveDetailPane = NativeAgentPaneDetail
+					m.ShowLogs = false
+					jobID := job.ID
+					return m, func() tea.Msg {
+						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitOpen}
+					}
+				}
+				m.StatusSummary = theme.DefaultTheme.Warning.Render("Agent preview only available for agent jobs")
+			}
+			return m, nil
+
 		case key.Matches(msg, m.KeyMap.ViewSkillPane):
 			return m.openDetailPane(SkillPane)
 
@@ -1618,6 +1656,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openDetailPane(LogsPaneDetail)
 			} else {
 				// If any pane is open, close it
+				wasNativeAgent := m.ActiveDetailPane == NativeAgentPaneDetail
 				m.LogViewer.Stop()
 				if m.StreamCancel != nil {
 					m.StreamCancel()
@@ -1630,10 +1669,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ActiveDetailPane = NoPane
 				m.CurrentAgentStatus = nil // Clear agent status when closing pane
 				m.StatusSummary = ""
+				if wasNativeAgent {
+					return m, closeAgentSplitCmd()
+				}
 				return m, nil
 			}
 
 		case key.Matches(msg, m.KeyMap.CloseDetailPane):
+			// If native agent preview is active, close the split and return to jobs.
+			if m.ActiveDetailPane == NativeAgentPaneDetail {
+				m.ActiveDetailPane = NoPane
+				m.ShowLogs = false
+				m.Focus = FocusJobs
+				m.ActiveLogJob = nil
+				m.StatusSummary = ""
+				return m, closeAgentSplitCmd()
+			}
 			// For agent jobs (isolated_agent, interactive_agent), Esc should only blur
 			// the input (handled above), not close the detail pane. Users can close
 			// with 'v' (CycleDetailPane) instead.
@@ -2272,15 +2323,35 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	return m, nil
 }
 
+// closeAgentSplitCmd returns a tea.Cmd that emits AgentSplitClose if the
+// model was previously showing NativeAgentPaneDetail. Returns nil otherwise.
+func closeAgentSplitCmd() tea.Cmd {
+	return func() tea.Msg {
+		return embed.SplitAgentRequestMsg{Action: embed.AgentSplitClose}
+	}
+}
+
 // openDetailPane opens a specific detail pane and loads its content
 func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
+	// If leaving native agent preview, emit a close split request.
+	wasNativeAgent := m.ActiveDetailPane == NativeAgentPaneDetail
+
 	m.ActiveDetailPane = pane
 	m.ShowLogs = true
 	// Auto-focus the detail pane when opening it
 	m.Focus = FocusDetailPrimary
 
+	// batchWithClose batches a content-loading cmd with a close-split cmd
+	// when transitioning away from the native agent pane.
+	batchWithClose := func(c tea.Cmd) tea.Cmd {
+		if wasNativeAgent {
+			return tea.Batch(c, closeAgentSplitCmd())
+		}
+		return c
+	}
+
 	if m.Cursor >= len(m.Jobs) {
-		return m, nil
+		return m, batchWithClose(nil)
 	}
 
 	job := m.Jobs[m.Cursor]
@@ -2306,18 +2377,18 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading logs for %s...", job.Title))
 		if isAgentJob {
-			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
+			return m, batchWithClose(loadAndStreamAgentLogsCmd(m.Plan, job))
 		}
-		return m, loadLogContentCmd(m.Plan, job)
+		return m, batchWithClose(loadLogContentCmd(m.Plan, job))
 	case FrontmatterPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title))
-		return m, loadFrontmatterCmd(job)
+		return m, batchWithClose(loadFrontmatterCmd(job))
 	case BriefingPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading briefing for %s...", job.Title))
-		return m, loadBriefingCmd(m.Plan, job)
+		return m, batchWithClose(loadBriefingCmd(m.Plan, job))
 	case EditPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
-		return m, loadJobFileContentCmd(job)
+		return m, batchWithClose(loadJobFileContentCmd(job))
 	case SkillPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading skills for %s...", job.Title))
 		m.skillPaneCursor = 0
@@ -2327,10 +2398,10 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.skillPaneRawContent = result.treeContent
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
-		return m, nil
+		return m, batchWithClose(nil)
 	}
 
-	return m, nil
+	return m, batchWithClose(nil)
 }
 
 // wrapContentForViewport delegates to the shared markdown package.

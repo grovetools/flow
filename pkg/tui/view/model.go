@@ -113,6 +113,9 @@ type Config struct {
 	// InitialGraph is the dependency graph for InitialPlan. Must be
 	// non-nil if InitialPlan is set.
 	InitialGraph *orchestration.DependencyGraph
+	// Hosted is true when running inside groveterm. Passed through to
+	// the status sub-model to enable the native agent pane preview.
+	Hosted bool
 }
 
 // viewState holds the mutable sub-model state that is shared between
@@ -181,6 +184,7 @@ func New(cfg Config) Model {
 			Plan:         cfg.InitialPlan,
 			Graph:        cfg.InitialGraph,
 			DaemonClient: cfg.DaemonClient,
+			Hosted:       cfg.Hosted,
 		})
 		vs.statusModel = &sm
 		m.mode = modeStatus
@@ -373,6 +377,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Plan:         plan,
 			Graph:        graph,
 			DaemonClient: m.s.cfg.DaemonClient,
+			Hosted:       m.s.cfg.Hosted,
 		})
 		m.s.statusModel = &newStatus
 		m.mode = modeStatus
@@ -426,6 +431,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Plan:         plan,
 						Graph:        graph,
 						DaemonClient: m.s.cfg.DaemonClient,
+						Hosted:       m.s.cfg.Hosted,
 					})
 					m.s.statusModel = &newStatus
 					m.mode = modeStatus
