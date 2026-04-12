@@ -182,6 +182,15 @@ type Model struct {
 	DaemonConnected bool
 }
 
+// IsTextEntryActive returns true when the user is focused on a text input,
+// signalling that single-letter shortcuts should not be intercepted.
+func (m Model) IsTextEntryActive() bool {
+	return m.IsolatedAgentInputActive || m.Renaming || m.CreatingJob ||
+		m.ClawDialogActive || m.skillSearchActive || m.ShowStatusPicker ||
+		m.ShowTypePicker || m.ShowTemplatePicker || m.EditingDeps ||
+		m.selectingRecipe || m.columnSelectMode
+}
+
 // Config carries the dependencies a status TUI Model needs. Callers construct
 // a Config and pass it to New. The CLI wrapper and the terminal embed panel
 // both supply their own Config so daemon clients, keymaps, and layout

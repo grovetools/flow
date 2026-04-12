@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/grovetools/core/pkg/daemon"
 	groveplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
@@ -545,14 +546,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// async-build path). ctrl+f reported as both "ctrl+f" and
 		// "ctrl+F" depending on terminal — accept both.
 		ks := msg.String()
-		if m.mode == modeStatus && (ks == "ctrl+f" || ks == "ctrl+F") && m.s.statusModel != nil && m.s.statusModel.Plan != nil {
-			return m.switchToTab(tabFinishPlan)
-		}
-		if m.mode == modeBrowser && ks == "n" {
-			return m.switchToTab(tabAddPlan)
-		}
-		if m.mode == modeStatus && ks == "a" && m.s.statusModel != nil && m.s.statusModel.Plan != nil {
-			return m.switchToTab(tabAddJob)
+
+		// Check if text entry is active in the status model
+		textEntryActive := m.mode == modeStatus && m.s.statusModel != nil && m.s.statusModel.IsTextEntryActive()
+
+		if !textEntryActive {
+			if m.mode == modeStatus && (ks == "ctrl+f" || ks == "ctrl+F") && m.s.statusModel != nil && m.s.statusModel.Plan != nil {
+				return m.switchToTab(tabFinishPlan)
+			}
+			if m.mode == modeBrowser && ks == "n" {
+				return m.switchToTab(tabAddPlan)
+			}
+			if m.mode == modeStatus && ks == "a" && m.s.statusModel != nil && m.s.statusModel.Plan != nil {
+				return m.switchToTab(tabAddJob)
+			}
 		}
 
 		// esc in status mode pops back to the browser.
@@ -918,6 +925,9 @@ func (m Model) View() string {
 	content := m.pager.View()
 	if m.finishTransient != "" {
 		content = m.finishTransient + "\n" + content
+	}
+	if m.width > 0 && m.height > 0 {
+		return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content)
 	}
 	return content
 }

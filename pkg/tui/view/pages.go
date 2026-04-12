@@ -104,10 +104,15 @@ func (p *statusPage) SetSize(w, h int) {
 
 func (p *statusPage) Enabled() bool { return p.s.statusModel != nil }
 
+func (p *statusPage) IsTextEntryActive() bool {
+	return p.s.statusModel != nil && p.s.statusModel.IsTextEntryActive()
+}
+
 // Compile-time checks.
 var _ pager.Page = (*statusPage)(nil)
 var _ pager.PageWithTitle = (*statusPage)(nil)
 var _ pager.PageWithEnabled = (*statusPage)(nil)
+var _ pager.PageWithTextInput = (*statusPage)(nil)
 
 // ---------- addJobPage (tab 1: Add Job) ----------
 
