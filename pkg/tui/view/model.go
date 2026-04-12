@@ -568,8 +568,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// esc in status mode pops back to the browser.
+		// esc in status mode: if the status model has an active detail
+		// pane (or text entry), delegate esc to it so the detail pane
+		// is closed properly (including BSP splits). Only pop back to
+		// the browser when nothing is open in the status view.
 		if m.mode == modeStatus && ks == "esc" {
+			if m.s.statusModel != nil && (m.s.statusModel.ActiveDetailPane != status.NoPane || m.s.statusModel.IsTextEntryActive()) {
+				// Let the status model handle esc (close detail pane, etc.)
+				break // fall through to pager delegation below
+			}
 			if m.s.statusModel != nil {
 				_ = m.s.statusModel.Close()
 				m.s.statusModel = nil

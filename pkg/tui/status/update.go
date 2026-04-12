@@ -585,6 +585,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshPlan(m.PlanDir)
 
 	case embed.SplitEditorClosedMsg:
+		// Editor exited (user typed :wq or host closed the split).
+		// Demote to sync internal state but discard the returned command
+		// — the host already tore down the BSP split.
+		if m.ActiveDetailPane == EditorPaneDetail {
+			m.Manager, _ = m.Manager.Demote("detail")
+			m.ActiveDetailPane = NoPane
+			m.Focus = FocusJobs
+		}
 		m.StatusSummary = theme.DefaultTheme.Success.Render("Editor closed")
 		m.refreshSkillPane()
 		return m, refreshPlan(m.PlanDir)
@@ -1499,12 +1507,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor > 0 {
 				m.Cursor--
 				m.adjustScrollOffset()
-				if m.ActiveDetailPane == NativeAgentPaneDetail {
-					m.ActiveDetailPane = NoPane
-					m.ShowLogs = false
-					m.Manager, _ = m.Manager.SetHidden("detail", true)
-					m.Focus = FocusJobs
-					return m, closeAgentSplitCmd()
+				if m.Manager.IsPromoted("detail") {
+					cmd := m.closeCurrentDetail()
+					return m, cmd
 				}
 				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
@@ -1515,12 +1520,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
-				if m.ActiveDetailPane == NativeAgentPaneDetail {
-					m.ActiveDetailPane = NoPane
-					m.ShowLogs = false
-					m.Manager, _ = m.Manager.SetHidden("detail", true)
-					m.Focus = FocusJobs
-					return m, closeAgentSplitCmd()
+				if m.Manager.IsPromoted("detail") {
+					cmd := m.closeCurrentDetail()
+					return m, cmd
 				}
 				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
@@ -1531,12 +1533,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Jobs) > 0 {
 				m.Cursor = len(m.Jobs) - 1
 				m.adjustScrollOffset()
-				if m.ActiveDetailPane == NativeAgentPaneDetail {
-					m.ActiveDetailPane = NoPane
-					m.ShowLogs = false
-					m.Manager, _ = m.Manager.SetHidden("detail", true)
-					m.Focus = FocusJobs
-					return m, closeAgentSplitCmd()
+				if m.Manager.IsPromoted("detail") {
+					cmd := m.closeCurrentDetail()
+					return m, cmd
 				}
 				if m.ShowLogs {
 					return m.reloadActiveDetailPane()
@@ -1592,6 +1591,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.Edit), key.Matches(msg, m.KeyMap.Confirm):
 			if m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
+				if m.Hosted {
+					// Route through unified detail pane + Promote so the
+					// pane manager owns the BSP lifecycle.
+					mdl, cmd := m.openDetailPane(EditorPaneDetail)
+					m = mdl.(Model)
+					path := job.FilePath
+					openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path} }
+					closeCmd := func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} }
+					var promoteCmd tea.Cmd
+					m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+					return m, tea.Batch(cmd, promoteCmd)
+				}
 				return m, editJob(job, m.Hosted)
 			}
 
@@ -1628,13 +1639,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				job := m.Jobs[m.Cursor]
 				isAgent := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeIsolatedAgent
 				if isAgent {
-					m.ActiveDetailPane = NativeAgentPaneDetail
-					m.ShowLogs = false
-					m.Manager, _ = m.Manager.SetHidden("detail", true)
+					// If already promoted with an agent, just refocus
+					// the existing BSP split — don't tear down and recreate.
+					if m.ActiveDetailPane == NativeAgentPaneDetail && m.Manager.IsPromoted("detail") {
+						return m, nil
+					}
+					// Route through unified detail pane + Promote.
+					mdl, cmd := m.openDetailPane(NativeAgentPaneDetail)
+					m = mdl.(Model)
 					jobID := job.ID
-					return m, func() tea.Msg {
+					openCmd := func() tea.Msg {
 						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitOpen}
 					}
+					closeCmd := func() tea.Msg {
+						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitClose}
+					}
+					var promoteCmd tea.Cmd
+					m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+					return m, tea.Batch(cmd, promoteCmd)
 				}
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Agent preview only available for agent jobs")
 			}
@@ -1648,38 +1670,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ActiveDetailPane == NoPane {
 				// If closed, open logs pane by default
 				return m.openDetailPane(LogsPaneDetail)
-			} else {
-				// If any pane is open, close it
-				wasNativeAgent := m.ActiveDetailPane == NativeAgentPaneDetail
-				m.LogViewer.Stop()
-				if m.StreamCancel != nil {
-					m.StreamCancel()
-					m.StreamCancel = nil
-				}
-				m.StreamingJobID = ""
-				m.ShowLogs = false
-				m.Manager, _ = m.Manager.SetHidden("detail", true)
-				m.Focus = FocusJobs
-				m.ActiveLogJob = nil
-				m.ActiveDetailPane = NoPane
-				m.CurrentAgentStatus = nil // Clear agent status when closing pane
-				m.StatusSummary = ""
-				if wasNativeAgent {
-					return m, closeAgentSplitCmd()
-				}
-				return m, nil
 			}
+			// If any pane is open, close it via the unified helper.
+			cmd := m.closeCurrentDetail()
+			return m, cmd
 
 		case key.Matches(msg, m.KeyMap.CloseDetailPane):
-			// If native agent preview is active, close the split and return to jobs.
-			if m.ActiveDetailPane == NativeAgentPaneDetail {
-				m.ActiveDetailPane = NoPane
-				m.ShowLogs = false
-				m.Manager, _ = m.Manager.SetHidden("detail", true)
-				m.Focus = FocusJobs
-				m.ActiveLogJob = nil
-				m.StatusSummary = ""
-				return m, closeAgentSplitCmd()
+			// BSP splits (agent or editor) — close via unified helper.
+			if m.Manager.IsPromoted("detail") {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
 			}
 			// For agent jobs (isolated_agent, interactive_agent), Esc should only blur
 			// the input (handled above), not close the detail pane. Users can close
@@ -1717,24 +1717,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StatusSummary = theme.DefaultTheme.Muted.Render("Press Esc again to interrupt agent")
 				return m, nil
 			}
-			m.LogViewer.Stop()
-			if m.StreamCancel != nil {
-				m.StreamCancel()
-				m.StreamCancel = nil
-			}
-			m.StreamingJobID = ""
-			m.ShowLogs = false
-			m.Manager, _ = m.Manager.SetHidden("detail", true)
+			// Fallthrough: close internal lipgloss pane.
+			cmd := m.closeCurrentDetail()
 			m.LogPaneFullscreen = false
-			m.Focus = FocusJobs
-			m.ActiveLogJob = nil
-			m.ActiveDetailPane = NoPane
-			m.CurrentAgentStatus = nil // Clear agent status when closing pane
-			m.StatusSummary = ""
-			// Also clear isolated agent input mode
-			m.IsolatedAgentInputActive = false
-			m.IsolatedAgentInput.Blur()
-			return m, nil
+			return m, cmd
 
 		case key.Matches(msg, m.KeyMap.SendInput):
 			// Focus the chat input when viewing an agent job that supports input
@@ -2330,28 +2316,55 @@ func closeAgentSplitCmd() tea.Cmd {
 	}
 }
 
-// openDetailPane opens a specific detail pane and loads its content
+// closeEditorSplitCmd returns a tea.Cmd that emits SplitEditorCloseRequestMsg
+// to tell the host to tear down the ephemeral editor BSP split.
+func closeEditorSplitCmd() tea.Cmd {
+	return func() tea.Msg {
+		return embed.SplitEditorCloseRequestMsg{}
+	}
+}
+
+// openDetailPane opens a specific detail pane and loads its content.
+// It enforces the "one detail at a time" invariant via the pane manager's
+// Promote/Demote API. BSP splits (agent/editor) promote the detail slot;
+// internal panes demote it back.
 func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
-	// If leaving native agent preview, emit a close split request.
-	wasNativeAgent := m.ActiveDetailPane == NativeAgentPaneDetail
+	isTargetPromoted := (pane == NativeAgentPaneDetail || pane == EditorPaneDetail)
+	isCurrentlyPromoted := m.Manager.IsPromoted("detail")
+
+	var cmds []tea.Cmd
+
+	// If switching from promoted -> internal, demote first to close the BSP split.
+	if isCurrentlyPromoted && !isTargetPromoted {
+		var demoteCmd tea.Cmd
+		m.Manager, demoteCmd = m.Manager.Demote("detail")
+		if demoteCmd != nil {
+			cmds = append(cmds, demoteCmd)
+		}
+	}
 
 	m.ActiveDetailPane = pane
+
+	if isTargetPromoted {
+		// Promote the detail slot: the pane manager emits the openCmd and
+		// stores the closeCmd for later Demote.
+		m.ShowLogs = false
+		return m, tea.Batch(cmds...)
+	}
+
+	// Internal lipgloss pane: ensure it's visible.
 	m.ShowLogs = true
 	m.Manager, _ = m.Manager.SetHidden("detail", false)
-	// Auto-focus the detail pane when opening it
 	m.Focus = FocusDetailPrimary
 
-	// batchWithClose batches a content-loading cmd with a close-split cmd
-	// when transitioning away from the native agent pane.
-	batchWithClose := func(c tea.Cmd) tea.Cmd {
-		if wasNativeAgent {
-			return tea.Batch(c, closeAgentSplitCmd())
-		}
-		return c
+	// Defensively close any orphaned BSP splits when opening an internal
+	// pane in hosted mode (host handlers no-op when there's no sibling).
+	if !isCurrentlyPromoted && m.Hosted {
+		cmds = append(cmds, tea.Batch(closeAgentSplitCmd(), closeEditorSplitCmd()))
 	}
 
 	if m.Cursor >= len(m.Jobs) {
-		return m, batchWithClose(nil)
+		return m, tea.Batch(cmds...)
 	}
 
 	job := m.Jobs[m.Cursor]
@@ -2377,18 +2390,19 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading logs for %s...", job.Title))
 		if isAgentJob {
-			return m, batchWithClose(loadAndStreamAgentLogsCmd(m.Plan, job))
+			cmds = append(cmds, loadAndStreamAgentLogsCmd(m.Plan, job))
+		} else {
+			cmds = append(cmds, loadLogContentCmd(m.Plan, job))
 		}
-		return m, batchWithClose(loadLogContentCmd(m.Plan, job))
 	case FrontmatterPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title))
-		return m, batchWithClose(loadFrontmatterCmd(job))
+		cmds = append(cmds, loadFrontmatterCmd(job))
 	case BriefingPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading briefing for %s...", job.Title))
-		return m, batchWithClose(loadBriefingCmd(m.Plan, job))
+		cmds = append(cmds, loadBriefingCmd(m.Plan, job))
 	case EditPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
-		return m, batchWithClose(loadJobFileContentCmd(job))
+		cmds = append(cmds, loadJobFileContentCmd(job))
 	case SkillPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading skills for %s...", job.Title))
 		m.skillPaneCursor = 0
@@ -2398,10 +2412,9 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.skillPaneRawContent = result.treeContent
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
-		return m, batchWithClose(nil)
 	}
 
-	return m, batchWithClose(nil)
+	return m, tea.Batch(cmds...)
 }
 
 // wrapContentForViewport delegates to the shared markdown package.

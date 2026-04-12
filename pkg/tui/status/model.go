@@ -62,6 +62,7 @@ const (
 	EditPane
 	SkillPane
 	NativeAgentPaneDetail
+	EditorPaneDetail // BSP split editor (hosted mode only)
 )
 
 // Model represents the state of the TUI
@@ -204,6 +205,48 @@ func (m Model) IsTextEntryActive() bool {
 		m.ClawDialogActive || m.skillSearchActive || m.ShowStatusPicker ||
 		m.ShowTypePicker || m.ShowTemplatePicker || m.EditingDeps ||
 		m.selectingRecipe || m.columnSelectMode
+}
+
+// closeCurrentDetail tears down whatever detail view is currently active and
+// resets the model to NoPane/FocusJobs. It returns a tea.Cmd that emits the
+// appropriate BSP close message when leaving a host-managed split (agent or
+// editor), or nil for internal lipgloss panes.
+func (m *Model) closeCurrentDetail() tea.Cmd {
+	if m.ActiveDetailPane == NoPane {
+		return nil
+	}
+
+	// If the detail pane is promoted (BSP split), demote it to tear down
+	// the host split and reclaim layout space.
+	if m.Manager.IsPromoted("detail") {
+		var demoteCmd tea.Cmd
+		m.Manager, demoteCmd = m.Manager.Demote("detail")
+		m.ActiveDetailPane = NoPane
+		m.ShowLogs = false
+		m.Focus = FocusJobs
+		m.ActiveLogJob = nil
+		m.CurrentAgentStatus = nil
+		m.StatusSummary = ""
+		return demoteCmd
+	}
+
+	// Internal lipgloss pane — just hide it.
+	m.LogViewer.Stop()
+	if m.StreamCancel != nil {
+		m.StreamCancel()
+		m.StreamCancel = nil
+	}
+	m.StreamingJobID = ""
+	m.ShowLogs = false
+	m.Manager, _ = m.Manager.SetHidden("detail", true)
+	m.Focus = FocusJobs
+	m.ActiveLogJob = nil
+	m.ActiveDetailPane = NoPane
+	m.CurrentAgentStatus = nil
+	m.StatusSummary = ""
+	m.IsolatedAgentInputActive = false
+	m.IsolatedAgentInput.Blur()
+	return nil
 }
 
 // syncLayoutFromManager reads the pane dimensions from the Manager into the
