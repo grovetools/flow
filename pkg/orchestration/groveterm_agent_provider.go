@@ -3,11 +3,15 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/grovetools/agentlogs/pkg/agentstream"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/sirupsen/logrus"
 )
@@ -75,6 +79,13 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	// Build the command and args for the agent CLI
 	command, args := p.buildCommand(agentArgs, briefingFilePath)
 
+	// Wrap with agentstream to capture PID via deterministic pidfile
+	rawCommand := command
+	if len(args) > 0 {
+		rawCommand += " " + strings.Join(args, " ")
+	}
+	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
+
 	// Build environment variables for the agent pane
 	envVars := map[string]string{
 		"GROVE_FLOW_JOB_ID":    job.ID,
@@ -102,13 +113,14 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 		Pretty(theme.IconInteractiveAgent + " Spawning native agent pane via groveterm").
 		Log(ctx)
 
-	// Send the spawn request to the daemon, which relays to groveterm via SSE
+	// Send the spawn request to the daemon, which relays to groveterm via SSE.
+	// Pass the wrapped command with nil Args — the wrapping includes PID capture.
 	if err := daemonClient.SpawnAgentPane(ctx, daemon.SpawnAgentRequest{
 		JobID:     job.ID,
 		PlanName:  plan.Name,
 		JobTitle:  job.Title,
-		Command:   command,
-		Args:      args,
+		Command:   wrappedCommand,
+		Args:      nil,
 		WorkDir:   workDir,
 		Env:       envVars,
 		AutoSplit: p.autoSplit,
@@ -126,11 +138,132 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 		p.log.WithError(err).Warn("Failed to create lock file")
 	}
 
+	// Asynchronously discover PID and register session in background
+	go func() {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir); err != nil {
+			p.log.WithError(err).Error("Failed to discover and register groveterm session")
+		}
+	}()
+
 	p.ulog.Success("Native agent pane spawned").
 		Field("job_id", job.ID).
 		Field("provider", p.providerName).
 		Pretty(theme.IconSuccess + " Native agent pane spawned in groveterm").
 		Log(ctx)
+
+	return nil
+}
+
+// discoverAndRegisterSessionAsync discovers the agent PID and transcript path,
+// then confirms the session with the daemon so log streaming works.
+// Adapted from ClaudeAgentProvider.discoverAndRegisterSessionAsync.
+func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir string) error {
+	logger := grovelogging.NewLogger("flow-groveterm-session-discovery")
+
+	logger.WithFields(map[string]interface{}{
+		"job_id":   job.ID,
+		"plan":     plan.Name,
+		"provider": p.providerName,
+	}).Debug("Starting async groveterm session discovery and confirmation")
+
+	jobStartTime := job.StartTime
+	if jobStartTime.IsZero() {
+		jobStartTime = time.Now()
+	}
+
+	ctx := context.Background()
+
+	// Wait for PID via deterministic pidfile (written by BuildAgentCommand wrapper)
+	pid, err := agentstream.WaitForPID(ctx, job.ID)
+	if err != nil {
+		logger.WithError(err).Warn("Pidfile-based PID discovery failed")
+		pid = 0
+	} else {
+		logger.WithField("pid", pid).Debug("Discovered agent PID via pidfile")
+		agentstream.CleanupPIDFile(job.ID)
+	}
+
+	// Discover transcript path using agentstream
+	var transcriptPath string
+	transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+		Provider:  p.providerName,
+		WorkDir:   workDir,
+		AfterTime: jobStartTime,
+	})
+	if err != nil {
+		logger.WithError(err).Warn("Failed to discover transcript via agentstream, retrying...")
+		for i := 0; i < 10; i++ {
+			time.Sleep(1 * time.Second)
+			transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+				Provider:  p.providerName,
+				WorkDir:   workDir,
+				AfterTime: jobStartTime,
+			})
+			if err == nil {
+				break
+			}
+		}
+		if err != nil {
+			logger.WithError(err).Warn("Transcript path discovery failed, continuing without it")
+		}
+	}
+
+	// Extract native session ID from transcript path
+	var nativeID string
+	if transcriptPath != "" {
+		nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+	}
+
+	// Confirm the session with the daemon
+	daemonClient := daemon.NewWithAutoStart()
+	defer daemonClient.Close()
+
+	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
+		JobID:          job.ID,
+		NativeID:       nativeID,
+		PID:            pid,
+		TranscriptPath: transcriptPath,
+	}); err != nil {
+		logger.WithError(err).Warn("Failed to confirm session with daemon, falling back to filesystem registry")
+
+		user := os.Getenv("USER")
+		if user == "" {
+			user = "unknown"
+		}
+		repo, branch := getGitInfo(workDir)
+
+		metadata := sessions.SessionMetadata{
+			SessionID:        job.ID,
+			ClaudeSessionID:  nativeID,
+			Provider:         p.providerName,
+			PID:              pid,
+			WorkingDirectory: workDir,
+			User:             user,
+			Repo:             repo,
+			Branch:           branch,
+			StartedAt:        time.Now(),
+			JobTitle:         job.Title,
+			PlanName:         plan.Name,
+			JobFilePath:      job.FilePath,
+			Type:             "interactive_agent",
+			TranscriptPath:   transcriptPath,
+		}
+
+		registry, regErr := sessions.NewFileSystemRegistry()
+		if regErr != nil {
+			return fmt.Errorf("failed to create session registry: %w", regErr)
+		}
+
+		if regErr := registry.Register(metadata); regErr != nil {
+			return fmt.Errorf("failed to register session: %w", regErr)
+		}
+	}
+
+	logger.WithFields(logrus.Fields{
+		"session_id":      job.ID,
+		"pid":             pid,
+		"transcript_path": transcriptPath,
+	}).Info("Confirmed groveterm agent session")
 
 	return nil
 }
