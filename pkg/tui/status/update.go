@@ -801,10 +801,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Adjust scroll offset to show cursor at bottom on first render
 		m.adjustScrollOffset()
 
-		// Centralized layout calculation
-		m.updateLayoutDimensions()
+		// Calculate how much space the input area and footer consume
+		chatInputHeight := m.calculateChatInputHeight()
+		contentWidth := msg.Width - 4 // Account for Margin(0, 2)
+		if contentWidth < 40 {
+			contentWidth = 40
+		}
 
-		// Update viewport sizes
+		// Set pane Fixed/Flex based on current direction, then distribute
+		m.syncPaneLayout()
+		mgrMsg := tea.WindowSizeMsg{
+			Width:  contentWidth,
+			Height: msg.Height - footerHeight - chatInputHeight,
+		}
+		m.Manager, cmd = m.Manager.Update(mgrMsg)
+		m.syncLayoutFromManager()
+
+		// Update viewport sizes using the Manager-derived dimensions
 		m.frontmatterViewport.Width = m.LogViewerWidth
 		m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
 		m.briefingViewport.Width = m.LogViewerWidth
@@ -853,12 +866,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight-logHeaderHeight)
 		}
 
+		var cmds []tea.Cmd
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		// Update log viewer size if active
 		if m.ShowLogs {
-			m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
-			return m, cmd
+			var lvCmd tea.Cmd
+			m.LogViewer, lvCmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
+			if lvCmd != nil {
+				cmds = append(cmds, lvCmd)
+			}
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 
 	case logviewer.LogLineMsg:
 		// Delegate log messages to the log viewer only if the message
@@ -1379,78 +1399,74 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.SwitchFocus):
 			if m.ShowLogs && !m.LogPaneFullscreen {
-				isShiftTab := msg.Type == tea.KeyShiftTab
-
 				if m.ActiveDetailPane == SkillPane {
 					// 3-way cycle: Jobs <-> Tree <-> ArtifactViewport
-					if !isShiftTab {
-						switch m.Focus {
-						case FocusJobs:
-							m.Focus = FocusDetailPrimary
-						case FocusDetailPrimary:
-							m.Focus = FocusDetailSecondary
-						default:
-							m.Focus = FocusJobs
+					// The Manager only knows "jobs" and "detail", so we handle
+					// the skill sub-focus (tree ↔ artifact) manually.
+					isShiftTab := msg.Type == tea.KeyShiftTab
+					if m.Manager.ActivePane() != nil && m.Manager.ActivePane().ID == "detail" {
+						// Currently on detail pane — cycle sub-focus or go to jobs
+						if !isShiftTab {
+							if m.SkillSubFocus == 0 {
+								// tree → artifact
+								m.SkillSubFocus = 1
+								m.Focus = FocusDetailSecondary
+								m.refreshSkillPane()
+								return m, nil
+							}
+							// artifact → jobs (let Manager cycle)
+							m.SkillSubFocus = 0
+						} else {
+							if m.SkillSubFocus == 1 {
+								// artifact → tree
+								m.SkillSubFocus = 0
+								m.Focus = FocusDetailPrimary
+								m.refreshSkillPane()
+								return m, nil
+							}
+							// tree → jobs (let Manager cycle backward)
 						}
 					} else {
-						switch m.Focus {
-						case FocusJobs:
-							m.Focus = FocusDetailSecondary
-						case FocusDetailSecondary:
-							m.Focus = FocusDetailPrimary
-						default:
-							m.Focus = FocusJobs
+						// Currently on jobs pane — go to detail
+						if !isShiftTab {
+							m.SkillSubFocus = 0
+						} else {
+							m.SkillSubFocus = 1
 						}
-					}
-					// Re-render skill pane to update separator highlight
-					m.refreshSkillPane()
-				} else {
-					// 2-way cycle: Jobs <-> Detail
-					if m.Focus == FocusJobs {
-						m.Focus = FocusDetailPrimary
-					} else {
-						m.Focus = FocusJobs
 					}
 				}
+				// Let the Manager handle the actual focus cycle between jobs ↔ detail
+				m.Manager, cmd = m.Manager.Update(msg)
+				m.syncFocusFromManager()
+				m.refreshSkillPane()
+				return m, cmd
 			}
 
 		case key.Matches(msg, m.KeyMap.ToggleLayout):
 			if m.ShowLogs {
-				m.LogSplitVertical = !m.LogSplitVertical
+				// Let the Manager toggle direction
+				m.Manager, cmd = m.Manager.Update(msg)
+				// Recalculate pane layout for the new direction
+				m.syncPaneLayout()
+				// Re-distribute with the updated layout
+				chatInputHeight := m.calculateChatInputHeight()
+				contentWidth := m.Width - 4
+				if contentWidth < 40 {
+					contentWidth = 40
+				}
+				mgrMsg := tea.WindowSizeMsg{
+					Width:  contentWidth,
+					Height: m.Height - footerHeight - chatInputHeight,
+				}
+				m.Manager, _ = m.Manager.Update(mgrMsg)
+				m.syncFocusFromManager()
+				m.syncLayoutFromManager()
+
 				// Save the new state
 				_ = saveState(m.columnVisibility, m.LogSplitVertical)
 
-				// Centralized layout calculation
-				m.updateLayoutDimensions()
-
 				// Update viewport sizes for all detail panes
-				m.frontmatterViewport.Width = m.LogViewerWidth
-				m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.briefingViewport.Width = m.LogViewerWidth
-				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.editViewport.Width = m.LogViewerWidth
-				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.updateSkillViewportSizes()
-
-				// Re-wrap content for all detail viewports to adapt to the new layout
-				if m.frontmatterRawContent != "" {
-					styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
-					wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
-					m.frontmatterViewport.SetContent(wrappedContent)
-				}
-				if m.briefingRawContent != "" {
-					styledContent := renderStyledBriefing(m.briefingRawContent)
-					wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
-					m.briefingViewport.SetContent(wrappedContent)
-				}
-				if m.editRawContent != "" {
-					styledContent := renderStyledMarkdown(m.editRawContent)
-					wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
-					m.editViewport.SetContent(wrappedContent)
-				}
-				if m.skillPaneRawContent != "" {
-					m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
-				}
+				m.resizeAllDetailViewports()
 
 				// Update log viewer with new dimensions
 				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
@@ -1460,44 +1476,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.ToggleFullscreen):
 			if m.ShowLogs {
-				m.LogPaneFullscreen = !m.LogPaneFullscreen
-
-				// When entering fullscreen, force focus to logs pane
-				if m.LogPaneFullscreen {
-					m.Focus = FocusDetailPrimary
-				}
-
-				// Centralized layout calculation
-				m.updateLayoutDimensions()
+				// Let the Manager toggle fullscreen
+				m.Manager, cmd = m.Manager.Update(msg)
+				m.syncFocusFromManager()
+				m.syncLayoutFromManager()
 
 				// Update viewport sizes for all detail panes
-				m.frontmatterViewport.Width = m.LogViewerWidth
-				m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.briefingViewport.Width = m.LogViewerWidth
-				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.editViewport.Width = m.LogViewerWidth
-				m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
-				m.updateSkillViewportSizes()
-
-				// Re-wrap content for all detail viewports to adapt to the new layout
-				if m.frontmatterRawContent != "" {
-					styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
-					wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
-					m.frontmatterViewport.SetContent(wrappedContent)
-				}
-				if m.briefingRawContent != "" {
-					styledContent := renderStyledBriefing(m.briefingRawContent)
-					wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
-					m.briefingViewport.SetContent(wrappedContent)
-				}
-				if m.editRawContent != "" {
-					styledContent := renderStyledMarkdown(m.editRawContent)
-					wrappedContent := wrapContentForViewport(styledContent, m.editViewport.Width-1)
-					m.editViewport.SetContent(wrappedContent)
-				}
-				if m.skillPaneRawContent != "" {
-					m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
-				}
+				m.resizeAllDetailViewports()
 
 				// Update log viewer with new dimensions
 				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
@@ -1512,6 +1497,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.ActiveDetailPane == NativeAgentPaneDetail {
 					m.ActiveDetailPane = NoPane
 					m.ShowLogs = false
+					m.Manager, _ = m.Manager.SetHidden("detail", true)
 					m.Focus = FocusJobs
 					return m, closeAgentSplitCmd()
 				}
@@ -1527,6 +1513,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.ActiveDetailPane == NativeAgentPaneDetail {
 					m.ActiveDetailPane = NoPane
 					m.ShowLogs = false
+					m.Manager, _ = m.Manager.SetHidden("detail", true)
 					m.Focus = FocusJobs
 					return m, closeAgentSplitCmd()
 				}
@@ -1542,6 +1529,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.ActiveDetailPane == NativeAgentPaneDetail {
 					m.ActiveDetailPane = NoPane
 					m.ShowLogs = false
+					m.Manager, _ = m.Manager.SetHidden("detail", true)
 					m.Focus = FocusJobs
 					return m, closeAgentSplitCmd()
 				}
@@ -1637,6 +1625,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if isAgent {
 					m.ActiveDetailPane = NativeAgentPaneDetail
 					m.ShowLogs = false
+					m.Manager, _ = m.Manager.SetHidden("detail", true)
 					jobID := job.ID
 					return m, func() tea.Msg {
 						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitOpen}
@@ -1664,6 +1653,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.StreamingJobID = ""
 				m.ShowLogs = false
+				m.Manager, _ = m.Manager.SetHidden("detail", true)
 				m.Focus = FocusJobs
 				m.ActiveLogJob = nil
 				m.ActiveDetailPane = NoPane
@@ -1680,6 +1670,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ActiveDetailPane == NativeAgentPaneDetail {
 				m.ActiveDetailPane = NoPane
 				m.ShowLogs = false
+				m.Manager, _ = m.Manager.SetHidden("detail", true)
 				m.Focus = FocusJobs
 				m.ActiveLogJob = nil
 				m.StatusSummary = ""
@@ -1728,6 +1719,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.StreamingJobID = ""
 			m.ShowLogs = false
+			m.Manager, _ = m.Manager.SetHidden("detail", true)
 			m.LogPaneFullscreen = false
 			m.Focus = FocusJobs
 			m.ActiveLogJob = nil
@@ -1751,6 +1743,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Switch to logs pane
 					m.ActiveDetailPane = LogsPaneDetail
 					m.ShowLogs = true
+					m.Manager, _ = m.Manager.SetHidden("detail", false)
 				}
 				// Focus the input
 				m.IsolatedAgentInputActive = true
@@ -1875,6 +1868,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.IsRunningJob = true
 				m.ActiveDetailPane = LogsPaneDetail // Switch to log viewer pane
 				m.ShowLogs = true
+				m.Manager, _ = m.Manager.SetHidden("detail", false)
 				m.Focus = FocusDetailPrimary
 
 				// Set the active job for the log pane header. If multiple jobs, use the first.
@@ -2338,6 +2332,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 
 	m.ActiveDetailPane = pane
 	m.ShowLogs = true
+	m.Manager, _ = m.Manager.SetHidden("detail", false)
 	// Auto-focus the detail pane when opening it
 	m.Focus = FocusDetailPrimary
 
