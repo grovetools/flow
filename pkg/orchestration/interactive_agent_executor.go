@@ -214,7 +214,8 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	connected, _ := daemonClient.IsTerminalConnected(ctx)
 	daemonClient.Close()
 
-	if connected {
+	insideGroveterm := os.Getenv("GROVE_TERMINAL") == "1"
+	if connected && insideGroveterm {
 		provider = NewGrovetermAgentProvider(providerName, true)
 	} else {
 		// Fallback to legacy tmux-based providers
