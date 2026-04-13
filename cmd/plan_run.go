@@ -230,10 +230,19 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	}
 	// Note: if planRunAll is true, we don't check because we want to avoid the prompt for batch runs
 
+	// Resolve agent_target from the caller's environment. The executor
+	// requires a concrete value ("native" or "tmux") — "auto" must be
+	// resolved here at the CLI perimeter, not inside the executor.
+	agentTarget := "tmux" // safe default (Case 2, 3, 5)
+	if os.Getenv("GROVE_TERMINAL") != "" {
+		agentTarget = "native" // Case 1: running inside groveterm shell
+	}
+
 	// Inject the loaded configuration into the plan object
 	plan.Orchestration = &orchestration.Config{
 		OneshotModel:        flowCfg.OneshotModel,
 		MaxConsecutiveSteps: flowCfg.MaxConsecutiveSteps,
+		AgentTarget:         agentTarget,
 	}
 
 	// Check if any oneshot jobs need to be run
@@ -298,7 +307,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		if daemonClient == nil {
 			return fmt.Errorf("--background requires the daemon; start it with 'grove daemon start' or remove --local flag")
 		}
-		return submitJobsBackground(ctx, daemonClient, plan, targetJobs, jobsToRun)
+		return submitJobsBackground(ctx, daemonClient, plan, targetJobs, jobsToRun, agentTarget)
 	}
 
 	// Handle different run modes
@@ -668,7 +677,7 @@ var (
 )
 
 // submitJobsBackground submits jobs to the daemon and exits without waiting.
-func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orchestration.Plan, targetJobs []string, jobsToRun []*orchestration.Job) error {
+func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orchestration.Plan, targetJobs []string, jobsToRun []*orchestration.Job, agentTarget string) error {
 	jobs := jobsToRun
 	if len(jobs) == 0 && len(targetJobs) > 0 {
 		for _, jf := range targetJobs {
@@ -691,8 +700,9 @@ func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orche
 	fmt.Printf("Submitting %d job(s) to daemon in background...\n", len(jobs))
 	for _, job := range jobs {
 		info, err := client.SubmitJob(ctx, models.JobSubmitRequest{
-			PlanDir: plan.Directory,
-			JobFile: job.Filename,
+			PlanDir:     plan.Directory,
+			JobFile:     job.Filename,
+			AgentTarget: agentTarget,
 		})
 		if err != nil {
 			fmt.Printf("  %s %s: %v\n", color.RedString(theme.IconError), job.Filename, err)

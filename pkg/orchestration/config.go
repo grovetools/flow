@@ -4,4 +4,5 @@ package orchestration
 type Config struct {
 	OneshotModel        string
 	MaxConsecutiveSteps int
+	AgentTarget         string // "native" or "tmux" — resolved at submission time, never "auto"
 }

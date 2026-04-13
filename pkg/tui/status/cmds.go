@@ -579,10 +579,18 @@ type JobSubmittedMsg struct {
 func submitJobsViaDaemonCmd(client daemon.Client, plan *orchestration.Plan, jobs []*orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		var jobIDs []string
+		// Resolve agent_target from the TUI's environment — the TUI
+		// may run inside groveterm (GROVE_TERMINAL) or tmux (TMUX).
+		agentTarget := "tmux"
+		if os.Getenv("GROVE_TERMINAL") != "" {
+			agentTarget = "native"
+		}
+
 		for _, job := range jobs {
 			info, err := client.SubmitJob(context.Background(), models.JobSubmitRequest{
-				PlanDir: plan.Directory,
-				JobFile: job.Filename,
+				PlanDir:     plan.Directory,
+				JobFile:     job.Filename,
+				AgentTarget: agentTarget,
 			})
 			if err != nil {
 				return JobSubmittedMsg{Jobs: jobs, Err: fmt.Errorf("submit %s: %w", job.Filename, err)}

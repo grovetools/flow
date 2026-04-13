@@ -45,7 +45,7 @@ type FlowProviderConfig struct {
 // FlowConfig holds the flow extension configuration from grove.toml.
 type FlowConfig struct {
 	InteractiveProvider string                          `yaml:"interactive_provider,omitempty"`
-	AgentRenderer       string                          `yaml:"agent_renderer,omitempty"` // "auto", "native", or "tmux"
+	AgentTarget         string                          `yaml:"agent_target,omitempty"` // "auto", "native", or "tmux"
 	Providers           map[string]FlowProviderConfig   `yaml:"providers"`
 }
 
@@ -209,35 +209,23 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		providerName = flowCfg.InteractiveProvider
 	}
 
-	// Determine agent renderer: "auto" (default), "native", or "tmux"
+	// Determine agent target — must be resolved by the submission path
+	// (CLI or TUI). The executor never checks env vars or daemon state.
 	var provider InteractiveAgentProvider
-	daemonClient := daemon.NewWithAutoStart()
-	connected, _ := daemonClient.IsTerminalConnected(ctx)
-	daemonClient.Close()
 
-	renderer := "auto"
-	if flowCfg.AgentRenderer != "" {
-		renderer = flowCfg.AgentRenderer
+	target := ""
+	if plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
+		target = plan.Orchestration.AgentTarget
 	}
 
 	useNative := false
-	switch renderer {
+	switch target {
 	case "native":
 		useNative = true
 	case "tmux":
 		useNative = false
 	default:
-		// "auto": env vars are the primary signal (set by groveterm/tmux
-		// in child processes). GROVE_TERMINAL → native, TMUX → tmux.
-		// Fall back to daemon connectivity for daemon-orchestrated jobs
-		// (daemon strips TMUX on startup so it doesn't taint routing).
-		if os.Getenv("GROVE_TERMINAL") != "" {
-			useNative = true
-		} else if os.Getenv("TMUX") != "" {
-			useNative = false
-		} else {
-			useNative = connected
-		}
+		return fmt.Errorf("agent_target not set: job submitted without routing context — this is a bug in the submission path (CLI or TUI should always tag jobs)")
 	}
 
 	if useNative {
