@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
-	
+
+	"github.com/grovetools/core/pkg/process"
 	"gopkg.in/yaml.v3"
 )
 
@@ -390,19 +391,35 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 				}
 			}
 
-			// Check if lock is stale (older than 5 minutes)
-			if info, err := os.Stat(lockPath); err == nil {
-				if time.Since(info.ModTime()) > 5*time.Minute {
-					// Remove stale lock
-					os.Remove(lockPath)
-					// Retry
-					file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-					if err != nil {
-						return nil, fmt.Errorf("file is locked")
+			// Check if the lock holder process is still alive
+			isStale := false
+			if content, readErr := os.ReadFile(lockPath); readErr == nil {
+				var pidInLock int
+				if _, scanErr := fmt.Sscanf(string(content), "%d", &pidInLock); scanErr == nil {
+					// PID 0 means the lock was created before the real PID was known (e.g., groveterm-native agents).
+					// If the process is dead (or PID 0), the lock is stale.
+					if !process.IsProcessAlive(pidInLock) {
+						isStale = true
 					}
-				} else {
+				}
+			}
+			// Fall back to time-based staleness if we couldn't determine PID status
+			if !isStale {
+				if info, statErr := os.Stat(lockPath); statErr == nil {
+					if time.Since(info.ModTime()) > 5*time.Minute {
+						isStale = true
+					}
+				}
+			}
+			if isStale {
+				os.Remove(lockPath)
+				// Retry
+				file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+				if err != nil {
 					return nil, fmt.Errorf("file is locked")
 				}
+			} else {
+				return nil, fmt.Errorf("file is locked")
 			}
 		} else {
 			return nil, err

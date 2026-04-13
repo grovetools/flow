@@ -543,7 +543,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"status": msg.Status,
 		}).Debug("Received daemon job status update")
 
-		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" || msg.Status == "pending_user" {
+		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" || msg.Status == "pending_user" || msg.Status == "idle" {
 			m.IsRunningJob = false
 
 			if msg.Status == "completed" {
@@ -556,6 +556,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StatusSummary = theme.DefaultTheme.Error.Render(errMsg)
 			} else if msg.Status == "pending_user" {
 				m.StatusSummary = theme.DefaultTheme.Info.Render("Job awaiting user input.")
+			} else if msg.Status == "idle" {
+				m.StatusSummary = theme.DefaultTheme.Info.Render("Agent is idle.")
 			} else {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Job cancelled.")
 			}
@@ -680,26 +682,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			MaxConsecutiveSteps: 20,
 			SkipInteractive:     true,
 		}
-		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
-		if err != nil {
-			logger.WithFields(map[string]interface{}{
-				"error": err,
-			}).Error("Failed to recreate orchestrator during refresh - keeping old orchestrator")
-			m.StatusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("Warning: Failed to recreate orchestrator: %v", err))
-			// IMPORTANT: Don't update m.Plan if orchestrator creation failed
-			// This keeps the old orchestrator and old plan in sync
-			return m, nil
-		} else {
-			m.Orchestrator = orch
-		}
-
-		// Update model with refreshed data
+		// Always update the plan/graph/jobs from disk so the TUI reflects reality
 		m.Plan = plan
 		m.Graph = graph
 		jobs, parents, indents := flattenJobTreeWithParents(plan)
 		m.Jobs = jobs
 		m.JobParents = parents
 		m.JobIndents = indents
+
+		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
+		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"error": err,
+			}).Error("Failed to recreate orchestrator during refresh - keeping old orchestrator")
+			m.StatusSummary = theme.DefaultTheme.Warning.Render(fmt.Sprintf("Warning: Failed to recreate orchestrator: %v", err))
+		} else {
+			m.Orchestrator = orch
+		}
+
+		// Reconcile IsRunningJob with actual disk state.
+		// If we think a job is running but the disk shows it's no longer active,
+		// clear the flag so the user can press 'r' again.
+		if m.IsRunningJob && m.ActiveLogJob != nil {
+			found := false
+			for _, job := range m.Jobs {
+				if job.ID == m.ActiveLogJob.ID {
+					found = true
+					if job.Status != orchestration.JobStatusRunning {
+						logger.WithFields(map[string]interface{}{
+							"job_id":     job.ID,
+							"job_status": job.Status,
+						}).Info("Clearing IsRunningJob - tracked job is no longer running on disk")
+						m.IsRunningJob = false
+					}
+					break
+				}
+			}
+			if !found {
+				m.IsRunningJob = false
+			}
+		}
 
 		// Only update status summary if not running a job
 		// (preserve the "Running..." message)

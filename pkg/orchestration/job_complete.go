@@ -96,6 +96,108 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 	}
 
+	// For interactive agents, kill the agent and clean up tmux BEFORE updating status.
+	// The agent holds a lock on the job file, so we must terminate it first.
+	if job.Type == JobTypeInteractiveAgent {
+		if !silent {
+			fmt.Println("Cleaning up interactive agent session...")
+		}
+
+		// Kill the agent process by reading the PID from grove-hooks session metadata
+		if err := killAgentSession(job.ID); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not kill agent session: %v\n", err)
+			}
+		} else if !silent {
+			fmt.Println("  * Agent process killed.")
+		}
+
+		// Also kill the tmux window for the interactive_agent job
+		worktreePath, err := getWorktreePathFromSession(job.ID)
+
+		// If we can't find the session (e.g., resumed job), fall back to using the job's worktree
+		if err != nil && job.Worktree != "" {
+			gitRoot, gitErr := GetProjectGitRoot(plan.Directory)
+			if gitErr == nil {
+				if workspace.IsNotebookRepo(gitRoot) {
+					gitRoot = ""
+					gitErr = fmt.Errorf("skipping notebook repo")
+				}
+			}
+			if gitErr == nil {
+				gitRootInfo, gitRootErr := workspace.GetProjectByPath(gitRoot)
+				if gitRootErr == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
+					gitRoot = gitRootInfo.ParentProjectPath
+				}
+				worktreePath = filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
+				err = nil
+			}
+		}
+
+		if err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not determine working directory: %v\n", err)
+			}
+		} else {
+			projInfo, err := ResolveProjectForSessionNaming(worktreePath)
+			if err != nil {
+				if !silent {
+					fmt.Printf("  Note: could not get project info to determine session name: %v\n", err)
+				}
+			} else {
+				sessionName := projInfo.Identifier("_")
+				windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+
+				targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
+				if !silent {
+					fmt.Printf("  Closing tmux window: %s\n", targetWindow)
+				}
+				cmd := tmux.Command("kill-window", "-t", targetWindow)
+				err := cmd.Run()
+
+				if err != nil {
+					listCmd := tmux.Command("list-windows", "-t", sessionName, "-F", "#{window_name}")
+					output, listErr := listCmd.Output()
+					if listErr == nil {
+						windows := strings.Split(strings.TrimSpace(string(output)), "\n")
+						for _, win := range windows {
+							if strings.HasPrefix(win, windowName) {
+								targetWindow = fmt.Sprintf("%s:%s", sessionName, win)
+								if !silent {
+									fmt.Printf("  Found window with prefix: %s\n", targetWindow)
+								}
+								killCmd := tmux.Command("kill-window", "-t", targetWindow)
+								if killErr := killCmd.Run(); killErr == nil {
+									if !silent {
+										fmt.Println("  * Tmux window closed.")
+									}
+									err = nil
+									break
+								}
+							}
+						}
+					}
+				}
+
+				if err != nil {
+					if !silent {
+						fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
+					}
+				} else if !silent {
+					fmt.Println("  * Tmux window closed.")
+				}
+			}
+		}
+
+		// Give the process a moment to terminate, then remove the stale lock file
+		time.Sleep(200 * time.Millisecond)
+		if err := RemoveLockFile(job.FilePath); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not remove lock file: %v\n", err)
+			}
+		}
+	}
+
 	// Update status (skip if already completed)
 	oldStatus := job.Status
 	if !alreadyCompleted {
@@ -144,113 +246,6 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 			}
 		}
 	}
-
-	// If this was an interactive agent, try to kill its associated agent process and tmux session.
-	if job.Type == JobTypeInteractiveAgent {
-		if !silent {
-			fmt.Println("Attempting to clean up associated agent session...")
-		}
-
-		// Kill the agent process by reading the PID from grove-hooks session metadata
-		if err := killAgentSession(job.ID); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not kill agent session: %v\n", err)
-			}
-		} else if !silent {
-			fmt.Println("  * Agent process killed.")
-		}
-
-		// Also kill the tmux window for any interactive_agent job
-		// First try to read the session metadata to get the working directory
-		worktreePath, err := getWorktreePathFromSession(job.ID)
-
-		// If we can't find the session (e.g., resumed job), fall back to using the job's worktree
-		if err != nil && job.Worktree != "" {
-			// Determine worktree path from the plan's project git root (notebook-aware)
-			gitRoot, gitErr := GetProjectGitRoot(plan.Directory)
-			if gitErr == nil {
-				// Skip worktree operations if this is a notebook repo
-				if workspace.IsNotebookRepo(gitRoot) {
-					// Don't error here - just skip the worktree resolution
-					gitRoot = ""
-					gitErr = fmt.Errorf("skipping notebook repo")
-				}
-			}
-			if gitErr == nil {
-				// If gitRoot is itself a worktree, find the actual main repository root
-				gitRootInfo, gitRootErr := workspace.GetProjectByPath(gitRoot)
-				if gitRootErr == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
-					gitRoot = gitRootInfo.ParentProjectPath
-				}
-				worktreePath = filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
-				err = nil // Clear the error since we found it via worktree
-			}
-		}
-
-		if err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not determine working directory: %v\n", err)
-			}
-		} else {
-			projInfo, err := ResolveProjectForSessionNaming(worktreePath)
-			if err != nil {
-				if !silent {
-					fmt.Printf("  Note: could not get project info to determine session name: %v\n", err)
-				}
-			} else {
-				sessionName := projInfo.Identifier("_")
-				// Replicate window name logic from interactive_agent_executor
-				windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
-
-				// First, try exact match
-				targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
-				if !silent {
-					fmt.Printf("  Closing tmux window: %s\n", targetWindow)
-				}
-				cmd := tmux.Command("kill-window", "-t", targetWindow)
-				err := cmd.Run()
-
-				// If exact match fails, try to find windows with this prefix
-				// (tmux may add numeric suffixes like "job-hi5-" for duplicate names)
-				if err != nil {
-					listCmd := tmux.Command("list-windows", "-t", sessionName, "-F", "#{window_name}")
-					output, listErr := listCmd.Output()
-					if listErr == nil {
-						windows := strings.Split(strings.TrimSpace(string(output)), "\n")
-						for _, win := range windows {
-							if strings.HasPrefix(win, windowName) {
-								targetWindow = fmt.Sprintf("%s:%s", sessionName, win)
-								if !silent {
-									fmt.Printf("  Found window with prefix: %s\n", targetWindow)
-								}
-								killCmd := tmux.Command("kill-window", "-t", targetWindow)
-								if killErr := killCmd.Run(); killErr == nil {
-									if !silent {
-										fmt.Println("  * Tmux window closed.")
-									}
-									err = nil // Clear the error
-									break
-								}
-							}
-						}
-					}
-				}
-
-				if err != nil {
-					// This is not a fatal error; the window might already be closed.
-					if !silent {
-						fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
-					}
-				} else if !silent {
-					fmt.Println("  * Tmux window closed.")
-				}
-			}
-		}
-	}
-
-	// Remove lock file if it exists
-	lockFilePath := job.FilePath + ".lock"
-	os.Remove(lockFilePath) // Ignore errors - file might not exist
 
 	// Success message
 	if !silent {
