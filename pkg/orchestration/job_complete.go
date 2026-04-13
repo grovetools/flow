@@ -40,7 +40,8 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 
 	// For isolated agents, kill the agent FIRST before updating status.
 	// The agent holds a lock on the job file, so we must terminate it first.
-	if job.Type == JobTypeIsolatedAgent && !alreadyCompleted {
+	// Always attempt cleanup even if already completed — the process may still be alive.
+	if job.Type == JobTypeIsolatedAgent {
 		if !silent {
 			fmt.Println("Cleaning up isolated agent tmux server...")
 		}
@@ -54,6 +55,30 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 
 		// Also try to kill the agent process via session metadata
+		if err := killAgentSession(job.ID); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not kill agent session: %v\n", err)
+			}
+		} else if !silent {
+			fmt.Println("  * Agent process killed.")
+		}
+
+		// Give the process a moment to terminate, then remove the stale lock file
+		time.Sleep(200 * time.Millisecond)
+		if err := RemoveLockFile(job.FilePath); err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not remove lock file: %v\n", err)
+			}
+		}
+	}
+
+	// For headless agents, kill the agent process before updating status.
+	// Without this, pressing 'c' in the TUI leaves the agent running.
+	if job.Type == JobTypeHeadlessAgent {
+		if !silent {
+			fmt.Println("Cleaning up headless agent process...")
+		}
+
 		if err := killAgentSession(job.ID); err != nil {
 			if !silent {
 				fmt.Printf("  Note: could not kill agent session: %v\n", err)
