@@ -102,14 +102,120 @@ func formatDuration(d time.Duration) string {
 	}
 }
 
-// renderTableViewWithWidth renders the jobs as a table with a maximum width constraint
+// renderTableViewWithWidth renders the jobs as a table, responsively dropping
+// low-priority columns when maxWidth is too narrow to fit them all.
 func (m Model) renderTableViewWithWidth(maxWidth int) string {
+	if maxWidth > 0 {
+		m = m.withResponsiveColumns(maxWidth)
+	}
 	tableStr := m.renderTableView()
-	// Apply width constraint to prevent overflow
+	// Final safety net: clip any remaining overflow (e.g. long filenames).
 	if maxWidth > 0 {
 		return lipgloss.NewStyle().MaxWidth(maxWidth).Render(tableStr)
 	}
 	return tableStr
+}
+
+// columnDropPriority returns columns in the order they should be removed when
+// space is constrained. Last element is dropped first.
+func columnDropPriority() []string {
+	return []string{
+		"DURATION", "COMPLETED", "UPDATED", "PREPEND",
+		"WORKTREE", "MODEL", "SKILL", "TEMPLATE", "TITLE", "STATUS", "TYPE",
+	}
+}
+
+// withResponsiveColumns returns a copy of the model with column visibility
+// adjusted so the table fits within maxWidth. JOB is always kept.
+func (m Model) withResponsiveColumns(maxWidth int) Model {
+	if maxWidth <= 0 {
+		return m
+	}
+
+	// Estimate the table width for the current visible columns.
+	estWidth := m.estimateTableWidth()
+	if estWidth <= maxWidth {
+		return m // Everything fits.
+	}
+
+	// Copy visibility map so we don't mutate the original.
+	vis := make(map[string]bool, len(m.columnVisibility))
+	for k, v := range m.columnVisibility {
+		vis[k] = v
+	}
+	m.columnVisibility = vis
+
+	// Drop columns in priority order until the table fits.
+	for _, col := range columnDropPriority() {
+		if !vis[col] {
+			continue
+		}
+		vis[col] = false
+		estWidth = m.estimateTableWidth()
+		if estWidth <= maxWidth {
+			break
+		}
+	}
+	return m
+}
+
+// estimateTableWidth returns the approximate rendered width of the table
+// based on currently visible columns and job content, mirroring the logic
+// in calculateFocusJobsWidth.
+func (m Model) estimateTableWidth() int {
+	columnWidths := make(map[string]int)
+	for _, colName := range m.availableColumns {
+		if m.columnVisibility[colName] {
+			columnWidths[colName] = lipgloss.Width(colName)
+		}
+	}
+
+	visibleJobs := m.getVisibleJobs()
+	for _, job := range visibleJobs {
+		if m.columnVisibility["JOB"] {
+			indent := m.JobIndents[job.ID]
+			treePrefixWidth := 0
+			if indent > 0 {
+				treePrefixWidth = ((indent - 1) * 2) + 3
+			}
+			w := treePrefixWidth + 2 + lipgloss.Width(job.Filename)
+			if w > columnWidths["JOB"] {
+				columnWidths["JOB"] = w
+			}
+		}
+		if m.columnVisibility["TITLE"] {
+			w := lipgloss.Width(job.Title)
+			if w > columnWidths["TITLE"] {
+				columnWidths["TITLE"] = w
+			}
+		}
+		if m.columnVisibility["TYPE"] {
+			w := 2 + lipgloss.Width(string(job.Type))
+			if w > columnWidths["TYPE"] {
+				columnWidths["TYPE"] = w
+			}
+		}
+	}
+
+	totalWidth := 0
+	visibleColCount := 0
+	if len(m.Selected) > 0 {
+		visibleColCount++
+		totalWidth += 3
+	}
+	for _, colName := range m.availableColumns {
+		if m.columnVisibility[colName] {
+			visibleColCount++
+			totalWidth += columnWidths[colName]
+		}
+	}
+	if visibleColCount > 0 {
+		totalWidth += 2                          // borders
+		totalWidth += (visibleColCount - 1) * 3  // separators
+		totalWidth += visibleColCount * 2         // padding
+		totalWidth += 4                          // buffer
+	}
+	return totalWidth
 }
 
 // renderTableView renders the jobs as a table with configurable columns

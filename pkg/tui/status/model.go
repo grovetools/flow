@@ -918,7 +918,7 @@ func (m Model) View() string {
 // based on the content of the currently visible columns.
 func (m *Model) calculateFocusJobsWidth() int {
 	if len(m.Jobs) == 0 {
-		return 60 // Default minimum
+		return 30 // Default minimum
 	}
 
 	// 1. Initialize max widths with header lengths
@@ -933,7 +933,7 @@ func (m *Model) calculateFocusJobsWidth() int {
 	visibleJobs := m.getVisibleJobs()
 	if len(visibleJobs) == 0 {
 		// Fallback if no jobs are visible (e.g., empty plan)
-		return 60
+		return 30
 	}
 
 	for _, job := range visibleJobs {
@@ -996,13 +996,15 @@ func (m *Model) calculateFocusJobsWidth() int {
 		totalWidth += 4 // Extra spacing buffer
 	}
 
-	// 4. Apply reasonable bounds to the final calculated width
-	if totalWidth < 60 {
-		totalWidth = 60 // Absolute minimum
+	// 4. Apply reasonable bounds to the final calculated width.
+	// Use a low minimum so narrow panes still get a usable table
+	// (column dropping in renderTableViewWithWidth handles the rest).
+	if totalWidth < 30 {
+		totalWidth = 30
 	}
 	// Cap at 80% of terminal width to ensure logs are always somewhat visible
 	maxWidth := int(float64(m.Width) * 0.8)
-	if totalWidth > maxWidth {
+	if maxWidth > 0 && totalWidth > maxWidth {
 		totalWidth = maxWidth
 	}
 
