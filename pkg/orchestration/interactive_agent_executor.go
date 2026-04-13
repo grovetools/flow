@@ -227,8 +227,15 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	case "tmux":
 		useNative = false
 	default:
-		// "auto": use native pane if groveterm is connected
-		useNative = connected
+		// "auto": prefer env vars (set by groveterm/tmux in child processes),
+		// fall back to daemon connectivity check for bare terminals.
+		if os.Getenv("GROVE_TERMINAL") != "" {
+			useNative = true
+		} else if os.Getenv("TMUX") != "" {
+			useNative = false
+		} else {
+			useNative = connected
+		}
 	}
 
 	if useNative {
