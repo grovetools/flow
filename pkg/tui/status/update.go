@@ -1916,7 +1916,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						"num_jobs":   len(jobsToRun),
 						"use_method": "daemon",
 					}).Info("Submitting jobs via daemon")
-					runCmd = submitJobsViaDaemonCmd(m.DaemonClient, m.Plan, jobsToRun)
+					runCmd = submitJobsViaDaemonCmd(m.DaemonClient, m.Plan, jobsToRun, m.Hosted)
 				} else if m.Orchestrator != nil {
 					logger.WithFields(map[string]interface{}{
 						"num_jobs":   len(jobsToRun),

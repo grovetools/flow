@@ -576,13 +576,15 @@ type JobSubmittedMsg struct {
 
 // submitJobsViaDaemonCmd submits jobs to the daemon for execution.
 // Unlike runJobsWithOrchestrator, this returns immediately — the daemon handles execution.
-func submitJobsViaDaemonCmd(client daemon.Client, plan *orchestration.Plan, jobs []*orchestration.Job) tea.Cmd {
+// hosted indicates the TUI is running inside groveterm (native panes) vs tmux.
+func submitJobsViaDaemonCmd(client daemon.Client, plan *orchestration.Plan, jobs []*orchestration.Job, hosted bool) tea.Cmd {
 	return func() tea.Msg {
 		var jobIDs []string
-		// Resolve agent_target from the TUI's environment — the TUI
-		// may run inside groveterm (GROVE_TERMINAL) or tmux (TMUX).
+		// The caller (TUI) knows whether it's hosted in groveterm.
+		// No env var sniffing — the Hosted flag is set by the terminal
+		// panel wrapper at construction time.
 		agentTarget := "tmux"
-		if os.Getenv("GROVE_TERMINAL") != "" {
+		if hosted {
 			agentTarget = "native"
 		}
 
