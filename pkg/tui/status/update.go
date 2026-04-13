@@ -106,24 +106,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Render the content for display.
+		var renderedContent string
 		if msg.Err != nil {
-			m.LogViewer.SetContent(theme.DefaultTheme.Error.Render(fmt.Sprintf("Error loading logs: %v", msg.Err)))
+			renderedContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error loading logs: %v", msg.Err))
 		} else {
-			// Apply muted styling to "No logs found" messages
-			content := msg.Content
-			if strings.HasPrefix(content, "No logs found") {
-				content = theme.DefaultTheme.Muted.Render(content)
+			renderedContent = msg.Content
+			if strings.HasPrefix(renderedContent, "No logs found") {
+				renderedContent = theme.DefaultTheme.Muted.Render(renderedContent)
 			} else if m.ActiveLogJob != nil {
-				// Apply markdown styling for agent job types
 				isAgentJob := m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent ||
 					m.ActiveLogJob.Type == orchestration.JobTypeHeadlessAgent ||
 					m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent
 				if isAgentJob {
-					content = renderStyledMarkdown(content)
+					renderedContent = renderStyledMarkdown(renderedContent)
 				}
 			}
-			m.LogViewer.SetContent(content)
 		}
+
+		// If promoted to a BSP viewport, forward content there instead of the internal viewer.
+		if m.Hosted && m.Manager.IsPromoted("detail") && m.ActiveDetailPane == LogsPaneDetail {
+			m.LogViewer.SetContent(renderedContent) // keep internal state in sync for fallback
+			var cmds []tea.Cmd
+			cmds = append(cmds, func() tea.Msg {
+				return embed.UpdateViewportContentMsg{Content: renderedContent, Append: false}
+			})
+
+			// Still need to handle streaming setup below
+			if msg.ShouldRetry {
+				cmds = append(cmds, retryLoadAgentLogsAfterDelay())
+			}
+			if msg.StartStreaming && m.ActiveLogJob != nil && msg.LogFilePath != "" {
+				if m.StreamingJobID != m.ActiveLogJob.ID || m.StreamCancel == nil {
+					if m.StreamCancel != nil {
+						m.StreamCancel()
+					}
+					ctx, cancel := context.WithCancel(context.Background())
+					m.StreamCancel = cancel
+					m.StreamingJobID = m.ActiveLogJob.ID
+					cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, m.MsgCh))
+					isAgentWithStatus := m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
+						m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent
+					if isAgentWithStatus {
+						cmds = append(cmds, pollAgentStatusAfterDelay())
+					}
+				}
+			} else if m.StreamCancel != nil {
+				m.StreamCancel()
+				m.StreamCancel = nil
+				m.StreamingJobID = ""
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		m.LogViewer.SetContent(renderedContent)
 
 		var cmds []tea.Cmd
 
@@ -208,41 +244,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FrontmatterContentLoadedMsg:
 		if m.ActiveDetailPane == FrontmatterPane {
+			var renderedContent string
 			if msg.Err != nil {
-				m.frontmatterRawContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err))
-				m.frontmatterViewport.SetContent(m.frontmatterRawContent)
+				renderedContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err))
 			} else {
-				// Store the raw, unstyled content
 				m.frontmatterRawContent = msg.Content
-				// Ensure layout dimensions are current before wrapping
-				m.updateLayoutDimensions()
-				m.frontmatterViewport.Width = m.LogViewerWidth
-				m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
-				// Render styled frontmatter and wrap to viewport width - 1 for scrollbar
-				styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
-				wrappedContent := wrapContentForViewport(styledContent, m.frontmatterViewport.Width-1)
-				m.frontmatterViewport.SetContent(wrappedContent)
+				renderedContent = renderStyledFrontmatter(m.frontmatterRawContent)
 			}
+
+			// Forward to BSP viewport if hosted + viewport active.
+			if m.Hosted && m.viewportActive {
+				return m, func() tea.Msg {
+					return embed.UpdateViewportContentMsg{Content: renderedContent, Append: false}
+				}
+			}
+
+			// Internal fallback.
+			m.updateLayoutDimensions()
+			m.frontmatterViewport.Width = m.LogViewerWidth
+			m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
+			wrappedContent := wrapContentForViewport(renderedContent, m.frontmatterViewport.Width-1)
+			m.frontmatterViewport.SetContent(wrappedContent)
 		}
 		return m, nil
 
 	case BriefingContentLoadedMsg:
 		if m.ActiveDetailPane == BriefingPane {
+			var renderedContent string
 			if msg.Err != nil {
-				m.briefingRawContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err))
-				m.briefingViewport.SetContent(m.briefingRawContent)
+				renderedContent = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %v", msg.Err))
 			} else {
-				// Store the raw, unstyled content
 				m.briefingRawContent = msg.Content
-				// Ensure layout dimensions are current before wrapping
-				m.updateLayoutDimensions()
-				m.briefingViewport.Width = m.LogViewerWidth
-				m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
-				// Render styled briefing XML and wrap to viewport width - 1 for scrollbar
-				styledContent := renderStyledBriefing(m.briefingRawContent)
-				wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
-				m.briefingViewport.SetContent(wrappedContent)
+				renderedContent = renderStyledBriefing(m.briefingRawContent)
 			}
+
+			// Forward to BSP viewport if hosted + viewport active.
+			if m.Hosted && m.viewportActive {
+				return m, func() tea.Msg {
+					return embed.UpdateViewportContentMsg{Content: renderedContent, Append: false}
+				}
+			}
+
+			// Internal fallback.
+			m.updateLayoutDimensions()
+			m.briefingViewport.Width = m.LogViewerWidth
+			m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
+			wrappedContent := wrapContentForViewport(renderedContent, m.briefingViewport.Width-1)
+			m.briefingViewport.SetContent(wrappedContent)
 		}
 		return m, nil
 
@@ -599,6 +647,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshSkillPane()
 		return m, refreshPlan(m.PlanDir)
 
+	case embed.SplitViewportClosedMsg:
+		// Viewport closed (user pressed q or host closed the split).
+		// Demote to sync internal state — the host already tore down the BSP split.
+		if m.Manager.IsPromoted("detail") {
+			m.Manager, _ = m.Manager.Demote("detail")
+			m.ActiveDetailPane = NoPane
+			m.ShowLogs = false
+			m.Focus = FocusJobs
+			m.ActiveLogJob = nil
+			m.CurrentAgentStatus = nil
+			m.viewportActive = false
+			if m.StreamCancel != nil {
+				m.StreamCancel()
+				m.StreamCancel = nil
+				m.StreamingJobID = ""
+			}
+		}
+		return m, nil
+
 	case IsolatedAgentInputSentMsg:
 		// Handle response from sending input to isolated agent
 		if msg.Err != nil {
@@ -918,7 +985,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case logviewer.LogLineMsg:
 		// Delegate log messages to the log viewer only if the message
 		// belongs to the currently active job being viewed.
-		if m.ShowLogs && m.ActiveLogJob != nil && msg.Workspace == m.ActiveLogJob.ID {
+		if m.ActiveLogJob != nil && msg.Workspace == m.ActiveLogJob.ID {
 			// Apply markdown styling for agent job types
 			isAgentJob := m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent ||
 				m.ActiveLogJob.Type == orchestration.JobTypeHeadlessAgent ||
@@ -926,8 +993,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if isAgentJob {
 				msg.Line = styleStreamingLogLine(msg.Line, &m.MarkdownInCodeBlock)
 			}
-			m.LogViewer, cmd = m.LogViewer.Update(msg)
-			return m, cmd
+
+			// If promoted to a BSP viewport, forward the line there.
+			if m.Hosted && m.Manager.IsPromoted("detail") && m.ActiveDetailPane == LogsPaneDetail {
+				m.LogViewer, cmd = m.LogViewer.Update(msg)
+				return m, tea.Batch(cmd, func() tea.Msg {
+					return embed.UpdateViewportContentMsg{Content: msg.Line, Append: true}
+				})
+			}
+
+			if m.ShowLogs {
+				m.LogViewer, cmd = m.LogViewer.Update(msg)
+				return m, cmd
+			}
 		}
 		// Discard the log line if it's for a different job.
 		return m, nil
@@ -1052,6 +1130,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, createAgentFromChatJobWithTitle(m.Plan, m.CreateJobDeps, customTitle)
 					}
 					return m, createAgentFromChatJobWithTitle(m.Plan, []*orchestration.Job{m.CreateJobBaseJob}, customTitle)
+				} else if m.CreateJobType == "generic" {
+					return m, createGenericJobWithTitle(m.Plan, m.CreateJobDeps, customTitle)
 				}
 			case "esc":
 				m.CreatingJob = false
@@ -1395,7 +1475,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ShowLogs && (m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary) {
 			// Global keys that should pass through to the main switch
 			switch msg.String() {
-			case "q", "ctrl+c", "?", "F", "L", "h", "l", "left", "right", "f", "b", "m", "p", "v",
+			case "q", "ctrl+c", "?", "F", "L", "left", "right", "f", "b", "m", "p", "v",
 				"tab", "shift+tab", "V", "z", "i", "s", "esc":
 				// Let these be handled by the main logic below
 			default:
@@ -1644,7 +1724,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					mdl, cmd := m.openDetailPane(EditorPaneDetail)
 					m = mdl.(Model)
 					path := job.FilePath
-					openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path} }
+					openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35} }
 					closeCmd := func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} }
 					var promoteCmd tea.Cmd
 					m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
@@ -1666,13 +1746,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.ViewLogs):
+			if m.Hosted && m.Cursor < len(m.Jobs) {
+				job := m.Jobs[m.Cursor]
+				// If already promoted with a viewport showing logs, just refocus.
+				if m.ActiveDetailPane == LogsPaneDetail && m.Manager.IsPromoted("detail") {
+					return m, nil
+				}
+				mdl, cmd := m.openDetailPane(LogsPaneDetail)
+				m = mdl.(Model)
+				title := "Logs: " + job.Title
+				if m.viewportActive {
+					// Viewport already open — swap title + content, no new BSP split.
+					titleCmd := func() tea.Msg {
+						return embed.UpdateViewportTitleMsg{Title: title}
+					}
+					return m, tea.Batch(cmd, titleCmd)
+				}
+				openCmd := func() tea.Msg {
+					return embed.SplitViewportRequestMsg{
+						PanelID:    "logs",
+						Title:      title,
+						AutoScroll: true,
+						Ratio:      0.35,
+					}
+				}
+				closeCmd := func() tea.Msg { return embed.SplitViewportCloseRequestMsg{} }
+				var promoteCmd tea.Cmd
+				m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+				m.viewportActive = true
+				return m, tea.Batch(cmd, promoteCmd)
+			}
 			return m.openDetailPane(LogsPaneDetail)
 
 		case key.Matches(msg, m.KeyMap.ViewFrontmatter):
-			return m.openDetailPane(FrontmatterPane)
+			return m.openHostedViewportPane(FrontmatterPane, "Frontmatter")
 
 		case key.Matches(msg, m.KeyMap.ViewBriefing):
-			return m.openDetailPane(BriefingPane)
+			return m.openHostedViewportPane(BriefingPane, "Briefing")
 
 		case key.Matches(msg, m.KeyMap.ViewEdit):
 			return m.openDetailPane(EditPane)
@@ -1696,7 +1806,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m = mdl.(Model)
 					jobID := job.ID
 					openCmd := func() tea.Msg {
-						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitOpen}
+						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitOpen, Ratio: 0.35}
 					}
 					closeCmd := func() tea.Msg {
 						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitClose}
@@ -2081,21 +2191,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.AddJob):
+			m.CreatingJob = true
+			m.CreateJobType = "generic"
+
+			// Collect selected jobs as dependencies
 			if len(m.Selected) > 0 {
-				// Get selected job IDs for dependencies
-				var deps []string
+				var selectedJobs []*orchestration.Job
 				for id := range m.Selected {
 					for _, job := range m.Jobs {
 						if job.ID == id {
-							deps = append(deps, job.Filename)
+							selectedJobs = append(selectedJobs, job)
 							break
 						}
 					}
 				}
-				return m, addJobWithDependencies(m.Plan.Directory, deps)
+				m.CreateJobDeps = selectedJobs
 			} else {
-				return m, addJobWithDependencies(m.Plan.Directory, nil)
+				m.CreateJobDeps = nil
 			}
+
+			ti := textinput.New()
+			ti.Placeholder = "new-job"
+			ti.Focus()
+			ti.CharLimit = 100
+			ti.Width = 50
+			m.CreateJobInput = ti
+			return m, textinput.Blink
 
 		case key.Matches(msg, m.KeyMap.AddFromRecipe):
 			m.selectingRecipe = true
@@ -2371,12 +2492,26 @@ func closeEditorSplitCmd() tea.Cmd {
 	}
 }
 
+// closeViewportSplitCmd returns a tea.Cmd that emits SplitViewportCloseRequestMsg
+// to tell the host to tear down the viewport BSP split.
+func closeViewportSplitCmd() tea.Cmd {
+	return func() tea.Msg {
+		return embed.SplitViewportCloseRequestMsg{}
+	}
+}
+
 // openDetailPane opens a specific detail pane and loads its content.
 // It enforces the "one detail at a time" invariant via the pane manager's
 // Promote/Demote API. BSP splits (agent/editor) promote the detail slot;
 // internal panes demote it back.
 func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
-	isTargetPromoted := (pane == NativeAgentPaneDetail || pane == EditorPaneDetail)
+	// A pane is "promoted" (BSP split) when it's a native agent/editor, or
+	// when it uses the ViewportPanel in hosted mode. Frontmatter/briefing
+	// are promoted when a viewport is already active (content swap).
+	isViewportPane := pane == LogsPaneDetail || pane == FrontmatterPane || pane == BriefingPane
+	isTargetPromoted := (pane == NativeAgentPaneDetail || pane == EditorPaneDetail ||
+		(pane == LogsPaneDetail && m.Hosted) ||
+		(isViewportPane && m.Hosted && m.viewportActive))
 	isCurrentlyPromoted := m.Manager.IsPromoted("detail")
 
 	var cmds []tea.Cmd
@@ -2388,14 +2523,44 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		if demoteCmd != nil {
 			cmds = append(cmds, demoteCmd)
 		}
+		m.viewportActive = false
 	}
 
 	m.ActiveDetailPane = pane
 
 	if isTargetPromoted {
-		// Promote the detail slot: the pane manager emits the openCmd and
-		// stores the closeCmd for later Demote.
+		// Promoted detail slot: the pane stays hidden from the internal
+		// Manager layout. Content loading still runs so the viewport
+		// receives data via UpdateViewportContentMsg.
 		m.ShowLogs = false
+
+		// For viewport-promoted logs, still trigger content loading so the
+		// viewport receives initial content via UpdateViewportContentMsg.
+		if pane == LogsPaneDetail && m.Cursor < len(m.Jobs) {
+			job := m.Jobs[m.Cursor]
+			m.ActiveLogJob = job
+			isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent ||
+				job.Type == orchestration.JobTypeHeadlessAgent ||
+				job.Type == orchestration.JobTypeIsolatedAgent
+			if isAgentJob {
+				cmds = append(cmds, loadAndStreamAgentLogsCmd(m.Plan, job))
+			} else {
+				cmds = append(cmds, loadLogContentCmd(m.Plan, job))
+			}
+		}
+
+		// For viewport-promoted frontmatter/briefing, trigger content loading.
+		if m.Cursor < len(m.Jobs) {
+			job := m.Jobs[m.Cursor]
+			m.ActiveLogJob = job
+			switch pane {
+			case FrontmatterPane:
+				cmds = append(cmds, loadFrontmatterCmd(job))
+			case BriefingPane:
+				cmds = append(cmds, loadBriefingCmd(m.Plan, job))
+			}
+		}
+
 		return m, tea.Batch(cmds...)
 	}
 
@@ -2407,7 +2572,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// Defensively close any orphaned BSP splits when opening an internal
 	// pane in hosted mode (host handlers no-op when there's no sibling).
 	if !isCurrentlyPromoted && m.Hosted {
-		cmds = append(cmds, tea.Batch(closeAgentSplitCmd(), closeEditorSplitCmd()))
+		cmds = append(cmds, tea.Batch(closeAgentSplitCmd(), closeEditorSplitCmd(), closeViewportSplitCmd()))
 	}
 
 	if m.Cursor >= len(m.Jobs) {
@@ -2461,6 +2626,63 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
 	}
 
+	return m, tea.Batch(cmds...)
+}
+
+// openHostedViewportPane opens a detail pane that uses the BSP ViewportPanel
+// when Hosted. If a viewport is already active, it swaps title + content
+// without creating a new BSP split. Falls back to internal rendering when
+// not hosted.
+func (m Model) openHostedViewportPane(pane DetailPane, label string) (tea.Model, tea.Cmd) {
+	if !m.Hosted || m.Cursor >= len(m.Jobs) {
+		return m.openDetailPane(pane)
+	}
+
+	job := m.Jobs[m.Cursor]
+	title := label + ": " + job.Title
+
+	// Cancel any active log stream when switching away from logs.
+	if m.ActiveDetailPane == LogsPaneDetail {
+		if m.StreamCancel != nil {
+			m.StreamCancel()
+			m.StreamCancel = nil
+			m.StreamingJobID = ""
+		}
+	}
+
+	mdl, cmd := m.openDetailPane(pane)
+	m = mdl.(Model)
+
+	var cmds []tea.Cmd
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	if m.viewportActive {
+		// Viewport already open — swap title + clear content (loader will push real content).
+		cmds = append(cmds, func() tea.Msg {
+			return embed.UpdateViewportTitleMsg{Title: title}
+		})
+		cmds = append(cmds, func() tea.Msg {
+			return embed.UpdateViewportContentMsg{Content: "Loading...", Append: false}
+		})
+		return m, tea.Batch(cmds...)
+	}
+
+	// No viewport yet — create the BSP split.
+	openCmd := func() tea.Msg {
+		return embed.SplitViewportRequestMsg{
+			PanelID:    "detail",
+			Title:      title,
+			AutoScroll: false,
+			Ratio:      0.35,
+		}
+	}
+	closeCmd := func() tea.Msg { return embed.SplitViewportCloseRequestMsg{} }
+	var promoteCmd tea.Cmd
+	m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+	m.viewportActive = true
+	cmds = append(cmds, promoteCmd)
 	return m, tea.Batch(cmds...)
 }
 

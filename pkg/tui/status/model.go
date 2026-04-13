@@ -196,6 +196,12 @@ type Model struct {
 	// focused: 0 = tree view, 1 = artifact viewport. Only relevant when
 	// ActiveDetailPane == SkillPane.
 	SkillSubFocus int
+
+	// viewportActive tracks whether a BSP ViewportPanel is currently open
+	// in the host. When true, switching between migrated detail types
+	// (logs, frontmatter, briefing) swaps content/title instead of
+	// creating a new BSP split.
+	viewportActive bool
 }
 
 // IsTextEntryActive returns true when the user is focused on a text input,
@@ -227,6 +233,13 @@ func (m *Model) closeCurrentDetail() tea.Cmd {
 		m.ActiveLogJob = nil
 		m.CurrentAgentStatus = nil
 		m.StatusSummary = ""
+		m.viewportActive = false
+		// Cancel any active log stream (viewport-promoted logs).
+		if m.StreamCancel != nil {
+			m.StreamCancel()
+			m.StreamCancel = nil
+			m.StreamingJobID = ""
+		}
 		return demoteCmd
 	}
 
@@ -868,8 +881,8 @@ func (m Model) View() string {
 	}
 	jobsPane.Content = m.renderFocusJobs(jobsWidth)
 
-	// Detail pane: pre-render header + content
-	if !m.Manager.IsHidden("detail") {
+	// Detail pane: pre-render header + content (skip when promoted to BSP viewport).
+	if !m.Manager.IsHidden("detail") && !m.Manager.IsPromoted("detail") {
 		detailPane := m.Manager.Panes[1].Model.(*DetailPaneModel)
 		detailPane.Header = m.renderDetailHeader()
 		detailPane.Content = m.renderDetailContent()

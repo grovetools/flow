@@ -1182,22 +1182,30 @@ func setMultipleJobTemplate(jobs []*orchestration.Job, plan *orchestration.Plan,
 	}
 }
 
-func addJobWithDependencies(planDir string, dependencies []string) tea.Cmd {
-	// Build the command
-	args := []string{"plan", "add", planDir, "-i"}
+// createGenericJobWithTitle creates a new job with the given title and optional dependencies.
+func createGenericJobWithTitle(plan *orchestration.Plan, selectedJobs []*orchestration.Job, customTitle string) tea.Cmd {
+	return func() tea.Msg {
+		jobID := orchestration.GenerateUniqueJobID(plan, customTitle)
 
-	// Add dependencies if provided
-	for _, dep := range dependencies {
-		args = append(args, "-d", dep)
-	}
-
-	// Run flow through grove delegator (if available)
-	return tea.ExecProcess(delegation.Command("flow", args...), func(err error) tea.Msg {
-		if err != nil {
-			return err
+		var depIDs []string
+		for _, job := range selectedJobs {
+			depIDs = append(depIDs, job.ID)
 		}
-		return RefreshMsg{} // Refresh to show the new job
-	})
+
+		newJob := &orchestration.Job{
+			ID:        jobID,
+			Title:     customTitle,
+			Status:    orchestration.JobStatusPending,
+			DependsOn: depIDs,
+		}
+
+		_, err := orchestration.AddJob(plan, newJob)
+		if err != nil {
+			return CreateJobCompleteMsg{Err: err}
+		}
+
+		return CreateJobCompleteMsg{Err: nil}
+	}
 }
 
 // createXmlPlanJob creates a new oneshot job with the "agent-xml" template

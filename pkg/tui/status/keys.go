@@ -151,12 +151,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("tab/shift+tab", "switch focus"),
 		),
 		FocusLeft: key.NewBinding(
-			key.WithKeys("h", "left"),
-			key.WithHelp("h/←", "focus left"),
+			key.WithKeys("left"),
+			key.WithHelp("←", "focus left"),
 		),
 		FocusRight: key.NewBinding(
-			key.WithKeys("l", "right"),
-			key.WithHelp("l/→", "focus right"),
+			key.WithKeys("right"),
+			key.WithHelp("→", "focus right"),
 		),
 		ToggleLayout: key.NewBinding(
 			key.WithKeys("V"),

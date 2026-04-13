@@ -722,6 +722,8 @@ func (m Model) renderJobCreationDialog() string {
 		jobTypeName = "Implementation Job"
 	} else if m.CreateJobType == "agent-from-chat" {
 		jobTypeName = "Agent from Chat Job"
+	} else if m.CreateJobType == "generic" {
+		jobTypeName = "Job"
 	}
 
 	var b strings.Builder

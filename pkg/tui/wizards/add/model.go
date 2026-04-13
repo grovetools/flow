@@ -90,16 +90,38 @@ type Model struct {
 }
 
 // IsTextEntryActive reports whether the wizard currently has a
-// text input or textarea focused. Hosts that want to intercept
-// single-character keys (e.g. the flow meta-panel's 1-4 tab jumps)
-// consult this so they don't swallow characters the user is typing
-// into a form field. Returns false when the wizard is in its
-// "unfocused" navigation mode (after pressing ESC).
+// text input, textarea, or list filter input focused. Hosts that
+// want to intercept single-character keys (e.g. the flow
+// meta-panel's 1-4 tab jumps) consult this so they don't swallow
+// characters the user is typing into a form field. Returns false
+// when the wizard is in its "unfocused" navigation mode (after
+// pressing ESC).
 func (m Model) IsTextEntryActive() bool {
 	if m.unfocused {
 		return false
 	}
-	return m.titleInput.Focused() || m.promptInput.Focused()
+	if m.titleInput.Focused() || m.promptInput.Focused() {
+		return true
+	}
+	return m.isListFiltering()
+}
+
+// isListFiltering reports whether the currently focused list
+// component is in active filter mode (the user is typing into the
+// list's built-in search input).
+func (m Model) isListFiltering() bool {
+	switch m.focusIndex {
+	case 1:
+		return m.jobTypeList.FilterState() == list.Filtering
+	case 2:
+		if m.slot2IsSkills {
+			return m.skillList.FilterState() == list.Filtering
+		}
+		return m.templateList.FilterState() == list.Filtering
+	case 3:
+		return m.depList.FilterState() == list.Filtering
+	}
+	return false
 }
 
 // New constructs a Model from the given Config. It initializes all

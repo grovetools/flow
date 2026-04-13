@@ -61,6 +61,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if we're in a list that needs arrow keys
 		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 2 || m.focusIndex == 3)
 
+		// Also treat an active list filter input as text input so
+		// single-char keys (like q) are typed into the filter
+		// instead of firing navigation/quit actions.
+		if !inTextInput && inList {
+			inTextInput = m.isListFiltering()
+		}
+
 		// Handle configurable keybindings using key.Matches (these take precedence)
 		switch {
 		case key.Matches(msg, m.keys.Help):
@@ -322,36 +329,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Delegate to the focused component
-	switch m.focusIndex {
-	case 0: // Title input
-		m.titleInput, cmd = m.titleInput.Update(msg)
-	case 1: // Job type list
-		prevSelection := m.jobTypeList.SelectedItem()
-		m.jobTypeList, cmd = m.jobTypeList.Update(msg)
-		// Check if job type selection changed
-		newSelection := m.jobTypeList.SelectedItem()
-		if prevSelection != newSelection && newSelection != nil {
-			selectedJobType := string(newSelection.(item))
-			// Switch slot 2 between skills (agent types) and templates (chat/oneshot)
-			switch selectedJobType {
-			case "interactive_agent", "isolated_agent", "headless_agent":
-				m.slot2IsSkills = true
-			default:
-				m.slot2IsSkills = false
-				m.templateList = m.buildTemplateList(selectedJobType)
+	// Delegate to the focused component only if in insert mode.
+	// When unfocused (navigation mode), components should not
+	// receive key events — prevents lists from capturing keys
+	// meant for wizard-level navigation.
+	if !m.unfocused {
+		switch m.focusIndex {
+		case 0: // Title input
+			m.titleInput, cmd = m.titleInput.Update(msg)
+		case 1: // Job type list
+			prevSelection := m.jobTypeList.SelectedItem()
+			m.jobTypeList, cmd = m.jobTypeList.Update(msg)
+			// Check if job type selection changed
+			newSelection := m.jobTypeList.SelectedItem()
+			if prevSelection != newSelection && newSelection != nil {
+				selectedJobType := string(newSelection.(item))
+				// Switch slot 2 between skills (agent types) and templates (chat/oneshot)
+				switch selectedJobType {
+				case "interactive_agent", "isolated_agent", "headless_agent":
+					m.slot2IsSkills = true
+				default:
+					m.slot2IsSkills = false
+					m.templateList = m.buildTemplateList(selectedJobType)
+				}
 			}
+		case 2: // Slot 2: Skills or Template list
+			if m.slot2IsSkills {
+				m.skillList, cmd = m.skillList.Update(msg)
+			} else {
+				m.templateList, cmd = m.templateList.Update(msg)
+			}
+		case 3: // Dependency list
+			m.depList, cmd = m.depList.Update(msg)
+		case 4: // Prompt textarea
+			m.promptInput, cmd = m.promptInput.Update(msg)
 		}
-	case 2: // Slot 2: Skills or Template list
-		if m.slot2IsSkills {
-			m.skillList, cmd = m.skillList.Update(msg)
-		} else {
-			m.templateList, cmd = m.templateList.Update(msg)
-		}
-	case 3: // Dependency list
-		m.depList, cmd = m.depList.Update(msg)
-	case 4: // Prompt textarea
-		m.promptInput, cmd = m.promptInput.Update(msg)
 	}
 
 	return m, cmd
