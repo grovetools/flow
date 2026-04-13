@@ -205,14 +205,17 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	case "tmux":
 		useNative = false
 	default:
-		// "auto": prefer env vars (set by groveterm/tmux in child processes),
-		// fall back to daemon connectivity check for bare terminals.
+		// "auto": GROVE_TERMINAL is a positive signal from groveterm shells.
+		// If set, always use native. Otherwise, use the daemon connectivity
+		// check (which works for daemon-orchestrated jobs where the daemon
+		// may inherit TMUX from its parent shell). Only fall back to tmux
+		// when groveterm is NOT connected.
 		if os.Getenv("GROVE_TERMINAL") != "" {
 			useNative = true
-		} else if os.Getenv("TMUX") != "" {
-			useNative = false
+		} else if connected {
+			useNative = true
 		} else {
-			useNative = connected
+			useNative = false // tmux or bare terminal
 		}
 	}
 
