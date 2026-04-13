@@ -130,19 +130,27 @@ func (m Model) View() string {
 	allRows := lipgloss.JoinVertical(lipgloss.Left, titleRow, row2WithMargin, row3WithMargin)
 	b.WriteString(allRows)
 
-	// Help text with left margin
-	helpStyle := theme.DefaultTheme.Muted.
-		Padding(1, 0, 0, 0).
-		MarginLeft(2)
+	out := b.String()
 
+	// Clamp the rendered output to the terminal width so wide layouts
+	// don't overflow in narrow terminals or embedded pager views.
+	if m.width > 0 {
+		out = lipgloss.NewStyle().MaxWidth(m.width).Render(out)
+	}
+
+	return out
+}
+
+// FooterView returns the mode indicator + help text for use by the
+// pager's SetFooter mechanism when the wizard is embedded as a tab.
+func (m Model) FooterView() string {
 	helpText := m.helpModel.View()
 
-	// Add mode indicator
 	var modeIndicator string
 	if m.unfocused {
-		modeIndicator = theme.DefaultTheme.Muted.Render(" [NORMAL] hjkl navigate • i insert • q quit")
+		modeIndicator = " [NORMAL] hjkl navigate • i insert • q quit"
 	} else {
-		modeIndicator = theme.DefaultTheme.Muted.Render(" [INSERT] esc normal")
+		modeIndicator = " [INSERT] esc normal"
 	}
 
 	// Claw indicator — only shown for interactive_agent
@@ -156,9 +164,5 @@ func (m Model) View() string {
 		clawSuffix += lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText).Render(" ctrl+g")
 	}
 
-	// Combine: help • mode | claw toggle
-	fullHelpText := helpText + modeIndicator + clawSuffix
-	b.WriteString(helpStyle.Render(fullHelpText))
-
-	return b.String()
+	return theme.DefaultTheme.Muted.Render(helpText + modeIndicator + clawSuffix)
 }

@@ -29,6 +29,10 @@ func doneCancelled() tea.Cmd {
 // own state.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
+
 	case embed.SetWorkspaceMsg:
 		// Workspace changed under us. The wizard's items are plan-
 		// scoped and now stale — close the wizard by emitting a

@@ -14,6 +14,9 @@ import (
 // View renders the current state of the browser Model.
 func (m Model) View() string {
 	padStyle := lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
+	if m.width > 0 {
+		padStyle = padStyle.MaxWidth(m.width)
+	}
 
 	if m.loading {
 		return padStyle.Render("Loading plans...\n")
@@ -45,13 +48,14 @@ func (m Model) View() string {
 
 	if len(m.plans) == 0 {
 		s.WriteString("No plans found in directory.\n")
-		s.WriteString("\n")
-		s.WriteString(m.help.View())
+		if !m.embedMode {
+			s.WriteString("\n")
+			s.WriteString(m.help.View())
+		}
 		return padStyle.Render(s.String())
 	}
 
 	tableStr := m.renderPlanTable()
-	helpView := m.help.View()
 
 	if m.showGitLog {
 		var detailPane string
@@ -98,11 +102,9 @@ func (m Model) View() string {
 
 					mainContent := lipgloss.JoinVertical(lipgloss.Left, tableStr, detailsView)
 					s.WriteString(mainContent)
-					s.WriteString("\n")
-					s.WriteString(helpView)
-					if m.statusMessage != "" {
-						s.WriteString("\n\n")
-						s.WriteString(theme.DefaultTheme.Success.Render(m.statusMessage))
+					if !m.embedMode {
+						s.WriteString("\n")
+						s.WriteString(m.footerLine())
 					}
 					return padStyle.Render(s.String())
 				}
@@ -122,15 +124,31 @@ func (m Model) View() string {
 		s.WriteString(tableStr)
 	}
 
-	s.WriteString("\n")
-	s.WriteString(helpView)
-
-	if m.statusMessage != "" {
-		s.WriteString("\n\n")
-		s.WriteString(theme.DefaultTheme.Success.Render(m.statusMessage))
+	if !m.embedMode {
+		s.WriteString("\n")
+		s.WriteString(m.footerLine())
 	}
 
 	return padStyle.Render(s.String())
+}
+
+// footerLine builds the help + status-message line rendered at the
+// bottom of the view (standalone mode) or returned via Footer() for
+// pager-pinned rendering (embed mode).
+func (m Model) footerLine() string {
+	var b strings.Builder
+	b.WriteString(m.help.View())
+	if m.statusMessage != "" {
+		b.WriteString("\n\n")
+		b.WriteString(theme.DefaultTheme.Success.Render(m.statusMessage))
+	}
+	return b.String()
+}
+
+// Footer returns the help + status line for use as a pinned pager
+// footer. Only meaningful when EmbedMode is true.
+func (m Model) Footer() string {
+	return m.footerLine()
 }
 
 // renderGitLogPane renders the top-level workspace git log pane with a

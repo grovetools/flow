@@ -13,10 +13,14 @@ import (
 func (m Model) View() string {
 	// Show help if active.
 	if m.helpModel.ShowAll {
-		return lipgloss.JoinVertical(lipgloss.Left,
+		out := lipgloss.JoinVertical(lipgloss.Left,
 			lipgloss.NewStyle().Padding(1).Render("🏁 Plan Finish - Help"),
 			m.helpModel.View(),
 		)
+		if m.width > 0 {
+			out = lipgloss.NewStyle().MaxWidth(m.width).Render(out)
+		}
+		return out
 	}
 
 	var b strings.Builder
@@ -99,12 +103,17 @@ func (m Model) View() string {
 		}
 	}
 
-	// Help footer - minimal.
-	b.WriteString("\n")
-	helpStyle := theme.DefaultTheme.Muted
-	b.WriteString(helpStyle.Render("? help • q quit"))
+	out := b.String()
+	if m.width > 0 {
+		out = lipgloss.NewStyle().MaxWidth(m.width).Render(out)
+	}
+	return out
+}
 
-	return b.String()
+// FooterView returns the help hint for use by the pager's SetFooter
+// mechanism when the wizard is embedded as a tab.
+func (m Model) FooterView() string {
+	return theme.DefaultTheme.Muted.Render("? help • q quit")
 }
 
 // renderInlineDetails shows detailed repository status inline below

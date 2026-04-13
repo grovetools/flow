@@ -84,6 +84,9 @@ type Model struct {
 
 	// Claw (channel + autonomous) toggle
 	clawEnabled bool
+
+	// Terminal dimensions for width-clamping the View output.
+	width, height int
 }
 
 // IsTextEntryActive reports whether the wizard currently has a

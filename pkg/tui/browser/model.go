@@ -62,6 +62,11 @@ type Config struct {
 	// KeyMap, if non-nil, overrides the default browser keymap. Leave
 	// nil to use NewKeyMap(config.LoadDefault()).
 	KeyMap *KeyMap
+	// EmbedMode suppresses the inline footer (help + status) in View()
+	// so the host can pin it via Footer() instead. When false (the
+	// default, standalone CLI use) the footer renders inline at the
+	// bottom of the view.
+	EmbedMode bool
 }
 
 // Model is the browser TUI state. It holds the rendered plan list, the
@@ -89,6 +94,8 @@ type Model struct {
 	gitLogContent  string
 	gitLogError    error
 	showOnHold     bool
+
+	embedMode bool // suppress inline footer; host uses Footer()
 
 	// Ecosystem sub-navigation: when the user toggles git log on an
 	// ecosystem plan, we enter a secondary navigation mode that walks
@@ -149,6 +156,7 @@ func New(cfg Config) Model {
 		help:           helpModel,
 		keys:           km,
 		showGitLog:     false,
+		embedMode:      cfg.EmbedMode,
 	}
 }
 

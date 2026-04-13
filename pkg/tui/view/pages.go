@@ -191,11 +191,19 @@ func (p *addJobPage) IsTextEntryActive() bool {
 	return p.s.wizardModel != nil && p.s.wizardModel.IsTextEntryActive()
 }
 
+func (p *addJobPage) Footer() string {
+	if p.s.wizardModel == nil {
+		return ""
+	}
+	return p.s.wizardModel.FooterView()
+}
+
 var _ pager.Page = (*addJobPage)(nil)
 var _ pager.PageWithTitle = (*addJobPage)(nil)
 var _ pager.PageWithEnabled = (*addJobPage)(nil)
 var _ pager.PageWithReady = (*addJobPage)(nil)
 var _ pager.PageWithTextInput = (*addJobPage)(nil)
+var _ pager.PageWithFooter = (*addJobPage)(nil)
 
 // ---------- plansPage (tab 2: Plans) ----------
 
@@ -257,8 +265,13 @@ func (p *plansPage) SetSize(w, h int) {
 	p.height = h
 }
 
+func (p *plansPage) Footer() string {
+	return p.s.browserModel.Footer()
+}
+
 var _ pager.Page = (*plansPage)(nil)
 var _ pager.PageWithTitle = (*plansPage)(nil)
+var _ pager.PageWithFooter = (*plansPage)(nil)
 
 // ---------- addPlanPage (tab 3: Add Plan) ----------
 
@@ -334,10 +347,18 @@ func (p *addPlanPage) IsTextEntryActive() bool {
 	return p.s.initWizardModel != nil && p.s.initWizardModel.IsTextEntryActive()
 }
 
+func (p *addPlanPage) Footer() string {
+	if p.s.initWizardModel == nil {
+		return ""
+	}
+	return p.s.initWizardModel.FooterView()
+}
+
 var _ pager.Page = (*addPlanPage)(nil)
 var _ pager.PageWithTitle = (*addPlanPage)(nil)
 var _ pager.PageWithReady = (*addPlanPage)(nil)
 var _ pager.PageWithTextInput = (*addPlanPage)(nil)
+var _ pager.PageWithFooter = (*addPlanPage)(nil)
 
 // ---------- finishPlanPage (tab 4: Finish Plan) ----------
 
@@ -411,7 +432,15 @@ func (p *finishPlanPage) SetSize(w, h int) {
 func (p *finishPlanPage) Enabled() bool        { return p.s.statusModel != nil }
 func (p *finishPlanPage) Ready() (bool, string) { return p.s.finishWizardModel != nil, "Loading wizard…" }
 
+func (p *finishPlanPage) Footer() string {
+	if p.s.finishWizardModel == nil {
+		return ""
+	}
+	return p.s.finishWizardModel.FooterView()
+}
+
 var _ pager.Page = (*finishPlanPage)(nil)
 var _ pager.PageWithTitle = (*finishPlanPage)(nil)
 var _ pager.PageWithEnabled = (*finishPlanPage)(nil)
 var _ pager.PageWithReady = (*finishPlanPage)(nil)
+var _ pager.PageWithFooter = (*finishPlanPage)(nil)

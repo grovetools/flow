@@ -29,21 +29,28 @@ func (m Model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
+	container := lipgloss.NewStyle().PaddingLeft(2)
+	if m.width > 0 {
+		container = container.MaxWidth(m.width)
+	}
+	return container.Render(b.String())
+}
+
+// FooterView returns the mode indicator + help text for use by the
+// pager's SetFooter mechanism when the wizard is embedded as a tab.
+func (m Model) FooterView() string {
+	var modeIndicator string
 	if m.unfocused {
-		b.WriteString(theme.DefaultTheme.Muted.Render("[NORMAL]"))
+		modeIndicator = "[NORMAL]"
 	} else {
-		b.WriteString(theme.DefaultTheme.Muted.Render("[INSERT]"))
+		modeIndicator = "[INSERT]"
 	}
 
 	helpText := m.help.View()
 	if helpText != "" {
-		b.WriteString(" • ")
-		b.WriteString(helpText)
+		return theme.DefaultTheme.Muted.Render(modeIndicator + " • " + helpText)
 	}
-
-	container := lipgloss.NewStyle().PaddingLeft(2)
-	return container.Render(b.String())
+	return theme.DefaultTheme.Muted.Render(modeIndicator)
 }
 
 // renderMainScreen renders the main configuration screen.

@@ -170,6 +170,7 @@ func New(cfg Config) Model {
 		PlansDir:     cfg.PlansDir,
 		WorkspaceDir: cfg.WorkspaceDir,
 		DaemonClient: cfg.DaemonClient,
+		EmbedMode:    true,
 	})
 	vs := &viewState{
 		cfg:          cfg,

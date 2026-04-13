@@ -50,6 +50,7 @@ type Model struct {
 	branchExists   bool
 	keys           KeyMap
 	helpModel      help.Model
+	width          int
 }
 
 // New constructs a Model from the given Config. The cursor is placed

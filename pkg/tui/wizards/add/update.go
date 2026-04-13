@@ -32,6 +32,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
 	case embed.SetWorkspaceMsg:
 		// Workspace changed under us. The wizard's plan pointer is
 		// now stale — close the wizard by emitting a cancel DoneMsg

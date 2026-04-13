@@ -915,7 +915,10 @@ func (m Model) View() string {
 	parts = append(parts, footer)
 
 	finalView := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	result := lipgloss.NewStyle().Margin(0, 2).Render(finalView)
+	result := lipgloss.NewStyle().
+		Margin(0, 2).
+		MaxWidth(m.Width).
+		Render(finalView)
 
 	return result
 }
