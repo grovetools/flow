@@ -73,7 +73,11 @@ func (m *DetailPaneModel) View() string {
 	if w < 1 {
 		w = 1
 	}
-	divider := theme.DefaultTheme.Muted.Render(strings.Repeat("─", w))
+	dividerStyle := theme.DefaultTheme.Muted
+	if m.Focused {
+		dividerStyle = lipgloss.NewStyle().Foreground(theme.DefaultColors.Orange)
+	}
+	divider := dividerStyle.Render(strings.Repeat("─", w))
 	return lipgloss.JoinVertical(lipgloss.Left, divider, m.Header, divider, m.Content)
 }
 

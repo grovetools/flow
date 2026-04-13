@@ -37,6 +37,8 @@ type KeyMap struct {
 	CycleDetailPane  key.Binding
 	CloseDetailPane  key.Binding
 	SwitchFocus      key.Binding
+	FocusLeft        key.Binding // Spatial navigation: focus left pane (jobs)
+	FocusRight       key.Binding // Spatial navigation: focus right pane (detail)
 	ToggleLayout     key.Binding
 	ToggleFullscreen key.Binding
 	ViewNativeAgent  key.Binding // Preview native agent PTY pane (groveterm only)
@@ -113,8 +115,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("T", "toggle columns"),
 		),
 		ViewLogs: key.NewBinding(
-			key.WithKeys("l"),
-			key.WithHelp("l", "view logs"),
+			key.WithKeys("L"),
+			key.WithHelp("L", "view logs"),
 		),
 		ViewFrontmatter: key.NewBinding(
 			key.WithKeys("f"),
@@ -147,6 +149,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		SwitchFocus: key.NewBinding(
 			key.WithKeys("tab", "shift+tab"),
 			key.WithHelp("tab/shift+tab", "switch focus"),
+		),
+		FocusLeft: key.NewBinding(
+			key.WithKeys("h", "left"),
+			key.WithHelp("h/←", "focus left"),
+		),
+		FocusRight: key.NewBinding(
+			key.WithKeys("l", "right"),
+			key.WithHelp("l/→", "focus right"),
 		),
 		ToggleLayout: key.NewBinding(
 			key.WithKeys("V"),
@@ -186,7 +196,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
 			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
 			k.ViewBriefing, k.ViewEdit, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview, k.CycleDetailPane,
-			k.CloseDetailPane, k.SwitchFocus, k.ToggleLayout, k.ToggleFullscreen,
+			k.CloseDetailPane, k.SwitchFocus, k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(
 			k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,

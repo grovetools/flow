@@ -1373,7 +1373,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ShowLogs && (m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary) {
 			// Global keys that should pass through to the main switch
 			switch msg.String() {
-			case "q", "ctrl+c", "?", "F", "l", "f", "b", "m", "p", "v",
+			case "q", "ctrl+c", "?", "F", "L", "h", "l", "left", "right", "f", "b", "m", "p", "v",
 				"tab", "shift+tab", "V", "z", "i", "s", "esc":
 				// Let these be handled by the main logic below
 			default:
@@ -1454,6 +1454,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshSkillPane()
 				return m, cmd
 			}
+
+		case key.Matches(msg, m.KeyMap.FocusLeft):
+			// h / left → focus the jobs pane (left)
+			if m.ShowLogs && !m.LogPaneFullscreen {
+				if m.Focus != FocusJobs {
+					m.Manager.ActivePaneIdx = 0
+					m.syncFocusFromManager()
+					m.refreshSkillPane()
+				}
+			}
+			return m, nil
+
+		case key.Matches(msg, m.KeyMap.FocusRight):
+			// l / right → focus the detail pane (right), or open logs if no detail pane
+			if m.ShowLogs && !m.LogPaneFullscreen {
+				if m.Focus == FocusJobs {
+					m.Manager.ActivePaneIdx = 1
+					m.syncFocusFromManager()
+					m.refreshSkillPane()
+				}
+			} else if m.ActiveDetailPane == NoPane {
+				// No detail pane open — open logs (mimics old `l` behavior)
+				return m.openDetailPane(LogsPaneDetail)
+			}
+			return m, nil
 
 		case key.Matches(msg, m.KeyMap.ToggleLayout):
 			if m.ShowLogs {

@@ -358,7 +358,12 @@ func (m Model) renderDetailHeader() string {
 	}
 
 	header := fmt.Sprintf("%s: %s  %s%s • %s • %s%s", paneTitle, jobIcon, jobTitle, filenameDisplay, template, statusIcon, scrollInfo)
-	header = theme.DefaultTheme.Bold.Render(header)
+	detailFocused := m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary
+	if detailFocused {
+		header = theme.DefaultTheme.Bold.Render(header)
+	} else {
+		header = theme.DefaultTheme.Muted.Render(header)
+	}
 	if m.LogViewerWidth > 0 {
 		header = ansi.Truncate(header, m.LogViewerWidth, "…")
 	}
@@ -868,6 +873,7 @@ func (m Model) View() string {
 		detailPane := m.Manager.Panes[1].Model.(*DetailPaneModel)
 		detailPane.Header = m.renderDetailHeader()
 		detailPane.Content = m.renderDetailContent()
+		detailPane.Focused = m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary
 	}
 
 	// ── Render layout via Manager ────────────────────────────────────
