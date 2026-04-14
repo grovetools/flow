@@ -1011,13 +1011,14 @@ func (m *Model) calculateFocusJobsWidth() int {
 		}
 	}
 
-	// Add table formatting: left border (1) + right border (1) + separators between columns (3 each)
-	// Format is: "│ col1 │ col2 │ col3 │"
+	// Add table formatting chrome. Separators are single │ chars (1 cell);
+	// the spaces around them come from cell padding (already counted).
 	if visibleColCount > 0 {
-		totalWidth += 2 // Left and right borders
-		totalWidth += (visibleColCount - 1) * 3 // Separators between columns: " │ "
-		totalWidth += visibleColCount * 2 // Padding: 1 space on each side of each column
-		totalWidth += 4 // Extra spacing buffer
+		totalWidth += 2                         // left + right borders
+		totalWidth += (visibleColCount - 1) * 1 // separators: │ (1 char)
+		totalWidth += visibleColCount * 2       // cell padding: 1 space each side
+		totalWidth += 2                         // selection indicator (▶ or spaces)
+		totalWidth += 2                         // safety buffer
 	}
 
 	// 4. Apply reasonable bounds to the final calculated width.

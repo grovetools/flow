@@ -210,10 +210,11 @@ func (m Model) estimateTableWidth() int {
 		}
 	}
 	if visibleColCount > 0 {
-		totalWidth += 2                          // borders
-		totalWidth += (visibleColCount - 1) * 3  // separators
-		totalWidth += visibleColCount * 2         // padding
-		totalWidth += 4                          // buffer
+		totalWidth += 2                         // left + right borders (1 char each)
+		totalWidth += (visibleColCount - 1) * 1 // separators: │ (1 char, padding already counted)
+		totalWidth += visibleColCount * 2       // cell padding: 1 space each side per column
+		totalWidth += 2                         // external selection indicator (▶ or spaces)
+		totalWidth += 2                         // safety buffer
 	}
 	return totalWidth
 }
