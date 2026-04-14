@@ -145,7 +145,7 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 
 		var rulesContent []byte
 		cfg, cfgErr := config.LoadFrom(plan.Directory)
-		if cfgErr == nil && cfg.Context.DefaultRulesPath != "" {
+		if cfgErr == nil && cfg != nil && cfg.Context != nil && cfg.Context.DefaultRulesPath != "" {
 			rulesContent, _ = os.ReadFile(cfg.Context.DefaultRulesPath)
 		}
 
