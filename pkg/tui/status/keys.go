@@ -43,6 +43,7 @@ type KeyMap struct {
 	ToggleFullscreen key.Binding
 	ViewContext      key.Binding // View context panel (groveterm only)
 	ViewNativeAgent  key.Binding // Preview native agent PTY pane (groveterm only)
+	ViewMemory       key.Binding // View memory search panel (groveterm only)
 	SendInput        key.Binding // For isolated agents: toggle input mode
 	ToggleClaw       key.Binding // Enable/disable claw (channels + autonomous)
 }
@@ -139,6 +140,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("p"),
 			key.WithHelp("p", "preview agent pane"),
 		),
+		ViewMemory: key.NewBinding(
+			key.WithKeys("M"),
+			key.WithHelp("M", "memory search"),
+		),
 		ViewSkillPane: key.NewBinding(
 			key.WithKeys("F"),
 			key.WithHelp("F", "skills"),
@@ -200,7 +205,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
 			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-			k.ViewBriefing, k.ViewEdit, k.ViewContext, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview, k.CycleDetailPane,
+			k.ViewBriefing, k.ViewEdit, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview, k.CycleDetailPane,
 			k.CloseDetailPane, k.SwitchFocus, k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(

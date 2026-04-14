@@ -3,6 +3,8 @@ package status
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -653,6 +655,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Focus = FocusJobs
 		}
 		return m, nil
+
+	case embed.SplitMemoryClosedMsg:
+		// Memory panel closed by host — demote internal state.
+		if m.ActiveDetailPane == MemoryPaneDetail {
+			if m.Manager.IsPromoted("detail") {
+				m.Manager, _ = m.Manager.Demote("detail")
+			}
+			m.ActiveDetailPane = NoPane
+			m.Focus = FocusJobs
+		}
+		return m, nil
+
+	case embed.AppendContextRuleMsg:
+		// Memory panel wants to add a file to the current job's rules.
+		if m.Cursor >= len(m.Jobs) {
+			return m, nil
+		}
+		job := m.Jobs[m.Cursor]
+		rule, err := resolveContextAlias(msg.Path)
+		if err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to resolve alias: %v", err))
+			return m, nil
+		}
+		rulesFile := job.RulesFile
+		if rulesFile == "" {
+			// Create a rules file for this job.
+			rulesFile = "rules/" + job.Filename + ".rules"
+			job.RulesFile = rulesFile
+		}
+		absRulesFile := rulesFile
+		if !strings.HasPrefix(rulesFile, "/") {
+			absRulesFile = m.PlanDir + "/" + rulesFile
+		}
+		if err := appendRuleLine(absRulesFile, rule); err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to append rule: %v", err))
+			return m, nil
+		}
+		m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Added: %s", rule))
+		return m, refreshPlan(m.PlanDir)
 
 	case embed.SplitViewportClosedMsg:
 		// Viewport closed (user pressed q or host closed the split).
@@ -1893,6 +1934,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
 			return m, tea.Batch(loadCmd, promoteCmd)
 
+		case key.Matches(msg, m.KeyMap.ViewMemory):
+			if !m.Hosted {
+				m.StatusSummary = theme.DefaultTheme.Warning.Render("Memory panel requires groveterm host")
+				return m, nil
+			}
+			if m.Cursor >= len(m.Jobs) {
+				return m, nil
+			}
+			// Toggle off if already showing memory pane.
+			if m.ActiveDetailPane == MemoryPaneDetail && m.Manager.IsPromoted("detail") {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			job := m.Jobs[m.Cursor]
+			mdl, loadCmd := m.openDetailPane(MemoryPaneDetail)
+			m = mdl.(Model)
+			query := job.Title
+			openCmd := func() tea.Msg {
+				return embed.SplitMemoryRequestMsg{
+					Query: query,
+					Ratio: 0.35,
+					Focus: false,
+				}
+			}
+			closeCmd := func() tea.Msg { return embed.SplitMemoryCloseRequestMsg{} }
+			var promoteCmd tea.Cmd
+			m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+			return m, tea.Batch(loadCmd, promoteCmd)
+
 		case key.Matches(msg, m.KeyMap.CycleDetailPane):
 			// Toggle detail pane visibility (show/hide)
 			if m.ActiveDetailPane == NoPane {
@@ -2610,7 +2680,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// (key handler or openHostedViewportPane) handles the actual Promote call.
 	isViewportPane := pane == LogsPaneDetail || pane == FrontmatterPane || pane == BriefingPane
 	isTargetPromoted := (pane == NativeAgentPaneDetail || pane == EditorPaneDetail ||
-		pane == ContextPaneDetail ||
+		pane == ContextPaneDetail || pane == MemoryPaneDetail ||
 		(isViewportPane && m.Hosted))
 	isCurrentlyPromoted := m.Manager.IsPromoted("detail")
 
@@ -3034,4 +3104,38 @@ func (m Model) emitContextScopeUpdate() tea.Cmd {
 	return func() tea.Msg {
 		return embed.UpdateContextScopeMsg{RulesFile: rulesFile}
 	}
+}
+
+// resolveContextAlias converts an absolute file path into a cx alias format
+// (@a:project:relative/path) by looking up the workspace project that contains it.
+func resolveContextAlias(absPath string) (string, error) {
+	node, err := workspace.GetProjectByPath(absPath)
+	if err != nil {
+		return absPath, nil // Fall back to absolute path if resolution fails.
+	}
+	rel, err := filepath.Rel(node.Path, absPath)
+	if err != nil {
+		return absPath, nil
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		return "@a:" + node.Name, nil
+	}
+	return "@a:" + node.Name + ":" + rel, nil
+}
+
+// appendRuleLine appends a rule line to the given rules file, creating the
+// file and its parent directories if they don't exist.
+func appendRuleLine(path, rule string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create rules dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open rules file: %w", err)
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "%s\n", rule)
+	return err
 }

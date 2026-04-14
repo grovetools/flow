@@ -62,6 +62,7 @@ const (
 	EditPane
 	SkillPane
 	ContextPaneDetail
+	MemoryPaneDetail
 	NativeAgentPaneDetail
 	EditorPaneDetail // BSP split editor (hosted mode only)
 )
@@ -351,6 +352,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Skills"
 	case ContextPaneDetail:
 		paneTitle = "Context"
+	case MemoryPaneDetail:
+		paneTitle = "Memory"
 	}
 
 	jobIcon := getJobIcon(currentJob)
