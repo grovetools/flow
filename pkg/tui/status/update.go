@@ -2014,14 +2014,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Start running the jobs asynchronously
 				m.IsRunningJob = true
-				m.ActiveDetailPane = LogsPaneDetail // Switch to log viewer pane
-				m.ShowLogs = true
-				m.Manager, _ = m.Manager.SetHidden("detail", false)
-				m.Focus = FocusDetailPrimary
-
-				// Set the active job for the log pane header. If multiple jobs, use the first.
-				// This might be overridden later if an agent job is found.
 				m.ActiveLogJob = jobsToRun[0]
+
+				var layoutCmds []tea.Cmd
+
+				if m.Hosted {
+					isNativeAgent := jobsToRun[0].Type == orchestration.JobTypeInteractiveAgent ||
+						jobsToRun[0].Type == orchestration.JobTypeIsolatedAgent
+
+					if isNativeAgent {
+						// The daemon will auto-split a native PTY pane shortly.
+						// Close any existing detail pane so we don't end up with nested orange borders.
+						if cmd := m.closeCurrentDetail(); cmd != nil {
+							layoutCmds = append(layoutCmds, cmd)
+						}
+					} else {
+						// For shell jobs and headless agents, open the logs as a BSP viewport split.
+						title := "Logs: " + jobsToRun[0].Title
+
+						mdl, cmd := m.openDetailPane(LogsPaneDetail)
+						m = mdl.(Model)
+						if cmd != nil {
+							layoutCmds = append(layoutCmds, cmd)
+						}
+
+						if m.viewportActive {
+							layoutCmds = append(layoutCmds, func() tea.Msg {
+								return embed.UpdateViewportTitleMsg{Title: title}
+							})
+							layoutCmds = append(layoutCmds, func() tea.Msg {
+								return embed.UpdateViewportContentMsg{Content: "Running...", Append: false}
+							})
+						} else {
+							openCmd := func() tea.Msg {
+								return embed.SplitViewportRequestMsg{
+									PanelID:    "logs",
+									Title:      title,
+									AutoScroll: true,
+									Ratio:      0.35,
+								}
+							}
+							closeCmd := func() tea.Msg { return embed.SplitViewportCloseRequestMsg{} }
+							var promoteCmd tea.Cmd
+							m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+							m.viewportActive = true
+							if promoteCmd != nil {
+								layoutCmds = append(layoutCmds, promoteCmd)
+							}
+						}
+					}
+				} else {
+					// Standalone mode fallback
+					m.ActiveDetailPane = LogsPaneDetail
+					m.ShowLogs = true
+					m.Manager, _ = m.Manager.SetHidden("detail", false)
+					m.Focus = FocusDetailPrimary
+				}
 
 				// Centralized layout calculation
 				m.updateLayoutDimensions()
@@ -2066,6 +2114,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				var cmds []tea.Cmd
+				cmds = append(cmds, layoutCmds...)
 				cmds = append(cmds, runCmd)
 
 				// For non-daemon paths, also start agent log streaming via aglogs.
