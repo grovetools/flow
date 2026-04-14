@@ -119,8 +119,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("L", "view logs"),
 		),
 		ViewFrontmatter: key.NewBinding(
-			key.WithKeys("f"),
-			key.WithHelp("f", "view frontmatter"),
+			key.WithKeys("t"),
+			key.WithHelp("t", "view frontmatter"),
 		),
 		ViewBriefing: key.NewBinding(
 			key.WithKeys("b"),
