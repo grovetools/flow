@@ -2240,39 +2240,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.AddJob):
-			// In hosted mode, switch to the Add Job pager tab instead of
-			// showing the inline create-job form.
-			if m.Hosted {
-				return m, func() tea.Msg {
-					return embed.SwitchTabMsg{TabIndex: 1} // tabAddJob
-				}
+			// Switch to the Add Job pager tab.
+			return m, func() tea.Msg {
+				return embed.SwitchTabMsg{TabIndex: 1} // tabAddJob
 			}
-			m.CreatingJob = true
-			m.CreateJobType = "generic"
-
-			// Collect selected jobs as dependencies
-			if len(m.Selected) > 0 {
-				var selectedJobs []*orchestration.Job
-				for id := range m.Selected {
-					for _, job := range m.Jobs {
-						if job.ID == id {
-							selectedJobs = append(selectedJobs, job)
-							break
-						}
-					}
-				}
-				m.CreateJobDeps = selectedJobs
-			} else {
-				m.CreateJobDeps = nil
-			}
-
-			ti := textinput.New()
-			ti.Placeholder = "new-job"
-			ti.Focus()
-			ti.CharLimit = 100
-			ti.Width = 50
-			m.CreateJobInput = ti
-			return m, textinput.Blink
 
 		case key.Matches(msg, m.KeyMap.AddFromRecipe):
 			m.selectingRecipe = true
