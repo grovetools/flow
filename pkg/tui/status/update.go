@@ -2555,12 +2555,12 @@ func closeViewportSplitCmd() tea.Cmd {
 // internal panes demote it back.
 func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// A pane is "promoted" (BSP split) when it's a native agent/editor, or
-	// when it uses the ViewportPanel in hosted mode. Frontmatter/briefing
-	// are promoted when a viewport is already active (content swap).
+	// when it uses the ViewportPanel in hosted mode. All viewport panes
+	// (logs, frontmatter, briefing) are promoted in hosted mode — the caller
+	// (key handler or openHostedViewportPane) handles the actual Promote call.
 	isViewportPane := pane == LogsPaneDetail || pane == FrontmatterPane || pane == BriefingPane
 	isTargetPromoted := (pane == NativeAgentPaneDetail || pane == EditorPaneDetail ||
-		(pane == LogsPaneDetail && m.Hosted) ||
-		(isViewportPane && m.Hosted && m.viewportActive))
+		(isViewportPane && m.Hosted))
 	isCurrentlyPromoted := m.Manager.IsPromoted("detail")
 
 	var cmds []tea.Cmd
