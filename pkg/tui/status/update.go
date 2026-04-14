@@ -42,19 +42,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return updated, relisten
 
 	case embed.FocusMsg:
-		// Host gave this panel focus. Nothing additional to do — the model
-		// already routes keys through its own Focus state machine once the
-		// bubbletea program routes events here.
+		m.HasFocus = true
 		return m, nil
 
 	case embed.BlurMsg:
-		// Host withdrew focus. Cancel any active log stream so we don't keep
-		// spinning goroutines while off-screen.
-		if m.StreamCancel != nil {
-			m.StreamCancel()
-			m.StreamCancel = nil
-			m.StreamingJobID = ""
-		}
+		// Host withdrew focus. Do NOT cancel the log stream here — stream
+		// cancellation should only happen on explicit pane close or job switch.
+		// In hosted mode, blur just means the user moved focus to a sibling
+		// BSP split (e.g. the viewport), and the stream must keep feeding it.
+		m.HasFocus = false
 		return m, nil
 
 	case embed.SetWorkspaceMsg:
@@ -1494,6 +1490,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor = 0
 				m.ScrollOffset = 0
 				m.Sequence.Clear()
+				if m.ActiveDetailPane != NoPane {
+					return m.reloadActiveDetailPane()
+				}
 			}
 			// First 'g' or sequence in progress - sequence is tracking it
 			return m, nil
@@ -1634,11 +1633,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor > 0 {
 				m.Cursor--
 				m.adjustScrollOffset()
-				if m.Manager.IsPromoted("detail") {
-					cmd := m.closeCurrentDetail()
-					return m, cmd
-				}
-				if m.ShowLogs {
+				if m.ActiveDetailPane != NoPane {
 					return m.reloadActiveDetailPane()
 				}
 			}
@@ -1647,11 +1642,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
-				if m.Manager.IsPromoted("detail") {
-					cmd := m.closeCurrentDetail()
-					return m, cmd
-				}
-				if m.ShowLogs {
+				if m.ActiveDetailPane != NoPane {
 					return m.reloadActiveDetailPane()
 				}
 			}
@@ -1660,11 +1651,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Jobs) > 0 {
 				m.Cursor = len(m.Jobs) - 1
 				m.adjustScrollOffset()
-				if m.Manager.IsPromoted("detail") {
-					cmd := m.closeCurrentDetail()
-					return m, cmd
-				}
-				if m.ShowLogs {
+				if m.ActiveDetailPane != NoPane {
 					return m.reloadActiveDetailPane()
 				}
 			}
@@ -1676,7 +1663,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor = 0
 			}
 			m.adjustScrollOffset()
-			if m.ShowLogs {
+			if m.ActiveDetailPane != NoPane {
 				return m.reloadActiveDetailPane()
 			}
 
@@ -1687,7 +1674,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor = len(m.Jobs) - 1
 			}
 			m.adjustScrollOffset()
-			if m.ShowLogs {
+			if m.ActiveDetailPane != NoPane {
 				return m.reloadActiveDetailPane()
 			}
 
@@ -1768,6 +1755,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Title:      title,
 						AutoScroll: true,
 						Ratio:      0.35,
+						Focus:      false,
 					}
 				}
 				closeCmd := func() tea.Msg { return embed.SplitViewportCloseRequestMsg{} }
@@ -2052,6 +2040,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 									Title:      title,
 									AutoScroll: true,
 									Ratio:      0.35,
+									Focus:      false,
 								}
 							}
 							closeCmd := func() tea.Msg { return embed.SplitViewportCloseRequestMsg{} }
@@ -2594,7 +2583,13 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// Internal lipgloss pane: ensure it's visible.
 	m.ShowLogs = true
 	m.Manager, _ = m.Manager.SetHidden("detail", false)
-	m.Focus = FocusDetailPrimary
+
+	// Only steal focus for interactive pane types (editor, native agent).
+	// Informational panes (logs, frontmatter, briefing, skills) keep the
+	// cursor in the job list so the user can continue browsing.
+	if pane == EditPane || pane == NativeAgentPaneDetail {
+		m.Focus = FocusDetailPrimary
+	}
 
 	// Defensively close any orphaned BSP splits when opening an internal
 	// pane in hosted mode (host handlers no-op when there's no sibling).
@@ -2703,6 +2698,7 @@ func (m Model) openHostedViewportPane(pane DetailPane, label string) (tea.Model,
 			Title:      title,
 			AutoScroll: false,
 			Ratio:      0.35,
+			Focus:      false,
 		}
 	}
 	closeCmd := func() tea.Msg { return embed.SplitViewportCloseRequestMsg{} }

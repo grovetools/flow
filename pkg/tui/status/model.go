@@ -111,6 +111,7 @@ type Model struct {
 	StreamingJobID      string             // Track which job is currently streaming to prevent duplicates
 	StreamCancel        context.CancelFunc // Function to cancel the active agent log stream
 	ActiveDetailPane    DetailPane
+	HasFocus            bool               // True when the host has given this panel focus
 	columnSelectMode    bool
 	columnList          list.Model
 	availableColumns    []string
