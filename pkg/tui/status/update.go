@@ -2240,6 +2240,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.AddJob):
+			// In hosted mode, switch to the Add Job pager tab instead of
+			// showing the inline create-job form.
+			if m.Hosted {
+				return m, func() tea.Msg {
+					return embed.SwitchTabMsg{TabIndex: 1} // tabAddJob
+				}
+			}
 			m.CreatingJob = true
 			m.CreateJobType = "generic"
 
