@@ -298,7 +298,8 @@ func (m *Model) syncFocusFromManager() {
 // syncPaneLayout adjusts the jobs pane's Fixed/Flex values based on the
 // current split direction so the Manager distributes space correctly.
 func (m *Model) syncPaneLayout() {
-	if m.Manager.Direction == panes.DirectionHorizontal {
+	detailVisible := !m.Manager.IsHidden("detail") && !m.Manager.IsPromoted("detail")
+	if m.Manager.Direction == panes.DirectionHorizontal && detailVisible {
 		m.Manager.Panes[0].Fixed = m.calculateFocusJobsWidth()
 		m.Manager.Panes[0].Flex = 0
 	} else {
