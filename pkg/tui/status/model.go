@@ -61,6 +61,7 @@ const (
 	BriefingPane
 	EditPane
 	SkillPane
+	ContextPaneDetail
 	NativeAgentPaneDetail
 	EditorPaneDetail // BSP split editor (hosted mode only)
 )
@@ -348,6 +349,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Preview"
 	case SkillPane:
 		paneTitle = "Skills"
+	case ContextPaneDetail:
+		paneTitle = "Context"
 	}
 
 	jobIcon := getJobIcon(currentJob)

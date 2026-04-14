@@ -643,6 +643,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshSkillPane()
 		return m, refreshPlan(m.PlanDir)
 
+	case embed.SplitContextClosedMsg:
+		// Context panel closed by host — demote internal state.
+		if m.ActiveDetailPane == ContextPaneDetail {
+			if m.Manager.IsPromoted("detail") {
+				m.Manager, _ = m.Manager.Demote("detail")
+			}
+			m.ActiveDetailPane = NoPane
+			m.Focus = FocusJobs
+		}
+		return m, nil
+
 	case embed.SplitViewportClosedMsg:
 		// Viewport closed (user pressed q or host closed the split).
 		// Demote to sync internal state — the host already tore down the BSP split.
@@ -1471,7 +1482,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ShowLogs && (m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary) {
 			// Global keys that should pass through to the main switch
 			switch msg.String() {
-			case "q", "ctrl+c", "?", "F", "L", "left", "right", "f", "b", "m", "p", "v",
+			case "q", "ctrl+c", "?", "F", "L", "left", "right", "f", "b", "m", "p", "v", "w",
 				"tab", "shift+tab", "V", "z", "i", "s", "esc":
 				// Let these be handled by the main logic below
 			default:
@@ -1491,7 +1502,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ScrollOffset = 0
 				m.Sequence.Clear()
 				if m.ActiveDetailPane != NoPane {
-					return m.reloadActiveDetailPane()
+					m, reloadCmd := m.reloadActiveDetailPane()
+					if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
+						return m, tea.Batch(reloadCmd, scopeCmd)
+					}
+					return m, reloadCmd
 				}
 			}
 			// First 'g' or sequence in progress - sequence is tracking it
@@ -1634,7 +1649,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor--
 				m.adjustScrollOffset()
 				if m.ActiveDetailPane != NoPane {
-					return m.reloadActiveDetailPane()
+					m, reloadCmd := m.reloadActiveDetailPane()
+					if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
+						return m, tea.Batch(reloadCmd, scopeCmd)
+					}
+					return m, reloadCmd
 				}
 			}
 
@@ -1643,7 +1662,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor++
 				m.adjustScrollOffset()
 				if m.ActiveDetailPane != NoPane {
-					return m.reloadActiveDetailPane()
+					m, reloadCmd := m.reloadActiveDetailPane()
+					if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
+						return m, tea.Batch(reloadCmd, scopeCmd)
+					}
+					return m, reloadCmd
 				}
 			}
 
@@ -1652,7 +1675,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Cursor = len(m.Jobs) - 1
 				m.adjustScrollOffset()
 				if m.ActiveDetailPane != NoPane {
-					return m.reloadActiveDetailPane()
+					m, reloadCmd := m.reloadActiveDetailPane()
+					if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
+						return m, tea.Batch(reloadCmd, scopeCmd)
+					}
+					return m, reloadCmd
 				}
 			}
 
@@ -1664,7 +1691,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.adjustScrollOffset()
 			if m.ActiveDetailPane != NoPane {
-				return m.reloadActiveDetailPane()
+				m, reloadCmd := m.reloadActiveDetailPane()
+				if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
+					return m, tea.Batch(reloadCmd, scopeCmd)
+				}
+				return m, reloadCmd
 			}
 
 		case key.Matches(msg, m.KeyMap.PageDown):
@@ -1675,7 +1706,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.adjustScrollOffset()
 			if m.ActiveDetailPane != NoPane {
-				return m.reloadActiveDetailPane()
+				m, reloadCmd := m.reloadActiveDetailPane()
+				if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
+					return m, tea.Batch(reloadCmd, scopeCmd)
+				}
+				return m, reloadCmd
 			}
 
 		case key.Matches(msg, m.KeyMap.Select):
@@ -1809,6 +1844,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.ViewSkillPane):
 			return m.openDetailPane(SkillPane)
+
+		case key.Matches(msg, m.KeyMap.ViewContext):
+			if !m.Hosted {
+				m.StatusSummary = theme.DefaultTheme.Warning.Render("Context panel requires groveterm host")
+				return m, nil
+			}
+			if m.Cursor >= len(m.Jobs) {
+				return m, nil
+			}
+			// Toggle off if already showing context pane.
+			if m.ActiveDetailPane == ContextPaneDetail && m.Manager.IsPromoted("detail") {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			job := m.Jobs[m.Cursor]
+			rulesFile := job.RulesFile
+			if rulesFile == "" {
+				// No rules file — show a placeholder in a viewport.
+				mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
+				m = mdl.(Model)
+				openCmd := func() tea.Msg {
+					return embed.SplitViewportRequestMsg{
+						PanelID: "context",
+						Title:   "Context",
+						Content: "No rules file configured. Press e to create one.",
+						Ratio:   0.35,
+						Focus:   false,
+					}
+				}
+				closeCmd := func() tea.Msg { return embed.SplitContextCloseRequestMsg{} }
+				var promoteCmd tea.Cmd
+				m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+				return m, tea.Batch(loadCmd, promoteCmd)
+			}
+			// Open the context panel BSP split.
+			mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
+			m = mdl.(Model)
+			openCmd := func() tea.Msg {
+				return embed.SplitContextRequestMsg{
+					RulesFile: rulesFile,
+					Ratio:     0.35,
+					Focus:     false,
+				}
+			}
+			closeCmd := func() tea.Msg { return embed.SplitContextCloseRequestMsg{} }
+			var promoteCmd tea.Cmd
+			m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+			return m, tea.Batch(loadCmd, promoteCmd)
 
 		case key.Matches(msg, m.KeyMap.CycleDetailPane):
 			// Toggle detail pane visibility (show/hide)
@@ -2527,6 +2610,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// (key handler or openHostedViewportPane) handles the actual Promote call.
 	isViewportPane := pane == LogsPaneDetail || pane == FrontmatterPane || pane == BriefingPane
 	isTargetPromoted := (pane == NativeAgentPaneDetail || pane == EditorPaneDetail ||
+		pane == ContextPaneDetail ||
 		(isViewportPane && m.Hosted))
 	isCurrentlyPromoted := m.Manager.IsPromoted("detail")
 
@@ -2934,4 +3018,20 @@ func (m Model) handleArtifactViewportKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.skillArtifactViewport, cmd = m.skillArtifactViewport.Update(msg)
 	return m, cmd
+}
+
+// emitContextScopeUpdate returns a tea.Cmd that emits an UpdateContextScopeMsg
+// for the currently selected job, if the context pane is active and hosted.
+// Returns nil if the context pane is not active.
+func (m Model) emitContextScopeUpdate() tea.Cmd {
+	if !m.Hosted || m.ActiveDetailPane != ContextPaneDetail {
+		return nil
+	}
+	if m.Cursor >= len(m.Jobs) {
+		return nil
+	}
+	rulesFile := m.Jobs[m.Cursor].RulesFile
+	return func() tea.Msg {
+		return embed.UpdateContextScopeMsg{RulesFile: rulesFile}
+	}
 }
