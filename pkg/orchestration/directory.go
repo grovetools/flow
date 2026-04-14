@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"gopkg.in/yaml.v3"
@@ -132,7 +133,30 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 	}
 
 	filename := GenerateJobFilename(nextNum, job.Title)
-	filepath := filepath.Join(plan.Directory, filename)
+
+	// Auto-create per-job rules file if one isn't already set
+	if job.RulesFile == "" {
+		rulesRelPath := filepath.Join("rules", filename+".rules")
+		rulesAbsPath := filepath.Join(plan.Directory, rulesRelPath)
+
+		if err := os.MkdirAll(filepath.Join(plan.Directory, "rules"), 0755); err != nil {
+			return "", fmt.Errorf("creating rules directory: %w", err)
+		}
+
+		var rulesContent []byte
+		cfg, cfgErr := config.LoadFrom(plan.Directory)
+		if cfgErr == nil && cfg.Context.DefaultRulesPath != "" {
+			rulesContent, _ = os.ReadFile(cfg.Context.DefaultRulesPath)
+		}
+
+		if err := os.WriteFile(rulesAbsPath, rulesContent, 0644); err != nil {
+			return "", fmt.Errorf("writing rules file: %w", err)
+		}
+
+		job.RulesFile = rulesRelPath
+	}
+
+	jobFilePath := filepath.Join(plan.Directory, filename)
 
 	// Generate job content
 	content, err := generateJobContent(job)
@@ -141,13 +165,13 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 	}
 
 	// Write job file
-	if err := os.WriteFile(filepath, content, 0644); err != nil {
+	if err := os.WriteFile(jobFilePath, content, 0644); err != nil {
 		return "", fmt.Errorf("writing job file: %w", err)
 	}
 
 	// Update plan structures
 	job.Filename = filename
-	job.FilePath = filepath
+	job.FilePath = jobFilePath
 	plan.Jobs = append(plan.Jobs, job)
 	plan.JobsByID[job.ID] = job
 
