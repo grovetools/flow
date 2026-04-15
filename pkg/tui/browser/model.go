@@ -106,6 +106,9 @@ type Model struct {
 	repoGitLogError      error
 }
 
+// PlanCount returns the number of plans in the browser list.
+func (m Model) PlanCount() int { return len(m.plans) }
+
 // CurrentPlan returns the *orchestration.Plan currently under the
 // browser's cursor, or nil if the list is empty or the cursor is
 // out of range. Hosts call this when they need to promote the

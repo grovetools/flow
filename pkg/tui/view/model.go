@@ -975,5 +975,38 @@ func (m *Model) Close() error {
 	return firstErr
 }
 
+// TestState returns a snapshot of internal state for the debug API.
+func (m Model) TestState() map[string]interface{} {
+	state := map[string]interface{}{}
+
+	switch m.mode {
+	case modeBrowser:
+		state["mode"] = "browser"
+	case modeStatus:
+		state["mode"] = "status"
+	case modeAddWizard:
+		state["mode"] = "add_wizard"
+	case modeFinishWizard:
+		state["mode"] = "finish_wizard"
+	case modeInitWizard:
+		state["mode"] = "init_wizard"
+	}
+
+	state["plan_count"] = m.s.browserModel.PlanCount()
+
+	if m.s.statusModel != nil {
+		state["job_count"] = len(m.s.statusModel.Jobs)
+		state["selected_job_index"] = m.s.statusModel.Cursor
+		if m.s.statusModel.Cursor >= 0 && m.s.statusModel.Cursor < len(m.s.statusModel.Jobs) {
+			state["selected_job_title"] = m.s.statusModel.Jobs[m.s.statusModel.Cursor].Title
+		}
+		if m.s.statusModel.Plan != nil {
+			state["plan_name"] = m.s.statusModel.Plan.Name
+		}
+	}
+
+	return state
+}
+
 // compile-time guard that Model satisfies tea.Model.
 var _ tea.Model = Model{}
