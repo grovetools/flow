@@ -1192,11 +1192,21 @@ func createGenericJobWithTitle(plan *orchestration.Plan, selectedJobs []*orchest
 			depIDs = append(depIDs, job.ID)
 		}
 
+		// Inherit worktree from parent jobs, fall back to plan config default.
+		worktree := ""
+		if len(selectedJobs) > 0 {
+			worktree = selectedJobs[0].Worktree
+		}
+		if worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
+			worktree = plan.Config.Worktree
+		}
+
 		newJob := &orchestration.Job{
 			ID:        jobID,
 			Title:     customTitle,
 			Status:    orchestration.JobStatusPending,
 			DependsOn: depIDs,
+			Worktree:  worktree,
 		}
 
 		_, err := orchestration.AddJob(plan, newJob)

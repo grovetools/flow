@@ -483,7 +483,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabJobs})
 			if msg.Result != nil && m.s.statusModel != nil {
 				if job, ok := msg.Result.(*orchestration.Job); ok && job != nil {
-					if _, err := orchestration.AddJob(m.s.statusModel.Plan, job); err == nil {
+					plan := m.s.statusModel.Plan
+					// Apply plan config defaults that the wizard doesn't set.
+					if plan.Config != nil {
+						if job.Model == "" && plan.Config.Model != "" {
+							job.Model = plan.Config.Model
+						}
+						if job.Worktree == "" && plan.Config.Worktree != "" {
+							job.Worktree = plan.Config.Worktree
+						}
+						if job.Inline.IsEmpty() && !plan.Config.Inline.IsEmpty() {
+							job.Inline = plan.Config.Inline
+						}
+					}
+					if _, err := orchestration.AddJob(plan, job); err == nil {
 						m.finishTransient = "Added job: " + job.Title
 						return m, func() tea.Msg { return status.RefreshMsg{} }
 					} else {

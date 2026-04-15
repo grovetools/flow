@@ -93,8 +93,18 @@ func (h statusTUIHost) Init() tea.Cmd {
 
 func (h statusTUIHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case embed.DoneMsg, embed.CloseRequestMsg, embed.CloseConfirmMsg:
+	case embed.CloseRequestMsg, embed.CloseConfirmMsg:
 		return h, tea.Quit
+
+	case embed.DoneMsg:
+		// Forward DoneMsg to the inner model — it handles wizard
+		// completion (add-job, finish-plan) internally. Only quit
+		// if the inner model re-emits a close request.
+		updated, cmd := h.model.Update(msg)
+		if vm, ok := updated.(view.Model); ok {
+			h.model = vm
+		}
+		return h, cmd
 
 	case embed.EditRequestMsg:
 		// Standalone CLI: translate to tea.ExecProcess so $EDITOR
