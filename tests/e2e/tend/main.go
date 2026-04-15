@@ -152,6 +152,9 @@ func main() {
 		scenarios.TemplateShimScenario,
 		scenarios.PlaybookListScenario,
 		scenarios.PlaybookRecipeResolutionScenario,
+
+		// Demote job to note
+		scenarios.DemoteToNoteScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
