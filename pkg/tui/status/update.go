@@ -1909,6 +1909,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			job := m.Jobs[m.Cursor]
+
+			// If the job has no rules_file at all, show a placeholder
+			// instead of falling through to resolveJobRulesFile which
+			// would inject default.rules.
+			if job.RulesFile == "" {
+				mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
+				m = mdl.(Model)
+				openCmd := func() tea.Msg {
+					return embed.SplitViewportRequestMsg{
+						PanelID: "context",
+						Title:   "Context",
+						Content: "No rules file configured for this job.\n\nEdit the job's frontmatter to add a rules_file.",
+						Ratio:   0.35,
+						Focus:   false,
+					}
+				}
+				closeCmd := func() tea.Msg { return embed.SplitContextCloseRequestMsg{} }
+				var promoteCmd tea.Cmd
+				m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+				return m, tea.Batch(loadCmd, promoteCmd)
+			}
+
 			rulesFile := resolveJobRulesFile(m.PlanDir, job.RulesFile)
 			if _, err := os.Stat(rulesFile); os.IsNotExist(err) {
 				// Rules file doesn't exist — show a placeholder in a viewport.
