@@ -58,10 +58,13 @@ func runPlanDemote(cmd *cobra.Command, args []string) error {
 	job.FilePath = jobFilePath
 	job.Filename = filepath.Base(jobFilePath)
 
-	// Lifecycle path: if the job has a note_ref and the note exists at that
-	// path (in in_progress/), move it back to inbox/ directly.
+	// Lifecycle path: if the job has a note_ref, find the note and move it
+	// back to inbox/. The note may be at the exact note_ref path, or it may
+	// have been moved to .archive/ or in_progress/ by older code.
 	if job.NoteRef != "" {
-		if _, statErr := os.Stat(job.NoteRef); statErr == nil {
+		actualPath := findNoteRef(job.NoteRef)
+		if actualPath != "" {
+			job.NoteRef = actualPath
 			return demoteViaRename(job)
 		}
 	}
@@ -81,9 +84,14 @@ func demoteViaRename(job *orchestration.Job) error {
 		}
 		inboxDir = filepath.Join(absWorkspace, "inbox")
 	} else {
-		// Derive inbox from the note_ref location:
-		// in_progress/ is a sibling of inbox/ under the workspace dir
-		inboxDir = filepath.Join(filepath.Dir(filepath.Dir(job.NoteRef)), "inbox")
+		// Derive inbox from the note_ref location using workspace extraction.
+		// The note may be in in_progress/, .archive/, inbox/.archive/, etc.
+		wsDir := extractWorkspaceDir(job.NoteRef)
+		if wsDir != "" {
+			inboxDir = filepath.Join(wsDir, "inbox")
+		} else {
+			inboxDir = filepath.Join(filepath.Dir(filepath.Dir(job.NoteRef)), "inbox")
+		}
 	}
 
 	if err := os.MkdirAll(inboxDir, 0755); err != nil {
@@ -197,6 +205,36 @@ func extractWorkspaceDir(absPath string) string {
 	}
 	// Last resort: use the plan directory's parent
 	return filepath.Dir(filepath.Dir(absPath))
+}
+
+// findNoteRef searches for a note at its expected path and common fallback
+// locations (.archive/, in_progress/). Returns the actual path if found, or
+// empty string if the note can't be located anywhere.
+func findNoteRef(noteRef string) string {
+	// Check the exact path first
+	if _, err := os.Stat(noteRef); err == nil {
+		return noteRef
+	}
+
+	noteDir := filepath.Dir(noteRef)
+	parentDir := filepath.Dir(noteDir)
+	base := filepath.Base(noteRef)
+
+	// Check sibling directories: in_progress/, .archive/, inbox/, completed/
+	for _, dir := range []string{"in_progress", ".archive", "inbox", "completed"} {
+		candidate := filepath.Join(parentDir, dir, base)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	// Also check .archive/ inside the original directory (inbox/.archive/)
+	archiveInDir := filepath.Join(noteDir, ".archive", base)
+	if _, err := os.Stat(archiveInDir); err == nil {
+		return archiveInDir
+	}
+
+	return ""
 }
 
 // parseNotePathFromOutput extracts the note file path from nb new output.
