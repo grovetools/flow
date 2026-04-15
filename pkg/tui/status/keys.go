@@ -32,9 +32,8 @@ type KeyMap struct {
 	ViewLogs         key.Binding
 	ViewFrontmatter  key.Binding
 	ViewBriefing     key.Binding
-	ViewEdit         key.Binding
-	ViewSkillPane    key.Binding
-	CycleDetailPane  key.Binding
+	ViewEdit      key.Binding
+	ViewSkillPane key.Binding
 	CloseDetailPane  key.Binding
 	SwitchFocus      key.Binding
 	FocusLeft        key.Binding // Spatial navigation: focus left pane (jobs)
@@ -129,8 +128,8 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("b", "view briefing"),
 		),
 		ViewEdit: key.NewBinding(
-			key.WithKeys("m"),
-			key.WithHelp("m", "preview markdown"),
+			key.WithKeys("v"),
+			key.WithHelp("v", "preview job file"),
 		),
 		ViewContext: key.NewBinding(
 			key.WithKeys("w"),
@@ -147,10 +146,6 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		ViewSkillPane: key.NewBinding(
 			key.WithKeys("F"),
 			key.WithHelp("F", "skills"),
-		),
-		CycleDetailPane: key.NewBinding(
-			key.WithKeys("v"),
-			key.WithHelp("v", "toggle detail pane"),
 		),
 		CloseDetailPane: key.NewBinding(
 			key.WithKeys("esc"),
@@ -205,7 +200,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
 			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-			k.ViewBriefing, k.ViewEdit, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview, k.CycleDetailPane,
+			k.ViewBriefing, k.ViewEdit, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview,
 			k.CloseDetailPane, k.SwitchFocus, k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(

@@ -1782,16 +1782,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
 				if m.Hosted {
-					// Route through unified detail pane + Promote so the
-					// pane manager owns the BSP lifecycle.
-					mdl, cmd := m.openDetailPane(EditorPaneDetail)
-					m = mdl.(Model)
+					// Full edit mode: emit EditRequestMsg so the host
+					// hides Flow, mounts $EDITOR in the rail, and restores
+					// Flow on :wq via EditFinishedMsg.
 					path := job.FilePath
-					openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35} }
-					closeCmd := func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} }
-					var promoteCmd tea.Cmd
-					m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
-					return m, tea.Batch(cmd, promoteCmd)
+					return m, func() tea.Msg {
+						return embed.EditRequestMsg{Path: path}
+					}
 				}
 				return m, editJob(job, m.Hosted)
 			}
@@ -1849,6 +1846,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openHostedViewportPane(BriefingPane, "Briefing")
 
 		case key.Matches(msg, m.KeyMap.ViewEdit):
+			if m.Hosted && m.Cursor < len(m.Jobs) {
+				// Preview mode: open BSP split editor alongside job list.
+				job := m.Jobs[m.Cursor]
+				mdl, cmd := m.openDetailPane(EditorPaneDetail)
+				m = mdl.(Model)
+				path := job.FilePath
+				openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35} }
+				closeCmd := func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} }
+				var promoteCmd tea.Cmd
+				m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
+				return m, tea.Batch(cmd, promoteCmd)
+			}
 			return m.openDetailPane(EditPane)
 
 		case key.Matches(msg, m.KeyMap.ViewNativeAgent):
@@ -1970,16 +1979,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
 			return m, tea.Batch(loadCmd, promoteCmd)
 
-		case key.Matches(msg, m.KeyMap.CycleDetailPane):
-			// Toggle detail pane visibility (show/hide)
-			if m.ActiveDetailPane == NoPane {
-				// If closed, open logs pane by default
-				return m.openDetailPane(LogsPaneDetail)
-			}
-			// If any pane is open, close it via the unified helper.
-			cmd := m.closeCurrentDetail()
-			return m, cmd
-
 		case key.Matches(msg, m.KeyMap.CloseDetailPane):
 			// BSP splits (agent or editor) — close via unified helper.
 			if m.Manager.IsPromoted("detail") {
@@ -1987,8 +1986,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			// For agent jobs (isolated_agent, interactive_agent), Esc should only blur
-			// the input (handled above), not close the detail pane. Users can close
-			// with 'v' (CycleDetailPane) instead.
+			// the input (handled above), not close the detail pane.
 			// However, double-Esc (two Esc presses within 500ms) will interrupt the agent.
 			isAgentJob := m.ActiveLogJob != nil &&
 				(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
@@ -2638,6 +2636,19 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		return m, loadBriefingCmd(m.Plan, job)
 	case EditPane:
 		return m, loadJobFileContentCmd(job)
+	case EditorPaneDetail:
+		if m.Hosted {
+			// Sticky navigation: re-emit SplitEditorRequestMsg so the host
+			// swaps the buffer in the existing editor split.
+			path := job.FilePath
+			return m, func() tea.Msg {
+				return embed.SplitEditorRequestMsg{
+					Path:  path,
+					Ratio: 0.35,
+				}
+			}
+		}
+		return m, nil
 	case SkillPane:
 		m.skillPaneCursor = 0
 		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
