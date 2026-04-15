@@ -3,9 +3,14 @@ package orchestration
 import (
 	"context"
 	"strings"
+	"sync"
 
 	grovelogging "github.com/grovetools/core/logging"
 )
+
+// shimWarned tracks job IDs that have already emitted a deprecation
+// warning so we don't spam on every LoadPlan refresh.
+var shimWarned sync.Map
 
 // legacyTemplateShim maps deleted template names to their replacements.
 // Values are encoded as "<kind>:<name>" where kind is either "skill" or
@@ -65,12 +70,14 @@ func applyTemplateShim(job *Job) {
 	ctx := context.Background()
 	switch kind {
 	case "skill":
-		shimUlog.Warn("Job uses deprecated template; upgrading to skill").
-			Field("job_id", job.ID).
-			Field("old_template", job.Template).
-			Field("new_skill", name).
-			StructuredOnly().
-			Log(ctx)
+		if _, alreadyWarned := shimWarned.LoadOrStore(job.ID, true); !alreadyWarned {
+			shimUlog.Warn("Job uses deprecated template; upgrading to skill").
+				Field("job_id", job.ID).
+				Field("old_template", job.Template).
+				Field("new_skill", name).
+				StructuredOnly().
+				Log(ctx)
+		}
 		// Only set the skill if the job does not already declare one,
 		// so an explicit `skill:` in the frontmatter wins over the shim.
 		if job.Skill == "" {
@@ -78,12 +85,14 @@ func applyTemplateShim(job *Job) {
 		}
 		job.Template = ""
 	case "template":
-		shimUlog.Warn("Job uses deleted template; falling back to default").
-			Field("job_id", job.ID).
-			Field("old_template", job.Template).
-			Field("new_template", name).
-			StructuredOnly().
-			Log(ctx)
+		if _, alreadyWarned := shimWarned.LoadOrStore(job.ID, true); !alreadyWarned {
+			shimUlog.Warn("Job uses deleted template; falling back to default").
+				Field("job_id", job.ID).
+				Field("old_template", job.Template).
+				Field("new_template", name).
+				StructuredOnly().
+				Log(ctx)
+		}
 		job.Template = name
 	}
 }
