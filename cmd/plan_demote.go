@@ -11,21 +11,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var demoteWorkspaceFlag string
+
+func init() {
+	planDemoteCmd.Flags().StringVar(&demoteWorkspaceFlag, "workspace", "", "Override target workspace for the demoted note")
+}
+
 var planDemoteCmd = &cobra.Command{
 	Use:   "demote <job-file-path>",
 	Short: "Demote a plan job back to an nb inbox note",
 	Long: `Move a flow plan job back to the nb inbox as a note.
 
-The job's title and prompt body are used to create the new note.
-If the job has a note_ref pointing to a different workspace, the note
-is routed back to that workspace's inbox. Otherwise, it goes to the
-inbox of the workspace containing the plan.
+If the job has a note_ref pointing to an in_progress/ note, the note is
+moved back to inbox/ directly. Otherwise, the job's title and prompt body
+are used to create a new note via nb new.
+
+Use --workspace to override where the demoted note lands.
 
 The job's status is set to "abandoned" after demotion.
 
 Examples:
   flow plan demote plans/my-plan/03-stale-task.md
-  flow plan demote /abs/path/to/plans/my-plan/03-stale-task.md`,
+  flow plan demote /abs/path/to/plans/my-plan/03-stale-task.md
+  flow plan demote job.md --workspace /path/to/workspace`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPlanDemote,
 }
@@ -50,10 +58,66 @@ func runPlanDemote(cmd *cobra.Command, args []string) error {
 	job.FilePath = jobFilePath
 	job.Filename = filepath.Base(jobFilePath)
 
-	// Determine the target workspace directory for the new note.
-	// If the job has a note_ref, route to that note's workspace.
-	// Otherwise, use the workspace containing the plan.
-	targetWorkspaceDir := resolveTargetWorkspace(jobFilePath, job.NoteRef)
+	// Lifecycle path: if the job has a note_ref and the note exists at that
+	// path (in in_progress/), move it back to inbox/ directly.
+	if job.NoteRef != "" {
+		if _, statErr := os.Stat(job.NoteRef); statErr == nil {
+			return demoteViaRename(job)
+		}
+	}
+
+	// Fallback path: create a new note via nb new
+	return demoteViaNbNew(job, jobFilePath)
+}
+
+// demoteViaRename moves an in_progress note back to inbox/ and marks the job abandoned.
+func demoteViaRename(job *orchestration.Job) error {
+	// Determine the target inbox directory
+	var inboxDir string
+	if demoteWorkspaceFlag != "" {
+		absWorkspace, err := filepath.Abs(demoteWorkspaceFlag)
+		if err != nil {
+			return fmt.Errorf("resolving workspace path: %w", err)
+		}
+		inboxDir = filepath.Join(absWorkspace, "inbox")
+	} else {
+		// Derive inbox from the note_ref location:
+		// in_progress/ is a sibling of inbox/ under the workspace dir
+		inboxDir = filepath.Join(filepath.Dir(filepath.Dir(job.NoteRef)), "inbox")
+	}
+
+	if err := os.MkdirAll(inboxDir, 0755); err != nil {
+		return fmt.Errorf("creating inbox directory: %w", err)
+	}
+
+	destPath := filepath.Join(inboxDir, filepath.Base(job.NoteRef))
+	if err := os.Rename(job.NoteRef, destPath); err != nil {
+		return fmt.Errorf("moving note from in_progress to inbox: %w", err)
+	}
+
+	// Mark the job as abandoned
+	sp := orchestration.NewStatePersister()
+	if err := sp.UpdateJobStatus(job, orchestration.JobStatusAbandoned); err != nil {
+		return fmt.Errorf("updating job status to abandoned: %w", err)
+	}
+
+	fmt.Println(destPath)
+	return nil
+}
+
+// demoteViaNbNew creates a new note via nb new (fallback when no in_progress note exists).
+func demoteViaNbNew(job *orchestration.Job, jobFilePath string) error {
+	// Determine the target workspace directory
+	var targetWorkspaceDir string
+	if demoteWorkspaceFlag != "" {
+		absWorkspace, err := filepath.Abs(demoteWorkspaceFlag)
+		if err != nil {
+			return fmt.Errorf("resolving workspace path: %w", err)
+		}
+		targetWorkspaceDir = absWorkspace
+	} else {
+		targetWorkspaceDir = resolveTargetWorkspace(jobFilePath, job.NoteRef)
+	}
 
 	// Build the nb new command
 	nbArgs := []string{"new", job.Title, "--type", "inbox", "--no-edit"}

@@ -155,6 +155,8 @@ func main() {
 
 		// Demote job to note
 		scenarios.DemoteToNoteScenario,
+		scenarios.DemoteWithWorkspaceFlagScenario,
+		scenarios.PromoteDemoteRoundTripScenario,
 	}
 
 	if err := app.Execute(nil, allScenarios); err != nil {
