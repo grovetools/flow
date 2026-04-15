@@ -1923,7 +1923,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
 			m = mdl.(Model)
 			openCmd := func() tea.Msg {
+				workDir := m.PlanDir
+				if m.Plan != nil {
+					if wd, err := orchestration.DetermineWorkingDirectory(m.Plan, job); err == nil {
+						workDir = wd
+					}
+				}
 				return embed.SplitContextRequestMsg{
+					WorkDir:   workDir,
 					RulesFile: rulesFile,
 					Ratio:     0.35,
 					Focus:     false,
