@@ -1003,7 +1003,7 @@ func editJob(job *orchestration.Job, hosted bool) tea.Cmd {
 	// BSP split with neovim alongside the plan panel.
 	if hosted {
 		return func() tea.Msg {
-			return embed.SplitEditorRequestMsg{Path: job.FilePath}
+			return embed.SplitEditorRequestMsg{Path: job.FilePath, Focus: true}
 		}
 	}
 

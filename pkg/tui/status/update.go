@@ -1852,7 +1852,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				mdl, cmd := m.openDetailPane(EditorPaneDetail)
 				m = mdl.(Model)
 				path := job.FilePath
-				openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35} }
+				openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35, Focus: false} }
 				closeCmd := func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} }
 				var promoteCmd tea.Cmd
 				m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
@@ -2667,6 +2667,7 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 				return embed.SplitEditorRequestMsg{
 					Path:  path,
 					Ratio: 0.35,
+					Focus: false,
 				}
 			}
 		}
