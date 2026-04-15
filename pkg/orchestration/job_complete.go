@@ -247,6 +247,23 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 	}
 
+	// Move linked note from in_progress/ to completed/ if note_ref exists
+	if job.NoteRef != "" && !alreadyCompleted {
+		if _, err := os.Stat(job.NoteRef); err == nil {
+			noteDir := filepath.Dir(job.NoteRef)
+			parentDir := filepath.Dir(noteDir)
+			completedDir := filepath.Join(parentDir, "completed")
+			if err := os.MkdirAll(completedDir, 0755); err == nil {
+				dest := filepath.Join(completedDir, filepath.Base(job.NoteRef))
+				if err := os.Rename(job.NoteRef, dest); err == nil {
+					if !silent {
+						fmt.Printf("%s Moved linked note to completed/\n", color.GreenString("*"))
+					}
+				}
+			}
+		}
+	}
+
 	// Success message
 	if !silent {
 		if !alreadyCompleted {
