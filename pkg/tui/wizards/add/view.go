@@ -148,9 +148,9 @@ func (m Model) FooterView() string {
 
 	var modeIndicator string
 	if m.unfocused {
-		modeIndicator = " [NORMAL] hjkl navigate • i insert • q quit"
+		modeIndicator = " [NORMAL] hjkl navigate • i insert • ctrl+s save • q quit"
 	} else {
-		modeIndicator = " [INSERT] esc normal"
+		modeIndicator = " [INSERT] esc normal • ctrl+s save"
 	}
 
 	// Claw indicator — only shown for interactive_agent

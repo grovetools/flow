@@ -484,7 +484,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Result != nil && m.s.statusModel != nil {
 				if job, ok := msg.Result.(*orchestration.Job); ok && job != nil {
 					if _, err := orchestration.AddJob(m.s.statusModel.Plan, job); err == nil {
+						m.finishTransient = "Added job: " + job.Title
 						return m, func() tea.Msg { return status.RefreshMsg{} }
+					} else {
+						m.finishTransient = "Failed to add job: " + err.Error()
 					}
 				}
 			}

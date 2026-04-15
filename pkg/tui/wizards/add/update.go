@@ -309,11 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter":
-			if m.focusIndex == 4 {
-				// On the last field (prompt), enter confirms the form
-				m.extractValues()
-				return m, doneWithJob(m.toJob(m.plan))
-			} else if inList {
+			if inList {
 				// For lists, enter confirms selection and moves to next field
 				m.unfocused = false
 				m.focusIndex++
