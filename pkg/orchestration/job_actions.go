@@ -186,7 +186,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 // RenameJob renames a job file and updates its title and dependencies.
 func RenameJob(plan *Plan, jobToRename *Job, newTitle string) error {
 	// 1. Parse numeric prefix from old filename
-	re := regexp.MustCompile(`^(\d{2})-`)
+	re := regexp.MustCompile(`^(\d+)-`)
 	matches := re.FindStringSubmatch(jobToRename.Filename)
 	if len(matches) < 2 {
 		return fmt.Errorf("could not parse numeric prefix from filename: %s", jobToRename.Filename)

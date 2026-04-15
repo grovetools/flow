@@ -186,7 +186,7 @@ func GetNextJobNumber(dir string) (int, error) {
 	}
 
 	maxNum := 0
-	jobFileRegex := regexp.MustCompile(`^(\d{2})-.*\.md$`)
+	jobFileRegex := regexp.MustCompile(`^(\d+)-.*\.md$`)
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -276,7 +276,7 @@ func ListJobs(dir string) ([]string, error) {
 	}
 
 	var jobs []string
-	jobFileRegex := regexp.MustCompile(`^\d{2}-.*\.md$`)
+	jobFileRegex := regexp.MustCompile(`^\d+-.*\.md$`)
 
 	for _, entry := range entries {
 		if entry.IsDir() {

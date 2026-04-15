@@ -6,14 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/grovetools/core/util/sanitize"
 	"gopkg.in/yaml.v3"
 )
 
-// jobFilePattern matches job files like 01-job-name.md
-var jobFilePattern = regexp.MustCompile(`^\d{2}-.*\.md$`)
+// jobFilePattern matches job files like 01-job-name.md or 100-job-name.md
+var jobFilePattern = regexp.MustCompile(`^\d+-.*\.md$`)
 
 // LoadPlan loads all jobs from a plan directory.
 func LoadPlan(dir string) (*Plan, error) {
@@ -90,6 +92,19 @@ func LoadPlan(dir string) (*Plan, error) {
 			plan.JobsByID[job.ID] = job
 		}
 	}
+
+	// Sort jobs by numeric prefix so 99 < 100 < 101
+	numPrefix := regexp.MustCompile(`^(\d+)`)
+	sort.Slice(plan.Jobs, func(i, j int) bool {
+		mi := numPrefix.FindString(plan.Jobs[i].Filename)
+		mj := numPrefix.FindString(plan.Jobs[j].Filename)
+		ni, _ := strconv.Atoi(mi)
+		nj, _ := strconv.Atoi(mj)
+		if ni != nj {
+			return ni < nj
+		}
+		return plan.Jobs[i].Filename < plan.Jobs[j].Filename
+	})
 
 	// Resolve dependencies
 	if err := plan.ResolveDependencies(); err != nil {
