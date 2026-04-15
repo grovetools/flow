@@ -749,6 +749,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			refreshTick(),
 		)
 
+	case DemoteJobMsg:
+		if msg.Err != nil {
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Demote failed: %v", msg.Err))
+			return m, nil
+		}
+		m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Demoted to note: %s", msg.NotePath))
+		return m, refreshPlan(m.PlanDir)
+
 	case RefreshMsg:
 		logger := logging.NewLogger("flow-tui")
 
@@ -2599,6 +2607,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				return m, nil
+			}
+
+		case key.Matches(msg, m.KeyMap.DemoteToNote):
+			if m.Cursor >= 0 && m.Cursor < len(m.Jobs) {
+				job := m.Jobs[m.Cursor]
+				m.StatusSummary = fmt.Sprintf("Demoting '%s' to note...", job.Title)
+				return m, demoteJobCmd(job)
 			}
 
 		case key.Matches(msg, m.KeyMap.ToggleColumns):

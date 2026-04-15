@@ -1126,6 +1126,26 @@ func setJobStatus(job *orchestration.Job, plan *orchestration.Plan, status orche
 	}
 }
 
+// DemoteJobMsg is returned after demoting a job to an nb note.
+type DemoteJobMsg struct {
+	NotePath string
+	Err      error
+}
+
+// demoteJobCmd shells out to `flow plan demote <job-path>` to create an nb
+// note from the job and mark it as abandoned.
+func demoteJobCmd(job *orchestration.Job) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("flow", "plan", "demote", job.FilePath)
+		output, err := cmd.Output()
+		if err != nil {
+			return DemoteJobMsg{Err: fmt.Errorf("demote failed: %w", err)}
+		}
+		notePath := strings.TrimSpace(string(output))
+		return DemoteJobMsg{NotePath: notePath}
+	}
+}
+
 func setMultipleJobStatus(jobs []*orchestration.Job, plan *orchestration.Plan, status orchestration.JobStatus) tea.Cmd {
 	return func() tea.Msg {
 		sp := orchestration.NewStatePersister()

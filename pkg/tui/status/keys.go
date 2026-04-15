@@ -27,6 +27,7 @@ type KeyMap struct {
 	Rename        key.Binding
 	Resume        key.Binding
 	EditDeps      key.Binding
+	DemoteToNote  key.Binding
 	// View operations (TUI-specific)
 	ToggleColumns    key.Binding
 	ViewLogs         key.Binding
@@ -107,8 +108,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithHelp("ctrl+R", "resume job"),
 		),
 		EditDeps: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("ctrl+d", "edit dependencies"),
+		),
+		DemoteToNote: key.NewBinding(
 			key.WithKeys("D"),
-			key.WithHelp("D", "edit dependencies"),
+			key.WithHelp("D", "demote to note"),
 		),
 		// View operations
 		ToggleColumns: key.NewBinding(
@@ -206,7 +211,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.ActionsSection(
 			k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
 			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
-			k.Resume, k.EditDeps, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath, k.Help, k.Quit,
+			k.Resume, k.EditDeps, k.DemoteToNote, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath, k.Help, k.Quit,
 		),
 	}
 }
