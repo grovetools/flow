@@ -3153,7 +3153,13 @@ func (m Model) emitContextScopeUpdate() tea.Cmd {
 	if m.Cursor >= len(m.Jobs) {
 		return nil
 	}
-	rulesFile := resolveJobRulesFile(m.PlanDir, m.Jobs[m.Cursor].RulesFile)
+	job := m.Jobs[m.Cursor]
+	// Pass empty RulesFile through so the cx panel can show "no rules"
+	// instead of falling back to default.rules.
+	var rulesFile string
+	if job.RulesFile != "" {
+		rulesFile = resolveJobRulesFile(m.PlanDir, job.RulesFile)
+	}
 	return func() tea.Msg {
 		return embed.UpdateContextScopeMsg{RulesFile: rulesFile}
 	}
