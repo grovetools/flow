@@ -1900,16 +1900,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			job := m.Jobs[m.Cursor]
-			rulesFile := job.RulesFile
-			if rulesFile == "" {
-				// No rules file — show a placeholder in a viewport.
+			rulesFile := resolveJobRulesFile(m.PlanDir, job.RulesFile)
+			if _, err := os.Stat(rulesFile); os.IsNotExist(err) {
+				// Rules file doesn't exist — show a placeholder in a viewport.
 				mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
 				m = mdl.(Model)
 				openCmd := func() tea.Msg {
 					return embed.SplitViewportRequestMsg{
 						PanelID: "context",
 						Title:   "Context",
-						Content: "No rules file configured. Press e to create one.",
+						Content: fmt.Sprintf("Rules file not found at:\n%s\n\nPress e to create one.", rulesFile),
 						Ratio:   0.35,
 						Focus:   false,
 					}
@@ -3097,6 +3097,19 @@ func (m Model) handleArtifactViewportKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// resolveJobRulesFile resolves a job's rules_file to an absolute path
+// relative to the plan directory. If rulesFile is empty, returns the
+// plan's default.rules path. If already absolute, returns as-is.
+func resolveJobRulesFile(planDir, rulesFile string) string {
+	if rulesFile == "" {
+		return filepath.Join(planDir, "rules", "default.rules")
+	}
+	if filepath.IsAbs(rulesFile) {
+		return rulesFile
+	}
+	return filepath.Join(planDir, rulesFile)
+}
+
 // emitContextScopeUpdate returns a tea.Cmd that emits an UpdateContextScopeMsg
 // for the currently selected job, if the context pane is active and hosted.
 // Returns nil if the context pane is not active.
@@ -3107,7 +3120,7 @@ func (m Model) emitContextScopeUpdate() tea.Cmd {
 	if m.Cursor >= len(m.Jobs) {
 		return nil
 	}
-	rulesFile := m.Jobs[m.Cursor].RulesFile
+	rulesFile := resolveJobRulesFile(m.PlanDir, m.Jobs[m.Cursor].RulesFile)
 	return func() tea.Msg {
 		return embed.UpdateContextScopeMsg{RulesFile: rulesFile}
 	}
