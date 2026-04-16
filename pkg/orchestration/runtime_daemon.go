@@ -9,6 +9,8 @@ import (
 	"github.com/grovetools/core/pkg/models"
 )
 
+var submitLog = grovelogging.NewUnifiedLogger("flow.submit")
+
 // DaemonRuntime delegates job execution to the groved daemon via the daemon.Client API.
 // It submits jobs, streams logs back through the context writer, and blocks until completion.
 type DaemonRuntime struct {
@@ -41,10 +43,24 @@ func (r *DaemonRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) er
 		}
 	}
 
+	// Propagate agent target from orchestration config
+	agentTarget := ""
+	if plan.Orchestration != nil {
+		agentTarget = plan.Orchestration.AgentTarget
+	}
+
+	submitLog.Info("submitting job to daemon").
+		Field("job", job.Filename).
+		Field("type", string(job.Type)).
+		Field("agent_target", agentTarget).
+		Field("plan_dir", plan.Directory).
+		StructuredOnly().Log(ctx)
+
 	// Submit job to daemon
 	info, err := r.client.SubmitJob(ctx, models.JobSubmitRequest{
-		PlanDir: plan.Directory,
-		JobFile: job.Filename,
+		PlanDir:     plan.Directory,
+		JobFile:     job.Filename,
+		AgentTarget: agentTarget,
 	})
 	if err != nil {
 		if r.updater != nil {
