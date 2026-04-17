@@ -12,7 +12,6 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/sirupsen/logrus"
 )
@@ -53,7 +52,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Register session intent with the daemon BEFORE spawning the pane.
-	daemonClient := daemon.NewWithAutoStart(workDir)
+	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -83,16 +82,14 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	// Wrap with agentstream to capture PID via deterministic pidfile.
 	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
 
-	// Build environment variables for the agent pane. GROVE_SCOPE pins
-	// the agent's daemon client to its own plan workspace regardless of
-	// the host's scope, so agents for different plans don't fight over
-	// the same daemon.
+	// Build environment variables for the agent pane. The agent inherits
+	// GROVE_SCOPE from the treemux host that spawned this executor, so
+	// all agents in a treemux session talk to the same daemon.
 	envVars := map[string]string{
 		"GROVE_FLOW_JOB_ID":    job.ID,
 		"GROVE_FLOW_JOB_PATH":  job.FilePath,
 		"GROVE_FLOW_PLAN_NAME": plan.Name,
 		"GROVE_FLOW_JOB_TITLE": job.Title,
-		"GROVE_SCOPE":          workspace.ResolveScope(workDir),
 	}
 
 	// Add playbook env vars if applicable
@@ -216,7 +213,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	}
 
 	// Confirm the session with the daemon
-	daemonClient := daemon.NewWithAutoStart(workDir)
+	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{

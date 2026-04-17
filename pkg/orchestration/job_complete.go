@@ -210,7 +210,7 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 
 		// Notify the daemon that the session has ended
-		daemonClient := daemon.NewWithAutoStart(plan.Directory)
+		daemonClient := daemon.NewWithAutoStart()
 		if err := daemonClient.EndSession(context.Background(), job.ID, "completed"); err != nil {
 			logger.WithError(err).Debug("Failed to notify daemon of session end")
 		}

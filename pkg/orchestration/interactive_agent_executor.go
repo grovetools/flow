@@ -466,7 +466,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Register session intent with the daemon BEFORE launching the agent.
 	// This eliminates the PID race condition by pre-registering the session.
 	// The daemon will track this session and wait for confirmation with the actual PID.
-	daemonClient := daemon.NewWithAutoStart(workDir)
+	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -575,8 +575,8 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Use separate export commands for shell compatibility (bash/zsh/fish)
 		// and properly quote the title to handle spaces and special characters.
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s; export GROVE_SCOPE='%s'",
-			job.ID, job.FilePath, plan.Name, escapedTitle, workspace.ResolveScope(workDir))
+		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
+			job.ID, job.FilePath, plan.Name, escapedTitle)
 		envCommand += playbookEnvExports(job, plan)
 		if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to set environment variables")
@@ -892,7 +892,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	}
 
 	// Confirm the session with the daemon using the discovered PID
-	daemonClient := daemon.NewWithAutoStart(workDir)
+	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
@@ -1230,7 +1230,7 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 
 	// Try daemon API first — works when agent runs in a native groveterm pane.
 	ctx := context.Background()
-	daemonClient := daemon.NewWithAutoStart(workDir)
+	daemonClient := daemon.NewWithAutoStart()
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		result, err := daemonClient.CaptureAgentPane(ctx, job.ID)
 		daemonClient.Close()
@@ -1271,7 +1271,7 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	}
 
 	// Try daemon API first — works when agent runs in a native groveterm pane.
-	daemonClient := daemon.NewWithAutoStart(workDir)
+	daemonClient := daemon.NewWithAutoStart()
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		// Build the payload with vim-mode handling and submit key.
 		payload := buildAgentInputPayload(workDir, input)
@@ -1361,7 +1361,7 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 	}
 
 	// Try daemon API first — send Ctrl+C via native pane.
-	daemonClient := daemon.NewWithAutoStart(workDir)
+	daemonClient := daemon.NewWithAutoStart()
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		err := daemonClient.SendAgentInput(ctx, job.ID, "\x03")
 		daemonClient.Close()

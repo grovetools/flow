@@ -15,7 +15,6 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/flow/pkg/exec"
@@ -274,8 +273,8 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 
 	// Set environment variables in the isolated tmux pane
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s; export GROVE_FLOW_ISOLATED='true'; export GROVE_SCOPE='%s'",
-		job.ID, job.FilePath, plan.Name, escapedTitle, workspace.ResolveScope(workDir))
+	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s; export GROVE_FLOW_ISOLATED='true'",
+		job.ID, job.FilePath, plan.Name, escapedTitle)
 
 	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
 		e.log.WithError(err).Error("Failed to set environment variables")

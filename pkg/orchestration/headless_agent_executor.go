@@ -292,14 +292,13 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 	cmd.Stdin = strings.NewReader(prompt)
 
 	// Set environment variables to enable grove-hooks integration for session registration.
+	// GROVE_SCOPE is inherited from the parent process (treemux host).
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	agentScope := workspace.ResolveScope(worktreePath)
 	cmd.Env = append(os.Environ(),
 		"GROVE_FLOW_JOB_ID="+job.ID,
 		"GROVE_FLOW_JOB_PATH="+job.FilePath,
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
-		"GROVE_SCOPE="+agentScope, // pin the agent's daemon scope to its own plan worktree
 	)
 	if pbName, pbRoot := resolvePlaybookRootForJob(job, plan); pbRoot != "" {
 		cmd.Env = append(cmd.Env,

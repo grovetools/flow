@@ -37,7 +37,7 @@ This turns a standard interactive agent into a "claw" agent that can:
 				return err
 			}
 
-			client := daemon.NewWithAutoStart(plan.Directory)
+			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
 			// Enable signal channel
@@ -98,12 +98,12 @@ func newAgentUnclawCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			plan, job, err := resolveAgentTarget(args[0], args[1])
+			_, job, err := resolveAgentTarget(args[0], args[1])
 			if err != nil {
 				return err
 			}
 
-			client := daemon.NewWithAutoStart(plan.Directory)
+			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
 			if err := client.UpdateSessionChannels(ctx, job.ID, nil); err != nil {
@@ -130,12 +130,12 @@ func newAgentDetachCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			plan, job, err := resolveAgentTarget(args[0], args[1])
+			_, job, err := resolveAgentTarget(args[0], args[1])
 			if err != nil {
 				return err
 			}
 
-			client := daemon.NewWithAutoStart(plan.Directory)
+			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
 			// Get current session
@@ -183,12 +183,12 @@ func newAgentAttachCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			plan, job, err := resolveAgentTarget(args[0], args[1])
+			_, job, err := resolveAgentTarget(args[0], args[1])
 			if err != nil {
 				return err
 			}
 
-			client := daemon.NewWithAutoStart(plan.Directory)
+			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
 			session, err := client.GetSession(ctx, job.ID)

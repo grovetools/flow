@@ -14,7 +14,6 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -120,8 +119,8 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// Use separate export commands for shell compatibility (bash/zsh/fish)
 	// and properly quote the title to handle spaces and special characters.
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s; export GROVE_SCOPE='%s'",
-		job.ID, job.FilePath, plan.Name, escapedTitle, workspace.ResolveScope(workDir))
+	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
+		job.ID, job.FilePath, plan.Name, escapedTitle)
 	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to set environment variables")
 		job.Status = JobStatusFailed

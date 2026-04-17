@@ -280,7 +280,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// Configure runtime: DaemonRuntime by default, LocalRuntime with --local
 	var daemonClient daemon.Client
 	if !planRunLocal {
-		daemonClient = daemon.NewWithAutoStart(plan.Directory)
+		daemonClient = daemon.NewWithAutoStart()
 		if daemonClient.IsRunning() {
 			// Daemon is available — create orchestrator first, then set DaemonRuntime
 			// (DaemonRuntime needs the orchestrator as StatusUpdater)
