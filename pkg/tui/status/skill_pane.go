@@ -83,12 +83,18 @@ func readSkillStateMap(artifactDir string) map[string]orchestration.SkillFidelit
 }
 
 // resolveSkillDisplayNodes resolves job skill sequence into display nodes and flat list.
-func resolveSkillDisplayNodes(plan *orchestration.Plan, job *orchestration.Job) ([]*SkillDisplayNode, []*SkillDisplayNode) {
+// hostWorkDir is the host's active workspace path (e.g. treemux's
+// ActiveWorkspacePath, tracked via embed.SetWorkspaceMsg). When DetermineWorkingDirectory
+// fails and plan.Config.Worktree is set, we prefer the host path over os.Getwd() so the
+// lookup stays correct inside long-lived hosts where process cwd is frozen.
+func resolveSkillDisplayNodes(plan *orchestration.Plan, job *orchestration.Job, hostWorkDir string) ([]*SkillDisplayNode, []*SkillDisplayNode) {
 	workDir, err := orchestration.DetermineWorkingDirectory(plan, job)
 	if err != nil {
 		workDir = plan.Directory
 		if plan.Config != nil && plan.Config.Worktree != "" {
-			if wd, err := os.Getwd(); err == nil {
+			if hostWorkDir != "" {
+				workDir = hostWorkDir
+			} else if wd, err := os.Getwd(); err == nil {
 				workDir = wd
 			}
 		}
@@ -110,8 +116,8 @@ func resolveSkillDisplayNodes(plan *orchestration.Plan, job *orchestration.Job) 
 }
 
 // resolveSkillPaneNodes builds a mixed tree of SkillPaneNodes (skills + artifact children).
-func resolveSkillPaneNodes(plan *orchestration.Plan, job *orchestration.Job, stateMap map[string]orchestration.SkillFidelityState) []*SkillPaneNode {
-	_, flatDisplayNodes := resolveSkillDisplayNodes(plan, job)
+func resolveSkillPaneNodes(plan *orchestration.Plan, job *orchestration.Job, stateMap map[string]orchestration.SkillFidelityState, hostWorkDir string) []*SkillPaneNode {
+	_, flatDisplayNodes := resolveSkillDisplayNodes(plan, job, hostWorkDir)
 
 	var paneNodes []*SkillPaneNode
 	for _, dn := range flatDisplayNodes {
@@ -184,7 +190,9 @@ type skillPaneResult struct {
 }
 
 // renderInteractiveSkillPane builds the skill pane tree view and detail content separately.
-func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job, cursor int, _, height int) skillPaneResult {
+// hostWorkDir is the host's active workspace (threaded through for skill path resolution
+// when plan.Config.Worktree is set but orchestration.DetermineWorkingDirectory fails).
+func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job, cursor int, _, height int, hostWorkDir string) skillPaneResult {
 	empty := skillPaneResult{}
 	if len(job.SkillSequence) == 0 {
 		empty.treeContent = theme.DefaultTheme.Muted.Render("No skill sequence defined for this job.")
@@ -194,7 +202,7 @@ func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job
 	artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
 	stateMap := readSkillStateMap(artifactDir)
 
-	paneNodes := resolveSkillPaneNodes(plan, job, stateMap)
+	paneNodes := resolveSkillPaneNodes(plan, job, stateMap, hostWorkDir)
 
 	if len(paneNodes) == 0 {
 		empty.treeContent = theme.DefaultTheme.Muted.Render("No skills resolved.")

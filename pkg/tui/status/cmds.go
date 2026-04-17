@@ -1660,16 +1660,20 @@ func addJobsFromRecipeCmd(plan *orchestration.Plan, recipeName string, externalD
 // editSkillOrArtifactCmd emits an embed.EditRequestMsg so the host
 // (groveterm in-pane editor or StandaloneHost's tea.ExecProcess)
 // opens $EDITOR on a skill or artifact file.
-func editSkillOrArtifactCmd(plan *orchestration.Plan, job *orchestration.Job, node *SkillPaneNode) tea.Cmd {
+func editSkillOrArtifactCmd(plan *orchestration.Plan, job *orchestration.Job, node *SkillPaneNode, hostWorkDir string) tea.Cmd {
 	var targetPath string
 	if node.IsArtifact {
 		targetPath = filepath.Join(plan.Directory, ".artifacts", job.ID, node.FilePath)
 	} else {
 		// For skill nodes, open the SKILL.md from the skills directory
-		// Try to find the skill file in the workspace
+		// Try to find the skill file in the workspace. Prefer the host's
+		// active workspace path over os.Getwd() — the latter is pinned to
+		// the host process's launch directory when embedded in treemux.
 		workDir := plan.Directory
 		if plan.Config != nil && plan.Config.Worktree != "" {
-			if wd, err := os.Getwd(); err == nil {
+			if hostWorkDir != "" {
+				workDir = hostWorkDir
+			} else if wd, err := os.Getwd(); err == nil {
 				workDir = wd
 			}
 		}

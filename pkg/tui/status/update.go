@@ -2689,7 +2689,7 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		return m, nil
 	case SkillPane:
 		m.skillPaneCursor = 0
-		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight, m.PlanDir)
 		m.skillPaneNodes = result.nodes
 		m.skillPaneStateMap = result.stateMap
 		m.skillPaneRawContent = result.treeContent
@@ -2850,7 +2850,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	case SkillPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading skills for %s...", job.Title))
 		m.skillPaneCursor = 0
-		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight, m.PlanDir)
 		m.skillPaneNodes = result.nodes
 		m.skillPaneStateMap = result.stateMap
 		m.skillPaneRawContent = result.treeContent
@@ -2951,7 +2951,7 @@ func (m *Model) refreshSkillPane() {
 	if m.ActiveLogJob == nil {
 		return
 	}
-	result := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight)
+	result := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight, m.PlanDir)
 	m.skillPaneNodes = result.nodes
 	m.skillPaneStateMap = result.stateMap
 	// Tree goes into the main skill pane viewport
@@ -3111,7 +3111,7 @@ func (m Model) handleSkillTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Open editor on the selected skill/artifact node
 		if m.ActiveLogJob != nil && m.skillPaneCursor < len(m.skillPaneNodes) {
 			node := m.skillPaneNodes[m.skillPaneCursor]
-			return m, editSkillOrArtifactCmd(m.Plan, m.ActiveLogJob, node)
+			return m, editSkillOrArtifactCmd(m.Plan, m.ActiveLogJob, node, m.PlanDir)
 		}
 		return m, nil
 	}
