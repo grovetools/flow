@@ -12,6 +12,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/sirupsen/logrus"
 )
@@ -82,12 +83,16 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	// Wrap with agentstream to capture PID via deterministic pidfile.
 	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
 
-	// Build environment variables for the agent pane
+	// Build environment variables for the agent pane. GROVE_SCOPE pins
+	// the agent's daemon client to its own plan workspace regardless of
+	// the host's scope, so agents for different plans don't fight over
+	// the same daemon.
 	envVars := map[string]string{
 		"GROVE_FLOW_JOB_ID":    job.ID,
 		"GROVE_FLOW_JOB_PATH":  job.FilePath,
 		"GROVE_FLOW_PLAN_NAME": plan.Name,
 		"GROVE_FLOW_JOB_TITLE": job.Title,
+		"GROVE_SCOPE":          workspace.ResolveScope(workDir),
 	}
 
 	// Add playbook env vars if applicable
