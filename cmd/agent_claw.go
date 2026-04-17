@@ -31,13 +31,14 @@ This turns a standard interactive agent into a "claw" agent that can:
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			client := daemon.NewWithAutoStart()
-			defer client.Close()
 
 			plan, job, err := resolveAgentTarget(args[0], args[1])
 			if err != nil {
 				return err
 			}
+
+			client := daemon.NewWithAutoStart(plan.Directory)
+			defer client.Close()
 
 			// Enable signal channel
 			if err := client.UpdateSessionChannels(ctx, job.ID, []string{"signal"}); err != nil {
@@ -96,13 +97,14 @@ func newAgentUnclawCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			client := daemon.NewWithAutoStart()
-			defer client.Close()
 
-			_, job, err := resolveAgentTarget(args[0], args[1])
+			plan, job, err := resolveAgentTarget(args[0], args[1])
 			if err != nil {
 				return err
 			}
+
+			client := daemon.NewWithAutoStart(plan.Directory)
+			defer client.Close()
 
 			if err := client.UpdateSessionChannels(ctx, job.ID, nil); err != nil {
 				return fmt.Errorf("failed to disable channels: %w", err)
@@ -127,13 +129,14 @@ func newAgentDetachCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			client := daemon.NewWithAutoStart()
-			defer client.Close()
 
-			_, job, err := resolveAgentTarget(args[0], args[1])
+			plan, job, err := resolveAgentTarget(args[0], args[1])
 			if err != nil {
 				return err
 			}
+
+			client := daemon.NewWithAutoStart(plan.Directory)
+			defer client.Close()
 
 			// Get current session
 			session, err := client.GetSession(ctx, job.ID)
@@ -179,13 +182,14 @@ func newAgentAttachCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			client := daemon.NewWithAutoStart()
-			defer client.Close()
 
-			_, job, err := resolveAgentTarget(args[0], args[1])
+			plan, job, err := resolveAgentTarget(args[0], args[1])
 			if err != nil {
 				return err
 			}
+
+			client := daemon.NewWithAutoStart(plan.Directory)
+			defer client.Close()
 
 			session, err := client.GetSession(ctx, job.ID)
 			if err != nil || session == nil {

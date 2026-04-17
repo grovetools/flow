@@ -118,7 +118,7 @@ func loadPlansListCmd(plansDirectory string, cwdGitRoot string, showOnHold bool)
 // falls back to a direct filesystem scan if the daemon is unreachable
 // or has no cached data for this directory yet.
 func fetchPlans(plansDirectory string) ([]*orchestration.Plan, error) {
-	client := daemon.New()
+	client := daemon.New(plansDirectory)
 	defer client.Close()
 
 	if client.IsRunning() {

@@ -536,7 +536,7 @@ Falls back to the job log in the plan's .artifacts directory.`,
 
 			// Try daemon sessions for transcript path
 			ctx := context.Background()
-			client := daemon.New()
+			client := daemon.New(plan.Directory)
 			defer client.Close()
 
 			if transcriptPath := findTranscriptPath(ctx, client, job); transcriptPath != "" {

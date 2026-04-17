@@ -466,7 +466,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Register session intent with the daemon BEFORE launching the agent.
 	// This eliminates the PID race condition by pre-registering the session.
 	// The daemon will track this session and wait for confirmation with the actual PID.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(workDir)
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -892,7 +892,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	}
 
 	// Confirm the session with the daemon using the discovered PID
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(workDir)
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
@@ -1222,9 +1222,15 @@ func ResolveInteractiveAgentPane(plan *Plan, job *Job) (string, error) {
 // CaptureInteractiveAgentOutput captures the visible output from an interactive agent's pane.
 // Tries the daemon's native agent pane capture API first (groveterm), falls back to tmux.
 func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
+	// Determine workDir upfront so we can scope the daemon connection correctly.
+	workDir, err := DetermineWorkingDirectory(plan, job)
+	if err != nil {
+		return "", fmt.Errorf("could not determine working directory: %w", err)
+	}
+
 	// Try daemon API first — works when agent runs in a native groveterm pane.
 	ctx := context.Background()
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(workDir)
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		result, err := daemonClient.CaptureAgentPane(ctx, job.ID)
 		daemonClient.Close()
@@ -1234,12 +1240,6 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 		// Daemon capture failed — fall through to tmux.
 	} else {
 		daemonClient.Close()
-	}
-
-	// Fallback: tmux capture-pane on the project's tmux session.
-	workDir, err := DetermineWorkingDirectory(plan, job)
-	if err != nil {
-		return "", fmt.Errorf("could not determine working directory: %w", err)
 	}
 
 	projInfo, err := ResolveProjectForSessionNaming(workDir)
@@ -1264,11 +1264,16 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	ctx := context.Background()
 
+	// Determine workDir upfront so we can scope the daemon connection correctly.
+	workDir, err := DetermineWorkingDirectory(plan, job)
+	if err != nil {
+		return fmt.Errorf("could not determine working directory: %w", err)
+	}
+
 	// Try daemon API first — works when agent runs in a native groveterm pane.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(workDir)
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		// Build the payload with vim-mode handling and submit key.
-		workDir, _ := DetermineWorkingDirectory(plan, job)
 		payload := buildAgentInputPayload(workDir, input)
 		err := daemonClient.SendAgentInput(ctx, job.ID, payload)
 		daemonClient.Close()
@@ -1281,10 +1286,6 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	}
 
 	// Fallback: tmux send-keys on the project's tmux session.
-	workDir, err := DetermineWorkingDirectory(plan, job)
-	if err != nil {
-		return fmt.Errorf("could not determine working directory: %w", err)
-	}
 
 	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
@@ -1353,8 +1354,14 @@ func resolveInputMode(workDir string) string {
 func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 	ctx := context.Background()
 
+	// Determine workDir upfront so we can scope the daemon connection correctly.
+	workDir, err := DetermineWorkingDirectory(plan, job)
+	if err != nil {
+		return fmt.Errorf("could not determine working directory: %w", err)
+	}
+
 	// Try daemon API first — send Ctrl+C via native pane.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(workDir)
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		err := daemonClient.SendAgentInput(ctx, job.ID, "\x03")
 		daemonClient.Close()
@@ -1363,12 +1370,6 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 		}
 	} else {
 		daemonClient.Close()
-	}
-
-	// Fallback: tmux send-keys C-c.
-	workDir, err := DetermineWorkingDirectory(plan, job)
-	if err != nil {
-		return fmt.Errorf("could not determine working directory: %w", err)
 	}
 
 	projInfo, err := ResolveProjectForSessionNaming(workDir)

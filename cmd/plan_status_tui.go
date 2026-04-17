@@ -30,7 +30,7 @@ import (
 // Embedding hosts (terminal) bypass this file entirely and instantiate
 // view.New themselves with their own Config.
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(plan.Directory)
 	defer func() {
 		if daemonClient != nil {
 			daemonClient.Close()

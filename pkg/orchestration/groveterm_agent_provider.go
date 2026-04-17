@@ -52,7 +52,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Register session intent with the daemon BEFORE spawning the pane.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(workDir)
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -211,7 +211,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	}
 
 	// Confirm the session with the daemon
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(workDir)
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
