@@ -130,51 +130,44 @@ func LoadJob(filepath string) (*Job, error) {
 		return nil, fmt.Errorf("reading job file: %w", err)
 	}
 
-	// Parse frontmatter
-	frontmatter, body, err := ParseFrontmatter(content)
+	// Extract the raw YAML string without allocating a
+	// map[string]interface{} or doing a yaml.Marshal round-trip — the
+	// old path showed up as ~50% of the browser refresh CPU profile.
+	yamlStr, body, err := ExtractFrontmatterString(content)
 	if err != nil {
-		return nil, fmt.Errorf("parsing frontmatter: %w", err)
+		return nil, fmt.Errorf("extracting frontmatter: %w", err)
 	}
 
-	// Check if this file has a type field - if not, it's not a job
-	if typeField, ok := frontmatter["type"]; !ok || typeField == nil {
-		return nil, ErrNotAJob{Reason: "no 'type' field in frontmatter"}
+	if strings.TrimSpace(yamlStr) == "" {
+		return nil, ErrNotAJob{Reason: "no frontmatter"}
 	}
 
-	// Convert frontmatter map to Job struct
-	// Sanitize UTF-8 to prevent encoding errors in LLM client
 	job := &Job{
 		PromptBody: sanitize.UTF8(body),
 	}
 
-	// Marshal frontmatter to YAML and unmarshal to Job struct
-	// This handles the type conversions properly
-	yamlBytes, err := yaml.Marshal(frontmatter)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling frontmatter: %w", err)
+	if err := yaml.Unmarshal([]byte(yamlStr), job); err != nil {
+		return nil, fmt.Errorf("unmarshaling to job struct: %w", err)
 	}
 
-	if err := yaml.Unmarshal(yamlBytes, job); err != nil {
-		return nil, fmt.Errorf("unmarshaling to job struct: %w", err)
+	// Flat metadata fields (last_error, retry_count) are stored at the top
+	// level of the frontmatter but belong inside job.Metadata in memory.
+	// Unmarshal once more into a narrow shim to pick them up without
+	// reintroducing the map allocation.
+	type flatMeta struct {
+		LastError  string `yaml:"last_error"`
+		RetryCount int    `yaml:"retry_count"`
+	}
+	var fm flatMeta
+	if err := yaml.Unmarshal([]byte(yamlStr), &fm); err == nil {
+		job.Metadata.LastError = fm.LastError
+		job.Metadata.RetryCount = fm.RetryCount
 	}
 
 	// Rewrite any reference to a deleted builtin template to its current
 	// replacement (either a skill or the default chat template). See
 	// template_shim.go for the mapping.
 	applyTemplateShim(job)
-
-	// Read flat metadata fields that UpdateJobMetadata persists at the top level of frontmatter.
-	// These are stored flat (not nested under "metadata:") for simplicity.
-	if lastErr, ok := frontmatter["last_error"]; ok {
-		if s, ok := lastErr.(string); ok {
-			job.Metadata.LastError = s
-		}
-	}
-	if rc, ok := frontmatter["retry_count"]; ok {
-		if n, ok := rc.(int); ok {
-			job.Metadata.RetryCount = n
-		}
-	}
 
 	// Validate job type first - only job types are processed
 	if job.Type != JobTypeOneshot && job.Type != JobTypeAgent && job.Type != JobTypeHeadlessAgent && job.Type != JobTypeShell && job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeIsolatedAgent && job.Type != JobTypeGenerateRecipe && job.Type != JobTypeFile {

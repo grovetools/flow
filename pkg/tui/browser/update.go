@@ -22,14 +22,18 @@ import (
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case embed.FocusMsg:
-		// Host gave this panel focus. Nothing extra to do — the next
-		// key events routed through Update pick up naturally.
-		return m, nil
+		m.focused = true
+		m.loading = true
+		return m, tea.Batch(
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
+			fetchGitLogCmd(m.cwdGitRoot),
+		)
 
 	case embed.BlurMsg:
-		// Host withdrew focus. Browser has no long-lived streams, but
-		// we clear the transient status message so re-focusing starts
-		// with a clean footer.
+		// Host withdrew focus. Pause background polling until FocusMsg
+		// re-enables it. Clearing the status message avoids stale
+		// text when we next get focus.
+		m.focused = false
 		m.statusMessage = ""
 		return m, nil
 
@@ -97,6 +101,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case refreshTickMsg:
+		// Skip heavy I/O if a load is already in-flight or the panel
+		// isn't focused. Keep the tick heartbeat running so resuming
+		// after focus/idle happens on the next period.
+		if m.loading || !m.focused {
+			return m, refreshTick()
+		}
+		m.loading = true
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
 			fetchGitLogCmd(m.cwdGitRoot),

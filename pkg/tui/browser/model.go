@@ -81,6 +81,7 @@ type Model struct {
 	height         int
 	err            error
 	loading        bool
+	focused        bool
 	plansDirectory string
 	cwdGitRoot     string
 	statusMessage  string
@@ -154,6 +155,7 @@ func New(cfg Config) Model {
 		plans:          []PlanListItem{},
 		cursor:         0,
 		loading:        true,
+		focused:        !cfg.EmbedMode,
 		plansDirectory: cfg.PlansDir,
 		cwdGitRoot:     cfg.WorkspaceDir,
 		help:           helpModel,
