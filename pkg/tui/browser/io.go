@@ -1,6 +1,8 @@
 package browser
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/daemon"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
@@ -110,13 +113,42 @@ func loadPlansListCmd(plansDirectory string, cwdGitRoot string, showOnHold bool)
 	}
 }
 
-func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([]PlanListItem, error) {
+// fetchPlans returns the parsed plan list for plansDirectory. It tries
+// the daemon first (where the watcher keeps a pre-parsed snapshot) and
+// falls back to a direct filesystem scan if the daemon is unreachable
+// or has no cached data for this directory yet.
+func fetchPlans(plansDirectory string) ([]*orchestration.Plan, error) {
+	client := daemon.New()
+	defer client.Close()
+
+	if client.IsRunning() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		body, err := client.GetPlansRaw(ctx, plansDirectory)
+		if err == nil && len(body) > 0 {
+			var plans []*orchestration.Plan
+			if decodeErr := json.Unmarshal(body, &plans); decodeErr == nil {
+				// `Job.Dependencies` is `json:"-"`, so the DAG pointer
+				// graph is lost across the socket. Rebuild it locally.
+				for _, p := range plans {
+					_ = p.ResolveDependencies()
+				}
+				return plans, nil
+			}
+		}
+	}
+
+	return loadPlansFromDisk(plansDirectory)
+}
+
+// loadPlansFromDisk is the daemon-less fallback: scan the plansDir and
+// invoke orchestration.LoadPlan for each subdirectory.
+func loadPlansFromDisk(plansDirectory string) ([]*orchestration.Plan, error) {
 	entries, err := os.ReadDir(plansDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read plans directory %s: %w", plansDirectory, err)
 	}
-
-	var items []PlanListItem
+	plans := make([]*orchestration.Plan, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -124,17 +156,30 @@ func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([
 		planPath := filepath.Join(plansDirectory, entry.Name())
 		planConfigPath := filepath.Join(planPath, ".grove-plan.yml")
 		mdFiles, _ := filepath.Glob(filepath.Join(planPath, "*.md"))
-
-		// A directory is considered a plan if it has a .grove-plan.yml
-		// file or contains .md files.
 		if _, err := os.Stat(planConfigPath); err != nil && len(mdFiles) == 0 {
 			continue
 		}
-
 		plan, err := orchestration.LoadPlan(planPath)
 		if err != nil {
 			continue
 		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
+func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([]PlanListItem, error) {
+	plans, err := fetchPlans(plansDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []PlanListItem
+	// Hoist workspace discovery out of the per-plan loop. It walks the
+	// full ecosystem and used to dominate CPU on plans with .Repos set.
+	var provider *workspace.Provider
+
+	for _, plan := range plans {
 		if plan.Config != nil && plan.Config.Status == "finished" {
 			continue
 		}
@@ -142,7 +187,7 @@ func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([
 			continue
 		}
 
-		planInfo, statErr := os.Stat(planPath)
+		planInfo, statErr := os.Stat(plan.Directory)
 		var lastUpdated time.Time
 		if statErr == nil {
 			lastUpdated = planInfo.ModTime()
@@ -177,16 +222,16 @@ func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([
 				}
 			}
 			if gitRoot == "" {
-				project, err := workspace.GetProjectByPath(planPath)
+				project, err := workspace.GetProjectByPath(plan.Directory)
 				if err == nil && project != nil {
 					gitRoot = project.Path
 				}
 			}
 			if gitRoot == "" {
-				gitRoot, _ = git.GetGitRoot(planPath)
+				gitRoot, _ = git.GetGitRoot(plan.Directory)
 			}
 			if gitRoot == "" {
-				gitRoot = planutil.FindGitRootForWorktree(planPath, worktree)
+				gitRoot = planutil.FindGitRootForWorktree(plan.Directory, worktree)
 			}
 
 			if gitRoot != "" {
@@ -199,8 +244,13 @@ func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([
 						item.GitStatus = gitStatus
 
 						if plan.Config != nil && len(plan.Config.Repos) > 0 {
-							provider, perr := planutil.DiscoverWorkspaceProvider()
-							if perr != nil {
+							if provider == nil {
+								p, perr := planutil.DiscoverWorkspaceProvider()
+								if perr == nil {
+									provider = p
+								}
+							}
+							if provider == nil {
 								item.MergeStatus = "err (discovery failed)"
 							} else {
 								item.EcosystemRepoStatuses, item.MergeStatus = planutil.EcosystemRepoDetails(plan, worktree, provider)
