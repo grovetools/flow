@@ -103,7 +103,7 @@ type daemonStreamConnectedMsg struct {
 // the lifecycle and tears it down via Close().
 func subscribeToDaemonCmd() tea.Cmd {
 	return func() tea.Msg {
-		client := daemon.New()
+		client := daemon.NewWithAutoStart()
 
 		if !client.IsRunning() {
 			client.Close()
@@ -1708,7 +1708,7 @@ type clawResultMsg struct {
 func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes int, prompt string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		client := daemon.NewWithAutoStart()
+		client := daemon.NewWithAutoStart(plan.Directory)
 		defer client.Close()
 
 		// Enable signal channel
@@ -1781,7 +1781,7 @@ func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes in
 func unclawJobCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		client := daemon.NewWithAutoStart()
+		client := daemon.NewWithAutoStart(plan.Directory)
 		defer client.Close()
 
 		_ = client.UpdateSessionChannels(ctx, job.ID, nil)

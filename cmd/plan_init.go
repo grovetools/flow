@@ -340,7 +340,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Notify daemon to re-scan workspaces so it picks up the new plan immediately
-	client := daemon.New()
+	client := daemon.NewWithAutoStart(planPath)
 	if client.IsRunning() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = client.Refresh(ctx)
@@ -1386,7 +1386,7 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	// Resolve the provider. Built-in providers (native/docker/terraform) need a daemon client.
 	var client env.DaemonEnvClient
 	if envCfg.Provider == "native" || envCfg.Provider == "docker" || envCfg.Provider == "terraform" {
-		client = daemon.New()
+		client = daemon.NewWithAutoStart(loadPath)
 	}
 	provider := env.ResolveProvider(envCfg.Provider, client, envCfg.Command)
 

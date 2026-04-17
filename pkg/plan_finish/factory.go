@@ -299,7 +299,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					req.Workspace = node
 				}
 			}
-			client := daemon.New()
+			client := daemon.NewWithAutoStart(planPath)
 			prov := env.ResolveProvider(stateFile.Provider, client, stateFile.Command)
 			if err := prov.Down(context.Background(), req); err != nil {
 				return fmt.Errorf("environment teardown failed: %w", err)

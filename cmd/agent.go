@@ -467,7 +467,7 @@ Shows the plan name, job title, provider, and status for each agent.`,
   flow agent list --json | jq -r '.[] | select(.plan_name=="my-feature") | .session_id'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			client := daemon.New()
+			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
 			sessions, err := client.GetSessions(ctx)
