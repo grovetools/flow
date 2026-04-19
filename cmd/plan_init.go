@@ -1289,6 +1289,12 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	if activeProfile == "" {
 		activeProfile, _ = state.GetString("environment")
 	}
+	// "default" is an alias for the unnamed base [environment] block.
+	// Normalize here so the pre-validation below doesn't reject it as a missing
+	// named profile. ResolveEnvironment applies the same alias defensively.
+	if activeProfile == "default" {
+		activeProfile = ""
+	}
 
 	// Validate that the named profile exists before resolving
 	if activeProfile != "" {
