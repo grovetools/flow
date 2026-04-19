@@ -11,6 +11,7 @@ import (
 	"github.com/grovetools/agentlogs/pkg/agentstream"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/sirupsen/logrus"
@@ -70,6 +71,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 		WorkDir:     workDir,
 		Channels:    job.Channels,
 		Autonomous:  job.Autonomous,
+		Mux:         models.MuxTreemux,
 	}); err != nil {
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {

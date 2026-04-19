@@ -20,6 +20,7 @@ import (
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
@@ -483,6 +484,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		WorkDir:     workDir,
 		Channels:    job.Channels,
 		Autonomous:  job.Autonomous,
+		Mux:         models.MuxTmux,
 	}); err != nil {
 		// Log warning but continue - agent can still run, just tracking may be impaired
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
