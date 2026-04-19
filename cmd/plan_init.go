@@ -1383,6 +1383,21 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		}
 	}
 
+	// Bugfix: when provisioning an env for a newly-created worktree, wsProvider
+	// was built before the worktree existed, so FindByPath falls back to a prefix
+	// match and returns the parent ecosystem node (Name=<ecosystem>, Path=<eco root>).
+	// The daemon keys its RunningEnv map by Workspace.Name and resolves relative
+	// volume host_paths against Workspace.Path, so without this override every
+	// tier-N worktree collides on the parent ecosystem's entry:
+	//   "environment already running for worktree: kitchen-env"
+	// When we know the physical worktree directory, force Name/Path to match it.
+	if worktreeName != "" && req.Workspace != nil {
+		patched := *req.Workspace
+		patched.Name = filepath.Base(loadPath)
+		patched.Path = loadPath
+		req.Workspace = &patched
+	}
+
 	// Resolve the provider. Built-in providers (native/docker/terraform) need a daemon client.
 	var client env.DaemonEnvClient
 	if envCfg.Provider == "native" || envCfg.Provider == "docker" || envCfg.Provider == "terraform" {
