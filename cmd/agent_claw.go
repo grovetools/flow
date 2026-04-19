@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"strings"
 
+	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/flow/pkg/orchestration"
 	notifications "github.com/grovetools/notify"
 	notifyconfig "github.com/grovetools/notify/pkg/config"
@@ -57,16 +57,19 @@ This turns a standard interactive agent into a "claw" agent that can:
 			// Resolve tmux target and notify the agent about its new capabilities
 			targetPane, err := orchestration.ResolveInteractiveAgentPane(plan, job)
 			if err == nil && targetPane != "" {
-				// Update daemon with tmux target if it doesn't have it
+				// Update daemon with tmux target — harmless fallback; job 42's Mux
+				// dispatch handles the primary routing via Session.Mux.
 				_ = client.UpdateSessionTmuxTarget(ctx, job.ID, targetPane)
 
 				notifyCfg := notifyconfig.Load()
 				instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"})
 				if instructions != "" {
 					msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
-					if tmuxClient, err := tmux.NewClient(); err == nil {
-						_ = tmuxClient.SendKeys(ctx, targetPane, msg, "C-m")
-					}
+					grovelogging.NewLogger("flow.cmd.claw").WithFields(map[string]interface{}{
+						"job_id":  job.ID,
+						"msg_len": len(msg),
+					}).Info("Injecting claw bootstrap instructions")
+					_ = orchestration.SendInputToInteractiveAgent(plan, job, msg)
 				}
 			}
 

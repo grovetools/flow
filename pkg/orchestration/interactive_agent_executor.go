@@ -1224,6 +1224,9 @@ func ResolveInteractiveAgentPane(plan *Plan, job *Job) (string, error) {
 // CaptureInteractiveAgentOutput captures the visible output from an interactive agent's pane.
 // Tries the daemon's native agent pane capture API first (groveterm), falls back to tmux.
 func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
+	logger := grovelogging.NewLogger("flow.orchestration.agent")
+	logger.WithField("job_id", job.ID).Debug("CaptureOutput called")
+
 	// Determine workDir upfront so we can scope the daemon connection correctly.
 	workDir, err := DetermineWorkingDirectory(plan, job)
 	if err != nil {
@@ -1237,9 +1240,14 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 		result, err := daemonClient.CaptureAgentPane(ctx, job.ID)
 		daemonClient.Close()
 		if err == nil {
+			logger.WithFields(map[string]interface{}{
+				"tier":   "native",
+				"job_id": job.ID,
+				"bytes":  len(result),
+			}).Debug("Native capture succeeded")
 			return result, nil
 		}
-		// Daemon capture failed — fall through to tmux.
+		logger.WithError(err).WithField("job_id", job.ID).Warn("Native capture failed, falling back to tmux")
 	} else {
 		daemonClient.Close()
 	}
@@ -1258,12 +1266,28 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 		return "", fmt.Errorf("tmux not available: %w", err)
 	}
 
-	return tmuxClient.CapturePane(ctx, targetPane)
+	result, err := tmuxClient.CapturePane(ctx, targetPane)
+	if err != nil {
+		return "", err
+	}
+	logger.WithFields(map[string]interface{}{
+		"tier":        "tmux",
+		"job_id":      job.ID,
+		"tmux_target": targetPane,
+		"bytes":       len(result),
+	}).Debug("Tmux capture succeeded")
+	return result, nil
 }
 
 // SendInputToInteractiveAgent sends input text to an interactive agent.
 // Tries the daemon's native agent pane input API first (groveterm), falls back to tmux.
 func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
+	logger := grovelogging.NewLogger("flow.orchestration.agent")
+	logger.WithFields(map[string]interface{}{
+		"job_id":    job.ID,
+		"input_len": len(input),
+	}).Debug("SendInput called")
+
 	ctx := context.Background()
 
 	// Determine workDir upfront so we can scope the daemon connection correctly.
@@ -1274,15 +1298,21 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 
 	// Try daemon API first — works when agent runs in a native groveterm pane.
 	daemonClient := daemon.NewWithAutoStart()
-	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+	connected, _ := daemonClient.IsTerminalConnected(ctx)
+	if connected {
+		logger.WithFields(map[string]interface{}{
+			"tier":   "native",
+			"job_id": job.ID,
+		}).Info("Dispatching input")
 		// Build the payload with vim-mode handling and submit key.
 		payload := buildAgentInputPayload(workDir, input)
 		err := daemonClient.SendAgentInput(ctx, job.ID, payload)
 		daemonClient.Close()
 		if err == nil {
+			logger.Debug("Native send succeeded")
 			return nil
 		}
-		// Daemon send failed — fall through to tmux.
+		logger.WithError(err).WithField("job_id", job.ID).Warn("Native send failed, falling back to tmux")
 	} else {
 		daemonClient.Close()
 	}
@@ -1299,6 +1329,14 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
 	inputMode := resolveInputMode(workDir)
+
+	if !connected {
+		logger.WithFields(map[string]interface{}{
+			"tier":        "tmux",
+			"job_id":      job.ID,
+			"tmux_target": targetPane,
+		}).Info("Dispatching input")
+	}
 
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {
@@ -1319,6 +1357,7 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 		return fmt.Errorf("failed to send submit key: %w", err)
 	}
 
+	logger.WithField("tmux_target", targetPane).Debug("Tmux send succeeded")
 	return nil
 }
 
@@ -1354,6 +1393,9 @@ func resolveInputMode(workDir string) string {
 // SendInterruptToInteractiveAgent sends Ctrl+C to interrupt an interactive agent.
 // Tries the daemon's native agent pane input API first (groveterm), falls back to tmux.
 func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
+	logger := grovelogging.NewLogger("flow.orchestration.agent")
+	logger.WithField("job_id", job.ID).Debug("SendInterrupt called")
+
 	ctx := context.Background()
 
 	// Determine workDir upfront so we can scope the daemon connection correctly.
@@ -1364,12 +1406,19 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 
 	// Try daemon API first — send Ctrl+C via native pane.
 	daemonClient := daemon.NewWithAutoStart()
-	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+	connected, _ := daemonClient.IsTerminalConnected(ctx)
+	if connected {
+		logger.WithFields(map[string]interface{}{
+			"tier":   "native",
+			"job_id": job.ID,
+		}).Info("Dispatching interrupt")
 		err := daemonClient.SendAgentInput(ctx, job.ID, "\x03")
 		daemonClient.Close()
 		if err == nil {
+			logger.Debug("Native interrupt succeeded")
 			return nil
 		}
+		logger.WithError(err).WithField("job_id", job.ID).Warn("Native interrupt failed, falling back to tmux")
 	} else {
 		daemonClient.Close()
 	}
@@ -1383,10 +1432,22 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
+	if !connected {
+		logger.WithFields(map[string]interface{}{
+			"tier":        "tmux",
+			"job_id":      job.ID,
+			"tmux_target": targetPane,
+		}).Info("Dispatching interrupt")
+	}
+
 	tmuxClient, err := tmux.NewClient()
 	if err != nil {
 		return fmt.Errorf("tmux not available: %w", err)
 	}
 
-	return tmuxClient.SendKeys(ctx, targetPane, "C-c")
+	if err := tmuxClient.SendKeys(ctx, targetPane, "C-c"); err != nil {
+		return err
+	}
+	logger.WithField("tmux_target", targetPane).Debug("Tmux interrupt succeeded")
+	return nil
 }

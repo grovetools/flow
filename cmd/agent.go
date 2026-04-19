@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -92,32 +94,42 @@ func resolveAgentTarget(slug, jobID string) (*orchestration.Plan, *orchestration
 	return plan, job, nil
 }
 
-// resolveTmuxTarget returns the tmux target pane string.
-// If directTarget is set, returns it directly. Otherwise resolves from slug+job.
-func resolveTmuxTarget(directTarget string, args []string) (string, error) {
-	if directTarget != "" {
-		return directTarget, nil
-	}
-	if len(args) < 2 {
-		return "", fmt.Errorf("provide either -t <session:window> or <slug> <job>")
-	}
-	plan, job, err := resolveAgentTarget(args[0], args[1])
-	if err != nil {
-		return "", err
-	}
-	return orchestration.ResolveInteractiveAgentPane(plan, job)
+// agentCmdLogger returns a structured logger for CLI agent commands.
+func agentCmdLogger() *logrus.Entry {
+	return grovelogging.NewLogger("flow.cmd.agent")
 }
 
-// capturePaneOutput captures output from a tmux pane and returns the last N lines.
-func capturePaneOutput(targetPane string, lines int) (string, error) {
-	tmuxClient, err := tmux.NewClient()
-	if err != nil {
-		return "", fmt.Errorf("tmux not available: %w", err)
+// captureAgentOutput captures output from an interactive agent and returns the last N lines.
+// If plan and job are non-nil, delegates to the orchestration helper (which tries daemon
+// native-PTY capture first, then falls back to tmux). If both are nil, uses a direct tmux
+// capture of targetPane — this preserves the `-t <tmux-target>` CLI escape hatch.
+func captureAgentOutput(plan *orchestration.Plan, job *orchestration.Job, targetPane string, lines int) (string, error) {
+	delegation := "direct_tmux"
+	if plan != nil && job != nil {
+		delegation = "orchestration"
 	}
+	agentCmdLogger().WithFields(logrus.Fields{
+		"delegation": delegation,
+		"target":     targetPane,
+	}).Debug("captureAgentOutput called")
 
-	output, err := tmuxClient.CapturePane(context.Background(), targetPane)
-	if err != nil {
-		return "", fmt.Errorf("failed to capture pane: %w", err)
+	var output string
+	if plan != nil && job != nil {
+		out, err := orchestration.CaptureInteractiveAgentOutput(plan, job)
+		if err != nil {
+			return "", err
+		}
+		output = out
+	} else {
+		tmuxClient, err := tmux.NewClient()
+		if err != nil {
+			return "", fmt.Errorf("tmux not available: %w", err)
+		}
+		out, err := tmuxClient.CapturePane(context.Background(), targetPane)
+		if err != nil {
+			return "", fmt.Errorf("failed to capture pane: %w", err)
+		}
+		output = out
 	}
 
 	split := strings.Split(strings.TrimSpace(output), "\n")
@@ -128,9 +140,25 @@ func capturePaneOutput(targetPane string, lines int) (string, error) {
 	return strings.Join(split[start:], "\n"), nil
 }
 
-// sendToPane sends input text to a tmux pane, respecting input_mode config.
-func sendToPane(targetPane, input string) error {
-	// Read flow config for input_mode
+// sendToAgent sends input text to an interactive agent.
+// If plan and job are non-nil, delegates to the orchestration helper (native-PTY first,
+// tmux fallback). Otherwise falls back to a direct tmux send against targetPane, reading
+// input_mode from the flow config for vim-mode escape handling.
+func sendToAgent(plan *orchestration.Plan, job *orchestration.Job, targetPane, input string) error {
+	delegation := "direct_tmux"
+	if plan != nil && job != nil {
+		delegation = "orchestration"
+	}
+	agentCmdLogger().WithFields(logrus.Fields{
+		"delegation": delegation,
+		"target":     targetPane,
+	}).Debug("sendToAgent called")
+
+	if plan != nil && job != nil {
+		return orchestration.SendInputToInteractiveAgent(plan, job, input)
+	}
+
+	// Direct-tmux path (for `-t <tmux-target>`).
 	coreCfg, cfgErr := config.LoadDefault()
 	if cfgErr != nil {
 		coreCfg = &config.Config{}
@@ -210,12 +238,22 @@ Target the agent by plan slug + job, or directly by tmux target.`,
   flow agent read my-feature impl-feature -n 200 | grep -i error`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			targetPane, err := resolveTmuxTarget(target, args)
-			if err != nil {
-				return err
+			var plan *orchestration.Plan
+			var job *orchestration.Job
+			targetPane := target
+			if target == "" {
+				if len(args) < 2 {
+					return fmt.Errorf("provide either -t <session:window> or <slug> <job>")
+				}
+				var err error
+				plan, job, err = resolveAgentTarget(args[0], args[1])
+				if err != nil {
+					return err
+				}
+				targetPane = ""
 			}
 
-			output, err := capturePaneOutput(targetPane, lines)
+			output, err := captureAgentOutput(plan, job, targetPane, lines)
 			if err != nil {
 				return err
 			}
@@ -303,8 +341,9 @@ Target the agent by plan slug + job, or directly by tmux target.`,
   flow agent send -t "session:agent-2" 'commit your work'`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var plan *orchestration.Plan
+			var job *orchestration.Job
 			var targetPane, input string
-			var err error
 
 			if target != "" {
 				targetPane = target
@@ -324,7 +363,8 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 				if len(args) < 2 {
 					return fmt.Errorf("provide either -t <session:window> or <slug> <job> [message]")
 				}
-				targetPane, err = resolveTmuxTarget("", args[:2])
+				var err error
+				plan, job, err = resolveAgentTarget(args[0], args[1])
 				if err != nil {
 					return err
 				}
@@ -346,17 +386,25 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 				input = header + "\n" + input
 			}
 
-			if err := sendToPane(targetPane, input); err != nil {
+			if err := sendToAgent(plan, job, targetPane, input); err != nil {
 				return err
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "Message sent to %s\n", targetPane)
+			displayTarget := targetPane
+			if displayTarget == "" && plan != nil && job != nil {
+				if pane, err := orchestration.ResolveInteractiveAgentPane(plan, job); err == nil {
+					displayTarget = pane
+				} else {
+					displayTarget = job.Title
+				}
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "Message sent to %s\n", displayTarget)
 
 			if waitFlag {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Waiting for agent to become idle...\n")
 				time.Sleep(2 * time.Second)
 				for {
-					out, capErr := capturePaneOutput(targetPane, 30)
+					out, capErr := captureAgentOutput(plan, job, targetPane, 30)
 					if capErr == nil && isAgentIdle(out) {
 						fmt.Fprintf(cmd.ErrOrStderr(), "Agent is idle.\n")
 						break
@@ -404,14 +452,30 @@ whether the agent is idle (waiting for input), working (processing), or disconne
   while [ "$(flow agent status my-feature impl --json | jq -r .status)" != "idle" ]; do sleep 5; done`,
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			targetPane, err := resolveTmuxTarget(target, args)
-			if err != nil {
-				return err
+			var plan *orchestration.Plan
+			var job *orchestration.Job
+			targetPane := target
+			displayTarget := target
+			if target == "" {
+				if len(args) < 2 {
+					return fmt.Errorf("provide either -t <session:window> or <slug> <job>")
+				}
+				var err error
+				plan, job, err = resolveAgentTarget(args[0], args[1])
+				if err != nil {
+					return err
+				}
+				targetPane = ""
+				if pane, paneErr := orchestration.ResolveInteractiveAgentPane(plan, job); paneErr == nil {
+					displayTarget = pane
+				} else {
+					displayTarget = job.Title
+				}
 			}
 
-			output, capErr := capturePaneOutput(targetPane, 30)
+			output, capErr := captureAgentOutput(plan, job, targetPane, 30)
 
-			status := AgentStatus{Target: targetPane}
+			status := AgentStatus{Target: displayTarget}
 
 			if capErr != nil {
 				status.Status = "disconnected"
@@ -427,7 +491,7 @@ whether the agent is idle (waiting for input), working (processing), or disconne
 				return enc.Encode(status)
 			}
 
-			fmt.Printf("%s: %s\n", targetPane, status.Status)
+			fmt.Printf("%s: %s\n", displayTarget, status.Status)
 			return nil
 		},
 	}
