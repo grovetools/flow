@@ -1440,50 +1440,11 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		}
 	}
 
-	// Derive Services from resp.State (mirror of grove/cmd/env.go loop).
-	var services []env.ServiceState
-	if resp.State != nil {
-		for k, v := range resp.State {
-			services = append(services, env.ServiceState{Name: k, Status: v})
-		}
-	}
-
-	// Derive Ports from env vars ending in _PORT (mirror of grove/cmd/env.go loop).
-	ports := make(map[string]int)
-	for k, v := range resp.EnvVars {
-		if strings.HasSuffix(k, "_PORT") {
-			var port int
-			if _, err := fmt.Sscanf(v, "%d", &port); err == nil {
-				ports[k] = port
-			}
-		}
-	}
-
-	// Build state file with new fields
-	stateFile := env.EnvStateFile{
-		Provider:     envCfg.Provider,
-		Command:      envCfg.Command,
-		Environment:  activeProfile,
-		ManagedBy:    managedBy,
-		Ports:        ports,
-		Services:     services,
-		EnvVars:      resp.EnvVars,
-		Endpoints:    resp.Endpoints,
-		CleanupPaths: resp.CleanupPaths,
-		Volumes:      resp.Volumes,
-		State:        resp.State,
-	}
-	stateBytes, _ := json.MarshalIndent(stateFile, "", "  ")
-
-	// Write to .grove/env/state.json (primary location)
-	if err := os.WriteFile(worktreeStatePath, stateBytes, 0644); err != nil {
-		result.WriteString(fmt.Sprintf("%s  Warning: could not write .grove/env/state.json: %v\n", theme.IconWarning, err))
-	}
-
-	// Write legacy .env_state.json to plan directory for backward compat
-	if err := os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644); err != nil {
-		result.WriteString(fmt.Sprintf("%s  Warning: could not write .env_state.json: %v\n", theme.IconWarning, err))
-	}
+	// state.json is now written by the daemon (Manager.Up). The plan_init
+	// path used to mirror this on the client; that has been removed to keep
+	// the daemon as the sole authoritative writer of .grove/env/state.json.
+	_ = worktreeStatePath
+	_ = managedBy
 
 	// Display endpoints
 	if len(resp.Endpoints) > 0 {
