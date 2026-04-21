@@ -230,20 +230,22 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 				fmt.Println(color.GreenString("*") + " Session artifacts archived.")
 			}
 		}
+	}
 
-		// Append transcript if it's an agent job
-		if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent || job.Type == JobTypeIsolatedAgent {
+	// Append transcript for agent jobs — runs even when already completed so
+	// `flow plan complete` recovers the transcript if the agent was killed
+	// before the first completion call landed. AppendAgentTranscript compares
+	// existing vs new content and skips if unchanged.
+	if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent || job.Type == JobTypeIsolatedAgent {
+		if !silent {
+			fmt.Println("Appending agent session transcript...")
+		}
+		if err := AppendAgentTranscript(job, plan); err != nil {
 			if !silent {
-				fmt.Println("Appending agent session transcript...")
+				fmt.Printf("Warning: failed to append transcript: %v\n", err)
 			}
-			if err := AppendAgentTranscript(job, plan); err != nil {
-				// Log warning but don't fail the command
-				if !silent {
-					fmt.Printf("Warning: failed to append transcript: %v\n", err)
-				}
-			} else if !silent {
-				fmt.Println(color.GreenString("*") + " Appended session transcript.")
-			}
+		} else if !silent {
+			fmt.Println(color.GreenString("*") + " Appended session transcript.")
 		}
 	}
 
