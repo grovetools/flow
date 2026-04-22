@@ -573,25 +573,22 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			p.log.WithError(err).Warn("Failed to update tmux target on daemon")
 		}
 
-		// Export environment variables in the window's shell
-		// Use separate export commands for shell compatibility (bash/zsh/fish)
-		// and properly quote the title to handle spaces and special characters.
+		// Inline env vars on the agent command itself (not via a separate
+		// `export` line) so they scope only to the agent process and its
+		// descendants. Typing `export` into the pane would leak these vars
+		// into the user's interactive shell after the agent exits, causing
+		// subsequent `flow`/`cx`/`nav` invocations to route to the wrong
+		// daemon. GROVE_SCOPE is critical: without it the agent's daemon
+		// client falls back to the unscoped socket.
+		scope := workspace.ResolveScope(workDir)
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-		envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
-			job.ID, job.FilePath, plan.Name, escapedTitle)
-		envCommand += playbookEnvExports(job, plan)
-		if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
-			p.log.WithError(err).Error("Failed to set environment variables")
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("failed to set environment variables: %w", err)
-		}
+		envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+			scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+		envPrefix += playbookEnvInline(job, plan)
 
-		// Small delay to ensure environment variables are set
-		time.Sleep(100 * time.Millisecond)
-
-		// Wrap agent command with deterministic PID capture
-		wrappedCommand := agentstream.BuildAgentCommand(job.ID, agentCommand)
+		// Wrap agent command with deterministic PID capture, then prefix
+		// inline env so everything runs as one shell invocation.
+		wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
 		// Send the agent command to the new window
 		if err := tmuxClient.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to send agent command")
@@ -733,23 +730,18 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 	targetPane := windowTarget
 
-	// Use separate export commands for shell compatibility (bash/zsh/fish)
-	// and properly quote the title to handle spaces and special characters.
+	// Inline env vars on the agent command itself (see the matching site
+	// above for rationale). Scoping env to the agent process avoids
+	// polluting the user's interactive shell after the agent exits.
+	scope := workspace.ResolveScope(workDir)
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
-	envCommand += playbookEnvExports(job, plan)
-	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
-		p.log.WithError(err).Error("Failed to set environment variables")
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to set environment variables: %w", err)
-	}
+	envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix += playbookEnvInline(job, plan)
 
-	time.Sleep(100 * time.Millisecond)
-
-	// Wrap agent command with deterministic PID capture
-	wrappedCommand := agentstream.BuildAgentCommand(job.ID, agentCommand)
+	// Wrap agent command with deterministic PID capture, then prefix
+	// inline env so everything runs as one shell invocation.
+	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
 	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)

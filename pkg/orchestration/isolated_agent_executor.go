@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/flow/pkg/exec"
@@ -271,23 +272,19 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 		return fmt.Errorf("failed to build agent command: %w", err)
 	}
 
-	// Set environment variables in the isolated tmux pane
+	// Inline env vars on the agent command itself — scoped to the agent
+	// process, not exported into the pane's shell, so nothing leaks after
+	// the agent exits. GROVE_SCOPE routes the agent's daemon client calls
+	// to the plan's scoped daemon.
+	scope := workspace.ResolveScope(workDir)
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s; export GROVE_FLOW_ISOLATED='true'",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' ",
+		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix += playbookEnvInline(job, plan)
 
-	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, envCommand, "C-m"); err != nil {
-		e.log.WithError(err).Error("Failed to set environment variables")
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to set environment variables: %w", err)
-	}
-
-	// Small delay to ensure environment variables are set
-	time.Sleep(100 * time.Millisecond)
-
-	// Wrap agent command with deterministic PID capture
-	wrappedCommand := agentstream.BuildAgentCommand(job.ID, agentCommand)
+	// Wrap agent command with deterministic PID capture, then prefix
+	// inline env so everything runs as one shell invocation.
+	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
 	// Send the agent command to the isolated pane
 	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, wrappedCommand, "C-m"); err != nil {
 		e.log.WithError(err).Error("Failed to send agent command")

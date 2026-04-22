@@ -13,6 +13,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -146,18 +147,16 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	}
 
 	targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
+	// Inline env vars on the agent command so they scope only to the agent
+	// process; typing `export` into the pane would leak into the user's
+	// interactive shell after the agent exits.
+	scope := workspace.ResolveScope(workDir)
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envCommand := fmt.Sprintf("export GROVE_AGENT_PROVIDER='opencode'; export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
-	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to set environment variables: %w", err)
-	}
+	envPrefix := fmt.Sprintf("GROVE_AGENT_PROVIDER='opencode' GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix += playbookEnvInline(job, plan)
 
-	time.Sleep(100 * time.Millisecond)
-
-	if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
+	if err := tmuxClient.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)

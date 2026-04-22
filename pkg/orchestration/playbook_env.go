@@ -109,13 +109,14 @@ func resolvePlaybookRootForJob(job *Job, plan *Plan) (name, root string) {
 	return name, path
 }
 
-// playbookEnvExports returns a shell fragment of `export KEY='VALUE'`
-// statements that configure PLAYBOOK_ROOT (and friends) for a job's agent
-// subprocess. Returns an empty string if no playbook is active.
-func playbookEnvExports(job *Job, plan *Plan) string {
+// playbookEnvInline returns a shell fragment of `KEY='VALUE' ` assignments
+// suitable for prefixing a single command (e.g. `FOO=bar baz`), scoping the
+// variables to the agent process without exporting them into the surrounding
+// shell. Returns an empty string if no playbook is active.
+func playbookEnvInline(job *Job, plan *Plan) string {
 	name, root := resolvePlaybookRootForJob(job, plan)
 	if root == "" {
 		return ""
 	}
-	return fmt.Sprintf("; export PLAYBOOK_ROOT='%s'; export PLAYBOOK_NAME='%s'", root, name)
+	return fmt.Sprintf("PLAYBOOK_ROOT='%s' PLAYBOOK_NAME='%s' ", root, name)
 }

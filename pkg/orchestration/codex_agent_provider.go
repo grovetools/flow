@@ -14,6 +14,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -115,24 +116,18 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// Set environment variables in the window's shell so they're available to the codex process
 	targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 
-	// Export environment variables in the window's shell
-	// Use separate export commands for shell compatibility (bash/zsh/fish)
-	// and properly quote the title to handle spaces and special characters.
+	// Inline env vars on the agent command itself so they're scoped to the
+	// codex process and don't leak into the user's interactive shell after
+	// the agent exits. GROVE_SCOPE routes the agent's daemon client calls
+	// (notify, flow, hooks) to the plan's scoped daemon.
+	scope := workspace.ResolveScope(workDir)
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envCommand := fmt.Sprintf("export GROVE_FLOW_JOB_ID='%s'; export GROVE_FLOW_JOB_PATH='%s'; export GROVE_FLOW_PLAN_NAME='%s'; export GROVE_FLOW_JOB_TITLE=%s",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
-	if err := tmuxClient.SendKeys(ctx, targetPane, envCommand, "C-m"); err != nil {
-		p.log.WithError(err).Error("Failed to set environment variables")
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to set environment variables: %w", err)
-	}
+	envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix += playbookEnvInline(job, plan)
 
-	// Small delay to ensure environment variables are set
-	time.Sleep(100 * time.Millisecond)
-
-	// Send the agent command to the new window
-	if err := tmuxClient.SendKeys(ctx, targetPane, agentCommand, "C-m"); err != nil {
+	// Send the agent command with inline env prefix to the new window
+	if err := tmuxClient.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
