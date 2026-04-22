@@ -1417,6 +1417,11 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		req.Workspace = &patched
 	}
 
+	// Inject shared_backend_config when the resolved profile declares a
+	// shared_env (e.g. tier-N terraform profiles pulling outputs from a
+	// shared kitchen-infra). Mirrors grove/cmd/env.go.
+	env.ApplySharedBackendConfig(&req)
+
 	// Resolve the provider. Built-in providers (native/docker/terraform) need a daemon client.
 	var client env.DaemonEnvClient
 	if envCfg.Provider == "native" || envCfg.Provider == "docker" || envCfg.Provider == "terraform" {
