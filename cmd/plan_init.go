@@ -48,12 +48,16 @@ func RunPlanInitTUI(dir string, cliCmd *PlanInitCmd) error {
 // RunPlanInit implements the plan init command.
 func RunPlanInit(cmd *PlanInitCmd) error {
 	result, err := executePlanInit(cmd)
-	if err != nil {
-		return err
+	if result != "" {
+		fmt.Print(result)
 	}
-	fmt.Print(result)
-	return nil
+	return err
 }
+
+// provisionEnvironmentFn is the entry point used by executePlanInit to provision
+// the environment. Exposed as a var so tests can substitute a stub without
+// depending on daemons, providers, or grove.toml state.
+var provisionEnvironmentFn = provisionEnvironment
 
 // executePlanInit contains the core logic for initializing a plan and returns a result string.
 func executePlanInit(cmd *PlanInitCmd) (string, error) {
@@ -219,7 +223,11 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	result.WriteString("* Created .grove-plan.yml with default configuration\n")
 
 	// Environment provisioning: if the config has an environment provider, spin it up.
-	if envResult := provisionEnvironment(worktreeToSet, planPath, provider, cmd.EnvProfile); envResult != "" {
+	// Capture any error but keep running — the plan dir + worktree are still valid
+	// artifacts and the user can retry provisioning via `grove env up`. The captured
+	// error is returned at the end of executePlanInit so the command exits non-zero.
+	envResult, envProvisionErr := provisionEnvironmentFn(worktreeToSet, planPath, provider, cmd.EnvProfile)
+	if envResult != "" {
 		result.WriteString(envResult)
 	}
 
@@ -348,6 +356,9 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 	client.Close()
 
+	if envProvisionErr != nil {
+		return result.String(), fmt.Errorf("environment provisioning failed: %w", envProvisionErr)
+	}
 	return result.String(), nil
 }
 
@@ -1265,14 +1276,14 @@ func setWorktreeActivePlan(worktreePath, planName string) error {
 
 // provisionEnvironment checks the layered config for an environment provider and
 // provisions it if configured. Returns a string with status messages to append to the result.
-func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.Provider, envProfile string) string {
+func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.Provider, envProfile string) (string, error) {
 	// Determine the config load path: worktree if available, otherwise CWD
 	var loadPath string
 	if worktreeName != "" {
 		cwd, _ := os.Getwd()
 		gitRoot, err := orchestration.GetGitRootSafe(cwd)
 		if err != nil {
-			return ""
+			return "", nil
 		}
 		loadPath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 	} else {
@@ -1281,7 +1292,7 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 
 	layeredCfg, err := config.LoadLayered(loadPath)
 	if err != nil || layeredCfg.Final == nil {
-		return ""
+		return "", nil
 	}
 
 	// Determine active environment profile: --env flag > sticky state > default
@@ -1299,20 +1310,22 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	// Validate that the named profile exists before resolving
 	if activeProfile != "" {
 		if layeredCfg.Final.Environments == nil {
-			return fmt.Sprintf("%s  Error: environment profile %q not found (no environments defined)\n", theme.IconWarning, activeProfile)
+			err := fmt.Errorf("environment profile %q not found (no environments defined)", activeProfile)
+			return fmt.Sprintf("%s  Error: %v\n", theme.IconWarning, err), err
 		}
 		if _, exists := layeredCfg.Final.Environments[activeProfile]; !exists {
-			return fmt.Sprintf("%s  Error: environment profile %q not found\n", theme.IconWarning, activeProfile)
+			err := fmt.Errorf("environment profile %q not found", activeProfile)
+			return fmt.Sprintf("%s  Error: %v\n", theme.IconWarning, err), err
 		}
 	}
 
 	// Resolve the environment profile (merges default + named overlay)
 	envCfg, resolveErr := config.ResolveEnvironment(layeredCfg.Final, activeProfile)
 	if resolveErr != nil {
-		return fmt.Sprintf("%s  Warning: %v\n", theme.IconWarning, resolveErr)
+		return fmt.Sprintf("%s  Warning: %v\n", theme.IconWarning, resolveErr), resolveErr
 	}
 	if envCfg.Provider == "" {
-		return ""
+		return "", nil
 	}
 
 	var result strings.Builder
@@ -1351,7 +1364,7 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 			stateBytes, _ := json.MarshalIndent(existingState, "", "  ")
 			os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644)
 
-			return result.String()
+			return result.String(), nil
 		}
 	}
 
@@ -1414,11 +1427,11 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	resp, err := provider.Up(context.Background(), req)
 	if err != nil {
 		result.WriteString(fmt.Sprintf("%s  Warning: Environment provision failed: %v\n", theme.IconWarning, err))
-		return result.String()
+		return result.String(), err
 	}
 
 	if resp == nil {
-		return result.String()
+		return result.String(), nil
 	}
 
 	// Write .env.local to worktree (sorted keys for deterministic output)
@@ -1454,5 +1467,5 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		}
 	}
 
-	return result.String()
+	return result.String(), nil
 }

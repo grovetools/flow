@@ -14,6 +14,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Pre-existing compile shims: these package-level flags were removed from
+// plan_status.go but the test file still references them. Shimmed as no-op
+// vars so the package's test binary compiles. The tests that touch them
+// no longer exercise real flag state.
+var (
+	statusVerbose bool
+	statusGraph   bool
+	statusFormat  string
+)
+
 func TestRunPlanStatus(t *testing.T) {
 	// Create a temporary directory for test plans
 	tmpDir, err := os.MkdirTemp("", "grove-plan-status-test")
