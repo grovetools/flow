@@ -515,50 +515,51 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		},
 	}
 
+	markFinishedItem := &finish.Item{
+		ID:   ItemMarkFinished,
+		Name: "Mark plan as finished in .grove-plan.yml",
+		Check: func() (string, error) {
+			configPath := filepath.Join(planPath, ".grove-plan.yml")
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				return "Not found", nil
+			}
+			var config map[string]interface{}
+			if err := yaml.Unmarshal(data, &config); err != nil {
+				return "Invalid YAML", nil
+			}
+			if status, ok := config["status"].(string); ok && status == "finished" {
+				return color.GreenString("Already finished"), nil
+			}
+			return color.YellowString("Available"), nil
+		},
+		Action: func() error {
+			configPath := filepath.Join(planPath, ".grove-plan.yml")
+			data, err := os.ReadFile(configPath)
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			var config map[string]interface{}
+			if len(data) > 0 {
+				if err := yaml.Unmarshal(data, &config); err != nil {
+					return err
+				}
+			}
+			if config == nil {
+				config = make(map[string]interface{})
+			}
+			config["status"] = "finished"
+			newData, err := yaml.Marshal(config)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(configPath, newData, 0644)
+		},
+	}
+
 	items := []*finish.Item{
 		envTeardownItem,
 		mergeItem,
-		{
-			ID:   ItemMarkFinished,
-			Name: "Mark plan as finished in .grove-plan.yml",
-			Check: func() (string, error) {
-				configPath := filepath.Join(planPath, ".grove-plan.yml")
-				data, err := os.ReadFile(configPath)
-				if err != nil {
-					return "Not found", nil
-				}
-				var config map[string]interface{}
-				if err := yaml.Unmarshal(data, &config); err != nil {
-					return "Invalid YAML", nil
-				}
-				if status, ok := config["status"].(string); ok && status == "finished" {
-					return color.GreenString("Already finished"), nil
-				}
-				return color.YellowString("Available"), nil
-			},
-			Action: func() error {
-				configPath := filepath.Join(planPath, ".grove-plan.yml")
-				data, err := os.ReadFile(configPath)
-				if err != nil && !os.IsNotExist(err) {
-					return err
-				}
-				var config map[string]interface{}
-				if len(data) > 0 {
-					if err := yaml.Unmarshal(data, &config); err != nil {
-						return err
-					}
-				}
-				if config == nil {
-					config = make(map[string]interface{})
-				}
-				config["status"] = "finished"
-				newData, err := yaml.Marshal(config)
-				if err != nil {
-					return err
-				}
-				return os.WriteFile(configPath, newData, 0644)
-			},
-		},
 		{
 			ID:   ItemCloseSession,
 			Name: "Close tmux session",
@@ -611,44 +612,48 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				if _, err := os.Stat(filepath.Join(wPath, ".gitmodules")); err == nil {
 					hasSubmodules = true
 				}
-				if hasSubmodules {
-					if err := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider, opts.Force); err != nil {
-						fmt.Printf("    Warning: failed to remove linked submodule worktrees: %v\n", err)
+				// Attempt parent worktree removal FIRST. Removing
+				// submodule worktrees first causes the parent's
+				// tracked submodule checkouts to appear as `deleted:`
+				// in git status, so `git worktree remove` refuses
+				// without --force even when the user has no
+				// uncommitted work. Only prune linked submodule
+				// worktrees if git explicitly complains about
+				// submodules, then retry the parent.
+				runParent := func() error {
+					args := []string{"worktree", "remove"}
+					if opts.Force {
+						args = append(args, "--force")
 					}
+					args = append(args, wPath)
+					return executor.Execute("git", args...)
 				}
-				removeCmd := "git"
-				removeArgs := []string{"worktree", "remove"}
-				if opts.Force {
-					removeArgs = append(removeArgs, "--force")
-				}
-				removeArgs = append(removeArgs, wPath)
-				err := executor.Execute(removeCmd, removeArgs...)
+				err := runParent()
 				if err != nil && hasSubmodules && strings.Contains(err.Error(), "working trees containing submodules") {
-					fmt.Printf("    Note: Git won't remove worktrees with submodules, removing manually...\n")
-					statusCmd := exec.Command("git", "-C", wPath, "status", "--porcelain", "--ignore-submodules")
-					if statusOutput, statusErr := statusCmd.Output(); statusErr == nil {
-						if strings.TrimSpace(string(statusOutput)) != "" && !opts.Force {
-							fmt.Printf("    Warning: Worktree has uncommitted changes. Use --force to remove anyway.\n")
-							return fmt.Errorf("worktree has uncommitted changes")
-						}
+					if subErr := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider, opts.Force); subErr != nil {
+						fmt.Printf("    Warning: failed to remove linked submodule worktrees: %v\n", subErr)
 					}
-					if err := os.RemoveAll(wPath); err != nil {
-						fmt.Printf("    Error: Failed to remove worktree directory: %v\n", err)
-						return err
-					}
-					pruneCmd := exec.Command("git", "-C", gitRoot, "worktree", "prune")
-					if err := pruneCmd.Run(); err != nil {
-						fmt.Printf("    Warning: Failed to prune worktree metadata: %v\n", err)
-					}
-					fmt.Printf("    * Worktree removed successfully\n")
-					return nil
+					err = runParent()
 				}
-				// Do NOT auto-retry with --force when the user did
-				// not explicitly request force. Surfacing the
-				// original error lets the user re-run with --force
-				// (or toggle the force option in the wizard) if
-				// they really want to discard uncommitted work.
-				return err
+				if err != nil {
+					// Do NOT auto-retry with --force when the user
+					// did not explicitly request force. Surfacing
+					// the original error lets the user re-run with
+					// --force (or toggle the force option in the
+					// wizard) if they really want to discard
+					// uncommitted work.
+					return err
+				}
+				// After a successful parent removal, still prune any
+				// dangling worktree metadata from the submodule
+				// source repos so `git worktree list` in those repos
+				// stays clean.
+				if hasSubmodules {
+					if subErr := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider, opts.Force); subErr != nil {
+						fmt.Printf("    Warning: failed to prune linked submodule worktree metadata: %v\n", subErr)
+					}
+				}
+				return nil
 			},
 		},
 		{
@@ -875,6 +880,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return nil
 			},
 		},
+		markFinishedItem,
 		{
 			ID:   ItemArchivePlan,
 			Name: "Archive plan directory",

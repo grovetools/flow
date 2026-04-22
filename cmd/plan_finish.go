@@ -12,7 +12,6 @@ import (
 	"github.com/grovetools/flow/pkg/plan_finish"
 	"github.com/grovetools/flow/pkg/tui/wizards/finish"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 // NewPlanFinishCmd creates the `plan finish` command.
@@ -153,21 +152,22 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 		}
 	}
 
-	// Execute on_finish hook before marking as finished.
+	// Execute on_finish hook before running cleanup actions.
+	// ItemMarkFinished will update .grove-plan.yml status AFTER the
+	// destructive steps succeed; writing it here before execution
+	// would orphan the plan slug if a later action fails.
 	if plan.Config != nil && plan.Config.Status == "review" {
 		plan_finish.RunOnFinishHook(plan, planName)
-
-		// Now mark plan as finished.
-		plan.Config.Status = "finished"
-		configPath := filepath.Join(planPath, ".grove-plan.yml")
-		if data, err := yaml.Marshal(plan.Config); err == nil {
-			os.WriteFile(configPath, data, 0644)
-			fmt.Println("  - Marked plan as finished... Done")
-		}
 	}
 
-	// Execute enabled actions.
-	executeFinishActions(items)
+	// Execute enabled actions. Returns a non-nil error if any enabled
+	// action failed; when that happens archive_plan and mark_finished
+	// are skipped so the plan stays resolvable by slug for retry.
+	actionErr := executeFinishActions(items)
+	if actionErr != nil {
+		fmt.Fprintf(os.Stderr, "\ncleanup incomplete — plan left in 'review' status, re-run 'flow plan finish %s' after resolving the issue\n", planName)
+		return actionErr
+	}
 
 	// Check if the finished plan was the active plan and unset it.
 	activePlan, err := getActivePlanWithMigration()
@@ -185,14 +185,26 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 }
 
 // executeFinishActions runs the Action closure on every enabled item,
-// printing per-item success/failure. It is shared between the CLI
-// path and any other host that wants to run cleanup with the same
-// console output format.
-func executeFinishActions(items []*finish.Item) {
+// printing per-item success/failure. If an action fails, later items
+// whose IDs are in terminalItemIDs (archive_plan, mark_finished) are
+// skipped so a partial failure cannot orphan the plan slug. The first
+// error encountered is returned; other non-terminal items continue to
+// run. It is shared between the CLI path and any other host that
+// wants to run cleanup with the same console output format.
+func executeFinishActions(items []*finish.Item) error {
 	fmt.Println("\nPerforming selected actions...")
 	executed := false
+	var firstErr error
+	terminalItemIDs := map[string]bool{
+		plan_finish.ItemArchivePlan:  true,
+		plan_finish.ItemMarkFinished: true,
+	}
 	for _, item := range items {
 		if item == nil || !item.IsEnabled || item.Action == nil {
+			continue
+		}
+		if firstErr != nil && terminalItemIDs[item.ID] {
+			fmt.Printf("  - %-40s... %s\n", item.Name, color.YellowString("Skipped (previous failure)"))
 			continue
 		}
 		executed = true
@@ -200,6 +212,9 @@ func executeFinishActions(items []*finish.Item) {
 		if err := item.Action(); err != nil {
 			fmt.Println(color.RedString("Failed"))
 			fmt.Printf("    %s\n", err)
+			if firstErr == nil {
+				firstErr = err
+			}
 		} else {
 			fmt.Println(color.GreenString("Done"))
 		}
@@ -207,4 +222,5 @@ func executeFinishActions(items []*finish.Item) {
 	if !executed {
 		fmt.Println("No actions selected.")
 	}
+	return firstErr
 }
