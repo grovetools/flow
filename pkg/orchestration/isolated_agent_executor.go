@@ -15,7 +15,6 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/flow/pkg/exec"
@@ -274,12 +273,15 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 
 	// Inline env vars on the agent command itself — scoped to the agent
 	// process, not exported into the pane's shell, so nothing leaks after
-	// the agent exits. GROVE_SCOPE routes the agent's daemon client calls
-	// to the plan's scoped daemon.
-	scope := workspace.ResolveScope(workDir)
+	// the agent exits. GROVE_SCOPE is inherited from the executor's env
+	// (treemux or daemon), not forced from workDir.
+	scopePrefix := ""
+	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
+	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' ",
-		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' ",
+		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 
 	// Wrap agent command with deterministic PID capture, then prefix

@@ -13,7 +13,6 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/sirupsen/logrus"
 )
@@ -85,19 +84,18 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	// Wrap with agentstream to capture PID via deterministic pidfile.
 	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
 
-	// Build environment variables for the agent pane. GROVE_SCOPE is set
-	// explicitly from the plan's workDir so the agent's daemon calls route
-	// to the plan's scoped daemon regardless of what scope the executor or
-	// the spawning daemon happens to be in. (The daemon also exports its
-	// own scope into the agent script at server.go; the map value wins if
-	// they differ, which is the correct precedence — the plan's scope is
-	// authoritative.)
+	// Build environment variables for the agent pane. GROVE_SCOPE is inherited
+	// from the executor's env (treemux exports it at startup; the daemon
+	// process exports its own scope on boot) — we don't force it from workDir.
+	// Agents launched from a context without GROVE_SCOPE go to the global daemon.
 	envVars := map[string]string{
-		"GROVE_SCOPE":          workspace.ResolveScope(workDir),
 		"GROVE_FLOW_JOB_ID":    job.ID,
 		"GROVE_FLOW_JOB_PATH":  job.FilePath,
 		"GROVE_FLOW_PLAN_NAME": plan.Name,
 		"GROVE_FLOW_JOB_TITLE": job.Title,
+	}
+	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+		envVars["GROVE_SCOPE"] = scope
 	}
 
 	// Add playbook env vars if applicable

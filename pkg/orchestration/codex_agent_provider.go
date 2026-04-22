@@ -14,7 +14,6 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -118,12 +117,15 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 
 	// Inline env vars on the agent command itself so they're scoped to the
 	// codex process and don't leak into the user's interactive shell after
-	// the agent exits. GROVE_SCOPE routes the agent's daemon client calls
-	// (notify, flow, hooks) to the plan's scoped daemon.
-	scope := workspace.ResolveScope(workDir)
+	// the agent exits. GROVE_SCOPE is inherited from the executor's env
+	// (treemux or daemon), not forced from workDir.
+	scopePrefix := ""
+	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
+	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 
 	// Send the agent command with inline env prefix to the new window

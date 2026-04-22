@@ -13,7 +13,6 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -149,11 +148,15 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 	// Inline env vars on the agent command so they scope only to the agent
 	// process; typing `export` into the pane would leak into the user's
-	// interactive shell after the agent exits.
-	scope := workspace.ResolveScope(workDir)
+	// interactive shell after the agent exits. GROVE_SCOPE is inherited
+	// from the executor's env (treemux or daemon), not forced from workDir.
+	scopePrefix := ""
+	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
+	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := fmt.Sprintf("GROVE_AGENT_PROVIDER='opencode' GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := "GROVE_AGENT_PROVIDER='opencode' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 
 	if err := tmuxClient.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {

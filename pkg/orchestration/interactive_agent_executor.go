@@ -576,14 +576,19 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Inline env vars on the agent command itself (not via a separate
 		// `export` line) so they scope only to the agent process and its
 		// descendants. Typing `export` into the pane would leak these vars
-		// into the user's interactive shell after the agent exits, causing
-		// subsequent `flow`/`cx`/`nav` invocations to route to the wrong
-		// daemon. GROVE_SCOPE is critical: without it the agent's daemon
-		// client falls back to the unscoped socket.
-		scope := workspace.ResolveScope(workDir)
+		// into the user's interactive shell after the agent exits.
+		//
+		// GROVE_SCOPE is inherited from the executor's env (treemux exports
+		// it at startup; the daemon process exports its own scope on boot).
+		// If the executor has no GROVE_SCOPE set, we don't inject one —
+		// agents launched from plain tmux hit the unscoped global daemon.
+		scopePrefix := ""
+		if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+			scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
+		}
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-		envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-			scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+		envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+			job.ID, job.FilePath, plan.Name, escapedTitle)
 		envPrefix += playbookEnvInline(job, plan)
 
 		// Wrap agent command with deterministic PID capture, then prefix
@@ -733,10 +738,14 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Inline env vars on the agent command itself (see the matching site
 	// above for rationale). Scoping env to the agent process avoids
 	// polluting the user's interactive shell after the agent exits.
-	scope := workspace.ResolveScope(workDir)
+	// GROVE_SCOPE is inherited from the executor's env, not forced.
+	scopePrefix := ""
+	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
+	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := fmt.Sprintf("GROVE_SCOPE='%s' GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-		scope, job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 
 	// Wrap agent command with deterministic PID capture, then prefix
