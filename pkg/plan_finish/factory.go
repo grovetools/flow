@@ -635,6 +635,25 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					}
 					err = runParent()
 				}
+				// When the user asked for --force and git bailed out
+				// with "Directory not empty" (gitignored/untracked
+				// content survived `worktree remove --force`), honor
+				// the user's intent by nuking the directory directly.
+				// Gated by a strict path check to keep os.RemoveAll
+				// from ever escaping the .grove-worktrees boundary.
+				if err != nil && opts.Force && isDirNotEmptyErr(err) && pathIsUnderGroveWorktrees(wPath, gitRoot) {
+					wPathClean := filepath.Clean(wPath)
+					if rmErr := os.RemoveAll(wPathClean); rmErr != nil {
+						return fmt.Errorf("force-remove worktree dir: %w", rmErr)
+					}
+					// Git leaves orphaned metadata in .git/worktrees/<name>
+					// when `worktree remove` fails with "Directory not
+					// empty"; prune it so `git worktree list` stays clean.
+					if pruneErr := executor.Execute("git", "-C", gitRoot, "worktree", "prune"); pruneErr != nil {
+						fmt.Printf("    Warning: failed to prune worktree metadata: %v\n", pruneErr)
+					}
+					err = nil
+				}
 				if err != nil {
 					// Do NOT auto-retry with --force when the user
 					// did not explicitly request force. Surfacing
@@ -1195,4 +1214,30 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 	}
 	fmt.Printf("    * Ecosystem worktree removed successfully\n")
 	return nil
+}
+
+// isDirNotEmptyErr reports whether err is git's specific
+// "Directory not empty" failure from `worktree remove --force` when
+// gitignored/untracked content survives the remove.
+func isDirNotEmptyErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Directory not empty")
+}
+
+// pathIsUnderGroveWorktrees reports whether wPath is a safe target
+// for force-removal: it must live strictly beneath
+// <gitRoot>/.grove-worktrees/. Returns false if gitRoot is empty, if
+// wPath is the .grove-worktrees container itself, or if wPath escapes
+// the boundary (after cleaning). Guards os.RemoveAll against
+// catastrophic misuse.
+func pathIsUnderGroveWorktrees(wPath, gitRoot string) bool {
+	if gitRoot == "" || wPath == "" {
+		return false
+	}
+	wPathClean := filepath.Clean(wPath)
+	container := filepath.Clean(filepath.Join(gitRoot, ".grove-worktrees"))
+	if wPathClean == container {
+		return false
+	}
+	safePrefix := container + string(filepath.Separator)
+	return strings.HasPrefix(wPathClean, safePrefix)
 }
