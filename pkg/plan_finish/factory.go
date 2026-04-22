@@ -80,6 +80,15 @@ type Options struct {
 	CleanDevLinks bool
 	// RebuildBinaries enables the "rebuild main repo binaries" item.
 	RebuildBinaries bool
+	// PruneOrphans enables the "prune orphan resources" item that
+	// shells out to `grove env prune --worktree <slug> --yes` after
+	// env teardown. Safe local cleanup; cloud cleanup is gated on
+	// PruneCloud below.
+	PruneOrphans bool
+	// PruneCloud additionally forwards --include-cloud to the prune
+	// call, destroying per-worktree cloud resources (Cloud Run, GCE,
+	// AR tags, GCS state). Only effective when PruneOrphans is true.
+	PruneCloud bool
 }
 
 // Stable item identifiers. Hosts look items up by these constants
@@ -96,6 +105,7 @@ const (
 	ItemDeleteRemoteBranch     = "delete_remote_branch"
 	ItemRebuildBinaries        = "rebuild_binaries"
 	ItemArchivePlan            = "archive_plan"
+	ItemPruneOrphans           = "prune_orphans"
 )
 
 // ItemsByID returns the first item matching the given ID, or nil if
@@ -557,8 +567,50 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		},
 	}
 
+	pruneItem := &finish.Item{
+		ID:   ItemPruneOrphans,
+		Name: "Prune orphan environment resources",
+		Check: func() (string, error) {
+			if !opts.PruneOrphans {
+				return "Skipped (use --prune-orphans)", nil
+			}
+			if worktreeName == "" {
+				return "N/A", nil
+			}
+			if _, err := exec.LookPath("grove"); err != nil {
+				return "N/A (grove not found)", nil
+			}
+			if opts.PruneCloud {
+				return color.YellowString("Available (local + cloud)"), nil
+			}
+			return color.YellowString("Available (local only)"), nil
+		},
+		Action: func() error {
+			if !opts.PruneOrphans || worktreeName == "" {
+				return nil
+			}
+			args := []string{"env", "prune", "--worktree", worktreeName, "--yes"}
+			if opts.PruneCloud {
+				args = append(args, "--include-cloud")
+			}
+			fmt.Printf("    Pruning orphaned resources for %s...\n", worktreeName)
+			runCmd := exec.Command("grove", args...)
+			runCmd.Dir = gitRoot
+			runCmd.Stdout = os.Stdout
+			runCmd.Stderr = os.Stderr
+			if err := runCmd.Run(); err != nil {
+				// Best-effort — a prune failure shouldn't block
+				// the rest of plan finish (archive, branch
+				// cleanup). Surface as a warning.
+				fmt.Printf("    Warning: grove env prune failed: %v\n", err)
+			}
+			return nil
+		},
+	}
+
 	items := []*finish.Item{
 		envTeardownItem,
+		pruneItem,
 		mergeItem,
 		{
 			ID:   ItemCloseSession,
