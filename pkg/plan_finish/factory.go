@@ -89,6 +89,13 @@ type Options struct {
 	// call, destroying per-worktree cloud resources (Cloud Run, GCE,
 	// AR tags, GCS state). Only effective when PruneOrphans is true.
 	PruneCloud bool
+	// PreserveCloud keeps `skip_destroy=true` semantics during env
+	// teardown at plan-finish time. Default is false — plan-finish
+	// retires the worktree, so cloud resources that were
+	// semi-persistent across iteration should now be destroyed. Set
+	// this flag in the rare case that the caller wants to iterate
+	// again across finish (e.g. recovery of a legacy plan slug).
+	PreserveCloud bool
 }
 
 // Stable item identifiers. Hosts look items up by these constants
@@ -298,11 +305,12 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			}
 			fmt.Printf("    Tearing down %s environment...\n", stateFile.Provider)
 			req := env.EnvRequest{
-				Provider:  stateFile.Provider,
-				PlanDir:   planPath,
-				StateDir:  wsStateDir,
-				Config:    make(map[string]interface{}),
-				ManagedBy: stateFile.ManagedBy,
+				Provider:     stateFile.Provider,
+				PlanDir:      planPath,
+				StateDir:     wsStateDir,
+				Config:       make(map[string]interface{}),
+				ManagedBy:    stateFile.ManagedBy,
+				ForceDestroy: !opts.PreserveCloud,
 			}
 			if provider != nil && worktreePath != "" {
 				if node := provider.FindByPath(worktreePath); node != nil {
