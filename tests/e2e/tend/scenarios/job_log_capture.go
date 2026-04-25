@@ -408,7 +408,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 			}
 
 			// Run the shell job using the CLI command
-			runCmd := ctx.Bin("plan", "run", shellJobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", shellJobPath, "--yes")
 			runCmd.Dir(projectDir)
 			result := runCmd.Run()
 			if err := result.AssertSuccess(); err != nil {
@@ -469,7 +469,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 			}
 
 			// Run the chat job using the unified 'flow run' command
-			runCmd := ctx.Bin("run", chatJobPath)
+			runCmd := ctx.Bin("run", "--local", chatJobPath)
 			runCmd.Dir(projectDir).Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 			result := runCmd.Run()
 			if err := result.AssertSuccess(); err != nil {

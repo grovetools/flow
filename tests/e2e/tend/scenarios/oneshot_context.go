@@ -87,7 +87,7 @@ var OneshotWithContextScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "--all", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", "--all", "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 

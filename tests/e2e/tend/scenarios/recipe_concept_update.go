@@ -174,7 +174,7 @@ Based on the analysis of the project context and concepts, here are the recommen
 			projectDir := ctx.GetString("project_dir")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "--next", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", "--next", "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 
@@ -361,7 +361,7 @@ Analyze concepts with plans.
 			planPath := ctx.GetString("plan_path")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "--next", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", "--next", "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 

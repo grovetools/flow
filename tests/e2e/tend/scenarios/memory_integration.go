@@ -61,7 +61,7 @@ var MemoryIntegrationScenario = harness.NewScenario(
 			llmResponseFile := ctx.GetString("llm_response_file")
 
 			jobPath := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", "01-missing-db.md")
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 
@@ -124,7 +124,7 @@ What is the secret code?
 			llmResponseFile := ctx.GetString("llm_response_file")
 
 			jobPath := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", "02-opt-out.md")
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(
 				fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile),
@@ -183,7 +183,7 @@ What is the secret code?
 			llmResponseFile := ctx.GetString("llm_response_file")
 
 			jobPath := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", "03-success.md")
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(
 				fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile),

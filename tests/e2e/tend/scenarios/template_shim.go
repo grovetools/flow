@@ -67,7 +67,7 @@ var TemplateShimScenario = harness.NewScenario(
 				return err
 			}
 
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
@@ -88,7 +88,7 @@ var TemplateShimScenario = harness.NewScenario(
 				return err
 			}
 
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
@@ -109,7 +109,7 @@ var TemplateShimScenario = harness.NewScenario(
 				return err
 			}
 
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)

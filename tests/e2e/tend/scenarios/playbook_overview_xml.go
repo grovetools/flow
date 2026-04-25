@@ -51,7 +51,7 @@ var PlaybookOverviewXMLScenario = harness.NewScenario(
 			}
 
 			jobPath := filepath.Join(planPath, "01-overview-job.md")
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("plan run failed: %w", err)
@@ -101,7 +101,7 @@ var PlaybookOverviewXMLScenario = harness.NewScenario(
 
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 			jobPath := filepath.Join(planPath, "01-nopb-job.md")
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err

@@ -171,7 +171,7 @@ Analyze the project concepts.
 			planPath := ctx.GetString("plan_path")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "--next", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", "--next", "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 
@@ -354,7 +354,7 @@ Analyze concepts with their related notes.
 			planPath := ctx.GetString("plan_path")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "--next", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", "--next", "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 

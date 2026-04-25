@@ -62,7 +62,7 @@ var BriefingFilesScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", "--all", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", "--all", "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -139,7 +139,7 @@ var BriefingFilesScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", "--all", "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", "--all", "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -206,7 +206,7 @@ var BriefingFilesScenario = harness.NewScenario(
 			ctx.Bin("chat", "-s", chatFile, "--model", "claude-3-5-sonnet-20241022").Dir(projectDir).Run().AssertSuccess()
 
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
-			runCmd := ctx.Bin("run", chatFile)
+			runCmd := ctx.Bin("run", "--local", chatFile)
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			return runCmd.Run().AssertSuccess()
 		}),
@@ -294,7 +294,7 @@ User message that depends on the dependency file.
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
 			// Run the chat job via flow run (this tests the dependency resolution fix)
-			runCmd := ctx.Bin("run", chatFile)
+			runCmd := ctx.Bin("run", "--local", chatFile)
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("chat run failed: %w", err)
@@ -362,7 +362,7 @@ Test message for custom template.
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
 			// Run the chat job
-			runCmd := ctx.Bin("run", chatFile)
+			runCmd := ctx.Bin("run", "--local", chatFile)
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("chat run failed: %w", err)
@@ -415,7 +415,7 @@ Test message for custom template.
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
 			// Run only the specific oneshot job, not all jobs (avoid chat job loops)
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "09-test-oneshot-inline-files.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "09-test-oneshot-inline-files.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -501,7 +501,7 @@ User message with string shorthand inline.
 			planPath := ctx.GetString("plan_path")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("run", chatFile)
+			runCmd := ctx.Bin("run", "--local", chatFile)
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("chat run failed: %w", err)
@@ -570,7 +570,7 @@ User message with inlined dependency using array syntax.
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
 			// Run the chat job
-			runCmd := ctx.Bin("run", chatFile)
+			runCmd := ctx.Bin("run", "--local", chatFile)
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("chat run failed: %w", err)
@@ -630,7 +630,7 @@ User message with inlined dependency using array syntax.
 			planPath := ctx.GetString("plan_path")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "16-skill-oneshot.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "16-skill-oneshot.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -674,7 +674,7 @@ User message with inlined dependency using array syntax.
 			planPath := ctx.GetString("plan_path")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "17-bad-skill.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "17-bad-skill.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 
@@ -726,7 +726,7 @@ User message with prepended dependency.
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
 			// Run the chat job
-			runCmd := ctx.Bin("run", chatFile)
+			runCmd := ctx.Bin("run", "--local", chatFile)
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("chat run failed: %w", err)

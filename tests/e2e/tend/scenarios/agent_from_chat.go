@@ -142,7 +142,7 @@ This is a detailed implementation plan generated from the chat.`
 			debugPromptFile := filepath.Join(ctx.RootDir, "debug_prompt.txt")
 
 			// Run the job with mocked LLM for plan generation and debug logging enabled
-			cmd := ctx.Bin("plan", "run", agentJobPath)
+			cmd := ctx.Bin("plan", "run", "--local", agentJobPath)
 			cmd.Dir(projectDir).
 				Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile).
 				Env("GROVE_MOCK_PROMPT_DEBUG_FILE=" + debugPromptFile).

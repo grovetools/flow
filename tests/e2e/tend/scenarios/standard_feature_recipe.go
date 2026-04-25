@@ -249,7 +249,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			specJobPath := filepath.Join(planPath, "02-spec.md")
 
 			// Run the spec job with mock model (cx job already completed from previous step)
-			cmd := ctx.Bin("plan", "run", specJobPath, "--model", "mock", "-y")
+			cmd := ctx.Bin("plan", "run", "--local", specJobPath, "--model", "mock", "-y")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -317,7 +317,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			}
 
 			// Run the generate-plan job with mock model
-			cmd := ctx.Bin("plan", "run", planJobPath, "--model", "mock", "-y")
+			cmd := ctx.Bin("plan", "run", "--local", planJobPath, "--model", "mock", "-y")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -373,7 +373,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			implementJobPath := filepath.Join(planPath, "04-implement.md")
 
 			// Run the implement job with mock model (dependencies already completed)
-			cmd := ctx.Bin("plan", "run", implementJobPath, "--model", "mock", "-y")
+			cmd := ctx.Bin("plan", "run", "--local", implementJobPath, "--model", "mock", "-y")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -421,7 +421,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 			specTestsJobPath := filepath.Join(planPath, "05-spec-tests.md")
 
 			// Run the spec-tests job with mock model (dependencies already completed)
-			cmd := ctx.Bin("plan", "run", specTestsJobPath, "--model", "mock", "-y")
+			cmd := ctx.Bin("plan", "run", "--local", specTestsJobPath, "--model", "mock", "-y")
 			cmd.Dir(projectDir)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -588,7 +588,7 @@ func CheckPasswordHash(password, hash string) bool {
 			reviewJobPath := filepath.Join(planPath, "07-review.md")
 
 			// Run the review job from the worktree directory (all dependencies already completed)
-			cmd := ctx.Bin("plan", "run", reviewJobPath, "-y", "--model", "mock")
+			cmd := ctx.Bin("plan", "run", "--local", reviewJobPath, "-y", "--model", "mock")
 			cmd.Dir(worktreePath)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)

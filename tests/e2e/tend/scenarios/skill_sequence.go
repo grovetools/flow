@@ -72,7 +72,7 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			planPath := ctx.GetString("plan_path")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "01-full-sequence.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "01-full-sequence.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -129,7 +129,7 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			planPath := ctx.GetString("plan_path")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "02-mixed-skills.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "02-mixed-skills.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -174,7 +174,7 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			planPath := ctx.GetString("plan_path")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "03-unauthorized.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "03-unauthorized.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 
@@ -196,7 +196,7 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			planPath := ctx.GetString("plan_path")
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "04-empty-sequence.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "04-empty-sequence.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -249,7 +249,7 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			}
 
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
-			runCmd := ctx.Bin("plan", "run", jobFile, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobFile, "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			return runCmd.Run().AssertSuccess()
 		}),

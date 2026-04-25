@@ -78,7 +78,7 @@ var SkillFidelityTrackingScenario = harness.NewScenario(
 			}
 
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "01-cook-fidelity.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "01-cook-fidelity.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			return runCmd.Run().AssertSuccess()
 		}),

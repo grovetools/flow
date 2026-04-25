@@ -82,7 +82,7 @@ var TitleBasedRunScenario = harness.NewScenario(
 			responseFile := ctx.GetString("llm_response_file")
 
 			// Run using just the title (no path)
-			runCmd := ctx.Bin("run", "my-special-chat")
+			runCmd := ctx.Bin("run", "--local", "my-special-chat")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
@@ -101,7 +101,7 @@ var TitleBasedRunScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 
 			// Run using just the title (no path)
-			runCmd := ctx.Bin("run", "build-project", "--yes")
+			runCmd := ctx.Bin("run", "--local", "build-project", "--yes")
 			runCmd.Dir(projectDir)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
@@ -132,7 +132,7 @@ var TitleBasedRunScenario = harness.NewScenario(
 
 			// Run using explicit path
 			chatFile := filepath.Join(planPath, "03-explicit-path-chat.md")
-			runCmd := ctx.Bin("run", chatFile)
+			runCmd := ctx.Bin("run", "--local", chatFile)
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
@@ -156,7 +156,7 @@ var TitleBasedRunScenario = harness.NewScenario(
 			}
 
 			// Run using the title
-			runCmd := ctx.Bin("run", "another-chat-job")
+			runCmd := ctx.Bin("run", "--local", "another-chat-job")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)
@@ -176,7 +176,7 @@ var TitleBasedRunScenario = harness.NewScenario(
 			projectDir := ctx.GetString("project_dir")
 
 			// Try to run with a non-existent title
-			runCmd := ctx.Bin("run", "non-existent-job-title")
+			runCmd := ctx.Bin("run", "--local", "non-existent-job-title")
 			runCmd.Dir(projectDir)
 			result := runCmd.Run()
 			ctx.ShowCommandOutput(runCmd.String(), result.Stdout, result.Stderr)

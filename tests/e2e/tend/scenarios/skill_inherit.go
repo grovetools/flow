@@ -194,7 +194,7 @@ var SkillInheritFlagScenario = harness.NewScenario(
 				return err
 			}
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "04-implicit-auth.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "04-implicit-auth.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 
@@ -237,7 +237,7 @@ var SkillInheritFlagScenario = harness.NewScenario(
 				return err
 			}
 
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "05-transitive-seq.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "05-transitive-seq.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			result := runCmd.Run()
 

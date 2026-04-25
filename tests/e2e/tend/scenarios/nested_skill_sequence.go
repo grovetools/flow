@@ -96,7 +96,7 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 			}
 
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
-			runCmd := ctx.Bin("plan", "run", filepath.Join(planPath, "01-nested.md"), "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", filepath.Join(planPath, "01-nested.md"), "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_LLM_RESPONSE_FILE=" + responseFile)
 			if err := runCmd.Run().AssertSuccess(); err != nil {
 				return err
@@ -143,7 +143,7 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 				return err
 			}
 
-			runCmd := ctx.Bin("plan", "run", jobFile, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobFile, "--yes")
 			runCmd.Dir(projectDir)
 			res := runCmd.Run()
 			if res.ExitCode == 0 {
@@ -167,7 +167,7 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 				return err
 			}
 
-			runCmd := ctx.Bin("plan", "run", jobFile, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobFile, "--yes")
 			runCmd.Dir(projectDir)
 			res := runCmd.Run()
 			if res.ExitCode == 0 {
