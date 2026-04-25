@@ -905,7 +905,7 @@ func (m Model) renderColumnSelectView() string {
 		Faint(true).
 		Width(lipgloss.Width(styledView)).
 		Align(lipgloss.Center).
-		Render("\n\nPress space to toggle • Enter/Esc/T to close")
+		Render("Press space to toggle • Enter/Esc/T to close")
 	content := lipgloss.JoinVertical(lipgloss.Left, styledView, helpText)
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, content)
 }

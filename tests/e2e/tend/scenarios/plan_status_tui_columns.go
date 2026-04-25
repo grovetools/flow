@@ -34,21 +34,31 @@ var PlanStatusTUIColumnToggleScenario = harness.NewScenarioWithOptions(
 	false, // explicitOnly = false
 )
 
-// setupPlanForColumnToggle creates a plan with jobs that have template information.
+// setupPlanForColumnToggle creates a plan with a few short-named jobs so the
+// JOB column doesn't dominate the responsive table layout in narrow PTY tests
+// (default tmux session = 80 cols).
 func setupPlanForColumnToggle(ctx *harness.Context) error {
 	projectDir, notebooksRoot, err := setupDefaultEnvironment(ctx, "column-toggle-project")
 	if err != nil {
 		return err
 	}
 
-	// Initialize the plan from a recipe that includes templates
-	initCmd := ctx.Bin("plan", "init", "column-test-plan", "--recipe", "standard-feature")
+	initCmd := ctx.Bin("plan", "init", "column-test-plan")
 	initCmd.Dir(projectDir)
 	if result := initCmd.Run(); result.Error != nil {
 		return fmt.Errorf("plan init failed: %w", result.Error)
 	}
 	planPath := filepath.Join(notebooksRoot, "workspaces", "column-toggle-project", "plans", "column-test-plan")
 	ctx.Set("plan_path", planPath)
+
+	// Add a couple of independent shell jobs (short titles → short filenames).
+	for _, title := range []string{"A", "B"} {
+		add := ctx.Bin("plan", "add", "column-test-plan", "--type", "shell", "--title", title, "-p", "echo "+title)
+		add.Dir(projectDir)
+		if result := add.Run(); result.Error != nil {
+			return fmt.Errorf("failed to add job %s: %w", title, result.Error)
+		}
+	}
 
 	return nil
 }
@@ -192,8 +202,9 @@ func toggleStatusColumn(ctx *harness.Context) error {
 
 	time.Sleep(300 * time.Millisecond)
 
-	// Navigate down to STATUS (it's the 4th item: JOB, TITLE, TYPE, STATUS)
-	for i := 0; i < 3; i++ {
+	// Navigate down to STATUS — list order is JOB, TITLE, SKILL, TYPE, STATUS,
+	// so press 'down' 4 times.
+	for i := 0; i < 4; i++ {
 		if err := session.SendKeys("down"); err != nil {
 			return fmt.Errorf("failed to send 'down' key: %w", err)
 		}
@@ -426,8 +437,8 @@ func configureColumnsForPersistence(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Toggle STATUS on (navigate to it and press space)
-	for i := 0; i < 3; i++ {
+	// Toggle STATUS on — list order JOB, TITLE, SKILL, TYPE, STATUS.
+	for i := 0; i < 4; i++ {
 		if err := session.SendKeys("down"); err != nil {
 			return err
 		}
@@ -447,22 +458,16 @@ func configureColumnsForPersistence(ctx *harness.Context) error {
 	return nil
 }
 
-// closeAndReopenDialog closes the column toggle dialog and reopens it.
+// closeAndReopenDialog reopens the column toggle dialog. The previous step
+// already closed it via Enter; sending Esc again from the plan status view
+// would pop back to the plan browser, so we just reopen with Shift+T.
 func closeAndReopenDialog(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
-	// Close the dialog with Esc
-	if err := session.SendKeys("esc"); err != nil {
-		return fmt.Errorf("failed to close dialog: %w", err)
-	}
-	time.Sleep(500 * time.Millisecond)
-
-	// Wait for the TUI to stabilize
 	if err := session.WaitStable(); err != nil {
 		return err
 	}
 
-	// Reopen the dialog with Shift+T
 	if err := session.SendKeys("T"); err != nil {
 		return fmt.Errorf("failed to reopen dialog: %w", err)
 	}
