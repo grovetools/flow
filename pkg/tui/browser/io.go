@@ -128,17 +128,55 @@ func fetchPlans(plansDirectory string) ([]*orchestration.Plan, error) {
 		if err == nil && len(body) > 0 && string(body) != "[]" && string(body) != "null" {
 			var plans []*orchestration.Plan
 			if decodeErr := json.Unmarshal(body, &plans); decodeErr == nil {
-				// `Job.Dependencies` is `json:"-"`, so the DAG pointer
-				// graph is lost across the socket. Rebuild it locally.
-				for _, p := range plans {
-					_ = p.ResolveDependencies()
+				// If the daemon's cached snapshot is missing plan dirs that
+				// already exist on disk (e.g. just-created plan that the
+				// watcher hasn't picked up yet), fall through to a fresh
+				// filesystem scan instead of returning a stale list.
+				if !daemonPlansAreStale(plansDirectory, plans) {
+					// `Job.Dependencies` is `json:"-"`, so the DAG pointer
+					// graph is lost across the socket. Rebuild it locally.
+					for _, p := range plans {
+						_ = p.ResolveDependencies()
+					}
+					return plans, nil
 				}
-				return plans, nil
 			}
 		}
 	}
 
 	return loadPlansFromDisk(plansDirectory)
+}
+
+// daemonPlansAreStale returns true when the plans directory contains plan
+// subdirectories that are not represented in the daemon's snapshot. A plan
+// dir is identified by a `.grove-plan.yml` file or any `*.md` job file —
+// matching loadPlansFromDisk's recognition rule.
+func daemonPlansAreStale(plansDirectory string, plans []*orchestration.Plan) bool {
+	entries, err := os.ReadDir(plansDirectory)
+	if err != nil {
+		return false
+	}
+	known := make(map[string]struct{}, len(plans))
+	for _, p := range plans {
+		known[p.Name] = struct{}{}
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, ok := known[entry.Name()]; ok {
+			continue
+		}
+		planPath := filepath.Join(plansDirectory, entry.Name())
+		if _, statErr := os.Stat(filepath.Join(planPath, ".grove-plan.yml")); statErr == nil {
+			return true
+		}
+		mdFiles, _ := filepath.Glob(filepath.Join(planPath, "*.md"))
+		if len(mdFiles) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // loadPlansFromDisk is the daemon-less fallback: scan the plansDir and
