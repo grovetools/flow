@@ -71,7 +71,11 @@ var MemoryIntegrationScenario = harness.NewScenario(
 			}
 
 			// Find the briefing file in artifacts
-			artifactsDir := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts", "missing-db")
+			artifactsRoot := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts")
+			artifactsDir, err := findArtifactDirByPrefix(artifactsRoot, "missing-db")
+			if err != nil {
+				return err
+			}
 			entries, err := os.ReadDir(artifactsDir)
 			if err != nil {
 				return fmt.Errorf("reading artifacts dir: %w", err)
@@ -137,7 +141,11 @@ What is the secret code?
 			}
 
 			// Verify briefing does NOT contain memories
-			artifactsDir := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts", "opt-out")
+			artifactsRoot := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts")
+			artifactsDir, err := findArtifactDirByPrefix(artifactsRoot, "opt-out")
+			if err != nil {
+				return err
+			}
 			entries, err := os.ReadDir(artifactsDir)
 			if err != nil {
 				return fmt.Errorf("reading artifacts dir: %w", err)
@@ -196,7 +204,11 @@ What is the secret code?
 			}
 
 			// Verify briefing DOES contain memories
-			artifactsDir := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts", "success")
+			artifactsRoot := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts")
+			artifactsDir, err := findArtifactDirByPrefix(artifactsRoot, "success")
+			if err != nil {
+				return err
+			}
 			entries, err := os.ReadDir(artifactsDir)
 			if err != nil {
 				return fmt.Errorf("reading artifacts dir: %w", err)
@@ -226,3 +238,20 @@ What is the secret code?
 		}),
 	},
 )
+
+// findArtifactDirByPrefix returns the first subdirectory of root whose name
+// begins with prefix. Job artifact dirs are named "<id>-<hash>" so callers
+// look up by the user-facing prefix (e.g. "missing-db") rather than the
+// fully qualified ID.
+func findArtifactDirByPrefix(root, prefix string) (string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", fmt.Errorf("reading artifacts root %s: %w", root, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
+			return filepath.Join(root, e.Name()), nil
+		}
+	}
+	return "", fmt.Errorf("no artifact directory under %s with prefix %q", root, prefix)
+}
