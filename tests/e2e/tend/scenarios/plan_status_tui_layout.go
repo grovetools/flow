@@ -109,9 +109,9 @@ func showLogsAndToggleVertical(ctx *harness.Context) error {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Press 'l' to show logs (starts as horizontal by default)
-	if err := session.SendKeys("l"); err != nil {
-		return fmt.Errorf("failed to send 'l' key: %w", err)
+	// Press 'L' to show logs (starts as horizontal by default)
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key: %w", err)
 	}
 	time.Sleep(1000 * time.Millisecond)
 
@@ -204,15 +204,15 @@ func hideAndReshowLogs(ctx *harness.Context) error {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Press 'l' to hide logs
-	if err := session.SendKeys("l"); err != nil {
-		return fmt.Errorf("failed to send 'l' key to hide logs: %w", err)
+	// Press 'L' to hide logs
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key to hide logs: %w", err)
 	}
 	time.Sleep(800 * time.Millisecond)
 
-	// Press 'l' again to show logs - layout should persist
-	if err := session.SendKeys("l"); err != nil {
-		return fmt.Errorf("failed to send 'l' key to show logs: %w", err)
+	// Press 'L' again to show logs - layout should persist
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key to show logs: %w", err)
 	}
 	time.Sleep(1000 * time.Millisecond)
 

@@ -152,14 +152,23 @@ func markJobAsAbandoned(ctx *harness.Context) error {
 	}
 	time.Sleep(200 * time.Millisecond)
 
-	// Send 'a' to mark the job as abandoned
-	// Note: This assumes 'a' is the key for abandoning in the TUI
-	// If the TUI doesn't support this, we can skip this step
-	if err := session.SendKeys("a"); err != nil {
-		return fmt.Errorf("failed to send 'a' key: %w", err)
+	// Open the status picker with 'S', navigate to "Abandoned" (index 8 of
+	// 9 statuses: pending, todo, hold, running, completed, failed, blocked,
+	// needs_review, abandoned — see status/update.go), and confirm with Enter.
+	// Lowercase 'a' is now intercepted by the meta-panel as "switch to Add Job tab".
+	if err := session.SendKeys("S"); err != nil {
+		return fmt.Errorf("failed to send 'S' key: %w", err)
 	}
-
-	// Wait for the TUI to process the keypress
+	time.Sleep(300 * time.Millisecond)
+	for i := 0; i < 8; i++ {
+		if err := session.SendKeys("j"); err != nil {
+			return fmt.Errorf("failed to navigate status picker: %w", err)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := session.SendKeys("Enter"); err != nil {
+		return fmt.Errorf("failed to confirm status: %w", err)
+	}
 	time.Sleep(500 * time.Millisecond)
 
 	return nil

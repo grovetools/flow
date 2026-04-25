@@ -174,7 +174,7 @@ func testCompletedAgentJobNoLogs(ctx *harness.Context) error {
 	// If we see "Logs:" header, logs are open - close them
 	logsOpen := strings.Contains(content, "Logs:")
 	if logsOpen {
-		if err := session.SendKeys("v"); err != nil {
+		if err := session.SendKeys("L"); err != nil {
 			return fmt.Errorf("failed to close log viewer: %w", err)
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -188,8 +188,8 @@ func testCompletedAgentJobNoLogs(ctx *harness.Context) error {
 	time.Sleep(300 * time.Millisecond)
 
 	// Open log viewer for job 1
-	if err := session.SendKeys("v"); err != nil {
-		return fmt.Errorf("failed to send 'v' key: %w", err)
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key: %w", err)
 	}
 
 	time.Sleep(1 * time.Second)
@@ -223,7 +223,7 @@ func testCompletedAgentJobNoLogs(ctx *harness.Context) error {
 	}
 
 	// Close log viewer
-	if err := session.SendKeys("v"); err != nil {
+	if err := session.SendKeys("L"); err != nil {
 		return fmt.Errorf("failed to close log viewer: %w", err)
 	}
 
@@ -280,8 +280,8 @@ func testCompletedAgentJobWithLogs(ctx *harness.Context) error {
 	time.Sleep(300 * time.Millisecond)
 
 	// Open log viewer
-	if err := session.SendKeys("v"); err != nil {
-		return fmt.Errorf("failed to send 'v' key: %w", err)
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key: %w", err)
 	}
 
 	time.Sleep(1 * time.Second)
@@ -304,7 +304,7 @@ func testCompletedAgentJobWithLogs(ctx *harness.Context) error {
 	}
 
 	// Close and quit
-	if err := session.SendKeys("v"); err != nil {
+	if err := session.SendKeys("L"); err != nil {
 		return fmt.Errorf("failed to close log viewer: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
@@ -354,8 +354,8 @@ func testRunningAgentJobLogs(ctx *harness.Context) error {
 	// so no navigation is needed - just open the log viewer directly
 
 	// Open log viewer
-	if err := session.SendKeys("v"); err != nil {
-		return fmt.Errorf("failed to send 'v' key: %w", err)
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key: %w", err)
 	}
 
 	time.Sleep(1 * time.Second)
@@ -379,7 +379,7 @@ func testRunningAgentJobLogs(ctx *harness.Context) error {
 	}
 
 	// Close and quit
-	if err := session.SendKeys("v"); err != nil {
+	if err := session.SendKeys("L"); err != nil {
 		return fmt.Errorf("failed to close log viewer: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)

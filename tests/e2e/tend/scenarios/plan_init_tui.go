@@ -80,7 +80,7 @@ var PlanInitTUIScenario = harness.NewScenarioWithOptions(
 			ctx.Set("tui_session", session)
 
 			// Wait for the TUI to load by looking for the header
-			if err := session.WaitForText("Create New Plan", 10*time.Second); err != nil {
+			if err := session.WaitForText("Plan Name", 10*time.Second); err != nil {
 				content, _ := session.Capture()
 				return fmt.Errorf("TUI did not load: %w\nContent:\n%s", err, content)
 			}
@@ -229,7 +229,7 @@ var PlanInitTUIScenario = harness.NewScenarioWithOptions(
 			}
 
 			// Wait for main screen to return
-			if err := session.WaitForText("Create New Plan", 5*time.Second); err != nil {
+			if err := session.WaitForText("Plan Name", 5*time.Second); err != nil {
 				content, _ := session.Capture()
 				return fmt.Errorf("main screen did not return: %w\nContent:\n%s", err, content)
 			}

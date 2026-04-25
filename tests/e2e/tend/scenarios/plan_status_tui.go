@@ -234,16 +234,16 @@ func verifyStatusUpdate(ctx *harness.Context) error {
 	return nil
 }
 
-// toggleLogViewer sends the 'v' key to toggle the log viewer.
+// toggleLogViewer sends the 'L' key to toggle the log viewer.
 func toggleLogViewer(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	// Give the TUI a moment to stabilize
 	time.Sleep(500 * time.Millisecond)
 
-	// Send 'v' to toggle the log viewer
-	if err := session.SendKeys("v"); err != nil {
-		return fmt.Errorf("failed to send 'v' key: %w", err)
+	// Send 'L' to toggle the log viewer (commit 27cab4b: 'v' is now preview-edit)
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key: %w", err)
 	}
 
 	// Wait for the TUI to process the keypress
@@ -294,9 +294,9 @@ func closeLogViewer(ctx *harness.Context) error {
 	// Only send the close key if logs were actually found and opened
 	logsFound := ctx.Get("logs_found")
 	if logsFound != nil && logsFound.(bool) {
-		// Send 'v' to close the log viewer
-		if err := session.SendKeys("v"); err != nil {
-			return fmt.Errorf("failed to send 'v' key to close: %w", err)
+		// Send 'L' to close the log viewer
+		if err := session.SendKeys("L"); err != nil {
+			return fmt.Errorf("failed to send 'L' key to close: %w", err)
 		}
 
 		// Wait for the TUI to process the keypress
@@ -382,10 +382,10 @@ func ensureLogViewerOpen(ctx *harness.Context) error {
 		return nil
 	}
 
-	// Need to open logs with 'v' key
+	// Need to open logs with 'L' key
 	time.Sleep(500 * time.Millisecond)
-	if err := session.SendKeys("v"); err != nil {
-		return fmt.Errorf("failed to send 'v' key: %w", err)
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
 
@@ -401,20 +401,20 @@ func ensureLogViewerOpen(ctx *harness.Context) error {
 
 	hasFollow = strings.Contains(content, "Follow:")
 	if !hasFollow {
-		return fmt.Errorf("failed to open log viewer - 'Follow:' indicator not found after pressing 'v'")
+		return fmt.Errorf("failed to open log viewer - 'Follow:' indicator not found after pressing 'L'")
 	}
 
 	return nil
 }
 
-// openLogViewer sends the 'v' key to open the log viewer.
+// openLogViewer sends the 'L' key to open the log viewer.
 func openLogViewer(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	time.Sleep(500 * time.Millisecond)
 
-	if err := session.SendKeys("v"); err != nil {
-		return fmt.Errorf("failed to send 'v' key: %w", err)
+	if err := session.SendKeys("L"); err != nil {
+		return fmt.Errorf("failed to send 'L' key: %w", err)
 	}
 
 	time.Sleep(500 * time.Millisecond)
@@ -737,18 +737,18 @@ func toggleToHorizontalLayout(ctx *harness.Context) error {
 	return nil
 }
 
-// PlanStatusTUILogViewToggleScenario tests toggling the log viewer on and off with 'v' key.
+// PlanStatusTUILogViewToggleScenario tests toggling the log viewer on and off with 'L' key.
 var PlanStatusTUILogViewToggleScenario = harness.NewScenarioWithOptions(
 	"plan-status-tui-log-toggle",
-	"Verifies that 'v' key toggles the log viewer visibility.",
+	"Verifies that 'L' key toggles the log viewer visibility.",
 	[]string{"tui", "plan", "status", "logs"},
 	[]harness.Step{
 		harness.NewStep("Setup mock filesystem with dependent jobs", setupPlanWithDependencies),
 		harness.NewStep("Launch status TUI", launchStatusTUIAndVerify),
 		harness.NewStep("Verify log viewer state on startup", verifyLogViewerState),
-		harness.NewStep("Toggle logs with 'v' (may show or hide)", toggleLogViewer),
+		harness.NewStep("Toggle logs with 'L' (may show or hide)", toggleLogViewer),
 		harness.NewStep("Verify log viewer toggled", verifyLogViewerToggled),
-		harness.NewStep("Toggle logs with 'v' again", toggleLogViewer),
+		harness.NewStep("Toggle logs with 'L' again", toggleLogViewer),
 		harness.NewStep("Verify log viewer toggled back", verifyLogViewerToggledBack),
 		harness.NewStep("Quit the TUI", quitStatusTUI),
 	},
