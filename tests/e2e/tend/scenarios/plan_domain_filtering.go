@@ -176,11 +176,10 @@ var PlanDomainFilteringScenario = harness.NewScenario(
 				return err
 			}
 
-			// Verify output contains both generic and grove domains
+			// Verify output contains the generic domain. The grove-domain
+			// templates were converted to skills (see template_shim.go);
+			// only generic-domain templates remain in the registry.
 			if err := assert.Contains(result.Stdout, "generic", "output should contain generic domain"); err != nil {
-				return err
-			}
-			if err := assert.Contains(result.Stdout, "grove", "output should contain grove domain"); err != nil {
 				return err
 			}
 
@@ -233,19 +232,14 @@ var PlanDomainFilteringScenario = harness.NewScenario(
 				return fmt.Errorf("plan templates list --domain grove failed: %w", err)
 			}
 
-			// Verify output contains grove domain
-			if err := assert.Contains(result.Stdout, "grove", "output should contain grove domain"); err != nil {
-				return err
-			}
-
-			// Verify output does NOT contain generic domain in data rows
-			lines := strings.Split(result.Stdout, "\n")
+			// Grove-domain templates have been converted to skills; the
+			// filter should produce zero data rows. Behave like the
+			// nonexistent-domain case below.
+			lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
 			for i, line := range lines {
-				// Skip header lines
 				if i == 0 || strings.TrimSpace(line) == "" {
 					continue
 				}
-				// Check if line contains generic domain
 				fields := strings.Fields(line)
 				if len(fields) > 1 && fields[1] == "generic" {
 					return fmt.Errorf("output should not contain templates with generic domain, but found: %s", line)

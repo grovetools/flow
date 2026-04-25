@@ -78,16 +78,22 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 		harness.NewStep("Verify all recipe jobs were created with correct structure", func(ctx *harness.Context) error {
 			planPath := ctx.GetString("plan_path")
 
+			// Some recipe templates (cx-builder, tend-tester) are now legacy
+			// names that the orchestration loader's template shim rewrites
+			// into Skill assignments, clearing the Template field. Tests
+			// covering shim'd jobs assert on the resolved Skill instead of
+			// the original Template.
 			expectedJobs := map[string]struct {
 				jobType    orchestration.JobType
 				template   string
+				skill      string
 				dependsOn  []string
 				prependDep bool
 				gitChanges bool
 			}{
 				"01-cx.md": {
-					jobType:  orchestration.JobTypeInteractiveAgent,
-					template: "cx-builder",
+					jobType: orchestration.JobTypeInteractiveAgent,
+					skill:   "cx-builder",
 				},
 				"02-spec.md": {
 					jobType:   orchestration.JobTypeOneshot,
@@ -111,7 +117,7 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				},
 				"06-impl-tests.md": {
 					jobType:    orchestration.JobTypeInteractiveAgent,
-					template:   "tend-tester",
+					skill:      "tend-tester",
 					dependsOn:  []string{"05-spec-tests.md"},
 					prependDep: true,
 					gitChanges: true,
@@ -148,6 +154,12 @@ var StandardFeatureRecipeScenario = harness.NewScenario(
 				// Verify template if specified
 				if expected.template != "" && job.Template != expected.template {
 					return fmt.Errorf("job %s: expected template %s, got %s", jobFile, expected.template, job.Template)
+				}
+
+				// Verify skill if specified (set when the original recipe
+				// template was rewritten to a Skill by the loader's shim).
+				if expected.skill != "" && job.Skill != expected.skill {
+					return fmt.Errorf("job %s: expected skill %s, got %s", jobFile, expected.skill, job.Skill)
 				}
 
 				// Verify dependencies
