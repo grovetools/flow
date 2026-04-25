@@ -516,7 +516,9 @@ var ExplicitTargetStatusHandlingScenario = harness.NewScenario(
 			if err != nil {
 				return err
 			}
-			fixedContent := strings.Replace(content, "exit 1", "exit 0", 1)
+			// Replace in both frontmatter (last_error) and body — narrowing on
+			// "&& exit 1" avoids matching the YAML last_error message text.
+			fixedContent := strings.ReplaceAll(content, "&& exit 1", "&& exit 0")
 			if err := fs.WriteString(jobBPath, fixedContent); err != nil {
 				return err
 			}
@@ -594,7 +596,8 @@ var ExplicitTargetStatusHandlingScenario = harness.NewScenario(
 			if err != nil {
 				return err
 			}
-			fixedContent := strings.Replace(content, "exit 1", "exit 0", 1)
+			// Use && exit 1 to avoid matching the YAML last_error message text.
+			fixedContent := strings.ReplaceAll(content, "&& exit 1", "&& exit 0")
 			if err := fs.WriteString(jobEPath, fixedContent); err != nil {
 				return err
 			}

@@ -904,6 +904,19 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			return rulesFilePath, fmt.Errorf("failed to generate job-specific context: %w", err)
 		}
 
+		// Mirror the context summary to the per-job writer so callers
+		// capturing job.log see the same "Context Summary: N files, …"
+		// header that the default-rules branch emits.
+		if files, ferr := ctxMgr.ReadFilesList(grovecontext.FilesListFile); ferr == nil {
+			if stats, serr := ctxMgr.GetStats("oneshot", files, 10); serr == nil {
+				fmt.Fprintf(writer, "%s Context Summary: %d files, %s tokens, %s\n",
+					theme.IconFileTree,
+					stats.TotalFiles,
+					grovecontext.FormatTokenCount(stats.TotalTokens),
+					grovecontext.FormatBytes(int(stats.TotalSize)))
+			}
+		}
+
 		return rulesFilePath, e.displayContextInfo(ctx, contextDir)
 	}
 
@@ -1080,6 +1093,17 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 				grovecontext.FormatTokenCount(stats.TotalTokens),
 				grovecontext.FormatBytes(int(stats.TotalSize)))).
 			Log(ctx)
+
+		// Mirror the summary to the per-job writer (job.log) so callers that
+		// capture stdout-equivalent output can see it. ulog's Pretty payload
+		// goes to the unified log only.
+		if writer := grovelogging.GetWriter(ctx); writer != nil {
+			fmt.Fprintf(writer, "%s Context Summary: %d files, %s tokens, %s\n",
+				theme.IconFileTree,
+				stats.TotalFiles,
+				grovecontext.FormatTokenCount(stats.TotalTokens),
+				grovecontext.FormatBytes(int(stats.TotalSize)))
+		}
 
 		// Token limit check removed - no longer enforcing limits
 

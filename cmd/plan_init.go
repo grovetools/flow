@@ -1458,11 +1458,35 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		}
 	}
 
-	// state.json is now written by the daemon (Manager.Up). The plan_init
-	// path used to mirror this on the client; that has been removed to keep
-	// the daemon as the sole authoritative writer of .grove/env/state.json.
-	_ = worktreeStatePath
-	_ = managedBy
+	// state.json is owned by the daemon (Manager.Up) for built-in providers.
+	// For exec-plugin providers, no daemon is involved, so the client is the
+	// sole writer of .grove/env/state.json (and the legacy plan-dir
+	// .env_state.json mirror used by tests and `flow plan finish`).
+	if envCfg.Provider != "native" && envCfg.Provider != "docker" && envCfg.Provider != "terraform" {
+		var wsName, wsPath string
+		if req.Workspace != nil {
+			wsName = req.Workspace.Name
+			wsPath = req.Workspace.Path
+		}
+		stateFile := env.EnvStateFile{
+			Provider:      envCfg.Provider,
+			Command:       envCfg.Command,
+			Environment:   activeProfile,
+			ManagedBy:     managedBy,
+			WorkspaceName: wsName,
+			WorkspacePath: wsPath,
+			EnvVars:       resp.EnvVars,
+			Endpoints:     resp.Endpoints,
+			CleanupPaths:  resp.CleanupPaths,
+			Volumes:       resp.Volumes,
+			ProxyRoutes:   resp.ProxyRoutes,
+			State:         resp.State,
+		}
+		if stateBytes, err := json.MarshalIndent(stateFile, "", "  "); err == nil {
+			_ = os.WriteFile(worktreeStatePath, stateBytes, 0644)
+			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644)
+		}
+	}
 
 	// Display endpoints
 	if len(resp.Endpoints) > 0 {

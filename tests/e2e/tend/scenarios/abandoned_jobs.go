@@ -170,9 +170,10 @@ var AbandonedJobsScenario = harness.NewScenario(
 
 		harness.NewStep("Run dependent jobs and verify they execute", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
+			planPath := ctx.GetString("plan_path")
 
 			// Run Job B (depends on abandoned job)
-			runB := ctx.Bin("plan", "run", "abandoned-plan/02-dependent-job.md", "--yes")
+			runB := ctx.Bin("plan", "run", filepath.Join(planPath, "02-dependent-job.md"), "--yes")
 			runB.Dir(projectDir)
 			resultB := runB.Run()
 			ctx.ShowCommandOutput(runB.String(), resultB.Stdout, resultB.Stderr)
@@ -181,7 +182,7 @@ var AbandonedJobsScenario = harness.NewScenario(
 			}
 
 			// Run Job C (also depends on abandoned job)
-			runC := ctx.Bin("plan", "run", "abandoned-plan/03-another-dependent.md", "--yes")
+			runC := ctx.Bin("plan", "run", filepath.Join(planPath, "03-another-dependent.md"), "--yes")
 			runC.Dir(projectDir)
 			resultC := runC.Run()
 			ctx.ShowCommandOutput(runC.String(), resultC.Stdout, resultC.Stderr)
@@ -190,7 +191,7 @@ var AbandonedJobsScenario = harness.NewScenario(
 			}
 
 			// Now run Job E which depends on B and C
-			runE := ctx.Bin("plan", "run", "abandoned-plan/05-transitive-dependent.md", "--yes")
+			runE := ctx.Bin("plan", "run", filepath.Join(planPath, "05-transitive-dependent.md"), "--yes")
 			runE.Dir(projectDir)
 			resultE := runE.Run()
 			ctx.ShowCommandOutput(runE.String(), resultE.Stdout, resultE.Stderr)

@@ -225,7 +225,7 @@ region = "us-west-2"
 				return fmt.Errorf("plan review failed: %w", err)
 			}
 
-			cmd := ctx.Bin("plan", "finish", "env-test-plan", "--yes")
+			cmd := ctx.Bin("plan", "finish", "env-test-plan", "--yes", "--force")
 			cmd.Dir(projectDir)
 			cmd.Env(prependPath(binDir))
 			result := cmd.Run()

@@ -76,7 +76,11 @@ var PlaybookEnvInjectionScenario = harness.NewScenario(
 			dumpPath := filepath.Join(ctx.RootDir, "claude-env-dump.txt")
 			ctx.Set("dump_path", dumpPath)
 
-			cmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			// --local keeps execution in this process so the test-specific
+			// GROVE_MOCK_CLAUDE_DUMP_ENV env var reaches the mock claude.
+			// Daemon-routed runs spawn the agent under the daemon's clean
+			// environment and would lose this var.
+			cmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			cmd.Dir(projectDir).Env("GROVE_MOCK_CLAUDE_DUMP_ENV=" + dumpPath)
 			result := cmd.Run()
 			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
@@ -144,7 +148,7 @@ var PlaybookEnvInjectionScenario = harness.NewScenario(
 			}
 
 			dumpPath := filepath.Join(ctx.RootDir, "claude-env-dump-no-pb.txt")
-			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
+			runCmd := ctx.Bin("plan", "run", "--local", jobPath, "--yes")
 			runCmd.Dir(projectDir).Env("GROVE_MOCK_CLAUDE_DUMP_ENV=" + dumpPath)
 			_ = runCmd.Run()
 

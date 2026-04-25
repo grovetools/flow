@@ -145,13 +145,16 @@ var PlanMergeUpdateWorktreeScenario = harness.NewScenarioWithOptions(
 
 		harness.NewStep("Finish both plans and verify cleanup", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
-			cmdA := ctx.Bin("plan", "finish", "plan-a", "--yes", "--prune-worktree", "--delete-branch", "--archive")
+			// --force is required because plan_init seeds an ignored .grove/
+			// directory in the worktree; git worktree remove refuses to remove
+			// a worktree containing untracked/ignored files without --force.
+			cmdA := ctx.Bin("plan", "finish", "plan-a", "--yes", "--prune-worktree", "--delete-branch", "--archive", "--force")
 			cmdA.Dir(projectDir)
 			if err := cmdA.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("failed to finish plan-a: %w", err)
 			}
 
-			cmdB := ctx.Bin("plan", "finish", "plan-b", "--yes", "--prune-worktree", "--delete-branch", "--archive")
+			cmdB := ctx.Bin("plan", "finish", "plan-b", "--yes", "--prune-worktree", "--delete-branch", "--archive", "--force")
 			cmdB.Dir(projectDir)
 			if err := cmdB.Run().AssertSuccess(); err != nil {
 				return fmt.Errorf("failed to finish plan-b: %w", err)
