@@ -672,15 +672,16 @@ func verifyXMLJobDependencies(ctx *harness.Context) error {
 	})
 }
 
-// createImplementJobFromSelected presses 'i' and enters a title for the implement job.
+// createImplementJobFromSelected presses 'n' (Implement keybinding) and
+// enters a title for the implement job.
 func createImplementJobFromSelected(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Press 'i' to create implement job
-	if err := session.SendKeys("i"); err != nil {
-		return fmt.Errorf("failed to send 'i' key: %w", err)
+	// Press 'n' (Implement = new implementation) to create the implement job.
+	if err := session.SendKeys("n"); err != nil {
+		return fmt.Errorf("failed to send 'n' key: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
 
