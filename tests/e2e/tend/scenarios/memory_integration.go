@@ -57,9 +57,11 @@ var MemoryIntegrationScenario = harness.NewScenario(
 
 		harness.NewStep("Run missing-db job and verify no memories in briefing", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
+			notebooksRoot := ctx.GetString("notebooks_root")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "memory-test", "--target", "missing-db", "--yes")
+			jobPath := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", "01-missing-db.md")
+			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile))
 
@@ -69,7 +71,6 @@ var MemoryIntegrationScenario = harness.NewScenario(
 			}
 
 			// Find the briefing file in artifacts
-			notebooksRoot := ctx.GetString("notebooks_root")
 			artifactsDir := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts", "missing-db")
 			entries, err := os.ReadDir(artifactsDir)
 			if err != nil {
@@ -119,9 +120,11 @@ What is the secret code?
 
 		harness.NewStep("Run opt-out job with mock memories and verify omitted", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
+			notebooksRoot := ctx.GetString("notebooks_root")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "memory-test", "--target", "opt-out", "--yes")
+			jobPath := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", "02-opt-out.md")
+			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(
 				fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile),
@@ -134,7 +137,6 @@ What is the secret code?
 			}
 
 			// Verify briefing does NOT contain memories
-			notebooksRoot := ctx.GetString("notebooks_root")
 			artifactsDir := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts", "opt-out")
 			entries, err := os.ReadDir(artifactsDir)
 			if err != nil {
@@ -177,9 +179,11 @@ What is the secret code?
 
 		harness.NewStep("Run success job with mock memories and verify injected", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
+			notebooksRoot := ctx.GetString("notebooks_root")
 			llmResponseFile := ctx.GetString("llm_response_file")
 
-			runCmd := ctx.Bin("plan", "run", "memory-test", "--target", "success", "--yes")
+			jobPath := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", "03-success.md")
+			runCmd := ctx.Bin("plan", "run", jobPath, "--yes")
 			runCmd.Dir(projectDir)
 			runCmd.Env(
 				fmt.Sprintf("GROVE_MOCK_LLM_RESPONSE_FILE=%s", llmResponseFile),
@@ -192,7 +196,6 @@ What is the secret code?
 			}
 
 			// Verify briefing DOES contain memories
-			notebooksRoot := ctx.GetString("notebooks_root")
 			artifactsDir := filepath.Join(notebooksRoot, "workspaces", "memory-project", "plans", "memory-test", ".artifacts", "success")
 			entries, err := os.ReadDir(artifactsDir)
 			if err != nil {
