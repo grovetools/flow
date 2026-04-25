@@ -125,7 +125,7 @@ func fetchPlans(plansDirectory string) ([]*orchestration.Plan, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		body, err := client.GetPlansRaw(ctx, plansDirectory)
-		if err == nil && len(body) > 0 {
+		if err == nil && len(body) > 0 && string(body) != "[]" && string(body) != "null" {
 			var plans []*orchestration.Plan
 			if decodeErr := json.Unmarshal(body, &plans); decodeErr == nil {
 				// `Job.Dependencies` is `json:"-"`, so the DAG pointer

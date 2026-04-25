@@ -179,12 +179,18 @@ func (m Model) estimateTableWidth() int {
 				treePrefixWidth = ((indent - 1) * 2) + 3
 			}
 			w := treePrefixWidth + 2 + lipgloss.Width(job.Filename)
+			if w > 40 {
+				w = 40
+			}
 			if w > columnWidths["JOB"] {
 				columnWidths["JOB"] = w
 			}
 		}
 		if m.columnVisibility["TITLE"] {
 			w := lipgloss.Width(job.Title)
+			if w > 50 {
+				w = 50
+			}
 			if w > columnWidths["TITLE"] {
 				columnWidths["TITLE"] = w
 			}

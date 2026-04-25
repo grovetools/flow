@@ -968,20 +968,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Set pane Fixed/Flex based on current direction, then distribute
 		m.syncPaneLayout()
+		contentHeight := msg.Height - footerHeight - chatInputHeight
+		if contentHeight < 0 {
+			contentHeight = 0
+		}
 		mgrMsg := tea.WindowSizeMsg{
 			Width:  contentWidth,
-			Height: msg.Height - footerHeight - chatInputHeight,
+			Height: contentHeight,
 		}
 		m.Manager, cmd = m.Manager.Update(mgrMsg)
 		m.syncLayoutFromManager()
 
 		// Update viewport sizes using the Manager-derived dimensions
+		logHeight := m.LogViewerHeight - logHeaderHeight
+		if logHeight < 0 {
+			logHeight = 0
+		}
 		m.frontmatterViewport.Width = m.LogViewerWidth
-		m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
+		m.frontmatterViewport.Height = logHeight
 		m.briefingViewport.Width = m.LogViewerWidth
-		m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
+		m.briefingViewport.Height = logHeight
 		m.editViewport.Width = m.LogViewerWidth
-		m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
+		m.editViewport.Height = logHeight
 		m.updateSkillViewportSizes()
 
 		// Re-wrap content for all detail viewports to adapt to the new size
@@ -1031,7 +1039,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update log viewer size if active
 		if m.ShowLogs {
 			var lvCmd tea.Cmd
-			m.LogViewer, lvCmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
+			m.LogViewer, lvCmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: logHeight})
 			if lvCmd != nil {
 				cmds = append(cmds, lvCmd)
 			}
@@ -1647,6 +1655,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.ToggleLayout):
 			if m.ShowLogs {
+				m.LogSplitVertical = !m.LogSplitVertical
 				// Let the Manager toggle direction
 				m.Manager, cmd = m.Manager.Update(msg)
 				// Recalculate pane layout for the new direction
@@ -1657,9 +1666,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if contentWidth < 40 {
 					contentWidth = 40
 				}
+				contentHeight := m.Height - footerHeight - chatInputHeight
+				if contentHeight < 0 {
+					contentHeight = 0
+				}
 				mgrMsg := tea.WindowSizeMsg{
 					Width:  contentWidth,
-					Height: m.Height - footerHeight - chatInputHeight,
+					Height: contentHeight,
 				}
 				m.Manager, _ = m.Manager.Update(mgrMsg)
 				m.syncFocusFromManager()
@@ -1816,9 +1829,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.ViewLogs):
 			if m.Hosted && m.Cursor < len(m.Jobs) {
 				job := m.Jobs[m.Cursor]
-				// If already promoted with a viewport showing logs, just refocus.
+				// If already promoted with a viewport showing logs, toggle off.
 				if m.ActiveDetailPane == LogsPaneDetail && m.Manager.IsPromoted("detail") {
-					return m, nil
+					cmd := m.closeCurrentDetail()
+					return m, cmd
 				}
 				mdl, cmd := m.openDetailPane(LogsPaneDetail)
 				m = mdl.(Model)
@@ -1845,18 +1859,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewportActive = true
 				return m, tea.Batch(cmd, promoteCmd)
 			}
+			if m.ActiveDetailPane == LogsPaneDetail && m.ShowLogs {
+				cmd := m.closeCurrentDetail()
+				m.LogPaneFullscreen = false
+				return m, cmd
+			}
 			return m.openDetailPane(LogsPaneDetail)
 
 		case key.Matches(msg, m.KeyMap.ViewFrontmatter):
+			if m.ActiveDetailPane == FrontmatterPane {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
 			return m.openHostedViewportPane(FrontmatterPane, "Frontmatter")
 
 		case key.Matches(msg, m.KeyMap.ViewBriefing):
+			if m.ActiveDetailPane == BriefingPane {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
 			return m.openHostedViewportPane(BriefingPane, "Briefing")
 
 		case key.Matches(msg, m.KeyMap.ViewEdit):
 			if m.Hosted && m.Cursor < len(m.Jobs) {
 				// Preview mode: open BSP split editor alongside job list.
 				job := m.Jobs[m.Cursor]
+				if m.ActiveDetailPane == EditorPaneDetail && m.Manager.IsPromoted("detail") {
+					cmd := m.closeCurrentDetail()
+					return m, cmd
+				}
 				mdl, cmd := m.openDetailPane(EditorPaneDetail)
 				m = mdl.(Model)
 				path := job.FilePath
@@ -1865,6 +1896,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var promoteCmd tea.Cmd
 				m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
 				return m, tea.Batch(cmd, promoteCmd)
+			}
+			if m.ActiveDetailPane == EditPane {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
 			}
 			return m.openDetailPane(EditPane)
 
@@ -1901,6 +1936,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.ViewSkillPane):
+			if m.ActiveDetailPane == SkillPane {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
 			return m.openDetailPane(SkillPane)
 
 		case key.Matches(msg, m.KeyMap.ViewContext):
@@ -2816,16 +2855,20 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 
 	// Centralized layout calculation
 	m.updateLayoutDimensions()
-	m.LogViewer = logviewer.New(m.LogViewerWidth, m.LogViewerHeight-logHeaderHeight)
-	m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
+	logHeight := m.LogViewerHeight - logHeaderHeight
+	if logHeight < 0 {
+		logHeight = 0
+	}
+	m.LogViewer = logviewer.New(m.LogViewerWidth, logHeight)
+	m.LogViewer, _ = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: logHeight})
 
 	// Update viewport sizes for all panes
 	m.frontmatterViewport.Width = m.LogViewerWidth
-	m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.frontmatterViewport.Height = logHeight
 	m.briefingViewport.Width = m.LogViewerWidth
-	m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.briefingViewport.Height = logHeight
 	m.editViewport.Width = m.LogViewerWidth
-	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
 
 	// Trigger content loading for the active pane
