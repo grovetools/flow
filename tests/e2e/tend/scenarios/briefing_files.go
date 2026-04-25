@@ -2,6 +2,7 @@ package scenarios
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -616,13 +617,26 @@ User message with inlined dependency using array syntax.
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 
+			// The workspace must explicitly authorize skills used by jobs
+			// via grove.{toml,yml}. Append a [skills] block to the
+			// project's grove config so the skill: field on the job
+			// below resolves. The setup helper writes grove.yml.
+			groveCfg := filepath.Join(projectDir, "grove.yml")
+			existing, err := os.ReadFile(groveCfg)
+			if err != nil {
+				return fmt.Errorf("reading grove config: %w", err)
+			}
+			authorized := string(existing) + "\nskills:\n  use:\n    - grove-skill-guide\n    - nonexistent-skill-xyz\n"
+			if err := fs.WriteString(groveCfg, authorized); err != nil {
+				return err
+			}
+
 			// Create a oneshot job with skill: grove-skill-guide (builtin skill)
 			jobContent := "---\nid: skill-oneshot\ntitle: test-oneshot-skill\ntype: oneshot\nstatus: pending\nskill: grove-skill-guide\n---\nWrite a skill following the guide."
 			if err := fs.WriteString(filepath.Join(planPath, "16-skill-oneshot.md"), jobContent); err != nil {
 				return err
 			}
 
-			_ = projectDir
 			return nil
 		}),
 		harness.NewStep("Run oneshot with skill and verify briefing inlines skill content", func(ctx *harness.Context) error {

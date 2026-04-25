@@ -99,13 +99,14 @@ var OneshotWithContextScenario = harness.NewScenario(
 		}),
 
 		harness.NewStep("Verify context generation and job output", func(ctx *harness.Context) error {
-			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")
 			jobPath := filepath.Join(planPath, "01-review-code.md")
 
-			// 1. Verify context file was created (either by mock or real cx)
-			// The important part is that context generation was triggered
-			contextFile := filepath.Join(projectDir, ".grove", "context")
+			// 1. Verify context file was created (either by mock or real cx).
+			// Context is now generated under the plan directory at
+			// context/generated/context (plan-scoped); the legacy
+			// ~/.grove/context location is no longer used.
+			contextFile := filepath.Join(planPath, "context", "generated", "context")
 			if err := fs.AssertExists(contextFile); err != nil {
 				return fmt.Errorf("context file not found: %w", err)
 			}
