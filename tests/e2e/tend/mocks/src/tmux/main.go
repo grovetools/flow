@@ -33,7 +33,7 @@ func main() {
 				os.Exit(0)
 			}
 			// Return a mock session PID (for GetSessionPID)
-			if len(args) > 2 && strings.Contains(strings.Join(args, " "), "session_pid") {
+			if len(args) > 2 && strings.Contains(strings.Join(args, " "), "#{pid}") {
 				fmt.Println("88888")
 				os.Exit(0)
 			}
