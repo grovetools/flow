@@ -137,7 +137,7 @@ type BrowserPlanSelectedMsg struct {
 // New builds a Model from the given Config. Most fields default to their
 // zero values; real data is fetched in Init via async tea.Cmds.
 func New(cfg Config) Model {
-	km := KeyMap{}
+	var km KeyMap
 	if cfg.KeyMap != nil {
 		km = *cfg.KeyMap
 	} else {

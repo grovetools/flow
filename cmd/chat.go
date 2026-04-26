@@ -68,11 +68,6 @@ You can optionally specify chat titles to run only specific chats:
 	return chatCmd
 }
 
-// expandChatPath expands home directory and git variables in a path.
-func expandChatPath(path string) (string, error) {
-	return expandFlowPath(path)
-}
-
 // ensureChatJob ensures a file is initialized as a chat job, initializing it if necessary
 func ensureChatJob(filePath string) (*orchestration.Job, error) {
 	// Try to load as a job first

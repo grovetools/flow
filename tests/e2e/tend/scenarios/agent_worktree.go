@@ -263,7 +263,7 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 
 			// Create a lock file to simulate an active session
 			lockPath := jobPath + ".lock"
-			if err := fs.WriteString(lockPath, fmt.Sprintf("pid: 12345\nsession: agent-plan\n")); err != nil {
+			if err := fs.WriteString(lockPath, "pid: 12345\nsession: agent-plan\n"); err != nil {
 				return fmt.Errorf("creating lock file: %w", err)
 			}
 

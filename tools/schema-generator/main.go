@@ -5,9 +5,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/invopop/jsonschema"
 	"github.com/grovetools/flow/cmd"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/invopop/jsonschema"
 )
 
 func main() {
@@ -43,7 +43,7 @@ func main() {
 	}
 
 	// Write to the package root
-	if err := os.WriteFile("flow.schema.json", data, 0644); err != nil {
+	if err := os.WriteFile("flow.schema.json", data, 0o644); err != nil { //nolint:gosec // non-sensitive schema file
 		log.Fatalf("Error writing schema file: %v", err)
 	}
 
@@ -63,7 +63,7 @@ func main() {
 	}
 
 	// Write to the package root
-	if err := os.WriteFile("flow-job.schema.json", jobData, 0644); err != nil {
+	if err := os.WriteFile("flow-job.schema.json", jobData, 0o644); err != nil { //nolint:gosec // non-sensitive schema file
 		log.Fatalf("Error writing job schema file: %v", err)
 	}
 

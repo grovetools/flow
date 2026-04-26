@@ -1657,7 +1657,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ShowLogs {
 				m.LogSplitVertical = !m.LogSplitVertical
 				// Let the Manager toggle direction
-				m.Manager, cmd = m.Manager.Update(msg)
+				m.Manager, _ = m.Manager.Update(msg)
 				// Recalculate pane layout for the new direction
 				m.syncPaneLayout()
 				// Re-distribute with the updated layout
@@ -1693,7 +1693,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.ToggleFullscreen):
 			if m.ShowLogs {
 				// Let the Manager toggle fullscreen
-				m.Manager, cmd = m.Manager.Update(msg)
+				m.Manager, _ = m.Manager.Update(msg)
 				m.syncFocusFromManager()
 				m.syncLayoutFromManager()
 

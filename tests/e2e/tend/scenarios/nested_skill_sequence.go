@@ -46,9 +46,9 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 			}
 
 			// Normal nested skill: parent-skill -> child-a, child-b (children nested under parent)
-			writeSkill("parent-skill", "parent-skill", "The Parent", []string{"child-a", "child-b"}, nil)
-			writeSkill("parent-skill/child-a", "child-a", "First Child", nil, nil)
-			writeSkill("parent-skill/child-b", "child-b", "Second Child", nil, nil)
+			_ = writeSkill("parent-skill", "parent-skill", "The Parent", []string{"child-a", "child-b"}, nil)
+			_ = writeSkill("parent-skill/child-a", "child-a", "First Child", nil, nil)
+			_ = writeSkill("parent-skill/child-b", "child-b", "Second Child", nil, nil)
 
 			// Circular dependency: circular-a -> circular-b -> circular-a
 			writeSkill("circular-a", "circular-a", "Circ A", []string{"circular-b"}, nil)

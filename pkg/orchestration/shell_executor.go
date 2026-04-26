@@ -35,7 +35,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 	output := grovelogging.GetWriter(ctx)
 
 	// Generate a unique request ID for tracing
-	requestID, _ := ctx.Value("request_id").(string)
+	requestID, _ := ctx.Value(contextKey("request_id")).(string)
 
 	// Create lock file with the current process's PID.
 	if err := CreateLockFile(job.FilePath, os.Getpid()); err != nil {

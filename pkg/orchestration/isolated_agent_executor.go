@@ -111,7 +111,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Log briefing file creation
-	requestID, _ := ctx.Value("request_id").(string)
+	requestID, _ := ctx.Value(contextKey("request_id")).(string)
 	e.ulog.Success("Isolated agent briefing file created").
 		Field("job_id", job.ID).
 		Field("request_id", requestID).
@@ -375,7 +375,7 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 		}
 	} else {
 		logger.WithField("pid", agentPID).Debug("Discovered agent PID via pidfile")
-		agentstream.CleanupPIDFile(job.ID)
+		_ = agentstream.CleanupPIDFile(job.ID)
 	}
 
 	// Update lock file with actual PID
@@ -438,7 +438,7 @@ func (e *IsolatedAgentExecutor) findAgentPIDForIsolatedPane(socketName, targetPa
 	}
 
 	shellPID := 0
-	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &shellPID)
+	_, _ = fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &shellPID)
 	if shellPID == 0 {
 		return 0, fmt.Errorf("failed to parse pane PID from: %s", string(output))
 	}

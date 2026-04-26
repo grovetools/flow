@@ -25,7 +25,7 @@ type ConceptInfo struct {
 
 // gatherConcepts aggregates all project concepts and their linked notes/plans into a single context file.
 func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (string, error) {
-	requestID, _ := ctx.Value("request_id").(string)
+	requestID, _ := ctx.Value(contextKey("request_id")).(string)
 	logger := logging.NewLogger("concept-gatherer")
 
 	// 1. Initialize workspace discovery to find the current workspace
@@ -111,7 +111,7 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 			RelatedNotes []string `yaml:"related_notes"`
 			RelatedPlans []string `yaml:"related_plans"`
 		}
-		yaml.Unmarshal(manifestContent, &manifestData)
+		_ = yaml.Unmarshal(manifestContent, &manifestData)
 
 		if job.GatherConceptNotes && len(manifestData.RelatedNotes) > 0 {
 			conceptBuilder.WriteString("    <linked_notes>\n")
@@ -156,7 +156,7 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 				}
 
 				conceptBuilder.WriteString(fmt.Sprintf("      <plan alias=\"%s\">\n", planAlias))
-				filepath.Walk(fullPlanPath, func(path string, info os.FileInfo, err error) error {
+				_ = filepath.Walk(fullPlanPath, func(path string, info os.FileInfo, err error) error {
 					if err == nil && !info.IsDir() && strings.HasSuffix(info.Name(), ".md") {
 						planContent, err := os.ReadFile(path)
 						if err == nil {

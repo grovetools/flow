@@ -50,12 +50,12 @@ func TestGetNextJobNumber(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			testDir := filepath.Join(tmpDir, tt.name)
-			os.MkdirAll(testDir, 0755)
+			_ = os.MkdirAll(testDir, 0755)
 
 			// Create test files
 			for _, file := range tt.files {
 				path := filepath.Join(testDir, file)
-				os.WriteFile(path, []byte("test"), 0644)
+				_ = os.WriteFile(path, []byte("test"), 0644)
 			}
 
 			got, err := GetNextJobNumber(testDir)
@@ -378,7 +378,7 @@ func TestListJobs(t *testing.T) {
 
 	for _, file := range files {
 		path := filepath.Join(tmpDir, file)
-		os.WriteFile(path, []byte("test"), 0644)
+		_ = os.WriteFile(path, []byte("test"), 0644)
 	}
 
 	// List jobs

@@ -440,7 +440,7 @@ func getJobIcon(job *orchestration.Job) string {
 // getStatusIcon returns a colored dot indicator for a job status
 func (m Model) getStatusIcon(status orchestration.JobStatus) string {
 	statusStyles := getStatusStyles()
-	icon := "●" // Solid dot for completed
+	var icon string
 	style := theme.DefaultTheme.Muted
 
 	// Use different icons for different statuses
@@ -970,7 +970,7 @@ func renderStyledFrontmatter(rawYAML string) string {
 	sort.Strings(remainingKeys)
 
 	// Define styles
-	keyStyle := theme.DefaultTheme.Muted.Copy().Italic(true)
+	keyStyle := theme.DefaultTheme.Muted.Italic(true)
 	dimStyle := theme.DefaultTheme.Muted
 	sectionStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Cyan)
 
@@ -1149,7 +1149,7 @@ func renderStyledBriefing(rawContent string) string {
 	tagStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Blue)
 	attrNameStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Cyan)
 	attrValueStyle := lipgloss.NewStyle().Foreground(theme.DefaultColors.Green)
-	commentStyle := dimStyle.Copy().Italic(true)
+	commentStyle := dimStyle.Italic(true)
 
 	lines := strings.Split(rawContent, "\n")
 	for _, line := range lines {

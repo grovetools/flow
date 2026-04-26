@@ -146,7 +146,7 @@ var PlanReviewTUIActionScenario = harness.NewScenarioWithOptions(
 			session := ctx.Get("tui_session").(*tui.Session)
 
 			// Press Escape first to ensure we're back to the list if any subprocess was started
-			session.SendKeys("Escape")
+			_ = session.SendKeys("Escape")
 			time.Sleep(300 * time.Millisecond)
 
 			// Navigate down to plan-with-worktree (second item in the list)

@@ -57,7 +57,7 @@ func ParseFrontmatter(content []byte) (map[string]interface{}, []byte, error) {
 	}
 	
 	// Find where the body content starts (after closing delimiter and newline)
-	bodyStart := endIdx
+	var bodyStart int
 	if endIdx == startIdx {
 		// Empty frontmatter case
 		bodyStart = startIdx + 4 // Skip "---\n"

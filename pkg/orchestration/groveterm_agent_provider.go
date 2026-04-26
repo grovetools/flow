@@ -184,7 +184,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		pid = 0
 	} else {
 		logger.WithField("pid", pid).Debug("Discovered agent PID via pidfile")
-		agentstream.CleanupPIDFile(job.ID)
+		_ = agentstream.CleanupPIDFile(job.ID)
 	}
 
 	// Discover transcript path using agentstream

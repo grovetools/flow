@@ -23,8 +23,7 @@ func (i item) FilterValue() string { return string(i) }
 
 // dependencyItem represents a job that can be selected as a dependency.
 type dependencyItem struct {
-	job      *orchestration.Job
-	selected bool
+	job *orchestration.Job
 }
 
 func (d dependencyItem) FilterValue() string { return d.job.Filename + " " + d.job.Title }
@@ -34,7 +33,6 @@ func (d dependencyItem) Description() string { return d.job.Title }
 // skillItem represents a skill in the picker list.
 type skillItem struct {
 	name        string
-	workspace   string
 	description string
 	authorized  bool
 }

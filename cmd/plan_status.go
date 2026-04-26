@@ -11,7 +11,6 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/planutil"
 	"github.com/spf13/cobra"
@@ -95,57 +94,6 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	return runStatusTUI(plan, graph)
 }
 
-
-// Helper functions for rendering styled text
-func renderSuccess(text string) string {
-	return theme.DefaultTheme.Success.Render(text)
-}
-
-func renderError(text string) string {
-	return theme.DefaultTheme.Error.Render(text)
-}
-
-func renderWarning(text string) string {
-	return theme.DefaultTheme.Warning.Render(text)
-}
-
-func renderInfo(text string) string {
-	return theme.DefaultTheme.Info.Render(text)
-}
-
-func renderMuted(text string) string {
-	return theme.DefaultTheme.Muted.Render(text)
-}
-
-// colorizeStatus returns a colored status icon.
-func colorizeStatus(status orchestration.JobStatus) string {
-	switch status {
-	case orchestration.JobStatusCompleted:
-		return theme.DefaultTheme.Success.Render(theme.IconStatusCompleted)
-	case orchestration.JobStatusRunning:
-		return theme.DefaultTheme.Warning.Render(theme.IconStatusRunning)
-	case orchestration.JobStatusFailed:
-		return theme.DefaultTheme.Error.Render(theme.IconStatusFailed)
-	case orchestration.JobStatusBlocked:
-		return theme.DefaultTheme.Error.Render(theme.IconStatusBlocked)
-	case orchestration.JobStatusNeedsReview:
-		return theme.DefaultTheme.Info.Render(theme.IconStatusNeedsReview)
-	case orchestration.JobStatusPendingUser:
-		return theme.DefaultTheme.Info.Render(theme.IconStatusPendingUser)
-	case orchestration.JobStatusPendingLLM:
-		return theme.DefaultTheme.Warning.Render(theme.IconHeadlessAgent)
-	case "interrupted": // Jobs that were running but process is dead
-		return theme.DefaultTheme.Magenta.Render(theme.IconStatusInterrupted)
-	case orchestration.JobStatusTodo:
-		return theme.DefaultTheme.Info.Render(theme.IconStatusTodo)
-	case orchestration.JobStatusHold:
-		return theme.DefaultTheme.Warning.Render(theme.IconStatusHold)
-	case orchestration.JobStatusAbandoned:
-		return theme.DefaultTheme.Muted.Render(theme.IconStatusAbandoned)
-	default: // Pending
-		return theme.IconPending
-	}
-}
 
 // WorktreeStatus represents git and worktree information for JSON output
 type WorktreeStatus struct {
@@ -312,7 +260,6 @@ func formatStatusJSON(plan *orchestration.Plan) (string, error) {
 		output.Stats[string(job.Status)]++
 	}
 	output.Stats["total"] = len(plan.Jobs)
-	output.Stats["completed"] = output.Stats["completed"]
 
 	// Add worktree status if available
 	if plan.Config != nil && plan.Config.Worktree != "" {

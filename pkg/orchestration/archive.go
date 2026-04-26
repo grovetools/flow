@@ -35,7 +35,7 @@ func ArchiveContextRules(job *Job, plan *Plan, usedRulesPath string) error {
 		}
 		newContent, err := UpdateFrontmatter(jobContent, updates)
 		if err == nil {
-			os.WriteFile(job.FilePath, newContent, 0644)
+			_ = os.WriteFile(job.FilePath, newContent, 0644)
 		}
 	}
 

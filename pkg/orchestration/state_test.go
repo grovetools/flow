@@ -280,7 +280,7 @@ func TestStatePersister_FileLocking(t *testing.T) {
 	// Try to acquire lock again (should fail)
 	lock2, err := sp.lockFile(path)
 	if err == nil {
-		lock2.Unlock()
+		_ = lock2.Unlock()
 		t.Error("Expected error when acquiring lock on already locked file")
 	}
 	

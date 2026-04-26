@@ -59,7 +59,7 @@ func (m Model) View() string {
 
 	if m.showGitLog {
 		var detailPane string
-		detailTitle := "Details"
+		var detailTitle string
 
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
@@ -85,7 +85,7 @@ func (m Model) View() string {
 					}
 					repoLogPane = strings.Join(lines, "\n")
 
-					boxStyle := theme.DefaultTheme.Box.Copy().Padding(0, 1).MarginLeft(4).MarginTop(-1).Width(60)
+					boxStyle := theme.DefaultTheme.Box.Padding(0, 1).MarginLeft(4).MarginTop(-1).Width(60)
 					repoLogPaneStyled := boxStyle.Render(repoLogPane)
 
 					var repoName string
@@ -171,7 +171,7 @@ func (m Model) renderGitLogPane() string {
 	}
 	content = strings.Join(lines, "\n")
 
-	boxStyle := theme.DefaultTheme.Box.Copy().Padding(0, 1).MarginLeft(2).Width(60)
+	boxStyle := theme.DefaultTheme.Box.Padding(0, 1).MarginLeft(2).Width(60)
 	return boxStyle.Render(content)
 }
 

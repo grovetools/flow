@@ -134,7 +134,7 @@ var GracefulWaitRunNextScenario = harness.NewScenario(
 
 			// Remove lock file if exists to allow run-next to proceed
 			interactiveJobPath := ctx.GetString("interactive_job_path")
-			fs.RemoveIfExists(interactiveJobPath + ".lock")
+			_ = fs.RemoveIfExists(interactiveJobPath + ".lock")
 
 			// Run plan run -y (next mode, no specific target)
 			cmd := ctx.Bin("plan", "run", planName, "-y")

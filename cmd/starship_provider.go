@@ -108,10 +108,7 @@ func FlowStatusProvider(s state.State) (string, error) {
 	}
 
 	// Strip ".grove" prefix if present
-	displayName := activePlanStr
-	if strings.HasPrefix(displayName, ".grove") {
-		displayName = strings.TrimPrefix(displayName, ".grove")
-	}
+	displayName := strings.TrimPrefix(activePlanStr, ".grove")
 
 	// Get current git branch to avoid redundant display
 	// If plan name equals branch name, skip showing the plan name since starship already shows the branch

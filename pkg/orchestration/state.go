@@ -64,7 +64,7 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 	if err != nil {
 		return fmt.Errorf("acquire lock: %w", err)
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 
 	// Read current file
 	content, err := os.ReadFile(job.FilePath)
@@ -154,7 +154,7 @@ func (sp *StatePersister) UpdateJobType(job *Job, newType JobType) error {
 	if err != nil {
 		return fmt.Errorf("acquire lock: %w", err)
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 
 	// Read current file
 	content, err := os.ReadFile(job.FilePath)
@@ -195,7 +195,7 @@ func (sp *StatePersister) UpdateJobTemplate(job *Job, newTemplate string) error 
 	if err != nil {
 		return fmt.Errorf("acquire lock: %w", err)
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 
 	// Read current file
 	content, err := os.ReadFile(job.FilePath)
@@ -236,7 +236,7 @@ func (sp *StatePersister) UpdateJobMetadata(job *Job, meta JobMetadata) error {
 	if err != nil {
 		return fmt.Errorf("acquire lock: %w", err)
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 
 	// Read current file
 	content, err := os.ReadFile(job.FilePath)
@@ -286,7 +286,7 @@ func (sp *StatePersister) AppendJobOutput(job *Job, output string) error {
 	if err != nil {
 		return fmt.Errorf("acquire lock: %w", err)
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 
 	content, err := os.ReadFile(job.FilePath)
 	if err != nil {
@@ -429,7 +429,7 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 	// Write PID for debugging (only if we created the lock)
 	if file != nil {
 		fmt.Fprintf(file, "%d\n", currentPID)
-		file.Sync()
+		_ = file.Sync()
 	}
 
 	return &FileLock{path: lockPath, file: file}, nil

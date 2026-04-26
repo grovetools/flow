@@ -252,89 +252,6 @@ func toggleLogViewer(ctx *harness.Context) error {
 	return nil
 }
 
-// verifyLogViewerVisible verifies that the log viewer functionality responds.
-func verifyLogViewerVisible(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	// Wait for the TUI to stabilize
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	content, err := session.Capture(tui.WithCleanedOutput())
-	if err != nil {
-		return err
-	}
-
-	// The log viewer toggle should either:
-	// 1. Show the log viewer if logs exist (with "Follow:" indicator and divider)
-	// 2. Show a warning if no logs exist (with "No logs found")
-
-	hasLogViewer := strings.Contains(content, "Follow:") && strings.Contains(content, "Viewing logs")
-	hasNoLogsWarning := strings.Contains(content, "No logs found")
-
-	if !hasLogViewer && !hasNoLogsWarning {
-		return fmt.Errorf("expected either log viewer or 'No logs found' warning, got neither in:\n%s", content)
-	}
-
-	// Store whether logs were found for the next test step
-	if hasLogViewer {
-		ctx.Set("logs_found", true)
-	} else {
-		ctx.Set("logs_found", false)
-	}
-
-	return nil
-}
-
-// closeLogViewer sends the 'L' key again to close the log viewer (if it was opened).
-func closeLogViewer(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	// Only send the close key if logs were actually found and opened
-	logsFound := ctx.Get("logs_found")
-	if logsFound != nil && logsFound.(bool) {
-		// Send 'L' to close the log viewer
-		if err := session.SendKeys("L"); err != nil {
-			return fmt.Errorf("failed to send 'L' key to close: %w", err)
-		}
-
-		// Wait for the TUI to process the keypress
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	return nil
-}
-
-// verifyLogViewerClosed verifies that the log viewer is no longer displayed (if it was opened).
-func verifyLogViewerClosed(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	// Wait for the TUI to stabilize
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	content, err := session.Capture(tui.WithCleanedOutput())
-	if err != nil {
-		return err
-	}
-
-	logsFound := ctx.Get("logs_found")
-	if logsFound != nil && logsFound.(bool) {
-		// If logs were found and opened, they should now be closed
-		if strings.Contains(content, "Viewing logs") {
-			return fmt.Errorf("expected log viewer to be closed, but 'Viewing logs' still found in:\n%s", content)
-		}
-	}
-
-	// The job list should still be visible
-	if !strings.Contains(content, "01-job-a.md") {
-		return fmt.Errorf("expected job list to still be visible:\n%s", content)
-	}
-
-	return nil
-}
 
 // quitStatusTUI sends the quit command to the TUI.
 func quitStatusTUI(ctx *harness.Context) error {
@@ -407,52 +324,6 @@ func ensureLogViewerOpen(ctx *harness.Context) error {
 	return nil
 }
 
-// openLogViewer sends the 'L' key to open the log viewer.
-func openLogViewer(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	time.Sleep(500 * time.Millisecond)
-
-	if err := session.SendKeys("L"); err != nil {
-		return fmt.Errorf("failed to send 'L' key: %w", err)
-	}
-
-	time.Sleep(500 * time.Millisecond)
-	return nil
-}
-
-// verifyLogsVisible verifies that the log viewer is visible after opening.
-func verifyLogsVisible(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	content, err := session.Capture(tui.WithCleanedOutput())
-	if err != nil {
-		return err
-	}
-
-	// The log viewer may show either:
-	// 1. "Follow:" indicator if logs exist and are being followed
-	// 2. Log content if logs exist
-	// 3. "No logs found" message if no logs exist for the selected job
-	// We just need to verify that we're no longer seeing the full jobs table layout alone
-	hasFollow := strings.Contains(content, "Follow:")
-	hasLogContent := strings.Contains(content, "Viewing logs")
-	hasNoLogs := strings.Contains(content, "No logs")
-
-	if !hasFollow && !hasLogContent && !hasNoLogs {
-		// The log viewer didn't open - this is acceptable if there are no logs to view
-		// In that case, just store that logs weren't available
-		ctx.Set("logs_available", false)
-		return nil
-	}
-
-	ctx.Set("logs_available", true)
-	return nil
-}
 
 // switchFocusToLogs sends Tab key to switch focus to the logs pane.
 func switchFocusToLogs(ctx *harness.Context) error {
@@ -468,32 +339,6 @@ func switchFocusToLogs(ctx *harness.Context) error {
 	return nil
 }
 
-// verifyLogsPaneFocused verifies that the logs pane has focus (orange border).
-func verifyLogsPaneFocused(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	content, err := session.Capture()
-	if err != nil {
-		return err
-	}
-
-	// When logs pane is focused, it should have an orange border
-	// We can't directly check the color in text, but we can verify the border structure exists
-	// The focused pane will have ANSI color codes for orange
-	hasOrangeBorder := strings.Contains(content, "\x1b[38;2;255;165;0m") || // RGB orange
-	                   strings.Contains(content, "\x1b[38;5;208m") ||        // 256-color orange
-	                   strings.Contains(content, "\x1b[38;5;214m")           // Alternative orange
-
-	if !hasOrangeBorder {
-		return fmt.Errorf("expected logs pane to be focused with orange border, not found in output")
-	}
-
-	return nil
-}
 
 // switchFocusToJobs sends Tab key to switch focus back to the jobs pane.
 func switchFocusToJobs(ctx *harness.Context) error {
@@ -561,27 +406,6 @@ func verifyFocusReturned(ctx *harness.Context) error {
 	return nil
 }
 
-// verifyJobsPaneFocused verifies that the jobs pane has focus.
-func verifyJobsPaneFocused(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	// When jobs pane is focused, user should be able to navigate jobs
-	// We'll verify that the job list is still visible and interactive
-	content, err := session.Capture(tui.WithCleanedOutput())
-	if err != nil {
-		return err
-	}
-
-	if !strings.Contains(content, "01-job-a.md") {
-		return fmt.Errorf("expected jobs pane to be visible and focused, jobs not found in:\n%s", content)
-	}
-
-	return nil
-}
 
 // testEscKeyFocus verifies that Esc key returns focus to jobs pane from logs pane.
 func testEscKeyFocus(ctx *harness.Context) error {

@@ -159,44 +159,6 @@ func verifyVerticalLayoutPersistence(ctx *harness.Context) error {
 	return nil
 }
 
-// toggleBackToHorizontal toggles the layout back to horizontal.
-func toggleBackToHorizontal(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	time.Sleep(1000 * time.Millisecond)
-
-	// Press 'V' again to toggle back to horizontal
-	if err := session.SendKeys("V"); err != nil {
-		return fmt.Errorf("failed to send 'V' key: %w", err)
-	}
-	time.Sleep(2000 * time.Millisecond)
-
-	if err := session.WaitStable(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// verifyHorizontalLayoutPersistence captures the TUI and verifies the layout appears horizontal.
-func verifyHorizontalLayoutPersistence(ctx *harness.Context) error {
-	session := ctx.Get("tui_session").(*tui.Session)
-
-	time.Sleep(500 * time.Millisecond)
-
-	content, err := session.Capture(tui.WithCleanedOutput())
-	if err != nil {
-		return err
-	}
-
-	// In horizontal layout, there's a horizontal separator line between job list and logs
-	// For now, just verify logs are still showing
-	if !strings.Contains(content, "Plan Status") {
-		return fmt.Errorf("expected TUI to be running with logs visible, not found in:\n%s", content)
-	}
-
-	return nil
-}
 
 // hideAndReshowLogs hides logs with 'l' and shows them again to test if layout persisted.
 func hideAndReshowLogs(ctx *harness.Context) error {
@@ -247,29 +209,6 @@ func checkStateFileAfterVertical(ctx *harness.Context) error {
 	return nil
 }
 
-// checkStateFileAfterHorizontal verifies the state file contains log_split_vertical: false.
-func checkStateFileAfterHorizontal(ctx *harness.Context) error {
-	homeDir := ctx.HomeDir()
-	stateFile := filepath.Join(homeDir, ".local", "state", "grove", "flow", "status-tui-state.json")
-
-	time.Sleep(2000 * time.Millisecond)
-
-	if !fs.Exists(stateFile) {
-		return fmt.Errorf("state file should still exist after toggling layout")
-	}
-
-	content, err := fs.ReadString(stateFile)
-	if err != nil {
-		return fmt.Errorf("failed to read state file: %w", err)
-	}
-
-	// Verify log_split_vertical is false
-	if !strings.Contains(content, `"log_split_vertical": false`) {
-		return fmt.Errorf("expected log_split_vertical to be false after toggling to horizontal, got:\n%s", content)
-	}
-
-	return nil
-}
 
 // quitLayoutTUI quits the TUI session.
 func quitLayoutTUI(ctx *harness.Context) error {

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -200,14 +199,18 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		if err != nil {
 			return err
 		}
-		job, err = collectJobDetailsFromTemplate(cmd, plan, template, worktreeToUse)
+		var jobErr error
+		job, jobErr = collectJobDetailsFromTemplate(cmd, plan, template, worktreeToUse)
+		if jobErr != nil {
+			return jobErr
+		}
 	} else {
 		// Existing logic
-		job, err = collectJobDetails(cmd, plan, worktreeToUse)
-	}
-
-	if err != nil {
-		return err
+		var jobErr error
+		job, jobErr = collectJobDetails(cmd, plan, worktreeToUse)
+		if jobErr != nil {
+			return jobErr
+		}
 	}
 
 	if job == nil {
@@ -527,49 +530,6 @@ func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orc
 	return job, nil
 }
 
-func selectDependencies(plan *orchestration.Plan, reader *bufio.Reader) ([]string, error) {
-	if len(plan.Jobs) == 0 {
-		return nil, nil
-	}
-
-	fmt.Println("\nDependencies (enter job numbers separated by commas, or press enter for none):")
-
-	// List available jobs
-	jobMap := make(map[int]*orchestration.Job)
-	i := 1
-	for _, job := range plan.Jobs {
-		fmt.Printf("%d. %s (%s)\n", i, job.Title, job.Filename)
-		jobMap[i] = job
-		i++
-	}
-
-	fmt.Print("Selection: ")
-	selection, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read selection: %w", err)
-	}
-	selection = strings.TrimSpace(selection)
-
-	if selection == "" {
-		return nil, nil
-	}
-
-	// Parse selections
-	var deps []string
-	parts := strings.Split(selection, ",")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		var num int
-		if _, err := fmt.Sscanf(part, "%d", &num); err == nil {
-			if job, ok := jobMap[num]; ok {
-				deps = append(deps, job.Filename)
-			}
-		}
-	}
-
-	return deps, nil
-}
-
 func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan, template *orchestration.JobTemplate, worktreeToUse string) (*orchestration.Job, error) {
 	// Auto-detect worktree context if not explicitly provided
 	if worktreeToUse == "" {
@@ -718,10 +678,8 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	// When using a template, ALWAYS use reference-based approach
 	if true { // Always use include files with templates
 		// Include file handling
-		var includeFiles []string
-
 		// Only use include files, not prompt files
-		includeFiles = cmd.IncludeFiles
+		includeFiles := cmd.IncludeFiles
 
 		// Get project root
 		projectRoot, err := orchestration.GetProjectRoot()

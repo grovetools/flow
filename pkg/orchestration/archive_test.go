@@ -10,7 +10,7 @@ import (
 func TestArchiveContextRules_Success(t *testing.T) {
 	dir := t.TempDir()
 	planDir := filepath.Join(dir, "plan")
-	os.MkdirAll(planDir, 0755)
+	_ = os.MkdirAll(planDir, 0755)
 
 	// Create source rules file
 	rulesContent := "# My Rules\ninclude: **/*.go\nexclude: vendor/\n"
@@ -97,7 +97,7 @@ func TestArchiveContextRules_EmptyPath(t *testing.T) {
 func TestArchiveContextRulesForTurn_Success(t *testing.T) {
 	dir := t.TempDir()
 	planDir := filepath.Join(dir, "plan")
-	os.MkdirAll(planDir, 0755)
+	_ = os.MkdirAll(planDir, 0755)
 
 	rulesContent := "# Turn Rules\ninclude: **/*.go\n"
 	rulesPath := filepath.Join(dir, "active.rules")

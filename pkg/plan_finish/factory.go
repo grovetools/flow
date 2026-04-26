@@ -367,7 +367,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if provider == nil {
 				return color.YellowString("Available (discovery failed)"), nil
 			}
-			localWorkspaces := provider.LocalWorkspaces()
+			localWorkspaces := provider.LocalWorkspacesInEcosystem(gitRoot)
 			totalRepos := len(workspaceConfig.Repos)
 			needsMerge := 0
 			alreadyMerged := 0
@@ -474,7 +474,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if provider == nil {
 				return fmt.Errorf("cannot merge submodules; workspace discovery failed")
 			}
-			localWorkspaces := provider.LocalWorkspaces()
+			localWorkspaces := provider.LocalWorkspacesInEcosystem(gitRoot)
 			hasErrors := false
 			for _, repoName := range workspaceConfig.Repos {
 				repoPath, exists := localWorkspaces[repoName]
@@ -788,7 +788,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					submodulePaths, _ := parseGitmodules(gitmodulesPath)
 					var localWorkspaces map[string]string
 					if provider != nil {
-						localWorkspaces = provider.LocalWorkspaces()
+						localWorkspaces = provider.LocalWorkspacesInEcosystem(gitRoot)
 					} else {
 						localWorkspaces = make(map[string]string)
 					}
@@ -1129,7 +1129,7 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 	}
 	var localWorkspaces map[string]string
 	if provider != nil {
-		localWorkspaces = provider.LocalWorkspaces()
+		localWorkspaces = provider.LocalWorkspacesInEcosystem(gitRoot)
 	} else {
 		return nil
 	}
@@ -1192,7 +1192,7 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 	fmt.Printf("    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
 	var localWorkspaces map[string]string
 	if provider != nil {
-		localWorkspaces = provider.LocalWorkspaces()
+		localWorkspaces = provider.LocalWorkspacesInEcosystem(gitRoot)
 	} else {
 		fmt.Printf("    Warning: workspace discovery failed, cannot clean up submodule branches\n")
 		localWorkspaces = make(map[string]string)

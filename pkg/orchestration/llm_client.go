@@ -66,7 +66,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	// Track LLM request start
 	requestStart := time.Now()
 	// Get request ID from context or environment
-	requestID, _ := ctx.Value("request_id").(string)
+	requestID, _ := ctx.Value(contextKey("request_id")).(string)
 	if requestID == "" {
 		requestID = os.Getenv("GROVE_REQUEST_ID")
 	}

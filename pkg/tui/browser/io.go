@@ -448,7 +448,8 @@ func fastForwardUpdateCmd(plan PlanListItem) tea.Cmd {
 			if err != nil {
 				return fastForwardMsg{err: fmt.Errorf("failed to discover workspaces: %w", err)}
 			}
-			localWorkspaces := provider.LocalWorkspaces()
+			ecosystemRoot, _ := git.GetGitRoot(plan.Plan.Directory)
+			localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
 
 			for _, repoName := range plan.Plan.Config.Repos {
 				repoPath, exists := localWorkspaces[repoName]
@@ -511,7 +512,8 @@ func fastForwardMainCmd(plan PlanListItem) tea.Cmd {
 			if err != nil {
 				return fastForwardMsg{err: fmt.Errorf("failed to discover workspaces: %w", err)}
 			}
-			localWorkspaces := provider.LocalWorkspaces()
+			ecosystemRoot, _ := git.GetGitRoot(plan.Plan.Directory)
+			localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
 
 			for _, repoName := range plan.Plan.Config.Repos {
 				repoPath, exists := localWorkspaces[repoName]

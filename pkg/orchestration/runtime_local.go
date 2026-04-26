@@ -13,6 +13,9 @@ import (
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 )
 
+// contextKey is a private type for context keys to avoid collisions with other packages.
+type contextKey string
+
 // LocalRuntime executes jobs in-process by invoking the appropriate Executor.
 type LocalRuntime struct {
 	executors map[JobType]Executor
@@ -71,10 +74,10 @@ func (r *LocalRuntime) SetExecutor(jobType JobType, executor Executor) {
 // ExecuteJob handles logging setup, status transitions, and delegates to the executor.
 func (r *LocalRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) error {
 	// 1. Context and logging setup
-	requestID, _ := ctx.Value("request_id").(string)
+	requestID, _ := ctx.Value(contextKey("request_id")).(string)
 	if requestID == "" {
 		requestID = "req-" + uuid.New().String()[:8]
-		ctx = context.WithValue(ctx, "request_id", requestID)
+		ctx = context.WithValue(ctx, contextKey("request_id"), requestID)
 	}
 
 	logFields := map[string]interface{}{

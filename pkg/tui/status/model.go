@@ -136,7 +136,6 @@ type Model struct {
 	ClawDisabling      bool // true when disabling (unclaw)
 	skillSearchActive      bool                    // Whether search mode is active in skill pane
 	skillSearchInput       textinput.Model         // Text input for skill pane search
-	skillFilterText        string                  // Current filter text for skill pane
 	frontmatterRawContent string
 	briefingRawContent    string
 	editRawContent        string

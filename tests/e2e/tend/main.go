@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/grovetools/tend/pkg/app"
@@ -159,7 +160,7 @@ func main() {
 		scenarios.PromoteDemoteRoundTripScenario,
 	}
 
-	if err := app.Execute(nil, allScenarios); err != nil {
+	if err := app.Execute(context.TODO(), allScenarios); err != nil {
 		os.Exit(1)
 	}
 }

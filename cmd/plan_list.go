@@ -323,11 +323,6 @@ func createPlanSummary(plan *orchestration.Plan, expandedPath string) PlanSummar
 	return summary
 }
 
-// expandPath expands ~ and git variables in a path string.
-func expandPath(path string) (string, error) {
-	return expandFlowPath(path)
-}
-
 // outputPlansJSON outputs the plans in JSON format
 func outputPlansJSON(summaries []PlanSummary) error {
 	encoder := json.NewEncoder(os.Stdout)

@@ -161,9 +161,7 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobFile string) error {
 
 		// If not in the runnable list, check if it's a failed job that can be retried
 		if !isRunnable {
-			if job.CanBeRetried() {
-				isRunnable = true
-			} else {
+			if !job.CanBeRetried() {
 				runnableIDs := make([]string, len(runnable))
 				for i, r := range runnable {
 					runnableIDs[i] = r.ID

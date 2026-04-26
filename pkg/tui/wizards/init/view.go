@@ -63,21 +63,21 @@ func (m Model) renderMainScreen() string {
 		Padding(0, 1).
 		Width(40)
 
-	borderStyleWide := borderStyle.Copy().Width(85)
+	borderStyleWide := borderStyle.Width(85)
 
-	unfocusedBorderStyle := borderStyle.Copy().
+	unfocusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240"))
 
-	unfocusedBorderStyleWide := borderStyleWide.Copy().
+	unfocusedBorderStyleWide := borderStyleWide.
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240"))
 
-	focusedBorderStyle := borderStyle.Copy().
+	focusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(theme.DefaultColors.Orange)
 
-	focusedBorderStyleWide := borderStyleWide.Copy().
+	focusedBorderStyleWide := borderStyleWide.
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(theme.DefaultColors.Orange)
 
@@ -163,21 +163,21 @@ func (m Model) renderAdvancedScreen() string {
 		Padding(0, 1).
 		Width(40)
 
-	borderStyleWide := borderStyle.Copy().Width(85)
+	borderStyleWide := borderStyle.Width(85)
 
-	unfocusedBorderStyle := borderStyle.Copy().
+	unfocusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240"))
 
-	unfocusedBorderStyleWide := borderStyleWide.Copy().
+	unfocusedBorderStyleWide := borderStyleWide.
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240"))
 
-	focusedBorderStyle := borderStyle.Copy().
+	focusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(theme.DefaultColors.Orange)
 
-	focusedBorderStyleWide := borderStyleWide.Copy().
+	focusedBorderStyleWide := borderStyleWide.
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(theme.DefaultColors.Orange)
 

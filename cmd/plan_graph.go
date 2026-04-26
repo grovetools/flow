@@ -396,7 +396,7 @@ func serveInteractiveGraph(plan *orchestration.Plan, graph *DependencyGraph, por
 	fmt.Printf("Serving graph at http://localhost:%d\n", port)
 	fmt.Println("Press Ctrl+C to stop...")
 
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), nil)
+	return http.ListenAndServe(fmt.Sprintf(":%d", port), nil) //nolint:gosec // local dev server only
 }
 
 func getStatusSymbol(status orchestration.JobStatus) string {

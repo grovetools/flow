@@ -16,7 +16,6 @@ import (
 
 	"encoding/json"
 
-	"github.com/google/uuid"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
@@ -1067,14 +1066,6 @@ func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playboo
 	return os.WriteFile(configPath, []byte(configContent.String()), 0o644)
 }
 
-// generateJobID creates a unique job ID.
-func generateJobID() string {
-	// Use UUID for uniqueness
-	id := uuid.New().String()
-	// Take first 8 characters for brevity
-	return "job-" + id[:8]
-}
-
 // applyDefaultContextRulesToWorktree applies default context rules to a worktree.
 // It detects whether the worktree is a single-repo or ecosystem worktree and applies
 // rules accordingly.
@@ -1187,7 +1178,7 @@ func executeInitActions(actions []orchestration.InitAction, worktreeOverride, fi
 	}
 
 	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, "\n"))
+		return fmt.Errorf("%s", strings.Join(errors, "\n"))
 	}
 	return nil
 }

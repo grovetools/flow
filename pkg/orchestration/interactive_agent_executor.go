@@ -1,11 +1,9 @@
 package orchestration
 
 import (
-	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -102,7 +100,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		// Write the generated plan to a new briefing file for the agent to execute.
 		// The turnID is a unique identifier for this specific generation step.
 		bytes := make([]byte, 3)
-		rand.Read(bytes)
+		_, _ = rand.Read(bytes)
 		turnID := "generated-plan-" + hex.EncodeToString(bytes)
 
 		briefingFilePath, err = WriteBriefingFile(plan, job, generatedPlanContent, turnID)
@@ -114,7 +112,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}
 
 		// Log briefing file creation with structured logging
-		requestID, _ := ctx.Value("request_id").(string)
+		requestID, _ := ctx.Value(contextKey("request_id")).(string)
 		e.ulog.Success("Generated plan briefing file created").
 			Field("job_id", job.ID).
 			Field("request_id", requestID).
@@ -164,7 +162,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}
 
 		// Log briefing file creation with structured logging
-		requestID, _ := ctx.Value("request_id").(string)
+		requestID, _ := ctx.Value(contextKey("request_id")).(string)
 		e.ulog.Success("Interactive agent briefing file created").
 			Field("job_id", job.ID).
 			Field("request_id", requestID).
@@ -180,7 +178,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	if job.GatherConceptNotes || job.GatherConceptPlans {
 		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
 		if err != nil {
-			requestID, _ := ctx.Value("request_id").(string)
+			requestID, _ := ctx.Value(contextKey("request_id")).(string)
 			e.ulog.Warn("Failed to gather concepts").
 				Err(err).
 				Field("request_id", requestID).
@@ -202,7 +200,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 
 	// Unmarshal flow configuration (agent settings moved to flow extension)
 	var flowCfg FlowConfig
-	coreCfg.UnmarshalExtension("flow", &flowCfg)
+	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	// Determine which provider to use
 	providerName := "claude" // Default for backward compatibility
@@ -396,49 +394,6 @@ func (e *InteractiveAgentExecutor) generatePlanFromDependencies(ctx context.Cont
 	// Use io.Discard since this is for plan generation and the output isn't streamed
 	opts := LLMOptions{Model: effectiveModel, WorkingDir: workDir}
 	return e.llmClient.Complete(ctx, job, plan, fullPrompt, opts, io.Discard)
-}
-
-// waitForWindowClose waits for a specific tmux window to close
-func (e *InteractiveAgentExecutor) waitForWindowClose(ctx context.Context, client *tmux.Client, sessionName, windowName string, pollInterval time.Duration) error {
-	// For now, we'll use a simple approach: wait for the user to close the window
-	// In the future, we could enhance this to check specific window status
-	// But for now, we'll instruct the user to close the entire session when done
-	return client.WaitForSessionClose(ctx, sessionName, pollInterval)
-}
-
-
-// promptForJobStatus prompts the user to select the job status after tmux session ends
-func (e *InteractiveAgentExecutor) promptForJobStatus(sessionOrWindowName string) string {
-	ctx := context.Background()
-	e.ulog.Info("").Pretty("").Log(ctx) // blank line
-	e.ulog.Info("Session has ended. What's the job status?").
-		Field("session", sessionOrWindowName).
-		Pretty(fmt.Sprintf("💭 Session '%s' has ended. What's the job status?", sessionOrWindowName)).
-		Log(ctx)
-	e.ulog.Info("").Pretty("   c - Mark as completed").Log(ctx)
-	e.ulog.Info("").Pretty("   f - Mark as failed").Log(ctx)
-	e.ulog.Info("").Pretty("   q - No status change (keep as running)").Log(ctx)
-	e.ulog.Info("").Pretty("").Log(ctx) // blank line
-	e.ulog.Info("").Pretty("Choice [c/f/q]: ").Log(ctx)
-
-	var response string
-	fmt.Scanln(&response)
-	response = strings.ToLower(strings.TrimSpace(response))
-
-	// Default to "c" if user just presses enter
-	if response == "" {
-		response = "c"
-	}
-
-	// Validate response
-	if response != "c" && response != "f" && response != "q" {
-		e.ulog.Warn("Invalid choice. Defaulting to completed").
-			Field("choice", response).
-			Log(ctx)
-		response = "c"
-	}
-
-	return response
 }
 
 // ClaudeAgentProvider implements InteractiveAgentProvider for Claude Code.
@@ -703,7 +658,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			p.ulog.Info("Window already exists, attempting to kill it first").
 				Field("window", windowName).
 				Log(ctx)
-			tmuxClient.KillWindow(ctx, windowTarget)
+			_ = tmuxClient.KillWindow(ctx, windowTarget)
 			time.Sleep(100 * time.Millisecond)
 
 			if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
@@ -860,7 +815,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		}
 	} else {
 		logger.WithField("pid", claudePID).Debug("Discovered Claude Code PID via pidfile")
-		agentstream.CleanupPIDFile(job.ID)
+		_ = agentstream.CleanupPIDFile(job.ID)
 	}
 
 	// Discover transcript path using agentstream
@@ -945,153 +900,6 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	}).Info("Confirmed Claude session")
 
 	return nil
-}
-
-// sanitizePathForClaude replicates Claude's path sanitization algorithm
-// Claude replaces "/" with "-" and then replaces "-." with "--"
-func sanitizePathForClaude(path string) string {
-	// First replace all "/" with "-"
-	result := strings.ReplaceAll(path, "/", "-")
-
-	// Then replace all "-." with "--" to handle hidden directories like .grove-worktrees
-	result = strings.ReplaceAll(result, "-.", "--")
-
-	return result
-}
-
-// getFirstTimestampFromSessionFile reads the first timestamp from a Claude session jsonl file.
-// This is more reliable than using file modification time, which can be stale on some systems
-// (e.g., when Claude uses buffered writes or memory-mapped files).
-func getFirstTimestampFromSessionFile(filePath string) (time.Time, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	// Use a larger buffer for potentially large JSON lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	// Read up to 10 lines looking for a timestamp
-	for i := 0; i < 10 && scanner.Scan(); i++ {
-		var entry struct {
-			Timestamp time.Time `json:"timestamp"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil && !entry.Timestamp.IsZero() {
-			return entry.Timestamp, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("no timestamp found in first 10 lines of %s", filePath)
-}
-
-// findClaudeSessionID finds the Claude Code session ID by looking for the most recent session file
-// created after the specified job start time (to avoid reusing old sessions)
-func (p *ClaudeAgentProvider) findClaudeSessionID(workDir string, jobStartTime time.Time, logger *logrus.Entry) (string, error) {
-	// Claude stores sessions in ~/.claude/projects/<sanitized-path>/*.jsonl
-	// The directory name is the working directory with slashes replaced
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		logger.WithError(err).Error("Failed to get user home directory")
-		return "", err
-	}
-
-	// Sanitize the working directory path to match Claude's format
-	// Claude replaces "/" with "-" and removes leading "." from path components
-	sanitizedPath := sanitizePathForClaude(workDir)
-	claudeProjectsDir := filepath.Join(homeDir, ".claude", "projects", sanitizedPath)
-
-	logger.WithFields(map[string]interface{}{
-		"work_dir":            workDir,
-		"sanitized_path":      sanitizedPath,
-		"claude_projects_dir": claudeProjectsDir,
-		"job_start_time":      jobStartTime,
-	}).Debug("Looking for Claude session files")
-
-	// Check if the directory exists
-	if _, err := os.Stat(claudeProjectsDir); os.IsNotExist(err) {
-		logger.WithField("claude_projects_dir", claudeProjectsDir).Debug("Claude projects directory not found")
-		return "", fmt.Errorf("Claude projects directory not found: %s", claudeProjectsDir)
-	}
-
-	// Find the most recent .jsonl file (excluding agent-*.jsonl files which are sub-agents)
-	// Only consider files modified AFTER the job started to avoid reusing old sessions
-	entries, err := os.ReadDir(claudeProjectsDir)
-	if err != nil {
-		logger.WithError(err).Error("Failed to read Claude projects directory")
-		return "", fmt.Errorf("failed to read Claude projects directory: %w", err)
-	}
-
-	logger.WithField("entry_count", len(entries)).Debug("Found entries in Claude projects directory")
-
-	var latestFile string
-	var latestTime time.Time
-	skippedOld := 0
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		// Skip agent-* files (sub-agents)
-		if strings.HasPrefix(entry.Name(), "agent-") {
-			continue
-		}
-
-		if !strings.HasSuffix(entry.Name(), ".jsonl") {
-			continue
-		}
-
-		filePath := filepath.Join(claudeProjectsDir, entry.Name())
-
-		// Read the first timestamp from the file content instead of relying on
-		// file modification time. File mod times can be stale on some systems
-		// (e.g., macOS with APFS when Claude uses buffered writes).
-		contentTime, err := getFirstTimestampFromSessionFile(filePath)
-		if err != nil {
-			// Fall back to file mod time if we can't read content timestamp
-			info, infoErr := entry.Info()
-			if infoErr != nil {
-				continue
-			}
-			contentTime = info.ModTime()
-		}
-
-		// Only consider files with timestamps after the job started
-		// This prevents reusing old session files from previous jobs
-		if !contentTime.After(jobStartTime) {
-			skippedOld++
-			continue
-		}
-
-		if contentTime.After(latestTime) {
-			latestTime = contentTime
-			latestFile = entry.Name()
-		}
-	}
-
-	if skippedOld > 0 {
-		logger.WithFields(map[string]interface{}{
-			"skipped_count":  skippedOld,
-			"job_start_time": jobStartTime,
-		}).Debug("Skipped session files predating job start")
-	}
-
-	if latestFile == "" {
-		logger.WithField("claude_projects_dir", claudeProjectsDir).Warn("No Claude session files found")
-		return "", fmt.Errorf("no Claude session files found in %s", claudeProjectsDir)
-	}
-
-	// Extract session ID from filename (remove .jsonl extension)
-	sessionID := strings.TrimSuffix(latestFile, ".jsonl")
-	logger.WithFields(map[string]interface{}{
-		"latest_file":   latestFile,
-		"session_id":    sessionID,
-		"modified_time": latestTime,
-	}).Debug("Found latest Claude session file")
-	return sessionID, nil
 }
 
 // findClaudePIDForPane finds the PID of the Claude Code process running in a specific tmux pane
@@ -1378,7 +1186,7 @@ func resolveInputMode(workDir string) string {
 		coreCfg = &config.Config{}
 	}
 	var flowCfg FlowConfig
-	coreCfg.UnmarshalExtension("flow", &flowCfg)
+	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	inputMode := "vim" // default
 	providerName := "claude"

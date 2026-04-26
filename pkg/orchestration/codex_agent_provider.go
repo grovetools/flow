@@ -281,157 +281,13 @@ func (p *CodexAgentProvider) generateSessionName(workDir string) (string, error)
 	return projInfo.Identifier("_"), nil
 }
 
-// discoverAndRegisterSession discovers the codex session ID and registers it with grove-core
-func (p *CodexAgentProvider) discoverAndRegisterSession(job *Job, plan *Plan, workDir, targetPane string) {
-	// Create debug log file
-	debugFile, _ := os.Create(filepath.Join(os.TempDir(), fmt.Sprintf("grove-flow-codex-registration-%s.log", job.ID)))
-	if debugFile != nil {
-		defer func() {
-			debugFile.WriteString(fmt.Sprintf("Goroutine exiting at %s\n", time.Now().Format(time.RFC3339)))
-			debugFile.Sync()
-			debugFile.Close()
-		}()
-		debugFile.WriteString(fmt.Sprintf("Starting registration for job %s at %s\n", job.ID, time.Now().Format(time.RFC3339)))
-		debugFile.Sync()
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			msg := fmt.Sprintf("Error: Panic in session registration: %v\n", r)
-			fmt.Fprintf(os.Stderr, "%s", msg)
-			if debugFile != nil {
-				debugFile.WriteString(msg)
-				debugFile.Sync()
-			}
-		}
-	}()
-
-	p.log.WithFields(logrus.Fields{
-		"job_id":      job.ID,
-		"plan":        plan.Name,
-		"target_pane": targetPane,
-	}).Info("Starting codex session discovery and registration")
-
-	// Wait a moment for the log file to be created.
-	msg := fmt.Sprintf("[...] Waiting 2s for Codex log file to be created...\n")
-	fmt.Fprintf(os.Stderr, "%s", msg)
-	if debugFile != nil {
-		debugFile.WriteString(msg)
-		debugFile.Sync() // Flush to disk
-	}
-	time.Sleep(2 * time.Second)
-
-	if debugFile != nil {
-		debugFile.WriteString("After sleep, continuing...\n")
-		debugFile.Sync()
-	}
-
-	codexSessionsDir := filepath.Join(os.Getenv("HOME"), ".codex", "sessions")
-	if debugFile != nil {
-		debugFile.WriteString(fmt.Sprintf("Looking in: %s\n", codexSessionsDir))
-		debugFile.Sync()
-	}
-	p.log.WithField("sessions_dir", codexSessionsDir).Debug("Looking for codex session files")
-	latestFile, err := findMostRecentFile(codexSessionsDir, debugFile)
-	if err != nil {
-		msg := fmt.Sprintf("Error: Failed to find Codex session file: %v\n", err)
-		fmt.Fprintf(os.Stderr, "%s", msg)
-		if debugFile != nil {
-			debugFile.WriteString(msg)
-		}
-		p.log.WithError(err).Error("Failed to find most recent codex session file")
-		return
-	}
-	msg = fmt.Sprintf("* Found Codex log: %s\n", latestFile)
-	fmt.Fprintf(os.Stderr, "%s", msg)
-	if debugFile != nil {
-		debugFile.WriteString(msg)
-	}
-	p.log.WithField("latest_file", latestFile).Info("Found codex session file")
-
-	// Parse session ID from filename: rollout-2025-10-20T16-43-18-019a035c-b544-7552-b739-8573c821aaea.jsonl
-	base := filepath.Base(latestFile)
-	parts := strings.Split(strings.TrimSuffix(base, ".jsonl"), "-")
-	if len(parts) < 6 {
-		p.log.WithFields(logrus.Fields{
-			"filename": base,
-			"parts":    len(parts),
-		}).Error("Failed to parse session ID from codex log filename")
-		return
-	}
-	// UUID is the last 5 dash-separated segments
-	codexSessionID := strings.Join(parts[len(parts)-5:], "-")
-	p.log.WithField("codex_session_id", codexSessionID).Info("Parsed codex session ID")
-
-	// Find the PID of the codex process.
-	p.ulog.Debug("Looking for Codex PID in pane").
-		Field("target_pane", targetPane).
-		Log(context.Background())
-	pid, err := FindCodexPIDForPane(targetPane)
-	if err != nil {
-		p.ulog.Error("Failed to find Codex PID").
-			Err(err).
-			Log(context.Background())
-		return
-	}
-	p.ulog.Debug("Found Codex PID").
-		Field("pid", pid).
-		Log(context.Background())
-
-	// Register the session using the core registry.
-	registry, err := sessions.NewFileSystemRegistry()
-	if err != nil {
-		p.log.WithError(err).Error("Failed to create session registry")
-		return
-	}
-
-	// Get user info
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "unknown"
-	}
-
-	// Get git info
-	repo, branch := getGitInfo(workDir)
-
-	metadata := sessions.SessionMetadata{
-		SessionID:        job.ID,
-		ClaudeSessionID:  codexSessionID, // Store the native agent ID
-		Provider:         "codex",
-		PID:              pid,
-		WorkingDirectory: workDir,
-		User:             user,
-		Repo:             repo,
-		Branch:           branch,
-		StartedAt:        time.Now(),
-		JobTitle:         job.Title,
-		PlanName:         plan.Name,
-		JobFilePath:      job.FilePath,
-		TranscriptPath:   latestFile,
-	}
-
-	p.ulog.Debug("Registering session with registry").
-		Field("session_id", codexSessionID).
-		Field("pid", pid).
-		Log(context.Background())
-	if err := registry.Register(metadata); err != nil {
-		p.ulog.Error("Failed to register session").
-			Err(err).
-			Log(context.Background())
-	} else {
-		p.ulog.Success("Successfully registered Codex session").
-			Field("session_id", codexSessionID).
-			Field("pid", pid).
-			Log(context.Background())
-	}
-}
 
 // findMostRecentFile finds the most recently modified file in a directory tree.
 func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 	msg := fmt.Sprintf(" Searching for .jsonl files in: %s\n", dir)
 	fmt.Fprintf(os.Stderr, "%s", msg)
 	if debugFile != nil {
-		debugFile.WriteString(msg)
+		_, _ = debugFile.WriteString(msg)
 	}
 
 	var latestFile string
@@ -443,7 +299,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 			msg := fmt.Sprintf("  WARNING:  Walk error at %s: %v\n", path, err)
 			fmt.Fprintf(os.Stderr, "%s", msg)
 			if debugFile != nil {
-				debugFile.WriteString(msg)
+				_, _ = debugFile.WriteString(msg)
 			}
 			return err
 		}
@@ -454,7 +310,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 				latestFile = path
 				msg := fmt.Sprintf("   Found newer file: %s (modified: %s)\n", filepath.Base(path), info.ModTime().Format("15:04:05"))
 				if debugFile != nil {
-					debugFile.WriteString(msg)
+					_, _ = debugFile.WriteString(msg)
 				}
 			}
 		}
@@ -465,7 +321,7 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 		msg := fmt.Sprintf("Error: Walk failed: %v\n", err)
 		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
-			debugFile.WriteString(msg)
+			_, _ = debugFile.WriteString(msg)
 		}
 		return "", err
 	}
@@ -473,13 +329,13 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 		msg := fmt.Sprintf("Error: No .jsonl files found (searched %d files)\n", fileCount)
 		fmt.Fprintf(os.Stderr, "%s", msg)
 		if debugFile != nil {
-			debugFile.WriteString(msg)
+			_, _ = debugFile.WriteString(msg)
 		}
 		return "", fmt.Errorf("no jsonl files found in %s", dir)
 	}
 	msg = fmt.Sprintf("* Selected most recent file: %s\n", filepath.Base(latestFile))
 	if debugFile != nil {
-		debugFile.WriteString(msg)
+		_, _ = debugFile.WriteString(msg)
 	}
 	return latestFile, nil
 }

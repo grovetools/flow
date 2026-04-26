@@ -91,7 +91,7 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 			finalStatus = JobStatusFailed
 		}
 		job.EndTime = time.Now()
-		job.UpdateStatus(persister, finalStatus)
+		_ = job.UpdateStatus(persister, finalStatus)
 	}()
 
 	// Determine the working directory for the job
@@ -250,7 +250,7 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		Providers map[string]flowProviderConfig `yaml:"providers"`
 	}
 	var flowCfg flowConfig
-	coreCfg.UnmarshalExtension("flow", &flowCfg)
+	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	// Get agent args for claude provider (headless always uses claude)
 	var agentArgs []string
@@ -276,7 +276,7 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() { _ = os.Chdir(originalDir) }()
 
 	if err := os.Chdir(worktreePath); err != nil {
 		return fmt.Errorf("failed to change to worktree directory: %w", err)

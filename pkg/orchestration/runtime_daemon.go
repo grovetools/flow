@@ -66,7 +66,7 @@ func (r *DaemonRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) er
 		if r.updater != nil {
 			job.Metadata.LastError = fmt.Sprintf("submit job to daemon: %s", err)
 			_ = r.updater.UpdateJobMetadata(job, job.Metadata)
-			r.updater.UpdateJobStatus(job, JobStatusFailed)
+			_ = r.updater.UpdateJobStatus(job, JobStatusFailed)
 		}
 		return fmt.Errorf("submit job to daemon: %w", err)
 	}
@@ -103,7 +103,7 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 	switch status {
 	case "completed":
 		if r.updater != nil {
-			r.updater.UpdateJobStatus(job, JobStatusCompleted)
+			_ = r.updater.UpdateJobStatus(job, JobStatusCompleted)
 		}
 		return nil
 	case "running":
@@ -113,7 +113,7 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 		return nil
 	case "pending_user":
 		if r.updater != nil {
-			r.updater.UpdateJobStatus(job, JobStatusPendingUser)
+			_ = r.updater.UpdateJobStatus(job, JobStatusPendingUser)
 		}
 		return nil
 	case "failed":

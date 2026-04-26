@@ -59,7 +59,7 @@ var SkillSequenceBriefingScenario = harness.NewScenario(
 			notebooksRoot := ctx.GetString("notebooks_root")
 
 			// Init plan
-			ctx.Bin("plan", "init", "seq-plan").Dir(projectDir).Run().AssertSuccess()
+			_ = ctx.Bin("plan", "init", "seq-plan").Dir(projectDir).Run().AssertSuccess()
 			planPath := filepath.Join(notebooksRoot, "workspaces", "sequence-project", "plans", "seq-plan")
 			ctx.Set("plan_path", planPath)
 

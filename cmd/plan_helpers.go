@@ -1,93 +1,15 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/grovetools/core/command"
 	"github.com/grovetools/core/config"
-	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/sirupsen/logrus"
 )
-
-// expandFlowPath expands path variables like {{REPO}} and {{BRANCH}} correctly,
-// handling git worktrees properly by differentiating repository name from branch name.
-func expandFlowPath(path string) (string, error) {
-	// 1. Expand home directory
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("could not get user home directory: %w", err)
-		}
-		path = filepath.Join(home, path[2:])
-	}
-
-	// 2. Expand environment variables
-	path = os.ExpandEnv(path)
-
-	// 3. Expand git-related variables with worktree-aware logic
-	if strings.Contains(path, "${REPO}") || strings.Contains(path, "{{REPO}}") ||
-		strings.Contains(path, "${BRANCH}") || strings.Contains(path, "{{BRANCH}}") {
-
-		gitRoot, err := git.GetGitRoot(".")
-		if err == nil {
-			// Get the repository name - handle worktrees correctly
-			repoName, err := getRepositoryName(".")
-			if err != nil {
-				// Fallback to git root basename if we can't determine repo name
-				repoName = filepath.Base(gitRoot)
-			}
-
-			// Get current branch name
-			_, branchName, _ := git.GetRepoInfo(".")
-
-			path = strings.ReplaceAll(path, "${REPO}", repoName)
-			path = strings.ReplaceAll(path, "{{REPO}}", repoName)
-			path = strings.ReplaceAll(path, "${BRANCH}", branchName)
-			path = strings.ReplaceAll(path, "{{BRANCH}}", branchName)
-		}
-	}
-
-	return filepath.Abs(path)
-}
-
-// getRepositoryName returns the name of the repository, handling worktrees correctly.
-// For worktrees, it finds the main repository directory rather than using the worktree path.
-func getRepositoryName(dir string) (string, error) {
-	cmdBuilder := command.NewSafeBuilder()
-
-	// Get the common git directory (points to main repo even in worktrees)
-	cmd, err := cmdBuilder.Build(context.Background(), "git", "rev-parse", "--git-common-dir")
-	if err != nil {
-		return "", fmt.Errorf("failed to build command: %w", err)
-	}
-	execCmd := cmd.Exec()
-	execCmd.Dir = dir
-	output, err := execCmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("get git common dir: %w", err)
-	}
-
-	commonDir := strings.TrimSpace(string(output))
-
-	// Convert to absolute path if relative
-	if !filepath.IsAbs(commonDir) {
-		absDir, err := filepath.Abs(filepath.Join(dir, commonDir))
-		if err != nil {
-			return "", fmt.Errorf("resolve absolute path: %w", err)
-		}
-		commonDir = absDir
-	}
-
-	// The repository name is the basename of the parent directory of .git
-	repoPath := filepath.Dir(commonDir)
-	return filepath.Base(repoPath), nil
-}
 
 // resolvePlanPath determines the absolute path for a plan directory.
 // It uses the NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).

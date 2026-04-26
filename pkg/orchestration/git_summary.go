@@ -30,7 +30,7 @@ func GenerateGitChangesXML(workDir string) (string, error) {
 			xmlBuilder.WriteString("      <![CDATA[\n")
 			xmlBuilder.WriteString(trimmedOutput)
 			xmlBuilder.WriteString("\n      ]]>\n")
-			xmlBuilder.WriteString(fmt.Sprintf("    </git_change>\n"))
+			xmlBuilder.WriteString("    </git_change>\n")
 		}
 		return nil
 	}

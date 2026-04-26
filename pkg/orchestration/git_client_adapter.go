@@ -30,7 +30,7 @@ func (g *GitClientAdapter) WorktreeAdd(path, branch string) error {
 	ctx := context.Background()
 	
 	// Check if branch exists
-	cmd := exec.CommandContext(ctx, "git", "-C", g.repoPath, "rev-parse", "--verify", branch)
+	cmd := exec.CommandContext(ctx, "git", "-C", g.repoPath, "rev-parse", "--verify", branch) //nolint:gosec // args are internal, not user input
 	createBranch := cmd.Run() != nil
 	
 	return g.wtManager.CreateWorktree(ctx, g.repoPath, path, branch, createBranch)
@@ -87,7 +87,7 @@ func (g *GitClientAdapter) WorktreeRemove(name string, force bool) error {
 	err = g.wtManager.RemoveWorktree(ctx, g.repoPath, path)
 	if err != nil && force {
 		// Force removal
-		cmd := exec.CommandContext(ctx, "git", "-C", g.repoPath, "worktree", "remove", "--force", path)
+		cmd := exec.CommandContext(ctx, "git", "-C", g.repoPath, "worktree", "remove", "--force", path) //nolint:gosec // args are internal, not user input
 		return cmd.Run()
 	}
 	
@@ -99,7 +99,7 @@ func (g *GitClientAdapter) CreateBranch(name string) error {
 	ctx := context.Background()
 	
 	// Create branch from current HEAD
-	cmd := exec.CommandContext(ctx, "git", "-C", g.repoPath, "branch", name)
+	cmd := exec.CommandContext(ctx, "git", "-C", g.repoPath, "branch", name) //nolint:gosec // args are internal, not user input
 	if err := cmd.Run(); err != nil {
 		// Check if branch already exists
 		checkCmd := exec.CommandContext(ctx, "git", "-C", g.repoPath, "rev-parse", "--verify", name)

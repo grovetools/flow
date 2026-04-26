@@ -46,11 +46,6 @@ func (tm *TemplateManager) FindTemplate(name string) (*JobTemplate, error) {
 	for {
 		templatePath := filepath.Join(dir, ".grove", "job-templates", name+".md")
 		if _, err := os.Stat(templatePath); err == nil {
-			// Calculate relative path for cleaner display
-			relPath, _ := filepath.Rel(currentDir, templatePath)
-			if relPath == "" {
-				relPath = templatePath
-			}
 			return tm.LoadTemplate(templatePath, name, "project")
 		}
 

@@ -430,7 +430,7 @@ Test job %d`, i, i, i)
 		wg.Add(1)
 		go func(j *Job) {
 			defer wg.Done()
-			orch.RunJob(ctx, j.FilePath)
+			_ = orch.RunJob(ctx, j.FilePath)
 		}(job)
 		
 		// Small delay to respect parallelism limit

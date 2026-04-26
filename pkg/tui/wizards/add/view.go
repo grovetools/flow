@@ -30,10 +30,10 @@ func (m Model) View() string {
 		Padding(0, 0).
 		Width(45)
 
-	unfocusedBorderStyle := borderStyle.Copy().
+	unfocusedBorderStyle := borderStyle.
 		BorderForeground(theme.DefaultColors.Border)
 
-	focusedBorderStyle := borderStyle.Copy().
+	focusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(theme.DefaultColors.Orange)
 
@@ -59,7 +59,7 @@ func (m Model) View() string {
 		}
 
 		if forceHeight > 0 {
-			style = style.Copy().Height(forceHeight)
+			style = style.Height(forceHeight)
 		}
 
 		return style.Render(fieldContent.String())
@@ -68,11 +68,11 @@ func (m Model) View() string {
 	// Row 1: Title (full width) with left margin
 	var titleFieldStyle lipgloss.Style
 	if m.focusIndex == 0 && !m.unfocused {
-		titleFieldStyle = focusedBorderStyle.Copy().Width(93).MarginLeft(2)
+		titleFieldStyle = focusedBorderStyle.Width(93).MarginLeft(2)
 	} else if m.focusIndex == 0 && m.unfocused {
-		titleFieldStyle = unfocusedBorderStyle.Copy().Width(93).MarginLeft(2)
+		titleFieldStyle = unfocusedBorderStyle.Width(93).MarginLeft(2)
 	} else {
-		titleFieldStyle = borderStyle.Copy().Width(93).MarginLeft(2)
+		titleFieldStyle = borderStyle.Width(93).MarginLeft(2)
 	}
 	var titleContent strings.Builder
 	if m.focusIndex == 0 {

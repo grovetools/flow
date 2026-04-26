@@ -441,9 +441,8 @@ var SessionArchivingScenario = harness.NewScenario(
 
 			// The completion should succeed (archiving failure is non-fatal)
 			// But we expect a warning in the output
-			if !strings.Contains(result.Stdout, "Warning") && !strings.Contains(result.Stderr, "Warning") {
-				// It's OK if there's no warning in the output, the important part is that it doesn't fail
-			}
+			// It's OK if there's no warning in the output — the important part is that it doesn't fail.
+			// No action needed when warning is absent.
 
 			// Verify the job was still marked as completed
 			content, err = fs.ReadString(missingSessionJobPath)

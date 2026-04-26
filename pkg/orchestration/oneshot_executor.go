@@ -32,9 +32,8 @@ import (
 )
 
 var (
-	log       = grovelogging.NewLogger("grove-flow")
-	prettyLog = grovelogging.NewPrettyLogger()
-	ulog      = grovelogging.NewUnifiedLogger("grove-flow")
+	log  = grovelogging.NewLogger("grove-flow")
+	ulog = grovelogging.NewUnifiedLogger("grove-flow")
 )
 
 // resolveModelAlias expands a model alias to its full API ID, or returns the input unchanged.
@@ -103,7 +102,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	output := grovelogging.GetWriter(ctx)
 
 	// Get request ID from context
-	requestID, _ := ctx.Value("request_id").(string)
+	requestID, _ := ctx.Value(contextKey("request_id")).(string)
 
 	// Handle chat jobs - execute directly without confirmation
 	// Plan-level confirmations already guard against unintended execution
@@ -185,6 +184,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		} else if conceptContextFile != "" {
 			// Add the aggregated concepts file to the list of files to upload
 			// We handle this here before building the prompt.
+			// (file is picked up by context gathering logic below)
 		}
 	}
 
@@ -1080,7 +1080,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		ulog.Warn("Failed to get context stats").Err(err).Log(ctx)
 	} else {
 		// Display summary statistics
-		requestID, _ := ctx.Value("request_id").(string)
+		requestID, _ := ctx.Value(contextKey("request_id")).(string)
 		ulog.Info("Context summary generated").
 			Field("request_id", requestID).
 			Field("job_id", job.ID).
@@ -1185,7 +1185,7 @@ func (e *OneShotExecutor) displayContextInfo(ctx context.Context, worktreePath s
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
 	// Generate a unique request ID for tracing this turn
 	requestID := "req-" + uuid.New().String()[:8]
-	ctx = context.WithValue(ctx, "request_id", requestID)
+	ctx = context.WithValue(ctx, contextKey("request_id"), requestID)
 	ulog.Info("Executing chat turn").
 		Field("job_id", job.ID).
 		Field("request_id", requestID).
@@ -1357,7 +1357,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 				Field("job_id", job.ID).
 				Log(ctx)
 		} else if conceptContextFile != "" {
-			// The file will be picked up by the context gathering logic below
+			// The file will be picked up by the context gathering logic below.
+			// No action needed here.
 		}
 	}
 
@@ -1712,7 +1713,7 @@ interpret and continue through YOUR current system instructions.
 	var geminiErr error
 	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
 		// Check if mocking is enabled - if so, always use llmClient regardless of model
-		response, err = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
+		response, _ = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Resolve API key here where we have the correct execution context
 		apiKey, geminiErr = geminiconfig.ResolveAPIKey()

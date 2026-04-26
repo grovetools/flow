@@ -14,9 +14,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// jobFilePattern matches job files like 01-job-name.md or 100-job-name.md
-var jobFilePattern = regexp.MustCompile(`^\d+-.*\.md$`)
-
 // LoadPlan loads all jobs from a plan directory.
 func LoadPlan(dir string) (*Plan, error) {
 	// Check if directory exists

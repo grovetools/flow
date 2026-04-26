@@ -36,7 +36,7 @@ var BriefingFilesScenario = harness.NewScenario(
 		harness.NewStep("Create oneshot job with prepend_dependencies=true", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			// Init plan
-			ctx.Bin("plan", "init", "briefing-plan").Dir(projectDir).Run().AssertSuccess()
+			_ = ctx.Bin("plan", "init", "briefing-plan").Dir(projectDir).Run().AssertSuccess()
 
 			// Create dependency file
 			planPath := filepath.Join(ctx.GetString("notebooks_root"), "workspaces", "briefing-project", "plans", "briefing-plan")
@@ -198,13 +198,13 @@ var BriefingFilesScenario = harness.NewScenario(
 		harness.NewStep("Create and run chat job", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			chatsDir := filepath.Join(ctx.GetString("notebooks_root"), "workspaces", "briefing-project", "chats")
-			fs.CreateDir(chatsDir)
+			_ = fs.CreateDir(chatsDir)
 			chatFile := filepath.Join(chatsDir, "test-chat.md")
-			fs.WriteString(chatFile, "Initial user message.")
+			_ = fs.WriteString(chatFile, "Initial user message.")
 			ctx.Set("chat_file_path", chatFile)
 
 			// Use a non-gemini model so it uses the llm mock command
-			ctx.Bin("chat", "-s", chatFile, "--model", "claude-3-5-sonnet-20241022").Dir(projectDir).Run().AssertSuccess()
+			_ = ctx.Bin("chat", "-s", chatFile, "--model", "claude-3-5-sonnet-20241022").Dir(projectDir).Run().AssertSuccess()
 
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 			runCmd := ctx.Bin("run", "--local", chatFile)

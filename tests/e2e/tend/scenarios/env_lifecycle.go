@@ -29,7 +29,7 @@ func createMockEnvBinary(dir, name string, response env.EnvResponse) (string, er
 
 	binaryPath := filepath.Join(binDir, fmt.Sprintf("grove-env-%s", name))
 	script := fmt.Sprintf("#!/bin/sh\ncat /dev/stdin > /dev/null\necho '%s'\n", string(respBytes))
-	if err := os.WriteFile(binaryPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(binaryPath, []byte(script), 0755); err != nil { //nolint:gosec // test binary needs execute permission
 		return "", err
 	}
 

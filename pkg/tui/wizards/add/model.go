@@ -52,7 +52,6 @@ type Model struct {
 	helpModel  help.Model
 	focusIndex int
 	unfocused  bool // Track if we're in unfocused state
-	err        error
 
 	// Form inputs
 	titleInput   textinput.Model

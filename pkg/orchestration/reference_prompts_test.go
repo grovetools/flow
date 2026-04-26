@@ -20,8 +20,8 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 
 	// Change to tmp dir for relative path resolution
 	oldCwd, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	defer os.Chdir(oldCwd)
+	_ = os.Chdir(tmpDir)
+	defer func() { _ = os.Chdir(oldCwd) }()
 
 	plan := &Plan{
 		Directory: tmpDir,
@@ -181,8 +181,8 @@ You are a test template. Your role is to process the provided files according to
 
 	// Change to tmp dir
 	oldCwd, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	defer os.Chdir(oldCwd)
+	_ = os.Chdir(tmpDir)
+	defer func() { _ = os.Chdir(oldCwd) }()
 
 	// plan := &Plan{
 	// 	Directory: tmpDir,
@@ -255,8 +255,8 @@ func TestCLIIntegration(t *testing.T) {
 func TestEdgeCases(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldCwd, _ := os.Getwd()
-	os.Chdir(tmpDir)
-	defer os.Chdir(oldCwd)
+	_ = os.Chdir(tmpDir)
+	defer func() { _ = os.Chdir(oldCwd) }()
 
 	plan := &Plan{
 		Directory: tmpDir,
@@ -290,7 +290,7 @@ func TestEdgeCases(t *testing.T) {
 		os.WriteFile(realFile, []byte("package real"), 0644)
 
 		symlinkFile := filepath.Join(tmpDir, "link.go")
-		os.Symlink(realFile, symlinkFile)
+		_ = os.Symlink(realFile, symlinkFile)
 
 		job := &Job{
 			Include:    []string{"link.go"},
