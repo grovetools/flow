@@ -78,7 +78,7 @@ func NewWorktreeManager(baseDir string, gitClient GitClient, logger Logger) (*Wo
 	}
 
 	// Create base directory if needed
-	if err := os.MkdirAll(baseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating base directory: %w", err)
 	}
 
@@ -298,7 +298,7 @@ func (wm *WorktreeManager) LockWorktree(name string, jobID string) error {
 
 	// Write lock file
 	content := fmt.Sprintf("%s\n%d\n%s", lock.JobID, lock.PID, lock.LockedAt.Format(time.RFC3339))
-	if err := os.WriteFile(lockPath, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(lockPath, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("writing lock file: %w", err)
 	}
 

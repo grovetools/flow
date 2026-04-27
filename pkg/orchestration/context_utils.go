@@ -196,7 +196,7 @@ func ResolveLogDirectory(plan *Plan, job *Job) string {
 				logDir = filepath.Join(ctxDir, "logs", plan.Name)
 			}
 		}
-		if err := os.MkdirAll(logDir, 0755); err == nil {
+		if err := os.MkdirAll(logDir, 0o755); err == nil {
 			return logDir
 		}
 	}

@@ -812,7 +812,7 @@ func AddJobsFromRecipe(plan *Plan, recipe *Recipe, externalDeps []string, templa
 		}
 
 		// Write to disk
-		if err := os.WriteFile(newJob.FilePath, content, 0600); err != nil {
+		if err := os.WriteFile(newJob.FilePath, content, 0o600); err != nil {
 			return nil, fmt.Errorf("writing job file %s: %w", newJob.FilePath, err)
 		}
 

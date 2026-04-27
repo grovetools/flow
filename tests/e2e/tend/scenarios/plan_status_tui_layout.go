@@ -79,7 +79,7 @@ func launchTUIForLayoutTest(ctx *harness.Context) error {
 	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
 		return fmt.Errorf("failed to create wrapper script: %w", err)
 	}
-	if err := os.Chmod(wrapperScript, 0755); err != nil {
+	if err := os.Chmod(wrapperScript, 0o755); err != nil {
 		return fmt.Errorf("failed to make wrapper script executable: %w", err)
 	}
 
@@ -317,7 +317,7 @@ func verifyLongNamesNotTruncated(ctx *harness.Context) error {
 	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
 		return fmt.Errorf("failed to create wrapper script: %w", err)
 	}
-	if err := os.Chmod(wrapperScript, 0755); err != nil {
+	if err := os.Chmod(wrapperScript, 0o755); err != nil {
 		return fmt.Errorf("failed to make wrapper script executable: %w", err)
 	}
 

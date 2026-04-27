@@ -154,7 +154,6 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 				}
 				cmd := tmux.Command("kill-window", "-t", targetWindow)
 				err := cmd.Run()
-
 				if err != nil {
 					listCmd := tmux.Command("list-windows", "-t", sessionName, "-F", "#{window_name}")
 					output, listErr := listCmd.Output()
@@ -255,7 +254,7 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 			noteDir := filepath.Dir(job.NoteRef)
 			parentDir := filepath.Dir(noteDir)
 			completedDir := filepath.Join(parentDir, "completed")
-			if err := os.MkdirAll(completedDir, 0755); err == nil {
+			if err := os.MkdirAll(completedDir, 0o755); err == nil {
 				dest := filepath.Join(completedDir, filepath.Base(job.NoteRef))
 				if err := os.Rename(job.NoteRef, dest); err == nil {
 					if !silent {

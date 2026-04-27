@@ -153,7 +153,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				configPath := filepath.Join(plan.Directory, ".grove-plan.yml")
 				data, err := yaml.Marshal(plan.Config)
 				if err == nil {
-					_ = os.WriteFile(configPath, data, 0600)
+					_ = os.WriteFile(configPath, data, 0o600)
 				}
 				m.plans[m.editPlanIndex].Notes = newNotes
 			}
@@ -356,7 +356,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			configPath := filepath.Join(plan.Directory, ".grove-plan.yml")
 			if data, err := yaml.Marshal(plan.Config); err == nil {
-				if werr := os.WriteFile(configPath, data, 0600); werr != nil {
+				if werr := os.WriteFile(configPath, data, 0o600); werr != nil {
 					m.statusMessage = fmt.Sprintf("Failed to update plan: %v", werr)
 				} else {
 					m.statusMessage = fmt.Sprintf("Plan '%s' %s hold", selectedPlan.Name, action)

@@ -148,7 +148,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 	if job != nil && plan != nil {
 		logDir := ResolveLogDirectory(plan, job)
 		promptLogDir := filepath.Join(logDir, "prompts")
-		if err := os.MkdirAll(promptLogDir, 0755); err != nil {
+		if err := os.MkdirAll(promptLogDir, 0o755); err != nil {
 			ulog.Warn("Could not create prompt log directory").
 				Err(err).
 				Log(ctx)
@@ -159,7 +159,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 			logFilePath := filepath.Join(promptLogDir, logFileName)
 
 			// Write the full prompt to the file
-			if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0600); err != nil {
+			if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0o600); err != nil {
 				ulog.Warn("Could not write prompt log file").
 					Err(err).
 					Field("request_id", requestID).

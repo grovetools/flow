@@ -109,10 +109,12 @@ func (p *statusPage) IsTextEntryActive() bool {
 }
 
 // Compile-time checks.
-var _ pager.Page = (*statusPage)(nil)
-var _ pager.PageWithTitle = (*statusPage)(nil)
-var _ pager.PageWithEnabled = (*statusPage)(nil)
-var _ pager.PageWithTextInput = (*statusPage)(nil)
+var (
+	_ pager.Page              = (*statusPage)(nil)
+	_ pager.PageWithTitle     = (*statusPage)(nil)
+	_ pager.PageWithEnabled   = (*statusPage)(nil)
+	_ pager.PageWithTextInput = (*statusPage)(nil)
+)
 
 // ---------- addJobPage (tab 1: Add Job) ----------
 
@@ -198,12 +200,14 @@ func (p *addJobPage) Footer() string {
 	return p.s.wizardModel.FooterView()
 }
 
-var _ pager.Page = (*addJobPage)(nil)
-var _ pager.PageWithTitle = (*addJobPage)(nil)
-var _ pager.PageWithEnabled = (*addJobPage)(nil)
-var _ pager.PageWithReady = (*addJobPage)(nil)
-var _ pager.PageWithTextInput = (*addJobPage)(nil)
-var _ pager.PageWithFooter = (*addJobPage)(nil)
+var (
+	_ pager.Page              = (*addJobPage)(nil)
+	_ pager.PageWithTitle     = (*addJobPage)(nil)
+	_ pager.PageWithEnabled   = (*addJobPage)(nil)
+	_ pager.PageWithReady     = (*addJobPage)(nil)
+	_ pager.PageWithTextInput = (*addJobPage)(nil)
+	_ pager.PageWithFooter    = (*addJobPage)(nil)
+)
 
 // ---------- plansPage (tab 2: Plans) ----------
 
@@ -269,9 +273,11 @@ func (p *plansPage) Footer() string {
 	return p.s.browserModel.Footer()
 }
 
-var _ pager.Page = (*plansPage)(nil)
-var _ pager.PageWithTitle = (*plansPage)(nil)
-var _ pager.PageWithFooter = (*plansPage)(nil)
+var (
+	_ pager.Page           = (*plansPage)(nil)
+	_ pager.PageWithTitle  = (*plansPage)(nil)
+	_ pager.PageWithFooter = (*plansPage)(nil)
+)
 
 // ---------- addPlanPage (tab 3: Add Plan) ----------
 
@@ -354,11 +360,13 @@ func (p *addPlanPage) Footer() string {
 	return p.s.initWizardModel.FooterView()
 }
 
-var _ pager.Page = (*addPlanPage)(nil)
-var _ pager.PageWithTitle = (*addPlanPage)(nil)
-var _ pager.PageWithReady = (*addPlanPage)(nil)
-var _ pager.PageWithTextInput = (*addPlanPage)(nil)
-var _ pager.PageWithFooter = (*addPlanPage)(nil)
+var (
+	_ pager.Page              = (*addPlanPage)(nil)
+	_ pager.PageWithTitle     = (*addPlanPage)(nil)
+	_ pager.PageWithReady     = (*addPlanPage)(nil)
+	_ pager.PageWithTextInput = (*addPlanPage)(nil)
+	_ pager.PageWithFooter    = (*addPlanPage)(nil)
+)
 
 // ---------- finishPlanPage (tab 4: Finish Plan) ----------
 
@@ -441,8 +449,10 @@ func (p *finishPlanPage) Footer() string {
 	return p.s.finishWizardModel.FooterView()
 }
 
-var _ pager.Page = (*finishPlanPage)(nil)
-var _ pager.PageWithTitle = (*finishPlanPage)(nil)
-var _ pager.PageWithEnabled = (*finishPlanPage)(nil)
-var _ pager.PageWithReady = (*finishPlanPage)(nil)
-var _ pager.PageWithFooter = (*finishPlanPage)(nil)
+var (
+	_ pager.Page            = (*finishPlanPage)(nil)
+	_ pager.PageWithTitle   = (*finishPlanPage)(nil)
+	_ pager.PageWithEnabled = (*finishPlanPage)(nil)
+	_ pager.PageWithReady   = (*finishPlanPage)(nil)
+	_ pager.PageWithFooter  = (*finishPlanPage)(nil)
+)

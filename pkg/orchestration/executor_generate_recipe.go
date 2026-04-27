@@ -178,7 +178,7 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 	content = append(content, []byte(outputSection)...)
 
 	// Write back
-	if err := os.WriteFile(job.FilePath, content, 0600); err != nil {
+	if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
 		return fmt.Errorf("writing job file with output: %w", err)
 	}
 
@@ -279,7 +279,7 @@ func (e *GenerateRecipeExecutor) createRecipeFiles(recipeName string, response s
 	recipePath := filepath.Join(homeDir, ".config", "grove", "recipes", recipeName)
 
 	// Create recipe directory
-	if err := os.MkdirAll(recipePath, 0755); err != nil {
+	if err := os.MkdirAll(recipePath, 0o755); err != nil {
 		return "", fmt.Errorf("creating recipe directory: %w", err)
 	}
 
@@ -292,7 +292,7 @@ func (e *GenerateRecipeExecutor) createRecipeFiles(recipeName string, response s
 	// Write each file
 	for filename, content := range files {
 		filePath := filepath.Join(recipePath, filename)
-		if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
+		if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
 			return "", fmt.Errorf("writing file %s: %w", filename, err)
 		}
 	}

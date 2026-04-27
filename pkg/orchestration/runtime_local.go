@@ -143,7 +143,7 @@ func (r *LocalRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) err
 		return fmt.Errorf("failed to get log path: %w", err)
 	}
 
-	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

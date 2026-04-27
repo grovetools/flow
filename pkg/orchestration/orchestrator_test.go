@@ -44,7 +44,7 @@ func createTempJobFile(t *testing.T, dir, filename string, jobType JobType, stat
 	t.Helper()
 	fp := filepath.Join(dir, filename)
 	content := fmt.Sprintf("---\ntitle: %s\ntype: %s\nstatus: %s\n---\n\nTest job\n", filename, jobType, status)
-	if err := os.WriteFile(fp, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(fp, []byte(content), 0o600); err != nil {
 		t.Fatalf("Failed to create temp job file %s: %v", fp, err)
 	}
 	return fp
@@ -58,7 +58,7 @@ func updateJobFileStatus(t *testing.T, filePath string, newStatus JobStatus) {
 		t.Fatalf("Failed to read job file: %v", err)
 	}
 	updated := strings.Replace(string(content), "status: running", "status: "+string(newStatus), 1)
-	if err := os.WriteFile(filePath, []byte(updated), 0600); err != nil {
+	if err := os.WriteFile(filePath, []byte(updated), 0o600); err != nil {
 		t.Fatalf("Failed to write job file: %v", err)
 	}
 }
@@ -558,7 +558,6 @@ func TestOrchestrator_RunAll_InteractiveJobDoesNotTimeout(t *testing.T) {
 
 	ctx := context.Background()
 	err = orch.RunAll(ctx)
-
 	if err != nil {
 		if strings.Contains(err.Error(), "maximum consecutive step limit") {
 			t.Errorf("RunAll should NOT hit step limit while waiting for interactive jobs, but got: %v", err)

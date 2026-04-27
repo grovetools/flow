@@ -149,7 +149,7 @@ This is a test specification for integration testing.
 3. Build UI components`
 
 	specPath := filepath.Join(tmpDir, "spec.md")
-	err := os.WriteFile(specPath, []byte(specContent), 0600)
+	err := os.WriteFile(specPath, []byte(specContent), 0o600)
 	require.NoError(t, err)
 
 	// Initialize plan
@@ -272,7 +272,7 @@ depends_on: %s
 Test job %s`, job.id, job.id, formatDeps(job.deps), job.id)
 
 				filename := fmt.Sprintf("%02d-job-%s.md", i+1, job.id)
-				err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0600)
+				err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0o600)
 				require.NoError(t, err)
 			}
 
@@ -349,7 +349,7 @@ type: oneshot
 Test prompt`
 
 	jobPath := filepath.Join(tmpDir, "01-test.md")
-	err := os.WriteFile(jobPath, []byte(jobContent), 0600)
+	err := os.WriteFile(jobPath, []byte(jobContent), 0o600)
 	require.NoError(t, err)
 
 	// Load job
@@ -397,7 +397,7 @@ type: oneshot
 Test job %d`, i, i, i)
 
 		filename := fmt.Sprintf("%02d-job.md", i)
-		err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0600)
+		err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0o600)
 		require.NoError(t, err)
 	}
 
@@ -504,7 +504,7 @@ output:
   type: file
 ---
 Design the API structure for the feature.`
-	err := os.WriteFile(filepath.Join(dir, "02-design-api.md"), []byte(content), 0600)
+	err := os.WriteFile(filepath.Join(dir, "02-design-api.md"), []byte(content), 0o600)
 	require.NoError(t, err)
 
 	// 03-implement-backend.md
@@ -520,7 +520,7 @@ output:
   type: commit
 ---
 Implement the backend based on the API design.`
-	err = os.WriteFile(filepath.Join(dir, "03-implement-backend.md"), []byte(content), 0600)
+	err = os.WriteFile(filepath.Join(dir, "03-implement-backend.md"), []byte(content), 0o600)
 	require.NoError(t, err)
 
 	// 04-implement-frontend.md
@@ -536,7 +536,7 @@ output:
   type: commit
 ---
 Implement the frontend based on the API design.`
-	err = os.WriteFile(filepath.Join(dir, "04-implement-frontend.md"), []byte(content), 0600)
+	err = os.WriteFile(filepath.Join(dir, "04-implement-frontend.md"), []byte(content), 0o600)
 	require.NoError(t, err)
 }
 

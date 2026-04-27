@@ -224,7 +224,7 @@ func TestRemoveWorktree(t *testing.T) {
 	wm, _ := NewWorktreeManager(dir, gitClient, logger)
 
 	// Create lock directory
-	if err := os.MkdirAll(filepath.Join(dir, ".locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".locks"), 0o755); err != nil {
 		t.Fatalf("failed to create locks dir: %v", err)
 	}
 
@@ -247,7 +247,7 @@ func TestLockManagement(t *testing.T) {
 	wm, _ := NewWorktreeManager(dir, gitClient, logger)
 
 	// Create lock directory
-	if err := os.MkdirAll(filepath.Join(dir, ".locks"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ".locks"), 0o755); err != nil {
 		t.Fatalf("failed to create locks dir: %v", err)
 	}
 
@@ -290,7 +290,7 @@ func TestCleanupStaleWorktrees(t *testing.T) {
 
 	// Create old worktree directory
 	oldWT := filepath.Join(dir, "old-wt")
-	if err := os.MkdirAll(oldWT, 0755); err != nil {
+	if err := os.MkdirAll(oldWT, 0o755); err != nil {
 		t.Fatalf("failed to create worktree dir: %v", err)
 	}
 

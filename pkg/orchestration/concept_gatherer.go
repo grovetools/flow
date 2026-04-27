@@ -180,12 +180,12 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 
 	// 5. Write to artifact file
 	artifactsDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
-	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create artifacts directory: %w", err)
 	}
 
 	conceptContextFile := filepath.Join(artifactsDir, "aggregated-concepts.md")
-	if err := os.WriteFile(conceptContextFile, []byte(conceptBuilder.String()), 0600); err != nil {
+	if err := os.WriteFile(conceptContextFile, []byte(conceptBuilder.String()), 0o600); err != nil {
 		return "", fmt.Errorf("failed to write aggregated concepts file: %w", err)
 	}
 

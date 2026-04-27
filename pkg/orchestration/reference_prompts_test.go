@@ -13,12 +13,12 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 
 	// Create test source files
 	file1 := filepath.Join(tmpDir, "file1.go")
-	if err := os.WriteFile(file1, []byte("package main\n\nfunc main() {}"), 0600); err != nil {
+	if err := os.WriteFile(file1, []byte("package main\n\nfunc main() {}"), 0o600); err != nil {
 		t.Fatalf("failed to write file1: %v", err)
 	}
 
 	file2 := filepath.Join(tmpDir, "file2.go")
-	if err := os.WriteFile(file2, []byte("package main\n\nfunc helper() {}"), 0600); err != nil {
+	if err := os.WriteFile(file2, []byte("package main\n\nfunc helper() {}"), 0o600); err != nil {
 		t.Fatalf("failed to write file2: %v", err)
 	}
 
@@ -70,7 +70,6 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		prompt, _, _, err := executor.buildPrompt(job, plan, "")
-
 		// The test might fail if the template doesn't exist, but we can verify
 		// that it's attempting to use the reference-based path
 		if err != nil {
@@ -135,7 +134,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			filename := filepath.Join(tmpDir, strings.ReplaceAll("file_{{i}}.go", "{{i}}", string(rune('0'+i))))
 			content := strings.ReplaceAll("package main\n\n// File {{i}}", "{{i}}", string(rune('0'+i)))
-			if err := os.WriteFile(filename, []byte(content), 0600); err != nil {
+			if err := os.WriteFile(filename, []byte(content), 0o600); err != nil {
 				t.Fatalf("failed to write file: %v", err)
 			}
 			includeFiles = append(includeFiles, filepath.Base(filename))
@@ -173,7 +172,7 @@ func TestTemplateIntegration(t *testing.T) {
 	// Create a test template directory structure
 	groveDir := filepath.Join(tmpDir, ".grove")
 	templatesDir := filepath.Join(groveDir, "templates")
-	if err := os.MkdirAll(templatesDir, 0755); err != nil {
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
 		t.Fatalf("failed to create templates dir: %v", err)
 	}
 
@@ -185,7 +184,7 @@ model: test-model
 ---
 
 You are a test template. Your role is to process the provided files according to the instructions.`
-	if err := os.WriteFile(templatePath, []byte(templateContent), 0600); err != nil {
+	if err := os.WriteFile(templatePath, []byte(templateContent), 0o600); err != nil {
 		t.Fatalf("failed to write template: %v", err)
 	}
 
@@ -200,7 +199,7 @@ You are a test template. Your role is to process the provided files according to
 
 	t.Run("load_custom_template", func(t *testing.T) {
 		// Create include file
-		if err := os.WriteFile("test.go", []byte("package test"), 0600); err != nil {
+		if err := os.WriteFile("test.go", []byte("package test"), 0o600); err != nil {
 			t.Fatalf("failed to write test.go: %v", err)
 		}
 
@@ -278,7 +277,7 @@ func TestEdgeCases(t *testing.T) {
 		// Create a binary file
 		binaryFile := filepath.Join(tmpDir, "binary.dat")
 		binaryContent := []byte{0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD}
-		if err := os.WriteFile(binaryFile, binaryContent, 0600); err != nil {
+		if err := os.WriteFile(binaryFile, binaryContent, 0o600); err != nil {
 			t.Fatalf("failed to write binary file: %v", err)
 		}
 
@@ -301,7 +300,7 @@ func TestEdgeCases(t *testing.T) {
 	t.Run("symlink_handling", func(t *testing.T) {
 		// Create a file and a symlink to it
 		realFile := filepath.Join(tmpDir, "real.go")
-		if err := os.WriteFile(realFile, []byte("package real"), 0600); err != nil {
+		if err := os.WriteFile(realFile, []byte("package real"), 0o600); err != nil {
 			t.Fatalf("failed to write real.go: %v", err)
 		}
 
@@ -327,7 +326,7 @@ func TestEdgeCases(t *testing.T) {
 		// Create a file with a very long name
 		longName := strings.Repeat("a", 200) + ".go"
 		longFile := filepath.Join(tmpDir, longName)
-		if err := os.WriteFile(longFile, []byte("package long"), 0600); err != nil {
+		if err := os.WriteFile(longFile, []byte("package long"), 0o600); err != nil {
 			t.Fatalf("failed to write long file: %v", err)
 		}
 

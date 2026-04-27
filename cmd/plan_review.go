@@ -141,7 +141,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal plan config: %w", err)
 	}
-	if err := os.WriteFile(configPath, yamlData, 0600); err != nil {
+	if err := os.WriteFile(configPath, yamlData, 0o600); err != nil {
 		return fmt.Errorf("failed to write updated plan config: %w", err)
 	}
 

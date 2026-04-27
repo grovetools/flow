@@ -95,7 +95,7 @@ func RunPlanGraph(cmd *PlanGraphCmd) error {
 
 	// Write output
 	if cmd.Output != "" {
-		if err := os.WriteFile(cmd.Output, []byte(output), 0600); err != nil {
+		if err := os.WriteFile(cmd.Output, []byte(output), 0o600); err != nil {
 			return fmt.Errorf("failed to write output file: %w", err)
 		}
 		fmt.Printf("Graph written to %s\n", cmd.Output)

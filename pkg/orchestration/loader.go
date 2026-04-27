@@ -327,7 +327,7 @@ func (p *Plan) GetJobsSortedByFilename() []*Job {
 // SavePlan saves a plan structure to disk (mainly used for tests).
 func SavePlan(dir string, plan *Plan) error {
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating plan directory: %w", err)
 	}
 
@@ -349,7 +349,7 @@ func SavePlan(dir string, plan *Plan) error {
 
 		// Write job file
 		filepath := filepath.Join(dir, job.Filename)
-		if err := os.WriteFile(filepath, content, 0600); err != nil {
+		if err := os.WriteFile(filepath, content, 0o600); err != nil {
 			return fmt.Errorf("writing job file %s: %w", job.Filename, err)
 		}
 	}

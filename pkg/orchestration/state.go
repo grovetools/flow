@@ -377,7 +377,7 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 	currentPID := os.Getpid()
 
 	// Try to create lock file exclusively
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
 			// Check if lock belongs to current process (for executor-created locks)
@@ -414,7 +414,7 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 			if isStale {
 				os.Remove(lockPath)
 				// Retry
-				file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+				file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 				if err != nil {
 					return nil, fmt.Errorf("file is locked")
 				}
@@ -450,7 +450,7 @@ func (fl *FileLock) Unlock() error {
 
 func (sp *StatePersister) writeAtomic(path string, content []byte) error {
 	// Get current file permissions if file exists
-	var perm os.FileMode = 0644
+	var perm os.FileMode = 0o644
 	if info, err := os.Stat(path); err == nil {
 		perm = info.Mode()
 	}

@@ -315,7 +315,6 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		msg := fmt.Sprintf("Error: Walk failed: %v\n", err)
 		fmt.Fprintf(os.Stderr, "%s", msg)

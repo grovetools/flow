@@ -26,7 +26,7 @@ var ConceptGatheringScenario = harness.NewScenario(
 
 			// Create first concept: api-design
 			apiDesignDir := filepath.Join(conceptsDir, "api-design")
-			if err := os.MkdirAll(apiDesignDir, 0755); err != nil {
+			if err := os.MkdirAll(apiDesignDir, 0o755); err != nil {
 				return fmt.Errorf("creating api-design concept: %w", err)
 			}
 
@@ -70,7 +70,7 @@ This concept covers RESTful API design patterns.
 
 			// Create second concept: database-schema
 			dbSchemaDir := filepath.Join(conceptsDir, "database-schema")
-			if err := os.MkdirAll(dbSchemaDir, 0755); err != nil {
+			if err := os.MkdirAll(dbSchemaDir, 0o755); err != nil {
 				return fmt.Errorf("creating database-schema concept: %w", err)
 			}
 
@@ -102,7 +102,7 @@ This concept covers database design principles.
 
 			// Create context rules
 			rulesDir := filepath.Join(projectDir, ".grove")
-			if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 				return err
 			}
 			if err := fs.WriteString(filepath.Join(rulesDir, "rules"), "*.go\n"); err != nil {
@@ -225,7 +225,7 @@ var ConceptGatheringWithNotesScenario = harness.NewScenario(
 
 			// Create inbox note first
 			inboxDir := filepath.Join(notebooksRoot, "workspaces", "gather-notes-project", "inbox")
-			if err := os.MkdirAll(inboxDir, 0755); err != nil {
+			if err := os.MkdirAll(inboxDir, 0o755); err != nil {
 				return err
 			}
 			noteContent := `---
@@ -246,7 +246,7 @@ Key implementation details for the architecture concept.
 			// Create concept with related note
 			conceptsDir := filepath.Join(notebooksRoot, "workspaces", "gather-notes-project", "concepts")
 			conceptDir := filepath.Join(conceptsDir, "architecture")
-			if err := os.MkdirAll(conceptDir, 0755); err != nil {
+			if err := os.MkdirAll(conceptDir, 0o755); err != nil {
 				return err
 			}
 
@@ -290,7 +290,7 @@ High-level architecture overview.
 
 			// Create context rules
 			rulesDir := filepath.Join(projectDir, ".grove")
-			if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 				return err
 			}
 			if err := fs.WriteString(filepath.Join(rulesDir, "rules"), "*.go\n"); err != nil {

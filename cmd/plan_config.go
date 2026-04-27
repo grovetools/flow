@@ -247,7 +247,7 @@ func setConfigValues(configPath string, pairs []string) error {
 	}
 
 	// Write the file
-	if err := os.WriteFile(configPath, yamlData, 0600); err != nil {
+	if err := os.WriteFile(configPath, yamlData, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -301,7 +301,7 @@ func setConfigValues(configPath string, pairs []string) error {
 					fmt.Printf("Warning: could not update frontmatter for %s: %v\n", job.Filename, err)
 					continue
 				}
-				if err := os.WriteFile(job.FilePath, newContent, 0600); err != nil {
+				if err := os.WriteFile(job.FilePath, newContent, 0o600); err != nil {
 					fmt.Printf("Warning: could not write updated job file %s: %v\n", job.Filename, err)
 					continue
 				}

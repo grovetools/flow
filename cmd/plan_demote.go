@@ -94,7 +94,7 @@ func demoteViaRename(job *orchestration.Job) error {
 		}
 	}
 
-	if err := os.MkdirAll(inboxDir, 0755); err != nil {
+	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
 		return fmt.Errorf("creating inbox directory: %w", err)
 	}
 

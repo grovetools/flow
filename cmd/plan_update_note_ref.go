@@ -62,7 +62,7 @@ func runPlanUpdateNoteRef(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			if err := os.WriteFile(jobPath, newContent, 0600); err != nil {
+			if err := os.WriteFile(jobPath, newContent, 0o600); err != nil {
 				fmt.Printf("Warning: failed to write %s: %v\n", job.Filename, err)
 				continue
 			}

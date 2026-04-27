@@ -24,7 +24,7 @@ var RecipeConceptUpdateScenario = harness.NewScenario(
 			// Create a concept directory structure
 			conceptsDir := filepath.Join(notebooksRoot, "workspaces", "concept-project", "concepts")
 			systemArchDir := filepath.Join(conceptsDir, "system-architecture")
-			if err := os.MkdirAll(systemArchDir, 0755); err != nil {
+			if err := os.MkdirAll(systemArchDir, 0o755); err != nil {
 				return fmt.Errorf("creating concepts directory: %w", err)
 			}
 
@@ -58,7 +58,7 @@ This is the overview of our system architecture.
 
 			// Create a related note
 			inboxDir := filepath.Join(notebooksRoot, "workspaces", "concept-project", "inbox")
-			if err := os.MkdirAll(inboxDir, 0755); err != nil {
+			if err := os.MkdirAll(inboxDir, 0o755); err != nil {
 				return err
 			}
 			noteContent := `---
@@ -78,7 +78,7 @@ This note contains details about the architecture that need to be reflected in c
 
 			// Create context rules file for the project
 			rulesDir := filepath.Join(projectDir, ".grove")
-			if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 				return err
 			}
 			if err := fs.WriteString(filepath.Join(rulesDir, "rules"), "*.go\n"); err != nil {
@@ -256,7 +256,7 @@ var RecipeConceptUpdateWithPlansScenario = harness.NewScenario(
 			// Create a concept with linked plan
 			conceptsDir := filepath.Join(notebooksRoot, "workspaces", "concept-plans-project", "concepts")
 			conceptDir := filepath.Join(conceptsDir, "test-concept")
-			if err := os.MkdirAll(conceptDir, 0755); err != nil {
+			if err := os.MkdirAll(conceptDir, 0o755); err != nil {
 				return err
 			}
 
@@ -283,7 +283,7 @@ This concept is linked to a plan.
 
 			// Create a linked plan
 			planDir := filepath.Join(notebooksRoot, "workspaces", "concept-plans-project", "plans", "test-plan")
-			if err := os.MkdirAll(planDir, 0755); err != nil {
+			if err := os.MkdirAll(planDir, 0o755); err != nil {
 				return err
 			}
 			planContent := `---
@@ -298,7 +298,7 @@ This is a test plan linked to the concept.
 
 			// Create context rules
 			rulesDir := filepath.Join(projectDir, ".grove")
-			if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 				return err
 			}
 			if err := fs.WriteString(filepath.Join(rulesDir, "rules"), "*.go\n"); err != nil {

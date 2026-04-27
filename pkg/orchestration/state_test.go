@@ -53,7 +53,7 @@ func TestStatePersister_UpdateJobStatus(t *testing.T) {
 
 			// Write initial job file
 			content := createJobFile(job)
-			if err := os.WriteFile(job.FilePath, content, 0600); err != nil {
+			if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
 				t.Fatal(err)
 			}
 
@@ -101,7 +101,7 @@ func TestStatePersister_ConcurrentUpdates(t *testing.T) {
 
 	// Write initial job file
 	content := createJobFile(job)
-	if err := os.WriteFile(job.FilePath, content, 0600); err != nil {
+	if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,7 +162,7 @@ func TestStatePersister_AppendJobOutput(t *testing.T) {
 
 	// Write initial job file
 	content := createJobFile(job)
-	if err := os.WriteFile(job.FilePath, content, 0600); err != nil {
+	if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,7 +264,7 @@ func TestStatePersister_FileLocking(t *testing.T) {
 	path := filepath.Join(dir, "lock-test.md")
 
 	// Create file
-	if err := os.WriteFile(path, []byte("test"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -320,7 +320,7 @@ func TestStatePersister_ValidateJobStates(t *testing.T) {
 
 	// Write job files
 	validContent := createJobFile(validJob)
-	if err := os.WriteFile(validJob.FilePath, validContent, 0600); err != nil {
+	if err := os.WriteFile(validJob.FilePath, validContent, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -329,7 +329,7 @@ id: invalid-job
 title: "Invalid Job"
 ---
 Job content`)
-	if err := os.WriteFile(invalidJob.FilePath, invalidContent, 0600); err != nil {
+	if err := os.WriteFile(invalidJob.FilePath, invalidContent, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -374,7 +374,7 @@ func TestStatePersister_UpdateJobMetadata(t *testing.T) {
 
 	// Write initial job file
 	content := createJobFile(job)
-	if err := os.WriteFile(job.FilePath, content, 0600); err != nil {
+	if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 

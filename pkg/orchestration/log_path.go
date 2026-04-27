@@ -18,7 +18,7 @@ func GetJobLogPath(plan *Plan, job *Job) (string, error) {
 	}
 
 	jobArtifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
-	if err := os.MkdirAll(jobArtifactDir, 0755); err != nil {
+	if err := os.MkdirAll(jobArtifactDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create job artifact directory: %w", err)
 	}
 

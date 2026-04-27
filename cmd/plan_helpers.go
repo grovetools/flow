@@ -177,14 +177,14 @@ func ensureRollingPlanExists(planPath string) error {
 	}
 
 	// Directory does not exist, so create it
-	if err := os.MkdirAll(planPath, 0755); err != nil {
+	if err := os.MkdirAll(planPath, 0o755); err != nil {
 		return fmt.Errorf("creating rolling plan directory: %w", err)
 	}
 
 	// Create a minimal .grove-plan.yml file
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
 	configContent := []byte("# Rolling plan - auto-created for quick tasks without a formal plan.\n")
-	if err := os.WriteFile(configPath, configContent, 0600); err != nil {
+	if err := os.WriteFile(configPath, configContent, 0o600); err != nil {
 		return fmt.Errorf("creating rolling plan .grove-plan.yml: %w", err)
 	}
 

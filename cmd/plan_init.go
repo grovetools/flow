@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,10 +12,7 @@ import (
 	"sort"
 	"strings"
 	"text/template"
-
 	"time"
-
-	"encoding/json"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
@@ -1243,7 +1241,7 @@ func createWorktreeIfRequested(worktreeName string, repos []string, workspacePat
 // setWorktreeActivePlan writes a state file within a worktree to set the active plan.
 func setWorktreeActivePlan(worktreePath, planName string) error {
 	groveDir := filepath.Join(worktreePath, ".grove")
-	if err := os.MkdirAll(groveDir, 0755); err != nil {
+	if err := os.MkdirAll(groveDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create .grove directory in worktree: %w", err)
 	}
 
@@ -1258,7 +1256,7 @@ func setWorktreeActivePlan(worktreePath, planName string) error {
 	}
 
 	statePath := filepath.Join(groveDir, "state.yml")
-	if err := os.WriteFile(statePath, yamlBytes, 0600); err != nil {
+	if err := os.WriteFile(statePath, yamlBytes, 0o600); err != nil {
 		return fmt.Errorf("failed to write state file in worktree: %w", err)
 	}
 
@@ -1346,14 +1344,14 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 					envContent.WriteString(fmt.Sprintf("%s=%s\n", k, existingState.EnvVars[k]))
 				}
 				envPath := filepath.Join(loadPath, ".env.local")
-				if err := os.WriteFile(envPath, []byte(envContent.String()), 0600); err != nil {
+				if err := os.WriteFile(envPath, []byte(envContent.String()), 0o600); err != nil {
 					result.WriteString(fmt.Sprintf("%s  Warning: could not write .env.local: %v\n", theme.IconWarning, err))
 				}
 			}
 
 			// Write legacy .env_state.json to plan dir for backward compat
 			stateBytes, _ := json.MarshalIndent(existingState, "", "  ")
-			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0600)
+			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0o600)
 
 			return result.String(), nil
 		}
@@ -1366,7 +1364,7 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	}
 
 	// Create state directory
-	if err := os.MkdirAll(worktreeStateDir, 0755); err != nil {
+	if err := os.MkdirAll(worktreeStateDir, 0o755); err != nil {
 		result.WriteString(fmt.Sprintf("%s  Warning: could not create .grove/env directory: %v\n", theme.IconWarning, err))
 	}
 
@@ -1442,7 +1440,7 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 			envContent.WriteString(fmt.Sprintf("%s=%s\n", k, resp.EnvVars[k]))
 		}
 		envPath := filepath.Join(loadPath, ".env.local")
-		if err := os.WriteFile(envPath, []byte(envContent.String()), 0600); err != nil {
+		if err := os.WriteFile(envPath, []byte(envContent.String()), 0o600); err != nil {
 			result.WriteString(fmt.Sprintf("%s  Warning: could not write .env.local: %v\n", theme.IconWarning, err))
 		} else {
 			result.WriteString("* Wrote environment variables to .env.local\n")
@@ -1474,8 +1472,8 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 			State:         resp.State,
 		}
 		if stateBytes, err := json.MarshalIndent(stateFile, "", "  "); err == nil {
-			_ = os.WriteFile(worktreeStatePath, stateBytes, 0600)
-			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0600)
+			_ = os.WriteFile(worktreeStatePath, stateBytes, 0o600)
+			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0o600)
 		}
 	}
 

@@ -467,7 +467,6 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 
 	jobPath := filepath.Join(plan.Directory, jobFile)
 	err := orch.RunJob(ctx, jobPath)
-
 	if err != nil {
 		ulog.Error("Job failed").
 			Field("job", job.Title).

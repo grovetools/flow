@@ -8,9 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	planActionList bool
-)
+var planActionList bool
 
 var planActionCmd = &cobra.Command{
 	Use:   "action [action-name] [plan-name]",

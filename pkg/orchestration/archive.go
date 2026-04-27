@@ -35,7 +35,7 @@ func ArchiveContextRules(job *Job, plan *Plan, usedRulesPath string) error {
 		}
 		newContent, err := UpdateFrontmatter(jobContent, updates)
 		if err == nil {
-			_ = os.WriteFile(job.FilePath, newContent, 0600)
+			_ = os.WriteFile(job.FilePath, newContent, 0o600)
 		}
 	}
 
@@ -64,12 +64,12 @@ func archiveRulesFile(plan *Plan, jobID string, filename string, usedRulesPath s
 	}
 
 	destArtifactDir := filepath.Join(plan.Directory, ".artifacts", jobID)
-	if err := os.MkdirAll(destArtifactDir, 0755); err != nil {
+	if err := os.MkdirAll(destArtifactDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create artifact directory: %w", err)
 	}
 
 	destRulesPath := filepath.Join(destArtifactDir, filename)
-	if err := os.WriteFile(destRulesPath, content, 0600); err != nil {
+	if err := os.WriteFile(destRulesPath, content, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write archived rules file: %w", err)
 	}
 
@@ -175,7 +175,7 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 		Field("dest_artifact_dir", destArtifactDir).
 		Log(ctx)
 
-	if err := os.MkdirAll(destArtifactDir, 0755); err != nil {
+	if err := os.MkdirAll(destArtifactDir, 0o755); err != nil {
 		ulog.Error("[ARCHIVE] Failed to create artifact directory").
 			Field("dest_artifact_dir", destArtifactDir).
 			Err(err).

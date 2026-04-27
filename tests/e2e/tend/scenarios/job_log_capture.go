@@ -144,7 +144,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 			}
 			ctx.Set("oneshot_job_log_path", jobLogPath)
 
-			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
 				return fmt.Errorf("creating job log file: %w", err)
 			}
@@ -253,7 +253,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 			}
 			ctx.Set("chat_job_log_path", jobLogPath)
 
-			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
 				return fmt.Errorf("creating job log file: %w", err)
 			}
@@ -337,7 +337,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 			}
 			ctx.Set("shell_job_log_path", jobLogPath)
 
-			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
 				return fmt.Errorf("creating job log file: %w", err)
 			}
@@ -397,7 +397,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 				return fmt.Errorf("failed to update frontmatter: %w", err)
 			}
 
-			if err := os.WriteFile(shellJobPath, newContent, 0600); err != nil {
+			if err := os.WriteFile(shellJobPath, newContent, 0o600); err != nil {
 				return fmt.Errorf("failed to write job file: %w", err)
 			}
 
@@ -458,7 +458,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 				return fmt.Errorf("failed to rebuild markdown: %w", err)
 			}
 
-			if err := os.WriteFile(chatJobPath, newContent, 0600); err != nil {
+			if err := os.WriteFile(chatJobPath, newContent, 0o600); err != nil {
 				return fmt.Errorf("failed to write job file: %w", err)
 			}
 

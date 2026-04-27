@@ -74,7 +74,7 @@ func setupXMLRulesInheritancePlan(ctx *harness.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to update frontmatter: %w", err)
 	}
-	if err := os.WriteFile(jobPath, newContent, 0600); err != nil {
+	if err := os.WriteFile(jobPath, newContent, 0o600); err != nil {
 		return fmt.Errorf("failed to write updated job: %w", err)
 	}
 
@@ -95,7 +95,7 @@ func launchXMLRulesInheritanceTUI(ctx *harness.Context) error {
 	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
 		return fmt.Errorf("failed to create wrapper script: %w", err)
 	}
-	if err := os.Chmod(wrapperScript, 0755); err != nil {
+	if err := os.Chmod(wrapperScript, 0o755); err != nil {
 		return fmt.Errorf("failed to make wrapper script executable: %w", err)
 	}
 

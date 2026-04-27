@@ -47,21 +47,23 @@ func sendToMsgCh(ch chan<- tea.Msg, msg tea.Msg) {
 	}
 }
 
-type RefreshMsg struct{}
-type ArchiveConfirmedMsg struct{ Job *orchestration.Job }
-type EditFileAndQuitMsg struct{ FilePath string }
-type EditFileInTmuxMsg struct{ Err error }
-type TickMsg time.Time
-type StatusUpdateMsg string
-type RefreshTickMsg time.Time
-type RenameCompleteMsg struct{ Err error }
-type UpdateDepsCompleteMsg struct{ Err error }
-type CreateJobCompleteMsg struct{ Err error }
-type recipeAddedMsg struct{ err error }
-type JobRunFinishedMsg struct {
-	Jobs []*orchestration.Job // The jobs that were executed
-	Err  error
-}
+type (
+	RefreshMsg            struct{}
+	ArchiveConfirmedMsg   struct{ Job *orchestration.Job }
+	EditFileAndQuitMsg    struct{ FilePath string }
+	EditFileInTmuxMsg     struct{ Err error }
+	TickMsg               time.Time
+	StatusUpdateMsg       string
+	RefreshTickMsg        time.Time
+	RenameCompleteMsg     struct{ Err error }
+	UpdateDepsCompleteMsg struct{ Err error }
+	CreateJobCompleteMsg  struct{ Err error }
+	recipeAddedMsg        struct{ err error }
+	JobRunFinishedMsg     struct {
+		Jobs []*orchestration.Job // The jobs that were executed
+		Err  error
+	}
+)
 type RetryLoadAgentLogsMsg struct{}
 
 type FrontmatterContentLoadedMsg struct {
@@ -510,7 +512,7 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 		}
 
 		// Open the log file in append mode for writing streamed content
-		logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		logFile, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			return LogContentLoadedMsg{Err: fmt.Errorf("failed to open log file: %w", err), JobID: job.ID}
 		}
@@ -781,7 +783,7 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 					}
 
 					// Open the job's log file for appending
-					logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+					logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 					if err != nil {
 						errChan <- fmt.Errorf("failed to open log file %s: %w", logFilePath, err)
 						return
@@ -929,7 +931,7 @@ func doArchiveJob(planDir string, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		// Archive the job by moving it to an archive directory
 		archiveDir := filepath.Join(planDir, ".archive")
-		if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 			return err
 		}
 
@@ -948,7 +950,7 @@ func doArchiveJobs(planDir string, jobs []*orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		// Archive the jobs by moving them to an archive directory
 		archiveDir := filepath.Join(planDir, ".archive")
-		if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 			return err
 		}
 

@@ -12,7 +12,7 @@ func TestScopeToSubProject(t *testing.T) {
 	tmpDir := t.TempDir()
 	ecoRoot := filepath.Join(tmpDir, "genohype-eco")
 	subProject := filepath.Join(ecoRoot, "genohype")
-	if err := os.MkdirAll(subProject, 0755); err != nil {
+	if err := os.MkdirAll(subProject, 0o755); err != nil {
 		t.Fatal(err)
 	}
 

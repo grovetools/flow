@@ -32,7 +32,7 @@ var OneshotWithContextScenario = harness.NewScenario(
 
 			// Create context rules file - this is critical for triggering context generation
 			rulesDir := filepath.Join(projectDir, ".grove")
-			if err := os.MkdirAll(rulesDir, 0755); err != nil {
+			if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 				return err
 			}
 			if err := fs.WriteString(filepath.Join(rulesDir, "rules"), "*.go\n"); err != nil {

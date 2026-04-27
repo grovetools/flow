@@ -571,7 +571,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(configPath, newData, 0600)
+			return os.WriteFile(configPath, newData, 0o600)
 		},
 	}
 
@@ -970,7 +970,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				plansParentDir := filepath.Dir(planPath)
 				planName := filepath.Base(planPath)
 				archiveDir := filepath.Join(plansParentDir, ".archive")
-				if err := os.MkdirAll(archiveDir, 0755); err != nil {
+				if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create archive directory: %w", err)
 				}
 				archivePath := filepath.Join(archiveDir, planName)

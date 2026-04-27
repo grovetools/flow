@@ -109,7 +109,7 @@ func launchStatusTUIAndVerify(ctx *harness.Context) error {
 	if err := fs.WriteString(wrapperScript, scriptContent); err != nil {
 		return fmt.Errorf("failed to create wrapper script: %w", err)
 	}
-	if err := os.Chmod(wrapperScript, 0755); err != nil {
+	if err := os.Chmod(wrapperScript, 0o755); err != nil {
 		return fmt.Errorf("failed to make wrapper script executable: %w", err)
 	}
 
@@ -183,7 +183,6 @@ func verifySplitScreenLogs(ctx *harness.Context) error {
 	// The log viewer should be visible (either showing content or initializing)
 	// We just verify the split-screen layout is active
 	return nil
-
 }
 
 // markFirstJobCompleted sends the 'c' key to mark the first job as completed.

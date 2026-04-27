@@ -25,7 +25,7 @@ func TestOneShotExecutor_Execute(t *testing.T) {
 	// Create spec file
 	specPath := filepath.Join(tmpDir, "spec.md")
 	specContent := "# Test Specification\n\nImplement feature X."
-	if err := os.WriteFile(specPath, []byte(specContent), 0600); err != nil {
+	if err := os.WriteFile(specPath, []byte(specContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -43,7 +43,7 @@ output:
 Create a plan based on the spec.`
 
 	jobPath := filepath.Join(tmpDir, "01-test-job.md")
-	if err := os.WriteFile(jobPath, []byte(jobContent), 0600); err != nil {
+	if err := os.WriteFile(jobPath, []byte(jobContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -89,12 +89,12 @@ func TestOneShotExecutor_BuildPrompt(t *testing.T) {
 
 	// Create test files
 	spec1 := filepath.Join(tmpDir, "spec1.md")
-	if err := os.WriteFile(spec1, []byte("Spec 1 content"), 0600); err != nil {
+	if err := os.WriteFile(spec1, []byte("Spec 1 content"), 0o600); err != nil {
 		t.Fatalf("failed to write spec1: %v", err)
 	}
 
 	spec2 := filepath.Join(tmpDir, "spec2.md")
-	if err := os.WriteFile(spec2, []byte("Spec 2 content"), 0600); err != nil {
+	if err := os.WriteFile(spec2, []byte("Spec 2 content"), 0o600); err != nil {
 		t.Fatalf("failed to write spec2: %v", err)
 	}
 
@@ -130,12 +130,12 @@ func TestOneShotExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
 
 	// Create test source files
 	file1 := filepath.Join(tmpDir, "file1.go")
-	if err := os.WriteFile(file1, []byte("package main\n\nfunc main() {}"), 0600); err != nil {
+	if err := os.WriteFile(file1, []byte("package main\n\nfunc main() {}"), 0o600); err != nil {
 		t.Fatalf("failed to write file1: %v", err)
 	}
 
 	file2 := filepath.Join(tmpDir, "file2.go")
-	if err := os.WriteFile(file2, []byte("package main\n\nfunc helper() {}"), 0600); err != nil {
+	if err := os.WriteFile(file2, []byte("package main\n\nfunc helper() {}"), 0o600); err != nil {
 		t.Fatalf("failed to write file2: %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestMockLLMClientFile(t *testing.T) {
 	// Create mock response file
 	mockFile := filepath.Join(tmpDir, "mock_response.txt")
 	mockContent := "This is a mock response"
-	if err := os.WriteFile(mockFile, []byte(mockContent), 0600); err != nil {
+	if err := os.WriteFile(mockFile, []byte(mockContent), 0o600); err != nil {
 		t.Fatalf("failed to write mock file: %v", err)
 	}
 
@@ -235,7 +235,7 @@ depends_on:
 ---
 Implement the second part.`
 
-	if err := os.WriteFile(mockFile, []byte(mockContent), 0600); err != nil {
+	if err := os.WriteFile(mockFile, []byte(mockContent), 0o600); err != nil {
 		t.Fatalf("failed to write mock file: %v", err)
 	}
 
@@ -536,7 +536,7 @@ include:
   - missing.md
 ---
 Body`
-				_ = os.WriteFile(jobPath, []byte(jobContent), 0600)
+				_ = os.WriteFile(jobPath, []byte(jobContent), 0o600)
 				job, _ := LoadJob(jobPath)
 				job.FilePath = jobPath
 				plan := &Plan{Directory: tmpDir}
@@ -556,7 +556,7 @@ status: pending
 type: oneshot
 ---
 Body`
-				_ = os.WriteFile(jobPath, []byte(jobContent), 0600)
+				_ = os.WriteFile(jobPath, []byte(jobContent), 0o600)
 				job, _ := LoadJob(jobPath)
 				job.FilePath = jobPath
 				job.PromptBody = strings.Repeat("x", 200) // Exceeds test limit

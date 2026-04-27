@@ -18,7 +18,7 @@ import (
 // plugin. It reads JSON from stdin and writes a fixed EnvResponse to stdout.
 func createMockEnvBinary(dir, name string, response env.EnvResponse) (string, error) {
 	binDir := filepath.Join(dir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return "", err
 	}
 
@@ -29,7 +29,7 @@ func createMockEnvBinary(dir, name string, response env.EnvResponse) (string, er
 
 	binaryPath := filepath.Join(binDir, fmt.Sprintf("grove-env-%s", name))
 	script := fmt.Sprintf("#!/bin/sh\ncat /dev/stdin > /dev/null\necho '%s'\n", string(respBytes))
-	if err := os.WriteFile(binaryPath, []byte(script), 0755); err != nil { //nolint:gosec // test binary needs execute permission
+	if err := os.WriteFile(binaryPath, []byte(script), 0o755); err != nil { //nolint:gosec // test binary needs execute permission
 		return "", err
 	}
 

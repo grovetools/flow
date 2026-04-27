@@ -44,7 +44,7 @@ func setupRulesArchivingEnv(ctx *harness.Context) error {
 
 	// Create context rules file in .grove/
 	rulesDir := filepath.Join(projectDir, ".grove")
-	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
 		return err
 	}
 	if err := fs.WriteString(filepath.Join(rulesDir, "rules"), "*.go\n"); err != nil {
@@ -111,7 +111,7 @@ func injectRulesFileIntoJob(ctx *harness.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to update frontmatter: %w", err)
 	}
-	if err := os.WriteFile(jobPath, newContent, 0600); err != nil {
+	if err := os.WriteFile(jobPath, newContent, 0o600); err != nil {
 		return fmt.Errorf("failed to write updated job file: %w", err)
 	}
 

@@ -45,7 +45,7 @@ type: oneshot
 
 This is a test job.
 `
-	err = os.WriteFile(filepath.Join(planDir, "01-test.md"), []byte(jobContent), 0600)
+	err = os.WriteFile(filepath.Join(planDir, "01-test.md"), []byte(jobContent), 0o600)
 	require.NoError(t, err)
 
 	// Test 1: Check --json flag
@@ -98,7 +98,7 @@ prompt: "exit 1"
 
 This job will fail.
 `
-		err = os.WriteFile(filepath.Join(failDir, "01-failing-job.md"), []byte(failJobContent), 0600)
+		err = os.WriteFile(filepath.Join(failDir, "01-failing-job.md"), []byte(failJobContent), 0o600)
 		require.NoError(t, err)
 
 		// Create a successful job
@@ -112,7 +112,7 @@ prompt: "echo success"
 
 This job will succeed.
 `
-		err = os.WriteFile(filepath.Join(failDir, "02-successful-job.md"), []byte(successJobContent), 0600)
+		err = os.WriteFile(filepath.Join(failDir, "02-successful-job.md"), []byte(successJobContent), 0o600)
 		require.NoError(t, err)
 
 		// Run the plan (expect failure)

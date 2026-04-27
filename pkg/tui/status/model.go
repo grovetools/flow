@@ -827,7 +827,6 @@ func (m Model) renderAgentInputBox(rightAligned bool) string {
 
 // renderFooter renders the help and status message footer.
 func (m Model) renderFooter() string {
-
 	helpView := m.Help.View()
 	followStatus := ""
 	if m.ShowLogs {

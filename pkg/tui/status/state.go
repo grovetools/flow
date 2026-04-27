@@ -17,7 +17,7 @@ type tuiState struct {
 // getStateFilePath returns the path to the TUI state file.
 func getStateFilePath() (string, error) {
 	stateDir := filepath.Join(paths.StateDir(), "flow")
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return "", err
 	}
 	return filepath.Join(stateDir, "status-tui-state.json"), nil
@@ -94,5 +94,5 @@ func saveState(visibility map[string]bool, logSplitVertical bool) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	return os.WriteFile(path, data, 0o600)
 }

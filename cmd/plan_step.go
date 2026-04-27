@@ -220,7 +220,7 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 					continue
 				}
 
-				if err := os.WriteFile(jobToSkip.FilePath, newContent, 0600); err != nil {
+				if err := os.WriteFile(jobToSkip.FilePath, newContent, 0o600); err != nil {
 					fmt.Printf("%s Error writing job file: %v\n", color.RedString("x"), err)
 					continue
 				}

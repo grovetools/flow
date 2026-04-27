@@ -10,12 +10,12 @@ import (
 func TestArchiveContextRules_Success(t *testing.T) {
 	dir := t.TempDir()
 	planDir := filepath.Join(dir, "plan")
-	_ = os.MkdirAll(planDir, 0755)
+	_ = os.MkdirAll(planDir, 0o755)
 
 	// Create source rules file
 	rulesContent := "# My Rules\ninclude: **/*.go\nexclude: vendor/\n"
 	rulesPath := filepath.Join(dir, "custom.rules")
-	if err := os.WriteFile(rulesPath, []byte(rulesContent), 0600); err != nil {
+	if err := os.WriteFile(rulesPath, []byte(rulesContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -29,7 +29,7 @@ type: oneshot
 ---
 Some body content.
 `
-	if err := os.WriteFile(jobFilePath, []byte(jobFileContent), 0600); err != nil {
+	if err := os.WriteFile(jobFilePath, []byte(jobFileContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -97,11 +97,11 @@ func TestArchiveContextRules_EmptyPath(t *testing.T) {
 func TestArchiveContextRulesForTurn_Success(t *testing.T) {
 	dir := t.TempDir()
 	planDir := filepath.Join(dir, "plan")
-	_ = os.MkdirAll(planDir, 0755)
+	_ = os.MkdirAll(planDir, 0o755)
 
 	rulesContent := "# Turn Rules\ninclude: **/*.go\n"
 	rulesPath := filepath.Join(dir, "active.rules")
-	if err := os.WriteFile(rulesPath, []byte(rulesContent), 0600); err != nil {
+	if err := os.WriteFile(rulesPath, []byte(rulesContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

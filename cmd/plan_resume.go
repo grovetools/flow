@@ -109,7 +109,6 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 
 	// Create a custom resume function that properly names the window
 	err = resumeAgentInTmux(cmd.Context(), plan, job, resumeCmdParts)
-
 	if err != nil {
 		// If launching fails, revert the status back to completed
 		_ = persister.UpdateJobStatus(job, orchestration.JobStatusCompleted)

@@ -15,7 +15,7 @@ func lockFileName(jobFilePath string) string {
 func CreateLockFile(jobFilePath string, pid int) error {
 	lockFile := lockFileName(jobFilePath)
 	content := []byte(strconv.Itoa(pid))
-	return os.WriteFile(lockFile, content, 0600)
+	return os.WriteFile(lockFile, content, 0o600)
 }
 
 // RemoveLockFile deletes a job's lock file.

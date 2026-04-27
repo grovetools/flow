@@ -98,7 +98,6 @@ func findMostRecentCodexLog(dir string) (string, error) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		return "", err
 	}

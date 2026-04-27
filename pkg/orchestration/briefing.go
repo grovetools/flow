@@ -41,7 +41,7 @@ func countLines(filePath string) (int, error) {
 // For chat jobs, turnID should be the unique turn identifier. For other jobs, pass empty string.
 func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (string, error) {
 	jobArtifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
-	if err := os.MkdirAll(jobArtifactDir, 0755); err != nil {
+	if err := os.MkdirAll(jobArtifactDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating job artifact directory: %w", err)
 	}
 
@@ -57,7 +57,7 @@ func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (str
 	briefingFilePath := filepath.Join(jobArtifactDir, briefingFilename)
 
 	// Write the file
-	if err := os.WriteFile(briefingFilePath, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(briefingFilePath, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("writing briefing file: %w", err)
 	}
 

@@ -27,7 +27,7 @@ func initRepo(t *testing.T, dir string) {
 func addFile(t *testing.T, dir, filename, content string) {
 	t.Helper()
 	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("Failed to write %s: %v", filename, err)
 	}
 	runGit(t, dir, "add", filename)
@@ -238,7 +238,7 @@ func TestRebaseWorktreeBranch(t *testing.T) {
 
 	// Create a worktree
 	worktreePath := filepath.Join(tempDir, ".grove-worktrees", "test-worktree")
-	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
 		t.Fatalf("Failed to create worktrees dir: %v", err)
 	}
 	createWorktree(t, tempDir, "test-worktree", worktreePath)

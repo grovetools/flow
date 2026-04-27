@@ -140,7 +140,7 @@ func ensureChatJob(filePath string) (*orchestration.Job, error) {
 	}
 
 	// Write the updated file
-	if err := os.WriteFile(filePath, newContent, 0600); err != nil {
+	if err := os.WriteFile(filePath, newContent, 0o600); err != nil {
 		return nil, fmt.Errorf("failed to write updated file: %w", err)
 	}
 
@@ -225,7 +225,7 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build new file content: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, newContent, 0600); err != nil {
+	if err := os.WriteFile(filePath, newContent, 0o600); err != nil {
 		return fmt.Errorf("failed to write updated file: %w", err)
 	}
 
@@ -257,7 +257,6 @@ func runChatList(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to walk chat directory %s: %w", chatDir, err)
 	}
@@ -414,7 +413,6 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return fmt.Errorf("failed to scan for runnable chats in %s: %w", chatDir, err)
 		}
@@ -511,7 +509,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			executionErrors = append(executionErrors, fmt.Errorf("%s", errorMsg))
 			continue
 		}
-		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			errorMsg := fmt.Sprintf("x Error opening log file for chat '%s': %v\n", job.Title, err)
 			fmt.Print(errorMsg)

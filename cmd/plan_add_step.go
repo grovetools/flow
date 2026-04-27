@@ -130,7 +130,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 
 	// Create plan directory if it doesn't exist
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(planPath, 0755); err != nil {
+		if err := os.MkdirAll(planPath, 0o755); err != nil {
 			return fmt.Errorf("failed to create plan directory: %w", err)
 		}
 	}
