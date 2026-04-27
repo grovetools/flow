@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	flowexec "github.com/grovetools/flow/pkg/exec"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
+	flowexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
 

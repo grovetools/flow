@@ -80,7 +80,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("failed to gather context files: %w", err)
 	}
 
@@ -155,7 +155,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		Providers           map[string]flowProviderConfig `yaml:"providers"`
 	}
 	var flowCfg flowConfig
-	coreCfg.UnmarshalExtension("flow", &flowCfg)
+	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	// Determine which provider to use (default to claude)
 	providerName := "claude"
@@ -233,8 +233,8 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 
 	// Create the isolated tmux socket name
 	socketName := TmuxSocketName(job.ID)
-	sessionName := "main"      // Simple session name since the socket is unique
-	windowName := "0"          // First window
+	sessionName := "main" // Simple session name since the socket is unique
+	windowName := "0"     // First window
 	targetPane := TmuxTargetPane(job.ID)
 
 	e.ulog.Info("Creating isolated tmux server for agent").
@@ -249,12 +249,12 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	// Create a new tmux server with a custom socket
 	// The -d flag creates the session in detached mode
 	createArgs := []string{
-		"-L", socketName,       // Use custom socket
+		"-L", socketName, // Use custom socket
 		"new-session",
-		"-d",                   // Detached
-		"-s", sessionName,      // Session name
-		"-n", windowName,       // Window name
-		"-c", workDir,          // Working directory
+		"-d",              // Detached
+		"-s", sessionName, // Session name
+		"-n", windowName, // Window name
+		"-c", workDir, // Working directory
 	}
 
 	if err := executor.Execute("tmux", createArgs...); err != nil {
@@ -348,10 +348,10 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 	logger := grovelogging.NewLogger("flow-isolated-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
-		"job_id":     job.ID,
-		"plan":       plan.Name,
-		"socket":     socketName,
-		"provider":   providerName,
+		"job_id":   job.ID,
+		"plan":     plan.Name,
+		"socket":   socketName,
+		"provider": providerName,
 	}).Debug("Starting isolated agent PID discovery and registration")
 
 	// Wait for PID via deterministic pidfile (written by BuildAgentCommand)

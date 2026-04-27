@@ -46,6 +46,7 @@ func sendToMsgCh(ch chan<- tea.Msg, msg tea.Msg) {
 		// channel full; drop the message rather than block the sender
 	}
 }
+
 type RefreshMsg struct{}
 type ArchiveConfirmedMsg struct{ Job *orchestration.Job }
 type EditFileAndQuitMsg struct{ FilePath string }
@@ -548,7 +549,7 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 
 				// Write to log file
 				fmt.Fprintln(logFile, formatted)
-				logFile.Sync()
+				_ = logFile.Sync()
 
 				// Hand the log line to the Update loop via the Model's channel.
 				sendToMsgCh(msgCh, logviewer.LogLineMsg{
@@ -855,7 +856,7 @@ func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.C
 			}
 			f = file
 			closer = func() { file.Close() }
-			sync = func() { file.Sync() }
+			sync = func() { _ = file.Sync() }
 		} else {
 			// No log file - use a no-op writer
 			f = io.Discard
@@ -1024,58 +1025,6 @@ func executePlanResume(job *orchestration.Job) tea.Cmd {
 		})
 }
 
-func viewLogsCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
-	return func() tea.Msg {
-		// Check if we're in tmux
-		if os.Getenv("TMUX") == "" {
-			// Not in tmux, fall back to less
-			jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
-			pagerCmd := exec.Command("sh", "-c", fmt.Sprintf("grove aglogs read %s | less -R", jobSpec))
-
-			if err := pagerCmd.Run(); err != nil {
-				return StatusUpdateMsg(fmt.Sprintf("Error viewing logs: %v", err))
-			}
-			return StatusUpdateMsg("Returned from log viewer.")
-		}
-
-		// In tmux, open logs in a new window
-		ctx := context.Background()
-		client, err := tmux.NewClient()
-		if err != nil {
-			return StatusUpdateMsg(fmt.Sprintf("Error creating tmux client: %v", err))
-		}
-
-		session, err := client.GetCurrentSession(ctx)
-		if err != nil {
-			return StatusUpdateMsg(fmt.Sprintf("Error getting current session: %v", err))
-		}
-
-		// Create window name based on job
-		windowName := fmt.Sprintf("logs-%s", job.Filename)
-		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
-
-		// Create the command to run in the new window
-		// Force color output by setting CLICOLOR_FORCE, then pipe to less -R
-		// CLICOLOR_FORCE=1 tells programs to always output color, even when piped
-		command := fmt.Sprintf("CLICOLOR_FORCE=1 grove aglogs read %s | less -R", jobSpec)
-
-		// Create new window
-		err = client.NewWindow(ctx, session, windowName, command)
-		if err != nil {
-			return StatusUpdateMsg(fmt.Sprintf("Error creating logs window: %v", err))
-		}
-
-		// Switch to the new window
-		windowTarget := session + ":" + windowName
-		if err := client.SwitchClient(ctx, windowTarget); err != nil {
-			// Not critical if switch fails, window was still created
-			return StatusUpdateMsg("Logs window created.")
-		}
-
-		return StatusUpdateMsg("Opened logs in new window.")
-	}
-}
-
 // JobCompletedMsg is sent when a job completion attempt finishes
 type JobCompletedMsg struct {
 	Err error
@@ -1136,7 +1085,7 @@ type DemoteJobMsg struct {
 // note from the job and mark it as abandoned.
 func demoteJobCmd(job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("flow", "plan", "demote", job.FilePath)
+		cmd := exec.Command("flow", "plan", "demote", job.FilePath) //nolint:gosec // job.FilePath is internal
 		output, err := cmd.Output()
 		if err != nil {
 			return DemoteJobMsg{Err: fmt.Errorf("demote failed: %w", err)}
@@ -1235,162 +1184,6 @@ func createGenericJobWithTitle(plan *orchestration.Plan, selectedJobs []*orchest
 		}
 
 		return CreateJobCompleteMsg{Err: nil}
-	}
-}
-
-// createXmlPlanJob creates a new oneshot job with the "agent-xml" template
-// that depends on the selected job.
-func createXmlPlanJob(plan *orchestration.Plan, selectedJob *orchestration.Job) tea.Cmd {
-	return func() tea.Msg {
-		// Create the xml plan job title
-		xmlTitle := fmt.Sprintf("xml-plan-%s", selectedJob.Title)
-
-		// Generate a unique ID for the new job
-		xmlID := orchestration.GenerateUniqueJobID(plan, xmlTitle)
-
-		// Create the new job
-		newJob := &orchestration.Job{
-			ID:                  xmlID,
-			Title:               xmlTitle,
-			Type:                orchestration.JobTypeOneshot,
-			Status:              orchestration.JobStatusPending,
-			DependsOn:           []string{selectedJob.ID},
-			Worktree:            selectedJob.Worktree,
-			RulesFile:           selectedJob.RulesFile,
-			Template:            "agent-xml",
-			PromptBody:          "generate a detailed plan",
-			PrependDependencies: true,
-		}
-
-		// Add the job to the plan
-		_, err := orchestration.AddJob(plan, newJob)
-		if err != nil {
-			return fmt.Errorf("failed to create xml plan job: %w", err)
-		}
-
-		// Return refresh message to update the TUI
-		return RefreshMsg{}
-	}
-}
-
-// createXmlPlanJobWithDeps creates a new oneshot job with the "agent-xml" template
-// that depends on multiple selected jobs.
-func createXmlPlanJobWithDeps(plan *orchestration.Plan, selectedJobs []*orchestration.Job) tea.Cmd {
-	return func() tea.Msg {
-		if len(selectedJobs) == 0 {
-			return fmt.Errorf("no jobs selected")
-		}
-
-		// Create the xml plan job title - use first job's title
-		xmlTitle := fmt.Sprintf("xml-plan-%s", selectedJobs[0].Title)
-
-		// Generate a unique ID for the new job
-		xmlID := orchestration.GenerateUniqueJobID(plan, xmlTitle)
-
-		// Collect all dependency IDs
-		var depIDs []string
-		for _, job := range selectedJobs {
-			depIDs = append(depIDs, job.ID)
-		}
-
-		// Use the worktree from the first selected job
-		worktree := selectedJobs[0].Worktree
-
-		// Create the new job
-		newJob := &orchestration.Job{
-			ID:                  xmlID,
-			Title:               xmlTitle,
-			Type:                orchestration.JobTypeOneshot,
-			Status:              orchestration.JobStatusPending,
-			DependsOn:           depIDs,
-			Worktree:            worktree,
-			RulesFile:           selectedJobs[0].RulesFile,
-			Template:            "agent-xml",
-			PromptBody:          "generate a detailed plan",
-			PrependDependencies: true,
-		}
-
-		// Add the job to the plan
-		_, err := orchestration.AddJob(plan, newJob)
-		if err != nil {
-			return fmt.Errorf("failed to create xml plan job: %w", err)
-		}
-
-		// Return refresh message to update the TUI
-		return RefreshMsg{}
-	}
-}
-
-func createImplementationJob(plan *orchestration.Plan, selectedJob *orchestration.Job) tea.Cmd {
-	return func() tea.Msg {
-		// Create the implementation job title
-		implTitle := fmt.Sprintf("impl-%s", selectedJob.Title)
-
-		// Generate a unique ID for the new job
-		implID := orchestration.GenerateUniqueJobID(plan, implTitle)
-
-		// Create the new job
-		newJob := &orchestration.Job{
-			ID:        implID,
-			Title:     implTitle,
-			Type:      orchestration.JobTypeInteractiveAgent,
-			Status:    orchestration.JobStatusPending,
-			DependsOn: []string{selectedJob.ID},
-			Worktree:  selectedJob.Worktree,
-		}
-
-		// Add the job to the plan
-		_, err := orchestration.AddJob(plan, newJob)
-		if err != nil {
-			return fmt.Errorf("failed to create implementation job: %w", err)
-		}
-
-		// Return refresh message to update the TUI
-		return RefreshMsg{}
-	}
-}
-
-// createImplementationJobWithDeps creates a new interactive_agent job with "impl-" prefix
-// that depends on multiple selected jobs.
-func createImplementationJobWithDeps(plan *orchestration.Plan, selectedJobs []*orchestration.Job) tea.Cmd {
-	return func() tea.Msg {
-		if len(selectedJobs) == 0 {
-			return fmt.Errorf("no jobs selected")
-		}
-
-		// Create the implementation job title - use first job's title
-		implTitle := fmt.Sprintf("impl-%s", selectedJobs[0].Title)
-
-		// Generate a unique ID for the new job
-		implID := orchestration.GenerateUniqueJobID(plan, implTitle)
-
-		// Collect all dependency IDs
-		var depIDs []string
-		for _, job := range selectedJobs {
-			depIDs = append(depIDs, job.ID)
-		}
-
-		// Use the worktree from the first selected job
-		worktree := selectedJobs[0].Worktree
-
-		// Create the new job
-		newJob := &orchestration.Job{
-			ID:        implID,
-			Title:     implTitle,
-			Type:      orchestration.JobTypeInteractiveAgent,
-			Status:    orchestration.JobStatusPending,
-			DependsOn: depIDs,
-			Worktree:  worktree,
-		}
-
-		// Add the job to the plan
-		_, err := orchestration.AddJob(plan, newJob)
-		if err != nil {
-			return fmt.Errorf("failed to create implementation job: %w", err)
-		}
-
-		// Return refresh message to update the TUI
-		return RefreshMsg{}
 	}
 }
 
@@ -1537,23 +1330,6 @@ func sendInteractiveAgentInputCmd(plan *orchestration.Plan, job *orchestration.J
 			JobID: job.ID,
 			Input: input,
 			Err:   err,
-		}
-	}
-}
-
-// captureIsolatedAgentOutputCmd captures the current output from an isolated agent's pane
-func captureIsolatedAgentOutputCmd(jobID string) tea.Cmd {
-	return func() tea.Msg {
-		output, err := orchestration.CaptureIsolatedAgentOutput(jobID)
-		if err != nil {
-			return LogContentLoadedMsg{
-				Content: fmt.Sprintf("Error capturing output: %v", err),
-				JobID:   jobID,
-			}
-		}
-		return LogContentLoadedMsg{
-			Content: output,
-			JobID:   jobID,
 		}
 	}
 }
@@ -1769,7 +1545,7 @@ func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes in
 					if idx := strings.LastIndex(s, "\n---\n"); idx >= 0 {
 						s = s[:idx] + "\n" + autoYAML + s[idx:]
 					}
-					_ = os.WriteFile(job.FilePath, []byte(s), 0o644)
+					_ = os.WriteFile(job.FilePath, []byte(s), 0o600)
 				}
 			}
 		}
@@ -1809,7 +1585,7 @@ func unclawJobCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 						}
 						s = s[:idx] + s[end:]
 					}
-					_ = os.WriteFile(job.FilePath, []byte(s), 0o644)
+					_ = os.WriteFile(job.FilePath, []byte(s), 0o600)
 				}
 			}
 		}

@@ -26,7 +26,7 @@ func BuildDependencyGraph(plan *Plan) (*DependencyGraph, error) {
 	// Add all jobs as nodes
 	for _, job := range plan.Jobs {
 		graph.nodes[job.ID] = job
-		
+
 		// Use resolved dependencies instead of raw DependsOn
 		depIDs := make([]string, 0, len(job.Dependencies))
 		for _, dep := range job.Dependencies {
@@ -59,7 +59,7 @@ func (dg *DependencyGraph) GetExecutionPlan() (*ExecutionPlan, error) {
 
 	for len(processed) < len(sorted) {
 		stage := []string{}
-		
+
 		for _, jobID := range sorted {
 			if processed[jobID] {
 				continue

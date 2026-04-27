@@ -101,18 +101,18 @@ type Options struct {
 // Stable item identifiers. Hosts look items up by these constants
 // via Items.ByID instead of depending on slice indexes.
 const (
-	ItemEnvTeardown            = "env_teardown"
-	ItemMergeSubmodules        = "merge_submodules"
-	ItemMarkFinished           = "mark_finished"
-	ItemCloseSession           = "close_session"
-	ItemPruneWorktree          = "prune_worktree"
-	ItemCleanDevLinks          = "clean_dev_links"
+	ItemEnvTeardown             = "env_teardown"
+	ItemMergeSubmodules         = "merge_submodules"
+	ItemMarkFinished            = "mark_finished"
+	ItemCloseSession            = "close_session"
+	ItemPruneWorktree           = "prune_worktree"
+	ItemCleanDevLinks           = "clean_dev_links"
 	ItemDeleteSubmoduleBranches = "delete_submodule_branches"
-	ItemDeleteLocalBranch      = "delete_local_branch"
-	ItemDeleteRemoteBranch     = "delete_remote_branch"
-	ItemRebuildBinaries        = "rebuild_binaries"
-	ItemArchivePlan            = "archive_plan"
-	ItemPruneOrphans           = "prune_orphans"
+	ItemDeleteLocalBranch       = "delete_local_branch"
+	ItemDeleteRemoteBranch      = "delete_remote_branch"
+	ItemRebuildBinaries         = "rebuild_binaries"
+	ItemArchivePlan             = "archive_plan"
+	ItemPruneOrphans            = "prune_orphans"
 )
 
 // ItemsByID returns the first item matching the given ID, or nil if
@@ -381,7 +381,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					repoDetails = append(repoDetails, finish.RepoStatus{Name: repoName, Status: "not_found"})
 					continue
 				}
-				branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName)
+				branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName) //nolint:gosec // worktreeName is internal
 				branchCheckCmd.Dir = repoPath
 				if err := branchCheckCmd.Run(); err != nil {
 					notFound++
@@ -395,7 +395,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					repoDetails = append(repoDetails, finish.RepoStatus{Name: repoName, Status: "not_found"})
 					continue
 				}
-				aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName)
+				aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName) //nolint:gosec // worktreeName is internal
 				aheadCmd.Dir = repoPath
 				aheadOutput, err := aheadCmd.Output()
 				if err != nil {
@@ -482,7 +482,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping\n", repoName)
 					continue
 				}
-				branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName)
+				branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName) //nolint:gosec // worktreeName is internal
 				branchCheckCmd.Dir = repoPath
 				if err := branchCheckCmd.Run(); err != nil {
 					continue
@@ -493,7 +493,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					fmt.Printf("      Warning: main branch not found in %s, skipping\n", repoName)
 					continue
 				}
-				aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName)
+				aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName) //nolint:gosec // worktreeName is internal
 				aheadCmd.Dir = repoPath
 				aheadOutput, err := aheadCmd.Output()
 				if err != nil {
@@ -571,7 +571,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(configPath, newData, 0644)
+			return os.WriteFile(configPath, newData, 0600)
 		},
 	}
 
@@ -1078,7 +1078,7 @@ func RunOnFinishHook(plan *orchestration.Plan, planName string) {
 		fmt.Printf("Warning: failed to render on_finish hook command: %v\n", err)
 		return
 	}
-	hookCmd := exec.Command("sh", "-c", renderedCmd.String())
+	hookCmd := exec.Command("sh", "-c", renderedCmd.String()) //nolint:gosec // on_finish hook comes from trusted plan config
 	hookCmd.Stdout = os.Stdout
 	hookCmd.Stderr = os.Stderr
 	if err := hookCmd.Run(); err != nil {

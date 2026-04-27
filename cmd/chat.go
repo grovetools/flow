@@ -21,10 +21,10 @@ import (
 )
 
 var (
-	chatSpecFile   string
-	chatTitle      string
-	chatModel      string
-	chatStatus     string
+	chatSpecFile string
+	chatTitle    string
+	chatModel    string
+	chatStatus   string
 )
 
 func GetChatCommand() *cobra.Command {
@@ -41,7 +41,7 @@ Example:
 	chatCmd.Flags().StringVarP(&chatSpecFile, "spec-file", "s", "", "Path to an existing markdown file to convert into a chat job (required)")
 	chatCmd.Flags().StringVarP(&chatTitle, "title", "t", "", "Title for the chat job (defaults to the filename)")
 	chatCmd.Flags().StringVarP(&chatModel, "model", "m", "", "LLM model to use for the chat (defaults to flow.oneshot_model from config)")
-	chatCmd.MarkFlagRequired("spec-file")
+	_ = chatCmd.MarkFlagRequired("spec-file")
 
 	chatListCmd := &cobra.Command{
 		Use:   "list",
@@ -140,7 +140,7 @@ func ensureChatJob(filePath string) (*orchestration.Job, error) {
 	}
 
 	// Write the updated file
-	if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+	if err := os.WriteFile(filePath, newContent, 0600); err != nil {
 		return nil, fmt.Errorf("failed to write updated file: %w", err)
 	}
 
@@ -225,7 +225,7 @@ func runChatInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to build new file content: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+	if err := os.WriteFile(filePath, newContent, 0600); err != nil {
 		return fmt.Errorf("failed to write updated file: %w", err)
 	}
 
@@ -427,7 +427,7 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 			fmt.Println("\nAvailable chats:")
 			// Show available chats by running list logic
 			if chatDir, err := resolveChatsDir(); err == nil {
-				filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
+				_ = filepath.Walk(chatDir, func(path string, info os.FileInfo, err error) error {
 					if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
 						return nil
 					}
@@ -458,7 +458,6 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 		ModelOverride:       "", // Use job's model
 		MaxConsecutiveSteps: 20,
 	}
-
 
 	var executionErrors []error
 	for _, job := range runnableChats {
@@ -540,4 +539,3 @@ func runChatRun(cmd *cobra.Command, args []string) error {
 	fmt.Println("All runnable chats processed successfully.")
 	return nil
 }
-

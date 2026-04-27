@@ -46,7 +46,7 @@ func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 	executor := NewHeadlessAgentExecutor(NewMockLLMClient(), config)
-	
+
 	// Use mock agent runner
 	mockRunner := &mockAgentRunner{}
 	executor.agentRunner = mockRunner

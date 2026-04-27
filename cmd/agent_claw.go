@@ -279,5 +279,5 @@ func writeClawFrontmatter(job *orchestration.Job) {
 		newContent = []byte(s)
 	}
 
-	_ = os.WriteFile(job.FilePath, newContent, 0o644)
+	_ = os.WriteFile(job.FilePath, newContent, 0o600)
 }

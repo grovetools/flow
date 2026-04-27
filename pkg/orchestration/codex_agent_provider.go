@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	flowexec "github.com/grovetools/flow/pkg/exec"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
+	flowexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/sirupsen/logrus"
 )
 
@@ -280,7 +280,6 @@ func (p *CodexAgentProvider) generateSessionName(workDir string) (string, error)
 	}
 	return projInfo.Identifier("_"), nil
 }
-
 
 // findMostRecentFile finds the most recently modified file in a directory tree.
 func findMostRecentFile(dir string, debugFile *os.File) (string, error) {

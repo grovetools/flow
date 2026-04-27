@@ -252,7 +252,6 @@ func toggleLogViewer(ctx *harness.Context) error {
 	return nil
 }
 
-
 // quitStatusTUI sends the quit command to the TUI.
 func quitStatusTUI(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
@@ -324,7 +323,6 @@ func ensureLogViewerOpen(ctx *harness.Context) error {
 	return nil
 }
 
-
 // switchFocusToLogs sends Tab key to switch focus to the logs pane.
 func switchFocusToLogs(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
@@ -338,7 +336,6 @@ func switchFocusToLogs(ctx *harness.Context) error {
 	time.Sleep(500 * time.Millisecond)
 	return nil
 }
-
 
 // switchFocusToJobs sends Tab key to switch focus back to the jobs pane.
 func switchFocusToJobs(ctx *harness.Context) error {
@@ -405,7 +402,6 @@ func verifyFocusReturned(ctx *harness.Context) error {
 
 	return nil
 }
-
 
 // testEscKeyFocus verifies that Esc key returns focus to jobs pane from logs pane.
 func testEscKeyFocus(ctx *harness.Context) error {

@@ -57,7 +57,7 @@ func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (str
 	briefingFilePath := filepath.Join(jobArtifactDir, briefingFilename)
 
 	// Write the file
-	if err := os.WriteFile(briefingFilePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(briefingFilePath, []byte(content), 0600); err != nil {
 		return "", fmt.Errorf("writing briefing file: %w", err)
 	}
 

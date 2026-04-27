@@ -131,7 +131,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	}); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("spawn native agent pane: %w", err)
 	}
 

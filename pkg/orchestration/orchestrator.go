@@ -44,13 +44,13 @@ type Orchestrator struct {
 
 // PlanStatus provides comprehensive status information.
 type PlanStatus struct {
-	Total      int
-	Pending    int
-	Running    int
-	Completed  int
-	Failed     int
-	Blocked    int
-	Progress   float64
+	Total     int
+	Pending   int
+	Running   int
+	Completed int
+	Failed    int
+	Blocked   int
+	Progress  float64
 }
 
 // NewOrchestrator creates a new orchestrator instance.
@@ -296,24 +296,24 @@ func (o *Orchestrator) reloadJobStatusesFromDisk() error {
 			o.logger.Error("Failed to reload job from disk", "job", job.ID, "error", err)
 			continue // Skip this job but continue with others
 		}
-		
+
 		// Update status if it changed externally
 		if diskJob.Status != job.Status {
-			o.logger.Info("Job status changed externally", 
-				"job", job.ID, 
+			o.logger.Info("Job status changed externally",
+				"job", job.ID,
 				"old_status", job.Status,
 				"new_status", diskJob.Status)
-			
+
 			// Update in-memory status
 			job.Status = diskJob.Status
 			job.StartTime = diskJob.StartTime
 			job.EndTime = diskJob.EndTime
-			
+
 			// Update dependency graph
 			o.dependencyGraph.UpdateJobStatus(job.ID, job.Status)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -425,11 +425,11 @@ func (o *Orchestrator) executeJob(ctx context.Context, job *Job) error {
 func (o *Orchestrator) UpdateJobStatus(job *Job, status JobStatus) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	
+
 	// Update in-memory state
 	oldStatus := job.Status
 	job.Status = status
-	
+
 	// Update timestamps
 	switch status {
 	case JobStatusRunning:
@@ -437,14 +437,14 @@ func (o *Orchestrator) UpdateJobStatus(job *Job, status JobStatus) error {
 	case JobStatusCompleted, JobStatusFailed:
 		job.EndTime = time.Now()
 	}
-	
+
 	// Persist to file
 	if err := o.stateManager.UpdateJobStatus(job, status); err != nil {
 		// Rollback in-memory change
 		job.Status = oldStatus
 		return fmt.Errorf("persist status change: %w", err)
 	}
-	
+
 	// Log state transition
 	o.logger.Info("Job status updated",
 		"job", job.ID,
@@ -484,7 +484,7 @@ func (o *Orchestrator) SetLogger(logger Logger) {
 }
 
 // defaultLogger provides a simple logger implementation using grove-core unified logging.
-type defaultLogger struct{
+type defaultLogger struct {
 	ulog *grovelogging.UnifiedLogger
 }
 

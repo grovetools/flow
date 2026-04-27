@@ -185,7 +185,7 @@ func gatherConcepts(ctx context.Context, job *Job, plan *Plan, workDir string) (
 	}
 
 	conceptContextFile := filepath.Join(artifactsDir, "aggregated-concepts.md")
-	if err := os.WriteFile(conceptContextFile, []byte(conceptBuilder.String()), 0644); err != nil {
+	if err := os.WriteFile(conceptContextFile, []byte(conceptBuilder.String()), 0600); err != nil {
 		return "", fmt.Errorf("failed to write aggregated concepts file: %w", err)
 	}
 

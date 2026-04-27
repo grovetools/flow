@@ -26,18 +26,18 @@ func getStateFilePath() (string, error) {
 // defaultColumnVisibility defines the initial state for columns.
 func defaultColumnVisibility() map[string]bool {
 	return map[string]bool{
-		"JOB":        true,  // Job filename visible by default
-		"TITLE":      false,
-		"TYPE":       true,  // Job type visible by default
-		"STATUS":     false,
-		"TEMPLATE":   true,  // Template name visible by default
-		"MODEL":      false,
-		"WORKTREE":   false,
-		"PREPEND":    false,
-		"UPDATED":    false,
-		"COMPLETED":  false,
-		"SKILL":      false,
-		"DURATION":   false,
+		"JOB":       true, // Job filename visible by default
+		"TITLE":     false,
+		"TYPE":      true, // Job type visible by default
+		"STATUS":    false,
+		"TEMPLATE":  true, // Template name visible by default
+		"MODEL":     false,
+		"WORKTREE":  false,
+		"PREPEND":   false,
+		"UPDATED":   false,
+		"COMPLETED": false,
+		"SKILL":     false,
+		"DURATION":  false,
 	}
 }
 
@@ -94,5 +94,5 @@ func saveState(visibility map[string]bool, logSplitVertical bool) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }

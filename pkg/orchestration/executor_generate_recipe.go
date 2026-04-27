@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattn/go-isatty"
 	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/mattn/go-isatty"
 )
 
 var recipeUlog = grovelogging.NewUnifiedLogger("grove-flow.recipe")
@@ -64,7 +64,7 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
 	// Ensure lock file is removed when execution finishes.
-	defer RemoveLockFile(job.FilePath)
+	defer func() { _ = RemoveLockFile(job.FilePath) }()
 
 	// Determine the working directory for the job
 	var workDir string
@@ -102,13 +102,13 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 	if job.SourcePlan == "" {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("source_plan is required for generate-recipe jobs")
 	}
 	if job.RecipeName == "" {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("recipe_name is required for generate-recipe jobs")
 	}
 
@@ -118,14 +118,14 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("reading source plan files: %w", err)
 	}
 
 	if len(planFiles) == 0 {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("no job files found in source plan: %s", job.SourcePlan)
 	}
 
@@ -152,7 +152,7 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("LLM completion: %w", err)
 	}
 
@@ -161,24 +161,24 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return fmt.Errorf("creating recipe files: %w", err)
 	}
 
 	// Update job output by appending to the file
 	outputSection := fmt.Sprintf("\n\n---\n\n## Output\n\nSuccessfully generated recipe '%s' at: %s\n", job.RecipeName, recipePath)
-	
+
 	// Read current content
 	content, err := os.ReadFile(job.FilePath)
 	if err != nil {
 		return fmt.Errorf("reading job file: %w", err)
 	}
-	
+
 	// Append output
 	content = append(content, []byte(outputSection)...)
-	
+
 	// Write back
-	if err := os.WriteFile(job.FilePath, content, 0644); err != nil {
+	if err := os.WriteFile(job.FilePath, content, 0600); err != nil {
 		return fmt.Errorf("writing job file with output: %w", err)
 	}
 
@@ -206,7 +206,7 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 // readPlanFiles reads all .md files from a plan directory
 func (e *GenerateRecipeExecutor) readPlanFiles(planPath string) (map[string]string, error) {
 	files := make(map[string]string)
-	
+
 	entries, err := os.ReadDir(planPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading directory %s: %w", planPath, err)
@@ -243,14 +243,14 @@ func (e *GenerateRecipeExecutor) constructPrompt(userInstructions string, planFi
 
 	// Source files
 	promptBuilder.WriteString("Source Plan Files:\n\n")
-	
+
 	// Sort filenames for consistent output
 	var filenames []string
 	for filename := range planFiles {
 		filenames = append(filenames, filename)
 	}
 	sort.Strings(filenames)
-	
+
 	for _, filename := range filenames {
 		promptBuilder.WriteString(fmt.Sprintf("=== START: %s ===\n", filename))
 		promptBuilder.WriteString(planFiles[filename])
@@ -275,9 +275,9 @@ func (e *GenerateRecipeExecutor) createRecipeFiles(recipeName string, response s
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
-	
+
 	recipePath := filepath.Join(homeDir, ".config", "grove", "recipes", recipeName)
-	
+
 	// Create recipe directory
 	if err := os.MkdirAll(recipePath, 0755); err != nil {
 		return "", fmt.Errorf("creating recipe directory: %w", err)
@@ -292,7 +292,7 @@ func (e *GenerateRecipeExecutor) createRecipeFiles(recipeName string, response s
 	// Write each file
 	for filename, content := range files {
 		filePath := filepath.Join(recipePath, filename)
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
 			return "", fmt.Errorf("writing file %s: %w", filename, err)
 		}
 	}
@@ -303,29 +303,29 @@ func (e *GenerateRecipeExecutor) createRecipeFiles(recipeName string, response s
 // parseRecipeFiles extracts individual files from the LLM response
 func (e *GenerateRecipeExecutor) parseRecipeFiles(response string) map[string]string {
 	files := make(map[string]string)
-	
+
 	// Split by file delimiter
 	parts := strings.Split(response, "--- [")
-	
+
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]
-		
+
 		// Extract filename
 		endIdx := strings.Index(part, "] ---")
 		if endIdx == -1 {
 			continue
 		}
-		
+
 		filename := part[:endIdx]
 		content := strings.TrimSpace(part[endIdx+5:])
-		
+
 		// Remove any trailing delimiter if it exists
 		if idx := strings.Index(content, "--- ["); idx != -1 {
 			content = strings.TrimSpace(content[:idx])
 		}
-		
+
 		files[filename] = content
 	}
-	
+
 	return files
 }

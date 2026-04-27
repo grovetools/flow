@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/mattn/go-isatty"
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -220,7 +220,7 @@ func runPlanStep(cmd *cobra.Command, args []string) error {
 					continue
 				}
 
-				if err := os.WriteFile(jobToSkip.FilePath, newContent, 0644); err != nil {
+				if err := os.WriteFile(jobToSkip.FilePath, newContent, 0600); err != nil {
 					fmt.Printf("%s Error writing job file: %v\n", color.RedString("x"), err)
 					continue
 				}

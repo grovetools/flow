@@ -13,10 +13,14 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 
 	// Create test source files
 	file1 := filepath.Join(tmpDir, "file1.go")
-	os.WriteFile(file1, []byte("package main\n\nfunc main() {}"), 0644)
+	if err := os.WriteFile(file1, []byte("package main\n\nfunc main() {}"), 0600); err != nil {
+		t.Fatalf("failed to write file1: %v", err)
+	}
 
 	file2 := filepath.Join(tmpDir, "file2.go")
-	os.WriteFile(file2, []byte("package main\n\nfunc helper() {}"), 0644)
+	if err := os.WriteFile(file2, []byte("package main\n\nfunc helper() {}"), 0600); err != nil {
+		t.Fatalf("failed to write file2: %v", err)
+	}
 
 	// Change to tmp dir for relative path resolution
 	oldCwd, _ := os.Getwd()
@@ -56,7 +60,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 	t.Run("reference_based_prompt", func(t *testing.T) {
 		// Create a mock template for testing
 		_ = "You are a code refactoring expert." // mockTemplateContent
-		
+
 		// We'll test the structure even if template loading fails
 		job := &Job{
 			Template:   "test-template",
@@ -66,7 +70,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		prompt, _, _, err := executor.buildPrompt(job, plan, "")
-		
+
 		// The test might fail if the template doesn't exist, but we can verify
 		// that it's attempting to use the reference-based path
 		if err != nil {
@@ -115,7 +119,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		_, _, _, err := executor.buildPrompt(job, plan, "")
-		
+
 		if err == nil {
 			t.Errorf("Expected error for missing include file")
 		}
@@ -131,7 +135,9 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			filename := filepath.Join(tmpDir, strings.ReplaceAll("file_{{i}}.go", "{{i}}", string(rune('0'+i))))
 			content := strings.ReplaceAll("package main\n\n// File {{i}}", "{{i}}", string(rune('0'+i)))
-			os.WriteFile(filename, []byte(content), 0644)
+			if err := os.WriteFile(filename, []byte(content), 0600); err != nil {
+				t.Fatalf("failed to write file: %v", err)
+			}
 			includeFiles = append(includeFiles, filepath.Base(filename))
 		}
 
@@ -167,7 +173,9 @@ func TestTemplateIntegration(t *testing.T) {
 	// Create a test template directory structure
 	groveDir := filepath.Join(tmpDir, ".grove")
 	templatesDir := filepath.Join(groveDir, "templates")
-	os.MkdirAll(templatesDir, 0755)
+	if err := os.MkdirAll(templatesDir, 0755); err != nil {
+		t.Fatalf("failed to create templates dir: %v", err)
+	}
 
 	// Create a test template
 	templatePath := filepath.Join(templatesDir, "test-template.md")
@@ -177,7 +185,9 @@ model: test-model
 ---
 
 You are a test template. Your role is to process the provided files according to the instructions.`
-	os.WriteFile(templatePath, []byte(templateContent), 0644)
+	if err := os.WriteFile(templatePath, []byte(templateContent), 0600); err != nil {
+		t.Fatalf("failed to write template: %v", err)
+	}
 
 	// Change to tmp dir
 	oldCwd, _ := os.Getwd()
@@ -190,7 +200,9 @@ You are a test template. Your role is to process the provided files according to
 
 	t.Run("load_custom_template", func(t *testing.T) {
 		// Create include file
-		os.WriteFile("test.go", []byte("package test"), 0644)
+		if err := os.WriteFile("test.go", []byte("package test"), 0600); err != nil {
+			t.Fatalf("failed to write test.go: %v", err)
+		}
 
 		job := &Job{
 			ID:         "test-job",
@@ -266,7 +278,9 @@ func TestEdgeCases(t *testing.T) {
 		// Create a binary file
 		binaryFile := filepath.Join(tmpDir, "binary.dat")
 		binaryContent := []byte{0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD}
-		os.WriteFile(binaryFile, binaryContent, 0644)
+		if err := os.WriteFile(binaryFile, binaryContent, 0600); err != nil {
+			t.Fatalf("failed to write binary file: %v", err)
+		}
 
 		job := &Job{
 			Include:    []string{"binary.dat"},
@@ -275,7 +289,7 @@ func TestEdgeCases(t *testing.T) {
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		_, _, _, err := executor.buildPrompt(job, plan, "")
-		
+
 		// Should handle binary files gracefully (either skip or encode)
 		if err != nil {
 			t.Logf("Binary file handling resulted in error (expected): %v", err)
@@ -287,7 +301,9 @@ func TestEdgeCases(t *testing.T) {
 	t.Run("symlink_handling", func(t *testing.T) {
 		// Create a file and a symlink to it
 		realFile := filepath.Join(tmpDir, "real.go")
-		os.WriteFile(realFile, []byte("package real"), 0644)
+		if err := os.WriteFile(realFile, []byte("package real"), 0600); err != nil {
+			t.Fatalf("failed to write real.go: %v", err)
+		}
 
 		symlinkFile := filepath.Join(tmpDir, "link.go")
 		_ = os.Symlink(realFile, symlinkFile)
@@ -299,7 +315,7 @@ func TestEdgeCases(t *testing.T) {
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		prompt, _, _, err := executor.buildPrompt(job, plan, "")
-		
+
 		if err != nil {
 			t.Errorf("Failed to process symlink: %v", err)
 		} else if !strings.Contains(prompt, "package real") {
@@ -311,7 +327,9 @@ func TestEdgeCases(t *testing.T) {
 		// Create a file with a very long name
 		longName := strings.Repeat("a", 200) + ".go"
 		longFile := filepath.Join(tmpDir, longName)
-		os.WriteFile(longFile, []byte("package long"), 0644)
+		if err := os.WriteFile(longFile, []byte("package long"), 0600); err != nil {
+			t.Fatalf("failed to write long file: %v", err)
+		}
 
 		job := &Job{
 			Include:    []string{longName},
@@ -320,7 +338,7 @@ func TestEdgeCases(t *testing.T) {
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
 		_, _, _, err := executor.buildPrompt(job, plan, "")
-		
+
 		// Should handle long filenames gracefully
 		if err != nil && !strings.Contains(err.Error(), "too long") {
 			t.Logf("Long filename handling: %v", err)

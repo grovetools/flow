@@ -9,6 +9,9 @@
 package planinit
 
 import (
+	"path/filepath"
+	"sort"
+
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,8 +21,6 @@ import (
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
-	"path/filepath"
-	"sort"
 )
 
 // Screen represents the current screen in the plan init wizard.

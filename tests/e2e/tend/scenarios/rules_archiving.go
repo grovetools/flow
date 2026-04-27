@@ -111,7 +111,7 @@ func injectRulesFileIntoJob(ctx *harness.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to update frontmatter: %w", err)
 	}
-	if err := os.WriteFile(jobPath, newContent, 0644); err != nil {
+	if err := os.WriteFile(jobPath, newContent, 0600); err != nil {
 		return fmt.Errorf("failed to write updated job file: %w", err)
 	}
 

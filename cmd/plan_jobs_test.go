@@ -102,7 +102,7 @@ func TestPlanJobsListCommand(t *testing.T) {
 		cmd.Stderr = &stderr
 
 		// Parent command without subcommand should show help
-		cmd.Run() // Ignore error as help returns non-zero
+		_ = cmd.Run() // Ignore error as help returns non-zero
 
 		output := stdout.String() + stderr.String()
 

@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
+	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/skills/pkg/skills"
 )
 
@@ -175,12 +175,12 @@ func ResolveWorkingDirectory(plan *Plan) string {
 	if gitRoot, err := GetProjectGitRoot(plan.Directory); err == nil {
 		return gitRoot
 	}
-	
+
 	// Otherwise use current working directory
 	if cwd, err := os.Getwd(); err == nil {
 		return cwd
 	}
-	
+
 	// Last resort: use plan directory
 	return plan.Directory
 }
@@ -200,7 +200,7 @@ func ResolveLogDirectory(plan *Plan, job *Job) string {
 			return logDir
 		}
 	}
-	
+
 	// Fall back to plan directory
 	return filepath.Join(plan.Directory, ".logs")
 }
@@ -211,7 +211,7 @@ func ResolvePromptSource(source string, plan *Plan) (string, error) {
 	if filepath.IsAbs(source) {
 		return source, nil
 	}
-	
+
 	// Try multiple resolution strategies
 	candidates := []string{
 		// Relative to plan directory
@@ -221,18 +221,18 @@ func ResolvePromptSource(source string, plan *Plan) (string, error) {
 		// Relative to current working directory
 		source,
 	}
-	
+
 	// If we can determine a project root, also try that
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, filepath.Join(cwd, source))
 	}
-	
+
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
 	}
-	
+
 	return "", fmt.Errorf("could not find prompt source: %s", source)
 }
 
@@ -274,26 +274,26 @@ func ResolveTemplate(templateName string, plan *Plan) (string, error) {
 	if strings.Contains(templateName, "/") || strings.HasSuffix(templateName, ".md") {
 		return ResolvePromptSource(templateName, plan)
 	}
-	
+
 	// Otherwise, look for built-in templates
 	// First check plan directory for custom templates
 	customTemplate := filepath.Join(plan.Directory, "templates", templateName+".md")
 	if _, err := os.Stat(customTemplate); err == nil {
 		return customTemplate, nil
 	}
-	
+
 	// Check for built-in templates
 	builtinTemplate := filepath.Join("internal", "orchestration", "builtin_templates", templateName+".md")
 	if _, err := os.Stat(builtinTemplate); err == nil {
 		return builtinTemplate, nil
 	}
-	
+
 	// Try as a plain file in the plan directory
 	plainFile := filepath.Join(plan.Directory, templateName+".md")
 	if _, err := os.Stat(plainFile); err == nil {
 		return plainFile, nil
 	}
-	
+
 	return "", fmt.Errorf("template not found: %s", templateName)
 }
 

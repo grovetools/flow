@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/grovetools/agentlogs/pkg/agentstream"
-	flowexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
@@ -25,6 +24,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	grovecontext "github.com/grovetools/cx/pkg/context"
+	flowexec "github.com/grovetools/flow/pkg/exec"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -43,9 +43,9 @@ type FlowProviderConfig struct {
 
 // FlowConfig holds the flow extension configuration from grove.toml.
 type FlowConfig struct {
-	InteractiveProvider string                          `yaml:"interactive_provider,omitempty"`
-	AgentTarget         string                          `yaml:"agent_target,omitempty"` // "auto", "native", or "tmux"
-	Providers           map[string]FlowProviderConfig   `yaml:"providers"`
+	InteractiveProvider string                        `yaml:"interactive_provider,omitempty"`
+	AgentTarget         string                        `yaml:"agent_target,omitempty"` // "auto", "native", or "tmux"
+	Providers           map[string]FlowProviderConfig `yaml:"providers"`
 }
 
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
@@ -93,7 +93,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			updateJobFile(job)
+			_ = updateJobFile(job)
 			return fmt.Errorf("failed to generate plan from dependencies: %w", err)
 		}
 
@@ -107,7 +107,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			updateJobFile(job)
+			_ = updateJobFile(job)
 			return fmt.Errorf("failed to write generated plan briefing file: %w", err)
 		}
 
@@ -129,7 +129,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			updateJobFile(job)
+			_ = updateJobFile(job)
 			return fmt.Errorf("failed to gather context files: %w", err)
 		}
 
@@ -142,7 +142,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			updateJobFile(job)
+			_ = updateJobFile(job)
 			e.ulog.Error("Failed to build prompt for job").
 				Field("job_id", job.ID).
 				Field("job_file", job.FilePath).
@@ -426,7 +426,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
-		"job_id":        job.ID,
+		"job_id":         job.ID,
 		"daemon_running": daemonClient.IsRunning(),
 	}).Info("Registering session intent with daemon")
 

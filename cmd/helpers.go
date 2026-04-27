@@ -7,15 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
+	grovecontext "github.com/grovetools/cx/pkg/context"
 )
 
 var helpersUlog = grovelogging.NewUnifiedLogger("grove-flow.helpers")
-
 
 // configureDefaultContextRules applies default context rules to a given repository path.
 func configureDefaultContextRules(repoPath string) error {
@@ -44,7 +43,7 @@ func configureDefaultContextRules(repoPath string) error {
 	}
 
 	// Write the rules to .grove/rules within the target repo.
-	if err := os.WriteFile(rulesDestPath, defaultContent, 0644); err != nil {
+	if err := os.WriteFile(rulesDestPath, defaultContent, 0600); err != nil {
 		return fmt.Errorf("failed to write default rules to %s: %w", rulesDestPath, err)
 	}
 
@@ -56,7 +55,6 @@ func configureDefaultContextRules(repoPath string) error {
 		Log(ctx)
 	return nil
 }
-
 
 // configureGoWorkspace creates a go.work file for both ecosystem and single-repo worktrees.
 func configureGoWorkspace(worktreePath string, repos []string, provider *workspace.Provider) error {
@@ -94,7 +92,7 @@ func configureGoWorkspace(worktreePath string, repos []string, provider *workspa
 		}
 		content.WriteString(")\n")
 
-		if err := os.WriteFile(filepath.Join(worktreePath, "go.work"), []byte(content.String()), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(worktreePath, "go.work"), []byte(content.String()), 0600); err != nil {
 			return fmt.Errorf("failed to write go.work for ecosystem worktree: %w", err)
 		}
 		ctx := context.Background()

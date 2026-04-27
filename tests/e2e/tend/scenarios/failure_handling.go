@@ -636,7 +636,6 @@ var ExplicitTargetStatusHandlingScenario = harness.NewScenario(
 	},
 )
 
-
 // StatusErrorDetailsScenario tests that failed jobs include last_error and log_path in JSON status output.
 var StatusErrorDetailsScenario = harness.NewScenario(
 	"status-error-details",

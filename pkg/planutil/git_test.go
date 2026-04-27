@@ -27,7 +27,7 @@ func initRepo(t *testing.T, dir string) {
 func addFile(t *testing.T, dir, filename, content string) {
 	t.Helper()
 	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatalf("Failed to write %s: %v", filename, err)
 	}
 	runGit(t, dir, "add", filename)

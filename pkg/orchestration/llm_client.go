@@ -17,11 +17,11 @@ import (
 
 // LLMOptions defines configuration for an LLM completion request.
 type LLMOptions struct {
-	Model             string
-	SchemaPath        string   // Path to JSON schema file for structured output
-	WorkingDir        string   // Working directory for the LLM command
-	ContextFiles      []string // Paths to context files (.grove/context, CLAUDE.md)
-	IncludeFiles      []string // Paths to include files from job configuration
+	Model        string
+	SchemaPath   string   // Path to JSON schema file for structured output
+	WorkingDir   string   // Working directory for the LLM command
+	ContextFiles []string // Paths to context files (.grove/context, CLAUDE.md)
+	IncludeFiles []string // Paths to include files from job configuration
 }
 
 // LLMClient defines the interface for LLM interactions.
@@ -159,7 +159,7 @@ func (c *CommandLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, p
 			logFilePath := filepath.Join(promptLogDir, logFileName)
 
 			// Write the full prompt to the file
-			if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0644); err != nil {
+			if err := os.WriteFile(logFilePath, []byte(fullPrompt.String()), 0600); err != nil {
 				ulog.Warn("Could not write prompt log file").
 					Err(err).
 					Field("request_id", requestID).

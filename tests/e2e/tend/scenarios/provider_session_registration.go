@@ -176,7 +176,7 @@ func createProviderSessionRegistrationScenario(p ProviderConfig) *harness.Scenar
 				jobPath := ctx.GetString("job_path")
 
 				// Remove lock file if exists
-				fs.RemoveIfExists(jobPath + ".lock")
+				_ = fs.RemoveIfExists(jobPath + ".lock")
 
 				cmd := ctx.Bin("plan", "complete", jobPath)
 				cmd.Dir(projectDir)

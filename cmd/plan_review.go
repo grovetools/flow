@@ -109,7 +109,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 			}
 
 			// Execute the command
-			hookCmd := exec.Command("sh", "-c", renderedCmd.String())
+			hookCmd := exec.Command("sh", "-c", renderedCmd.String()) //nolint:gosec // on_review hook comes from trusted plan config
 			hookCmd.Stdout = os.Stdout
 			hookCmd.Stderr = os.Stderr
 			if err := hookCmd.Run(); err != nil {
@@ -130,7 +130,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 	// Read existing config to preserve other fields
 	var existingConfig orchestration.PlanConfig
 	if data, err := os.ReadFile(configPath); err == nil {
-		yaml.Unmarshal(data, &existingConfig)
+		_ = yaml.Unmarshal(data, &existingConfig)
 	}
 	existingConfig.Status = "review"
 	if plan.Config.Hooks != nil {
@@ -141,7 +141,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal plan config: %w", err)
 	}
-	if err := os.WriteFile(configPath, yamlData, 0644); err != nil {
+	if err := os.WriteFile(configPath, yamlData, 0600); err != nil {
 		return fmt.Errorf("failed to write updated plan config: %w", err)
 	}
 

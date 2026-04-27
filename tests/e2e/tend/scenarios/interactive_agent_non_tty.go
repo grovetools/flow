@@ -321,7 +321,7 @@ func createMultiJobNonTTYScenario() *harness.Scenario {
 				projectDir := ctx.GetString("project_dir")
 				jobPath := ctx.GetString("interactive_job_path")
 
-				fs.RemoveIfExists(jobPath + ".lock")
+				_ = fs.RemoveIfExists(jobPath + ".lock")
 
 				cmd := ctx.Bin("plan", "complete", jobPath)
 				cmd.Dir(projectDir)
@@ -370,8 +370,8 @@ func createMultiJobNonTTYScenario() *harness.Scenario {
 // Exported scenarios for all providers
 var (
 	// Non-TTY interactive agent tests for each provider
-	ClaudeInteractiveNonTTYScenario  = createInteractiveAgentNonTTYScenario(AllProviders()[0])
-	CodexInteractiveNonTTYScenario   = createInteractiveAgentNonTTYScenario(AllProviders()[1])
+	ClaudeInteractiveNonTTYScenario   = createInteractiveAgentNonTTYScenario(AllProviders()[0])
+	CodexInteractiveNonTTYScenario    = createInteractiveAgentNonTTYScenario(AllProviders()[1])
 	OpencodeInteractiveNonTTYScenario = createInteractiveAgentNonTTYScenario(AllProviders()[2])
 
 	// Multi-job regression test

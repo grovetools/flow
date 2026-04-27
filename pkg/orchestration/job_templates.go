@@ -16,7 +16,7 @@ import (
 type JobTemplate struct {
 	Name        string                 `json:"name"`
 	Path        string                 `json:"path"`
-	Source      string                 `json:"source"` // "project", "user", "builtin"
+	Source      string                 `json:"source"`           // "project", "user", "builtin"
 	Domain      string                 `json:"domain,omitempty"` // "generic" or "grove"
 	Type        string                 `json:"type,omitempty"`   // "agent" or "oneshot"
 	Description string                 `json:"description,omitempty" yaml:"description,omitempty"`

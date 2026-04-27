@@ -30,16 +30,16 @@ func NewTestMockLLMClient() *TestMockLLMClient {
 func (m *TestMockLLMClient) Complete(ctx context.Context, prompt string, opts LLMOptions) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.calls = append(m.calls, prompt)
-	
+
 	// Return predefined response
 	for key, response := range m.responses {
 		if strings.Contains(prompt, key) {
 			return response, nil
 		}
 	}
-	
+
 	return "Default test response", nil
 }
 
@@ -57,19 +57,19 @@ func NewSmartMockLLMClient() *SmartMockLLMClient {
 func (m *SmartMockLLMClient) Complete(ctx context.Context, prompt string, opts LLMOptions) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.calls = append(m.calls, prompt)
-	
+
 	// If this is a planning job, generate new job files
 	if strings.Contains(prompt, "high-level implementation plan") {
 		return m.generatePlanningResponse(), nil
 	}
-	
+
 	// For implementation jobs, return success
 	if strings.Contains(prompt, "implement") {
 		return "Implementation completed successfully.", nil
 	}
-	
+
 	return m.TestMockLLMClient.Complete(ctx, prompt, opts)
 }
 
@@ -149,49 +149,49 @@ This is a test specification for integration testing.
 3. Build UI components`
 
 	specPath := filepath.Join(tmpDir, "spec.md")
-	err := os.WriteFile(specPath, []byte(specContent), 0644)
+	err := os.WriteFile(specPath, []byte(specContent), 0600)
 	require.NoError(t, err)
 
 	// Initialize plan
 	// err = InitPlan(tmpDir, specPath)
 	// require.NoError(t, err)
-	
+
 	// Load plan
 	plan, err := LoadPlan(tmpDir)
 	require.NoError(t, err)
 	require.Len(t, plan.Jobs, 1)
-	
+
 	// Create orchestrator with mock LLM
 	_ = NewSmartMockLLMClient() // Orchestrator will use its internal mock LLM
 	config := &OrchestratorConfig{
 		MaxParallelJobs: 2,
 		CheckInterval:   5 * time.Second,
 	}
-	
+
 	orch, err := NewOrchestrator(plan, config)
 	require.NoError(t, err)
-	
+
 	// Create a simple oneshot executor for testing
 	// Executors are registered internally by the orchestrator
 	// The orchestrator will create its own executors with the mock LLM client
-	
+
 	// Run initial planning job
 	ctx := context.Background()
 	initialJob := plan.Jobs[0]
 	err = orch.RunJob(ctx, initialJob.FilePath)
 	require.NoError(t, err)
-	
+
 	// In a real scenario, the LLM would create new job files
 	// For this test, we'll simulate that by creating them manually
 	createTestJobFiles(t, tmpDir)
-	
+
 	// Reload plan to see new jobs
 	plan, err = LoadPlan(tmpDir)
 	require.NoError(t, err)
-	
+
 	// Verify new jobs were created (emergent DAG)
 	assert.True(t, len(plan.Jobs) > 1, "Planning job should have created new jobs")
-	
+
 	// Run all jobs to completion
 	completed := 0
 	for {
@@ -199,14 +199,14 @@ This is a test specification for integration testing.
 		if len(runnable) == 0 {
 			break
 		}
-		
+
 		for _, job := range runnable {
 			// Simulate job execution
 			job.Status = JobStatusCompleted
 			completed++
 		}
 	}
-	
+
 	// Verify all jobs completed
 	assert.Equal(t, len(plan.Jobs), completed)
 }
@@ -255,11 +255,11 @@ func TestDependencyResolution(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			
+
 			// Create job files
 			for i, job := range tt.jobs {
 				content := fmt.Sprintf(`---
@@ -270,34 +270,34 @@ type: oneshot
 depends_on: %s
 ---
 Test job %s`, job.id, job.id, formatDeps(job.deps), job.id)
-				
+
 				filename := fmt.Sprintf("%02d-job-%s.md", i+1, job.id)
-				err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0644)
+				err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0600)
 				require.NoError(t, err)
 			}
-			
+
 			// Load plan
 			plan, err := LoadPlan(tmpDir)
-			
+
 			if tt.wantErr {
 				assert.Error(t, err, "Expected error for circular dependencies")
 				return
 			}
-			
+
 			require.NoError(t, err)
-			
+
 			// Simulate execution stages
 			stages := [][]string{}
 			completed := make(map[string]bool)
-			
+
 			for {
 				stage := []string{}
-				
+
 				for _, job := range plan.Jobs {
 					if completed[job.ID] {
 						continue
 					}
-					
+
 					// Check if all dependencies are completed
 					canRun := true
 					for _, dep := range job.DependsOn {
@@ -306,27 +306,27 @@ Test job %s`, job.id, job.id, formatDeps(job.deps), job.id)
 							break
 						}
 					}
-					
+
 					if canRun {
 						stage = append(stage, job.ID)
 					}
 				}
-				
+
 				if len(stage) == 0 {
 					break
 				}
-				
+
 				// Mark stage jobs as completed
 				for _, id := range stage {
 					completed[id] = true
 				}
-				
+
 				stages = append(stages, stage)
 			}
-			
+
 			// Compare execution stages
 			assert.Equal(t, len(tt.expected), len(stages), "Number of execution stages mismatch")
-			
+
 			for i, expectedStage := range tt.expected {
 				if i < len(stages) {
 					assert.ElementsMatch(t, expectedStage, stages[i], "Stage %d mismatch", i)
@@ -338,7 +338,7 @@ Test job %s`, job.id, job.id, formatDeps(job.deps), job.id)
 
 func TestStatePersistence(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create job file
 	jobContent := `---
 id: test-job
@@ -347,36 +347,36 @@ status: pending
 type: oneshot
 ---
 Test prompt`
-	
+
 	jobPath := filepath.Join(tmpDir, "01-test.md")
-	err := os.WriteFile(jobPath, []byte(jobContent), 0644)
+	err := os.WriteFile(jobPath, []byte(jobContent), 0600)
 	require.NoError(t, err)
-	
+
 	// Load job
 	job, err := LoadJob(jobPath)
 	require.NoError(t, err)
-	
+
 	// Update status
 	sp := NewStatePersister()
 	err = sp.UpdateJobStatus(job, JobStatusRunning)
 	require.NoError(t, err)
-	
+
 	// Reload and verify
 	reloaded, err := LoadJob(jobPath)
 	require.NoError(t, err)
 	assert.Equal(t, JobStatusRunning, reloaded.Status)
-	
+
 	// Append output
 	err = sp.AppendJobOutput(job, "Test output line 1")
 	require.NoError(t, err)
-	
+
 	err = sp.AppendJobOutput(job, "Test output line 2")
 	require.NoError(t, err)
-	
+
 	// Read file and verify output section
 	content, err := os.ReadFile(jobPath)
 	require.NoError(t, err)
-	
+
 	contentStr := string(content)
 	assert.Contains(t, contentStr, "## Output")
 	assert.Contains(t, contentStr, "Test output line 1")
@@ -385,7 +385,7 @@ Test prompt`
 
 func TestConcurrentJobExecution(t *testing.T) {
 	tmpDir := t.TempDir()
-	
+
 	// Create 10 independent jobs
 	for i := 1; i <= 10; i++ {
 		content := fmt.Sprintf(`---
@@ -395,23 +395,23 @@ status: pending
 type: oneshot
 ---
 Test job %d`, i, i, i)
-		
+
 		filename := fmt.Sprintf("%02d-job.md", i)
-		err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0644)
+		err := os.WriteFile(filepath.Join(tmpDir, filename), []byte(content), 0600)
 		require.NoError(t, err)
 	}
-	
+
 	plan, err := LoadPlan(tmpDir)
 	require.NoError(t, err)
-	
+
 	// Track execution order
 	executionOrder := []string{}
 	executionTimes := make(map[string]time.Time)
 	_ = executionOrder // Will be used when we can hook into the executor
 	_ = executionTimes // Will be used when we can hook into the executor
-	
+
 	// The orchestrator will use its internal executors
-	
+
 	// Create orchestrator
 	config := &OrchestratorConfig{
 		MaxParallelJobs: 3,
@@ -421,52 +421,52 @@ Test job %d`, i, i, i)
 	require.NoError(t, err)
 	// Note: In real orchestrator, executors are registered internally
 	// For this test, we'll need to modify the approach
-	
+
 	// Execute all jobs
 	ctx := context.Background()
 	var wg sync.WaitGroup
-	
+
 	for _, job := range plan.Jobs {
 		wg.Add(1)
 		go func(j *Job) {
 			defer wg.Done()
 			_ = orch.RunJob(ctx, j.FilePath)
 		}(job)
-		
+
 		// Small delay to respect parallelism limit
 		time.Sleep(10 * time.Millisecond)
 	}
-	
+
 	wg.Wait()
-	
+
 	// Verify all executed
 	assert.Len(t, executionOrder, 10)
-	
+
 	// Verify parallelism was respected
 	// Check that at most 3 jobs were running at the same time
 	maxConcurrent := 0
 	for i := 0; i < len(executionOrder); i++ {
 		startTime := executionTimes[executionOrder[i]]
 		concurrent := 1
-		
+
 		for j := 0; j < len(executionOrder); j++ {
 			if i == j {
 				continue
 			}
 			otherStart := executionTimes[executionOrder[j]]
 			otherEnd := otherStart.Add(100 * time.Millisecond)
-			
+
 			// Check if jobs overlapped
 			if startTime.After(otherStart) && startTime.Before(otherEnd) {
 				concurrent++
 			}
 		}
-		
+
 		if concurrent > maxConcurrent {
 			maxConcurrent = concurrent
 		}
 	}
-	
+
 	assert.LessOrEqual(t, maxConcurrent, 3, "Max parallelism exceeded")
 }
 
@@ -481,7 +481,7 @@ func formatDeps(deps []string) string {
 	if len(deps) == 0 {
 		return "[]"
 	}
-	
+
 	formatted := []string{}
 	for _, dep := range deps {
 		formatted = append(formatted, fmt.Sprintf("  - %s", dep))
@@ -491,7 +491,7 @@ func formatDeps(deps []string) string {
 
 func createTestJobFiles(t *testing.T, dir string) {
 	// Create the job files that the smart mock would have created
-	
+
 	// 02-design-api.md
 	content := `---
 id: design-api
@@ -504,9 +504,9 @@ output:
   type: file
 ---
 Design the API structure for the feature.`
-	err := os.WriteFile(filepath.Join(dir, "02-design-api.md"), []byte(content), 0644)
+	err := os.WriteFile(filepath.Join(dir, "02-design-api.md"), []byte(content), 0600)
 	require.NoError(t, err)
-	
+
 	// 03-implement-backend.md
 	content = `---
 id: impl-backend
@@ -520,9 +520,9 @@ output:
   type: commit
 ---
 Implement the backend based on the API design.`
-	err = os.WriteFile(filepath.Join(dir, "03-implement-backend.md"), []byte(content), 0644)
+	err = os.WriteFile(filepath.Join(dir, "03-implement-backend.md"), []byte(content), 0600)
 	require.NoError(t, err)
-	
+
 	// 04-implement-frontend.md
 	content = `---
 id: impl-frontend
@@ -536,7 +536,7 @@ output:
   type: commit
 ---
 Implement the frontend based on the API design.`
-	err = os.WriteFile(filepath.Join(dir, "04-implement-frontend.md"), []byte(content), 0644)
+	err = os.WriteFile(filepath.Join(dir, "04-implement-frontend.md"), []byte(content), 0600)
 	require.NoError(t, err)
 }
 

@@ -309,7 +309,6 @@ var JobManagementScenario = harness.NewScenario(
 			return nil
 		}),
 
-
 		harness.NewStep("Test renaming a job that other jobs depend on", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			planPath := ctx.GetString("plan_path")

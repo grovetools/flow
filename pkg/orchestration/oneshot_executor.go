@@ -118,7 +118,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
 	// Ensure lock file is removed when execution finishes.
-	defer RemoveLockFile(job.FilePath)
+	defer func() { _ = RemoveLockFile(job.FilePath) }()
 
 	// Update job status to running
 	job.Status = JobStatusRunning
@@ -137,7 +137,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			updateJobFile(job)
+			_ = updateJobFile(job)
 			execErr = fmt.Errorf("prepare worktree: %w", err)
 			return execErr
 		}
@@ -174,18 +174,15 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// --- Concept Gathering Logic ---
 	if job.GatherConceptNotes || job.GatherConceptPlans {
-		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
+		_, err := gatherConcepts(ctx, job, plan, workDir)
 		if err != nil {
 			ulog.Warn("Failed to gather concepts").
 				Err(err).
 				Field("request_id", requestID).
 				Field("job_id", job.ID).
 				Log(ctx)
-		} else if conceptContextFile != "" {
-			// Add the aggregated concepts file to the list of files to upload
-			// We handle this here before building the prompt.
-			// (file is picked up by context gathering logic below)
 		}
+		// The concept file (if any) is picked up by context gathering logic below.
 	}
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
@@ -207,7 +204,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		ulog.Error("Failed to build prompt for job").
 			Field("job_id", job.ID).
 			Field("job_file", job.FilePath).
@@ -399,7 +396,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		ulog.Error("LLM completion failed").
 			Err(err).
 			Field("request_id", requestID).
@@ -414,7 +411,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	if err := e.appendToJobFile(response, job); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		execErr = fmt.Errorf("appending output to job file: %w", err)
 		return execErr
 	}
@@ -685,7 +682,7 @@ func (e *OneShotExecutor) appendToJobFile(output string, job *Job) error {
 	newContent := string(content) + separator + output
 
 	// Write back
-	if err := os.WriteFile(job.FilePath, []byte(newContent), 0o644); err != nil {
+	if err := os.WriteFile(job.FilePath, []byte(newContent), 0o600); err != nil {
 		return fmt.Errorf("writing job file: %w", err)
 	}
 
@@ -711,7 +708,7 @@ func updateJobFile(job *Job) error {
 	}
 
 	// Write back
-	if err := os.WriteFile(job.FilePath, newContent, 0o644); err != nil {
+	if err := os.WriteFile(job.FilePath, newContent, 0o600); err != nil {
 		return fmt.Errorf("writing job file: %w", err)
 	}
 
@@ -801,7 +798,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		if err == nil {
 			statePath := filepath.Join(groveDir, "state.yml")
 			// This is a best-effort attempt; failure should not stop the job.
-			_ = os.WriteFile(statePath, yamlBytes, 0o644)
+			_ = os.WriteFile(statePath, yamlBytes, 0o600)
 		}
 	}
 
@@ -1221,7 +1218,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Ensure status is correctly set to pending_user and return.
 		if job.Status != JobStatusPendingUser {
 			job.Status = JobStatusPendingUser
-			updateJobFile(job)
+			_ = updateJobFile(job)
 		}
 		return nil
 	}
@@ -1233,7 +1230,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
 	// Ensure lock file is removed when execution finishes.
-	defer RemoveLockFile(job.FilePath)
+	defer func() { _ = RemoveLockFile(job.FilePath) }()
 
 	// Update job status to running
 	job.Status = JobStatusRunning
@@ -1257,7 +1254,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 
 		// Write the updated content back to the file
-		if err := os.WriteFile(job.FilePath, newContent, 0o644); err != nil {
+		if err := os.WriteFile(job.FilePath, newContent, 0o600); err != nil {
 			execErr = fmt.Errorf("writing updated chat file: %w", err)
 			return execErr
 		}
@@ -1302,7 +1299,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			Log(ctx)
 		job.Status = JobStatusCompleted
 		job.EndTime = time.Now()
-		updateJobFile(job)
+		_ = updateJobFile(job)
 		return nil
 	}
 
@@ -1349,17 +1346,15 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// --- Concept Gathering Logic ---
 	if job.GatherConceptNotes || job.GatherConceptPlans {
-		conceptContextFile, err := gatherConcepts(ctx, job, plan, worktreePath)
+		_, err := gatherConcepts(ctx, job, plan, worktreePath)
 		if err != nil {
 			ulog.Warn("Failed to gather concepts").
 				Err(err).
 				Field("request_id", requestID).
 				Field("job_id", job.ID).
 				Log(ctx)
-		} else if conceptContextFile != "" {
-			// The file will be picked up by the context gathering logic below.
-			// No action needed here.
 		}
+		// The concept file (if any) is picked up by context gathering logic below.
 	}
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
@@ -1811,7 +1806,7 @@ interpret and continue through YOUR current system instructions.
 	newCell := fmt.Sprintf("\n<!-- grove: {%s} -->\n## LLM Response (%s)\n\n%s\n\n<!-- grove: {\"template\": \"%s\"} -->\n", groveMetadata, timestamp, response, directive.Template)
 
 	// Append atomically
-	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0o644); err != nil {
+	if err := os.WriteFile(job.FilePath, append(content, []byte(newCell)...), 0o600); err != nil {
 		execErr = fmt.Errorf("appending LLM response: %w", err)
 		return execErr
 	}
@@ -1828,7 +1823,7 @@ interpret and continue through YOUR current system instructions.
 	// Update job status - chat jobs always go to pending_user (not completed)
 	job.Status = JobStatusPendingUser
 	job.EndTime = time.Now()
-	updateJobFile(job)
+	_ = updateJobFile(job)
 
 	return nil
 }

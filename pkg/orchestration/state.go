@@ -27,7 +27,7 @@ func (fp *FrontmatterParser) WriteFrontmatter(w io.Writer, frontmatter map[strin
 	if err != nil {
 		return fmt.Errorf("marshaling frontmatter: %w", err)
 	}
-	
+
 	if _, err := w.Write([]byte("---\n")); err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func (fp *FrontmatterParser) WriteFrontmatter(w io.Writer, frontmatter map[strin
 	if _, err := w.Write([]byte("---\n")); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -246,7 +246,7 @@ func (sp *StatePersister) UpdateJobMetadata(job *Job, meta JobMetadata) error {
 
 	// Build updates map
 	updates := make(map[string]interface{})
-	
+
 	if meta.RetryCount > 0 {
 		updates["retry_count"] = meta.RetryCount
 	}
@@ -256,7 +256,7 @@ func (sp *StatePersister) UpdateJobMetadata(job *Job, meta JobMetadata) error {
 	if meta.ExecutionTime > 0 {
 		updates["execution_time"] = meta.ExecutionTime.String()
 	}
-	
+
 	updates["updated_at"] = time.Now().Format(time.RFC3339)
 
 	// Apply update

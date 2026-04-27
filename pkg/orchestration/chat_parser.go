@@ -32,7 +32,7 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 	// Find all grove directives in the content
 	matches := groveDirectiveRegex.FindAllStringSubmatch(body, -1)
 	matchIndices := groveDirectiveRegex.FindAllStringIndex(body, -1)
-	
+
 	// If no directives found, assume entire content is initial user prompt
 	if len(matches) == 0 {
 		return []*ChatTurn{{
@@ -41,9 +41,9 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 			Timestamp: time.Now(),
 		}}, nil
 	}
-	
+
 	var turns []*ChatTurn
-	
+
 	// Check if there's content before the first directive
 	if matchIndices[0][0] > 0 {
 		initialContent := strings.TrimSpace(body[:matchIndices[0][0]])
@@ -55,25 +55,25 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 			})
 		}
 	}
-	
+
 	// Process each directive
 	for i, match := range matches {
 		if len(match) < 2 {
 			continue
 		}
-		
+
 		// Parse the directive JSON
 		var directive ChatDirective
 		if err := json.Unmarshal([]byte(match[1]), &directive); err != nil {
 			continue
 		}
-		
+
 		// Determine speaker from directive
 		speaker := "llm"
 		if directive.Template != "" {
 			speaker = "user"
 		}
-		
+
 		// Extract content from the start of the directive line until next directive or end
 		// This ensures we capture any content on the same line as the directive
 		startIdx := matchIndices[i][0]
@@ -83,14 +83,14 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 		} else {
 			endIdx = len(body)
 		}
-		
+
 		// Get the full content including the directive line
 		fullContent := body[startIdx:endIdx]
-		
+
 		// Remove the directive comment itself from the content
 		content := groveDirectiveRegex.ReplaceAllString(fullContent, "")
 		content = strings.TrimSpace(content)
-		
+
 		if content != "" || speaker == "user" {
 			turns = append(turns, &ChatTurn{
 				Speaker:   speaker,
@@ -100,6 +100,6 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 			})
 		}
 	}
-	
+
 	return turns, nil
 }

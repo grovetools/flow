@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/git"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/embed"
@@ -152,7 +153,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				configPath := filepath.Join(plan.Directory, ".grove-plan.yml")
 				data, err := yaml.Marshal(plan.Config)
 				if err == nil {
-					_ = os.WriteFile(configPath, data, 0644)
+					_ = os.WriteFile(configPath, data, 0600)
 				}
 				m.plans[m.editPlanIndex].Notes = newNotes
 			}
@@ -355,7 +356,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			configPath := filepath.Join(plan.Directory, ".grove-plan.yml")
 			if data, err := yaml.Marshal(plan.Config); err == nil {
-				if werr := os.WriteFile(configPath, data, 0644); werr != nil {
+				if werr := os.WriteFile(configPath, data, 0600); werr != nil {
 					m.statusMessage = fmt.Sprintf("Failed to update plan: %v", werr)
 				} else {
 					m.statusMessage = fmt.Sprintf("Plan '%s' %s hold", selectedPlan.Name, action)
@@ -389,7 +390,8 @@ func (m Model) fetchSelectedRepoGitLog() tea.Cmd {
 	if err != nil {
 		return nil
 	}
-	localWorkspaces := provider.LocalWorkspaces()
+	ecosystemRoot, _ := git.GetGitRoot(selectedPlan.Plan.Directory)
+	localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
 	if repoPath, exists := localWorkspaces[repoStatus.Name]; exists {
 		return fetchRepoGitLogCmd(repoPath)
 	}

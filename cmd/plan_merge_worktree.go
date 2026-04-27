@@ -126,7 +126,8 @@ func mergeWorktreeEcosystem(plan *orchestration.Plan, worktreeName string) error
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
 	provider := workspace.NewProvider(discoveryResult)
-	localWorkspaces := provider.LocalWorkspaces()
+	ecosystemRoot, _ := git.GetGitRoot(plan.Directory)
+	localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
 
 	var results []string
 	var errors []string

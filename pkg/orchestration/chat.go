@@ -17,7 +17,7 @@ type ChatDirective struct {
 	ID        string                 `json:"id,omitempty"`
 	Template  string                 `json:"template,omitempty"`
 	Model     string                 `json:"model,omitempty"`
-	Type      string                 `json:"type,omitempty"`       // Job type override for this turn
+	Type      string                 `json:"type,omitempty"` // Job type override for this turn
 	Action    string                 `json:"action,omitempty"`
 	RulesFile string                 `json:"rules_file,omitempty"` // Archived rules file used for this turn's context
 	Vars      map[string]interface{} `json:"vars,omitempty"`

@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattn/go-isatty"
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/planutil"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -94,24 +94,23 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	return runStatusTUI(plan, graph)
 }
 
-
 // WorktreeStatus represents git and worktree information for JSON output
 type WorktreeStatus struct {
-	Name         string          `json:"name"`
-	Branch       string          `json:"branch,omitempty"`
-	GitStatus    *GitStatusInfo  `json:"git_status,omitempty"`
-	MergeStatus  string          `json:"merge_status"`
-	ReviewStatus string          `json:"review_status"`
+	Name         string         `json:"name"`
+	Branch       string         `json:"branch,omitempty"`
+	GitStatus    *GitStatusInfo `json:"git_status,omitempty"`
+	MergeStatus  string         `json:"merge_status"`
+	ReviewStatus string         `json:"review_status"`
 }
 
 // GitStatusInfo contains git repository status information
 type GitStatusInfo struct {
-	Clean        bool   `json:"clean"`
-	AheadCount   int    `json:"ahead_count"`
-	BehindCount  int    `json:"behind_count"`
-	HasUntracked bool   `json:"has_untracked"`
-	HasModified  bool   `json:"has_modified"`
-	HasStaged    bool   `json:"has_staged"`
+	Clean        bool `json:"clean"`
+	AheadCount   int  `json:"ahead_count"`
+	BehindCount  int  `json:"behind_count"`
+	HasUntracked bool `json:"has_untracked"`
+	HasModified  bool `json:"has_modified"`
+	HasStaged    bool `json:"has_staged"`
 }
 
 // getWorktreeStatus retrieves worktree and git status information for a plan
@@ -197,9 +196,9 @@ func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
 // JobOutput wraps orchestration.Job for JSON serialization, adding failure details.
 type JobOutput struct {
 	*orchestration.Job
-	LastError      string                              `json:"last_error,omitempty"`
-	LogPath        string                              `json:"log_path,omitempty"`
-	SkillFidelity  []orchestration.SkillFidelityState   `json:"skill_fidelity,omitempty"`
+	LastError     string                             `json:"last_error,omitempty"`
+	LogPath       string                             `json:"log_path,omitempty"`
+	SkillFidelity []orchestration.SkillFidelityState `json:"skill_fidelity,omitempty"`
 }
 
 // formatStatusJSON creates JSON output.
@@ -245,10 +244,10 @@ func formatStatusJSON(plan *orchestration.Plan) (string, error) {
 
 	// Create a structure for JSON output with git/worktree info
 	output := struct {
-		Plan     string           `json:"plan"`
-		Jobs     []JobOutput      `json:"jobs"`
-		Stats    map[string]int   `json:"statistics"`
-		Worktree *WorktreeStatus  `json:"worktree,omitempty"`
+		Plan     string          `json:"plan"`
+		Jobs     []JobOutput     `json:"jobs"`
+		Stats    map[string]int  `json:"statistics"`
+		Worktree *WorktreeStatus `json:"worktree,omitempty"`
 	}{
 		Plan:  plan.Name,
 		Jobs:  jobOutputs,

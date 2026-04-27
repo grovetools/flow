@@ -94,7 +94,7 @@ func handleNew() {
 		content += "\n" + body + "\n"
 	}
 
-	if err := os.WriteFile(notePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(notePath, []byte(content), 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "[MOCK NB] Error writing note: %v\n", err)
 		os.Exit(1)
 	}

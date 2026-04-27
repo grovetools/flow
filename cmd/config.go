@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+
 	"github.com/grovetools/core/config"
 )
 
@@ -64,7 +65,7 @@ func loadFullConfig() (*AppConfig, error) {
 	}
 
 	var flowCfg FlowConfig
-	coreCfg.UnmarshalExtension("flow", &flowCfg)
+	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	return &AppConfig{
 		Core: coreCfg,

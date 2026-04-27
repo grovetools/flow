@@ -112,7 +112,7 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 
 	if err != nil {
 		// If launching fails, revert the status back to completed
-		persister.UpdateJobStatus(job, orchestration.JobStatusCompleted)
+		_ = persister.UpdateJobStatus(job, orchestration.JobStatusCompleted)
 		return fmt.Errorf("failed to re-launch agent session: %w", err)
 	}
 

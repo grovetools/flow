@@ -19,8 +19,8 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/pkg/plan"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -760,7 +760,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) e
 
 		// Write the processed job file to the new plan directory
 		destPath := filepath.Join(planPath, filename)
-		if err := os.WriteFile(destPath, finalContent, 0o644); err != nil {
+		if err := os.WriteFile(destPath, finalContent, 0o600); err != nil {
 			return fmt.Errorf("writing recipe job file %s: %w", filename, err)
 		}
 	}
@@ -922,7 +922,7 @@ func executeOnStartHook(planPath, planName, noteRef string) error {
 			}
 
 			// Execute the command
-			hookCmd := exec.Command("sh", "-c", renderedCmd.String())
+			hookCmd := exec.Command("sh", "-c", renderedCmd.String()) //nolint:gosec // on_start hook comes from trusted plan config
 			hookCmd.Stdout = os.Stdout
 			hookCmd.Stderr = os.Stderr
 			if err := hookCmd.Run(); err != nil {
@@ -1063,7 +1063,7 @@ func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playboo
 	}
 
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
-	return os.WriteFile(configPath, []byte(configContent.String()), 0o644)
+	return os.WriteFile(configPath, []byte(configContent.String()), 0o600)
 }
 
 // applyDefaultContextRulesToWorktree applies default context rules to a worktree.
@@ -1258,7 +1258,7 @@ func setWorktreeActivePlan(worktreePath, planName string) error {
 	}
 
 	statePath := filepath.Join(groveDir, "state.yml")
-	if err := os.WriteFile(statePath, yamlBytes, 0644); err != nil {
+	if err := os.WriteFile(statePath, yamlBytes, 0600); err != nil {
 		return fmt.Errorf("failed to write state file in worktree: %w", err)
 	}
 
@@ -1346,14 +1346,14 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 					envContent.WriteString(fmt.Sprintf("%s=%s\n", k, existingState.EnvVars[k]))
 				}
 				envPath := filepath.Join(loadPath, ".env.local")
-				if err := os.WriteFile(envPath, []byte(envContent.String()), 0644); err != nil {
+				if err := os.WriteFile(envPath, []byte(envContent.String()), 0600); err != nil {
 					result.WriteString(fmt.Sprintf("%s  Warning: could not write .env.local: %v\n", theme.IconWarning, err))
 				}
 			}
 
 			// Write legacy .env_state.json to plan dir for backward compat
 			stateBytes, _ := json.MarshalIndent(existingState, "", "  ")
-			os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644)
+			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0600)
 
 			return result.String(), nil
 		}
@@ -1442,7 +1442,7 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 			envContent.WriteString(fmt.Sprintf("%s=%s\n", k, resp.EnvVars[k]))
 		}
 		envPath := filepath.Join(loadPath, ".env.local")
-		if err := os.WriteFile(envPath, []byte(envContent.String()), 0644); err != nil {
+		if err := os.WriteFile(envPath, []byte(envContent.String()), 0600); err != nil {
 			result.WriteString(fmt.Sprintf("%s  Warning: could not write .env.local: %v\n", theme.IconWarning, err))
 		} else {
 			result.WriteString("* Wrote environment variables to .env.local\n")
@@ -1474,8 +1474,8 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 			State:         resp.State,
 		}
 		if stateBytes, err := json.MarshalIndent(stateFile, "", "  "); err == nil {
-			_ = os.WriteFile(worktreeStatePath, stateBytes, 0644)
-			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0644)
+			_ = os.WriteFile(worktreeStatePath, stateBytes, 0600)
+			_ = os.WriteFile(filepath.Join(planPath, ".env_state.json"), stateBytes, 0600)
 		}
 	}
 

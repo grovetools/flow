@@ -164,7 +164,7 @@ func sendToAgent(plan *orchestration.Plan, job *orchestration.Job, targetPane, i
 		coreCfg = &config.Config{}
 	}
 	var flowCfg orchestration.FlowConfig
-	coreCfg.UnmarshalExtension("flow", &flowCfg)
+	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	inputMode := "vim"
 	providerName := "claude"

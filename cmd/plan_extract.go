@@ -51,12 +51,12 @@ Examples:
 				jsonFlag, _ := cmd.Flags().GetBool("json")
 				return runJobsExtractList(file, jsonFlag)
 			}
-			
+
 			// For extract command, title is required
 			if title == "" {
 				return fmt.Errorf("--title is required for extract command")
 			}
-			
+
 			// Otherwise, run the normal extract command
 			return runJobsExtract(title, file, args, dependsOn, worktree, model, outputType)
 		},
@@ -104,7 +104,7 @@ func runJobsExtract(title string, file string, blockIDs []string, dependsOn []st
 		// Otherwise, look for it in the current plan
 		chatFilePath = filepath.Join(currentPlanPath, file)
 	}
-	
+
 	if _, err := os.Stat(chatFilePath); err != nil {
 		return fmt.Errorf("file %s not found: %w", file, err)
 	}
@@ -279,7 +279,7 @@ func runJobsExtractList(file string, jsonOutput bool) error {
 		}
 		chatFilePath = filepath.Join(currentPlanPath, file)
 	}
-	
+
 	if _, err := os.Stat(chatFilePath); err != nil {
 		return fmt.Errorf("file %s not found: %w", file, err)
 	}
@@ -293,12 +293,12 @@ func runJobsExtractList(file string, jsonOutput bool) error {
 	// Parse the file to find all grove directives with IDs
 	contentStr := string(content)
 	lines := strings.Split(contentStr, "\n")
-	
+
 	// Regular expression to find grove directives
 	groveDirectiveRegex := regexp.MustCompile(`(?m)<!-- grove: (.+?) -->`)
-	
+
 	var blocks []BlockInfo
-	
+
 	for i, line := range lines {
 		matches := groveDirectiveRegex.FindStringSubmatch(line)
 		if len(matches) > 1 {
@@ -307,18 +307,18 @@ func runJobsExtractList(file string, jsonOutput bool) error {
 			if err := json.Unmarshal([]byte(matches[1]), &directive); err != nil {
 				continue // Skip malformed directives
 			}
-			
+
 			if directive.ID != "" {
 				// Determine the type based on whether it has a template
 				blockType := "llm"
 				if directive.Template != "" {
 					blockType = "user"
 				}
-				
+
 				// Get preview from the following lines
 				preview := ""
 				// Look at the next few lines for content
-				for j := i + 1; j < len(lines) && j < i + 6; j++ {
+				for j := i + 1; j < len(lines) && j < i+6; j++ {
 					line := strings.TrimSpace(lines[j])
 					if line != "" && !strings.HasPrefix(line, "<!--") && !strings.HasPrefix(line, "##") {
 						preview = line
@@ -332,7 +332,7 @@ func runJobsExtractList(file string, jsonOutput bool) error {
 						break
 					}
 				}
-				
+
 				blocks = append(blocks, BlockInfo{
 					ID:        directive.ID,
 					Type:      blockType,

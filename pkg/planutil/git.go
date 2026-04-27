@@ -36,7 +36,7 @@ func CommitCount(repoPath, revRange string) int {
 		return 0
 	}
 	count := 0
-	fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &count)
+	_, _ = fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &count)
 	return count
 }
 
@@ -48,7 +48,7 @@ func MergeStatus(repoPath, branchName string) string {
 		return "-"
 	}
 
-	branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
+	branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branchName) //nolint:gosec // branchName is internal, not user input
 	branchCheckCmd.Dir = repoPath
 	if err := branchCheckCmd.Run(); err != nil {
 		return "no branch"
@@ -156,7 +156,8 @@ func EcosystemRepoDetails(plan *orchestration.Plan, worktree string, provider *w
 	if provider == nil {
 		return nil, "err (no provider)"
 	}
-	localWorkspaces := provider.LocalWorkspaces()
+	ecosystemRoot, _ := git.GetGitRoot(plan.Directory)
+	localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
 
 	var details []EcosystemRepoStatus
 	statusCounts := make(map[string]int)

@@ -103,14 +103,14 @@ func loadRecipeMetadata(recipe *Recipe, recipeDir string, fs embed.FS) error {
 }
 
 type Recipe struct {
-	Name              string                      `json:"name"`
-	Description       string                      `json:"description"`
-	Source            string                      `json:"source,omitempty"`  // [Built-in], [User], [Dynamic], or [Project]
-	Domain            string                      `json:"domain,omitempty"`  // "generic" or "grove"
-	DefaultNoteTarget string                      `json:"-"`                 // This will be populated from recipe.yml
-	Jobs              map[string][]byte           `json:"-"`                 // Filename -> Content
-	InitActions       []InitAction                `yaml:"init,omitempty"`    // Actions that run with --init flag
-	NamedActions      map[string][]InitAction     `yaml:"actions,omitempty"` // Named, on-demand action groups
+	Name              string                  `json:"name"`
+	Description       string                  `json:"description"`
+	Source            string                  `json:"source,omitempty"`  // [Built-in], [User], [Dynamic], or [Project]
+	Domain            string                  `json:"domain,omitempty"`  // "generic" or "grove"
+	DefaultNoteTarget string                  `json:"-"`                 // This will be populated from recipe.yml
+	Jobs              map[string][]byte       `json:"-"`                 // Filename -> Content
+	InitActions       []InitAction            `yaml:"init,omitempty"`    // Actions that run with --init flag
+	NamedActions      map[string][]InitAction `yaml:"actions,omitempty"` // Named, on-demand action groups
 }
 
 // GetBuiltinRecipe finds and returns a built-in recipe.
@@ -261,7 +261,7 @@ func ListDynamicRecipes(getRecipeCmd string) ([]*Recipe, error) {
 		return nil, fmt.Errorf("empty get_recipe_cmd")
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.Command(parts[0], parts[1:]...) //nolint:gosec // get_recipe_cmd comes from trusted config
 	output, err := cmd.Output()
 	if err != nil {
 		// Log a warning instead of failing hard. A provider might be broken.
@@ -812,7 +812,7 @@ func AddJobsFromRecipe(plan *Plan, recipe *Recipe, externalDeps []string, templa
 		}
 
 		// Write to disk
-		if err := os.WriteFile(newJob.FilePath, content, 0644); err != nil {
+		if err := os.WriteFile(newJob.FilePath, content, 0600); err != nil {
 			return nil, fmt.Errorf("writing job file %s: %w", newJob.FilePath, err)
 		}
 

@@ -69,89 +69,89 @@ const (
 
 // Model represents the state of the TUI
 type Model struct {
-	Plan               *orchestration.Plan
-	Graph              *orchestration.DependencyGraph
-	Orchestrator       *orchestration.Orchestrator // Direct orchestrator for job execution
-	Jobs               []*orchestration.Job
-	JobParents         map[string]*orchestration.Job // Track parent in tree structure
-	JobIndents         map[string]int                // Track indentation level
-	Cursor             int
-	ScrollOffset       int             // Track scroll position for viewport
-	Selected           map[string]bool // For multi-select
-	StatusSummary      string
-	Err                error
-	Width              int
-	Height             int
-	ConfirmArchive     bool // Show archive confirmation
-	ShowStatusPicker   bool // Show status picker
-	StatusPickerCursor int  // Cursor position in status picker
-	ShowTypePicker     bool // Show type picker
-	TypePickerCursor   int  // Cursor position in type picker
-	ShowTemplatePicker bool // Show template picker
-	TemplatePickerCursor int  // Cursor position in template picker
-	PlanDir            string // Store plan directory for refresh
-	KeyMap        KeyMap
-	Help          help.Model
-	Sequence      *keymap.SequenceState // For detecting multi-key sequences (gg)
-	CursorVisible bool                  // Track cursor visibility for blinking animation
-	Renaming           bool
-	RenameInput        textinput.Model
-	RenameJobIndex     int
-	selectingRecipe    bool
-	recipeList         list.Model
-	EditingDeps        bool
-	EditDepsJobIndex   int
-	EditDepsSelected   map[string]bool // Track which jobs are selected as dependencies
-	CreatingJob        bool
-	CreateJobInput     textinput.Model
-	CreateJobType      string // "xml" or "impl"
-	CreateJobBaseJob    *orchestration.Job
-	CreateJobDeps       []*orchestration.Job // For multi-select case
-	ShowLogs            bool
-	LogViewer           logviewer.Model
-	ActiveLogJob        *orchestration.Job
-	StreamingJobID      string             // Track which job is currently streaming to prevent duplicates
-	StreamCancel        context.CancelFunc // Function to cancel the active agent log stream
-	ActiveDetailPane    DetailPane
-	HasFocus            bool               // True when the host has given this panel focus
-	columnSelectMode    bool
-	columnList          list.Model
-	availableColumns    []string
-	columnVisibility    map[string]bool
-	frontmatterViewport viewport.Model
-	briefingViewport    viewport.Model
-	editViewport        viewport.Model
-	skillPaneViewport      viewport.Model
-	skillArtifactViewport  viewport.Model         // Scrollable artifact detail viewport
-	skillPaneCursor        int                     // Cursor position in the skill pane tree
-	skillPaneNodes         []*SkillPaneNode        // Flattened skill/artifact nodes for cursor navigation
-	skillPaneStateMap      map[string]orchestration.SkillFidelityState // Cached state map
+	Plan                  *orchestration.Plan
+	Graph                 *orchestration.DependencyGraph
+	Orchestrator          *orchestration.Orchestrator // Direct orchestrator for job execution
+	Jobs                  []*orchestration.Job
+	JobParents            map[string]*orchestration.Job // Track parent in tree structure
+	JobIndents            map[string]int                // Track indentation level
+	Cursor                int
+	ScrollOffset          int             // Track scroll position for viewport
+	Selected              map[string]bool // For multi-select
+	StatusSummary         string
+	Err                   error
+	Width                 int
+	Height                int
+	ConfirmArchive        bool   // Show archive confirmation
+	ShowStatusPicker      bool   // Show status picker
+	StatusPickerCursor    int    // Cursor position in status picker
+	ShowTypePicker        bool   // Show type picker
+	TypePickerCursor      int    // Cursor position in type picker
+	ShowTemplatePicker    bool   // Show template picker
+	TemplatePickerCursor  int    // Cursor position in template picker
+	PlanDir               string // Store plan directory for refresh
+	KeyMap                KeyMap
+	Help                  help.Model
+	Sequence              *keymap.SequenceState // For detecting multi-key sequences (gg)
+	CursorVisible         bool                  // Track cursor visibility for blinking animation
+	Renaming              bool
+	RenameInput           textinput.Model
+	RenameJobIndex        int
+	selectingRecipe       bool
+	recipeList            list.Model
+	EditingDeps           bool
+	EditDepsJobIndex      int
+	EditDepsSelected      map[string]bool // Track which jobs are selected as dependencies
+	CreatingJob           bool
+	CreateJobInput        textinput.Model
+	CreateJobType         string // "xml" or "impl"
+	CreateJobBaseJob      *orchestration.Job
+	CreateJobDeps         []*orchestration.Job // For multi-select case
+	ShowLogs              bool
+	LogViewer             logviewer.Model
+	ActiveLogJob          *orchestration.Job
+	StreamingJobID        string             // Track which job is currently streaming to prevent duplicates
+	StreamCancel          context.CancelFunc // Function to cancel the active agent log stream
+	ActiveDetailPane      DetailPane
+	HasFocus              bool // True when the host has given this panel focus
+	columnSelectMode      bool
+	columnList            list.Model
+	availableColumns      []string
+	columnVisibility      map[string]bool
+	frontmatterViewport   viewport.Model
+	briefingViewport      viewport.Model
+	editViewport          viewport.Model
+	skillPaneViewport     viewport.Model
+	skillArtifactViewport viewport.Model                              // Scrollable artifact detail viewport
+	skillPaneCursor       int                                         // Cursor position in the skill pane tree
+	skillPaneNodes        []*SkillPaneNode                            // Flattened skill/artifact nodes for cursor navigation
+	skillPaneStateMap     map[string]orchestration.SkillFidelityState // Cached state map
 
 	// Claw dialog
-	ClawDialogActive   bool
-	ClawDialogJobIndex int
-	ClawIdleInput      textinput.Model
-	ClawPromptInput    textinput.Model
-	ClawDialogFocus    int // 0=idle, 1=prompt
-	ClawDisabling      bool // true when disabling (unclaw)
-	skillSearchActive      bool                    // Whether search mode is active in skill pane
-	skillSearchInput       textinput.Model         // Text input for skill pane search
+	ClawDialogActive      bool
+	ClawDialogJobIndex    int
+	ClawIdleInput         textinput.Model
+	ClawPromptInput       textinput.Model
+	ClawDialogFocus       int             // 0=idle, 1=prompt
+	ClawDisabling         bool            // true when disabling (unclaw)
+	skillSearchActive     bool            // Whether search mode is active in skill pane
+	skillSearchInput      textinput.Model // Text input for skill pane search
 	frontmatterRawContent string
 	briefingRawContent    string
 	editRawContent        string
-	skillPaneRawContent    string
-	Focus               ViewFocus // Track which pane is active
-	LogSplitVertical    bool      // Track log viewer layout
-	LogPaneFullscreen   bool      // Track if logs pane is fullscreen
-	IsRunningJob        bool      // Track if a job is currently running
-	isAutorunning       bool      // True when automatically running all stages
-	originalSelection   map[string]bool // Track the original user selection for autorun
-	RunLogFile         string    // Path to temporary log file for job output
+	skillPaneRawContent   string
+	Focus                 ViewFocus       // Track which pane is active
+	LogSplitVertical      bool            // Track log viewer layout
+	LogPaneFullscreen     bool            // Track if logs pane is fullscreen
+	IsRunningJob          bool            // Track if a job is currently running
+	isAutorunning         bool            // True when automatically running all stages
+	originalSelection     map[string]bool // Track the original user selection for autorun
+	RunLogFile            string          // Path to temporary log file for job output
 	// MsgCh is the channel used by background streaming goroutines to deliver
 	// messages into the Update loop. The Model's listenStream tea.Cmd drains it.
 	// Close() closes this channel (once) so the listener goroutine unblocks
 	// and the recursive listenStream cmd returns.
-	MsgCh              chan tea.Msg
+	MsgCh chan tea.Msg
 	// Daemon SSE stream state, owned per-Model so multiple embedded status
 	// instances can coexist inside a single host without sharing state. Set
 	// when daemonStreamConnectedMsg is delivered; cleared by Close().
@@ -163,10 +163,10 @@ type Model struct {
 	// across bubbletea's value-receiver Update copies of the Model.
 	streamWg *sync.WaitGroup
 	// msgChCloseOnce guards against double-closing MsgCh during Close().
-	msgChCloseOnce *sync.Once
-	LogViewerWidth     int       // Cached log viewer width
-	LogViewerHeight    int       // Cached log viewer height
-	FocusJobsWidth      int       // Cached jobs pane width for vertical split
+	msgChCloseOnce  *sync.Once
+	LogViewerWidth  int // Cached log viewer width
+	LogViewerHeight int // Cached log viewer height
+	FocusJobsWidth  int // Cached jobs pane width for vertical split
 
 	// Isolated agent input support
 	IsolatedAgentInput       textinput.Model // Text input for sending to isolated agents
@@ -523,7 +523,7 @@ func New(cfg Config) Model {
 
 	// Create orchestrator for direct job execution
 	orchConfig := &orchestration.OrchestratorConfig{
-		MaxParallelJobs:     1,    // TUI runs one job or selection at a time
+		MaxParallelJobs:     1, // TUI runs one job or selection at a time
 		CheckInterval:       5 * time.Second,
 		MaxConsecutiveSteps: 20,
 		SkipInteractive:     true, // Don't prompt for user input in TUI mode
@@ -602,43 +602,43 @@ func New(cfg Config) Model {
 	}
 
 	return Model{
-		Plan:             plan,
-		Graph:            graph,
-		Orchestrator:     orch,
-		Jobs:             jobs,
-		JobParents:       parents,
-		JobIndents:       indents,
-		Cursor:           initialCursor,
-		ScrollOffset:     0,
-		Selected:         make(map[string]bool),
-		StatusSummary:    formatStatusSummaryHelper(plan),
-		ConfirmArchive:   false,
-		PlanDir:          plan.Directory,
-		KeyMap:           keyMap,
-		Help:             helpModel,
-		Sequence:         keymap.NewSequenceState(),
-		CursorVisible:    true,
-		LogViewer:        logViewerModel,
-		ShowLogs:         false, // Start with logs hidden by default
-		ActiveLogJob:     nil,
-		ActiveDetailPane: NoPane,
-		columnSelectMode:    false,
-		columnList:          columnList,
-		availableColumns:    availableColumns,
-		columnVisibility:    columnVisibility,
-		Focus:            FocusJobs,
-		LogSplitVertical: logSplitVertical,
-		IsRunningJob:        false,
-		RunLogFile:          "", // No longer creating TUI-specific log files
-		MsgCh:               make(chan tea.Msg, 1024),
-		streamWg:            &sync.WaitGroup{},
-		msgChCloseOnce:      &sync.Once{},
-		frontmatterViewport: frontmatterVp,
-		briefingViewport:    briefingVp,
+		Plan:                     plan,
+		Graph:                    graph,
+		Orchestrator:             orch,
+		Jobs:                     jobs,
+		JobParents:               parents,
+		JobIndents:               indents,
+		Cursor:                   initialCursor,
+		ScrollOffset:             0,
+		Selected:                 make(map[string]bool),
+		StatusSummary:            formatStatusSummaryHelper(plan),
+		ConfirmArchive:           false,
+		PlanDir:                  plan.Directory,
+		KeyMap:                   keyMap,
+		Help:                     helpModel,
+		Sequence:                 keymap.NewSequenceState(),
+		CursorVisible:            true,
+		LogViewer:                logViewerModel,
+		ShowLogs:                 false, // Start with logs hidden by default
+		ActiveLogJob:             nil,
+		ActiveDetailPane:         NoPane,
+		columnSelectMode:         false,
+		columnList:               columnList,
+		availableColumns:         availableColumns,
+		columnVisibility:         columnVisibility,
+		Focus:                    FocusJobs,
+		LogSplitVertical:         logSplitVertical,
+		IsRunningJob:             false,
+		RunLogFile:               "", // No longer creating TUI-specific log files
+		MsgCh:                    make(chan tea.Msg, 1024),
+		streamWg:                 &sync.WaitGroup{},
+		msgChCloseOnce:           &sync.Once{},
+		frontmatterViewport:      frontmatterVp,
+		briefingViewport:         briefingVp,
 		editViewport:             editVp,
-		skillPaneViewport:         skillPaneVp,
-		skillArtifactViewport:     skillArtifactVp,
-		skillSearchInput:          skillSearch,
+		skillPaneViewport:        skillPaneVp,
+		skillArtifactViewport:    skillArtifactVp,
+		skillSearchInput:         skillSearch,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
 		DaemonClient:             daemonClient,
@@ -1104,8 +1104,6 @@ func (m *Model) getVisibleJobCount() int {
 
 	return availableHeight
 }
-
-
 
 // adjustScrollOffset ensures the cursor is visible within the viewport
 func (m *Model) adjustScrollOffset() {

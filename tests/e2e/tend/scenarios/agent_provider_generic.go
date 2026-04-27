@@ -14,10 +14,10 @@ import (
 
 // ProviderConfig defines the configuration for testing a specific provider.
 type ProviderConfig struct {
-	Name       string   // Provider name: "claude", "codex", "opencode"
-	MockName   string   // Mock binary name (e.g., "claude", "cx", "opencode")
-	TestArgs   []string // Test args to verify are passed
-	ProjectSuffix string // Unique suffix for project names
+	Name          string   // Provider name: "claude", "codex", "opencode"
+	MockName      string   // Mock binary name (e.g., "claude", "cx", "opencode")
+	TestArgs      []string // Test args to verify are passed
+	ProjectSuffix string   // Unique suffix for project names
 }
 
 // AllProviders returns configurations for all three providers.

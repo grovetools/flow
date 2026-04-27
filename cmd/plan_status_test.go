@@ -206,7 +206,7 @@ func TestRunPlanStatus(t *testing.T) {
 			os.Stdout = oldStdout
 
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, _ = io.Copy(&buf, r)
 			output := buf.String()
 
 			// Check output
@@ -364,7 +364,7 @@ func TestJSONOutputSuppressesHumanReadableText(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
 
 	// Output should be pure JSON
@@ -426,7 +426,7 @@ func TestJSONFlagOverridesFormatFlag(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
 
 	// Output should still be pure JSON despite format flag
@@ -507,7 +507,7 @@ func TestPlanStatusJSONOutputWithNonEmptyPlan(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := strings.TrimSpace(buf.String())
 
 	// First character should be { (start of JSON)

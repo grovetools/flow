@@ -127,7 +127,7 @@ func showConfig(configPath string, jsonOutput bool) error {
 		if err := yaml.Unmarshal(data, &config); err != nil {
 			return fmt.Errorf("failed to parse config file: %w", err)
 		}
-		
+
 		// Filter out nil values
 		filtered := make(map[string]interface{})
 		for k, v := range config {
@@ -135,7 +135,7 @@ func showConfig(configPath string, jsonOutput bool) error {
 				filtered[k] = v
 			}
 		}
-		
+
 		jsonData, err := json.MarshalIndent(filtered, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to convert to JSON: %w", err)
@@ -185,7 +185,7 @@ func getConfigValue(configPath string, key string, jsonOutput bool) error {
 func setConfigValues(configPath string, pairs []string) error {
 	// Read existing config or create new one
 	var config map[string]interface{}
-	
+
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -247,12 +247,12 @@ func setConfigValues(configPath string, pairs []string) error {
 	}
 
 	// Write the file
-	if err := os.WriteFile(configPath, yamlData, 0644); err != nil {
+	if err := os.WriteFile(configPath, yamlData, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
 	fmt.Printf("* Updated %s\n", configPath)
-	
+
 	// Propagate non-blank values to job files that don't have them set
 	updatesToPropagate := make(map[string]interface{})
 	for _, pair := range pairs {
@@ -263,7 +263,7 @@ func setConfigValues(configPath string, pairs []string) error {
 			updatesToPropagate[key] = value
 		}
 	}
-	
+
 	if len(updatesToPropagate) > 0 {
 		planPath := filepath.Dir(configPath)
 		plan, err := orchestration.LoadPlan(planPath)
@@ -271,7 +271,7 @@ func setConfigValues(configPath string, pairs []string) error {
 			fmt.Printf("Warning: could not load plan to propagate config: %v\n", err)
 			return nil
 		}
-		
+
 		updatedJobs := 0
 		for _, job := range plan.Jobs {
 			jobContent, err := os.ReadFile(job.FilePath)
@@ -279,9 +279,9 @@ func setConfigValues(configPath string, pairs []string) error {
 				fmt.Printf("Warning: could not read job file %s: %v\n", job.Filename, err)
 				continue
 			}
-			
+
 			frontmatter, _, _ := orchestration.ParseFrontmatter(jobContent)
-			
+
 			jobUpdates := make(map[string]interface{})
 			for key, value := range updatesToPropagate {
 				if _, ok := frontmatter[key]; !ok {
@@ -294,25 +294,25 @@ func setConfigValues(configPath string, pairs []string) error {
 					jobUpdates[key] = value
 				}
 			}
-			
+
 			if len(jobUpdates) > 0 {
 				newContent, err := orchestration.UpdateFrontmatter(jobContent, jobUpdates)
 				if err != nil {
 					fmt.Printf("Warning: could not update frontmatter for %s: %v\n", job.Filename, err)
 					continue
 				}
-				if err := os.WriteFile(job.FilePath, newContent, 0644); err != nil {
+				if err := os.WriteFile(job.FilePath, newContent, 0600); err != nil {
 					fmt.Printf("Warning: could not write updated job file %s: %v\n", job.Filename, err)
 					continue
 				}
 				updatedJobs++
 			}
 		}
-		
+
 		if updatedJobs > 0 {
 			fmt.Printf("* Propagated config changes to %d job(s)\n", updatedJobs)
 		}
 	}
-	
+
 	return nil
 }

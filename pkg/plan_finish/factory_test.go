@@ -48,7 +48,7 @@ func setupPruneTest(t *testing.T, withSubmodules bool) (gitRoot, worktreeName, w
 	path = fake
 	url = https://example.invalid/fake.git
 `
-		if err := os.WriteFile(filepath.Join(wPath, ".gitmodules"), []byte(gm), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(wPath, ".gitmodules"), []byte(gm), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -163,7 +163,7 @@ func TestPruneWorktree_ForceHammer_DirectoryNotEmpty(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(leftover), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(leftover, []byte("x"), 0644); err != nil {
+	if err := os.WriteFile(leftover, []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
 

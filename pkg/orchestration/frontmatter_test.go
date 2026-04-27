@@ -8,11 +8,11 @@ import (
 
 func TestParseFrontmatter(t *testing.T) {
 	tests := []struct {
-		name    string
-		content string
-		want    map[string]interface{}
+		name     string
+		content  string
+		want     map[string]interface{}
 		wantBody string
-		wantErr bool
+		wantErr  bool
 	}{
 		{
 			name: "valid frontmatter",
@@ -34,7 +34,7 @@ This is the body content.`,
 			name: "no frontmatter",
 			content: `This is just plain content.
 No frontmatter here.`,
-			want:     map[string]interface{}{},
+			want: map[string]interface{}{},
 			wantBody: `This is just plain content.
 No frontmatter here.`,
 			wantErr: false,
@@ -61,7 +61,7 @@ output:
 ---
 Complex body.`,
 			want: map[string]interface{}{
-				"id": "complex-123",
+				"id":         "complex-123",
 				"depends_on": []interface{}{"job1.md", "job2.md"},
 				"output": map[string]interface{}{
 					"type": "file",
@@ -138,17 +138,17 @@ title: No closing`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, body, err := ParseFrontmatter([]byte(tt.content))
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseFrontmatter() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
 				if !reflect.DeepEqual(got, tt.want) {
 					t.Errorf("ParseFrontmatter() frontmatter = %v, want %v", got, tt.want)
 				}
-				
+
 				if string(body) != tt.wantBody {
 					t.Errorf("ParseFrontmatter() body = %q, want %q", string(body), tt.wantBody)
 				}
@@ -236,17 +236,17 @@ Body.`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := UpdateFrontmatter([]byte(tt.content), tt.updates)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("UpdateFrontmatter() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
 				// Normalize whitespace for comparison
 				gotStr := strings.TrimSpace(string(got))
 				wantStr := strings.TrimSpace(tt.want)
-				
+
 				// For the comment preservation test, we need to be more lenient
 				// as the YAML library might not preserve all formatting exactly
 				if strings.Contains(tt.content, "# This is a comment") {
@@ -256,7 +256,7 @@ Body.`,
 					}
 					return
 				}
-				
+
 				if gotStr != wantStr {
 					t.Errorf("UpdateFrontmatter() = %q, want %q", gotStr, wantStr)
 				}
@@ -267,11 +267,11 @@ Body.`,
 
 func TestExtractFrontmatterString(t *testing.T) {
 	tests := []struct {
-		name         string
-		content      string
-		wantYAML     string
-		wantBody     string
-		wantErr      bool
+		name     string
+		content  string
+		wantYAML string
+		wantBody string
+		wantErr  bool
 	}{
 		{
 			name: "extract valid frontmatter",
@@ -297,17 +297,17 @@ status: pending`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotYAML, gotBody, err := ExtractFrontmatterString([]byte(tt.content))
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ExtractFrontmatterString() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if !tt.wantErr {
 				if gotYAML != tt.wantYAML {
 					t.Errorf("ExtractFrontmatterString() YAML = %q, want %q", gotYAML, tt.wantYAML)
 				}
-				
+
 				if string(gotBody) != tt.wantBody {
 					t.Errorf("ExtractFrontmatterString() body = %q, want %q", string(gotBody), tt.wantBody)
 				}

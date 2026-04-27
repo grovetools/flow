@@ -35,7 +35,7 @@ func ArchiveContextRules(job *Job, plan *Plan, usedRulesPath string) error {
 		}
 		newContent, err := UpdateFrontmatter(jobContent, updates)
 		if err == nil {
-			_ = os.WriteFile(job.FilePath, newContent, 0644)
+			_ = os.WriteFile(job.FilePath, newContent, 0600)
 		}
 	}
 
@@ -69,7 +69,7 @@ func archiveRulesFile(plan *Plan, jobID string, filename string, usedRulesPath s
 	}
 
 	destRulesPath := filepath.Join(destArtifactDir, filename)
-	if err := os.WriteFile(destRulesPath, content, 0644); err != nil {
+	if err := os.WriteFile(destRulesPath, content, 0600); err != nil {
 		return "", fmt.Errorf("failed to write archived rules file: %w", err)
 	}
 

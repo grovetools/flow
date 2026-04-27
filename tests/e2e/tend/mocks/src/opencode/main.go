@@ -50,7 +50,7 @@ func main() {
 {"type":"message","role":"assistant","content":"Mock response from opencode"}
 `, time.Now().Format(time.RFC3339), sessionID)
 
-		if err := os.WriteFile(sessionFile, []byte(mockContent), 0644); err != nil {
+		if err := os.WriteFile(sessionFile, []byte(mockContent), 0600); err != nil {
 			fmt.Fprintf(os.Stderr, "[MOCK OPENCODE] Warning: Could not write session file: %v\n", err)
 		} else {
 			fmt.Fprintf(os.Stderr, "[MOCK OPENCODE] Created session file: %s\n", sessionFile)

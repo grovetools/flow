@@ -4,10 +4,10 @@ import (
 	"os"
 	"path/filepath"
 
-	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
+	grovecontext "github.com/grovetools/cx/pkg/context"
 )
 
 // ExecutionContext provides context about where jobs are being executed from
@@ -15,16 +15,16 @@ import (
 type ExecutionContext struct {
 	// PlanDirectory is where the plan files are stored
 	PlanDirectory string
-	
+
 	// ProjectRoot is the root of the project (where grove.yml is located)
 	ProjectRoot string
-	
+
 	// GitRoot is the root of the git repository
 	GitRoot string
-	
+
 	// WorkingDirectory is where commands should be executed
 	WorkingDirectory string
-	
+
 	// Config is the loaded grove configuration
 	Config *config.Config
 }
@@ -35,14 +35,14 @@ func NewExecutionContext(planDir string, cfg *config.Config) (*ExecutionContext,
 		PlanDirectory: planDir,
 		Config:        cfg,
 	}
-	
+
 	// Get current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 	ctx.WorkingDirectory = cwd
-	
+
 	// Find project root (where grove.yml is)
 	if cfg != nil {
 		// If we have a config, find where it came from
@@ -55,7 +55,7 @@ func NewExecutionContext(planDir string, cfg *config.Config) (*ExecutionContext,
 	} else {
 		ctx.ProjectRoot = cwd
 	}
-	
+
 	// Find git root - try multiple strategies
 	// First try from project root
 	gitRoot, err := git.GetGitRoot(ctx.ProjectRoot)
@@ -77,7 +77,7 @@ func NewExecutionContext(planDir string, cfg *config.Config) (*ExecutionContext,
 	} else {
 		ctx.GitRoot = gitRoot
 	}
-	
+
 	return ctx, nil
 }
 
@@ -94,13 +94,13 @@ func (ctx *ExecutionContext) ResolvePromptSource(source string) string {
 		// Relative to parent of plan directory (for cross-plan references)
 		filepath.Join(filepath.Dir(ctx.PlanDirectory), source),
 	}
-	
+
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
-	
+
 	// Default to plan directory relative
 	return filepath.Join(ctx.PlanDirectory, source)
 }

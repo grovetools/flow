@@ -184,7 +184,7 @@ func ensureRollingPlanExists(planPath string) error {
 	// Create a minimal .grove-plan.yml file
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
 	configContent := []byte("# Rolling plan - auto-created for quick tasks without a formal plan.\n")
-	if err := os.WriteFile(configPath, configContent, 0644); err != nil {
+	if err := os.WriteFile(configPath, configContent, 0600); err != nil {
 		return fmt.Errorf("creating rolling plan .grove-plan.yml: %w", err)
 	}
 
@@ -215,13 +215,13 @@ func loadFlowConfigWithDynamicRecipes() (*FlowConfig, string, error) {
 			delete(recipes, "get_recipe_cmd")
 		}
 	}
-	
+
 	// Now unmarshal into the typed FlowConfig struct
 	var flowCfg FlowConfig
 	if err := coreCfg.UnmarshalExtension("flow", &flowCfg); err != nil {
 		return nil, "", fmt.Errorf("failed to parse 'flow' configuration into struct: %w", err)
 	}
-	
+
 	return &flowCfg, getRecipeCmd, nil
 }
 

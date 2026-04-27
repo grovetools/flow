@@ -169,8 +169,8 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Create test source files
-				os.WriteFile(filepath.Join(dir, "source1.txt"), []byte("Source 1 content"), 0644)
-				os.WriteFile(filepath.Join(dir, "source2.txt"), []byte("Source 2 content"), 0644)
+				_ = os.WriteFile(filepath.Join(dir, "source1.txt"), []byte("Source 1 content"), 0600)
+				_ = os.WriteFile(filepath.Join(dir, "source2.txt"), []byte("Source 2 content"), 0600)
 			},
 			cmd: &PlanAddStepCmd{
 				Type:         "oneshot",

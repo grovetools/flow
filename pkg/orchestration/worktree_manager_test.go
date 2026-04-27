@@ -12,10 +12,10 @@ import (
 // Mock implementations
 
 type mockGitClient struct {
-	worktrees      []Worktree
-	currentBranch  string
-	addCalled      bool
-	removeCalled   bool
+	worktrees          []Worktree
+	currentBranch      string
+	addCalled          bool
+	removeCalled       bool
 	createBranchCalled bool
 }
 
@@ -86,14 +86,14 @@ func TestNewWorktreeManager(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name: "valid git repo",
+			name:      "valid git repo",
 			gitClient: &mockGitClient{},
-			wantErr: false,
+			wantErr:   false,
 		},
 		{
-			name: "not a git repo",
+			name:      "not a git repo",
 			gitClient: &mockGitClient{},
-			wantErr: false, // mockGitClient always returns true for IsGitRepo
+			wantErr:   false, // mockGitClient always returns true for IsGitRepo
 		},
 	}
 
@@ -101,13 +101,13 @@ func TestNewWorktreeManager(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			logger := &mockLogger{}
-			
+
 			wm, err := NewWorktreeManager(dir, tt.gitClient, logger)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewWorktreeManager() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			
+
 			if !tt.wantErr && wm == nil {
 				t.Error("expected worktree manager, got nil")
 			}
@@ -155,20 +155,20 @@ func TestCreateWorktree(t *testing.T) {
 				worktrees: tt.existing,
 			}
 			logger := &mockLogger{}
-			
+
 			wm, _ := NewWorktreeManager(dir, gitClient, logger)
-			
+
 			path, err := wm.CreateWorktree(tt.wtName, tt.baseBranch)
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateWorktree() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			
+
 			if !tt.wantErr {
 				if path == "" {
 					t.Error("expected path, got empty string")
 				}
-				
+
 				if tt.name == "create new worktree" && !gitClient.addCalled {
 					t.Error("expected WorktreeAdd to be called")
 				}
@@ -183,30 +183,30 @@ func TestGetOrCreateWorktree(t *testing.T) {
 		currentBranch: "feature",
 	}
 	logger := &mockLogger{}
-	
+
 	wm, _ := NewWorktreeManager(dir, gitClient, logger)
-	
+
 	// First call should create
 	path1, err := wm.GetOrCreateWorktree("test-wt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if !gitClient.addCalled {
 		t.Error("expected WorktreeAdd to be called")
 	}
-	
+
 	// Second call should return existing
 	gitClient.addCalled = false
 	path2, err := wm.GetOrCreateWorktree("test-wt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	if gitClient.addCalled {
 		t.Error("expected WorktreeAdd NOT to be called for existing worktree")
 	}
-	
+
 	if path1 != path2 {
 		t.Errorf("expected same path, got %s and %s", path1, path2)
 	}
@@ -220,18 +220,20 @@ func TestRemoveWorktree(t *testing.T) {
 		},
 	}
 	logger := &mockLogger{}
-	
+
 	wm, _ := NewWorktreeManager(dir, gitClient, logger)
-	
+
 	// Create lock directory
-	os.MkdirAll(filepath.Join(dir, ".locks"), 0755)
-	
+	if err := os.MkdirAll(filepath.Join(dir, ".locks"), 0755); err != nil {
+		t.Fatalf("failed to create locks dir: %v", err)
+	}
+
 	// Test normal removal
 	err := wm.RemoveWorktree("test-wt", false)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	
+
 	if !gitClient.removeCalled {
 		t.Error("expected WorktreeRemove to be called")
 	}
@@ -241,18 +243,20 @@ func TestLockManagement(t *testing.T) {
 	dir := t.TempDir()
 	gitClient := &mockGitClient{}
 	logger := &mockLogger{}
-	
+
 	wm, _ := NewWorktreeManager(dir, gitClient, logger)
-	
+
 	// Create lock directory
-	os.MkdirAll(filepath.Join(dir, ".locks"), 0755)
-	
+	if err := os.MkdirAll(filepath.Join(dir, ".locks"), 0755); err != nil {
+		t.Fatalf("failed to create locks dir: %v", err)
+	}
+
 	// Test locking
 	err := wm.LockWorktree("test-wt", "job-123")
 	if err != nil {
 		t.Fatalf("failed to lock worktree: %v", err)
 	}
-	
+
 	// Check if locked
 	locked, lock := wm.IsLocked("test-wt")
 	if !locked {
@@ -261,19 +265,19 @@ func TestLockManagement(t *testing.T) {
 	if lock.JobID != "job-123" {
 		t.Errorf("expected job ID 'job-123', got %s", lock.JobID)
 	}
-	
+
 	// Try to lock again
 	err = wm.LockWorktree("test-wt", "job-456")
 	if err == nil {
 		t.Error("expected error when locking already locked worktree")
 	}
-	
+
 	// Unlock
 	err = wm.UnlockWorktree("test-wt")
 	if err != nil {
 		t.Fatalf("failed to unlock worktree: %v", err)
 	}
-	
+
 	// Check if unlocked
 	locked, _ = wm.IsLocked("test-wt")
 	if locked {
@@ -283,15 +287,19 @@ func TestLockManagement(t *testing.T) {
 
 func TestCleanupStaleWorktrees(t *testing.T) {
 	dir := t.TempDir()
-	
+
 	// Create old worktree directory
 	oldWT := filepath.Join(dir, "old-wt")
-	os.MkdirAll(oldWT, 0755)
-	
+	if err := os.MkdirAll(oldWT, 0755); err != nil {
+		t.Fatalf("failed to create worktree dir: %v", err)
+	}
+
 	// Set modification time to past
 	oldTime := time.Now().Add(-48 * time.Hour)
-	os.Chtimes(oldWT, oldTime, oldTime)
-	
+	if err := os.Chtimes(oldWT, oldTime, oldTime); err != nil {
+		t.Fatalf("failed to set worktree times: %v", err)
+	}
+
 	gitClient := &mockGitClient{
 		worktrees: []Worktree{
 			{Name: "old-wt", Path: oldWT},
@@ -299,15 +307,15 @@ func TestCleanupStaleWorktrees(t *testing.T) {
 		},
 	}
 	logger := &mockLogger{}
-	
+
 	wm, _ := NewWorktreeManager(dir, gitClient, logger)
-	
+
 	// Cleanup worktrees older than 24 hours
 	err := wm.CleanupStaleWorktrees(24 * time.Hour)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	
+
 	// Check that old worktree was removed
 	if !gitClient.removeCalled {
 		t.Error("expected old worktree to be removed")
@@ -316,10 +324,10 @@ func TestCleanupStaleWorktrees(t *testing.T) {
 
 func TestCleanupJobWorktree(t *testing.T) {
 	tests := []struct {
-		name           string
-		job            *Job
-		config         WorktreeConfig
-		expectRemoval  bool
+		name          string
+		job           *Job
+		config        WorktreeConfig
+		expectRemoval bool
 	}{
 		{
 			name: "auto cleanup disabled",
@@ -367,15 +375,15 @@ func TestCleanupJobWorktree(t *testing.T) {
 				},
 			}
 			logger := &mockLogger{}
-			
+
 			wm, _ := NewWorktreeManager(dir, gitClient, logger)
 			wm.SetConfig(tt.config)
-			
+
 			err := wm.CleanupJobWorktree(tt.job)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			
+
 			if tt.expectRemoval && !gitClient.removeCalled {
 				t.Error("expected worktree to be removed")
 			}

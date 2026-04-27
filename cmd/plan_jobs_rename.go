@@ -73,7 +73,7 @@ func runPlanJobsRename(cmd *cobra.Command, args []string) error {
 
 	// Find and report updated jobs
 	type updateInfo struct {
-		filename      string
+		filename       string
 		updatedDepends bool
 		updatedPrompt  bool
 	}

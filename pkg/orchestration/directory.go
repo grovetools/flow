@@ -149,7 +149,7 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 			rulesContent, _ = os.ReadFile(cfg.Context.DefaultRulesPath)
 		}
 
-		if err := os.WriteFile(rulesAbsPath, rulesContent, 0644); err != nil {
+		if err := os.WriteFile(rulesAbsPath, rulesContent, 0600); err != nil {
 			return "", fmt.Errorf("writing rules file: %w", err)
 		}
 
@@ -165,7 +165,7 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 	}
 
 	// Write job file
-	if err := os.WriteFile(jobFilePath, content, 0644); err != nil {
+	if err := os.WriteFile(jobFilePath, content, 0600); err != nil {
 		return "", fmt.Errorf("writing job file: %w", err)
 	}
 

@@ -2,15 +2,15 @@ package orchestration
 
 // PlanConfig holds plan-specific default settings from .grove-plan.yml.
 type PlanConfig struct {
-	Model    string `yaml:"model,omitempty"`
-	Worktree string `yaml:"worktree,omitempty"`
-	Status   string `yaml:"status,omitempty"`
-	Repos                []string          `yaml:"repos,omitempty"`                // List of repos to include in ecosystem worktree
-	Notes                string            `yaml:"notes,omitempty"`                // User notes/description for the plan
-	Inline               InlineConfig      `yaml:"inline,omitempty"`               // New field: controls which file types are inlined by default
-	PrependDependencies  bool              `yaml:"prepend_dependencies,omitempty"` // Deprecated: use inline instead
-	Hooks                map[string]string `yaml:"hooks,omitempty"`
-	Recipe               string            `yaml:"recipe,omitempty"` // Recipe used to create this plan
+	Model               string            `yaml:"model,omitempty"`
+	Worktree            string            `yaml:"worktree,omitempty"`
+	Status              string            `yaml:"status,omitempty"`
+	Repos               []string          `yaml:"repos,omitempty"`                // List of repos to include in ecosystem worktree
+	Notes               string            `yaml:"notes,omitempty"`                // User notes/description for the plan
+	Inline              InlineConfig      `yaml:"inline,omitempty"`               // New field: controls which file types are inlined by default
+	PrependDependencies bool              `yaml:"prepend_dependencies,omitempty"` // Deprecated: use inline instead
+	Hooks               map[string]string `yaml:"hooks,omitempty"`
+	Recipe              string            `yaml:"recipe,omitempty"` // Recipe used to create this plan
 	// Playbook is the name of the playbook this plan is scoped to. Jobs
 	// inherit this value unless they declare their own override. Primary
 	// source of truth for $PLAYBOOK_ROOT env injection at execution time.
@@ -47,4 +47,3 @@ type Plan struct {
 	Context       *ExecutionContext // Execution context for the plan
 	Config        *PlanConfig       // Plan-specific configuration from .grove-plan.yml
 }
-

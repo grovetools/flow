@@ -3,7 +3,7 @@ package orchestration_test
 import (
 	"strings"
 	"testing"
-	
+
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -71,12 +71,12 @@ title: Test Plan
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			turns, err := orchestration.ParseChatFile([]byte(tt.content))
-			
+
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseChatFile() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			
+
 			if len(turns) != tt.wantTurns {
 				t.Errorf("ParseChatFile() got %d turns, want %d", len(turns), tt.wantTurns)
 			}

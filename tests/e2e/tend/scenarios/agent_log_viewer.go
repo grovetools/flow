@@ -25,7 +25,7 @@ var AgentLogViewerScenario = harness.NewScenarioWithOptions(
 	[]harness.Step{
 		harness.NewStep("Setup test environment with agent jobs", setupAgentLogViewerEnvironment),
 		harness.SetupMocks(
-			harness.Mock{CommandName: "grove"}, // Mocks `grove aglogs`
+			harness.Mock{CommandName: "grove"},  // Mocks `grove aglogs`
 			harness.Mock{CommandName: "claude"}, // Mock claude to prevent actual agent launch
 			harness.Mock{CommandName: "tmux"},   // Mock tmux to prevent real sessions
 		),
@@ -391,4 +391,3 @@ func testRunningAgentJobLogs(ctx *harness.Context) error {
 
 	return nil
 }
-

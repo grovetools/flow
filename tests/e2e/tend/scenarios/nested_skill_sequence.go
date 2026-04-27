@@ -51,15 +51,15 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 			_ = writeSkill("parent-skill/child-b", "child-b", "Second Child", nil, nil)
 
 			// Circular dependency: circular-a -> circular-b -> circular-a
-			writeSkill("circular-a", "circular-a", "Circ A", []string{"circular-b"}, nil)
-			writeSkill("circular-b", "circular-b", "Circ B", []string{"circular-a"}, nil)
+			_ = writeSkill("circular-a", "circular-a", "Circ A", []string{"circular-b"}, nil)
+			_ = writeSkill("circular-b", "circular-b", "Circ B", []string{"circular-a"}, nil)
 
 			// Depth limit: depth-1 -> depth-2 -> depth-3 -> depth-4 -> depth-5
-			writeSkill("depth-1", "depth-1", "D1", []string{"depth-2"}, nil)
-			writeSkill("depth-2", "depth-2", "D2", []string{"depth-3"}, nil)
-			writeSkill("depth-3", "depth-3", "D3", []string{"depth-4"}, nil)
-			writeSkill("depth-4", "depth-4", "D4", []string{"depth-5"}, nil)
-			writeSkill("depth-5", "depth-5", "D5", nil, nil)
+			_ = writeSkill("depth-1", "depth-1", "D1", []string{"depth-2"}, nil)
+			_ = writeSkill("depth-2", "depth-2", "D2", []string{"depth-3"}, nil)
+			_ = writeSkill("depth-3", "depth-3", "D3", []string{"depth-4"}, nil)
+			_ = writeSkill("depth-4", "depth-4", "D4", []string{"depth-5"}, nil)
+			_ = writeSkill("depth-5", "depth-5", "D5", nil, nil)
 
 			// Authorize only root-level skills in grove.toml
 			groveToml := filepath.Join(projectDir, "grove.toml")

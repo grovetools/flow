@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/grovetools/core/pkg/daemon"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 )
 
@@ -124,7 +124,7 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 				job.Metadata.LastError = "job failed"
 			}
 			_ = r.updater.UpdateJobMetadata(job, job.Metadata)
-			r.updater.UpdateJobStatus(job, JobStatusFailed)
+			_ = r.updater.UpdateJobStatus(job, JobStatusFailed)
 		}
 		if errMsg != "" {
 			return fmt.Errorf("job failed: %s", errMsg)
@@ -134,7 +134,7 @@ func (r *DaemonRuntime) handleTerminalStatus(job *Job, status, errMsg string) er
 		if r.updater != nil {
 			job.Metadata.LastError = "job cancelled"
 			_ = r.updater.UpdateJobMetadata(job, job.Metadata)
-			r.updater.UpdateJobStatus(job, JobStatusFailed)
+			_ = r.updater.UpdateJobStatus(job, JobStatusFailed)
 		}
 		return fmt.Errorf("job cancelled")
 	default:

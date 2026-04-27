@@ -33,8 +33,8 @@ type KeyMap struct {
 	ViewLogs         key.Binding
 	ViewFrontmatter  key.Binding
 	ViewBriefing     key.Binding
-	ViewEdit      key.Binding
-	ViewSkillPane key.Binding
+	ViewEdit         key.Binding
+	ViewSkillPane    key.Binding
 	CloseDetailPane  key.Binding
 	SwitchFocus      key.Binding
 	FocusLeft        key.Binding // Spatial navigation: focus left pane (jobs)

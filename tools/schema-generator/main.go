@@ -43,7 +43,7 @@ func main() {
 	}
 
 	// Write to the package root
-	if err := os.WriteFile("flow.schema.json", data, 0o644); err != nil { //nolint:gosec // non-sensitive schema file
+	if err := os.WriteFile("flow.schema.json", data, 0o600); err != nil { //nolint:gosec // non-sensitive schema file
 		log.Fatalf("Error writing schema file: %v", err)
 	}
 
@@ -63,7 +63,7 @@ func main() {
 	}
 
 	// Write to the package root
-	if err := os.WriteFile("flow-job.schema.json", jobData, 0o644); err != nil { //nolint:gosec // non-sensitive schema file
+	if err := os.WriteFile("flow-job.schema.json", jobData, 0o600); err != nil { //nolint:gosec // non-sensitive schema file
 		log.Fatalf("Error writing job schema file: %v", err)
 	}
 

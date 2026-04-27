@@ -12,17 +12,17 @@ func createTestPlan(jobs []*Job) *Plan {
 		Jobs:     jobs,
 		JobsByID: make(map[string]*Job),
 	}
-	
+
 	// Populate JobsByID
 	for _, job := range plan.Jobs {
 		plan.JobsByID[job.ID] = job
 	}
-	
+
 	// Resolve dependencies
 	if err := plan.ResolveDependencies(); err != nil {
 		panic(err) // In tests, we can panic on setup errors
 	}
-	
+
 	return plan
 }
 
@@ -33,12 +33,12 @@ func createTestPlanUnresolved(jobs []*Job) *Plan {
 		Jobs:     jobs,
 		JobsByID: make(map[string]*Job),
 	}
-	
+
 	// Populate JobsByID
 	for _, job := range plan.Jobs {
 		plan.JobsByID[job.ID] = job
 	}
-	
+
 	// Don't resolve dependencies - leave that to the test
 	return plan
 }
@@ -68,10 +68,10 @@ func TestBuildDependencyGraph(t *testing.T) {
 
 func TestDependencyGraph_ValidateDependencies(t *testing.T) {
 	tests := []struct {
-		name      string
-		jobs      []*Job
-		wantError bool
-		errorMsg  string
+		name       string
+		jobs       []*Job
+		wantError  bool
+		errorMsg   string
 		setupError bool // Whether error should occur during setup
 	}{
 		{
@@ -87,9 +87,9 @@ func TestDependencyGraph_ValidateDependencies(t *testing.T) {
 			jobs: []*Job{
 				{ID: "job1", DependsOn: []string{"job2"}},
 			},
-			wantError: true,
+			wantError:  true,
 			setupError: true,
-			errorMsg:  "non-existent job",
+			errorMsg:   "non-existent job",
 		},
 		{
 			name: "self dependency",
@@ -130,11 +130,11 @@ func TestDependencyGraph_ValidateDependencies(t *testing.T) {
 				}
 				return
 			}
-			
+
 			// For tests that expect graph validation errors (not setup errors)
 			// we need to bypass dependency resolution to test the graph validation
 			plan := createTestPlanUnresolved(tt.jobs)
-			
+
 			// Manually set up dependencies for graph validation tests
 			// This bypasses ResolveDependencies which would catch circular deps
 			for _, job := range plan.Jobs {
@@ -145,7 +145,7 @@ func TestDependencyGraph_ValidateDependencies(t *testing.T) {
 					}
 				}
 			}
-			
+
 			graph, err := BuildDependencyGraph(plan)
 			if tt.wantError {
 				if err == nil {

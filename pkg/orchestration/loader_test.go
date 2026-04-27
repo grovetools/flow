@@ -58,7 +58,7 @@ Implement the feature.`,
 	// Write test files
 	for _, tt := range tests {
 		path := filepath.Join(tmpDir, tt.filename)
-		if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
 			t.Fatalf("Failed to write test file %s: %v", tt.filename, err)
 		}
 	}
@@ -236,7 +236,7 @@ Body`,
 			// Write test files
 			for filename, content := range tt.files {
 				path := filepath.Join(testDir, filename)
-				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -374,7 +374,7 @@ This is reference content that provides context for downstream jobs.
 It is not executed but can be referenced as a dependency.`
 
 	path := filepath.Join(tmpDir, "01-context.md")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -442,7 +442,7 @@ Use the context file to implement.`,
 	// Write test files
 	for _, tt := range tests {
 		path := filepath.Join(tmpDir, tt.filename)
-		if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
 			t.Fatalf("Failed to write test file %s: %v", tt.filename, err)
 		}
 	}
@@ -497,7 +497,7 @@ skill: test-skill
 Job that uses a skill.`
 
 	path := filepath.Join(tmpDir, "01-skill-job.md")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
@@ -532,4 +532,3 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
-

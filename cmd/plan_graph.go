@@ -40,8 +40,8 @@ Examples:
   flow graph my-feature                     # from any directory
   flow graph my-feature --dir ~/Code/myapp  # explicit workspace
   flow graph my-feature -f dot -o graph.dot # DOT output to file`,
-		Args:  cobra.MaximumNArgs(1),
-		RunE:  runPlanGraph,
+		Args: cobra.MaximumNArgs(1),
+		RunE: runPlanGraph,
 	}
 	graphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
 	graphCmd.Flags().BoolVarP(&planGraphServe, "serve", "s", false, "Serve interactive HTML visualization")
@@ -95,7 +95,7 @@ func RunPlanGraph(cmd *PlanGraphCmd) error {
 
 	// Write output
 	if cmd.Output != "" {
-		if err := os.WriteFile(cmd.Output, []byte(output), 0644); err != nil {
+		if err := os.WriteFile(cmd.Output, []byte(output), 0600); err != nil {
 			return fmt.Errorf("failed to write output file: %w", err)
 		}
 		fmt.Printf("Graph written to %s\n", cmd.Output)
@@ -390,7 +390,7 @@ func serveInteractiveGraph(plan *orchestration.Plan, graph *DependencyGraph, por
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
-		w.Write(buf.Bytes())
+		_, _ = w.Write(buf.Bytes())
 	})
 
 	fmt.Printf("Serving graph at http://localhost:%d\n", port)

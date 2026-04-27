@@ -1,13 +1,14 @@
 package cmd
 
 import (
-	"github.com/grovetools/core/util/sanitize"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/grovetools/core/util/sanitize"
 
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/tmux"
@@ -250,7 +251,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 			if session == sessionName {
 				// Session exists, switch to it
 				fmt.Printf("* Switching to existing session '%s'...\n", sessionName)
-				
+
 				isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 				if !isTUIMode {
 					// If we're already in tmux, switch to the session
@@ -272,7 +273,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 
 	// Session doesn't exist, create it
 	fmt.Printf("* Creating new session '%s' in main repository...\n", sessionName)
-	
+
 	// Create the session
 	if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-c", gitRoot); err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
@@ -281,14 +282,14 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	// Rename the initial window to "plan"
 	if err := executor.Execute("tmux", "rename-window", "-t", sessionName, "plan"); err != nil {
 		// Clean up on failure
-		executor.Execute("tmux", "kill-session", "-t", sessionName)
+		_ = executor.Execute("tmux", "kill-session", "-t", sessionName)
 		return fmt.Errorf("failed to rename window: %w", err)
 	}
 
 	// Move the "plan" window to index 2
 	if err := executor.Execute("tmux", "move-window", "-s", fmt.Sprintf("%s:plan", sessionName), "-t", "2"); err != nil {
 		// Clean up on failure
-		executor.Execute("tmux", "kill-session", "-t", sessionName)
+		_ = executor.Execute("tmux", "kill-session", "-t", sessionName)
 		return fmt.Errorf("failed to move window: %w", err)
 	}
 
@@ -296,7 +297,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	commandStr := strings.Join(commandToRun, " ")
 	if err := executor.Execute("tmux", "send-keys", "-t", sessionName, commandStr, "C-m"); err != nil {
 		// Clean up on failure
-		executor.Execute("tmux", "kill-session", "-t", sessionName)
+		_ = executor.Execute("tmux", "kill-session", "-t", sessionName)
 		return fmt.Errorf("failed to send command: %w", err)
 	}
 

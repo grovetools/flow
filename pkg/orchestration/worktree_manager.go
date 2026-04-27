@@ -119,7 +119,7 @@ func (wm *WorktreeManager) CreateWorktree(name string, baseBranch string) (strin
 
 	// Create branch name
 	branchName := wm.formatBranchName(baseBranch, name)
-	
+
 	// Create branch
 	if err := wm.gitClient.CreateBranch(branchName); err != nil {
 		// Branch might already exist, which is OK
@@ -149,8 +149,7 @@ func (wm *WorktreeManager) GetOrCreateWorktree(name string) (string, error) {
 	for _, wt := range worktrees {
 		if wt.Name == name || strings.HasSuffix(wt.Path, name) {
 			wm.logger.Debug("found existing worktree", "name", name, "path", wt.Path)
-			
-			
+
 			return wt.Path, nil
 		}
 	}
@@ -267,7 +266,7 @@ func (wm *WorktreeManager) CleanupJobWorktree(job *Job) error {
 			PrettyOnly().
 			Log(ctx)
 		var response string
-		fmt.Scanln(&response)
+		_, _ = fmt.Scanln(&response)
 		if strings.ToLower(response) != "y" {
 			return nil
 		}
@@ -284,7 +283,7 @@ func (wm *WorktreeManager) LockWorktree(name string, jobID string) error {
 	defer wm.mu.Unlock()
 
 	lockPath := wm.getLockPath(name)
-	
+
 	// Check if already locked
 	if _, err := os.Stat(lockPath); err == nil {
 		return fmt.Errorf("worktree already locked")
@@ -299,7 +298,7 @@ func (wm *WorktreeManager) LockWorktree(name string, jobID string) error {
 
 	// Write lock file
 	content := fmt.Sprintf("%s\n%d\n%s", lock.JobID, lock.PID, lock.LockedAt.Format(time.RFC3339))
-	if err := os.WriteFile(lockPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(lockPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("writing lock file: %w", err)
 	}
 
@@ -318,7 +317,7 @@ func (wm *WorktreeManager) UnlockWorktree(name string) error {
 // IsLocked checks if a worktree is locked.
 func (wm *WorktreeManager) IsLocked(name string) (bool, *WorktreeLock) {
 	lockPath := wm.getLockPath(name)
-	
+
 	content, err := os.ReadFile(lockPath)
 	if err != nil {
 		return false, nil
@@ -330,7 +329,7 @@ func (wm *WorktreeManager) IsLocked(name string) (bool, *WorktreeLock) {
 	}
 
 	var pid int
-	fmt.Sscanf(parts[1], "%d", &pid)
+	_, _ = fmt.Sscanf(parts[1], "%d", &pid)
 
 	lockedAt, _ := time.Parse(time.RFC3339, parts[2])
 
@@ -404,10 +403,9 @@ func isProcessAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// On Unix, this doesn't actually check if process exists
 	// We need to send signal 0 to check
 	err = process.Signal(os.Signal(nil))
 	return err == nil
 }
-

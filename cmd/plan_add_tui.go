@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/grovetools/core/tui/embed"
 	coreconfig "github.com/grovetools/core/config"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
 	skillservice "github.com/grovetools/skills/pkg/service"

@@ -13,20 +13,20 @@ import (
 func ParseFrontmatter(content []byte) (map[string]interface{}, []byte, error) {
 	// Convert to string for easier manipulation
 	contentStr := string(content)
-	
+
 	// Check if the file starts with frontmatter delimiter
 	if !strings.HasPrefix(contentStr, "---\n") && !strings.HasPrefix(contentStr, "---\r\n") {
 		// No frontmatter, return empty map and full content
 		return make(map[string]interface{}), content, nil
 	}
-	
+
 	// Find the closing delimiter
 	// Start after the opening "---"
 	startIdx := strings.Index(contentStr, "\n") + 1
 	if startIdx == 0 {
 		return nil, nil, fmt.Errorf("invalid frontmatter: no newline after opening delimiter")
 	}
-	
+
 	// Look for the closing "---" on its own line
 	var endIdx int
 	// Handle empty frontmatter case where closing delimiter comes immediately
@@ -43,10 +43,10 @@ func ParseFrontmatter(content []byte) (map[string]interface{}, []byte, error) {
 		}
 		endIdx = startIdx + tmpIdx
 	}
-	
+
 	// Extract the YAML content
 	yamlContent := contentStr[startIdx:endIdx]
-	
+
 	// Parse the YAML
 	var frontmatter map[string]interface{}
 	if yamlContent == "" {
@@ -55,7 +55,7 @@ func ParseFrontmatter(content []byte) (map[string]interface{}, []byte, error) {
 	} else if err := yaml.Unmarshal([]byte(yamlContent), &frontmatter); err != nil {
 		return nil, nil, fmt.Errorf("parsing frontmatter: %w", err)
 	}
-	
+
 	// Find where the body content starts (after closing delimiter and newline)
 	var bodyStart int
 	if endIdx == startIdx {
@@ -67,9 +67,9 @@ func ParseFrontmatter(content []byte) (map[string]interface{}, []byte, error) {
 	if bodyStart > len(contentStr) {
 		bodyStart = len(contentStr)
 	}
-	
+
 	remainingContent := []byte(contentStr[bodyStart:])
-	
+
 	return frontmatter, remainingContent, nil
 }
 
@@ -80,35 +80,35 @@ func UpdateFrontmatter(content []byte, updates map[string]interface{}) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// If no frontmatter exists, create new one
 	if frontmatterStr == "" {
 		newFrontmatter := make(map[string]interface{})
 		for k, v := range updates {
 			newFrontmatter[k] = v
 		}
-		
+
 		yamlBytes, err := yaml.Marshal(newFrontmatter)
 		if err != nil {
 			return nil, fmt.Errorf("marshaling new frontmatter: %w", err)
 		}
-		
+
 		// Combine with body
 		var result bytes.Buffer
 		result.WriteString("---\n")
 		result.Write(yamlBytes)
 		result.WriteString("---\n")
 		result.Write(body)
-		
+
 		return result.Bytes(), nil
 	}
-	
+
 	// Update existing frontmatter using Node API
 	updatedYAML, err := UpdateFrontmatterNode([]byte(frontmatterStr), updates)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Reconstruct the file
 	return ReplaceFrontmatter(content, string(updatedYAML)), nil
 }
@@ -119,25 +119,25 @@ func UpdateFrontmatterNode(yamlData []byte, updates map[string]interface{}) ([]b
 	if err := yaml.Unmarshal(yamlData, &root); err != nil {
 		return nil, fmt.Errorf("unmarshaling YAML: %w", err)
 	}
-	
+
 	// Navigate to the document content
 	if len(root.Content) == 0 {
 		return nil, fmt.Errorf("no YAML document found")
 	}
 	doc := root.Content[0]
-	
+
 	// Update fields in the document
 	for key, value := range updates {
 		updateNodeValue(doc, key, value)
 	}
-	
+
 	var buf bytes.Buffer
 	encoder := yaml.NewEncoder(&buf)
 	encoder.SetIndent(2)
 	if err := encoder.Encode(&root); err != nil {
 		return nil, fmt.Errorf("encoding YAML: %w", err)
 	}
-	
+
 	return buf.Bytes(), nil
 }
 
@@ -259,19 +259,19 @@ func resolveYAMLTag(value interface{}) string {
 // ExtractFrontmatterString extracts the raw YAML string between delimiters.
 func ExtractFrontmatterString(content []byte) (string, []byte, error) {
 	contentStr := string(content)
-	
+
 	// Check if the file starts with frontmatter delimiter
 	if !strings.HasPrefix(contentStr, "---\n") && !strings.HasPrefix(contentStr, "---\r\n") {
 		// No frontmatter
 		return "", content, nil
 	}
-	
+
 	// Find the closing delimiter
 	startIdx := strings.Index(contentStr, "\n") + 1
 	if startIdx == 0 {
 		return "", nil, fmt.Errorf("invalid frontmatter: no newline after opening delimiter")
 	}
-	
+
 	endIdx := strings.Index(contentStr[startIdx:], "\n---\n")
 	if endIdx == -1 {
 		endIdx = strings.Index(contentStr[startIdx:], "\r\n---\r\n")
@@ -280,31 +280,31 @@ func ExtractFrontmatterString(content []byte) (string, []byte, error) {
 		}
 	}
 	endIdx += startIdx
-	
+
 	// Extract the YAML content
 	yamlContent := contentStr[startIdx:endIdx]
-	
+
 	// Find where the body content starts
 	bodyStart := endIdx + 5 // length of "\n---\n"
 	if bodyStart > len(contentStr) {
 		bodyStart = len(contentStr)
 	}
-	
+
 	remainingContent := []byte(contentStr[bodyStart:])
-	
+
 	return yamlContent, remainingContent, nil
 }
 
 // ReplaceFrontmatter replaces existing frontmatter with new YAML string.
 func ReplaceFrontmatter(content []byte, newFrontmatter string) []byte {
 	_, body, _ := ExtractFrontmatterString(content)
-	
+
 	var result bytes.Buffer
 	result.WriteString("---\n")
 	result.WriteString(strings.TrimSpace(newFrontmatter))
 	result.WriteString("\n---\n")
 	result.Write(body)
-	
+
 	return result.Bytes()
 }
 

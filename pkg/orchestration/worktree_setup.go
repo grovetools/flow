@@ -83,9 +83,9 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 
 // SyncSkillsToWorktree copies skills from all sources to a new worktree.
 // Skills are collected from multiple sources with the following precedence (higher wins):
-//   1. User skills from ~/.config/grove/skills
-//   2. Ecosystem skills from the notebook (if project is part of an ecosystem)
-//   3. Project skills from the notebook
+//  1. User skills from ~/.config/grove/skills
+//  2. Ecosystem skills from the notebook (if project is part of an ecosystem)
+//  3. Project skills from the notebook
 //
 // This delegates to grove-skills for the actual discovery and sync logic.
 func SyncSkillsToWorktree(worktreePath string, node *workspace.WorkspaceNode) error {

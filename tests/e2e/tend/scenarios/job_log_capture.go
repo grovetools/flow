@@ -397,7 +397,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 				return fmt.Errorf("failed to update frontmatter: %w", err)
 			}
 
-			if err := os.WriteFile(shellJobPath, newContent, 0644); err != nil {
+			if err := os.WriteFile(shellJobPath, newContent, 0600); err != nil {
 				return fmt.Errorf("failed to write job file: %w", err)
 			}
 
@@ -458,7 +458,7 @@ var JobLogCaptureScenario = harness.NewScenario(
 				return fmt.Errorf("failed to rebuild markdown: %w", err)
 			}
 
-			if err := os.WriteFile(chatJobPath, newContent, 0644); err != nil {
+			if err := os.WriteFile(chatJobPath, newContent, 0600); err != nil {
 				return fmt.Errorf("failed to write job file: %w", err)
 			}
 

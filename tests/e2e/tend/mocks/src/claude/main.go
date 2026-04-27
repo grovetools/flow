@@ -18,7 +18,7 @@ func main() {
 	if dumpPath := os.Getenv("GROVE_MOCK_CLAUDE_DUMP_ENV"); dumpPath != "" {
 		env := os.Environ()
 		sort.Strings(env)
-		_ = os.WriteFile(dumpPath, []byte(strings.Join(env, "\n")), 0644)
+		_ = os.WriteFile(dumpPath, []byte(strings.Join(env, "\n")), 0600)
 	}
 
 	// Simulate successful exit

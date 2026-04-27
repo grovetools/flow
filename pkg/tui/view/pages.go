@@ -7,8 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/grovetools/core/tui/components/pager"
-	core_theme "github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/tui/embed"
+	core_theme "github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/status"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
@@ -185,7 +185,7 @@ func (p *addJobPage) SetSize(w, h int) {
 	p.height = h
 }
 
-func (p *addJobPage) Enabled() bool        { return p.s.statusModel != nil }
+func (p *addJobPage) Enabled() bool         { return p.s.statusModel != nil }
 func (p *addJobPage) Ready() (bool, string) { return p.s.wizardModel != nil, "Loading wizard…" }
 func (p *addJobPage) IsTextEntryActive() bool {
 	return p.s.wizardModel != nil && p.s.wizardModel.IsTextEntryActive()
@@ -429,8 +429,10 @@ func (p *finishPlanPage) SetSize(w, h int) {
 	p.height = h
 }
 
-func (p *finishPlanPage) Enabled() bool        { return p.s.statusModel != nil }
-func (p *finishPlanPage) Ready() (bool, string) { return p.s.finishWizardModel != nil, "Loading wizard…" }
+func (p *finishPlanPage) Enabled() bool { return p.s.statusModel != nil }
+func (p *finishPlanPage) Ready() (bool, string) {
+	return p.s.finishWizardModel != nil, "Loading wizard…"
+}
 
 func (p *finishPlanPage) Footer() string {
 	if p.s.finishWizardModel == nil {

@@ -40,7 +40,7 @@ var AgentWorktreeLifecycleScenario = harness.NewScenario(
 		}),
 
 		harness.SetupMocks(
-			harness.Mock{CommandName: "grove"}, // Mocks `grove aglogs`
+			harness.Mock{CommandName: "grove"},  // Mocks `grove aglogs`
 			harness.Mock{CommandName: "claude"}, // Mock claude to prevent actual agent launch
 			harness.Mock{CommandName: "tmux"},   // Mock tmux to prevent real sessions
 		),

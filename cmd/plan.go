@@ -118,10 +118,10 @@ var (
 	planInitModel          string
 	planInitWorktree       string
 	planInitExtractAllFrom string
-	planInitOpenSession     bool
+	planInitOpenSession    bool
 	planInitEnvProfile     string
-	planInitRecipe          string
-	planInitTUI             bool
+	planInitRecipe         string
+	planInitTUI            bool
 	planInitRecipeVars     []string
 	planInitRecipeCmd      string
 	planInitRepos          []string

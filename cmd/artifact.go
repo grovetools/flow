@@ -92,7 +92,7 @@ Subcommands:
 				}
 			}
 
-			if err := os.WriteFile(targetPath, data, 0644); err != nil {
+			if err := os.WriteFile(targetPath, data, 0600); err != nil {
 				return fmt.Errorf("writing artifact: %w", err)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "wrote artifact: %s\n", args[0])
@@ -253,7 +253,7 @@ Writes a <skill-name>-status.json file for TUI consumption.`,
 
 			statusPath := filepath.Join(artifactDir, fmt.Sprintf("%s-status.json", skillName))
 			data, _ := json.MarshalIndent(state, "", "  ")
-			if err := os.WriteFile(statusPath, data, 0644); err != nil {
+			if err := os.WriteFile(statusPath, data, 0600); err != nil {
 				return fmt.Errorf("writing status file: %w", err)
 			}
 

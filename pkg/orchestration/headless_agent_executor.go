@@ -70,7 +70,7 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
 	// Ensure lock file is removed when execution finishes.
-	defer RemoveLockFile(job.FilePath)
+	defer func() { _ = RemoveLockFile(job.FilePath) }()
 
 	// Update job status to running
 	job.StartTime = time.Now()
@@ -201,7 +201,6 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	return execErr
 }
 
-
 // prepareWorktree ensures the worktree exists and is ready.
 func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, plan *Plan) (string, error) {
 	if job.Worktree == "" {
@@ -262,7 +261,6 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 
 	return e.runOnHost(ctx, worktreePath, prompt, job, plan, agentArgs)
 }
-
 
 // runOnHost executes the agent directly on the host machine.
 func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, agentArgs []string) error {

@@ -93,7 +93,7 @@ func runPlanContextSet(cmd *cobra.Command, args []string) error {
 	destPath := filepath.Join(rulesDir, destFileName)
 
 	// Write rules content to destination
-	if err := os.WriteFile(destPath, rulesContent, 0644); err != nil {
+	if err := os.WriteFile(destPath, rulesContent, 0600); err != nil {
 		return fmt.Errorf("failed to write rules file: %w", err)
 	}
 
@@ -117,7 +117,7 @@ func runPlanContextSet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write updated content back
-	if err := os.WriteFile(absJobPath, newContent, 0644); err != nil {
+	if err := os.WriteFile(absJobPath, newContent, 0600); err != nil {
 		return fmt.Errorf("failed to write updated job file: %w", err)
 	}
 

@@ -53,10 +53,9 @@ If not in a tmux session, falls back to running the TUI directly.`,
 				return fmt.Errorf("failed to open in tmux window: %w", err)
 			}
 
-			// Close any popup that might have launched this command
-			if err := client.ClosePopup(ctx); err != nil {
-				// Ignore errors - we might not be in a popup
-			}
+			// Close any popup that might have launched this command.
+			// Ignore errors — we might not be in a popup.
+			_ = client.ClosePopup(ctx)
 
 			return nil
 		},

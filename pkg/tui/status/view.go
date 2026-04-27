@@ -36,9 +36,9 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 		// New statuses
 		orchestration.JobStatusTodo:      theme.DefaultTheme.Muted,
 		orchestration.JobStatusHold:      theme.DefaultTheme.Warning,
-		orchestration.JobStatusAbandoned: theme.DefaultTheme.Muted,       // Very subtle for abandoned jobs
-		orchestration.JobStatusIdle:      theme.DefaultTheme.Highlight,   // Agent waiting for next input
-		"interrupted":                    theme.DefaultTheme.Magenta,     // Magenta for interrupted jobs
+		orchestration.JobStatusAbandoned: theme.DefaultTheme.Muted,     // Very subtle for abandoned jobs
+		orchestration.JobStatusIdle:      theme.DefaultTheme.Highlight, // Agent waiting for next input
+		"interrupted":                    theme.DefaultTheme.Magenta,   // Magenta for interrupted jobs
 	}
 }
 
@@ -275,13 +275,18 @@ func (m Model) renderTableView() string {
 					isLast := true
 					for j := globalIndex + 1; j < len(m.Jobs); j++ {
 						if m.JobIndents[m.Jobs[j].ID] == indent {
-							isLast = false; break
+							isLast = false
+							break
 						}
 						if m.JobIndents[m.Jobs[j].ID] < indent {
 							break
 						}
 					}
-					if isLast { treePrefix += "└─ " } else { treePrefix += "├─ " }
+					if isLast {
+						treePrefix += "└─ "
+					} else {
+						treePrefix += "├─ "
+					}
 				}
 				statusIcon := m.getStatusIcon(job.Status)
 
@@ -324,20 +329,34 @@ func (m Model) renderTableView() string {
 					isClaw = true
 				} else {
 					switch job.Type {
-					case "interactive_agent": jobTypeSymbol = theme.IconInteractiveAgent
-					case "isolated_agent": jobTypeSymbol = theme.IconInteractiveAgent
-					case "headless_agent": jobTypeSymbol = theme.IconHeadlessAgent
-					case "chat": jobTypeSymbol = theme.IconChat
-					case "oneshot": jobTypeSymbol = theme.IconOneshot
-					case "shell": jobTypeSymbol = theme.IconShell
-					case "file": jobTypeSymbol = theme.IconFile
-					default: jobTypeSymbol = ""
+					case "interactive_agent":
+						jobTypeSymbol = theme.IconInteractiveAgent
+					case "isolated_agent":
+						jobTypeSymbol = theme.IconInteractiveAgent
+					case "headless_agent":
+						jobTypeSymbol = theme.IconHeadlessAgent
+					case "chat":
+						jobTypeSymbol = theme.IconChat
+					case "oneshot":
+						jobTypeSymbol = theme.IconOneshot
+					case "shell":
+						jobTypeSymbol = theme.IconShell
+					case "file":
+						jobTypeSymbol = theme.IconFile
+					default:
+						jobTypeSymbol = ""
 					}
 					typeLabel = string(job.Type)
 				}
 				var typeCol string
-				if jobTypeSymbol != "" { typeCol = fmt.Sprintf("%s %s", jobTypeSymbol, typeLabel) } else { typeCol = typeLabel }
-				if isClaw { typeCol = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet).Render(typeCol) }
+				if jobTypeSymbol != "" {
+					typeCol = fmt.Sprintf("%s %s", jobTypeSymbol, typeLabel)
+				} else {
+					typeCol = typeLabel
+				}
+				if isClaw {
+					typeCol = lipgloss.NewStyle().Foreground(theme.DefaultColors.Violet).Render(typeCol)
+				}
 				_ = isClaw
 				if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
 					cell = t.Muted.Render(typeCol)
@@ -1180,7 +1199,7 @@ func styleXMLLine(line string, tagStyle, attrNameStyle, attrValueStyle, commentS
 		if char == '<' {
 			// Start of a tag
 			tagEnd := i + 1
-			
+
 			// Find the end of the tag
 			for tagEnd < len(result) && result[tagEnd] != '>' {
 				tagEnd++
@@ -1200,7 +1219,7 @@ func styleXMLLine(line string, tagStyle, attrNameStyle, attrValueStyle, commentS
 				i++
 			}
 			content := result[contentStart:i]
-			
+
 			// Only render non-whitespace content
 			if strings.TrimSpace(content) != "" {
 				styled.WriteString(content)
@@ -1225,7 +1244,7 @@ func styleXMLTag(tag string, tagStyle, attrNameStyle, attrValueStyle, dimStyle l
 	result.WriteString(dimStyle.Render("<"))
 
 	inner := tag[1 : len(tag)-1]
-	
+
 	// Handle closing tags
 	if strings.HasPrefix(inner, "/") {
 		result.WriteString(dimStyle.Render("/"))
@@ -1409,7 +1428,7 @@ func styleAttributes(attrString string, attrNameStyle, attrValueStyle, dimStyle 
 			i++
 		}
 		attrName := attrString[nameStart:i]
-		
+
 		if attrName != "" {
 			result.WriteString(attrNameStyle.Render(attrName))
 		}

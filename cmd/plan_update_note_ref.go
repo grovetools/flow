@@ -10,11 +10,11 @@ import (
 )
 
 var planUpdateNoteRefCmd = &cobra.Command{
-	Use:   "update-note-ref [plan] [new-note-path]",
-	Short: "Updates the note_ref in all job files for a plan",
-	Long:  `Internal command to update the note_ref field in all job frontmatter after a note has been moved.`,
-	Args:  cobra.ExactArgs(2),
-	RunE:  runPlanUpdateNoteRef,
+	Use:    "update-note-ref [plan] [new-note-path]",
+	Short:  "Updates the note_ref in all job files for a plan",
+	Long:   `Internal command to update the note_ref field in all job frontmatter after a note has been moved.`,
+	Args:   cobra.ExactArgs(2),
+	RunE:   runPlanUpdateNoteRef,
 	Hidden: true,
 }
 
@@ -62,7 +62,7 @@ func runPlanUpdateNoteRef(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-			if err := os.WriteFile(jobPath, newContent, 0644); err != nil {
+			if err := os.WriteFile(jobPath, newContent, 0600); err != nil {
 				fmt.Printf("Warning: failed to write %s: %v\n", job.Filename, err)
 				continue
 			}

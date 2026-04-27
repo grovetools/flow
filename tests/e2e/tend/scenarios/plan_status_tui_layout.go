@@ -159,7 +159,6 @@ func verifyVerticalLayoutPersistence(ctx *harness.Context) error {
 	return nil
 }
 
-
 // hideAndReshowLogs hides logs with 'l' and shows them again to test if layout persisted.
 func hideAndReshowLogs(ctx *harness.Context) error {
 	session := ctx.Get("tui_session").(*tui.Session)
@@ -208,7 +207,6 @@ func checkStateFileAfterVertical(ctx *harness.Context) error {
 
 	return nil
 }
-
 
 // quitLayoutTUI quits the TUI session.
 func quitLayoutTUI(ctx *harness.Context) error {

@@ -42,7 +42,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
 	// Ensure lock file is removed when execution finishes.
-	defer RemoveLockFile(job.FilePath)
+	defer func() { _ = RemoveLockFile(job.FilePath) }()
 
 	// Update job status to running
 	persister := NewStatePersister()
@@ -103,7 +103,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 
 	// The PromptBody contains the shell command to run
 	// Use "sh" instead of "/bin/sh" to be more portable
-	cmd := exec.CommandContext(ctx, "sh", "-c", job.PromptBody)
+	cmd := exec.CommandContext(ctx, "sh", "-c", job.PromptBody) //nolint:gosec // job.PromptBody comes from trusted plan config
 	cmd.Dir = workDir
 
 	// Set up environment for better debugging

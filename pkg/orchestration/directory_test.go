@@ -11,9 +11,9 @@ func TestGetNextJobNumber(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	tests := []struct {
-		name     string
-		files    []string
-		wantNum  int
+		name    string
+		files   []string
+		wantNum int
 	}{
 		{
 			name:    "empty directory",
@@ -55,7 +55,7 @@ func TestGetNextJobNumber(t *testing.T) {
 			// Create test files
 			for _, file := range tt.files {
 				path := filepath.Join(testDir, file)
-				_ = os.WriteFile(path, []byte("test"), 0644)
+				_ = os.WriteFile(path, []byte("test"), 0600)
 			}
 
 			got, err := GetNextJobNumber(testDir)
@@ -71,10 +71,10 @@ func TestGetNextJobNumber(t *testing.T) {
 
 func TestGenerateJobFilename(t *testing.T) {
 	tests := []struct {
-		name    string
-		number  int
-		title   string
-		want    string
+		name   string
+		number int
+		title  string
+		want   string
 	}{
 		{
 			name:   "simple title",
@@ -124,10 +124,10 @@ func TestAddJob(t *testing.T) {
 
 	// Add first job
 	job1 := &Job{
-		ID:     "test-job-1",
-		Title:  "First Test Job",
-		Type:   JobTypeOneshot,
-		Status: JobStatusPending,
+		ID:         "test-job-1",
+		Title:      "First Test Job",
+		Type:       JobTypeOneshot,
+		Status:     JobStatusPending,
 		PromptBody: "Do something",
 	}
 
@@ -370,15 +370,15 @@ func TestListJobs(t *testing.T) {
 		"01-first.md",
 		"02-second.md",
 		"03-third.md",
-		"spec.md",        // Should be ignored
-		"README.md",      // Should be ignored
+		"spec.md",   // Should be ignored
+		"README.md", // Should be ignored
 		"99-last.md",
 		"10-middle.md",
 	}
 
 	for _, file := range files {
 		path := filepath.Join(tmpDir, file)
-		_ = os.WriteFile(path, []byte("test"), 0644)
+		_ = os.WriteFile(path, []byte("test"), 0600)
 	}
 
 	// List jobs

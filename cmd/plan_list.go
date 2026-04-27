@@ -66,7 +66,7 @@ func NewListCmd() *cobra.Command {
 	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all plans in the configured plans directory or across all workspaces",
-		Long: `Scans for and lists orchestration plans. By default, it scans the directory specified in the notebooks configuration. With --all-workspaces, it discovers all projects and scans for plans within them.`,
+		Long:  `Scans for and lists orchestration plans. By default, it scans the directory specified in the notebooks configuration. With --all-workspaces, it discovers all projects and scans for plans within them.`,
 		RunE:  runPlanList,
 	}
 	listCmd.Flags().BoolVarP(&planListVerbose, "verbose", "v", false, "Show detailed information including jobs in each plan")

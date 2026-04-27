@@ -349,11 +349,10 @@ func SavePlan(dir string, plan *Plan) error {
 
 		// Write job file
 		filepath := filepath.Join(dir, job.Filename)
-		if err := os.WriteFile(filepath, content, 0644); err != nil {
+		if err := os.WriteFile(filepath, content, 0600); err != nil {
 			return fmt.Errorf("writing job file %s: %w", job.Filename, err)
 		}
 	}
 
 	return nil
 }
-

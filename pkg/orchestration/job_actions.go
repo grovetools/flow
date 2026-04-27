@@ -88,7 +88,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		if !strings.Contains(string(content), "# Agent Chat Transcript") && !strings.Contains(string(content), "## Transcript") {
 			note := "\n# Agent Chat Transcript\n\n*This interactive agent job was never run.*"
 			newContent := string(content) + note
-			if writeErr := os.WriteFile(job.FilePath, []byte(newContent), 0644); writeErr != nil {
+			if writeErr := os.WriteFile(job.FilePath, []byte(newContent), 0600); writeErr != nil {
 				return fmt.Errorf("writing note to job file %s: %w", job.FilePath, writeErr)
 			}
 		}
@@ -150,7 +150,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		newContent = string(content) + transcriptHeader + transcriptOutput
 	}
 
-	if err := os.WriteFile(job.FilePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(job.FilePath, []byte(newContent), 0600); err != nil {
 		return fmt.Errorf("writing transcript to job file %s: %w", job.FilePath, err)
 	}
 
@@ -164,7 +164,7 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	if err == nil {
 		// Use formatted version (with ANSI colors) for job.log
 		if formattedErr == nil && len(formattedStr) > 0 {
-			if err := os.WriteFile(jobLogPath, []byte(formattedStr), 0644); err != nil {
+			if err := os.WriteFile(jobLogPath, []byte(formattedStr), 0600); err != nil {
 				// Log a warning but don't fail - this is just for TUI optimization
 				ulog.Warn("[TRANSCRIPT] Failed to write formatted transcript to job.log").
 					Field("job_id", job.ID).
@@ -211,7 +211,7 @@ func RenameJob(plan *Plan, jobToRename *Job, newTitle string) error {
 	if err != nil {
 		return fmt.Errorf("updating frontmatter for %s: %w", jobToRename.Filename, err)
 	}
-	if err := os.WriteFile(newFilePath, updatedContent, 0644); err != nil {
+	if err := os.WriteFile(newFilePath, updatedContent, 0600); err != nil {
 		return fmt.Errorf("writing new job file %s: %w", newFilename, err)
 	}
 
@@ -263,7 +263,7 @@ func RenameJob(plan *Plan, jobToRename *Job, newTitle string) error {
 			if err != nil {
 				return fmt.Errorf("updating references in %s: %w", job.Filename, err)
 			}
-			if err := os.WriteFile(job.FilePath, updatedDepContent, 0644); err != nil {
+			if err := os.WriteFile(job.FilePath, updatedDepContent, 0600); err != nil {
 				return fmt.Errorf("writing updated job file %s: %w", job.Filename, err)
 			}
 		}
@@ -301,7 +301,7 @@ func UpdateJobDependencies(job *Job, newDeps []string) error {
 	}
 
 	// Write back to file
-	if err := os.WriteFile(job.FilePath, updatedContent, 0644); err != nil {
+	if err := os.WriteFile(job.FilePath, updatedContent, 0600); err != nil {
 		return fmt.Errorf("writing job file %s: %w", job.Filename, err)
 	}
 

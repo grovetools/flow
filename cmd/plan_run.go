@@ -715,7 +715,6 @@ func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orche
 	return nil
 }
 
-
 // looksLikeFilePath returns true if the string appears to be a file path rather than a title.
 // A string is considered a file path if it contains "/" or ends with ".md".
 func looksLikeFilePath(s string) bool {
@@ -842,7 +841,7 @@ func searchDirForJobByTitle(dir string, title string) string {
 	}
 
 	var found string
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -874,4 +873,3 @@ func searchDirForJobByTitle(dir string, title string) string {
 
 	return found
 }
-
