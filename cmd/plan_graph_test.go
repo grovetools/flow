@@ -245,46 +245,51 @@ func TestGetStatusSymbol(t *testing.T) {
 }
 
 func createTestPlan() *orchestration.Plan {
+	job1 := &orchestration.Job{
+		ID:       "job1",
+		Title:    "First Job",
+		Filename: "01-first-job.md",
+		Status:   orchestration.JobStatusCompleted,
+		Type:     orchestration.JobTypeOneshot,
+	}
+	job2 := &orchestration.Job{
+		ID:        "job2",
+		Title:     "Second Job",
+		Filename:  "02-second-job.md",
+		Status:    orchestration.JobStatusRunning,
+		Type:      orchestration.JobTypeAgent,
+		DependsOn: []string{"job1"},
+	}
+	job3 := &orchestration.Job{
+		ID:        "job3",
+		Title:     "Third Job",
+		Filename:  "03-third-job.md",
+		Status:    orchestration.JobStatusPending,
+		Type:      orchestration.JobTypeOneshot,
+		DependsOn: []string{"job2"},
+	}
+	job4 := &orchestration.Job{
+		ID:        "job4",
+		Title:     "Fourth Job",
+		Filename:  "04-fourth-job.md",
+		Status:    orchestration.JobStatusPending,
+		Type:      orchestration.JobTypeAgent,
+		DependsOn: []string{"job2"},
+	}
+
+	// Set resolved dependency pointers (mirrors what LoadPlan does)
+	job2.Dependencies = []*orchestration.Job{job1}
+	job3.Dependencies = []*orchestration.Job{job2}
+	job4.Dependencies = []*orchestration.Job{job2}
+
 	return &orchestration.Plan{
 		Name: "test-plan",
-		Jobs: []*orchestration.Job{
-			{
-				ID:       "job1",
-				Title:    "First Job",
-				Filename: "01-first-job.md",
-				Status:   orchestration.JobStatusCompleted,
-				Type:     orchestration.JobTypeOneshot,
-			},
-			{
-				ID:        "job2",
-				Title:     "Second Job",
-				Filename:  "02-second-job.md",
-				Status:    orchestration.JobStatusRunning,
-				Type:      orchestration.JobTypeAgent,
-				DependsOn: []string{"job1"},
-			},
-			{
-				ID:        "job3",
-				Title:     "Third Job",
-				Filename:  "03-third-job.md",
-				Status:    orchestration.JobStatusPending,
-				Type:      orchestration.JobTypeOneshot,
-				DependsOn: []string{"job2"},
-			},
-			{
-				ID:        "job4",
-				Title:     "Fourth Job",
-				Filename:  "04-fourth-job.md",
-				Status:    orchestration.JobStatusPending,
-				Type:      orchestration.JobTypeAgent,
-				DependsOn: []string{"job2"},
-			},
-		},
+		Jobs: []*orchestration.Job{job1, job2, job3, job4},
 		JobsByID: map[string]*orchestration.Job{
-			"job1": nil, // Will be set by SavePlan
-			"job2": nil,
-			"job3": nil,
-			"job4": nil,
+			"job1": job1,
+			"job2": job2,
+			"job3": job3,
+			"job4": job4,
 		},
 	}
 }
