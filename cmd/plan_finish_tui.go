@@ -4,13 +4,14 @@ import (
 	"fmt"
 
 	"github.com/grovetools/core/tui/embed"
+
 	"github.com/grovetools/flow/pkg/tui/wizards/finish"
 )
 
 // runFinishTUI launches the embeddable plan-finish wizard via
 // embed.RunStandalone. The wizard toggles IsEnabled on the passed-in
 // items in-place; callers then execute the enabled Action closures.
-func runFinishTUI(planName string, items []*finish.Item, branchIsMerged bool, branchExists bool) error {
+func runFinishTUI(planName string, items []*finish.Item, branchIsMerged, branchExists bool) error {
 	model := finish.New(finish.Config{
 		PlanName:       planName,
 		Items:          items,

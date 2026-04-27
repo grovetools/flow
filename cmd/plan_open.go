@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // NewOpenCmd creates the top-level `open` command.

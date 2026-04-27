@@ -24,6 +24,7 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/tui/utils/scrollbar"
+
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 

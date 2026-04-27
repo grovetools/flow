@@ -5,9 +5,10 @@ import (
 
 	coreconfig "github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/embed"
+	skillservice "github.com/grovetools/skills/pkg/service"
+
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"
-	skillservice "github.com/grovetools/skills/pkg/service"
 )
 
 // runAddJobWizard launches the embeddable add-job wizard via

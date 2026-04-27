@@ -8,8 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 type PlanGraphCmd struct {

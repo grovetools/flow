@@ -17,9 +17,10 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	grovecontext "github.com/grovetools/cx/pkg/context"
-	"github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
+
+	"github.com/grovetools/flow/pkg/exec"
 )
 
 // IsolatedAgentExecutor executes isolated agent jobs in dedicated tmux servers.

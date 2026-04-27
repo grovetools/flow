@@ -13,8 +13,9 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
-	flowexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/sirupsen/logrus"
+
+	flowexec "github.com/grovetools/flow/pkg/exec"
 )
 
 // OpencodeAgentProvider implements InteractiveAgentProvider for the opencode agent.

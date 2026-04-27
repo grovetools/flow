@@ -10,9 +10,10 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	skillservice "github.com/grovetools/skills/pkg/service"
 	"github.com/grovetools/skills/pkg/skills"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // item is a simple string list entry for the job-type, skill-none,

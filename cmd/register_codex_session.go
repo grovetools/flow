@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 func GetRegisterCodexSessionCmd() *cobra.Command {

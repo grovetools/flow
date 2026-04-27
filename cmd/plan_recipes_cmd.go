@@ -7,8 +7,9 @@ import (
 	"text/tabwriter"
 
 	"github.com/grovetools/core/cli"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var planRecipesCmd = &cobra.Command{

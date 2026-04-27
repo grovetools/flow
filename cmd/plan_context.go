@@ -7,8 +7,9 @@ import (
 	"strings"
 
 	grovecontext "github.com/grovetools/cx/pkg/context"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // NewPlanContextCmd creates the plan context command.

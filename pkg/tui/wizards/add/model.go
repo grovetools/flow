@@ -10,8 +10,9 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	skillservice "github.com/grovetools/skills/pkg/service"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // Config carries the dependencies the add-job wizard needs. Hosts

@@ -10,9 +10,10 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/skills/pkg/skills"
 	"github.com/mattn/go-isatty"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 type PlanAddStepCmd struct {

@@ -8,9 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // PlanConfigCmd represents the plan config command
@@ -148,7 +149,7 @@ func showConfig(configPath string, jsonOutput bool) error {
 }
 
 // getConfigValue retrieves a specific configuration value
-func getConfigValue(configPath string, key string, jsonOutput bool) error {
+func getConfigValue(configPath, key string, jsonOutput bool) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {

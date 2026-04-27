@@ -15,8 +15,9 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
-	flowexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/sirupsen/logrus"
+
+	flowexec "github.com/grovetools/flow/pkg/exec"
 )
 
 type CodexAgentProvider struct {
@@ -409,7 +410,7 @@ func FindCodexPIDForPane(targetPane string) (int, error) {
 }
 
 // getGitInfo returns the repo name and current branch for the given directory
-func getGitInfo(workDir string) (repo string, branch string) {
+func getGitInfo(workDir string) (repo, branch string) {
 	// Get repo name from git config
 	cmd := osexec.Command("git", "-C", workDir, "remote", "get-url", "origin")
 	output, err := cmd.Output()

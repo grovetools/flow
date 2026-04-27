@@ -10,8 +10,9 @@ import (
 	markdown "github.com/grovetools/core/tui/components/markdown"
 	gtable "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // getStatusStyles returns theme-based styles for job statuses with subtle colors

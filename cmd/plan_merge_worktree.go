@@ -8,10 +8,11 @@ import (
 
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/grovetools/flow/pkg/planutil"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/planutil"
 )
 
 // planMergeWorktreeCmd implements the `flow plan merge-worktree` command

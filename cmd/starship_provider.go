@@ -12,9 +12,10 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/muesli/termenv"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // PlanStatistics holds the statistics for a plan.

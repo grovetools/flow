@@ -4,9 +4,10 @@ import (
 	"context"
 	"os"
 
-	"github.com/grovetools/flow/tests/e2e/tend/scenarios"
 	"github.com/grovetools/tend/pkg/app"
 	"github.com/grovetools/tend/pkg/harness"
+
+	"github.com/grovetools/flow/tests/e2e/tend/scenarios"
 )
 
 func main() {

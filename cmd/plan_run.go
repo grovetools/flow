@@ -18,8 +18,9 @@ import (
 	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var ulog = grovelogging.NewUnifiedLogger("grove-flow")
@@ -829,7 +830,7 @@ func findJobInNotebook(title string) (string, error) {
 }
 
 // searchDirForJobByTitle walks a directory looking for a markdown file with matching title.
-func searchDirForJobByTitle(dir string, title string) string {
+func searchDirForJobByTitle(dir, title string) string {
 	if dir == "" {
 		return ""
 	}

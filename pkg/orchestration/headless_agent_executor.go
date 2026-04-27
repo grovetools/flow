@@ -17,7 +17,7 @@ import (
 
 // AgentRunner defines the interface for running agents.
 type AgentRunner interface {
-	RunAgent(ctx context.Context, worktree string, prompt string) error
+	RunAgent(ctx context.Context, worktree, prompt string) error
 }
 
 // HeadlessAgentExecutor executes headless agent jobs in isolated git worktrees.
@@ -235,7 +235,7 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 }
 
 // runAgentInWorktree executes the agent in the worktree context.
-func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan) error {
+func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktreePath, prompt string, job *Job, plan *Plan) error {
 	coreCfg, err := config.LoadFrom(".")
 	if err != nil {
 		coreCfg = &config.Config{}
@@ -263,7 +263,7 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 }
 
 // runOnHost executes the agent directly on the host machine.
-func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath string, prompt string, job *Job, plan *Plan, agentArgs []string) error {
+func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, prompt string, job *Job, plan *Plan, agentArgs []string) error {
 	ulog.Debug("[HEADLESS] Running agent on host").
 		Field("job_id", job.ID).
 		Field("worktree", worktreePath).
@@ -336,7 +336,7 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath stri
 }
 
 // RunAgent implements the AgentRunner interface.
-func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree string, prompt string) error {
+func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree, prompt string) error {
 	return nil
 }
 

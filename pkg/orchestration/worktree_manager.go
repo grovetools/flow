@@ -96,7 +96,7 @@ func (wm *WorktreeManager) SetConfig(config WorktreeConfig) {
 }
 
 // CreateWorktree creates a new worktree.
-func (wm *WorktreeManager) CreateWorktree(name string, baseBranch string) (string, error) {
+func (wm *WorktreeManager) CreateWorktree(name, baseBranch string) (string, error) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
@@ -278,7 +278,7 @@ func (wm *WorktreeManager) CleanupJobWorktree(job *Job) error {
 // Lock management
 
 // LockWorktree locks a worktree for exclusive use.
-func (wm *WorktreeManager) LockWorktree(name string, jobID string) error {
+func (wm *WorktreeManager) LockWorktree(name, jobID string) error {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 

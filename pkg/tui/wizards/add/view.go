@@ -38,7 +38,7 @@ func (m Model) View() string {
 		BorderForeground(theme.DefaultColors.Orange)
 
 	// Helper to render each field with borders
-	renderField := func(index int, label string, view string, forceHeight int) string {
+	renderField := func(index int, label, view string, forceHeight int) string {
 		var fieldContent strings.Builder
 
 		if m.focusIndex == index {

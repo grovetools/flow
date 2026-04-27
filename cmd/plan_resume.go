@@ -12,9 +12,10 @@ import (
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/sanitize"
+	"github.com/spf13/cobra"
+
 	groveexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/spf13/cobra"
 )
 
 // NewPlanResumeCmd creates the `plan resume` command.

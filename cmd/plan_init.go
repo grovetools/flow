@@ -21,9 +21,10 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // RunPlanInitTUI launches the interactive TUI for creating a new plan.
@@ -360,7 +361,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 }
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
-func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath string, planName string) error {
+func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	// Derive ExtractAllFrom and NoteRef from FromNote if provided
 	// --from-note takes precedence over --extract-all-from and --note-ref
 	if cmd.FromNote != "" {

@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/grovetools/core/cli"
+
 	"github.com/grovetools/flow/cmd"
 	"github.com/grovetools/flow/pkg/docs"
 )

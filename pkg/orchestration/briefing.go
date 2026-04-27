@@ -39,7 +39,7 @@ func countLines(filePath string) (int, error) {
 // WriteBriefingFile saves the provided content to a uniquely named .xml file
 // in the plan's .artifacts/<job.ID> directory for auditing.
 // For chat jobs, turnID should be the unique turn identifier. For other jobs, pass empty string.
-func WriteBriefingFile(plan *Plan, job *Job, content string, turnID string) (string, error) {
+func WriteBriefingFile(plan *Plan, job *Job, content, turnID string) (string, error) {
 	jobArtifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
 	if err := os.MkdirAll(jobArtifactDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating job artifact directory: %w", err)
@@ -413,7 +413,7 @@ func collectSkillContent(b *strings.Builder, nodes []SkillSequenceNode, workDir 
 // renderSequenceNodes recursively renders a skill sequence tree as a TODO list.
 // When useArtifacts is true, it includes `flow artifact` CLI protocols.
 // When false, it uses plain TODO-list completion instructions.
-func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep bool, useArtifacts bool) {
+func renderSequenceNodes(b *strings.Builder, nodes []SkillSequenceNode, indent string, isSubstep, useArtifacts bool) {
 	var previousArtifacts []string
 
 	for _, node := range nodes {

@@ -14,9 +14,10 @@ import (
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var planListUlog = grovelogging.NewUnifiedLogger("grove-flow.plan-list")

@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 	"text/template"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var planReviewCmd = &cobra.Command{

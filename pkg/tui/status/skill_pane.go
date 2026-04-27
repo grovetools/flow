@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	markdown "github.com/grovetools/core/tui/components/markdown"
 	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -192,7 +193,7 @@ type skillPaneResult struct {
 // renderInteractiveSkillPane builds the skill pane tree view and detail content separately.
 // hostWorkDir is the host's active workspace (threaded through for skill path resolution
 // when plan.Config.Worktree is set but orchestration.DetermineWorkingDirectory fails).
-func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job, cursor int, _, height int, hostWorkDir string) skillPaneResult {
+func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job, cursor, _, height int, hostWorkDir string) skillPaneResult {
 	empty := skillPaneResult{}
 	if len(job.SkillSequence) == 0 {
 		empty.treeContent = theme.DefaultTheme.Muted.Render("No skill sequence defined for this job.")
@@ -271,7 +272,7 @@ func isLastArtifactChild(nodes []*SkillPaneNode, i int) bool {
 }
 
 // renderPaneNodeLine renders a single node line (skill or artifact) with optional cursor highlight.
-func renderPaneNodeLine(b *strings.Builder, node *SkillPaneNode, stateMap map[string]orchestration.SkillFidelityState, isCursor bool, isLastChild bool) {
+func renderPaneNodeLine(b *strings.Builder, node *SkillPaneNode, stateMap map[string]orchestration.SkillFidelityState, isCursor, isLastChild bool) {
 	t := theme.DefaultTheme
 
 	// Cursor indicator

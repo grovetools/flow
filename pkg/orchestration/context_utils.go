@@ -354,7 +354,7 @@ func ResolveSkillSequenceMetadata(skillNames []string, workDir string) ([]SkillS
 // When parentSkill is non-empty, resolution starts at depth 1 (bypassing access
 // control), since the parent skill is already authorized and its sub-skills
 // inherit that authorization.
-func ResolveSkillSequenceWithParent(skillNames []string, workDir string, parentSkill string) ([]SkillSequenceNode, error) {
+func ResolveSkillSequenceWithParent(skillNames []string, workDir, parentSkill string) ([]SkillSequenceNode, error) {
 	if parentSkill != "" {
 		return resolveSequenceRecursive(skillNames, workDir, 1, make(map[string]bool))
 	}

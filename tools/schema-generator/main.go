@@ -5,9 +5,10 @@ import (
 	"log"
 	"os"
 
+	"github.com/invopop/jsonschema"
+
 	"github.com/grovetools/flow/cmd"
 	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/invopop/jsonschema"
 )
 
 func main() {

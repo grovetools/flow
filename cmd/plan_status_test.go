@@ -9,9 +9,10 @@ import (
 	"testing"
 
 	"github.com/grovetools/core/cli"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // Pre-existing compile shims: these package-level flags were removed from

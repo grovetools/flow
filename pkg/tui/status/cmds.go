@@ -23,10 +23,11 @@ import (
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/delegation"
-	"github.com/grovetools/flow/pkg/orchestration"
 	notifications "github.com/grovetools/notify"
 	notifyconfig "github.com/grovetools/notify/pkg/config"
 	"gopkg.in/yaml.v3"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // Message types
@@ -843,7 +844,7 @@ func runJobsWithOrchestrator(orchestrator *orchestration.Orchestrator, jobs []*o
 // streaming their output to a log file for the TUI to display.
 // DEPRECATED: This is the old implementation that spawns CLI commands.
 // Use runJobsWithOrchestrator instead.
-func runJobsCmd(logFile string, planDir string, jobs []*orchestration.Job) tea.Cmd {
+func runJobsCmd(logFile, planDir string, jobs []*orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		// This command runs in a goroutine managed by the Bubble Tea runtime.
 

@@ -22,7 +22,7 @@ var NestedSkillSequenceScenario = harness.NewScenario(
 
 			skillsDir := filepath.Join(notebooksRoot, "workspaces", "nested-sequence-project", "skills")
 
-			writeSkill := func(relPath, name, desc string, seq []string, produces []string) error {
+			writeSkill := func(relPath, name, desc string, seq, produces []string) error {
 				dir := filepath.Join(skillsDir, relPath)
 				if err := fs.CreateDir(dir); err != nil {
 					return err

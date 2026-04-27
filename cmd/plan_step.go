@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // NewStepCmd creates the top-level `step` command.

@@ -806,7 +806,7 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 }
 
 // regenerateContextInWorktree regenerates the context within a worktree.
-func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath string, jobType string, job *Job, plan *Plan) (string, error) {
+func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath, jobType string, job *Job, plan *Plan) (string, error) {
 	writer := grovelogging.GetWriter(ctx)
 	ulog.Info("Checking context in worktree").
 		Field("job_type", jobType).

@@ -34,11 +34,12 @@ import (
 	"github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/sanitize"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
+
 	gexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/tui/wizards/finish"
-	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 // Options carries the cleanup toggles that used to live as CLI flag
@@ -241,7 +242,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 	}
 
-	findEnvState := func() (data []byte, statePath string, worktreeStateDir string) {
+	findEnvState := func() (data []byte, statePath, worktreeStateDir string) {
 		if worktreePath != "" {
 			wsStateDir := filepath.Join(worktreePath, ".grove", "env")
 			wsStatePath := filepath.Join(wsStateDir, "state.json")

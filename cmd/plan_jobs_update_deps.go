@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 
 	"github.com/fatih/color"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var planJobsUpdateDepsCmd = &cobra.Command{

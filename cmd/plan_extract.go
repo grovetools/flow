@@ -8,8 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // BlockInfo represents information about an extractable block
@@ -73,7 +74,7 @@ Examples:
 	return cmd
 }
 
-func runJobsExtract(title string, file string, blockIDs []string, dependsOn []string, worktree string, model string, outputType string) error {
+func runJobsExtract(title, file string, blockIDs, dependsOn []string, worktree, model, outputType string) error {
 	// Get the current plan directory
 	currentPlanPath, err := resolvePlanPathWithActiveJob("", ".")
 	if err != nil {

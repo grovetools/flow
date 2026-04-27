@@ -10,10 +10,11 @@ import (
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/flow/pkg/orchestration"
-	"github.com/grovetools/flow/pkg/planutil"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/planutil"
 )
 
 // Command flags

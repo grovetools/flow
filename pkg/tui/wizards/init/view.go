@@ -81,7 +81,7 @@ func (m Model) renderMainScreen() string {
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(theme.DefaultColors.Orange)
 
-	renderField := func(index int, title string, content string, wide bool) string {
+	renderField := func(index int, title, content string, wide bool) string {
 		var fieldBuilder strings.Builder
 
 		titlePrefix := "  "
@@ -181,7 +181,7 @@ func (m Model) renderAdvancedScreen() string {
 		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(theme.DefaultColors.Orange)
 
-	renderField := func(index int, title string, content string, wide bool) string {
+	renderField := func(index int, title, content string, wide bool) string {
 		var fieldBuilder strings.Builder
 		fieldBuilder.WriteString("  " + theme.DefaultTheme.Bold.Render(title))
 		fieldBuilder.WriteString("\n")

@@ -560,7 +560,7 @@ func GetPlaybookRecipe(playbookName, recipeName string) (*Recipe, error) {
 // When a playbook is active (e.g. --playbook gdv2), recipes defined in
 // that playbook's recipes/ directory are consulted after local .grove/recipes/
 // but before notebook/user/builtin sources.
-func GetRecipe(name string, getRecipeCmd string) (*Recipe, error) {
+func GetRecipe(name, getRecipeCmd string) (*Recipe, error) {
 	return GetRecipeWithPlaybook(name, getRecipeCmd, "")
 }
 

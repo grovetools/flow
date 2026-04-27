@@ -269,7 +269,7 @@ func (e *GenerateRecipeExecutor) constructPrompt(userInstructions string, planFi
 }
 
 // createRecipeFiles parses the LLM response and creates recipe files
-func (e *GenerateRecipeExecutor) createRecipeFiles(recipeName string, response string) (string, error) {
+func (e *GenerateRecipeExecutor) createRecipeFiles(recipeName, response string) (string, error) {
 	// Determine recipe directory path
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

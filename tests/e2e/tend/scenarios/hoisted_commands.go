@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/tend/pkg/assert"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
 	"github.com/grovetools/tend/pkg/harness"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // HoistedCommandsScenario tests the hoisted plan commands that are now available at the top level

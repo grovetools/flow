@@ -8,10 +8,11 @@ import (
 	"github.com/fatih/color"
 	groveplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
+	"github.com/spf13/cobra"
+
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/plan_finish"
 	"github.com/grovetools/flow/pkg/tui/wizards/finish"
-	"github.com/spf13/cobra"
 )
 
 // NewPlanFinishCmd creates the `plan finish` command.

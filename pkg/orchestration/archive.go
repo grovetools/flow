@@ -46,7 +46,7 @@ func ArchiveContextRules(job *Job, plan *Plan, usedRulesPath string) error {
 // within the job's artifact directory. Returns the relative artifact path for
 // inclusion in the turn's <!-- grove: {} --> metadata tag.
 // Returns "" if usedRulesPath is empty (no rules to archive).
-func ArchiveContextRulesForTurn(plan *Plan, jobID string, turnID string, usedRulesPath string) (string, error) {
+func ArchiveContextRulesForTurn(plan *Plan, jobID, turnID, usedRulesPath string) (string, error) {
 	if usedRulesPath == "" {
 		return "", nil
 	}
@@ -57,7 +57,7 @@ func ArchiveContextRulesForTurn(plan *Plan, jobID string, turnID string, usedRul
 
 // archiveRulesFile copies usedRulesPath into .artifacts/{jobID}/{filename}
 // and returns the relative artifact path.
-func archiveRulesFile(plan *Plan, jobID string, filename string, usedRulesPath string) (string, error) {
+func archiveRulesFile(plan *Plan, jobID, filename, usedRulesPath string) (string, error) {
 	content, err := os.ReadFile(usedRulesPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read used rules file: %w", err)

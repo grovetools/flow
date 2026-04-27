@@ -14,7 +14,7 @@ import (
 // resolvePlanPath determines the absolute path for a plan directory.
 // It uses the NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).
 // It falls back to a global search if the plan is not found in the current context.
-func resolvePlanPath(planName string, contextDir string) (string, error) {
+func resolvePlanPath(planName, contextDir string) (string, error) {
 	// If planName is already an absolute path, use it directly.
 	if filepath.IsAbs(planName) {
 		return planName, nil
@@ -97,7 +97,7 @@ func getActivePlanWithMigration() (string, error) {
 
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.
 // If no active job is set, it falls back to the rolling plan, creating it if necessary.
-func resolvePlanPathWithActiveJob(planName string, contextDir string) (string, error) {
+func resolvePlanPathWithActiveJob(planName, contextDir string) (string, error) {
 	usingRollingPlan := false
 
 	// If no plan name provided, try to use active job
@@ -133,7 +133,7 @@ func resolvePlanPathWithActiveJob(planName string, contextDir string) (string, e
 
 // resolvePlanPathInWorkspace resolves a plan path but returns an error if workspace detection fails.
 // Unlike resolvePlanPath, it does not fall back to the local directory or global search.
-func resolvePlanPathInWorkspace(planName string, contextDir string) (string, error) {
+func resolvePlanPathInWorkspace(planName, contextDir string) (string, error) {
 	// If planName is already an absolute path, use it directly.
 	if filepath.IsAbs(planName) {
 		return planName, nil

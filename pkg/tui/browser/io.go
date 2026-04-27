@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/util/delegation"
+
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/planutil"
 )
@@ -106,7 +107,7 @@ func fetchRepoGitLogCmd(repoPath string) tea.Cmd {
 	}
 }
 
-func loadPlansListCmd(plansDirectory string, cwdGitRoot string, showOnHold bool) tea.Cmd {
+func loadPlansListCmd(plansDirectory, cwdGitRoot string, showOnHold bool) tea.Cmd {
 	return func() tea.Msg {
 		plans, err := loadPlansList(plansDirectory, cwdGitRoot, showOnHold)
 		return planListLoadCompleteMsg{plans: plans, error: err}
@@ -206,7 +207,7 @@ func loadPlansFromDisk(plansDirectory string) ([]*orchestration.Plan, error) {
 	return plans, nil
 }
 
-func loadPlansList(plansDirectory string, cwdGitRoot string, showOnHold bool) ([]PlanListItem, error) {
+func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanListItem, error) {
 	plans, err := fetchPlans(plansDirectory)
 	if err != nil {
 		return nil, err

@@ -5,10 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/tend/pkg/assert"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/harness"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var OneshotWithContextScenario = harness.NewScenario(

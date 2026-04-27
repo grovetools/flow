@@ -24,10 +24,11 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	grovecontext "github.com/grovetools/cx/pkg/context"
-	flowexec "github.com/grovetools/flow/pkg/exec"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
+
+	flowexec "github.com/grovetools/flow/pkg/exec"
 )
 
 // InteractiveAgentProvider defines the interface for launching an interactive agent.

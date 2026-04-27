@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/verify"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // CompleteOneCmdScenario tests the enhanced `flow complete` command that accepts

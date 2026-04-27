@@ -14,9 +14,10 @@ import (
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/theme"
+	"gopkg.in/yaml.v3"
+
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/planutil"
-	"gopkg.in/yaml.v3"
 )
 
 // Update handles messages and advances Model state.

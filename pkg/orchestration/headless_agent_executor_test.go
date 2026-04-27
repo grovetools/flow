@@ -14,7 +14,7 @@ type mockAgentRunner struct {
 	runError  error
 }
 
-func (m *mockAgentRunner) RunAgent(ctx context.Context, worktree string, prompt string) error {
+func (m *mockAgentRunner) RunAgent(ctx context.Context, worktree, prompt string) error {
 	m.runCalled = true
 	return m.runError
 }

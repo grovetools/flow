@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // getArtifactContext resolves the plan, job, and artifact directory from

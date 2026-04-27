@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var planActionList bool

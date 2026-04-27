@@ -9,6 +9,7 @@ import (
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
 	core_theme "github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/status"
 	"github.com/grovetools/flow/pkg/tui/wizards/add"

@@ -11,9 +11,10 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/util/delegation"
-	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/tui/browser"
 )
 
 // Plan TUI command - interactive version of `flow plan list`.

@@ -16,8 +16,9 @@ import (
 	"github.com/grovetools/core/cli"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/tui/theme"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/spf13/cobra"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 var (

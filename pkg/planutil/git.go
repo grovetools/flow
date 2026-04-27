@@ -15,8 +15,9 @@ import (
 
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // EcosystemRepoStatus holds detailed status for a single repo in an
