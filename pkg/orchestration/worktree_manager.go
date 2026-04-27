@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	grovelogging "github.com/grovetools/core/logging"
@@ -399,13 +400,15 @@ func sanitizeForPath(s string) string {
 }
 
 func isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
 
-	// On Unix, this doesn't actually check if process exists
-	// We need to send signal 0 to check
-	err = process.Signal(os.Signal(nil))
-	return err == nil
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || os.IsPermission(err)
 }

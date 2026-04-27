@@ -45,12 +45,14 @@ func (fp *FrontmatterParser) WriteFrontmatter(w io.Writer, frontmatter map[strin
 type StatePersister struct {
 	mu                sync.RWMutex
 	frontmatterParser *FrontmatterParser
+	heldLocks         map[string]bool
 }
 
 // NewStatePersister creates a new state persister.
 func NewStatePersister() *StatePersister {
 	return &StatePersister{
 		frontmatterParser: &FrontmatterParser{},
+		heldLocks:         make(map[string]bool),
 	}
 }
 
@@ -368,8 +370,9 @@ func (sp *StatePersister) ValidateJobStates(plan *Plan) []error {
 
 // FileLock represents a lock on a file.
 type FileLock struct {
-	path string
-	file *os.File
+	path      string
+	file      *os.File
+	persister *StatePersister
 }
 
 func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
@@ -381,13 +384,16 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 	if err != nil {
 		if os.IsExist(err) {
 			// Check if lock belongs to current process (for executor-created locks)
-			if content, err := os.ReadFile(lockPath); err == nil {
-				var pidInLock int
-				if _, err := fmt.Sscanf(string(content), "%d", &pidInLock); err == nil && pidInLock == currentPID {
-					// Lock file belongs to us - we can proceed
-					// This happens when the executor creates the lock file first
-					// Return a "no-op" lock that won't try to unlock the executor's lock
-					return &FileLock{path: lockPath, file: nil}, nil
+			if !sp.heldLocks[lockPath] {
+				if content, err := os.ReadFile(lockPath); err == nil {
+					var pidInLock int
+					if _, err := fmt.Sscanf(string(content), "%d", &pidInLock); err == nil && pidInLock == currentPID {
+						// Lock file belongs to us - we can proceed
+						// This happens when the executor creates the lock file first
+						// Return a "no-op" lock that won't try to unlock the executor's lock
+						sp.heldLocks[lockPath] = true
+						return &FileLock{path: lockPath, file: nil, persister: sp}, nil
+					}
 				}
 			}
 
@@ -432,11 +438,15 @@ func (sp *StatePersister) lockFile(path string) (*FileLock, error) {
 		_ = file.Sync()
 	}
 
-	return &FileLock{path: lockPath, file: file}, nil
+	sp.heldLocks[lockPath] = true
+	return &FileLock{path: lockPath, file: file, persister: sp}, nil
 }
 
 // Unlock releases the file lock.
 func (fl *FileLock) Unlock() error {
+	if fl.persister != nil {
+		delete(fl.persister.heldLocks, fl.path)
+	}
 	if fl.file != nil {
 		fl.file.Close()
 		// Only remove the lock file if we created it
