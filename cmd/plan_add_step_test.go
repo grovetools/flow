@@ -67,7 +67,7 @@ func TestRunPlanAddStep(t *testing.T) {
 				}
 			},
 			cmd: &PlanAddStepCmd{
-				Type:       "agent",
+				Type:       "headless_agent",
 				Title:      "Implementation",
 				PromptFile: createTempFile(t, "Implement the feature"),
 			},
@@ -329,7 +329,7 @@ func TestCollectJobDetails(t *testing.T) {
 			name: "with dependencies",
 			cmd: &PlanAddStepCmd{
 				Title:      "Test Job",
-				Type:       "agent",
+				Type:       "headless_agent",
 				DependsOn:  []string{"01-initial.md"},
 				PromptFile: createTempFile(t, "Test prompt"),
 			},

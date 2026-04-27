@@ -68,8 +68,8 @@ func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 
 func TestHeadlessAgentExecutor_Name(t *testing.T) {
 	executor := NewHeadlessAgentExecutor(nil, nil)
-	if executor.Name() != "agent" {
-		t.Errorf("Expected name 'agent', got %s", executor.Name())
+	if executor.Name() != "headless_agent" {
+		t.Errorf("Expected name 'headless_agent', got %s", executor.Name())
 	}
 }
 

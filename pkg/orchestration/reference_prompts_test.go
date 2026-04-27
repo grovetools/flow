@@ -240,7 +240,7 @@ func TestCLIIntegration(t *testing.T) {
 	cmd := &JobsAddStepCmd{
 		Dir:          "test-dir",
 		Template:     "test-template",
-		Type:         "agent",
+		Type:         "headless_agent",
 		Title:        "Test Job",
 		DependsOn:    []string{"dep1", "dep2"},
 		PromptFile:   "",
