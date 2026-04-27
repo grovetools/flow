@@ -14,7 +14,7 @@ import (
 var PlanLifecycleScenario = harness.NewScenario(
 	"plan-lifecycle-commands",
 	"Tests the plan lifecycle commands: hold, unhold, review, and finish.",
-	[]string{"core", "plan", "lifecycle"},
+	[]string{"core", "plan", "lifecycle", "slow"},
 	[]harness.Step{
 		// Mock git to verify branch deletion and worktree commands
 		harness.SetupMocks(harness.Mock{CommandName: "git"}),

@@ -12,7 +12,7 @@ import (
 var CoreOrchestrationScenario = harness.NewScenario(
 	"core-orchestration",
 	"Validates core CLI orchestration logic: plan init, job execution, and status updates.",
-	[]string{"core", "cli"},
+	[]string{"core", "cli", "slow"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment", func(ctx *harness.Context) error {
 			_, _, err := setupDefaultEnvironment(ctx, "my-project")
