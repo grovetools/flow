@@ -48,8 +48,7 @@ test:
 # Mocks are built automatically by tend from tests/e2e/tend/mocks/src/
 test-e2e: build
 	@echo "Running grove-tend E2E tests..."
-	@go build -o bin/tend-e2e ./tests/e2e/
-	@tend run $(ARGS)
+	@tend run -p $(ARGS)
 
 
 clean:

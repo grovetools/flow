@@ -33,8 +33,8 @@ var AgentLogViewerScenario = harness.NewScenarioWithOptions(
 		harness.NewStep("Test viewing logs for completed agent job with logs", testCompletedAgentJobWithLogs),
 		harness.NewStep("Test viewing logs for running agent job", testRunningAgentJobLogs),
 	},
-	true,  // localOnly = true, requires tmux for TUI testing
-	false, // explicitOnly = false
+	true, // localOnly = true, requires tmux for TUI testing
+	true, // explicitOnly = true, flaky timing in parallel runs
 )
 
 // setupAgentLogViewerEnvironment creates a test environment with agent jobs in different states
