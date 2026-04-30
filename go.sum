@@ -79,6 +79,7 @@ github.com/googleapis/gax-go/v2 v2.14.1/go.mod h1:Hb/NubMaVM88SrNkvl8X/o8XWwDJEP
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/grovetools/compositor v0.0.1/go.mod h1:AWYzdCcLtuYFfH+bZquGqnNFE7zRtgSWQP3oQ+iVB1s=
 github.com/grovetools/core v0.6.4-0.20260402212142-fb475a947edc h1:3iPpxIIPRReh7CvmJW19TA6UoVP0XIgipVeJzZMzvlw=
 github.com/grovetools/core v0.6.4-0.20260402212142-fb475a947edc/go.mod h1:iOwTXDelqH3Qmd/OXvjGlbgL8MWjsjVesswICmexCsg=
 github.com/grovetools/cx v0.6.0 h1:q7WF21WMuBcSZsZtCbEn5R9SwAzScx6B9q7r2+Kr9dE=
@@ -93,6 +94,8 @@ github.com/grovetools/skills v0.6.0 h1:cv4pdHmSOv3parhhIhBd5Gt/TM0b55xAaaultZXas
 github.com/grovetools/skills v0.6.0/go.mod h1:OVEvY6X8ULojfWxW8qKUbg26cL2rgBir3pzHjqxWgr4=
 github.com/grovetools/tend v0.6.0 h1:LGz8CK3pPQC5RLw7BIaQcqHU66UqAYte39Ojlxo2GCk=
 github.com/grovetools/tend v0.6.0/go.mod h1:o36W0Kgx7ZmLUuutLH9afqgnaWahjXlV4rIVet2Adoc=
+github.com/grovetools/tuimux v0.0.1 h1:ON/PUc04lU2n5juXSPgYuns6hbN2eg6U863DC6eiQlM=
+github.com/grovetools/tuimux v0.0.1/go.mod h1:BIEisks+4ENC+Jq4sOuItZj9SrLfzFUVm4U8y00M4G0=
 github.com/hinshun/vt10x v0.0.0-20180809195222-d55458df857c/go.mod h1:DqJ97dSdRW1W22yXSB90986pcOyQ7r45iio1KN2ez1A=
 github.com/hpcloud/tail v1.0.0 h1:nfCOvKYfkgYP8hkirhJocXT2+zOD8yUNjXaWfTlyFKI=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=

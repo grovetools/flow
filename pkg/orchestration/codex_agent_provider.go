@@ -16,8 +16,6 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
-
-	flowexec "github.com/grovetools/flow/pkg/exec"
 )
 
 type CodexAgentProvider struct {
@@ -40,16 +38,12 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// NOTE: Session registration now happens AFTER the agent is launched and PID is discovered
-	// to avoid the race condition where PID 0 is registered before the actual process starts.
-	// See the synchronous PID discovery below after tmux window creation.
-
-	// Create tmux client
-	tmuxClient, err := tmux.NewClient()
+	// Create mux engine (auto-detects tuimux vs tmux).
+	engine, err := DetectMuxEngine()
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux engine not available: %w", err)
 	}
 
 	// Generate session name
@@ -61,24 +55,22 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	}
 
 	// Check if session already exists
-	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+	sessionExists, _ := engine.SessionExists(ctx, sessionName)
 
 	if !sessionExists {
-		p.log.WithField("session", sessionName).Info("Creating new tmux session for interactive job")
-		executor := &flowexec.RealCommandExecutor{}
-		if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-n", "workspace", "-c", workDir); err != nil {
+		p.log.WithField("session", sessionName).Info("Creating new session for interactive job")
+		if err := engine.CreateSession(ctx, sessionName, workDir); err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			return fmt.Errorf("failed to create tmux session: %w", err)
+			return fmt.Errorf("failed to create session: %w", err)
 		}
 
-		// Get the tmux session PID and create the lock file.
-		tmuxPID, err := tmuxClient.GetSessionPID(ctx, sessionName)
+		sessionPID, err := engine.GetSessionPID(ctx, sessionName)
 		if err != nil {
-			return fmt.Errorf("could not get tmux session PID to create lock file: %w", err)
+			return fmt.Errorf("could not get session PID to create lock file: %w", err)
 		}
-		if err := CreateLockFile(job.FilePath, tmuxPID); err != nil {
-			return fmt.Errorf("failed to create lock file with tmux PID: %w", err)
+		if err := CreateLockFile(job.FilePath, sessionPID); err != nil {
+			return fmt.Errorf("failed to create lock file with session PID: %w", err)
 		}
 	} else {
 		p.log.WithField("session", sessionName).Info("Using existing session for interactive job")
@@ -101,15 +93,8 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		Pretty(theme.IconWorktree + " Launching Codex agent in worktree session").
 		Log(ctx)
 
-	// Create new window - use tmuxClient to ensure correct tmux server targeting
-	// when the daemon runs on a separate tmux server (e.g., tmux -L groved).
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-	if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
-		Target:     sessionName,
-		WindowName: agentWindowName,
-		WorkingDir: workDir,
-		Detached:   true,
-	}); err != nil {
+	if err := engine.NewWindow(ctx, sessionName, agentWindowName, workDir, true); err != nil {
 		p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
 	}
 
@@ -129,8 +114,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 
-	// Send the agent command with inline env prefix to the new window
-	if err := tmuxClient.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()

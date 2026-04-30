@@ -71,10 +71,10 @@ func TestRunPlanStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name       string
-		args       []string
-		jsonOutput bool
-		wantErr    string
+		name        string
+		args        []string
+		jsonOutput  bool
+		wantErr     string
 		checkOutput func(t *testing.T, output string)
 	}{
 		{

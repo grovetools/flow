@@ -12,7 +12,6 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -122,11 +121,11 @@ func captureAgentOutput(plan *orchestration.Plan, job *orchestration.Job, target
 		}
 		output = out
 	} else {
-		tmuxClient, err := tmux.NewClient()
+		engine, err := orchestration.DetectMuxEngine()
 		if err != nil {
-			return "", fmt.Errorf("tmux not available: %w", err)
+			return "", fmt.Errorf("mux engine not available: %w", err)
 		}
-		out, err := tmuxClient.CapturePane(context.Background(), targetPane)
+		out, err := engine.CapturePane(context.Background(), targetPane)
 		if err != nil {
 			return "", fmt.Errorf("failed to capture pane: %w", err)
 		}
@@ -159,7 +158,7 @@ func sendToAgent(plan *orchestration.Plan, job *orchestration.Job, targetPane, i
 		return orchestration.SendInputToInteractiveAgent(plan, job, input)
 	}
 
-	// Direct-tmux path (for `-t <tmux-target>`).
+	// Direct path (for `-t <target>`).
 	coreCfg, cfgErr := config.LoadDefault()
 	if cfgErr != nil {
 		coreCfg = &config.Config{}
@@ -176,24 +175,24 @@ func sendToAgent(plan *orchestration.Plan, job *orchestration.Job, targetPane, i
 		inputMode = providerCfg.InputMode
 	}
 
-	tmuxClient, err := tmux.NewClient()
+	engine, err := orchestration.DetectMuxEngine()
 	if err != nil {
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux engine not available: %w", err)
 	}
 
 	ctx := context.Background()
 
 	if inputMode == "vim" {
-		if err := tmuxClient.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
+		if err := engine.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
 			return fmt.Errorf("failed to send input: %w", err)
 		}
 	} else {
-		if err := tmuxClient.SendKeys(ctx, targetPane, input); err != nil {
+		if err := engine.SendKeys(ctx, targetPane, input); err != nil {
 			return fmt.Errorf("failed to send input: %w", err)
 		}
 	}
 
-	if err := tmuxClient.SendKeys(ctx, targetPane, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, "C-m"); err != nil {
 		return fmt.Errorf("failed to send submit key: %w", err)
 	}
 	return nil
@@ -294,12 +293,12 @@ func buildSenderHeader() string {
 		return fmt.Sprintf("[from: %s]", label)
 	}
 
-	// Fallback: try to get current tmux session:window via display-message
-	out, err := tmux.Command("display-message", "-p", "#S:#W").Output()
-	if err == nil {
-		sessionWindow := strings.TrimSpace(string(out))
-		if sessionWindow != "" && sessionWindow != ":" {
-			return fmt.Sprintf("[from: %s]", sessionWindow)
+	// Fallback: try to get current session:window via the mux engine.
+	engine, engineErr := orchestration.DetectMuxEngine()
+	if engineErr == nil {
+		// Use a best-effort capture to identify current session.
+		if sessions, listErr := engine.ListSessions(context.Background()); listErr == nil && len(sessions) > 0 {
+			return fmt.Sprintf("[from: %s]", sessions[0].Name)
 		}
 	}
 
