@@ -120,6 +120,31 @@ func newAgentUnclawCmd() *cobra.Command {
 				return fmt.Errorf("failed to disable autonomous: %w", err)
 			}
 
+			// Strip claw frontmatter so the claw is not rehydrated on daemon restart
+			if job.FilePath != "" {
+				content, err := os.ReadFile(job.FilePath)
+				if err == nil {
+					updates := map[string]any{"channels": []string{}}
+					if newContent, err := orchestration.UpdateFrontmatter(content, updates); err == nil {
+						s := string(newContent)
+						if idx := strings.Index(s, "autonomous:\n"); idx >= 0 {
+							end := idx
+							lines := strings.Split(s[idx:], "\n")
+							end += len(lines[0]) + 1
+							for i := 1; i < len(lines); i++ {
+								if strings.HasPrefix(lines[i], "  ") {
+									end += len(lines[i]) + 1
+								} else {
+									break
+								}
+							}
+							s = s[:idx] + s[end:]
+						}
+						_ = os.WriteFile(job.FilePath, []byte(s), 0o600)
+					}
+				}
+			}
+
 			fmt.Printf("Claw disabled for %s\n", job.Title)
 			return nil
 		},
