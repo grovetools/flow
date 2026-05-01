@@ -9,6 +9,7 @@ import (
 	"time"
 
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
@@ -90,7 +91,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		return fmt.Errorf("tmux not available: %w", err)
 	}
 
-	sessionName, err := p.generateSessionName(workDir)
+	sessionName, err := mux.GenerateSessionName(workDir)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -170,7 +171,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	// We no longer need the async discoverAndRegisterSession call.
 
 	if !isTUIMode {
-		if os.Getenv("TMUX") != "" {
+		if mux.ActiveMux() != mux.MuxNone {
 			p.ulog.Info("Agent started in session").
 				Field("session", sessionName).
 				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux select-window -t %s", sessionName, targetPane)).
@@ -215,14 +216,6 @@ func (p *OpencodeAgentProvider) buildAgentCommand(job *Job, briefingFilePath str
 	return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), prompt), nil
 }
 
-// generateSessionName creates a unique session name for the interactive job (notebook-aware).
-func (p *OpencodeAgentProvider) generateSessionName(workDir string) (string, error) {
-	projInfo, err := ResolveProjectForSessionNaming(workDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to get project info: %w", err)
-	}
-	return projInfo.Identifier("_"), nil
-}
 
 // FindOpencodePIDForPane finds the PID of the 'opencode' process running within a specific tmux pane
 func FindOpencodePIDForPane(targetPane string) (int, error) {

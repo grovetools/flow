@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/sanitize"
@@ -206,7 +207,7 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 	}
 
 	// Switch to the session if we're already in tmux
-	if os.Getenv("TMUX") != "" {
+	if mux.ActiveMux() != mux.MuxNone {
 		fmt.Printf("* Switching to session '%s'...\n", sessionName)
 		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)

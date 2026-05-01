@@ -17,6 +17,7 @@ import (
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/components/logviewer"
@@ -976,28 +977,27 @@ func editJob(job *orchestration.Job, hosted bool) tea.Cmd {
 		}
 	}
 
-	// Check for tmux popup
-	if os.Getenv("TMUX") != "" {
-		client, err := tmux.NewClient()
-		if err == nil { // Silently ignore if tmux client fails
-			isPopup, _ := client.IsPopup(context.Background())
-			if isPopup {
-				return func() tea.Msg {
-					editor := os.Getenv("EDITOR")
-					if editor == "" {
-						editor = "vi" // Fallback editor
+	// Check for mux popup
+	if mux.ActiveMux() != mux.MuxNone {
+		if engine, err := mux.DetectMuxEngine(context.Background()); err == nil {
+			if tuiEngine, ok := engine.(mux.MuxTUIEngine); ok {
+				isPopup, _ := tuiEngine.IsPopup(context.Background())
+				if isPopup {
+					return func() tea.Msg {
+						editor := os.Getenv("EDITOR")
+						if editor == "" {
+							editor = "vi"
+						}
+						ctx := context.Background()
+						err := tuiEngine.OpenInEditorWindow(ctx, editor, job.FilePath, "plan", 3, false)
+						if err != nil {
+							return EditFileInTmuxMsg{Err: err}
+						}
+						if err := tuiEngine.ClosePopup(ctx); err != nil {
+							return EditFileInTmuxMsg{Err: fmt.Errorf("failed to close popup: %w", err)}
+						}
+						return EditFileInTmuxMsg{Err: nil}
 					}
-					ctx := context.Background()
-					err := client.OpenInEditorWindow(ctx, editor, job.FilePath, "plan", 3, false)
-					if err != nil {
-						return EditFileInTmuxMsg{Err: err}
-					}
-					// Close the popup explicitly before quitting
-					if err := client.ClosePopup(ctx); err != nil {
-						// Log error but continue - the file was opened successfully
-						return EditFileInTmuxMsg{Err: fmt.Errorf("failed to close popup: %w", err)}
-					}
-					return EditFileInTmuxMsg{Err: nil}
 				}
 			}
 		}

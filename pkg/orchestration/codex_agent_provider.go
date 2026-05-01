@@ -11,6 +11,7 @@ import (
 	"time"
 
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
@@ -39,7 +40,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	}
 
 	// Create mux engine (auto-detects tuimux vs tmux).
-	engine, err := DetectMuxEngine()
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -47,7 +48,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	}
 
 	// Generate session name
-	sessionName, err := p.generateSessionName(workDir)
+	sessionName, err := mux.GenerateSessionName(workDir)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -59,7 +60,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 
 	if !sessionExists {
 		p.log.WithField("session", sessionName).Info("Creating new session for interactive job")
-		if err := engine.CreateSession(ctx, sessionName, workDir); err != nil {
+		if err := engine.CreateSession(ctx, sessionName, mux.WithWorkDir(workDir)); err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			return fmt.Errorf("failed to create session: %w", err)
@@ -211,7 +212,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// --- End Synchronous PID Discovery and Session Registration ---
 
 	if !isTUIMode {
-		if os.Getenv("TMUX") != "" {
+		if mux.ActiveMux() != mux.MuxNone {
 			p.ulog.Info("Agent started in session").
 				Field("session", sessionName).
 				Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux select-window -t %s", sessionName, targetPane)).
@@ -257,14 +258,6 @@ func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFil
 	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
 }
 
-// generateSessionName creates a unique session name for the interactive job (notebook-aware).
-func (p *CodexAgentProvider) generateSessionName(workDir string) (string, error) {
-	projInfo, err := ResolveProjectForSessionNaming(workDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
-	}
-	return projInfo.Identifier("_"), nil
-}
 
 // findMostRecentFile finds the most recently modified file in a directory tree.
 func findMostRecentFile(dir string, debugFile *os.File) (string, error) {

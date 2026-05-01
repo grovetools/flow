@@ -18,6 +18,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
@@ -459,7 +460,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Check if job has a worktree - if so, create/reuse a session
 	if job.Worktree != "" {
 		// For jobs with worktrees, create/reuse a session based on the project identifier
-		sessionName, err := p.generateSessionName(workDir)
+		sessionName, err := mux.GenerateSessionName(workDir)
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -569,7 +570,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 
 		// Print instructions for how to view the agent (don't auto-switch windows)
 		if !isTUIMode {
-			if os.Getenv("TMUX") != "" {
+			if mux.ActiveMux() != mux.MuxNone {
 				p.ulog.Info("Agent started in session").
 					Field("session", sessionName).
 					Pretty(fmt.Sprintf("   Agent started in session '%s'. To view, run: tmux select-window -t %s", sessionName, targetPane)).
@@ -606,7 +607,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return fmt.Errorf("could not find project git root: %w", err)
 	}
 
-	sessionName, err := p.generateSessionName(gitRoot)
+	sessionName, err := mux.GenerateSessionName(gitRoot)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -766,14 +767,6 @@ func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFi
 	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
 }
 
-// generateSessionName creates a unique session name for the interactive job (notebook-aware).
-func (p *ClaudeAgentProvider) generateSessionName(workDir string) (string, error) {
-	projInfo, err := ResolveProjectForSessionNaming(workDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to get project info for session naming: %w", err)
-	}
-	return projInfo.Identifier("_"), nil
-}
 
 // discoverAndRegisterSessionAsync discovers the Claude Code PID and confirms the session with the daemon.
 // This function is designed to be called from a goroutine - it blocks internally but

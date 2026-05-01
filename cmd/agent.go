@@ -12,6 +12,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -121,7 +122,7 @@ func captureAgentOutput(plan *orchestration.Plan, job *orchestration.Job, target
 		}
 		output = out
 	} else {
-		engine, err := orchestration.DetectMuxEngine()
+		engine, err := mux.DetectMuxEngine(context.Background())
 		if err != nil {
 			return "", fmt.Errorf("mux engine not available: %w", err)
 		}
@@ -175,7 +176,7 @@ func sendToAgent(plan *orchestration.Plan, job *orchestration.Job, targetPane, i
 		inputMode = providerCfg.InputMode
 	}
 
-	engine, err := orchestration.DetectMuxEngine()
+	engine, err := mux.DetectMuxEngine(context.Background())
 	if err != nil {
 		return fmt.Errorf("mux engine not available: %w", err)
 	}
@@ -294,7 +295,7 @@ func buildSenderHeader() string {
 	}
 
 	// Fallback: try to get current session:window via the mux engine.
-	engine, engineErr := orchestration.DetectMuxEngine()
+	engine, engineErr := mux.DetectMuxEngine(context.Background())
 	if engineErr == nil {
 		// Use a best-effort capture to identify current session.
 		if sessions, listErr := engine.ListSessions(context.Background()); listErr == nil && len(sessions) > 0 {

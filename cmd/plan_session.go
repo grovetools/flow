@@ -11,6 +11,7 @@ import (
 	"github.com/grovetools/core/util/sanitize"
 
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 
@@ -87,7 +88,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 
 	// Check if we're currently in that session
 	inTargetSession := false
-	if os.Getenv("TMUX") != "" {
+	if mux.ActiveMux() != mux.MuxNone {
 		cmd := tmux.Command("display-message", "-p", "#S")
 		output, err := cmd.Output()
 		if err == nil && strings.TrimSpace(string(output)) == sessionName {
@@ -136,7 +137,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 
 		// Switch to the new session if we're already in tmux, but not if launched from another TUI
 		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-		if os.Getenv("TMUX") != "" && !isTUIMode {
+		if mux.ActiveMux() != mux.MuxNone && !isTUIMode {
 			executor := &groveexec.RealCommandExecutor{}
 			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 				fmt.Printf("Note: Could not switch to session (attach manually): tmux attach -t %s\n", sessionName)
@@ -194,7 +195,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	}
 
 	// If we're already in tmux, switch to the session
-	if os.Getenv("TMUX") != "" {
+	if mux.ActiveMux() != mux.MuxNone {
 		fmt.Printf("* Switching to session '%s'...\n", sessionName)
 		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
@@ -256,7 +257,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 				isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 				if !isTUIMode {
 					// If we're already in tmux, switch to the session
-					if os.Getenv("TMUX") != "" {
+					if mux.ActiveMux() != mux.MuxNone {
 						if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 							fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 						}
@@ -305,7 +306,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 	if !isTUIMode {
 		// If we're already in tmux, switch to the new session
-		if os.Getenv("TMUX") != "" {
+		if mux.ActiveMux() != mux.MuxNone {
 			fmt.Printf("* Switching to session '%s'...\n", sessionName)
 			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
 				fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
