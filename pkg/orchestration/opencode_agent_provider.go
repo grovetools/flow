@@ -9,6 +9,7 @@ import (
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
@@ -220,5 +221,5 @@ func FindOpencodePIDForPane(targetPane string) (int, error) {
 		return 0, fmt.Errorf("failed to get pane PID: %w", err)
 	}
 
-	return findDescendantPID(shellPID, "opencode")
+	return process.FindDescendantPID(shellPID, "opencode")
 }

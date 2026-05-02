@@ -14,6 +14,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/tui/theme"
 	grovecontext "github.com/grovetools/cx/pkg/context"
@@ -436,14 +437,14 @@ func (e *IsolatedAgentExecutor) findAgentPIDForIsolatedPane(socketName, targetPa
 	targetComm := providerName
 	if providerName == "claude" {
 		// Try claude first, then node as fallback
-		pid, err := findDescendantPID(shellPID, "claude")
+		pid, err := process.FindDescendantPID(shellPID, "claude")
 		if err == nil {
 			return pid, nil
 		}
 		targetComm = "node"
 	}
 
-	return findDescendantPID(shellPID, targetComm)
+	return process.FindDescendantPID(shellPID, targetComm)
 }
 
 // determineWorkDir determines the working directory for a job.

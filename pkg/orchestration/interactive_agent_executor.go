@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +17,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
@@ -934,10 +933,9 @@ func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string, logger *lo
 
 	// Find the 'claude' process that is a descendant of that shell
 	// Try 'claude' first (for the binary), then 'node' (for Node.js-based versions)
-	pid, err := p.findDescendantPID(shellPID, "claude", logger)
+	pid, err := process.FindDescendantPID(shellPID, "claude")
 	if err != nil {
-		// Fallback to searching for node
-		pid, err = p.findDescendantPID(shellPID, "node", logger)
+		pid, err = process.FindDescendantPID(shellPID, "node")
 		if err != nil {
 			return 0, fmt.Errorf("failed to find claude or node process: %w", err)
 		}
@@ -945,56 +943,6 @@ func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string, logger *lo
 	return pid, nil
 }
 
-// findDescendantPID recursively finds a descendant process with a given name.
-func (p *ClaudeAgentProvider) findDescendantPID(parentPID int, targetComm string, logger *logrus.Entry) (int, error) {
-	// Get all processes
-	cmd := exec.Command("ps", "-o", "pid,ppid,comm")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, err
-	}
-
-	// Build a process tree (map of ppid to children) and a pid-to-command map
-	tree := make(map[int][]int)
-	pidToComm := make(map[int]string)
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines[1:] { // skip header
-		fields := strings.Fields(line)
-		if len(fields) >= 3 {
-			pid, _ := strconv.Atoi(fields[0])
-			ppid, _ := strconv.Atoi(fields[1])
-			comm := fields[2]
-			tree[ppid] = append(tree[ppid], pid)
-			pidToComm[pid] = comm
-		}
-	}
-
-	// Traverse from parentPID using breadth-first search
-	queue := []int{parentPID}
-	visited := make(map[int]bool)
-
-	for len(queue) > 0 {
-		currentPID := queue[0]
-		queue = queue[1:]
-
-		if visited[currentPID] {
-			continue
-		}
-		visited[currentPID] = true
-
-		// Check if the current process is the target
-		if comm, ok := pidToComm[currentPID]; ok && strings.Contains(comm, targetComm) {
-			return currentPID, nil
-		}
-
-		// Add children to the queue
-		if children, ok := tree[currentPID]; ok {
-			queue = append(queue, children...)
-		}
-	}
-
-	return 0, fmt.Errorf("descendant process '%s' not found for parent PID %d", targetComm, parentPID)
-}
 
 // gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
 func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) ([]string, error) {

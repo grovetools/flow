@@ -6,12 +6,12 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
@@ -317,56 +317,6 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 	return latestFile, nil
 }
 
-// findDescendantPID recursively finds a descendant process with a given name.
-func findDescendantPID(parentPID int, targetComm string) (int, error) {
-	// 1. Get all processes
-	cmd := osexec.Command("ps", "-o", "pid,ppid,comm")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, err
-	}
-
-	// 2. Build a process tree (map of ppid to children) and a pid-to-command map
-	tree := make(map[int][]int)
-	pidToComm := make(map[int]string)
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines[1:] { // skip header
-		fields := strings.Fields(line)
-		if len(fields) >= 3 {
-			pid, _ := strconv.Atoi(fields[0])
-			ppid, _ := strconv.Atoi(fields[1])
-			comm := fields[2]
-			tree[ppid] = append(tree[ppid], pid)
-			pidToComm[pid] = comm
-		}
-	}
-
-	// 3. Traverse from parentPID using breadth-first search
-	queue := []int{parentPID}
-	visited := make(map[int]bool)
-
-	for len(queue) > 0 {
-		currentPID := queue[0]
-		queue = queue[1:]
-
-		if visited[currentPID] {
-			continue
-		}
-		visited[currentPID] = true
-
-		// Check if the current process is the target
-		if comm, ok := pidToComm[currentPID]; ok && strings.Contains(comm, targetComm) {
-			return currentPID, nil
-		}
-
-		// Add children to the queue
-		if children, ok := tree[currentPID]; ok {
-			queue = append(queue, children...)
-		}
-	}
-
-	return 0, fmt.Errorf("descendant process '%s' not found for parent PID %d", targetComm, parentPID)
-}
 
 // FindCodexPIDForPane finds the PID of the 'codex' process running within a specific tmux pane
 // by traversing the process tree from the pane's shell.
@@ -382,7 +332,7 @@ func FindCodexPIDForPane(targetPane string) (int, error) {
 	}
 
 	// Find the 'codex' process that is a descendant of that shell.
-	return findDescendantPID(shellPID, "codex")
+	return process.FindDescendantPID(shellPID, "codex")
 }
 
 // getGitInfo returns the repo name and current branch for the given directory
