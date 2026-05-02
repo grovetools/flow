@@ -80,7 +80,11 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	}
 	// --- End Synchronous Session Registration ---
 
-	engine, err := mux.DetectMuxEngine(ctx)
+	agentTarget := "tmux"
+	if plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
+		agentTarget = plan.Orchestration.AgentTarget
+	}
+	engine, err := mux.GetEngine(agentTarget)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -203,7 +207,6 @@ func (p *OpencodeAgentProvider) buildAgentCommand(job *Job, briefingFilePath str
 	cmdParts = append(cmdParts, agentArgs...)
 	return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), prompt), nil
 }
-
 
 // FindOpencodePIDForPane finds the PID of the 'opencode' process running within a specific tmux pane
 func FindOpencodePIDForPane(targetPane string) (int, error) {

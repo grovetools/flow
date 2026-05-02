@@ -254,11 +254,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 					fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 				}
 			} else {
-				// Not in tmux, attach to the session
-				executor := &groveexec.RealCommandExecutor{}
-				if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
-					return fmt.Errorf("failed to attach to session: %w", err)
-				}
+				fmt.Printf("Attach with: tmux attach -t %s\n", sessionName)
 			}
 		}
 		return nil
@@ -289,12 +285,7 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 				fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 			}
 		} else {
-			// Not in tmux, attach to the new session
-			fmt.Printf("* Attaching to session '%s'...\n", sessionName)
-			executor := &groveexec.RealCommandExecutor{}
-			if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
-				return fmt.Errorf("failed to attach to session: %w", err)
-			}
+			fmt.Printf("Attach with: tmux attach -t %s\n", sessionName)
 		}
 	}
 

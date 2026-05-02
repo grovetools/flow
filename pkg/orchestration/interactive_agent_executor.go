@@ -216,9 +216,15 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		target = plan.Orchestration.AgentTarget
 	}
 
+	grovelogging.NewUnifiedLogger("flow.executor").Info("Executor routing agent job").
+		Field("job_id", job.ID).
+		Field("agent_target", target).
+		Field("provider", providerName).
+		StructuredOnly().Log(ctx)
+
 	useNative := false
 	switch target {
-	case "native":
+	case "native", "tuimux":
 		useNative = true
 	case "tmux":
 		useNative = false
@@ -227,7 +233,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	}
 
 	if useNative {
-		provider = NewGrovetermAgentProvider(providerName, false)
+		provider = NewGrovetermAgentProvider(providerName, false, target)
 	} else {
 		// Fallback to legacy tmux-based providers
 		switch providerName {
@@ -429,6 +435,15 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		"daemon_running": daemonClient.IsRunning(),
 	}).Info("Registering session intent with daemon")
 
+	agentTarget := models.MuxTmux
+	if plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
+		agentTarget = plan.Orchestration.AgentTarget
+	}
+	muxType := models.MuxTmux
+	if agentTarget == "tuimux" {
+		muxType = models.MuxTuimux
+	}
+
 	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
 		JobID:       job.ID,
 		Provider:    "claude",
@@ -438,7 +453,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		WorkDir:     workDir,
 		Channels:    job.Channels,
 		Autonomous:  job.Autonomous,
-		Mux:         models.MuxTmux,
+		Mux:         muxType,
 	}); err != nil {
 		// Log warning but continue - agent can still run, just tracking may be impaired
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
@@ -446,15 +461,22 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		p.log.Info("Session intent registered successfully")
 	}
 
-	// Create mux engine (auto-detects tuimux vs tmux).
-	engine, err := mux.DetectMuxEngine(ctx)
+	engine, err := mux.GetEngine(agentTarget)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("mux engine not available: %w", err)
 	}
 
+	grovelogging.NewUnifiedLogger("flow.agent").Info("Launching agent session").
+		Field("job_id", job.ID).
+		Field("agent_target", agentTarget).
+		Field("mux_type", muxType).
+		Field("engine", fmt.Sprintf("%T", engine)).
+		StructuredOnly().Log(ctx)
+
 	// Check if job has a worktree - if so, create/reuse a session
+	alog := grovelogging.NewUnifiedLogger("flow.agent")
 	if job.Worktree != "" {
 		// For jobs with worktrees, create/reuse a session based on the project identifier
 		sessionName, err := mux.GenerateSessionName(workDir)
@@ -464,27 +486,42 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			return err
 		}
 
+		alog.Info("Checking session existence").
+			Field("job_id", job.ID).
+			Field("session", sessionName).
+			Field("engine", fmt.Sprintf("%T", engine)).
+			StructuredOnly().Log(ctx)
+
 		// Check if session already exists
 		sessionExists, _ := engine.SessionExists(ctx, sessionName)
 
 		if !sessionExists {
-			p.log.WithField("session", sessionName).Info("Creating new session for interactive job")
+			alog.Info("Creating new session").
+				Field("session", sessionName).
+				Field("work_dir", workDir).
+				StructuredOnly().Log(ctx)
 			if err := engine.CreateSession(ctx, sessionName, mux.WithWorkDir(workDir)); err != nil {
+				alog.Info("CreateSession FAILED").
+					Field("session", sessionName).
+					Field("error", err.Error()).
+					StructuredOnly().Log(ctx)
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()
 				return fmt.Errorf("failed to create session: %w", err)
 			}
+			alog.Info("CreateSession succeeded").Field("session", sessionName).StructuredOnly().Log(ctx)
 
 			// Get the session PID and create the lock file.
 			tmuxPID, err := engine.GetSessionPID(ctx, sessionName)
 			if err != nil {
+				alog.Info("GetSessionPID FAILED").Field("error", err.Error()).StructuredOnly().Log(ctx)
 				return fmt.Errorf("could not get tmux session PID to create lock file: %w", err)
 			}
 			if err := CreateLockFile(job.FilePath, tmuxPID); err != nil {
 				return fmt.Errorf("failed to create lock file with tmux PID: %w", err)
 			}
 		} else {
-			p.log.WithField("session", sessionName).Info("Using existing session for interactive job")
+			alog.Info("Using existing session").Field("session", sessionName).StructuredOnly().Log(ctx)
 		}
 
 		// Build agent command
@@ -498,16 +535,17 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Create a new window for this specific agent job in the session
 		agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
-		p.ulog.Info("Launching agent in worktree session").
+		alog.Info("Creating agent window").
 			Field("window", agentWindowName).
 			Field("session", sessionName).
-			Pretty(theme.IconWorktree + " Launching agent in worktree session").
-			Log(ctx)
+			Field("agent_command_len", len(agentCommand)).
+			StructuredOnly().Log(ctx)
 
 		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 
 		// Create new window - always use Detached to avoid stealing focus.
 		if err := engine.NewWindow(ctx, sessionName, agentWindowName, workDir, true); err != nil {
+			alog.Info("NewWindow FAILED").Field("error", err.Error()).StructuredOnly().Log(ctx)
 			p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
 		}
 
@@ -591,6 +629,11 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	// Original behavior for jobs without worktrees
+	alog.Info("No worktree — using project git root path").
+		Field("job_id", job.ID).
+		Field("plan_dir", plan.Directory).
+		StructuredOnly().Log(ctx)
+
 	gitRoot, err := GetProjectGitRoot(plan.Directory)
 	if err != nil {
 		return fmt.Errorf("could not find project git root: %w", err)
@@ -603,6 +646,12 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		return err
 	}
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+
+	alog.Info("Non-worktree session setup").
+		Field("session", sessionName).
+		Field("window", windowName).
+		Field("git_root", gitRoot).
+		StructuredOnly().Log(ctx)
 
 	// Ensure session exists
 	sessionExists, _ := engine.SessionExists(ctx, sessionName)
@@ -742,7 +791,6 @@ func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFi
 	// Pass instruction to read the briefing file
 	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
 }
-
 
 // discoverAndRegisterSessionAsync discovers the Claude Code PID and confirms the session with the daemon.
 // This function is designed to be called from a goroutine - it blocks internally but

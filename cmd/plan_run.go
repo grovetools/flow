@@ -15,6 +15,7 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/theme"
@@ -234,10 +235,19 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// Resolve agent_target from the caller's environment. The executor
 	// requires a concrete value ("native" or "tmux") — "auto" must be
 	// resolved here at the CLI perimeter, not inside the executor.
-	agentTarget := "tmux" // safe default (Case 2, 3, 5)
-	if os.Getenv("GROVE_TERMINAL") != "" {
-		agentTarget = "native" // Case 1: running inside groveterm shell
+	agentTarget := "tmux" // safe default
+	if mux.ActiveMux() == mux.MuxTuimux {
+		agentTarget = "tuimux"
+	} else if os.Getenv("GROVE_TERMINAL") != "" {
+		agentTarget = "native"
 	}
+
+	ulog.Info("Resolved agent target for CLI run").
+		Field("agent_target", agentTarget).
+		Field("active_mux", string(mux.ActiveMux())).
+		Field("tuimux_pty", os.Getenv("TUIMUX_PTY")).
+		Field("grove_terminal", os.Getenv("GROVE_TERMINAL")).
+		StructuredOnly().Log(ctx)
 
 	// Inject the loaded configuration into the plan object
 	plan.Orchestration = &orchestration.Config{

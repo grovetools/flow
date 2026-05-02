@@ -27,18 +27,21 @@ type GrovetermAgentProvider struct {
 	ulog         *grovelogging.UnifiedLogger
 	providerName string            // "claude", "codex", "opencode"
 	autoSplit    bool              // whether to auto-split the pane in groveterm's UI
+	agentTarget  string            // "native" or "tuimux" — selects Mux type
 	extraEnv     map[string]string // additional env vars (e.g., GROVE_FLOW_ISOLATED for isolated agents)
 }
 
 // NewGrovetermAgentProvider creates a new GrovetermAgentProvider.
 // providerName selects the agent CLI ("claude", "codex", "opencode").
 // autoSplit controls whether the new pane is split into the active view.
-func NewGrovetermAgentProvider(providerName string, autoSplit bool) *GrovetermAgentProvider {
+// agentTarget determines the Mux type ("native" → MuxTreemux, "tuimux" → MuxTuimux).
+func NewGrovetermAgentProvider(providerName string, autoSplit bool, agentTarget string) *GrovetermAgentProvider {
 	return &GrovetermAgentProvider{
 		log:          grovelogging.NewLogger("grove-flow"),
 		ulog:         grovelogging.NewUnifiedLogger("grove-flow"),
 		providerName: providerName,
 		autoSplit:    autoSplit,
+		agentTarget:  agentTarget,
 	}
 }
 
@@ -71,7 +74,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 		WorkDir:     workDir,
 		Channels:    job.Channels,
 		Autonomous:  job.Autonomous,
-		Mux:         models.MuxTreemux,
+		Mux:         p.effectiveMux(),
 	}); err != nil {
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {
@@ -270,6 +273,14 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	}).Info("Confirmed groveterm agent session")
 
 	return nil
+}
+
+// effectiveMux returns the Mux type based on agentTarget.
+func (p *GrovetermAgentProvider) effectiveMux() string {
+	if p.agentTarget == "tuimux" {
+		return models.MuxTuimux
+	}
+	return models.MuxTreemux
 }
 
 // buildCommand constructs the full shell command string for the agent CLI.

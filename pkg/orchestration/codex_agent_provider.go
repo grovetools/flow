@@ -38,8 +38,11 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		return fmt.Errorf("updating job status: %w", err)
 	}
 
-	// Create mux engine (auto-detects tuimux vs tmux).
-	engine, err := mux.DetectMuxEngine(ctx)
+	agentTarget := "tmux"
+	if plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
+		agentTarget = plan.Orchestration.AgentTarget
+	}
+	engine, err := mux.GetEngine(agentTarget)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -256,7 +259,6 @@ func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFil
 	// Pass instruction to read the briefing file
 	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
 }
-
 
 // findMostRecentFile finds the most recently modified file in a directory tree.
 func findMostRecentFile(dir string, debugFile *os.File) (string, error) {

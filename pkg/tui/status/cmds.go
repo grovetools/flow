@@ -19,7 +19,6 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/components/logviewer"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/theme"
@@ -591,7 +590,17 @@ func submitJobsViaDaemonCmd(client daemon.Client, plan *orchestration.Plan, jobs
 		agentTarget := "tmux"
 		if hosted {
 			agentTarget = "native"
+		} else if mux.ActiveMux() == mux.MuxTuimux {
+			agentTarget = "tuimux"
 		}
+
+		logging.NewUnifiedLogger("flow.submit").Info("Resolved agent target for TUI submission").
+			Field("agent_target", agentTarget).
+			Field("active_mux", string(mux.ActiveMux())).
+			Field("tuimux_pty", os.Getenv("TUIMUX_PTY")).
+			Field("grove_terminal", os.Getenv("GROVE_TERMINAL")).
+			Field("hosted", hosted).
+			StructuredOnly().Log(context.Background())
 
 		for _, job := range jobs {
 			info, err := client.SubmitJob(context.Background(), models.JobSubmitRequest{
@@ -1513,8 +1522,8 @@ func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes in
 			instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"})
 			if instructions != "" {
 				msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
-				if tmuxClient, err := tmux.NewClient(); err == nil {
-					_ = tmuxClient.SendKeys(ctx, targetPane, msg, "C-m")
+				if engine, err := mux.DetectMuxEngine(ctx); err == nil {
+					_ = engine.SendKeys(ctx, targetPane, msg, "C-m")
 				}
 			}
 		}

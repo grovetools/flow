@@ -196,7 +196,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 
 	useNative := false
 	switch target {
-	case "native":
+	case "native", "tuimux":
 		useNative = true
 	case "tmux":
 		useNative = false
@@ -206,7 +206,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 
 	if useNative {
 		// Isolated agents launch silently into the groveterm icon rail (autoSplit=false)
-		provider := NewGrovetermAgentProvider(providerName, false)
+		provider := NewGrovetermAgentProvider(providerName, false, target)
 		provider.extraEnv = map[string]string{"GROVE_FLOW_ISOLATED": "true"}
 
 		// For isolated agents, inject --dangerously-skip-permissions for claude
