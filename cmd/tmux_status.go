@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/spf13/cobra"
 )
 
@@ -27,9 +27,18 @@ If not in a tmux session, falls back to running the TUI directly.`,
 				dir = args[0]
 			}
 
-			client, err := tmux.NewClient()
+			ctx := context.Background()
+			engine, err := mux.DetectMuxEngine(ctx)
 			if err != nil {
-				// Not in a tmux session, run the status TUI directly
+				// Not in a mux session, run the status TUI directly
+				statusCmd := &cobra.Command{
+					Use: "status",
+				}
+				return RunPlanStatus(statusCmd, args)
+			}
+
+			tuiEngine, ok := engine.(mux.MuxTUIEngine)
+			if !ok {
 				statusCmd := &cobra.Command{
 					Use: "status",
 				}
@@ -47,15 +56,11 @@ If not in a tmux session, falls back to running the TUI directly.`,
 				command += fmt.Sprintf(" %s", dir)
 			}
 
-			// Use the tmux client to manage the window with error handling
-			ctx := context.Background()
-			if err := client.FocusOrRunTUIWithErrorHandling(ctx, command, windowName, -1); err != nil {
+			if err := tuiEngine.FocusOrRunCommandInWindow(ctx, command, windowName, -1); err != nil {
 				return fmt.Errorf("failed to open in tmux window: %w", err)
 			}
 
-			// Close any popup that might have launched this command.
-			// Ignore errors — we might not be in a popup.
-			_ = client.ClosePopup(ctx)
+			_ = tuiEngine.ClosePopup(ctx)
 
 			return nil
 		},
