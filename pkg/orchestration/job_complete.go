@@ -12,7 +12,7 @@ import (
 	"github.com/fatih/color"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
-	"github.com/grovetools/core/pkg/tmux"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -152,26 +152,30 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 				if !silent {
 					fmt.Printf("  Closing tmux window: %s\n", targetWindow)
 				}
-				cmd := tmux.Command("kill-window", "-t", targetWindow)
-				err := cmd.Run()
+				engine, engineErr := mux.DetectMuxEngine(context.Background())
+				var err error
+				if engineErr != nil {
+					err = engineErr
+				} else {
+					err = engine.KillWindow(context.Background(), targetWindow)
+				}
 				if err != nil {
-					listCmd := tmux.Command("list-windows", "-t", sessionName, "-F", "#{window_name}")
-					output, listErr := listCmd.Output()
-					if listErr == nil {
-						windows := strings.Split(strings.TrimSpace(string(output)), "\n")
-						for _, win := range windows {
-							if strings.HasPrefix(win, windowName) {
-								targetWindow = fmt.Sprintf("%s:%s", sessionName, win)
-								if !silent {
-									fmt.Printf("  Found window with prefix: %s\n", targetWindow)
-								}
-								killCmd := tmux.Command("kill-window", "-t", targetWindow)
-								if killErr := killCmd.Run(); killErr == nil {
+					if engine != nil {
+						windows, listErr := engine.ListWindows(context.Background(), sessionName)
+						if listErr == nil {
+							for _, win := range windows {
+								if strings.HasPrefix(win.Name, windowName) {
+									targetWindow = fmt.Sprintf("%s:%s", sessionName, win.Name)
 									if !silent {
-										fmt.Println("  * Tmux window closed.")
+										fmt.Printf("  Found window with prefix: %s\n", targetWindow)
 									}
-									err = nil
-									break
+									if killErr := engine.KillWindow(context.Background(), targetWindow); killErr == nil {
+										if !silent {
+											fmt.Println("  * Window closed.")
+										}
+										err = nil
+										break
+									}
 								}
 							}
 						}

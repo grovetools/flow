@@ -13,14 +13,12 @@ import (
 	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
-
-	"github.com/grovetools/flow/pkg/exec"
 )
 
 // IsolatedAgentExecutor executes isolated agent jobs in dedicated tmux servers.
@@ -235,7 +233,6 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	// Create the isolated tmux socket name
 	socketName := TmuxSocketName(job.ID)
 	sessionName := "main" // Simple session name since the socket is unique
-	windowName := "0"     // First window
 	targetPane := TmuxTargetPane(job.ID)
 
 	e.ulog.Info("Creating isolated tmux server for agent").
@@ -245,23 +242,17 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 		Pretty(theme.IconInteractiveAgent + " Creating isolated tmux server: " + socketName).
 		Log(ctx)
 
-	executor := &exec.RealCommandExecutor{}
-
-	// Create a new tmux server with a custom socket
-	// The -d flag creates the session in detached mode
-	createArgs := []string{
-		"-L", socketName, // Use custom socket
-		"new-session",
-		"-d",              // Detached
-		"-s", sessionName, // Session name
-		"-n", windowName, // Window name
-		"-c", workDir, // Working directory
-	}
-
-	if err := executor.Execute("tmux", createArgs...); err != nil {
+	engine, err := mux.NewTmuxEngineWithSocket(socketName)
+	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		return fmt.Errorf("failed to create isolated tmux session: %w", err)
+		return fmt.Errorf("failed to create isolated mux engine: %w", err)
+	}
+
+	if err := engine.CreateSession(ctx, sessionName, mux.WithWorkDir(workDir)); err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return fmt.Errorf("failed to create isolated session: %w", err)
 	}
 
 	// Build the agent command based on provider
@@ -289,7 +280,7 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	// inline env so everything runs as one shell invocation.
 	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
 	// Send the agent command to the isolated pane
-	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, wrappedCommand, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 		e.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
@@ -431,17 +422,14 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 
 // findAgentPIDForIsolatedPane finds the PID of the agent process running in an isolated tmux pane.
 func (e *IsolatedAgentExecutor) findAgentPIDForIsolatedPane(socketName, targetPane, providerName string, logger *logrus.Entry) (int, error) {
-	// Use tmux with the custom socket to get the pane PID
-	cmd := tmux.Command("-L", socketName, "display-message", "-p", "-t", targetPane, "#{pane_pid}")
-	output, err := cmd.Output()
+	engine, err := mux.NewTmuxEngineWithSocket(socketName)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get pane PID: %w", err)
+		return 0, fmt.Errorf("failed to create isolated mux engine: %w", err)
 	}
 
-	shellPID := 0
-	_, _ = fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &shellPID)
-	if shellPID == 0 {
-		return 0, fmt.Errorf("failed to parse pane PID from: %s", string(output))
+	shellPID, err := engine.GetPanePID(context.Background(), targetPane)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get pane PID: %w", err)
 	}
 
 	// Find the agent process that is a descendant of that shell
@@ -538,25 +526,30 @@ func SendInputToIsolatedAgent(jobID, input string) error {
 		daemonClient.Close()
 	}
 
-	// Fallback: tmux send-keys on the isolated tmux server.
+	// Fallback: send-keys on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
 	targetPane := TmuxTargetPane(jobID)
 
-	executor := &exec.RealCommandExecutor{}
+	engine, err := mux.NewTmuxEngineWithSocket(socketName)
+	if err != nil {
+		return fmt.Errorf("failed to create isolated mux engine: %w", err)
+	}
 
-	if err := executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "Escape", "i", input); err != nil {
+	if err := engine.SendKeys(context.Background(), targetPane, "Escape", "i", input); err != nil {
 		return err
 	}
 
-	return executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "C-Enter")
+	return engine.SendKeys(context.Background(), targetPane, "C-Enter")
 }
 
 // KillIsolatedAgentServer kills the isolated tmux server for a job.
 func KillIsolatedAgentServer(jobID string) error {
 	socketName := TmuxSocketName(jobID)
-	executor := &exec.RealCommandExecutor{}
-	// kill-server will terminate all sessions and the tmux server for this socket
-	return executor.Execute("tmux", "-L", socketName, "kill-server")
+	engine, err := mux.NewTmuxEngineWithSocket(socketName)
+	if err != nil {
+		return fmt.Errorf("failed to create isolated mux engine: %w", err)
+	}
+	return engine.KillServer(context.Background(), "")
 }
 
 // SendInterruptToIsolatedAgent sends Ctrl+C to interrupt an isolated agent.
@@ -575,12 +568,15 @@ func SendInterruptToIsolatedAgent(jobID string) error {
 		daemonClient.Close()
 	}
 
-	// Fallback: tmux send-keys C-c on the isolated tmux server.
+	// Fallback: send-keys C-c on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
 	targetPane := TmuxTargetPane(jobID)
 
-	executor := &exec.RealCommandExecutor{}
-	return executor.Execute("tmux", "-L", socketName, "send-keys", "-t", targetPane, "C-c")
+	engine, err := mux.NewTmuxEngineWithSocket(socketName)
+	if err != nil {
+		return fmt.Errorf("failed to create isolated mux engine: %w", err)
+	}
+	return engine.SendKeys(context.Background(), targetPane, "C-c")
 }
 
 // CaptureIsolatedAgentOutput captures the visible output from an isolated agent's pane.
@@ -599,21 +595,19 @@ func CaptureIsolatedAgentOutput(jobID string) (string, error) {
 		daemonClient.Close()
 	}
 
-	// Fallback: tmux capture-pane on the isolated tmux server.
+	// Fallback: capture-pane on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
 	targetPane := TmuxTargetPane(jobID)
 
-	cmd := tmux.Command("-L", socketName, "capture-pane", "-t", targetPane, "-p")
-	output, err := cmd.Output()
+	engine, err := mux.NewTmuxEngineWithSocket(socketName)
 	if err != nil {
-		return "", fmt.Errorf("failed to capture pane output: %w", err)
+		return "", fmt.Errorf("failed to create isolated mux engine: %w", err)
 	}
-
-	return string(output), nil
+	return engine.CapturePane(context.Background(), targetPane)
 }
 
 // IsIsolatedAgentRunning checks if an isolated agent is still running.
-// Tries the daemon's session store first (groveterm), falls back to tmux list-sessions.
+// Tries the daemon's session store first (groveterm), falls back to engine list-sessions.
 func IsIsolatedAgentRunning(jobID string) bool {
 	// Try daemon API first — check if a running session exists for this job.
 	ctx := context.Background()
@@ -627,17 +621,19 @@ func IsIsolatedAgentRunning(jobID string) bool {
 					return true
 				}
 			}
-			// Session not found or not running — could be a race, fall through to tmux.
 		}
 	} else {
 		daemonClient.Close()
 	}
 
-	// Fallback: tmux list-sessions on the isolated tmux server.
+	// Fallback: list-sessions on the isolated tmux server.
 	socketName := TmuxSocketName(jobID)
-	cmd := tmux.Command("-L", socketName, "list-sessions")
-	err := cmd.Run()
-	return err == nil
+	engine, err := mux.NewTmuxEngineWithSocket(socketName)
+	if err != nil {
+		return false
+	}
+	sessions, err := engine.ListSessions(context.Background())
+	return err == nil && len(sessions) > 0
 }
 
 // SetOutput sets the output writer for the executor.

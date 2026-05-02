@@ -32,6 +32,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -623,19 +624,27 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		mergeItem,
 		{
 			ID:   ItemCloseSession,
-			Name: "Close tmux session",
+			Name: "Close session",
 			Check: func() (string, error) {
 				if sessionName == "" {
 					return "N/A", nil
 				}
-				err := executor.Execute("tmux", "has-session", "-t", sessionName)
-				if err == nil {
+				engine, err := mux.DetectMuxEngine(context.Background())
+				if err != nil {
+					return "Not found", nil
+				}
+				exists, _ := engine.SessionExists(context.Background(), sessionName)
+				if exists {
 					return color.YellowString("Running"), nil
 				}
 				return "Not found", nil
 			},
 			Action: func() error {
-				return executor.Execute("tmux", "kill-session", "-t", sessionName)
+				engine, err := mux.DetectMuxEngine(context.Background())
+				if err != nil {
+					return err
+				}
+				return engine.KillSession(context.Background(), sessionName)
 			},
 		},
 		{

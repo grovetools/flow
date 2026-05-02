@@ -20,7 +20,6 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
@@ -28,8 +27,6 @@ import (
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
-
-	flowexec "github.com/grovetools/flow/pkg/exec"
 )
 
 // InteractiveAgentProvider defines the interface for launching an interactive agent.
@@ -449,12 +446,12 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		p.log.Info("Session intent registered successfully")
 	}
 
-	// Create tmux client
-	tmuxClient, err := tmux.NewClient()
+	// Create mux engine (auto-detects tuimux vs tmux).
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux engine not available: %w", err)
 	}
 
 	// Check if job has a worktree - if so, create/reuse a session
@@ -468,19 +465,18 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		}
 
 		// Check if session already exists
-		sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+		sessionExists, _ := engine.SessionExists(ctx, sessionName)
 
 		if !sessionExists {
-			p.log.WithField("session", sessionName).Info("Creating new tmux session for interactive job")
-			executor := &flowexec.RealCommandExecutor{}
-			if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-n", "workspace", "-c", workDir); err != nil {
+			p.log.WithField("session", sessionName).Info("Creating new session for interactive job")
+			if err := engine.CreateSession(ctx, sessionName, mux.WithWorkDir(workDir)); err != nil {
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()
-				return fmt.Errorf("failed to create tmux session: %w", err)
+				return fmt.Errorf("failed to create session: %w", err)
 			}
 
-			// Get the tmux session PID and create the lock file.
-			tmuxPID, err := tmuxClient.GetSessionPID(ctx, sessionName)
+			// Get the session PID and create the lock file.
+			tmuxPID, err := engine.GetSessionPID(ctx, sessionName)
 			if err != nil {
 				return fmt.Errorf("could not get tmux session PID to create lock file: %w", err)
 			}
@@ -511,14 +507,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 
 		// Create new window - always use Detached to avoid stealing focus.
-		// Use tmuxClient (not RealCommandExecutor) to ensure correct tmux server targeting
-		// when the daemon runs on a separate tmux server (e.g., tmux -L groved).
-		if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
-			Target:     sessionName,
-			WindowName: agentWindowName,
-			WorkingDir: workDir,
-			Detached:   true,
-		}); err != nil {
+		if err := engine.NewWindow(ctx, sessionName, agentWindowName, workDir, true); err != nil {
 			p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
 		}
 
@@ -552,7 +541,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// inline env so everything runs as one shell invocation.
 		wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
 		// Send the agent command to the new window
-		if err := tmuxClient.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
+		if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -616,26 +605,25 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
 	// Ensure session exists
-	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+	sessionExists, _ := engine.SessionExists(ctx, sessionName)
 	if !sessionExists {
-		p.ulog.Info("Tmux session not found, creating it").
+		p.ulog.Info("Session not found, creating it").
 			Field("session", sessionName).
-			Pretty(fmt.Sprintf("Tmux session '%s' not found, creating it...", sessionName)).
+			Pretty(fmt.Sprintf("Session '%s' not found, creating it...", sessionName)).
 			Log(ctx)
 
-		executor := &flowexec.RealCommandExecutor{}
-		if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-n", "workspace", "-c", gitRoot); err != nil {
+		if err := engine.CreateSession(ctx, sessionName, mux.WithWorkDir(gitRoot)); err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			return fmt.Errorf("failed to create tmux session: %w", err)
+			return fmt.Errorf("failed to create session: %w", err)
 		}
 
-		tmuxPID, err := tmuxClient.GetSessionPID(ctx, sessionName)
+		tmuxPID, err := engine.GetSessionPID(ctx, sessionName)
 		if err != nil {
-			return fmt.Errorf("could not get tmux session PID to create lock file: %w", err)
+			return fmt.Errorf("could not get session PID to create lock file: %w", err)
 		}
 		if err := CreateLockFile(job.FilePath, tmuxPID); err != nil {
-			return fmt.Errorf("failed to create lock file with tmux PID: %w", err)
+			return fmt.Errorf("failed to create lock file with session PID: %w", err)
 		}
 	}
 
@@ -647,36 +635,24 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		Pretty(theme.IconRepo + " Launching agent in project session").
 		Log(ctx)
 
-	// Create new window - use tmuxClient (not RealCommandExecutor) to ensure correct
-	// tmux server targeting when the daemon runs on a separate tmux server.
 	windowTarget := fmt.Sprintf("%s:%s", sessionName, windowName)
-	if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
-		Target:     sessionName,
-		WindowName: windowName,
-		WorkingDir: workDir,
-		Detached:   true,
-	}); err != nil {
+	if err := engine.NewWindow(ctx, sessionName, windowName, workDir, true); err != nil {
 		if strings.Contains(err.Error(), "duplicate window") {
 			p.ulog.Info("Window already exists, attempting to kill it first").
 				Field("window", windowName).
 				Log(ctx)
-			_ = tmuxClient.KillWindow(ctx, windowTarget)
+			_ = engine.KillWindow(ctx, windowTarget)
 			time.Sleep(100 * time.Millisecond)
 
-			if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
-				Target:     sessionName,
-				WindowName: windowName,
-				WorkingDir: workDir,
-				Detached:   true,
-			}); err != nil {
+			if err := engine.NewWindow(ctx, sessionName, windowName, workDir, true); err != nil {
 				job.Status = JobStatusFailed
 				job.EndTime = time.Now()
-				return fmt.Errorf("failed to create new tmux window after killing existing: %w", err)
+				return fmt.Errorf("failed to create new window after killing existing: %w", err)
 			}
 		} else {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			return fmt.Errorf("failed to create new tmux window: %w", err)
+			return fmt.Errorf("failed to create new window: %w", err)
 		}
 	}
 
@@ -711,7 +687,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)
-	if err := tmuxClient.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
@@ -898,16 +874,14 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 
 // findClaudePIDForPane finds the PID of the Claude Code process running in a specific tmux pane
 func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string, logger *logrus.Entry) (int, error) {
-	// Use tmux display-message to get the pane PID
-	cmd := tmux.Command("display-message", "-p", "-t", targetPane, "#{pane_pid}")
-	output, err := cmd.Output()
+	engine, err := mux.DetectMuxEngine(context.Background())
 	if err != nil {
-		return 0, fmt.Errorf("failed to get pane PID: %w", err)
+		return 0, fmt.Errorf("mux engine not available: %w", err)
 	}
 
-	shellPID, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	shellPID, err := engine.GetPanePID(context.Background(), targetPane)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse pane PID: %w", err)
+		return 0, fmt.Errorf("failed to get pane PID: %w", err)
 	}
 
 	// Find the 'claude' process that is a descendant of that shell
@@ -1064,12 +1038,12 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 	targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
 
-	tmuxClient, err := tmux.NewClient()
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
-		return "", fmt.Errorf("tmux not available: %w", err)
+		return "", fmt.Errorf("mux engine not available: %w", err)
 	}
 
-	result, err := tmuxClient.CapturePane(ctx, targetPane)
+	result, err := engine.CapturePane(ctx, targetPane)
 	if err != nil {
 		return "", err
 	}
@@ -1141,26 +1115,26 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 		}).Info("Dispatching input")
 	}
 
-	tmuxClient, err := tmux.NewClient()
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux engine not available: %w", err)
 	}
 
 	if inputMode == "vim" {
-		if err := tmuxClient.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
+		if err := engine.SendKeys(ctx, targetPane, "Escape", "i", input); err != nil {
 			return fmt.Errorf("failed to send input text: %w", err)
 		}
 	} else {
-		if err := tmuxClient.SendKeys(ctx, targetPane, input); err != nil {
+		if err := engine.SendKeys(ctx, targetPane, input); err != nil {
 			return fmt.Errorf("failed to send input text: %w", err)
 		}
 	}
 
-	if err := tmuxClient.SendKeys(ctx, targetPane, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, "C-m"); err != nil {
 		return fmt.Errorf("failed to send submit key: %w", err)
 	}
 
-	logger.WithField("tmux_target", targetPane).Debug("Tmux send succeeded")
+	logger.WithField("tmux_target", targetPane).Debug("Send succeeded")
 	return nil
 }
 
@@ -1243,14 +1217,14 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 		}).Info("Dispatching interrupt")
 	}
 
-	tmuxClient, err := tmux.NewClient()
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux engine not available: %w", err)
 	}
 
-	if err := tmuxClient.SendKeys(ctx, targetPane, "C-c"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, "C-c"); err != nil {
 		return err
 	}
-	logger.WithField("tmux_target", targetPane).Debug("Tmux interrupt succeeded")
+	logger.WithField("tmux_target", targetPane).Debug("Interrupt succeeded")
 	return nil
 }

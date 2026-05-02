@@ -13,7 +13,6 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -370,16 +369,14 @@ func findDescendantPID(parentPID int, targetComm string) (int, error) {
 // FindCodexPIDForPane finds the PID of the 'codex' process running within a specific tmux pane
 // by traversing the process tree from the pane's shell.
 func FindCodexPIDForPane(targetPane string) (int, error) {
-	// Use tmux display-message to get the pane PID
-	cmd := tmux.Command("display-message", "-p", "-t", targetPane, "#{pane_pid}")
-	output, err := cmd.Output()
+	engine, err := mux.DetectMuxEngine(context.Background())
 	if err != nil {
-		return 0, fmt.Errorf("failed to get pane PID: %w", err)
+		return 0, fmt.Errorf("mux engine not available: %w", err)
 	}
 
-	shellPID, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	shellPID, err := engine.GetPanePID(context.Background(), targetPane)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse pane PID: %w", err)
+		return 0, fmt.Errorf("failed to get pane PID: %w", err)
 	}
 
 	// Find the 'codex' process that is a descendant of that shell.

@@ -4,19 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/sessions"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
-
-	flowexec "github.com/grovetools/flow/pkg/exec"
 )
 
 // OpencodeAgentProvider implements InteractiveAgentProvider for the opencode agent.
@@ -84,11 +80,11 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	}
 	// --- End Synchronous Session Registration ---
 
-	tmuxClient, err := tmux.NewClient()
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux engine not available: %w", err)
 	}
 
 	sessionName, err := mux.GenerateSessionName(workDir)
@@ -98,22 +94,21 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		return err
 	}
 
-	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+	sessionExists, _ := engine.SessionExists(ctx, sessionName)
 
 	if !sessionExists {
-		p.log.WithField("session", sessionName).Info("Creating new tmux session for opencode job")
-		executor := &flowexec.RealCommandExecutor{}
-		if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-n", "workspace", "-c", workDir); err != nil {
+		p.log.WithField("session", sessionName).Info("Creating new session for opencode job")
+		if err := engine.CreateSession(ctx, sessionName, mux.WithWorkDir(workDir)); err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			return fmt.Errorf("failed to create tmux session: %w", err)
+			return fmt.Errorf("failed to create session: %w", err)
 		}
 
-		tmuxPID, err := tmuxClient.GetSessionPID(ctx, sessionName)
+		sessionPID, err := engine.GetSessionPID(ctx, sessionName)
 		if err != nil {
-			return fmt.Errorf("could not get tmux session PID: %w", err)
+			return fmt.Errorf("could not get session PID: %w", err)
 		}
-		if err := CreateLockFile(job.FilePath, tmuxPID); err != nil {
+		if err := CreateLockFile(job.FilePath, sessionPID); err != nil {
 			return fmt.Errorf("failed to create lock file: %w", err)
 		}
 	} else {
@@ -134,15 +129,8 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		Pretty(theme.IconWorktree + " Launching OpenCode agent in worktree session").
 		Log(ctx)
 
-	// Use tmuxClient to ensure correct tmux server targeting when the daemon
-	// runs on a separate tmux server (e.g., tmux -L groved).
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-	if err := tmuxClient.NewWindowWithOptions(ctx, tmux.NewWindowOptions{
-		Target:     sessionName,
-		WindowName: agentWindowName,
-		WorkingDir: workDir,
-		Detached:   true,
-	}); err != nil {
+	if err := engine.NewWindow(ctx, sessionName, agentWindowName, workDir, true); err != nil {
 		p.log.WithError(err).Warn("Failed to create agent window, may already exist.")
 	}
 
@@ -160,7 +148,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 
-	if err := tmuxClient.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)
@@ -219,15 +207,14 @@ func (p *OpencodeAgentProvider) buildAgentCommand(job *Job, briefingFilePath str
 
 // FindOpencodePIDForPane finds the PID of the 'opencode' process running within a specific tmux pane
 func FindOpencodePIDForPane(targetPane string) (int, error) {
-	cmd := tmux.Command("display-message", "-p", "-t", targetPane, "#{pane_pid}")
-	output, err := cmd.Output()
+	engine, err := mux.DetectMuxEngine(context.Background())
 	if err != nil {
-		return 0, fmt.Errorf("failed to get pane PID: %w", err)
+		return 0, fmt.Errorf("mux engine not available: %w", err)
 	}
 
-	shellPID, err := strconv.Atoi(strings.TrimSpace(string(output)))
+	shellPID, err := engine.GetPanePID(context.Background(), targetPane)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse pane PID: %w", err)
+		return 0, fmt.Errorf("failed to get pane PID: %w", err)
 	}
 
 	return findDescendantPID(shellPID, "opencode")
