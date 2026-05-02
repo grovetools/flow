@@ -12,7 +12,6 @@ import (
 
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/mux"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/pkg/workspace"
 
 	groveexec "github.com/grovetools/flow/pkg/exec"
@@ -26,10 +25,10 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		return fmt.Errorf("not in a terminal")
 	}
 
-	// Create tmux client
-	tmuxClient, err := tmux.NewClient()
+	// Create mux engine
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux not available: %w", err)
 	}
 
 	// Get the project git root for the plan (notebook-aware)
@@ -84,14 +83,13 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	sessionName := projInfo.Identifier("_")
 
 	// Check if session already exists
-	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+	sessionExists, _ := engine.SessionExists(ctx, sessionName)
 
 	// Check if we're currently in that session
 	inTargetSession := false
 	if mux.ActiveMux() != mux.MuxNone {
-		cmd := tmux.Command("display-message", "-p", "#S")
-		output, err := cmd.Output()
-		if err == nil && strings.TrimSpace(string(output)) == sessionName {
+		currentSession, err := engine.GetCurrentSession(ctx)
+		if err == nil && currentSession == sessionName {
 			inTargetSession = true
 		}
 	}
@@ -112,14 +110,14 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		planName := plan.Name
 		setPlanCmd := fmt.Sprintf("flow plan set %s && %s", planName, strings.Join(commandToRun, " "))
 
-		panes := []tmux.PaneOptions{
+		panes := []mux.PaneOptions{
 			{
 				Command: setPlanCmd, // Set active plan then run flow plan status -t
 			},
 		}
 
 		// Create new session with plan window at index 2
-		opts := tmux.LaunchOptions{
+		opts := mux.LaunchOptions{
 			SessionName:      sessionName,
 			WorkingDirectory: worktreePath,
 			WindowName:       "plan",
@@ -128,7 +126,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		}
 
 		fmt.Printf(" Creating tmux session '%s' for worktree...\n", sessionName)
-		if err := tmuxClient.Launch(ctx, opts); err != nil {
+		if err := engine.Launch(ctx, opts); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 
@@ -138,8 +136,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		// Switch to the new session if we're already in tmux, but not if launched from another TUI
 		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 		if mux.ActiveMux() != mux.MuxNone && !isTUIMode {
-			executor := &groveexec.RealCommandExecutor{}
-			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+			if err := engine.SwitchSession(ctx, sessionName, ""); err != nil {
 				fmt.Printf("Note: Could not switch to session (attach manually): tmux attach -t %s\n", sessionName)
 			} else {
 				fmt.Printf("* Switched to session '%s'\n", sessionName)
@@ -154,14 +151,13 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	commandStr := strings.Join(commandToRun, " ")
 
 	// Create a new window for the plan run command
-	executor := &groveexec.RealCommandExecutor{}
 	// Use a more descriptive window name based on the command
 	windowName := commandToRun[2] // e.g., "run" or "status"
 	if len(commandToRun) > 3 {
 		windowName = fmt.Sprintf("%s-%s", commandToRun[2], commandToRun[3])
 	}
 
-	if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", worktreePath); err != nil {
+	if err := engine.NewWindow(ctx, sessionName, windowName, worktreePath, false); err != nil {
 		// Window might already exist, try to use it
 		fmt.Printf("Note: Could not create new window '%s': %v. Attempting to use existing window.\n", windowName, err)
 	}
@@ -172,7 +168,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	// Send commands to the window
 	// First change to the worktree directory
 	cdCmd := fmt.Sprintf("cd %s", worktreePath)
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, cdCmd, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, cdCmd, "C-m"); err != nil {
 		return fmt.Errorf("failed to send cd command: %w", err)
 	}
 
@@ -182,7 +178,7 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	// Set the active plan in the worktree
 	planName := filepath.Base(plan.Directory)
 	setPlanCmd := fmt.Sprintf("flow plan set %s", planName)
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, setPlanCmd, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, setPlanCmd, "C-m"); err != nil {
 		return fmt.Errorf("failed to send set plan command: %w", err)
 	}
 
@@ -190,18 +186,18 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 	time.Sleep(200 * time.Millisecond)
 
 	// Then run the actual command
-	if err := executor.Execute("tmux", "send-keys", "-t", targetPane, commandStr, "C-m"); err != nil {
+	if err := engine.SendKeys(ctx, targetPane, commandStr, "C-m"); err != nil {
 		return fmt.Errorf("failed to send command '%s': %w", commandStr, err)
 	}
 
 	// If we're already in tmux, switch to the session
 	if mux.ActiveMux() != mux.MuxNone {
 		fmt.Printf("* Switching to session '%s'...\n", sessionName)
-		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+		if err := engine.SwitchSession(ctx, sessionName, ""); err != nil {
 			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 		}
 		// Also switch to the new window
-		if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
+		if err := engine.SelectWindow(ctx, targetPane); err != nil {
 			fmt.Printf("Note: Could not switch to window '%s'\n", windowName)
 		}
 	} else {
@@ -219,10 +215,10 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 		return fmt.Errorf("not in a terminal")
 	}
 
-	// Create tmux client
-	tmuxClient, err := tmux.NewClient()
+	// Create mux engine
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux not available: %w", err)
 	}
 
 	// Get git root
@@ -246,61 +242,42 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 	sessionName := fmt.Sprintf("%s__%s", projInfo.Identifier("_"), sessionTitle)
 
 	// Check if session already exists
-	executor := &groveexec.RealCommandExecutor{}
-	sessions, err := tmuxClient.ListSessions(ctx)
-	if err == nil {
-		for _, session := range sessions {
-			if session == sessionName {
-				// Session exists, switch to it
-				fmt.Printf("* Switching to existing session '%s'...\n", sessionName)
+	exists, _ := engine.SessionExists(ctx, sessionName)
+	if exists {
+		// Session exists, switch to it
+		fmt.Printf("* Switching to existing session '%s'...\n", sessionName)
 
-				isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-				if !isTUIMode {
-					// If we're already in tmux, switch to the session
-					if mux.ActiveMux() != mux.MuxNone {
-						if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
-							fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
-						}
-					} else {
-						// Not in tmux, attach to the session
-						if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
-							return fmt.Errorf("failed to attach to session: %w", err)
-						}
-					}
+		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
+		if !isTUIMode {
+			if mux.ActiveMux() != mux.MuxNone {
+				if err := engine.SwitchSession(ctx, sessionName, ""); err != nil {
+					fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 				}
-				return nil
+			} else {
+				// Not in tmux, attach to the session
+				executor := &groveexec.RealCommandExecutor{}
+				if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
+					return fmt.Errorf("failed to attach to session: %w", err)
+				}
 			}
 		}
+		return nil
 	}
 
-	// Session doesn't exist, create it
+	// Session doesn't exist, create it via Launch
 	fmt.Printf("* Creating new session '%s' in main repository...\n", sessionName)
 
-	// Create the session
-	if err := executor.Execute("tmux", "new-session", "-d", "-s", sessionName, "-c", gitRoot); err != nil {
+	opts := mux.LaunchOptions{
+		SessionName:      sessionName,
+		WorkingDirectory: gitRoot,
+		WindowName:       "plan",
+		WindowIndex:      2,
+		Panes: []mux.PaneOptions{
+			{Command: strings.Join(commandToRun, " ")},
+		},
+	}
+	if err := engine.Launch(ctx, opts); err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
-	}
-
-	// Rename the initial window to "plan"
-	if err := executor.Execute("tmux", "rename-window", "-t", sessionName, "plan"); err != nil {
-		// Clean up on failure
-		_ = executor.Execute("tmux", "kill-session", "-t", sessionName)
-		return fmt.Errorf("failed to rename window: %w", err)
-	}
-
-	// Move the "plan" window to index 2
-	if err := executor.Execute("tmux", "move-window", "-s", fmt.Sprintf("%s:plan", sessionName), "-t", "2"); err != nil {
-		// Clean up on failure
-		_ = executor.Execute("tmux", "kill-session", "-t", sessionName)
-		return fmt.Errorf("failed to move window: %w", err)
-	}
-
-	// Send the command to the session
-	commandStr := strings.Join(commandToRun, " ")
-	if err := executor.Execute("tmux", "send-keys", "-t", sessionName, commandStr, "C-m"); err != nil {
-		// Clean up on failure
-		_ = executor.Execute("tmux", "kill-session", "-t", sessionName)
-		return fmt.Errorf("failed to send command: %w", err)
 	}
 
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
@@ -308,12 +285,13 @@ func CreateOrSwitchToMainRepoSessionAndRunCommand(ctx context.Context, planName 
 		// If we're already in tmux, switch to the new session
 		if mux.ActiveMux() != mux.MuxNone {
 			fmt.Printf("* Switching to session '%s'...\n", sessionName)
-			if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+			if err := engine.SwitchSession(ctx, sessionName, ""); err != nil {
 				fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 			}
 		} else {
 			// Not in tmux, attach to the new session
 			fmt.Printf("* Attaching to session '%s'...\n", sessionName)
+			executor := &groveexec.RealCommandExecutor{}
 			if err := executor.Execute("tmux", "attach-session", "-t", sessionName); err != nil {
 				return fmt.Errorf("failed to attach to session: %w", err)
 			}

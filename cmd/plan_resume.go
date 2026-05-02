@@ -10,12 +10,10 @@ import (
 	"time"
 
 	"github.com/grovetools/core/pkg/mux"
-	"github.com/grovetools/core/pkg/tmux"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/spf13/cobra"
 
-	groveexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -128,10 +126,10 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 		return fmt.Errorf("not in a terminal")
 	}
 
-	// Create tmux client
-	tmuxClient, err := tmux.NewClient()
+	// Create mux engine
+	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
-		return fmt.Errorf("tmux not available: %w", err)
+		return fmt.Errorf("mux not available: %w", err)
 	}
 
 	// Determine working directory using the canonical logic
@@ -149,12 +147,11 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 	sessionName := projInfo.Identifier("_")
 
 	// Check if session already exists
-	sessionExists, _ := tmuxClient.SessionExists(ctx, sessionName)
+	sessionExists, _ := engine.SessionExists(ctx, sessionName)
 
 	// Create window name for the resumed job (same pattern as interactive_agent_executor)
 	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
-	executor := &groveexec.RealCommandExecutor{}
 	commandStr := strings.Join(commandToRun, " ")
 
 	if !sessionExists {
@@ -162,13 +159,13 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 		planName := plan.Name
 		setPlanCmd := fmt.Sprintf("flow plan set %s && %s", planName, commandStr)
 
-		panes := []tmux.PaneOptions{
+		panes := []mux.PaneOptions{
 			{
 				Command: setPlanCmd,
 			},
 		}
 
-		opts := tmux.LaunchOptions{
+		opts := mux.LaunchOptions{
 			SessionName:      sessionName,
 			WorkingDirectory: workingDir,
 			WindowName:       windowName,
@@ -177,14 +174,14 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 		}
 
 		fmt.Printf(" Creating tmux session '%s' for resumed job...\n", sessionName)
-		if err := tmuxClient.Launch(ctx, opts); err != nil {
+		if err := engine.Launch(ctx, opts); err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
 
 		fmt.Printf("* Session '%s' created\n", sessionName)
 	} else {
 		// Session exists, create a new window for the resumed job
-		if err := executor.Execute("tmux", "new-window", "-t", sessionName, "-n", windowName, "-c", workingDir); err != nil {
+		if err := engine.NewWindow(ctx, sessionName, windowName, workingDir, false); err != nil {
 			fmt.Printf("Note: Could not create new window '%s': %v\n", windowName, err)
 		}
 
@@ -193,7 +190,7 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 		// Set the active plan in the worktree
 		planName := filepath.Base(plan.Directory)
 		setPlanCmd := fmt.Sprintf("flow plan set %s", planName)
-		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, setPlanCmd, "C-m"); err != nil {
+		if err := engine.SendKeys(ctx, targetPane, setPlanCmd, "C-m"); err != nil {
 			return fmt.Errorf("failed to send set plan command: %w", err)
 		}
 
@@ -201,7 +198,7 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 		time.Sleep(200 * time.Millisecond)
 
 		// Then run the actual resume command
-		if err := executor.Execute("tmux", "send-keys", "-t", targetPane, commandStr, "C-m"); err != nil {
+		if err := engine.SendKeys(ctx, targetPane, commandStr, "C-m"); err != nil {
 			return fmt.Errorf("failed to send command '%s': %w", commandStr, err)
 		}
 	}
@@ -209,12 +206,12 @@ func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orche
 	// Switch to the session if we're already in tmux
 	if mux.ActiveMux() != mux.MuxNone {
 		fmt.Printf("* Switching to session '%s'...\n", sessionName)
-		if err := executor.Execute("tmux", "switch-client", "-t", sessionName); err != nil {
+		if err := engine.SwitchSession(ctx, sessionName, ""); err != nil {
 			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
 		}
 		// Also switch to the new window
 		targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
-		if err := executor.Execute("tmux", "select-window", "-t", targetPane); err != nil {
+		if err := engine.SelectWindow(ctx, targetPane); err != nil {
 			fmt.Printf("Note: Could not switch to window '%s'\n", windowName)
 		}
 	} else {
