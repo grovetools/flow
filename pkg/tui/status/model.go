@@ -1048,7 +1048,8 @@ func (m *Model) calculateBSPJobPaneRatio() float64 {
 	if m.Width <= 0 {
 		return 0.35
 	}
-	ratio := float64(m.calculateFocusJobsWidth()) / float64(m.Width)
+	// +6 accounts for lipgloss margin (4 cols) + BSP gutter/border (2 cols)
+	ratio := float64(m.calculateFocusJobsWidth()+6) / float64(m.Width)
 	if ratio < 0.3 {
 		ratio = 0.3
 	}
