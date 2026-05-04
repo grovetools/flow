@@ -1845,12 +1845,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, tea.Batch(cmd, titleCmd)
 				}
+				ratio := m.calculateBSPJobPaneRatio()
 				openCmd := func() tea.Msg {
 					return embed.SplitViewportRequestMsg{
 						PanelID:    "logs",
 						Title:      title,
 						AutoScroll: true,
-						Ratio:      0.35,
+						Ratio:      ratio,
 						Focus:      false,
 					}
 				}
@@ -1892,7 +1893,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				mdl, cmd := m.openDetailPane(EditorPaneDetail)
 				m = mdl.(Model)
 				path := job.FilePath
-				openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path, Ratio: 0.35, Focus: false} }
+				ratio := m.calculateBSPJobPaneRatio()
+				openCmd := func() tea.Msg { return embed.SplitEditorRequestMsg{Path: path, Ratio: ratio, Focus: false} }
 				closeCmd := func() tea.Msg { return embed.SplitEditorCloseRequestMsg{} }
 				var promoteCmd tea.Cmd
 				m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
@@ -1922,8 +1924,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					mdl, cmd := m.openDetailPane(NativeAgentPaneDetail)
 					m = mdl.(Model)
 					jobID := job.ID
+					ratio := m.calculateBSPJobPaneRatio()
 					openCmd := func() tea.Msg {
-						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitOpen, Ratio: 0.35}
+						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitOpen, Ratio: ratio}
 					}
 					closeCmd := func() tea.Msg {
 						return embed.SplitAgentRequestMsg{JobID: jobID, Action: embed.AgentSplitClose}
@@ -1964,12 +1967,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if job.RulesFile == "" {
 				mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
 				m = mdl.(Model)
+				ratio := m.calculateBSPJobPaneRatio()
 				openCmd := func() tea.Msg {
 					return embed.SplitViewportRequestMsg{
 						PanelID: "context",
 						Title:   "Context",
 						Content: "No rules file configured for this job.\n\nEdit the job's frontmatter to add a rules_file.",
-						Ratio:   0.35,
+						Ratio:   ratio,
 						Focus:   false,
 					}
 				}
@@ -1984,12 +1988,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Rules file doesn't exist — show a placeholder in a viewport.
 				mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
 				m = mdl.(Model)
+				ratio := m.calculateBSPJobPaneRatio()
 				openCmd := func() tea.Msg {
 					return embed.SplitViewportRequestMsg{
 						PanelID: "context",
 						Title:   "Context",
 						Content: fmt.Sprintf("Rules file not found at:\n%s\n\nPress e to create one.", rulesFile),
-						Ratio:   0.35,
+						Ratio:   ratio,
 						Focus:   false,
 					}
 				}
@@ -2001,6 +2006,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open the context panel BSP split.
 			mdl, loadCmd := m.openDetailPane(ContextPaneDetail)
 			m = mdl.(Model)
+			ratio := m.calculateBSPJobPaneRatio()
 			openCmd := func() tea.Msg {
 				workDir := m.PlanDir
 				if m.Plan != nil {
@@ -2011,7 +2017,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return embed.SplitContextRequestMsg{
 					WorkDir:   workDir,
 					RulesFile: rulesFile,
-					Ratio:     0.35,
+					Ratio:     ratio,
 					Focus:     false,
 				}
 			}
@@ -2037,10 +2043,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			mdl, loadCmd := m.openDetailPane(MemoryPaneDetail)
 			m = mdl.(Model)
 			query := job.Title
+			ratio := m.calculateBSPJobPaneRatio()
 			openCmd := func() tea.Msg {
 				return embed.SplitMemoryRequestMsg{
 					Query: query,
-					Ratio: 0.35,
+					Ratio: ratio,
 					Focus: false,
 				}
 			}
@@ -2262,12 +2269,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								return embed.UpdateViewportContentMsg{Content: "Running...", Append: false}
 							})
 						} else {
+							ratio := m.calculateBSPJobPaneRatio()
 							openCmd := func() tea.Msg {
 								return embed.SplitViewportRequestMsg{
 									PanelID:    "logs",
 									Title:      title,
 									AutoScroll: true,
-									Ratio:      0.35,
+									Ratio:      ratio,
 									Focus:      false,
 								}
 							}
@@ -2721,7 +2729,7 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				return embed.SplitEditorRequestMsg{
 					Path:  path,
-					Ratio: 0.35,
+					Ratio: 0, // zero = preserve existing ratio
 					Focus: false,
 				}
 			}
@@ -2946,12 +2954,13 @@ func (m Model) openHostedViewportPane(pane DetailPane, label string) (tea.Model,
 	}
 
 	// No viewport yet — create the BSP split.
+	ratio := m.calculateBSPJobPaneRatio()
 	openCmd := func() tea.Msg {
 		return embed.SplitViewportRequestMsg{
 			PanelID:    "detail",
 			Title:      title,
 			AutoScroll: false,
-			Ratio:      0.35,
+			Ratio:      ratio,
 			Focus:      false,
 		}
 	}

@@ -1041,6 +1041,23 @@ func (m *Model) calculateFocusJobsWidth() int {
 	return totalWidth
 }
 
+// calculateBSPJobPaneRatio returns the fraction of total width the job table
+// needs, clamped to [0.3, 0.7]. Used as the initial BSP split ratio so the
+// preview pane never overlaps the job table.
+func (m *Model) calculateBSPJobPaneRatio() float64 {
+	if m.Width <= 0 {
+		return 0.35
+	}
+	ratio := float64(m.calculateFocusJobsWidth()) / float64(m.Width)
+	if ratio < 0.3 {
+		ratio = 0.3
+	}
+	if ratio > 0.7 {
+		ratio = 0.7
+	}
+	return ratio
+}
+
 // updateLayoutDimensions recalculates pane sizes by redistributing
 // through the Manager so viewport widths always match what renderPaneContent
 // will constrain to. This prevents the scrollbar overlay (█) from wrapping
