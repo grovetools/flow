@@ -7,10 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"path/filepath"
+
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -151,6 +155,10 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	envPrefix := "GROVE_AGENT_PROVIDER='opencode' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
+	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
+		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
+		envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
+	}
 	envPrefix += playbookEnvInline(job, plan)
 
 	if err := engine.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
@@ -572,6 +573,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 		envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 			job.ID, job.FilePath, plan.Name, escapedTitle)
+		if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
+			logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
+			envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
+		}
 		envPrefix += playbookEnvInline(job, plan)
 
 		// Wrap agent command with deterministic PID capture, then prefix
@@ -727,6 +732,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
+	if node, nodeErr := workspace.GetProjectByPath(workDir); nodeErr == nil && node != nil {
+		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
+		envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
+	}
 	envPrefix += playbookEnvInline(job, plan)
 
 	// Wrap agent command with deterministic PID capture, then prefix

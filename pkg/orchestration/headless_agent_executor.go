@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	grovecontext "github.com/grovetools/cx/pkg/context"
 )
@@ -300,6 +301,9 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
 	)
+	if node, err := workspace.GetProjectByPath(worktreePath); err == nil && node != nil {
+		cmd.Env = append(cmd.Env, "GROVE_LOG_DIR="+filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/")))
+	}
 	if pbName, pbRoot := resolvePlaybookRootForJob(job, plan); pbRoot != "" {
 		cmd.Env = append(cmd.Env,
 			"PLAYBOOK_ROOT="+pbRoot,
