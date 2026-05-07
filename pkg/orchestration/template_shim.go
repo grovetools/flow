@@ -71,8 +71,9 @@ func applyTemplateShim(job *Job) {
 	switch kind {
 	case "skill":
 		if _, alreadyWarned := shimWarned.LoadOrStore(job.ID, true); !alreadyWarned {
-			shimUlog.Warn("Job uses deprecated template; upgrading to skill").
+			shimUlog.Debug("Job uses deprecated template; upgrading to skill").
 				Field("job_id", job.ID).
+				Field("job_file", job.Filename).
 				Field("old_template", job.Template).
 				Field("new_skill", name).
 				StructuredOnly().
@@ -86,8 +87,9 @@ func applyTemplateShim(job *Job) {
 		job.Template = ""
 	case "template":
 		if _, alreadyWarned := shimWarned.LoadOrStore(job.ID, true); !alreadyWarned {
-			shimUlog.Warn("Job uses deleted template; falling back to default").
+			shimUlog.Debug("Job uses deleted template; falling back to default").
 				Field("job_id", job.ID).
+				Field("job_file", job.Filename).
 				Field("old_template", job.Template).
 				Field("new_template", name).
 				StructuredOnly().
