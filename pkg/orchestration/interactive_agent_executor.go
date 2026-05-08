@@ -445,15 +445,16 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
-		JobID:       job.ID,
-		Provider:    "claude",
-		JobFilePath: job.FilePath,
-		PlanName:    plan.Name,
-		Title:       job.Title,
-		WorkDir:     workDir,
-		Channels:    job.Channels,
-		Autonomous:  job.Autonomous,
-		Mux:         muxType,
+		JobID:        job.ID,
+		Provider:     "claude",
+		JobFilePath:  job.FilePath,
+		PlanName:     plan.Name,
+		Title:        job.Title,
+		WorkDir:      workDir,
+		Channels:     job.Channels,
+		SignalTarget: job.SignalTarget,
+		Autonomous:   job.Autonomous,
+		Mux:          muxType,
 	}); err != nil {
 		// Log warning but continue - agent can still run, just tracking may be impaired
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
@@ -951,7 +952,6 @@ func (p *ClaudeAgentProvider) findClaudePIDForPane(targetPane string, logger *lo
 	}
 	return pid, nil
 }
-
 
 // gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
 func (e *InteractiveAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir string) ([]string, error) {

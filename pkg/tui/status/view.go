@@ -769,6 +769,43 @@ func (m Model) renderJobCreationDialog() string {
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
+func (m Model) renderClawTargetSelector() string {
+	t := theme.DefaultTheme
+	var lines []string
+
+	if m.ClawDialogJobIndex >= 0 && m.ClawDialogJobIndex < len(m.Jobs) {
+		job := m.Jobs[m.ClawDialogJobIndex]
+		title := lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("Signal Target: %s", job.Title))
+		lines = append(lines, title)
+		lines = append(lines, "")
+	}
+
+	for i, opt := range m.ClawTargetOptions {
+		prefix := "  "
+		var style lipgloss.Style
+		if i == m.ClawTargetCursor {
+			prefix = theme.IconSelect + " "
+			style = lipgloss.NewStyle().Bold(true).Background(theme.DefaultColors.SubtleBackground)
+		} else {
+			style = t.Muted
+		}
+		lines = append(lines, style.Render(prefix+opt))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, t.Muted.Render("↑/↓ to navigate • Enter to select • Esc to cancel"))
+
+	content := strings.Join(lines, "\n")
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Orange).
+		Padding(1, 2).
+		Width(50).
+		Render(content)
+
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
 func (m Model) renderClawDialog() string {
 	if m.ClawDialogJobIndex < 0 || m.ClawDialogJobIndex >= len(m.Jobs) {
 		return "Error: Invalid job selected."

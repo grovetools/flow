@@ -1493,14 +1493,14 @@ type clawResultMsg struct {
 	Err     error
 }
 
-func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes int, prompt string) tea.Cmd {
+func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes int, prompt, signalTarget string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		client := daemon.NewWithAutoStart() // inherit GROVE_SCOPE from treemux host
 		defer client.Close()
 
 		// Enable signal channel
-		if err := client.UpdateSessionChannels(ctx, job.ID, []string{"signal"}); err != nil {
+		if err := client.UpdateSessionChannels(ctx, job.ID, models.SessionChannelsRequest{Channels: []string{"signal"}, SignalTarget: signalTarget}); err != nil {
 			return clawResultMsg{JobID: job.ID, Err: fmt.Errorf("enable channels: %w", err)}
 		}
 
@@ -1519,7 +1519,7 @@ func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes in
 			_ = client.UpdateSessionTmuxTarget(ctx, job.ID, targetPane)
 
 			notifyCfg := notifyconfig.Load()
-			instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"})
+			instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"}, signalTarget)
 			if instructions != "" {
 				msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
 				if engine, err := mux.DetectMuxEngine(ctx); err == nil {
@@ -1532,8 +1532,11 @@ func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes in
 		if job.FilePath != "" {
 			content, err := os.ReadFile(job.FilePath)
 			if err == nil {
-				// Channels (simple array — UpdateFrontmatter handles fine)
+				// Channels + signal_target (simple values — UpdateFrontmatter handles fine)
 				updates := map[string]any{"channels": []string{"signal"}}
+				if signalTarget != "" {
+					updates["signal_target"] = signalTarget
+				}
 				if newContent, err := orchestration.UpdateFrontmatter(content, updates); err == nil {
 					// Autonomous (nested struct — insert manually before closing ---)
 					s := string(newContent)
@@ -1572,17 +1575,29 @@ func unclawJobCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 		client := daemon.NewWithAutoStart() // inherit GROVE_SCOPE from treemux host
 		defer client.Close()
 
-		_ = client.UpdateSessionChannels(ctx, job.ID, nil)
+		_ = client.UpdateSessionChannels(ctx, job.ID, models.SessionChannelsRequest{})
 		_ = client.UpdateSessionAutonomous(ctx, job.ID, &models.AutonomousConfig{Enabled: false})
 
 		// Remove from frontmatter — set channels to empty and remove autonomous block
 		if job.FilePath != "" {
 			content, err := os.ReadFile(job.FilePath)
 			if err == nil {
-				updates := map[string]any{"channels": []string{}}
+				updates := map[string]any{"channels": []string{}, "signal_target": ""}
 				if newContent, err := orchestration.UpdateFrontmatter(content, updates); err == nil {
-					// Remove autonomous block (simple string removal)
 					s := string(newContent)
+					// Remove signal_target line if still present
+					if idx := strings.Index(s, "\nsignal_target:"); idx >= 0 {
+						end := idx + 1
+						line := s[end:]
+						lineEnd := strings.Index(line, "\n")
+						if lineEnd >= 0 {
+							end += lineEnd + 1
+						} else {
+							end += len(line)
+						}
+						s = s[:idx+1] + s[end:]
+					}
+					// Remove autonomous block (simple string removal)
 					// Remove "autonomous:\n  enabled: ...\n  idle_minutes: ...\n  prompt: ...\n" block
 					if idx := strings.Index(s, "autonomous:\n"); idx >= 0 {
 						end := idx

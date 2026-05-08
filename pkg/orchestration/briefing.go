@@ -275,7 +275,7 @@ func BuildXMLPrompt(job *Job, plan *Plan, workDir string, contextFiles []string,
 	// 7. Add channel instructions if the job has channels enabled.
 	if len(job.Channels) > 0 {
 		notifyCfg := notifyconfig.Load()
-		channelInstructions := notifications.AgentInstructions(notifyCfg, job.Channels)
+		channelInstructions := notifications.AgentInstructions(notifyCfg, job.Channels, job.SignalTarget)
 		if channelInstructions != "" {
 			b.WriteString("\n    <channel_instructions>\n")
 			b.WriteString(channelInstructions)

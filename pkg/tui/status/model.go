@@ -129,25 +129,29 @@ type Model struct {
 	skillPaneStateMap     map[string]orchestration.SkillFidelityState // Cached state map
 
 	// Claw dialog
-	ClawDialogActive      bool
-	ClawDialogJobIndex    int
-	ClawIdleInput         textinput.Model
-	ClawPromptInput       textinput.Model
-	ClawDialogFocus       int             // 0=idle, 1=prompt
-	ClawDisabling         bool            // true when disabling (unclaw)
-	skillSearchActive     bool            // Whether search mode is active in skill pane
-	skillSearchInput      textinput.Model // Text input for skill pane search
-	frontmatterRawContent string
-	briefingRawContent    string
-	editRawContent        string
-	skillPaneRawContent   string
-	Focus                 ViewFocus       // Track which pane is active
-	LogSplitVertical      bool            // Track log viewer layout
-	LogPaneFullscreen     bool            // Track if logs pane is fullscreen
-	IsRunningJob          bool            // Track if a job is currently running
-	isAutorunning         bool            // True when automatically running all stages
-	originalSelection     map[string]bool // Track the original user selection for autorun
-	RunLogFile            string          // Path to temporary log file for job output
+	ClawDialogActive         bool
+	ClawDialogJobIndex       int
+	ClawIdleInput            textinput.Model
+	ClawPromptInput          textinput.Model
+	ClawDialogFocus          int             // 0=idle, 1=prompt
+	ClawDisabling            bool            // true when disabling (unclaw)
+	ClawTargetSelectorActive bool            // true when showing target picker before claw dialog
+	ClawSelectedTarget       string          // selected signal target name (empty = broadcast)
+	ClawTargetCursor         int             // cursor position in target list
+	ClawTargetOptions        []string        // available target options
+	skillSearchActive        bool            // Whether search mode is active in skill pane
+	skillSearchInput         textinput.Model // Text input for skill pane search
+	frontmatterRawContent    string
+	briefingRawContent       string
+	editRawContent           string
+	skillPaneRawContent      string
+	Focus                    ViewFocus       // Track which pane is active
+	LogSplitVertical         bool            // Track log viewer layout
+	LogPaneFullscreen        bool            // Track if logs pane is fullscreen
+	IsRunningJob             bool            // Track if a job is currently running
+	isAutorunning            bool            // True when automatically running all stages
+	originalSelection        map[string]bool // Track the original user selection for autorun
+	RunLogFile               string          // Path to temporary log file for job output
 	// MsgCh is the channel used by background streaming goroutines to deliver
 	// messages into the Update loop. The Model's listenStream tea.Cmd drains it.
 	// Close() closes this channel (once) so the listener goroutine unblocks
@@ -211,7 +215,7 @@ type Model struct {
 // signalling that single-letter shortcuts should not be intercepted.
 func (m Model) IsTextEntryActive() bool {
 	return m.IsolatedAgentInputActive || m.Renaming || m.CreatingJob ||
-		m.ClawDialogActive || m.skillSearchActive || m.ShowStatusPicker ||
+		m.ClawDialogActive || m.ClawTargetSelectorActive || m.skillSearchActive || m.ShowStatusPicker ||
 		m.ShowTypePicker || m.ShowTemplatePicker || m.EditingDeps ||
 		m.selectingRecipe || m.columnSelectMode
 }
@@ -855,6 +859,9 @@ func (m Model) View() string {
 	}
 	if m.CreatingJob {
 		return m.renderJobCreationDialog()
+	}
+	if m.ClawTargetSelectorActive {
+		return m.renderClawTargetSelector()
 	}
 	if m.ClawDialogActive {
 		return m.renderClawDialog()

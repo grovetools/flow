@@ -20,6 +20,7 @@ import (
 func newAgentClawCmd() *cobra.Command {
 	var idleMinutes int
 	var prompt string
+	var signalTarget string
 
 	cmd := &cobra.Command{
 		Use:   "claw <slug> <job>",
@@ -42,7 +43,7 @@ This turns a standard interactive agent into a "claw" agent that can:
 			defer client.Close()
 
 			// Enable signal channel
-			if err := client.UpdateSessionChannels(ctx, job.ID, []string{"signal"}); err != nil {
+			if err := client.UpdateSessionChannels(ctx, job.ID, models.SessionChannelsRequest{Channels: []string{"signal"}, SignalTarget: signalTarget}); err != nil {
 				return fmt.Errorf("failed to enable channels: %w", err)
 			}
 
@@ -63,7 +64,7 @@ This turns a standard interactive agent into a "claw" agent that can:
 				_ = client.UpdateSessionTmuxTarget(ctx, job.ID, targetPane)
 
 				notifyCfg := notifyconfig.Load()
-				instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"})
+				instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"}, signalTarget)
 				if instructions != "" {
 					msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
 					grovelogging.NewLogger("flow.cmd.claw").WithFields(map[string]interface{}{
@@ -74,8 +75,9 @@ This turns a standard interactive agent into a "claw" agent that can:
 				}
 			}
 
-			// Update job frontmatter with channels + autonomous
+			// Update job frontmatter with channels + autonomous + signal_target
 			job.Channels = []string{"signal"}
+			job.SignalTarget = signalTarget
 			job.Autonomous = &models.AutonomousConfig{
 				Enabled:     true,
 				IdleMinutes: idleMinutes,
@@ -90,6 +92,7 @@ This turns a standard interactive agent into a "claw" agent that can:
 
 	cmd.Flags().IntVar(&idleMinutes, "idle", 15, "Minutes of inactivity before idle ping")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Custom idle ping prompt (default: check for new work)")
+	cmd.Flags().StringVar(&signalTarget, "signal-target", "", "Named signal target (contact or group) for outbound messages")
 
 	return cmd
 }
@@ -110,7 +113,7 @@ func newAgentUnclawCmd() *cobra.Command {
 			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
-			if err := client.UpdateSessionChannels(ctx, job.ID, nil); err != nil {
+			if err := client.UpdateSessionChannels(ctx, job.ID, models.SessionChannelsRequest{}); err != nil {
 				return fmt.Errorf("failed to disable channels: %w", err)
 			}
 
@@ -124,9 +127,21 @@ func newAgentUnclawCmd() *cobra.Command {
 			if job.FilePath != "" {
 				content, err := os.ReadFile(job.FilePath)
 				if err == nil {
-					updates := map[string]any{"channels": []string{}}
+					updates := map[string]any{"channels": []string{}, "signal_target": ""}
 					if newContent, err := orchestration.UpdateFrontmatter(content, updates); err == nil {
 						s := string(newContent)
+						// Remove signal_target line
+						if idx := strings.Index(s, "\nsignal_target:"); idx >= 0 {
+							end := idx + 1
+							line := s[end:]
+							lineEnd := strings.Index(line, "\n")
+							if lineEnd >= 0 {
+								end += lineEnd + 1
+							} else {
+								end += len(line)
+							}
+							s = s[:idx+1] + s[end:]
+						}
 						if idx := strings.Index(s, "autonomous:\n"); idx >= 0 {
 							end := idx
 							lines := strings.Split(s[idx:], "\n")
@@ -266,9 +281,12 @@ func writeClawFrontmatter(job *orchestration.Job) {
 		return
 	}
 
-	// Use UpdateFrontmatter for channels (simple string array — works fine)
+	// Use UpdateFrontmatter for channels + signal_target
 	updates := map[string]any{
 		"channels": job.Channels,
+	}
+	if job.SignalTarget != "" {
+		updates["signal_target"] = job.SignalTarget
 	}
 	newContent, err := orchestration.UpdateFrontmatter(content, updates)
 	if err != nil {

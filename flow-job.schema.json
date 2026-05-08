@@ -225,6 +225,10 @@
       "type": "array",
       "description": "External channels to enable (e.g. signal)"
     },
+    "signal_target": {
+      "type": "string",
+      "description": "Named signal target (contact or group) for outbound messages"
+    },
     "autonomous": {
       "$ref": "#/$defs/AutonomousConfig",
       "description": "Autonomous idle pinger configuration"

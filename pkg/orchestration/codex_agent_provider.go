@@ -317,7 +317,6 @@ func findMostRecentFile(dir string, debugFile *os.File) (string, error) {
 	return latestFile, nil
 }
 
-
 // FindCodexPIDForPane finds the PID of the 'codex' process running within a specific tmux pane
 // by traversing the process tree from the pane's shell.
 func FindCodexPIDForPane(targetPane string) (int, error) {

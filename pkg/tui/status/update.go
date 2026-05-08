@@ -24,6 +24,7 @@ import (
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/tui/utils/scrollbar"
+	notifyconfig "github.com/grovetools/notify/pkg/config"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -1076,6 +1077,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle claw target selector
+		if m.ClawTargetSelectorActive {
+			switch msg.String() {
+			case "up", "k":
+				if m.ClawTargetCursor > 0 {
+					m.ClawTargetCursor--
+				}
+			case "down", "j":
+				if m.ClawTargetCursor < len(m.ClawTargetOptions)-1 {
+					m.ClawTargetCursor++
+				}
+			case "enter":
+				selected := m.ClawTargetOptions[m.ClawTargetCursor]
+				if m.ClawTargetCursor == 0 {
+					m.ClawSelectedTarget = "" // broadcast
+				} else {
+					// Strip "group:" or "contact:" prefix
+					if strings.HasPrefix(selected, "group:") {
+						m.ClawSelectedTarget = strings.TrimPrefix(selected, "group:")
+					} else if strings.HasPrefix(selected, "contact:") {
+						m.ClawSelectedTarget = strings.TrimPrefix(selected, "contact:")
+					}
+				}
+				m.ClawTargetSelectorActive = false
+				// Transition to idle/prompt dialog
+				m.ClawDialogActive = true
+				m.ClawDisabling = false
+
+				idleInput := textinput.New()
+				idleInput.SetValue("15")
+				idleInput.Focus()
+				idleInput.CharLimit = 4
+				idleInput.Width = 6
+				m.ClawIdleInput = idleInput
+
+				promptInput := textinput.New()
+				promptInput.Placeholder = "optional idle prompt"
+				promptInput.CharLimit = 200
+				promptInput.Width = 40
+				m.ClawPromptInput = promptInput
+
+				m.ClawDialogFocus = 0
+				return m, textinput.Blink
+			case "esc":
+				m.ClawTargetSelectorActive = false
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Handle claw dialog
 		if m.ClawDialogActive {
 			switch msg.String() {
@@ -1092,7 +1143,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					idleMinutes = n
 				}
 				prompt := m.ClawPromptInput.Value()
-				return m, clawJobCmd(m.Plan, m.Jobs[m.ClawDialogJobIndex], idleMinutes, prompt)
+				return m, clawJobCmd(m.Plan, m.Jobs[m.ClawDialogJobIndex], idleMinutes, prompt, m.ClawSelectedTarget)
 			case "esc":
 				m.ClawDialogActive = false
 				return m, nil
@@ -2605,26 +2656,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.ClawDisabling = true
 						return m, nil
 					}
-					// Claw: show config dialog
-					m.ClawDialogActive = true
+					// Claw: show target selector first
+					m.ClawTargetSelectorActive = true
 					m.ClawDialogJobIndex = m.Cursor
-					m.ClawDisabling = false
+					m.ClawTargetCursor = 0
+					m.ClawSelectedTarget = ""
 
-					idleInput := textinput.New()
-					idleInput.SetValue("15")
-					idleInput.Focus()
-					idleInput.CharLimit = 4
-					idleInput.Width = 6
-					m.ClawIdleInput = idleInput
-
-					promptInput := textinput.New()
-					promptInput.Placeholder = "optional idle prompt"
-					promptInput.CharLimit = 200
-					promptInput.Width = 40
-					m.ClawPromptInput = promptInput
-
-					m.ClawDialogFocus = 0
-					return m, textinput.Blink
+					// Build target options from notify config
+					opts := []string{"Broadcast (no target)"}
+					cfg := notifyconfig.Load()
+					logging.NewUnifiedLogger("flow.tui.claw").Info("loading signal targets").
+						Field("contacts_count", len(cfg.Signal.Contacts)).
+						Field("named_groups_count", len(cfg.Signal.NamedGroups)).
+						StructuredOnly().Log(context.Background())
+					for name := range cfg.Signal.NamedGroups {
+						opts = append(opts, "group:"+name)
+					}
+					for name := range cfg.Signal.Contacts {
+						opts = append(opts, "contact:"+name)
+					}
+					m.ClawTargetOptions = opts
+					return m, nil
 				}
 			}
 

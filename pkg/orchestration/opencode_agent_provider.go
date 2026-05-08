@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
-
-	"path/filepath"
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"

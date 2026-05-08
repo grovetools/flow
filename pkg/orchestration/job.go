@@ -164,8 +164,9 @@ type Job struct {
 	NoteRef            string `yaml:"note_ref,omitempty" json:"note_ref,omitempty" jsonschema:"description=Reference to a notebook entry for context"`
 
 	// Channel & Autonomous support (for interactive_agent jobs)
-	Channels   []string                 `yaml:"channels,omitempty" json:"channels,omitempty" jsonschema:"description=External channels to enable (e.g. signal)"`
-	Autonomous *models.AutonomousConfig `yaml:"autonomous,omitempty" json:"autonomous,omitempty" jsonschema:"description=Autonomous idle pinger configuration"`
+	Channels     []string                 `yaml:"channels,omitempty" json:"channels,omitempty" jsonschema:"description=External channels to enable (e.g. signal)"`
+	SignalTarget string                   `yaml:"signal_target,omitempty" json:"signal_target,omitempty" jsonschema:"description=Named signal target (contact or group) for outbound messages"`
+	Autonomous   *models.AutonomousConfig `yaml:"autonomous,omitempty" json:"autonomous,omitempty" jsonschema:"description=Autonomous idle pinger configuration"`
 
 	// Skill fidelity tracking (populated post-execution from status.json files)
 	SkillFidelity []SkillFidelityState `yaml:"skill_fidelity,omitempty" json:"skill_fidelity,omitempty" jsonschema:"description=Skill sequence execution fidelity records"`
