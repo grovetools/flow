@@ -21,14 +21,15 @@ func newAgentClawCmd() *cobra.Command {
 	var idleMinutes int
 	var prompt string
 	var signalTarget string
+	var channel string
 
 	cmd := &cobra.Command{
 		Use:   "claw <slug> <job>",
 		Short: "Enable channels and autonomous mode on an interactive agent",
-		Long: `Enable Signal channel and autonomous idle pinging on a running interactive agent.
+		Long: `Enable messaging channel and autonomous idle pinging on a running interactive agent.
 
 This turns a standard interactive agent into a "claw" agent that can:
-- Receive and send Signal messages
+- Receive and send messages via Signal or Home Assistant Voice
 - Get periodic idle pings when inactive`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,11 +40,13 @@ This turns a standard interactive agent into a "claw" agent that can:
 				return err
 			}
 
+			channels := []string{channel}
+
 			client := daemon.NewWithAutoStart()
 			defer client.Close()
 
-			// Enable signal channel
-			if err := client.UpdateSessionChannels(ctx, job.ID, models.SessionChannelsRequest{Channels: []string{"signal"}, SignalTarget: signalTarget}); err != nil {
+			// Enable channel
+			if err := client.UpdateSessionChannels(ctx, job.ID, models.SessionChannelsRequest{Channels: channels, SignalTarget: signalTarget}); err != nil {
 				return fmt.Errorf("failed to enable channels: %w", err)
 			}
 
@@ -64,9 +67,9 @@ This turns a standard interactive agent into a "claw" agent that can:
 				_ = client.UpdateSessionTmuxTarget(ctx, job.ID, targetPane)
 
 				notifyCfg := notifyconfig.Load()
-				instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"}, signalTarget)
+				instructions := notifications.AgentInstructions(notifyCfg, channels, signalTarget)
 				if instructions != "" {
-					msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
+					msg := fmt.Sprintf("System: %s messaging and autonomous mode have been enabled for this session.\n\n%s", channel, instructions)
 					grovelogging.NewLogger("flow.cmd.claw").WithFields(map[string]interface{}{
 						"job_id":  job.ID,
 						"msg_len": len(msg),
@@ -76,7 +79,7 @@ This turns a standard interactive agent into a "claw" agent that can:
 			}
 
 			// Update job frontmatter with channels + autonomous + signal_target
-			job.Channels = []string{"signal"}
+			job.Channels = channels
 			job.SignalTarget = signalTarget
 			job.Autonomous = &models.AutonomousConfig{
 				Enabled:     true,
@@ -85,7 +88,7 @@ This turns a standard interactive agent into a "claw" agent that can:
 			}
 			writeClawFrontmatter(job)
 
-			fmt.Printf("Claw enabled for %s (signal + autonomous, idle=%dm)\n", job.Title, idleMinutes)
+			fmt.Printf("Claw enabled for %s (%s + autonomous, idle=%dm)\n", job.Title, channel, idleMinutes)
 			return nil
 		},
 	}
@@ -93,6 +96,7 @@ This turns a standard interactive agent into a "claw" agent that can:
 	cmd.Flags().IntVar(&idleMinutes, "idle", 15, "Minutes of inactivity before idle ping")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Custom idle ping prompt (default: check for new work)")
 	cmd.Flags().StringVar(&signalTarget, "signal-target", "", "Named signal target (contact or group) for outbound messages")
+	cmd.Flags().StringVar(&channel, "channel", "signal", "Messaging channel to enable (signal, ha)")
 
 	return cmd
 }
