@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	grovecontext "github.com/grovetools/cx/pkg/context"
@@ -93,6 +94,13 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 		job.EndTime = time.Now()
 		_ = job.UpdateStatus(persister, finalStatus)
+
+		// Clean up daemon session record for this headless agent.
+		if client := daemon.New(); client != nil {
+			endCtx, endCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer endCancel()
+			_ = client.EndSession(endCtx, job.ID, string(finalStatus))
+		}
 	}()
 
 	// Determine the working directory for the job
