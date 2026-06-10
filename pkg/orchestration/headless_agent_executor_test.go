@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,6 +78,73 @@ func TestHeadlessAgentExecutor_PrepareWorktree(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error for missing worktree, got nil")
 	}
+}
+
+func TestBuildHeadlessCommand(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("claude pipes prompt via stdin", func(t *testing.T) {
+		cmd, err := buildHeadlessCommand(ctx, "claude", "do the task", []string{"--model", "opus"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := filepath.Base(cmd.Path); got != "claude" && cmd.Args[0] != "claude" {
+			t.Errorf("expected claude binary, got path=%s args[0]=%s", cmd.Path, cmd.Args[0])
+		}
+		wantArgs := []string{"claude", "--dangerously-skip-permissions", "--model", "opus"}
+		if len(cmd.Args) != len(wantArgs) {
+			t.Fatalf("expected args %v, got %v", wantArgs, cmd.Args)
+		}
+		for i, a := range wantArgs {
+			if cmd.Args[i] != a {
+				t.Errorf("arg %d: expected %q, got %q", i, a, cmd.Args[i])
+			}
+		}
+		if cmd.Stdin == nil {
+			t.Errorf("expected prompt on stdin for claude")
+		}
+	})
+
+	t.Run("opencode uses run subcommand with prompt arg", func(t *testing.T) {
+		cmd, err := buildHeadlessCommand(ctx, "opencode", "do the task", []string{"--log-level", "DEBUG"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantArgs := []string{"opencode", "run", "--log-level", "DEBUG", "do the task"}
+		if len(cmd.Args) != len(wantArgs) {
+			t.Fatalf("expected args %v, got %v", wantArgs, cmd.Args)
+		}
+		for i, a := range wantArgs {
+			if cmd.Args[i] != a {
+				t.Errorf("arg %d: expected %q, got %q", i, a, cmd.Args[i])
+			}
+		}
+		if cmd.Stdin != nil {
+			t.Errorf("expected no stdin for opencode (prompt is an argument)")
+		}
+	})
+
+	t.Run("codex returns actionable error", func(t *testing.T) {
+		_, err := buildHeadlessCommand(ctx, "codex", "do the task", nil)
+		if err == nil {
+			t.Fatal("expected error for codex headless, got nil")
+		}
+		for _, want := range []string{"codex", "headless", "claude", "opencode"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error should mention %q, got: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("unknown provider returns error naming it", func(t *testing.T) {
+		_, err := buildHeadlessCommand(ctx, "gemini", "do the task", nil)
+		if err == nil {
+			t.Fatal("expected error for unknown provider, got nil")
+		}
+		if !strings.Contains(err.Error(), "gemini") {
+			t.Errorf("error should name the provider, got: %v", err)
+		}
+	})
 }
 
 func TestHeadlessAgentExecutor_BuildPrompt(t *testing.T) {
