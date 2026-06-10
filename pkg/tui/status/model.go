@@ -66,6 +66,7 @@ const (
 	MemoryPaneDetail
 	NativeAgentPaneDetail
 	EditorPaneDetail // BSP split editor (hosted mode only)
+	WorkflowPaneDetail
 )
 
 // Model represents the state of the TUI
@@ -127,6 +128,20 @@ type Model struct {
 	skillPaneCursor       int                                         // Cursor position in the skill pane tree
 	skillPaneNodes        []*SkillPaneNode                            // Flattened skill/artifact nodes for cursor navigation
 	skillPaneStateMap     map[string]orchestration.SkillFidelityState // Cached state map
+
+	// Workflow pane state. The pane consumes workflowmon events exclusively
+	// (never journal files), accumulated into workflowState; transcript lines
+	// for the selected agent stream into workflowLogViewer via MsgCh.
+	workflowPaneViewport    viewport.Model
+	workflowDetailViewport  viewport.Model
+	workflowLogViewer       logviewer.Model
+	workflowPaneCursor      int
+	workflowPaneNodes       []*WorkflowPaneNode
+	workflowPaneRawContent  string
+	workflowState           *workflowPaneState
+	workflowCancel          context.CancelFunc  // tears down the event source + transcript collector
+	workflowAgentLines      map[string][]string // formatted transcript lines per agent (capped)
+	workflowSelectedAgentID string              // agent whose transcript fills the detail viewer
 
 	// Claw dialog
 	ClawDialogActive         bool
@@ -199,9 +214,9 @@ type Model struct {
 	// handles split direction, fullscreen zoom, and focus cycling.
 	Manager panes.Manager
 
-	// SkillSubFocus tracks which sub-pane within the skill detail pane is
-	// focused: 0 = tree view, 1 = artifact viewport. Only relevant when
-	// ActiveDetailPane == SkillPane.
+	// SkillSubFocus tracks which sub-pane within a tree+detail pane is
+	// focused: 0 = tree view, 1 = detail viewport. Relevant when
+	// ActiveDetailPane is SkillPane or WorkflowPaneDetail.
 	SkillSubFocus int
 
 	// viewportActive tracks whether a BSP ViewportPanel is currently open
@@ -228,6 +243,9 @@ func (m *Model) closeCurrentDetail() tea.Cmd {
 	if m.ActiveDetailPane == NoPane {
 		return nil
 	}
+
+	// Tear down workflow monitoring whenever the detail view closes.
+	m.stopWorkflowMonitor()
 
 	// If the detail pane is promoted (BSP split), demote it to tear down
 	// the host split and reclaim layout space.
@@ -291,7 +309,7 @@ func (m *Model) syncFocusFromManager() {
 	case "jobs":
 		m.Focus = FocusJobs
 	case "detail":
-		if m.ActiveDetailPane == SkillPane && m.SkillSubFocus == 1 {
+		if (m.ActiveDetailPane == SkillPane || m.ActiveDetailPane == WorkflowPaneDetail) && m.SkillSubFocus == 1 {
 			m.Focus = FocusDetailSecondary
 		} else {
 			m.Focus = FocusDetailPrimary
@@ -354,6 +372,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Preview"
 	case SkillPane:
 		paneTitle = "Skills"
+	case WorkflowPaneDetail:
+		paneTitle = "Workflows"
 	case ContextPaneDetail:
 		paneTitle = "Context"
 	case MemoryPaneDetail:
@@ -411,6 +431,18 @@ func (m Model) renderDetailContent() string {
 		artifactView := addScrollbarToViewport(&m.skillArtifactViewport)
 		sepLine := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", m.LogViewerWidth))
 		return treeView + "\n" + sepLine + "\n" + artifactView
+	case WorkflowPaneDetail:
+		treeView := addScrollbarToViewport(&m.workflowPaneViewport)
+		sepLine := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", m.LogViewerWidth))
+		// Agent nodes show the live transcript viewer; run/phase nodes show
+		// the rendered detail viewport.
+		var bottom string
+		if m.workflowSelectedAgentID != "" {
+			bottom = m.workflowLogViewer.View()
+		} else {
+			bottom = addScrollbarToViewport(&m.workflowDetailViewport)
+		}
+		return treeView + "\n" + sepLine + "\n" + bottom
 	default:
 		return ""
 	}
@@ -449,6 +481,7 @@ func (m *Model) resizeAllDetailViewports() {
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.updateSkillViewportSizes()
+	m.updateWorkflowViewportSizes()
 
 	if m.frontmatterRawContent != "" {
 		styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
@@ -467,6 +500,9 @@ func (m *Model) resizeAllDetailViewports() {
 	}
 	if m.skillPaneRawContent != "" {
 		m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
+	}
+	if m.workflowPaneRawContent != "" {
+		m.workflowPaneViewport.SetContent(wrapContentForViewport(m.workflowPaneRawContent, m.workflowPaneViewport.Width-1))
 	}
 }
 
@@ -520,6 +556,8 @@ func New(cfg Config) Model {
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
 	skillArtifactVp := viewport.New(80, 10)
+	workflowPaneVp := viewport.New(80, 20)
+	workflowDetailVp := viewport.New(80, 10)
 
 	// Initialize search input for skill pane
 	skillSearch := textinput.New()
@@ -643,6 +681,10 @@ func New(cfg Config) Model {
 		editViewport:             editVp,
 		skillPaneViewport:        skillPaneVp,
 		skillArtifactViewport:    skillArtifactVp,
+		workflowPaneViewport:     workflowPaneVp,
+		workflowDetailViewport:   workflowDetailVp,
+		workflowLogViewer:        logviewer.New(80, 10),
+		workflowAgentLines:       make(map[string][]string),
 		skillSearchInput:         skillSearch,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
@@ -715,6 +757,7 @@ func (m Model) listenToDaemon() tea.Cmd {
 // grove terminal) must call Close() before discarding a Model instance
 // so background goroutines don't leak across instance lifetimes.
 func (m *Model) Close() error {
+	m.stopWorkflowMonitor()
 	if m.streamCancel != nil {
 		m.streamCancel()
 		m.streamCancel = nil
