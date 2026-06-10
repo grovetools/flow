@@ -52,7 +52,7 @@ func TestBuildCommandParity(t *testing.T) {
 		{
 			name:             "real-world long path",
 			agentArgs:        []string{"--model", "opus"},
-			briefingFilePath: "/Users/solom4/notebooks/grovetools/workspaces/grovetools/plans/treemux-phase4/.artifacts/impl-briefing-quoting-fix-093f2e09/briefing-1776017699.xml",
+			briefingFilePath: "/Users/someone/notebooks/grovetools/workspaces/grovetools/plans/treemux-phase4/.artifacts/impl-briefing-quoting-fix-093f2e09/briefing-1776017699.xml",
 		},
 	}
 

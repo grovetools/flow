@@ -294,7 +294,7 @@ func TestPathIsUnderGroveWorktrees_SafetyRails(t *testing.T) {
 		want bool
 	}{
 		{"root", "/", false},
-		{"home", "/Users/solom4", false},
+		{"home", "/Users/someone", false},
 		{"container itself", filepath.Join(gitRoot, ".grove-worktrees"), false},
 		{"escape via dotdot", filepath.Join(gitRoot, ".grove-worktrees", "..", ".."), false},
 		{"similar-name bypass", "/Users/someone/repo/.grove-worktreesX/foo", false},
