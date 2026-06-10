@@ -232,6 +232,12 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 			} else if !silent {
 				fmt.Println(color.GreenString("*") + " Session artifacts archived.")
 			}
+			if err := ArchiveWorkflowRuns(job, plan); err != nil {
+				// Log a warning but don't fail the entire completion process.
+				if !silent {
+					fmt.Printf("Warning: failed to archive workflow runs: %v\n", err)
+				}
+			}
 		}
 	}
 
