@@ -15,7 +15,7 @@ import (
 // ProviderConfig defines the configuration for testing a specific provider.
 type ProviderConfig struct {
 	Name          string   // Provider name: "claude", "codex", "opencode"
-	MockName      string   // Mock binary name (e.g., "claude", "cx", "opencode")
+	MockName      string   // Mock binary name (e.g., "claude", "codex", "opencode")
 	TestArgs      []string // Test args to verify are passed
 	ProjectSuffix string   // Unique suffix for project names
 }
@@ -31,7 +31,7 @@ func AllProviders() []ProviderConfig {
 		},
 		{
 			Name:          "codex",
-			MockName:      "cx",
+			MockName:      "codex",
 			TestArgs:      []string{"--codex-test-arg", "--full-auto"},
 			ProjectSuffix: "codex",
 		},
