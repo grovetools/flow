@@ -13,8 +13,72 @@ import (
 	"github.com/grovetools/core/util/delegation"
 )
 
+// verifiedTranscriptSpec decides whether a transcript may be streamed for a
+// job, based on the hooks session registry lookup result. It returns the
+// aglogs spec (the agent's native session id) and true only when the binding
+// is verified — i.e. the registry has an entry for the job with a recorded
+// native session id.
+//
+// A plan/job-name aglogs spec is NOT a safe fallback: aglogs resolves it to
+// ANY session that ever matched that plan/job name, which can silently stream
+// another agent's transcript into this job's log (see issue:
+// wrong-session-logs-bound-to-headless-tuimux-jobs). Comparing the
+// transcript's session_id against job.ID is not a substitute either — they
+// live in different namespaces (Claude session UUID vs flow job id) and never
+// match.
+func verifiedTranscriptSpec(metadata *sessions.SessionMetadata, findErr error) (string, bool) {
+	if findErr == nil && metadata != nil && metadata.ClaudeSessionID != "" {
+		return metadata.ClaudeSessionID, true
+	}
+	return "", false
+}
+
+// unverifiedBindingMarker is the single marker line appended to job.log when
+// the session binding for a job cannot be verified and the transcript is
+// therefore not captured.
+func unverifiedBindingMarker(jobID string) string {
+	return fmt.Sprintf("[flow] session binding unverified for job %s — transcript not captured (hooks session registry had no entry); see issue: wrong-session-logs\n", jobID)
+}
+
+// markTranscriptUnverified records (best-effort) that the job's transcript was
+// intentionally not captured because the session binding could not be
+// verified: it logs a warning and appends a single marker line to job.log
+// (deduplicated across repeated calls).
+func markTranscriptUnverified(ctx context.Context, job *Job, plan *Plan) {
+	ulog.Warn("[TRANSCRIPT] Session binding unverified — refusing to stream transcript").
+		Field("job_id", job.ID).
+		Field("plan_name", plan.Name).
+		Field("filename", job.Filename).
+		Log(ctx)
+
+	jobLogPath, err := GetJobLogPath(plan, job)
+	if err != nil {
+		return
+	}
+	marker := unverifiedBindingMarker(job.ID)
+	if existing, readErr := os.ReadFile(jobLogPath); readErr == nil && strings.Contains(string(existing), strings.TrimSpace(marker)) {
+		return // marker already present
+	}
+	f, err := os.OpenFile(jobLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		ulog.Warn("[TRANSCRIPT] Failed to write unverified-binding marker to job.log").
+			Field("job_id", job.ID).
+			Field("logpath", jobLogPath).
+			Err(err).
+			Log(ctx)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = f.WriteString(marker)
+}
+
 // AppendAgentTranscript finds the transcript for an agent job
 // and appends it to the job's markdown file.
+//
+// The transcript is streamed ONLY when the session binding is verified via
+// the hooks session registry (see verifiedTranscriptSpec). On an unverified
+// binding the transcript is not captured; a marker line is appended to
+// job.log instead.
 func AppendAgentTranscript(job *Job, plan *Plan) error {
 	ctx := context.Background()
 
@@ -29,23 +93,31 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		Field("filename", job.Filename).
 		Log(ctx)
 
-	// Try to get session ID from registry for aglogs (works for opencode, claude, etc.)
-	// Fall back to job spec if session not found in registry
-	aglogsSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+	// Resolve the aglogs spec via the hooks session registry. There is NO
+	// unverified fallback: streaming by plan/job name can bind another
+	// agent's transcript to this job (see verifiedTranscriptSpec).
+	var aglogsSpec string
+	var verified bool
 	if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
-		if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata.ClaudeSessionID != "" {
+		metadata, findErr := registry.Find(job.ID)
+		aglogsSpec, verified = verifiedTranscriptSpec(metadata, findErr)
+		if verified {
 			ulog.Debug("[TRANSCRIPT] Using session ID from registry").
 				Field("job_id", job.ID).
 				Field("claude_session_id", metadata.ClaudeSessionID).
 				Field("provider", metadata.Provider).
 				Log(ctx)
-			aglogsSpec = metadata.ClaudeSessionID
 		} else {
-			ulog.Debug("[TRANSCRIPT] Session not found in registry, using job spec").
+			ulog.Debug("[TRANSCRIPT] Session not found in registry").
 				Field("job_id", job.ID).
 				Field("find_error", findErr).
 				Log(ctx)
 		}
+	}
+
+	if !verified {
+		markTranscriptUnverified(ctx, job, plan)
+		return nil // Not an error; transcript intentionally not captured.
 	}
 
 	// Get formatted transcript for job.log (with ANSI colors)
