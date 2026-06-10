@@ -17,21 +17,10 @@ import (
 	grovecontext "github.com/grovetools/cx/pkg/context"
 )
 
-// AgentRunner defines the interface for running agents.
-type AgentRunner interface {
-	RunAgent(ctx context.Context, worktree, prompt string) error
-}
-
 // HeadlessAgentExecutor executes headless agent jobs in isolated git worktrees.
 type HeadlessAgentExecutor struct {
-	llmClient   LLMClient
-	config      *ExecutorConfig
-	agentRunner AgentRunner
-}
-
-// defaultAgentRunner implements AgentRunner using grove agent subprocess.
-type defaultAgentRunner struct {
-	config *ExecutorConfig
+	llmClient LLMClient
+	config    *ExecutorConfig
 }
 
 // NewHeadlessAgentExecutor creates a new headless agent executor.
@@ -46,9 +35,8 @@ func NewHeadlessAgentExecutor(llmClient LLMClient, config *ExecutorConfig) *Head
 	}
 
 	return &HeadlessAgentExecutor{
-		llmClient:   llmClient,
-		config:      config,
-		agentRunner: &defaultAgentRunner{config: config},
+		llmClient: llmClient,
+		config:    config,
 	}
 }
 
@@ -344,11 +332,6 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 	ulog.Debug("[HEADLESS] Claude CLI execution completed").
 		Field("job_id", job.ID).
 		Log(ctx)
-	return nil
-}
-
-// RunAgent implements the AgentRunner interface.
-func (r *defaultAgentRunner) RunAgent(ctx context.Context, worktree, prompt string) error {
 	return nil
 }
 

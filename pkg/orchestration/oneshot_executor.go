@@ -272,9 +272,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Log(ctx)
 	}
 
-	// Set environment for mock testing
-	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
-
 	// Set environment for mock LLM if needed
 	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
 	defer os.Unsetenv("GROVE_CURRENT_JOB_PATH")
@@ -389,7 +386,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			IncludeFiles: promptSourceFiles,
 		}
 		if isTUIMode() {
-			fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
+			fmt.Fprintf(output, "\n󰚩 Calling LLM API with model: %s\n\n", effectiveModel)
 		}
 		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
 	}
