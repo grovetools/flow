@@ -1,0 +1,4 @@
+{"type":"started","key":"v2:5c6d5b0d80077c4519bbe2738eba4eb252db95fa5ed6fa8cf132eb2ccc300a17","agentId":"a6053d9fe85440cfe"}
+{"type":"started","key":"v2:6f9f18eb8b3dc5b3a73ce48b60fd475d122a9992ae1bb6052c61b4af9b958e8f","agentId":"a9172cda79b99f9ad"}
+{"type":"result","key":"v2:5c6d5b0d80077c4519bbe2738eba4eb252db95fa5ed6fa8cf132eb2ccc300a17","agentId":"a6053d9fe85440cfe","result":{"summary":"first agent finding","files":["a.go","b.go"]}}
+{"type":"result","key":"v2:6f9f18eb8b3dc5b3a73ce48b60fd475d122a9992ae1bb6052c61b4af9b958e8f","agentId":"a9172cda79b99f9ad","result":"plain text result from a schemaless agent"}

@@ -15,6 +15,11 @@ type PlanConfig struct {
 	// inherit this value unless they declare their own override. Primary
 	// source of truth for $PLAYBOOK_ROOT env injection at execution time.
 	Playbook string `yaml:"playbook,omitempty" json:"playbook,omitempty"`
+	// ArchiveAgentTranscripts opts in to copying per-agent workflow
+	// transcripts (agent-*.jsonl, agent-*.meta.json) when archiving workflow
+	// runs on job completion. Off by default: transcripts can run to many MB
+	// per run, while the journal, script, and summary are always archived.
+	ArchiveAgentTranscripts bool `yaml:"archive_agent_transcripts,omitempty"`
 }
 
 // ShouldInline checks if a specific category should be inlined by default for jobs in this plan.

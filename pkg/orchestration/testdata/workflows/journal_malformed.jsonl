@@ -1,0 +1,4 @@
+{"type":"started","key":"v2:aaa1","agentId":"agent-one"}
+this line is not json at all
+{"type":"result","key":"v2:aaa1","agentId":"agent-one","result":{"ok":true}}
+{"type":"started","key":"v2:bbb2","agentId":
