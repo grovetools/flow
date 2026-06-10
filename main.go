@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/version"
 
 	"github.com/grovetools/flow/cmd"
 	"github.com/grovetools/flow/pkg/docs"
@@ -14,6 +15,15 @@ func main() {
 		"flow",
 		"Job orchestration and workflows",
 	)
+
+	vInfo := version.GetInfo()
+	rootCmd.Version = vInfo.Version
+	cli.SetVersionTemplate(rootCmd, cli.VersionInfo{
+		Version:   vInfo.Version,
+		Commit:    vInfo.Commit,
+		BuildDate: vInfo.BuildDate,
+		BuildArch: vInfo.Platform,
+	})
 
 	// Add hoisted plan commands at the top level
 	rootCmd.AddCommand(cmd.NewStatusCmd())
