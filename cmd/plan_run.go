@@ -265,10 +265,10 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check for llm command if oneshot jobs are present
+	// Check for the grove command (which provides `grove llm`) if oneshot jobs are present
 	if hasOneShot {
-		if _, err := exec.LookPath("llm"); err != nil {
-			return fmt.Errorf("dependency 'llm' not found. Please install with 'pip install llm'")
+		if _, err := exec.LookPath("grove"); err != nil {
+			return fmt.Errorf("dependency 'grove' not found in PATH (oneshot jobs invoke 'grove llm')")
 		}
 	}
 

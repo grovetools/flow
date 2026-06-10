@@ -29,16 +29,16 @@ type LLMClient interface {
 	Complete(ctx context.Context, job *Job, plan *Plan, prompt string, opts LLMOptions, output io.Writer) (string, error)
 }
 
-// CommandLLMClient implements LLMClient using the llm command-line tool.
+// CommandLLMClient implements LLMClient using the `grove llm` command-line tool.
 type CommandLLMClient struct {
 	cmdBuilder *command.SafeBuilder
 }
 
-// NewCommandLLMClient creates a new LLM client that executes the llm command.
+// NewCommandLLMClient creates a new LLM client that executes the `grove llm` command.
 func NewCommandLLMClient(executor command.Executor) *CommandLLMClient {
-	// Check if 'llm' command exists in PATH
-	if _, err := exec.LookPath("llm"); err != nil {
-		ulog.Warn("llm command not found in PATH").
+	// Check that 'grove' (which provides `grove llm`) exists in PATH
+	if _, err := exec.LookPath("grove"); err != nil {
+		ulog.Warn("grove command not found in PATH (required for `grove llm`)").
 			Err(err).
 			Log(context.Background())
 	}
