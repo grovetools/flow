@@ -172,14 +172,14 @@ var (
 func NewPlanCmd() *cobra.Command {
 	// Init command flags
 	planInitCmd.Flags().BoolVarP(&planInitForce, "force", "f", false, "Overwrite existing directory")
-	planInitCmd.Flags().StringVar(&planInitModel, "model", "", "Default model for jobs (e.g., claude-3-5-sonnet-20241022, gpt-4)")
+	planInitCmd.Flags().StringVar(&planInitModel, "model", "", "Default model for jobs (e.g., claude-sonnet-4-6, gemini-2.5-pro)")
 	planInitCmd.Flags().StringVar(&planInitWorktree, "worktree", "", "Set default worktree (uses plan name if no value provided)")
 	planInitCmd.Flags().Lookup("worktree").NoOptDefVal = "__AUTO__" // Special marker for auto-naming
 	planInitCmd.Flags().StringVar(&planInitExtractAllFrom, "extract-all-from", "", "Path to a markdown file to extract all content from into an initial job")
 	planInitCmd.Flags().BoolVar(&planInitOpenSession, "open-session", false, "Immediately open a tmux session for the plan (uses worktree if configured, otherwise main repo)")
 	planInitCmd.Flags().StringVar(&planInitEnvProfile, "env", "", "Named environment profile to use (e.g., docker, cloud)")
 	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature). When using --recipe-cmd, this can be omitted if the command provides only one recipe")
-	planInitCmd.Flags().StringArrayVar(&planInitRecipeVars, "recipe-vars", nil, "Variables to pass to recipe templates. Can be used multiple times or comma-delimited (e.g., --recipe-vars model=gpt-4 --recipe-vars rules_file=docs.rules OR --recipe-vars \"model=gpt-4,rules_file=docs.rules,output_dir=docs\")")
+	planInitCmd.Flags().StringArrayVar(&planInitRecipeVars, "recipe-vars", nil, "Variables to pass to recipe templates. Can be used multiple times or comma-delimited (e.g., --recipe-vars model=gemini-2.5-pro --recipe-vars rules_file=docs.rules OR --recipe-vars \"model=gemini-2.5-pro,rules_file=docs.rules,output_dir=docs\")")
 	planInitCmd.Flags().StringVar(&planInitRecipeCmd, "recipe-cmd", "", "Command that outputs JSON recipe definitions (overrides grove.yml's get_recipe_cmd)")
 	planInitCmd.Flags().StringSliceVar(&planInitRepos, "repos", nil, "Specific repos to include in ecosystem worktree (e.g., --repos grove-core,grove-flow). If not specified, all submodules are included")
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
@@ -196,7 +196,7 @@ func NewPlanCmd() *cobra.Command {
 	planRunCmd.Flags().IntVarP(&planRunParallel, "parallel", "p", 3, "Max parallel jobs")
 	planRunCmd.Flags().BoolVarP(&planRunWatch, "watch", "w", false, "Watch progress in real-time")
 	planRunCmd.Flags().BoolVarP(&planRunYes, "yes", "y", false, "Skip confirmation prompts")
-	planRunCmd.Flags().StringVar(&planRunModel, "model", "", "Override model for jobs (e.g., claude-3-5-sonnet-20240620, gpt-4)")
+	planRunCmd.Flags().StringVar(&planRunModel, "model", "", "Override model for jobs (e.g., claude-sonnet-4-6, gemini-2.5-pro)")
 	planRunCmd.Flags().BoolVar(&planRunSkipInteractive, "skip-interactive", false, "Skip interactive agent jobs (useful for CI/automation)")
 	planRunCmd.Flags().BoolVar(&planRunLocal, "local", false, "Force local execution (bypass daemon)")
 	planRunCmd.Flags().BoolVar(&planRunBackground, "background", false, "Submit to daemon and exit without waiting")
