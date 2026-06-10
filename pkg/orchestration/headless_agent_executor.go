@@ -12,6 +12,7 @@ import (
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	grovecontext "github.com/grovetools/cx/pkg/context"
@@ -257,7 +258,54 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		}
 	}
 
+	// Pre-register the session intent with the daemon BEFORE launching the
+	// agent, now that the work dir and resolved provider are known.
+	e.registerSessionIntent(ctx, job, plan, worktreePath, providerName)
+
 	return e.runOnHost(ctx, worktreePath, prompt, job, plan, providerName, agentArgs)
+}
+
+// registerSessionIntent best-effort pre-registers the headless session with
+// the daemon before the agent process is launched, mirroring the interactive
+// providers (ClaudeAgentProvider.Launch / GrovetermAgentProvider.Launch).
+// Without this, headless agents that never fire a tool hook leave the hooks
+// session registry empty, making the job's transcript binding unverifiable
+// (see issue: wrong-session-logs-bound-to-headless-tuimux-jobs).
+// Failure to register is logged as a warning and is never fatal.
+func (e *HeadlessAgentExecutor) registerSessionIntent(ctx context.Context, job *Job, plan *Plan, workDir, providerName string) {
+	daemonClient := daemon.NewWithAutoStart()
+	defer daemonClient.Close()
+
+	ulog.Debug("[HEADLESS] Registering session intent with daemon").
+		Field("job_id", job.ID).
+		Field("provider", providerName).
+		Field("daemon_running", daemonClient.IsRunning()).
+		Log(ctx)
+
+	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
+		JobID:        job.ID,
+		Provider:     providerName,
+		JobFilePath:  job.FilePath,
+		PlanName:     plan.Name,
+		Title:        job.Title,
+		WorkDir:      workDir,
+		Channels:     job.Channels,
+		SignalTarget: job.SignalTarget,
+		Autonomous:   job.Autonomous,
+		// Headless agents run as a direct child process, not inside a
+		// multiplexer pane.
+		Mux: models.MuxNone,
+	}); err != nil {
+		ulog.Warn("[HEADLESS] Failed to register session intent with daemon").
+			Field("job_id", job.ID).
+			Field("provider", providerName).
+			Err(err).
+			Log(ctx)
+	} else {
+		ulog.Debug("[HEADLESS] Session intent registered").
+			Field("job_id", job.ID).
+			Log(ctx)
+	}
 }
 
 // buildHeadlessCommand constructs the exec.Cmd for a provider's headless mode.
