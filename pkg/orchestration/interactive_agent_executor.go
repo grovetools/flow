@@ -363,7 +363,7 @@ func (e *InteractiveAgentExecutor) generatePlanFromDependencies(ctx context.Cont
 		effectiveModel = plan.Config.Model
 	}
 	if effectiveModel == "" {
-		effectiveModel = "gemini-2.0-flash-exp" // Fallback
+		effectiveModel = "gemini-2.5-flash" // Fallback
 	}
 
 	// Determine working directory for context discovery

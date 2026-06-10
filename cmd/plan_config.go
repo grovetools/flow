@@ -35,10 +35,10 @@ func NewPlanConfigCmd() *cobra.Command {
 
 Examples:
   # Set a single value
-  flow plan config myplan --set model=gemini-2.0-flash
+  flow plan config myplan --set model=gemini-2.5-flash
   
   # Set multiple values
-  flow plan config myplan --set model=gemini-2.0-flash --set worktree=feature/new
+  flow plan config myplan --set model=gemini-2.5-flash --set worktree=feature/new
   
   # Get a value
   flow plan config myplan --get model
