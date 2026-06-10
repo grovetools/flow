@@ -111,7 +111,7 @@ With multiple job file arguments, runs those jobs in parallel.`,
 	runCmd.Flags().IntVarP(&planRunParallel, "parallel", "p", 3, "Max parallel jobs")
 	runCmd.Flags().BoolVarP(&planRunWatch, "watch", "w", false, "Watch progress in real-time")
 	runCmd.Flags().BoolVarP(&planRunYes, "yes", "y", false, "Skip confirmation prompts")
-	runCmd.Flags().StringVar(&planRunModel, "model", "", "Override model for jobs (e.g., claude-3-5-sonnet-20240620, gpt-4)")
+	runCmd.Flags().StringVar(&planRunModel, "model", "", "Override model for jobs (e.g., claude-sonnet-4-6, gemini-2.5-pro)")
 	runCmd.Flags().BoolVar(&planRunSkipInteractive, "skip-interactive", false, "Skip interactive agent jobs (useful for CI/automation)")
 	runCmd.Flags().BoolVar(&planRunLocal, "local", false, "Force local execution (bypass daemon)")
 	runCmd.Flags().BoolVar(&planRunBackground, "background", false, "Submit to daemon and exit without waiting")
