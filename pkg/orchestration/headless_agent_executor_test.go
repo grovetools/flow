@@ -8,17 +8,6 @@ import (
 	"time"
 )
 
-// mockAgentRunner implements AgentRunner for testing.
-type mockAgentRunner struct {
-	runCalled bool
-	runError  error
-}
-
-func (m *mockAgentRunner) RunAgent(ctx context.Context, worktree, prompt string) error {
-	m.runCalled = true
-	return m.runError
-}
-
 func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir, err := os.MkdirTemp("", "headless-agent-executor-test")
@@ -46,10 +35,6 @@ func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 		Timeout: 5 * time.Second,
 	}
 	executor := NewHeadlessAgentExecutor(NewMockLLMClient(), config)
-
-	// Use mock agent runner
-	mockRunner := &mockAgentRunner{}
-	executor.agentRunner = mockRunner
 
 	// Execute job
 	ctx := context.Background()
