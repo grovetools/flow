@@ -402,6 +402,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fall back to polling (already running)
 		return m, nil
 
+	case workflowSessionResolvedMsg:
+		// Discovery finished for a workflow pane. If the pane was closed or
+		// the selection moved on while the cmd was in flight, tear down the
+		// just-started producers and drop the message.
+		if m.ActiveDetailPane != WorkflowPaneDetail || m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID {
+			if msg.Cancel != nil {
+				msg.Cancel()
+			}
+			return m, nil
+		}
+		if msg.Err != nil {
+			m.workflowState = &workflowPaneState{Err: msg.Err}
+			m.refreshWorkflowPane()
+			return m, nil
+		}
+		m.workflowCancel = msg.Cancel
+		if m.workflowState == nil {
+			m.workflowState = newWorkflowPaneState()
+		}
+		m.workflowState.SessionDir = msg.SessionDir
+		m.refreshWorkflowPane()
+		return m, nil
+
+	case workflowEventMsg:
+		if m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID || m.workflowState == nil {
+			return m, nil
+		}
+		applyWorkflowEvent(m.workflowState, msg.Event)
+		if m.ActiveDetailPane == WorkflowPaneDetail {
+			m.refreshWorkflowPane()
+		}
+		return m, nil
+
+	case workflowAgentLogMsg:
+		if m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID {
+			return m, nil
+		}
+		lines := append(m.workflowAgentLines[msg.AgentID], msg.Lines...)
+		if len(lines) > workflowAgentLineCap {
+			lines = lines[len(lines)-workflowAgentLineCap:]
+		}
+		m.workflowAgentLines[msg.AgentID] = lines
+		if m.ActiveDetailPane == WorkflowPaneDetail && m.workflowSelectedAgentID == msg.AgentID {
+			for _, line := range msg.Lines {
+				m.workflowLogViewer, _ = m.workflowLogViewer.Update(logviewer.LogLineMsg{Line: line, NoPrefix: true})
+			}
+		}
+		return m, nil
+
 	case RetryLoadAgentLogsMsg:
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
@@ -993,6 +1042,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editViewport.Width = m.LogViewerWidth
 		m.editViewport.Height = logHeight
 		m.updateSkillViewportSizes()
+		m.updateWorkflowViewportSizes()
 
 		// Re-wrap content for all detail viewports to adapt to the new size
 		if m.frontmatterRawContent != "" {
@@ -1012,6 +1062,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.skillPaneRawContent != "" {
 			m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
+		}
+		if m.workflowPaneRawContent != "" {
+			m.workflowPaneViewport.SetContent(wrapContentForViewport(m.workflowPaneRawContent, m.workflowPaneViewport.Width-1))
 		}
 
 		// Start log viewer on first window size message if we have jobs and logs are enabled
@@ -1637,29 +1690,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.SwitchFocus):
 			if m.ShowLogs && !m.LogPaneFullscreen {
-				if m.ActiveDetailPane == SkillPane {
-					// 3-way cycle: Jobs <-> Tree <-> ArtifactViewport
+				if m.ActiveDetailPane == SkillPane || m.ActiveDetailPane == WorkflowPaneDetail {
+					// 3-way cycle: Jobs <-> Tree <-> DetailViewport
 					// The Manager only knows "jobs" and "detail", so we handle
-					// the skill sub-focus (tree ↔ artifact) manually.
+					// the sub-focus (tree ↔ detail viewport) manually.
 					isShiftTab := msg.Type == tea.KeyShiftTab
 					if m.Manager.ActivePane() != nil && m.Manager.ActivePane().ID == "detail" {
 						// Currently on detail pane — cycle sub-focus or go to jobs
 						if !isShiftTab {
 							if m.SkillSubFocus == 0 {
-								// tree → artifact
+								// tree → detail viewport
 								m.SkillSubFocus = 1
 								m.Focus = FocusDetailSecondary
-								m.refreshSkillPane()
+								m.refreshActiveTreePane()
 								return m, nil
 							}
-							// artifact → jobs (let Manager cycle)
+							// detail viewport → jobs (let Manager cycle)
 							m.SkillSubFocus = 0
 						} else {
 							if m.SkillSubFocus == 1 {
-								// artifact → tree
+								// detail viewport → tree
 								m.SkillSubFocus = 0
 								m.Focus = FocusDetailPrimary
-								m.refreshSkillPane()
+								m.refreshActiveTreePane()
 								return m, nil
 							}
 							// tree → jobs (let Manager cycle backward)
@@ -1676,7 +1729,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let the Manager handle the actual focus cycle between jobs ↔ detail
 				m.Manager, cmd = m.Manager.Update(msg)
 				m.syncFocusFromManager()
-				m.refreshSkillPane()
+				m.refreshActiveTreePane()
 				return m, cmd
 			}
 
@@ -1686,7 +1739,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.Focus != FocusJobs {
 					m.Manager.ActivePaneIdx = 0
 					m.syncFocusFromManager()
-					m.refreshSkillPane()
+					m.refreshActiveTreePane()
 				}
 			}
 			return m, nil
@@ -1697,7 +1750,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.Focus == FocusJobs {
 					m.Manager.ActivePaneIdx = 1
 					m.syncFocusFromManager()
-					m.refreshSkillPane()
+					m.refreshActiveTreePane()
 				}
 			} else if m.ActiveDetailPane == NoPane {
 				// No detail pane open — open logs (mimics old `l` behavior)
@@ -1996,6 +2049,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			return m.openDetailPane(SkillPane)
+
+		case key.Matches(msg, m.KeyMap.ViewWorkflows):
+			if m.ActiveDetailPane == WorkflowPaneDetail {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			return m.openDetailPane(WorkflowPaneDetail)
 
 		case key.Matches(msg, m.KeyMap.ViewContext):
 			if !m.Hosted {
@@ -2796,6 +2856,10 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
 		return m, nil
+	case WorkflowPaneDetail:
+		// Job switched while the workflow pane is open: restart discovery
+		// for the new job's session.
+		return m, m.restartWorkflowMonitor(job)
 	}
 
 	return m, nil
@@ -2841,6 +2905,12 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	isCurrentlyPromoted := m.Manager.IsPromoted("detail")
 
 	var cmds []tea.Cmd
+
+	// Leaving the workflow pane tears down its event source and transcript
+	// collector; reopening rediscovers from scratch.
+	if m.ActiveDetailPane == WorkflowPaneDetail && pane != WorkflowPaneDetail {
+		m.stopWorkflowMonitor()
+	}
 
 	// If switching from promoted -> internal, demote first to close the BSP split.
 	if isCurrentlyPromoted && !isTargetPromoted {
@@ -2931,6 +3001,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
+	m.updateWorkflowViewportSizes()
 
 	// Trigger content loading for the active pane
 	switch pane {
@@ -2960,6 +3031,9 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.skillPaneRawContent = result.treeContent
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
+	case WorkflowPaneDetail:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Discovering workflow runs for %s...", job.Title))
+		cmds = append(cmds, m.restartWorkflowMonitor(job))
 	}
 
 	return m, tea.Batch(cmds...)
@@ -3072,6 +3146,9 @@ func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ActiveDetailPane == SkillPane {
 		return m.handleSkillTreeKey(msg)
 	}
+	if m.ActiveDetailPane == WorkflowPaneDetail {
+		return m.handleWorkflowTreeKey(msg)
+	}
 	return m.handleViewportKey(msg, m.ActiveDetailPane)
 }
 
@@ -3079,6 +3156,9 @@ func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleDetailSecondaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ActiveDetailPane == SkillPane {
 		return m.handleArtifactViewportKey(msg)
+	}
+	if m.ActiveDetailPane == WorkflowPaneDetail {
+		return m.handleWorkflowDetailKey(msg)
 	}
 	return m, nil
 }

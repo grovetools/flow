@@ -28,6 +28,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/workflowmon"
 )
 
 // Message types
@@ -123,6 +124,115 @@ func subscribeToDaemonCmd() tea.Cmd {
 		}
 
 		return daemonStreamConnectedMsg{ch: ch, cancel: cancel}
+	}
+}
+
+// workflowSessionResolvedMsg reports the outcome of workflow run discovery
+// for a job: the resolved Claude session directory plus the cancel func that
+// tears down the event source and transcript collector, or the error that
+// prevented discovery.
+type workflowSessionResolvedMsg struct {
+	JobID      string
+	SessionDir string
+	Cancel     context.CancelFunc
+	Err        error
+}
+
+// workflowEventMsg wraps one workflowmon lifecycle event for the Update loop.
+type workflowEventMsg struct {
+	JobID string
+	Event workflowmon.Event
+}
+
+// workflowAgentLogMsg carries one formatted transcript line for a workflow
+// agent, delivered via MsgCh by the transcript collector.
+type workflowAgentLogMsg struct {
+	JobID   string
+	AgentID string
+	Lines   []string
+}
+
+// startWorkflowMonitorCmd resolves the job's Claude session directory via the
+// hooks session registry and starts two background producers feeding MsgCh:
+// a workflowmon.FileSource forwarding typed lifecycle events, and an
+// agentstream.StreamWorkflow collector forwarding formatted transcript lines
+// tagged by agent ID. The returned msg carries the cancel func owning both.
+func startWorkflowMonitorCmd(job *orchestration.Job, msgCh chan tea.Msg) tea.Cmd {
+	jobID := job.ID
+	return func() tea.Msg {
+		registry, err := sessions.NewFileSystemRegistry()
+		if err != nil {
+			return workflowSessionResolvedMsg{JobID: jobID, Err: err}
+		}
+		metadata, err := registry.Find(jobID)
+		if err != nil {
+			return workflowSessionResolvedMsg{JobID: jobID, Err: fmt.Errorf("no Claude session registered for this job")}
+		}
+		if metadata.TranscriptPath == "" || metadata.ClaudeSessionID == "" {
+			return workflowSessionResolvedMsg{JobID: jobID, Err: fmt.Errorf("session metadata has no transcript path yet")}
+		}
+		// Transcript lives at ~/.claude/projects/<slug>/<session-id>.jsonl;
+		// workflow runs live in the sibling <session-id>/ directory.
+		sessionDir := filepath.Join(filepath.Dir(metadata.TranscriptPath), metadata.ClaudeSessionID)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		claudeSessionID := metadata.ClaudeSessionID
+		source := workflowmon.NewFileSource(sessionDir, workflowmon.FileSourceOptions{
+			SessionAlive: func() bool {
+				alive, err := registry.IsAlive(claudeSessionID)
+				return err == nil && alive
+			},
+		})
+		go func() {
+			<-ctx.Done()
+			_ = source.Close()
+		}()
+		go func() {
+			for ev := range source.Events() {
+				sendToMsgChBlocking(ctx, msgCh, workflowEventMsg{JobID: jobID, Event: ev})
+			}
+		}()
+		go collectWorkflowTranscripts(ctx, sessionDir, jobID, msgCh)
+
+		return workflowSessionResolvedMsg{JobID: jobID, SessionDir: sessionDir, Cancel: cancel}
+	}
+}
+
+// collectWorkflowTranscripts fans the session's multiplexed workflow
+// transcript stream into MsgCh as formatted lines, one message per entry.
+// Journal scoreboard entries are skipped — lifecycle state arrives through
+// the workflowmon event source instead.
+func collectWorkflowTranscripts(ctx context.Context, sessionDir, jobID string, msgCh chan tea.Msg) {
+	ch, err := agentstream.StreamWorkflow(ctx, sessionDir)
+	if err != nil {
+		return
+	}
+	for entry := range ch {
+		if entry.Provider == "journal" || entry.AgentID == "" {
+			continue
+		}
+		lines := formatWorkflowEntryLines(entry)
+		if len(lines) == 0 {
+			continue
+		}
+		sendToMsgChBlocking(ctx, msgCh, workflowAgentLogMsg{JobID: jobID, AgentID: entry.AgentID, Lines: lines})
+	}
+}
+
+// sendToMsgChBlocking sends a tea.Msg to the Model's stream channel, blocking
+// until the Update loop drains space or ctx is cancelled. Unlike sendToMsgCh
+// it never drops on a full channel — transcript replay bursts would otherwise
+// lose lines — while the recover still guards against sends on a closed
+// channel during shutdown.
+func sendToMsgChBlocking(ctx context.Context, ch chan<- tea.Msg, msg tea.Msg) {
+	defer func() { _ = recover() }()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- msg:
+	case <-ctx.Done():
 	}
 }
 

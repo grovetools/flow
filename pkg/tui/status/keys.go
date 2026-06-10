@@ -35,6 +35,7 @@ type KeyMap struct {
 	ViewBriefing     key.Binding
 	ViewEdit         key.Binding
 	ViewSkillPane    key.Binding
+	ViewWorkflows    key.Binding
 	CloseDetailPane  key.Binding
 	SwitchFocus      key.Binding
 	FocusLeft        key.Binding // Spatial navigation: focus left pane (jobs)
@@ -152,6 +153,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("F"),
 			key.WithHelp("F", "skills"),
 		),
+		ViewWorkflows: key.NewBinding(
+			key.WithKeys("W"),
+			key.WithHelp("W", "workflows"),
+		),
 		CloseDetailPane: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "close detail pane"),
@@ -205,7 +210,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
 			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-			k.ViewBriefing, k.ViewEdit, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview,
+			k.ViewBriefing, k.ViewEdit, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.ViewWorkflows, k.TogglePreview,
 			k.CloseDetailPane, k.SwitchFocus, k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(
