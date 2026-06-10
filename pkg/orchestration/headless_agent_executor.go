@@ -238,32 +238,58 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		coreCfg = &config.Config{}
 	}
 
-	// Unmarshal flow configuration to get provider args
-	type flowProviderConfig struct {
-		Args []string `yaml:"args"`
-	}
-	type flowConfig struct {
-		Providers map[string]flowProviderConfig `yaml:"providers"`
-	}
-	var flowCfg flowConfig
+	// Unmarshal flow configuration to resolve the provider and its args,
+	// mirroring the resolution done by the interactive agent executor.
+	var flowCfg FlowConfig
 	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
-	// Get agent args for claude provider (headless always uses claude)
+	// Determine which provider to use (default to claude for backward compatibility)
+	providerName := "claude"
+	if flowCfg.InteractiveProvider != "" {
+		providerName = flowCfg.InteractiveProvider
+	}
+
+	// Get agent args for the selected provider
 	var agentArgs []string
 	if flowCfg.Providers != nil {
-		if providerCfg, ok := flowCfg.Providers["claude"]; ok {
+		if providerCfg, ok := flowCfg.Providers[providerName]; ok {
 			agentArgs = providerCfg.Args
 		}
 	}
 
-	return e.runOnHost(ctx, worktreePath, prompt, job, plan, agentArgs)
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, providerName, agentArgs)
+}
+
+// buildHeadlessCommand constructs the exec.Cmd for a provider's headless mode.
+// Returns an error for providers that have no headless execution mode.
+func buildHeadlessCommand(ctx context.Context, providerName, prompt string, agentArgs []string) (*exec.Cmd, error) {
+	switch providerName {
+	case "claude":
+		// Claude Code headless: prompt is piped via stdin.
+		args := []string{"--dangerously-skip-permissions"}
+		args = append(args, agentArgs...)
+		cmd := exec.CommandContext(ctx, "claude", args...)
+		cmd.Stdin = strings.NewReader(prompt)
+		return cmd, nil
+	case "opencode":
+		// Opencode headless: 'opencode run' executes the prompt and exits
+		// (same invocation OpencodeAgentProvider.buildAgentCommand uses for
+		// non-interactive jobs).
+		args := []string{"run"}
+		args = append(args, agentArgs...)
+		args = append(args, prompt)
+		return exec.CommandContext(ctx, "opencode", args...), nil
+	default:
+		return nil, fmt.Errorf("provider %q does not support headless execution (no headless mode implemented); supported headless providers: claude, opencode — set flow.interactive_provider in grove.toml to a supported provider or run this job as interactive_agent", providerName)
+	}
 }
 
 // runOnHost executes the agent directly on the host machine.
-func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, prompt string, job *Job, plan *Plan, agentArgs []string) error {
+func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, prompt string, job *Job, plan *Plan, providerName string, agentArgs []string) error {
 	ulog.Debug("[HEADLESS] Running agent on host").
 		Field("job_id", job.ID).
 		Field("worktree", worktreePath).
+		Field("provider", providerName).
 		Field("agent_args", agentArgs).
 		Log(ctx)
 
@@ -277,14 +303,16 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		return fmt.Errorf("failed to change to worktree directory: %w", err)
 	}
 
-	args := []string{"--dangerously-skip-permissions"}
-	if agentArgs != nil {
-		args = append(args, agentArgs...)
+	cmd, err := buildHeadlessCommand(ctx, providerName, prompt, agentArgs)
+	if err != nil {
+		ulog.Error("[HEADLESS] Provider cannot run headless").
+			Field("job_id", job.ID).
+			Field("provider", providerName).
+			Err(err).
+			Log(ctx)
+		return err
 	}
-
-	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = worktreePath
-	cmd.Stdin = strings.NewReader(prompt)
 
 	// Set environment variables to enable grove-hooks integration for session registration.
 	// GROVE_SCOPE is inherited via os.Environ() — treemux exports it at startup
@@ -297,6 +325,11 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
 	)
+	if providerName != "claude" {
+		// Non-claude providers (e.g. opencode plugins) use this to identify
+		// themselves during session registration, matching the interactive path.
+		cmd.Env = append(cmd.Env, "GROVE_AGENT_PROVIDER="+providerName)
+	}
 	if node, err := workspace.GetProjectByPath(worktreePath); err == nil && node != nil {
 		cmd.Env = append(cmd.Env, "GROVE_LOG_DIR="+filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/")))
 	}
@@ -307,8 +340,9 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		)
 	}
 
-	ulog.Debug("[HEADLESS] Starting Claude CLI with environment variables").
+	ulog.Debug("[HEADLESS] Starting agent CLI with environment variables").
 		Field("job_id", job.ID).
+		Field("provider", providerName).
 		Field("GROVE_FLOW_JOB_ID", job.ID).
 		Field("GROVE_FLOW_JOB_PATH", job.FilePath).
 		Field("GROVE_FLOW_PLAN_NAME", plan.Name).
@@ -322,15 +356,17 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 	cmd.Stderr = io.Discard
 
 	if err := cmd.Run(); err != nil {
-		ulog.Error("[HEADLESS] Claude CLI execution failed").
+		ulog.Error("[HEADLESS] Agent CLI execution failed").
 			Field("job_id", job.ID).
+			Field("provider", providerName).
 			Err(err).
 			Log(ctx)
 		return fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	ulog.Debug("[HEADLESS] Claude CLI execution completed").
+	ulog.Debug("[HEADLESS] Agent CLI execution completed").
 		Field("job_id", job.ID).
+		Field("provider", providerName).
 		Log(ctx)
 	return nil
 }
