@@ -170,7 +170,7 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 		ToggleLayout: key.NewBinding(
 			key.WithKeys("V"),
-			key.WithHelp("V", "toggle layout"),
+			key.WithHelp("V", "toggle h/v split"),
 		),
 		ToggleFullscreen: key.NewBinding(
 			key.WithKeys("z"),
