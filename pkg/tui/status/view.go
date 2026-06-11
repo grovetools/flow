@@ -1128,25 +1128,9 @@ func renderProperty(builder *strings.Builder, k string, v interface{}, keyStyle,
 		// Add icons and colors for specific fields
 		switch k {
 		case "status":
-			switch val {
-			case "completed":
-				icon, valueStyle, hasStyle = theme.IconStatusCompleted+" ", theme.DefaultTheme.Success, true
-			case "running":
-				icon, valueStyle, hasStyle = theme.IconStatusRunning+" ", theme.DefaultTheme.Info, true
-			case "failed":
-				icon, valueStyle, hasStyle = theme.IconStatusFailed+" ", theme.DefaultTheme.Error, true
-			case "blocked":
-				icon, valueStyle, hasStyle = theme.IconStatusBlocked+" ", theme.DefaultTheme.Error, true
-			case "pending":
-				icon, valueStyle, hasStyle = theme.IconPending+" ", theme.DefaultTheme.Muted, true
-			case "todo":
-				icon, valueStyle, hasStyle = theme.IconStatusTodo+" ", theme.DefaultTheme.Muted, true
-			case "hold":
-				icon, valueStyle, hasStyle = theme.IconStatusHold+" ", theme.DefaultTheme.Warning, true
-			case "abandoned":
-				icon, valueStyle, hasStyle = theme.IconStatusAbandoned+" ", theme.DefaultTheme.Muted, true
-			case "needs_review":
-				icon, valueStyle, hasStyle = theme.IconStatusNeedsReview+" ", theme.DefaultTheme.Info, true
+			statusIcon, statusStyle := theme.StatusIconAndStyle(val, theme.DefaultTheme)
+			if statusIcon != "" {
+				icon, valueStyle, hasStyle = statusIcon+" ", statusStyle, true
 			}
 		case "type":
 			switch val {
