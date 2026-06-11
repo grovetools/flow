@@ -466,23 +466,10 @@ func (e *IsolatedAgentExecutor) determineWorkDir(ctx context.Context, job *Job, 
 			return "", fmt.Errorf("could not find git root: %w", err)
 		}
 
-		// Check if we're already in the requested worktree
-		currentPath := gitRoot
-		if !strings.HasSuffix(currentPath, filepath.Join(".grove-worktrees", job.Worktree)) {
-			actualGitRoot := gitRoot
-			if strings.Contains(gitRoot, ".grove-worktrees") {
-				parts := strings.Split(gitRoot, ".grove-worktrees")
-				if len(parts) > 0 {
-					actualGitRoot = strings.TrimSuffix(parts[0], string(filepath.Separator))
-				}
-			}
-
-			worktreePath := filepath.Join(actualGitRoot, ".grove-worktrees", job.Worktree)
-			if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-				// Worktree doesn't exist - for isolated agents, we don't auto-create worktrees
-				// They should either exist or the job should run in the main directory
-				e.log.WithField("worktree", job.Worktree).Warn("Worktree does not exist for isolated agent")
-			}
+		if _, _, exists := resolveWorktreeForJob(gitRoot, job.Worktree); !exists {
+			// Isolated agents don't auto-create worktrees: they must already
+			// exist, or the job runs in the main directory.
+			e.log.WithField("worktree", job.Worktree).Warn("Worktree does not exist for isolated agent")
 		}
 	}
 

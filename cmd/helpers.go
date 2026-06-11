@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
@@ -57,14 +56,15 @@ func configureDefaultContextRules(repoPath string) error {
 }
 
 // configureGoWorkspace creates a go.work file for both ecosystem and single-repo worktrees.
-func configureGoWorkspace(worktreePath string, repos []string, provider *workspace.Provider) error {
+// sourceGitRoot is the git root of the ORIGINAL checkout the worktree was made
+// from; it is used to locate the root go.work (and thus the go version) and to
+// drive single-repo dependency resolution. Resolving from the source rather
+// than from the worktree itself keeps this correct regardless of where the
+// worktree lives on disk (legacy in-repo or XDG).
+func configureGoWorkspace(worktreePath string, repos []string, sourceGitRoot string, provider *workspace.Provider) error {
 	if len(repos) > 0 { // Case 1: Ecosystem worktree.
-		// Find the root go.work to get the go version.
-		gitRoot, err := git.GetGitRoot(worktreePath)
-		if err != nil {
-			return nil // Not a git repo, can't find go.work.
-		}
-		goWorkConfig, err := workspace.FindRootGoWorkspace(gitRoot)
+		// Find the root go.work (from the source repo) to get the go version.
+		goWorkConfig, err := workspace.FindRootGoWorkspace(sourceGitRoot)
 		goVersion := "go 1.24.4" // Fallback.
 		if err == nil && goWorkConfig != nil && goWorkConfig.GoVersion != "" {
 			goVersion = goWorkConfig.GoVersion
@@ -105,16 +105,9 @@ func configureGoWorkspace(worktreePath string, repos []string, provider *workspa
 	} else {
 		// Case 2: Single-repo worktree.
 		// Use the SetupGoWorkspaceForWorktree function which parses go.mod
-		// and filters to only include required dependencies.
-
-		// First, we need to find the git root of the worktree to locate go.mod
-		gitRoot, err := git.GetGitRoot(worktreePath)
-		if err != nil {
-			return nil // Not a git repo, nothing to do
-		}
-
-		// Use the centralized workspace function that handles dependency filtering
-		if err := workspace.SetupGoWorkspaceForWorktree(worktreePath, gitRoot); err != nil {
+		// and filters to only include required dependencies. The source git
+		// root locates go.mod independent of the worktree's location.
+		if err := workspace.SetupGoWorkspaceForWorktree(worktreePath, sourceGitRoot); err != nil {
 			return fmt.Errorf("failed to setup go workspace for worktree: %w", err)
 		}
 
@@ -122,7 +115,7 @@ func configureGoWorkspace(worktreePath string, repos []string, provider *workspa
 		goWorkPath := filepath.Join(worktreePath, "go.work")
 		if _, err := os.Stat(goWorkPath); err == nil {
 			// Read the file to count dependencies (optional, for better messaging)
-			config, _ := workspace.FindRootGoWorkspace(gitRoot)
+			config, _ := workspace.FindRootGoWorkspace(sourceGitRoot)
 			if config != nil {
 				ctx := context.Background()
 				helpersUlog.Success("Configured go.work with workspace dependencies").

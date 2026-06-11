@@ -301,6 +301,11 @@ func TestPathIsUnderGroveWorktrees_SafetyRails(t *testing.T) {
 		{"empty path", "", false},
 		{"legitimate child", filepath.Join(gitRoot, ".grove-worktrees", "feature"), true},
 		{"nested legitimate", filepath.Join(gitRoot, ".grove-worktrees", "foo", "bar"), true},
+		// The guard pins to gitRoot's own worktree bases: a different repo's
+		// worktree directory must never be considered in-bounds, even though
+		// it also contains a .grove-worktrees component. (Multi-base contract.)
+		{"other repo worktree", "/Users/someone/other-repo/.grove-worktrees/feature", false},
+		{"trailing slash child", filepath.Join(gitRoot, ".grove-worktrees", "feature") + string(filepath.Separator), true},
 	}
 	for _, tc := range cases {
 		got := pathIsUnderGroveWorktrees(tc.path, gitRoot)

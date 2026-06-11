@@ -237,10 +237,13 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 	// details; copied onto mergeItem.Details after Check runs.
 	var sharedRepoDetails []finish.RepoStatus
 
-	// Determine worktree path for state lookups.
+	// Determine worktree path for state lookups. A miss leaves worktreePath
+	// empty, which routes state lookups to the legacy plan-local fallback.
 	var worktreePath string
 	if worktreeName != "" && gitRoot != "" {
-		worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+		if found, ok := workspace.FindWorktreePath(gitRoot, worktreeName); ok {
+			worktreePath = found
+		}
 	}
 
 	findEnvState := func() (data []byte, statePath, worktreeStateDir string) {
@@ -660,7 +663,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				}
 				for _, wt := range worktrees {
 					if strings.HasSuffix(wt.Path, worktreeName) {
-						wPath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+						wPath := wt.Path
 						statusOutput, statusErr := exec.Command("git", "-C", wPath, "status", "--porcelain", "--ignore-submodules").Output()
 						if statusErr != nil {
 							return color.YellowString("Exists"), nil
@@ -674,7 +677,10 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return "Not found", nil
 			},
 			Action: func() error {
-				wPath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+				wPath, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+				if !ok {
+					wPath = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
+				}
 				if plan.Config != nil && len(plan.Config.Repos) > 0 {
 					return cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos, provider, opts.Force)
 				}
@@ -802,8 +808,12 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					} else {
 						localWorkspaces = make(map[string]string)
 					}
+					ecoWorktreeRoot, ok := workspace.FindWorktreePath(gitRoot, branchName)
+					if !ok {
+						ecoWorktreeRoot = workspace.ResolveNewWorktreePath(gitRoot, branchName, false)
+					}
 					for submoduleName, submodulePath := range submodulePaths {
-						wtPath := filepath.Join(gitRoot, ".grove-worktrees", branchName, submodulePath)
+						wtPath := filepath.Join(ecoWorktreeRoot, submodulePath)
 						mainSubmodulePath := filepath.Join(gitRoot, submodulePath)
 						if _, err := os.Stat(filepath.Join(mainSubmodulePath, ".git")); err == nil {
 							removeWorktreeArgs := []string{"-C", mainSubmodulePath, "worktree", "remove"}
@@ -1128,7 +1138,10 @@ func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
 // When force is false, `git worktree remove` is run without --force so that
 // uncommitted submodule work is preserved (the failure surfaces to the caller).
 func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string, provider *workspace.Provider, force bool) error {
-	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	worktreePath, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+	if !ok {
+		worktreePath = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
+	}
 	gitmodulesPath := filepath.Join(worktreePath, ".gitmodules")
 	if _, err := os.Stat(gitmodulesPath); os.IsNotExist(err) {
 		return nil
@@ -1198,7 +1211,10 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 // are downgraded to their safe variants so that uncommitted work and unmerged commits
 // survive; failures surface to the caller instead of being papered over with os.RemoveAll.
 func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider, force bool) error {
-	ecosystemDir := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+	ecosystemDir, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+	if !ok {
+		ecosystemDir = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
+	}
 	fmt.Printf("    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
 	var localWorkspaces map[string]string
 	if provider != nil {
@@ -1224,7 +1240,9 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		if !exists {
 			fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping branch cleanup\n", repo)
 			if force {
-				if err := os.RemoveAll(repoWorktreePath); err != nil {
+				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot) {
+					fmt.Printf("      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
+				} else if err := os.RemoveAll(repoWorktreePath); err != nil {
 					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
 				}
 			} else if _, err := os.Stat(repoWorktreePath); err == nil {
@@ -1249,7 +1267,9 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 				// Already gone; nothing to do.
 			} else if force {
 				fmt.Printf("      Warning: git worktree remove failed, removing directory manually: %s\n", outputStr)
-				if err := os.RemoveAll(repoWorktreePath); err != nil {
+				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot) {
+					fmt.Printf("      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
+				} else if err := os.RemoveAll(repoWorktreePath); err != nil {
 					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
 				}
 			} else {
@@ -1279,6 +1299,9 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		// recover any preserved work.
 		return firstErr
 	}
+	if !pathIsUnderGroveWorktrees(ecosystemDir, gitRoot) {
+		return fmt.Errorf("refusing to remove ecosystem directory outside worktree boundary: %s", ecosystemDir)
+	}
 	if err := os.RemoveAll(ecosystemDir); err != nil {
 		return fmt.Errorf("failed to remove ecosystem directory: %w", err)
 	}
@@ -1294,20 +1317,25 @@ func isDirNotEmptyErr(err error) bool {
 }
 
 // pathIsUnderGroveWorktrees reports whether wPath is a safe target
-// for force-removal: it must live strictly beneath
-// <gitRoot>/.grove-worktrees/. Returns false if gitRoot is empty, if
-// wPath is the .grove-worktrees container itself, or if wPath escapes
-// the boundary (after cleaning). Guards os.RemoveAll against
-// catastrophic misuse.
+// for force-removal: it must live strictly beneath one of gitRoot's
+// worktree bases (the identifier-level container directories returned
+// by workspace.WorktreeBases). Returns false if gitRoot is empty, if
+// wPath is a base container itself, or if wPath escapes every base
+// (after cleaning). Guards os.RemoveAll against catastrophic misuse.
 func pathIsUnderGroveWorktrees(wPath, gitRoot string) bool {
 	if gitRoot == "" || wPath == "" {
 		return false
 	}
 	wPathClean := filepath.Clean(wPath)
-	container := filepath.Clean(filepath.Join(gitRoot, ".grove-worktrees"))
-	if wPathClean == container {
-		return false
+	for _, base := range workspace.WorktreeBases(gitRoot) {
+		container := filepath.Clean(base)
+		if wPathClean == container {
+			// The container itself is never a removal target.
+			return false
+		}
+		if strings.HasPrefix(wPathClean, container+string(filepath.Separator)) {
+			return true
+		}
 	}
-	safePrefix := container + string(filepath.Separator)
-	return strings.HasPrefix(wPathClean, safePrefix)
+	return false
 }

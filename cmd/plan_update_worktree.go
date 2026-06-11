@@ -82,9 +82,9 @@ func updateWorktreeSingleRepo(worktreeName string) error {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}
 
-	worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return fmt.Errorf("worktree not found: %s", worktreePath)
+	worktreePath, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+	if !ok {
+		return fmt.Errorf("worktree not found: %s", workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false))
 	}
 
 	// Determine default branch
@@ -130,8 +130,8 @@ func updateWorktreeEcosystem(plan *orchestration.Plan, worktreeName string) erro
 			continue
 		}
 
-		worktreePath := filepath.Join(repoPath, ".grove-worktrees", worktreeName)
-		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		worktreePath, ok := workspace.FindWorktreePath(repoPath, worktreeName)
+		if !ok {
 			// worktree for this specific repo doesn't exist, skip
 			continue
 		}

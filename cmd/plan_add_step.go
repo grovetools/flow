@@ -298,7 +298,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		if err == nil && currentNode != nil && currentNode.IsWorktree() && currentNode.RootEcosystemPath != "" {
 			// This is an ecosystem worktree context. Find the name of the ecosystem worktree.
 			// This is typically the base name of the ParentEcosystemPath for a sub-project worktree.
-			if currentNode.ParentEcosystemPath != "" && strings.Contains(currentNode.ParentEcosystemPath, ".grove-worktrees") {
+			if currentNode.ParentEcosystemPath != "" && workspace.IsWorktreePath(currentNode.ParentEcosystemPath) {
 				worktreeToUse = filepath.Base(currentNode.ParentEcosystemPath)
 			} else if currentNode.IsEcosystem() {
 				// This is the ecosystem worktree itself
@@ -592,7 +592,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		if err == nil && currentNode != nil && currentNode.IsWorktree() && currentNode.RootEcosystemPath != "" {
 			// This is an ecosystem worktree context. Find the name of the ecosystem worktree.
 			// This is typically the base name of the ParentEcosystemPath for a sub-project worktree.
-			if currentNode.ParentEcosystemPath != "" && strings.Contains(currentNode.ParentEcosystemPath, ".grove-worktrees") {
+			if currentNode.ParentEcosystemPath != "" && workspace.IsWorktreePath(currentNode.ParentEcosystemPath) {
 				worktreeToUse = filepath.Base(currentNode.ParentEcosystemPath)
 			} else if currentNode.IsEcosystem() {
 				// This is the ecosystem worktree itself

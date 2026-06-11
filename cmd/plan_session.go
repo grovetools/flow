@@ -48,15 +48,22 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		gitRoot = gitRootInfo.ParentProjectPath
 	}
 
-	// Check if we're already in the target worktree
+	// Check if we're already in the target worktree (any known worktree base).
 	currentDir, _ := os.Getwd()
-	expectedWorktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
 	var worktreePath string
+	alreadyInWorktree := false
+	if currentDir != "" && workspace.IsWorktreePath(currentDir) {
+		for _, base := range workspace.WorktreeBases(gitRoot) {
+			candidate := filepath.Join(base, worktreeName)
+			if strings.HasPrefix(currentDir, candidate) {
+				worktreePath = candidate
+				alreadyInWorktree = true
+				break
+			}
+		}
+	}
 
-	if currentDir != "" && strings.HasPrefix(currentDir, expectedWorktreePath) {
-		// We're already in the worktree, just use it
-		worktreePath = expectedWorktreePath
-	} else {
+	if !alreadyInWorktree {
 		// Prepare the worktree using the centralized helper
 		opts := workspace.PrepareOptions{
 			GitRoot:      gitRoot,

@@ -18,6 +18,7 @@ import (
 	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
 	groveplan "github.com/grovetools/core/pkg/plan"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/delegation"
 	grovecontext "github.com/grovetools/cx/pkg/context"
@@ -773,19 +774,21 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		gitRoot = plan.Directory
 	}
 
-	// Check if we're already in the worktree
-	currentDir, _ := os.Getwd()
-	if currentDir != "" && (strings.HasSuffix(currentDir, "/.grove-worktrees/"+job.Worktree) ||
-		strings.HasSuffix(gitRoot, "/.grove-worktrees/"+job.Worktree)) {
-		// We're already in the worktree
-		return currentDir, nil
+	// If gitRoot is itself inside a worktree, resolve back to the owning repo
+	// so the worktree is created/looked up against the right base.
+	realGitRoot := gitRoot
+	if workspace.IsWorktreePath(gitRoot) {
+		if owner, ok := workspace.WorktreeOwner(gitRoot); ok {
+			realGitRoot = owner
+		}
 	}
 
-	// Need to find the actual git root (not a worktree)
-	// If gitRoot ends with .grove-worktrees/something, go up to find real root
-	realGitRoot := gitRoot
-	if idx := strings.Index(gitRoot, "/.grove-worktrees/"); idx != -1 {
-		realGitRoot = gitRoot[:idx]
+	// If we're already inside the requested worktree, use the current dir.
+	currentDir, _ := os.Getwd()
+	if target, ok := workspace.FindWorktreePath(realGitRoot, job.Worktree); ok {
+		if filepath.Clean(currentDir) == target || filepath.Clean(gitRoot) == target {
+			return currentDir, nil
+		}
 	}
 
 	// Use the shared method to get or prepare the worktree at the git root
