@@ -267,6 +267,15 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		}
 	}
 
+	// Append per-job flags (--model, --effort) for claude only; other
+	// providers do not accept these flags.
+	if providerName == "claude" {
+		agentArgs, err = appendClaudeJobArgs(agentArgs, job, plan)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Pre-register the session intent with the daemon BEFORE launching the
 	// agent, now that the work dir and resolved provider are known.
 	e.registerSessionIntent(ctx, job, plan, worktreePath, providerName)
