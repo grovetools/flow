@@ -141,6 +141,19 @@ type Model struct {
 	// fed by the transcript collector via MsgCh; the inline tree itself is
 	// rendered from WorkflowStates by buildDisplayRows.
 	workflowAgentLines map[string][]string // formatted transcript lines per agent (capped)
+	// WorkflowStates is the per-job workflow registry: ONE daemon-backed
+	// subscription (or per-job FileSource fallbacks) routes events here by
+	// JobID — events for non-cursor jobs are folded, never dropped.
+	WorkflowStates map[string]*workflowPaneState
+	// workflowDaemonCancel tears down the single DaemonSource subscription
+	// (and its forwarding goroutine). Nil when the daemon path is inactive.
+	workflowDaemonCancel context.CancelFunc
+	// workflowMonitorCancels tears down per-job FileSource fallback
+	// monitors (daemon unreachable only), keyed by job ID.
+	workflowMonitorCancels map[string]context.CancelFunc
+	// workflowMonitorPending marks jobs whose FileSource session discovery
+	// is in flight, so the 2s refresh doesn't double-start monitors.
+	workflowMonitorPending map[string]bool
 
 	// Claw dialog
 	ClawDialogActive         bool
@@ -659,6 +672,9 @@ func New(cfg Config) Model {
 		skillPaneViewport:        skillPaneVp,
 		skillArtifactViewport:    skillArtifactVp,
 		workflowAgentLines:       make(map[string][]string),
+		WorkflowStates:           make(map[string]*workflowPaneState),
+		workflowMonitorCancels:   make(map[string]context.CancelFunc),
+		workflowMonitorPending:   make(map[string]bool),
 		skillSearchInput:         skillSearch,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
@@ -734,6 +750,7 @@ func (m Model) listenToDaemon() tea.Cmd {
 // grove terminal) must call Close() before discarding a Model instance
 // so background goroutines don't leak across instance lifetimes.
 func (m *Model) Close() error {
+	m.closeWorkflowMonitors()
 	if m.streamCancel != nil {
 		m.streamCancel()
 		m.streamCancel = nil

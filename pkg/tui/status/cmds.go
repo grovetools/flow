@@ -144,6 +144,55 @@ type workflowEventMsg struct {
 	Event workflowmon.Event
 }
 
+// workflowDaemonSourceStartedMsg reports that the single daemon-backed
+// workflow event source is running. Cancel tears down the source and its
+// forwarding goroutine (Model.Close(), or a duplicate start).
+type workflowDaemonSourceStartedMsg struct {
+	Cancel context.CancelFunc
+}
+
+// startDaemonWorkflowSourceCmd starts the ONE daemon-backed workflow event
+// source covering every job: a workflowmon.DaemonSource (snapshot replay +
+// SSE deltas + reconnect with backoff) whose events are forwarded into
+// MsgCh as workflowEventMsg routed by the event's own JobID. client may be
+// nil — a private client is constructed (and owned) in that case. Returns
+// nil when no daemon is reachable; the FileSource fallback (RefreshMsg
+// reconciliation) covers that.
+func startDaemonWorkflowSourceCmd(client daemon.Client, msgCh chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		ownsClient := false
+		if client == nil {
+			client = daemon.NewWithAutoStart()
+			ownsClient = true
+		}
+		if !client.IsRunning() {
+			if ownsClient {
+				client.Close()
+			}
+			return nil
+		}
+
+		source := workflowmon.NewDaemonSource(client, workflowmon.DaemonSourceOptions{})
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-ctx.Done()
+			_ = source.Close()
+			if ownsClient {
+				client.Close()
+			}
+		}()
+		go func() {
+			for ev := range source.Events() {
+				sendToMsgChBlocking(ctx, msgCh, workflowEventMsg{
+					JobID: workflowmon.EventJobID(ev),
+					Event: ev,
+				})
+			}
+		}()
+		return workflowDaemonSourceStartedMsg{Cancel: cancel}
+	}
+}
+
 // workflowAgentLogMsg carries one formatted transcript line for a workflow
 // agent, delivered via MsgCh by the transcript collector.
 type workflowAgentLogMsg struct {
