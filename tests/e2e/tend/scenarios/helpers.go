@@ -7,10 +7,136 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
 	"github.com/grovetools/tend/pkg/harness"
 )
+
+// expectedWorktreePath returns the on-disk location a worktree named name of
+// the repository rooted at gitRoot is expected to occupy, for use in e2e
+// assertions.
+//
+//	sibling=false (legacy in-repo layout):
+//	    <gitRoot>/.grove-worktrees/<name>
+//	sibling=true (XDG out-of-repo layout, --sibling-workspaces plans):
+//	    <ctx.DataDir()>/grove/worktrees/<DirIdentifier(gitRoot)>/<name>
+//
+// The XDG identifier is computed via core's workspace.DirIdentifier — the
+// SAME function the production code uses — so the expectation never drifts
+// from the real layout and is never reconstructed from HOME. ctx.DataDir() is
+// the sandboxed XDG_DATA_HOME, so this maps to paths.WorktreesDir()/<id>/<name>
+// inside the sandbox.
+func expectedWorktreePath(ctx *harness.Context, gitRoot, name string, sibling bool) string {
+	if sibling {
+		return filepath.Join(ctx.DataDir(), "grove", "worktrees", workspace.DirIdentifier(gitRoot), name)
+	}
+	return filepath.Join(gitRoot, ".grove-worktrees", name)
+}
+
+// setupEcosystemEnvironment builds a sandboxed ecosystem whose root and child
+// repos are addressed by their REALPATH, then returns the realpath ecosystem
+// git root, a map of child-repo name -> realpath dir, and the notebooks root.
+//
+// Why realpath: core's workspace.SetupSubmodules keeps only discovered
+// workspaces whose parent EqualFold-matches the ecosystem git root
+// (submodules.go direct-child filter). On macOS the harness sandbox lives
+// under /var/folders/... which symlinks to /private/var/folders/...;
+// `git rev-parse --show-toplevel` (the git root) returns the /private spelling
+// while workspace discovery walks the raw grove-source path. The two spellings
+// fail EqualFold and every sibling repo is silently dropped — the Phase 4
+// trap. Pointing the grove source at the resolved path makes both sides agree.
+// (The durable fix is a NormalizeForLookup-based comparison in core's
+// SetupSubmodules; this helper pins the desired behavior from the flow side.)
+//
+// Each child repo is enumerated under the ecosystem grove.yml `workspaces`
+// key so discovery promotes these otherwise grove-config-less repos
+// (discover.go zero-footprint child path), and is initialized as an
+// independent git repo with a single README commit so `git worktree add` can
+// link it. Callers may add and commit further files before creating worktrees.
+func setupEcosystemEnvironment(ctx *harness.Context, ecosystemName string, repos []string) (gitRoot string, repoDirs map[string]string, notebooksRoot string, err error) {
+	// Resolve the sandbox home so every path below matches git's realpath.
+	homeDir := ctx.HomeDir()
+	if resolved, rerr := filepath.EvalSymlinks(homeDir); rerr == nil {
+		homeDir = resolved
+	}
+	ctx.Set("home_dir", homeDir)
+
+	codeDir := filepath.Join(homeDir, "code")
+	if err = fs.CreateDir(codeDir); err != nil {
+		return
+	}
+
+	gitRoot = filepath.Join(codeDir, ecosystemName)
+	if err = fs.CreateDir(gitRoot); err != nil {
+		return
+	}
+	ctx.Set("project_dir", gitRoot)
+
+	// Ecosystem root: git repo + grove.yml enumerating the child workspaces so
+	// discovery promotes them.
+	ecoRepo, gerr := git.SetupTestRepo(gitRoot)
+	if gerr != nil {
+		err = gerr
+		return
+	}
+	if err = fs.WriteString(filepath.Join(gitRoot, "README.md"), fmt.Sprintf("# %s\n", ecosystemName)); err != nil {
+		return
+	}
+	if err = fs.WriteGroveConfig(gitRoot, &config.Config{Name: ecosystemName, Version: "1.0", Workspaces: repos}); err != nil {
+		return
+	}
+	if err = ecoRepo.AddCommit("Initial ecosystem commit"); err != nil {
+		return
+	}
+
+	// Child repos: each an independent git repo with one commit.
+	repoDirs = make(map[string]string, len(repos))
+	for _, repo := range repos {
+		repoDir := filepath.Join(gitRoot, repo)
+		if err = fs.CreateDir(repoDir); err != nil {
+			return
+		}
+		childRepo, cerr := git.SetupTestRepo(repoDir)
+		if cerr != nil {
+			err = cerr
+			return
+		}
+		if err = fs.WriteString(filepath.Join(repoDir, "README.md"), fmt.Sprintf("# %s\n", repo)); err != nil {
+			return
+		}
+		if err = childRepo.AddCommit("Initial " + repo + " commit"); err != nil {
+			return
+		}
+		repoDirs[repo] = repoDir
+	}
+
+	// Global config: grove source "code" pinned to the REALPATH code dir (an
+	// absolute path, not ~/code, so discovery walks the resolved spelling),
+	// linked to a centralized notebook.
+	notebooksRoot = filepath.Join(homeDir, "notebooks")
+	ctx.Set("notebooks_root", notebooksRoot)
+	groveConfigDir := filepath.Join(ctx.ConfigDir(), "grove")
+	enabled := true
+	globalCfg := &config.Config{
+		Version: "1.0",
+		Notebooks: &config.NotebooksConfig{
+			Definitions: map[string]*config.Notebook{
+				"default": {RootDir: notebooksRoot},
+			},
+			Rules: &config.NotebookRules{Default: "default"},
+		},
+		Groves: map[string]config.GroveSourceConfig{
+			"code": {
+				Path:     codeDir,
+				Enabled:  &enabled,
+				Notebook: "default",
+			},
+		},
+	}
+	err = fs.WriteGroveConfig(groveConfigDir, globalCfg)
+	return
+}
 
 // setupDefaultEnvironment is a helper function to create a standard sandboxed
 // test environment with a correctly configured global grove.yml.

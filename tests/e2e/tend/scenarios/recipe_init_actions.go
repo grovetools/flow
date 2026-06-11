@@ -157,58 +157,13 @@ var RecipeInitActionsEcosystemScenario = harness.NewScenario(
 	[]string{"recipe", "init-actions", "ecosystem", "worktree"},
 	[]harness.Step{
 		harness.NewStep("Setup sandboxed environment with ecosystem project", func(ctx *harness.Context) error {
-			projectDir, _, err := setupDefaultEnvironment(ctx, "ecosystem-project")
-			if err != nil {
-				return err
-			}
-
-			// Create main ecosystem repo
-			repo, err := git.SetupTestRepo(projectDir)
-			if err != nil {
-				return err
-			}
-			if err := fs.WriteString(filepath.Join(projectDir, "README.md"), "# Ecosystem Project\n"); err != nil {
-				return err
-			}
-			if err := repo.AddCommit("Initial commit"); err != nil {
-				return err
-			}
-
-			// Create sub-repos
-			backendDir := filepath.Join(projectDir, "backend")
-			frontendDir := filepath.Join(projectDir, "frontend")
-
-			// Create directories first
-			if err := fs.CreateDir(backendDir); err != nil {
-				return err
-			}
-			if err := fs.CreateDir(frontendDir); err != nil {
-				return err
-			}
-
-			backendRepo, err := git.SetupTestRepo(backendDir)
-			if err != nil {
-				return err
-			}
-			if err := fs.WriteString(filepath.Join(backendDir, "main.go"), "package main\n"); err != nil {
-				return err
-			}
-			if err := backendRepo.AddCommit("Initial backend commit"); err != nil {
-				return err
-			}
-
-			frontendRepo, err := git.SetupTestRepo(frontendDir)
-			if err != nil {
-				return err
-			}
-			if err := fs.WriteString(filepath.Join(frontendDir, "index.html"), "<html></html>\n"); err != nil {
-				return err
-			}
-			if err := frontendRepo.AddCommit("Initial frontend commit"); err != nil {
-				return err
-			}
-
-			return nil
+			// Build a realpath-rooted ecosystem with backend/frontend child
+			// repos enumerated under the ecosystem grove.yml `workspaces` key,
+			// so discovery promotes them and core's SetupSubmodules links them
+			// into the worktree (see setupEcosystemEnvironment for the macOS
+			// /var -> /private/var symlink rationale).
+			_, _, _, err := setupEcosystemEnvironment(ctx, "ecosystem-project", []string{"backend", "frontend"})
+			return err
 		}),
 
 		harness.NewStep("Create project recipe with repo-specific shell actions", func(ctx *harness.Context) error {
@@ -273,7 +228,9 @@ init:
 			planPath := filepath.Join(notebooksRoot, "workspaces", "ecosystem-project", "plans", "ecosystem-plan")
 			ctx.Set("plan_path", planPath)
 
-			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "ecosystem-plan")
+			// Legacy ecosystem baseline: the worktree lives at the in-repo
+			// .grove-worktrees path (no --sibling-workspaces => not XDG).
+			worktreePath := expectedWorktreePath(ctx, projectDir, "ecosystem-plan", false)
 			ctx.Set("worktree_path", worktreePath)
 
 			return nil
