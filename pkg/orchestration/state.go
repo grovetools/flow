@@ -382,19 +382,41 @@ const (
 
 // UpdateJobTranscript replaces (or appends) the job file's agent transcript
 // section with the given transcript, under the job-file lock and via an
-// atomic write. The frontmatter is parsed and preserved; the section splice
-// operates on the body only. When onlyIfMissing is true an existing
-// transcript section is left untouched (used for the "never run" note).
-//
-// It returns true when the file was modified. A byte-identical transcript is
-// skipped without a write (so repeated completion calls are cheap and don't
-// churn mtimes).
+// atomic write. When onlyIfMissing is true an existing transcript section is
+// left untouched (used for the "never run" note).
 //
 // This is the ONLY sanctioned way to write the transcript section: it is
 // called from both flow processes and groved's jobrunner, which used to race
 // each other (and StatePersister's own frontmatter writers) through an
 // unlocked full-file rewrite.
 func (sp *StatePersister) UpdateJobTranscript(job *Job, transcript string, onlyIfMissing bool) (bool, error) {
+	return sp.updateJobSection(job, transcriptSectionHeader,
+		[]string{legacyTranscriptSectionHeader}, transcript, "", onlyIfMissing)
+}
+
+// UpdateJobSection replaces (or inserts) a named markdown section in the job
+// file's body, under the job-file lock and via an atomic write. The
+// frontmatter is parsed and preserved; the splice operates on the body only.
+//
+// header is the exact section heading (e.g. "# Workflow Runs"). When the
+// section is missing it is inserted immediately before insertBeforeHeader
+// when that heading exists in the body, otherwise appended at EOF. When the
+// section already exists it is replaced in place: the replaced region runs
+// from header to the next occurrence of insertBeforeHeader after it (EOF
+// when insertBeforeHeader is empty or absent). When onlyIfMissing is true an
+// existing section is left untouched.
+//
+// It returns true when the file was modified. A byte-identical section is
+// skipped without a write (so repeated completion calls are cheap and don't
+// churn mtimes).
+func (sp *StatePersister) UpdateJobSection(job *Job, header, content, insertBeforeHeader string, onlyIfMissing bool) (bool, error) {
+	return sp.updateJobSection(job, header, nil, content, insertBeforeHeader, onlyIfMissing)
+}
+
+// updateJobSection implements UpdateJobSection/UpdateJobTranscript.
+// legacyHeaders are alternative headings matched (and rewritten to header)
+// when header itself is absent.
+func (sp *StatePersister) updateJobSection(job *Job, header string, legacyHeaders []string, content, insertBeforeHeader string, onlyIfMissing bool) (bool, error) {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 
@@ -404,34 +426,53 @@ func (sp *StatePersister) UpdateJobTranscript(job *Job, transcript string, onlyI
 	}
 	defer func() { _ = lock.Unlock() }()
 
-	content, err := os.ReadFile(job.FilePath)
+	fileContent, err := os.ReadFile(job.FilePath)
 	if err != nil {
 		return false, fmt.Errorf("read job file: %w", err)
 	}
 
-	frontmatter, body, err := sp.frontmatterParser.ParseFrontmatter(content)
+	frontmatter, body, err := sp.frontmatterParser.ParseFrontmatter(fileContent)
 	if err != nil {
 		return false, fmt.Errorf("parsing frontmatter: %w", err)
 	}
 
 	bodyStr := string(body)
-	header := transcriptSectionHeader
-	idx := strings.Index(bodyStr, transcriptSectionHeader)
-	if idx == -1 {
-		idx = strings.Index(bodyStr, legacyTranscriptSectionHeader)
-		header = legacyTranscriptSectionHeader
+	matchedHeader := header
+	idx := strings.Index(bodyStr, header)
+	for _, legacy := range legacyHeaders {
+		if idx != -1 {
+			break
+		}
+		idx = strings.Index(bodyStr, legacy)
+		matchedHeader = legacy
 	}
 
-	var before string
+	var before, after string
 	if idx != -1 {
 		if onlyIfMissing {
 			return false, nil
 		}
-		existing := strings.TrimSpace(strings.TrimPrefix(bodyStr[idx:], header))
-		if existing == strings.TrimSpace(transcript) {
+		// The existing section runs to the next occurrence of
+		// insertBeforeHeader after it, or EOF.
+		sectionEnd := len(bodyStr)
+		if insertBeforeHeader != "" {
+			if rel := strings.Index(bodyStr[idx+len(matchedHeader):], insertBeforeHeader); rel != -1 {
+				sectionEnd = idx + len(matchedHeader) + rel
+			}
+		}
+		existing := strings.TrimSpace(strings.TrimPrefix(bodyStr[idx:sectionEnd], matchedHeader))
+		if existing == strings.TrimSpace(content) {
 			return false, nil // unchanged; skip the write
 		}
 		before = bodyStr[:idx]
+		after = bodyStr[sectionEnd:]
+	} else if insertBeforeHeader != "" {
+		if insIdx := strings.Index(bodyStr, insertBeforeHeader); insIdx != -1 {
+			before = bodyStr[:insIdx]
+			after = bodyStr[insIdx:]
+		} else {
+			before = bodyStr
+		}
 	} else {
 		before = bodyStr
 	}
@@ -440,10 +481,16 @@ func (sp *StatePersister) UpdateJobTranscript(job *Job, transcript string, onlyI
 	if before != "" {
 		before += "\n\n"
 	}
-	newBody := before + transcriptSectionHeader + "\n\n" + transcript
+	var newBody string
+	if after != "" {
+		after = strings.TrimLeft(after, "\n")
+		newBody = before + header + "\n\n" + strings.TrimRight(content, "\n") + "\n\n" + after
+	} else {
+		newBody = before + header + "\n\n" + content
+	}
 
 	var newContent []byte
-	if bytes.HasPrefix(content, []byte("---")) {
+	if bytes.HasPrefix(fileContent, []byte("---")) {
 		newContent, err = RebuildMarkdownWithFrontmatter(frontmatter, []byte(newBody))
 		if err != nil {
 			return false, fmt.Errorf("rebuilding job content: %w", err)

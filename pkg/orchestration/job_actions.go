@@ -72,6 +72,38 @@ func markTranscriptUnverified(ctx context.Context, job *Job, plan *Plan) {
 	_, _ = f.WriteString(marker)
 }
 
+// hasLegacyStyleTranscript reports whether the job file already holds a
+// non-empty transcript section that predates the markdown render style
+// (captured terminal output from the old plain aglogs shell-out). Used only
+// to log the one-time rewrite when the section flips to markdown style.
+func hasLegacyStyleTranscript(jobFilePath string) bool {
+	content, err := os.ReadFile(jobFilePath)
+	if err != nil {
+		return false
+	}
+	body := string(content)
+	idx := strings.Index(body, transcriptSectionHeader)
+	header := transcriptSectionHeader
+	if idx == -1 {
+		idx = strings.Index(body, legacyTranscriptSectionHeader)
+		header = legacyTranscriptSectionHeader
+	}
+	if idx == -1 {
+		return false
+	}
+	section := strings.TrimSpace(strings.TrimPrefix(body[idx:], header))
+	if section == "" {
+		return false
+	}
+	// Markdown-style transcripts carry stable bold role/tool labels.
+	for _, marker := range []string{"**User:**", "**Assistant:**", "**Tool:", "**Thinking:**"} {
+		if strings.Contains(section, marker) {
+			return false
+		}
+	}
+	return true
+}
+
 // AppendAgentTranscript finds the transcript for an agent job
 // and appends it to the job's markdown file.
 //
@@ -126,8 +158,9 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	formattedOutput, formattedErr := formattedCmd.CombinedOutput()
 	formattedStr := string(formattedOutput)
 
-	// Get plain text transcript for .md file (without ANSI colors)
-	plainCmd := delegation.Command("aglogs", "read", aglogsSpec)
+	// Get markdown transcript for the .md file: environment-independent
+	// (no TTY/theme/icon dependence), injection-safe indented tool blocks.
+	plainCmd := delegation.Command("aglogs", "read", aglogsSpec, "--style=markdown")
 	plainOutput, plainErr := plainCmd.CombinedOutput()
 	plainStr := string(plainOutput)
 
@@ -170,10 +203,19 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	// AppendAgentTranscript from the daemon process concurrently with
 	// flow-side writers, so the unlocked full-file rewrite this used to do
 	// raced StatePersister's frontmatter updates.
-	transcriptOutput := plainStr // plain text for the .md file
+	hadOldFormat := hasLegacyStyleTranscript(job.FilePath)
+	transcriptOutput := plainStr // markdown-style text for the .md file
 	changed, err := NewStatePersister().UpdateJobTranscript(job, transcriptOutput, false)
 	if err != nil {
 		return fmt.Errorf("writing transcript to job file %s: %w", job.FilePath, err)
+	}
+	if changed && hadOldFormat {
+		// One-time per file: once rewritten, the section is markdown-style
+		// and this no longer fires.
+		ulog.Info("Transcript migrated to markdown style").
+			Field("job_id", job.ID).
+			Field("filepath", job.FilePath).
+			Log(ctx)
 	}
 	if !changed {
 		ulog.Info("Transcript unchanged, skipping").
