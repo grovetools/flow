@@ -182,6 +182,15 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 			Log(ctx)
 	}
 
+	// Archive any Claude Code workflow runs the agent spawned. Without this,
+	// headless jobs — whose deferred status update marks them completed
+	// before CompleteJob ever runs — lose their workflow artifacts entirely.
+	if err := ArchiveWorkflowRuns(job, plan); err != nil {
+		ulog.Warn("[HEADLESS] Failed to archive workflow runs for headless agent job").
+			Err(err).
+			Log(ctx)
+	}
+
 	// Append the formatted transcript using the generalized function
 	ulog.Debug("[HEADLESS] Appending formatted transcript").
 		Field("job_id", job.ID).

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -321,6 +322,94 @@ func (sp *StatePersister) AppendJobOutput(job *Job, output string) error {
 
 	// Write atomically
 	return sp.writeAtomic(job.FilePath, buf.Bytes())
+}
+
+// Transcript section headers. transcriptSectionHeader is the canonical
+// heading written by UpdateJobTranscript; legacyTranscriptSectionHeader is
+// the pre-rename heading still present in older job files (matched on read,
+// rewritten to the canonical form on update).
+const (
+	transcriptSectionHeader       = "# Agent Chat Transcript"
+	legacyTranscriptSectionHeader = "## Transcript"
+)
+
+// UpdateJobTranscript replaces (or appends) the job file's agent transcript
+// section with the given transcript, under the job-file lock and via an
+// atomic write. The frontmatter is parsed and preserved; the section splice
+// operates on the body only. When onlyIfMissing is true an existing
+// transcript section is left untouched (used for the "never run" note).
+//
+// It returns true when the file was modified. A byte-identical transcript is
+// skipped without a write (so repeated completion calls are cheap and don't
+// churn mtimes).
+//
+// This is the ONLY sanctioned way to write the transcript section: it is
+// called from both flow processes and groved's jobrunner, which used to race
+// each other (and StatePersister's own frontmatter writers) through an
+// unlocked full-file rewrite.
+func (sp *StatePersister) UpdateJobTranscript(job *Job, transcript string, onlyIfMissing bool) (bool, error) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return false, fmt.Errorf("acquire lock: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return false, fmt.Errorf("read job file: %w", err)
+	}
+
+	frontmatter, body, err := sp.frontmatterParser.ParseFrontmatter(content)
+	if err != nil {
+		return false, fmt.Errorf("parsing frontmatter: %w", err)
+	}
+
+	bodyStr := string(body)
+	header := transcriptSectionHeader
+	idx := strings.Index(bodyStr, transcriptSectionHeader)
+	if idx == -1 {
+		idx = strings.Index(bodyStr, legacyTranscriptSectionHeader)
+		header = legacyTranscriptSectionHeader
+	}
+
+	var before string
+	if idx != -1 {
+		if onlyIfMissing {
+			return false, nil
+		}
+		existing := strings.TrimSpace(strings.TrimPrefix(bodyStr[idx:], header))
+		if existing == strings.TrimSpace(transcript) {
+			return false, nil // unchanged; skip the write
+		}
+		before = bodyStr[:idx]
+	} else {
+		before = bodyStr
+	}
+
+	before = strings.TrimRight(before, "\n")
+	if before != "" {
+		before += "\n\n"
+	}
+	newBody := before + transcriptSectionHeader + "\n\n" + transcript
+
+	var newContent []byte
+	if bytes.HasPrefix(content, []byte("---")) {
+		newContent, err = RebuildMarkdownWithFrontmatter(frontmatter, []byte(newBody))
+		if err != nil {
+			return false, fmt.Errorf("rebuilding job content: %w", err)
+		}
+	} else {
+		// No frontmatter in the file; don't invent one.
+		newContent = []byte(newBody)
+	}
+
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+		return false, fmt.Errorf("write file: %w", err)
+	}
+	return true, nil
 }
 
 // ValidateJobStates validates all job states in a plan.

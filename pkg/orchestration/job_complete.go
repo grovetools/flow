@@ -218,25 +218,29 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 			logger.WithError(err).Debug("Failed to notify daemon of session end")
 		}
 		daemonClient.Close()
+	}
 
-		// Archive session artifacts if it's an agent job
-		if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent || job.Type == JobTypeIsolatedAgent {
+	// Archive session artifacts for agent jobs — runs even when already
+	// completed so a late/repeat `flow plan complete` recovers artifacts the
+	// first completion missed (e.g. a headless job whose deferred status
+	// update landed before CompleteJob ran). Both archive functions are
+	// idempotent overwrites into the same destination dirs.
+	if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent || job.Type == JobTypeIsolatedAgent {
+		if !silent {
+			fmt.Println("Archiving session artifacts...")
+		}
+		if err := ArchiveInteractiveSession(job, plan); err != nil {
+			// Log a warning but don't fail the entire completion process.
 			if !silent {
-				fmt.Println("Archiving session artifacts...")
+				fmt.Printf("Warning: failed to archive session artifacts: %v\n", err)
 			}
-			if err := ArchiveInteractiveSession(job, plan); err != nil {
-				// Log a warning but don't fail the entire completion process.
-				if !silent {
-					fmt.Printf("Warning: failed to archive session artifacts: %v\n", err)
-				}
-			} else if !silent {
-				fmt.Println(color.GreenString("*") + " Session artifacts archived.")
-			}
-			if err := ArchiveWorkflowRuns(job, plan); err != nil {
-				// Log a warning but don't fail the entire completion process.
-				if !silent {
-					fmt.Printf("Warning: failed to archive workflow runs: %v\n", err)
-				}
+		} else if !silent {
+			fmt.Println(color.GreenString("*") + " Session artifacts archived.")
+		}
+		if err := ArchiveWorkflowRuns(job, plan); err != nil {
+			// Log a warning but don't fail the entire completion process.
+			if !silent {
+				fmt.Printf("Warning: failed to archive workflow runs: %v\n", err)
 			}
 		}
 	}

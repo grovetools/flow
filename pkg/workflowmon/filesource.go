@@ -30,6 +30,13 @@ type FileSourceOptions struct {
 	// still alive. Staleness requires BOTH a quiet journal and a gone
 	// session; when nil, runs are never marked stale.
 	SessionAlive func() bool
+	// ScriptsDirs are the workflows/scripts directories searched for a
+	// run's persisted orchestration script. Defaults to the source's own
+	// <sessionDir>/workflows/scripts. Session artifacts can fragment across
+	// project-slug dirs, so a run discovered under one slug may have its
+	// script under another; pass every resolved session dir's scripts dir
+	// to merge them.
+	ScriptsDirs []string
 }
 
 // FileSource implements EventSource by polling a Claude Code session
@@ -73,6 +80,9 @@ func NewFileSource(sessionDir string, opts FileSourceOptions) *FileSource {
 	}
 	if opts.StaleAfter <= 0 {
 		opts.StaleAfter = defaultStaleAfter
+	}
+	if len(opts.ScriptsDirs) == 0 {
+		opts.ScriptsDirs = []string{filepath.Join(sessionDir, "workflows", "scripts")}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &FileSource{
@@ -139,7 +149,12 @@ func (s *FileSource) poll(ctx context.Context, runs map[string]*fileRunState) {
 				promptPending: make(map[string]bool),
 			}
 			runs[runID] = rs
-			meta := LoadRunMeta(filepath.Join(s.sessionDir, "workflows", "scripts"), runID)
+			var meta *ScriptMeta
+			for _, scriptsDir := range s.opts.ScriptsDirs {
+				if meta = LoadRunMeta(scriptsDir, runID); meta != nil {
+					break
+				}
+			}
 			if !s.emit(ctx, RunDiscovered{RunID: runID, Meta: meta}) {
 				return
 			}
