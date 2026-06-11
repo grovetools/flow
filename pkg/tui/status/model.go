@@ -66,7 +66,6 @@ const (
 	MemoryPaneDetail
 	NativeAgentPaneDetail
 	EditorPaneDetail // BSP split editor (hosted mode only)
-	WorkflowPaneDetail
 )
 
 // Model represents the state of the TUI
@@ -77,6 +76,15 @@ type Model struct {
 	Jobs                  []*orchestration.Job
 	JobParents            map[string]*orchestration.Job // Track parent in tree structure
 	JobIndents            map[string]int                // Track indentation level
+	// DisplayRows is the view model the jobs table renders: one RowTypeJob
+	// row per job plus virtual workflow child rows. Cursor and ScrollOffset
+	// index DisplayRows, never m.Jobs. Rebuilt by rebuildDisplayRows after
+	// every reflatten of m.Jobs (RefreshMsg) and on workflow activity.
+	DisplayRows []DisplayRow
+	// FoldState records explicit user fold overrides keyed by NodeID
+	// (true = collapsed). Nodes absent from the map follow the default
+	// policy (running jobs auto-expand, everything else collapsed).
+	FoldState             map[string]bool
 	Cursor                int
 	ScrollOffset          int             // Track scroll position for viewport
 	Selected              map[string]bool // For multi-select
@@ -129,19 +137,10 @@ type Model struct {
 	skillPaneNodes        []*SkillPaneNode                            // Flattened skill/artifact nodes for cursor navigation
 	skillPaneStateMap     map[string]orchestration.SkillFidelityState // Cached state map
 
-	// Workflow pane state. The pane consumes workflowmon events exclusively
-	// (never journal files), accumulated into workflowState; transcript lines
-	// for the selected agent stream into workflowLogViewer via MsgCh.
-	workflowPaneViewport    viewport.Model
-	workflowDetailViewport  viewport.Model
-	workflowLogViewer       logviewer.Model
-	workflowPaneCursor      int
-	workflowPaneNodes       []*WorkflowPaneNode
-	workflowPaneRawContent  string
-	workflowState           *workflowPaneState
-	workflowCancel          context.CancelFunc  // tears down the event source + transcript collector
-	workflowAgentLines      map[string][]string // formatted transcript lines per agent (capped)
-	workflowSelectedAgentID string              // agent whose transcript fills the detail viewer
+	// Workflow inline-tree state. Per-agent transcript line buffers are
+	// fed by the transcript collector via MsgCh; the inline tree itself is
+	// rendered from WorkflowStates by buildDisplayRows.
+	workflowAgentLines map[string][]string // formatted transcript lines per agent (capped)
 
 	// Claw dialog
 	ClawDialogActive         bool
@@ -244,9 +243,6 @@ func (m *Model) closeCurrentDetail() tea.Cmd {
 		return nil
 	}
 
-	// Tear down workflow monitoring whenever the detail view closes.
-	m.stopWorkflowMonitor()
-
 	// If the detail pane is promoted (BSP split), demote it to tear down
 	// the host split and reclaim layout space.
 	if m.Manager.IsPromoted("detail") {
@@ -309,7 +305,7 @@ func (m *Model) syncFocusFromManager() {
 	case "jobs":
 		m.Focus = FocusJobs
 	case "detail":
-		if (m.ActiveDetailPane == SkillPane || m.ActiveDetailPane == WorkflowPaneDetail) && m.SkillSubFocus == 1 {
+		if m.ActiveDetailPane == SkillPane && m.SkillSubFocus == 1 {
 			m.Focus = FocusDetailSecondary
 		} else {
 			m.Focus = FocusDetailPrimary
@@ -355,10 +351,10 @@ func (m Model) calculateChatInputHeight() int {
 
 // renderDetailHeader returns the pre-rendered header line for the detail pane.
 func (m Model) renderDetailHeader() string {
-	if m.Cursor >= len(m.Jobs) {
+	currentJob := m.CurrentJob()
+	if currentJob == nil {
 		return ""
 	}
-	currentJob := m.Jobs[m.Cursor]
 
 	var paneTitle string
 	switch m.ActiveDetailPane {
@@ -372,8 +368,6 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Preview"
 	case SkillPane:
 		paneTitle = "Skills"
-	case WorkflowPaneDetail:
-		paneTitle = "Workflows"
 	case ContextPaneDetail:
 		paneTitle = "Context"
 	case MemoryPaneDetail:
@@ -431,18 +425,6 @@ func (m Model) renderDetailContent() string {
 		artifactView := addScrollbarToViewport(&m.skillArtifactViewport)
 		sepLine := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", m.LogViewerWidth))
 		return treeView + "\n" + sepLine + "\n" + artifactView
-	case WorkflowPaneDetail:
-		treeView := addScrollbarToViewport(&m.workflowPaneViewport)
-		sepLine := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", m.LogViewerWidth))
-		// Agent nodes show the live transcript viewer; run/phase nodes show
-		// the rendered detail viewport.
-		var bottom string
-		if m.workflowSelectedAgentID != "" {
-			bottom = m.workflowLogViewer.View()
-		} else {
-			bottom = addScrollbarToViewport(&m.workflowDetailViewport)
-		}
-		return treeView + "\n" + sepLine + "\n" + bottom
 	default:
 		return ""
 	}
@@ -481,7 +463,6 @@ func (m *Model) resizeAllDetailViewports() {
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.updateSkillViewportSizes()
-	m.updateWorkflowViewportSizes()
 
 	if m.frontmatterRawContent != "" {
 		styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
@@ -500,9 +481,6 @@ func (m *Model) resizeAllDetailViewports() {
 	}
 	if m.skillPaneRawContent != "" {
 		m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
-	}
-	if m.workflowPaneRawContent != "" {
-		m.workflowPaneViewport.SetContent(wrapContentForViewport(m.workflowPaneRawContent, m.workflowPaneViewport.Width-1))
 	}
 }
 
@@ -556,8 +534,6 @@ func New(cfg Config) Model {
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
 	skillArtifactVp := viewport.New(80, 10)
-	workflowPaneVp := viewport.New(80, 20)
-	workflowDetailVp := viewport.New(80, 10)
 
 	// Initialize search input for skill pane
 	skillSearch := textinput.New()
@@ -644,13 +620,14 @@ func New(cfg Config) Model {
 		mgr.Direction = panes.DirectionVertical
 	}
 
-	return Model{
+	m := Model{
 		Plan:                     plan,
 		Graph:                    graph,
 		Orchestrator:             orch,
 		Jobs:                     jobs,
 		JobParents:               parents,
 		JobIndents:               indents,
+		FoldState:                make(map[string]bool),
 		Cursor:                   initialCursor,
 		ScrollOffset:             0,
 		Selected:                 make(map[string]bool),
@@ -681,9 +658,6 @@ func New(cfg Config) Model {
 		editViewport:             editVp,
 		skillPaneViewport:        skillPaneVp,
 		skillArtifactViewport:    skillArtifactVp,
-		workflowPaneViewport:     workflowPaneVp,
-		workflowDetailViewport:   workflowDetailVp,
-		workflowLogViewer:        logviewer.New(80, 10),
 		workflowAgentLines:       make(map[string][]string),
 		skillSearchInput:         skillSearch,
 		IsolatedAgentInput:       isolatedInput,
@@ -692,6 +666,9 @@ func New(cfg Config) Model {
 		Hosted:                   cfg.Hosted,
 		Manager:                  mgr,
 	}
+	m.DisplayRows = m.buildDisplayRows()
+	m.clampCursor()
+	return m
 }
 
 // streamMsg wraps a tea.Msg delivered via the Model's MsgCh channel. The Update
@@ -757,7 +734,6 @@ func (m Model) listenToDaemon() tea.Cmd {
 // grove terminal) must call Close() before discarding a Model instance
 // so background goroutines don't leak across instance lifetimes.
 func (m *Model) Close() error {
-	m.stopWorkflowMonitor()
 	if m.streamCancel != nil {
 		m.streamCancel()
 		m.streamCancel = nil
@@ -808,16 +784,16 @@ func (m Model) renderFocusJobs(contentWidth int) string {
 
 	// 2. Add scroll indicators
 	scrollIndicator := ""
-	if len(m.Jobs) > 0 {
+	if len(m.DisplayRows) > 0 {
 		visibleLines := m.getVisibleJobCount()
-		hasMore := m.ScrollOffset+visibleLines < len(m.Jobs)
+		hasMore := m.ScrollOffset+visibleLines < len(m.DisplayRows)
 		hasLess := m.ScrollOffset > 0
 		if hasLess || hasMore {
 			indicator := ""
 			if hasLess {
 				indicator += "↑ "
 			}
-			indicator += fmt.Sprintf("[%d/%d]", m.Cursor+1, len(m.Jobs))
+			indicator += fmt.Sprintf("[%d/%d]", m.Cursor+1, len(m.DisplayRows))
 			if hasMore {
 				indicator += " ↓"
 			}
@@ -966,8 +942,7 @@ func (m Model) View() string {
 			footer = "\n" + theme.DefaultTheme.Warning.
 				Bold(true).
 				Render(fmt.Sprintf("Archive %d selected job(s)? (y/n)", len(m.Selected)))
-		} else if m.Cursor < len(m.Jobs) {
-			job := m.Jobs[m.Cursor]
+		} else if job := m.CurrentJob(); job != nil {
 			footer = "\n" + theme.DefaultTheme.Warning.
 				Bold(true).
 				Render(fmt.Sprintf("Archive '%s'? (y/n)", job.Filename))
@@ -996,7 +971,7 @@ func (m Model) View() string {
 // calculateFocusJobsWidth calculates the optimal width for the jobs pane
 // based on the content of the currently visible columns.
 func (m *Model) calculateFocusJobsWidth() int {
-	if len(m.Jobs) == 0 {
+	if len(m.DisplayRows) == 0 {
 		return 30 // Default minimum
 	}
 
@@ -1008,14 +983,24 @@ func (m *Model) calculateFocusJobsWidth() int {
 		}
 	}
 
-	// 2. Iterate through visible jobs to find the max width for each visible column
-	visibleJobs := m.getVisibleJobs()
-	if len(visibleJobs) == 0 {
-		// Fallback if no jobs are visible (e.g., empty plan)
+	// 2. Iterate through visible rows to find the max width for each visible column
+	visibleRows := m.getVisibleRows()
+	if len(visibleRows) == 0 {
+		// Fallback if no rows are visible (e.g., empty plan)
 		return 30
 	}
 
-	for _, job := range visibleJobs {
+	for _, row := range visibleRows {
+		if row.Type != RowTypeJob {
+			// Virtual workflow rows render only into the JOB column.
+			if m.columnVisibility["JOB"] {
+				if w := m.virtualRowCellWidth(&row); w > columnWidths["JOB"] {
+					columnWidths["JOB"] = w
+				}
+			}
+			continue
+		}
+		job := row.Job
 		// Calculate rendered width for each potential column
 		// This logic mirrors the rendering in view.go
 		if m.columnVisibility["JOB"] {
@@ -1026,7 +1011,7 @@ func (m *Model) calculateFocusJobsWidth() int {
 				treePrefixWidth = ((indent - 1) * 2) + 3 // "  " per level above 1 + "└─ " (3 chars)
 			}
 			// statusIcon (1 visual char, but may have ANSI codes) + space (1) + filename
-			jobColWidth := treePrefixWidth + 2 + lipgloss.Width(job.Filename)
+			jobColWidth := treePrefixWidth + 2 + lipgloss.Width(job.Filename) + m.jobBadgeWidth(job)
 			if jobColWidth > columnWidths["JOB"] {
 				columnWidths["JOB"] = jobColWidth
 			}
