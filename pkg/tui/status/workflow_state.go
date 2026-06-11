@@ -50,7 +50,7 @@ type workflowRunState struct {
 // adhocRunID is the pseudo-run bucket for run-less subagents (ad-hoc
 // Agent-tool spawns, or workflow agents whose run attribution hasn't
 // arrived yet). Daemon-backed sources map empty RunIDs here.
-const adhocRunID = "adhoc"
+const adhocRunID = workflowmon.AdhocRunID
 
 // workflowPaneState is the per-job model of discovered runs. It is fed
 // exclusively by workflowmon events — never by reading journal files.

@@ -379,7 +379,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.DaemonConnected = true
 		m.streamCh = msg.ch
 		m.streamCancel = msg.cancel
-		return m, m.listenToDaemon()
+		// The daemon is reachable — start the single daemon-backed workflow
+		// event source (replaces per-job FileSource fallback monitors).
+		var wfCmd tea.Cmd
+		if m.workflowDaemonCancel == nil {
+			wfCmd = startDaemonWorkflowSourceCmd(m.DaemonClient, m.MsgCh)
+		}
+		return m, tea.Batch(m.listenToDaemon(), wfCmd)
 
 	case daemonStateUpdateMsg:
 		// Trigger refresh for session updates and all job lifecycle events.
@@ -400,6 +406,80 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case daemonStreamErrorMsg:
 		m.DaemonConnected = false
 		// Fall back to polling (already running)
+		return m, nil
+
+	case workflowDaemonSourceStartedMsg:
+		if msg.Cancel == nil {
+			return m, nil
+		}
+		if m.workflowDaemonCancel != nil {
+			// A source is already running (duplicate connect) — keep it.
+			msg.Cancel()
+			return m, nil
+		}
+		m.workflowDaemonCancel = msg.Cancel
+		// The daemon subscription is authoritative; tear down any
+		// FileSource fallback monitors.
+		for id, cancel := range m.workflowMonitorCancels {
+			cancel()
+			delete(m.workflowMonitorCancels, id)
+		}
+		return m, nil
+
+	case workflowEventMsg:
+		// Route by JobID into the per-job workflow registry — multi-job
+		// folding, not the old guard-and-drop on the cursor job. Events
+		// without job attribution, or for jobs outside this plan (the
+		// daemon subscription is host-wide), are noise here.
+		if msg.JobID == "" || m.jobIndexInJobs(msg.JobID) < 0 {
+			return m, nil
+		}
+		if m.WorkflowStates == nil {
+			m.WorkflowStates = make(map[string]*workflowPaneState)
+		}
+		st, ok := m.WorkflowStates[msg.JobID]
+		if !ok {
+			st = newWorkflowPaneState()
+			m.WorkflowStates[msg.JobID] = st
+		}
+		applyWorkflowEvent(st, msg.Event)
+		return m, nil
+
+	case workflowSessionResolvedMsg:
+		// Outcome of FileSource session discovery for one job.
+		delete(m.workflowMonitorPending, msg.JobID)
+		if msg.Err != nil {
+			// Record on an existing pane state only; discovery retries on
+			// the next refresh while the job keeps running.
+			if st, ok := m.WorkflowStates[msg.JobID]; ok {
+				st.Err = msg.Err
+			}
+			return m, nil
+		}
+		// If the daemon source took over while discovery ran, drop the
+		// freshly started monitor immediately.
+		if m.workflowDaemonCancel != nil {
+			if msg.Cancel != nil {
+				msg.Cancel()
+			}
+			return m, nil
+		}
+		if msg.Cancel != nil {
+			if old := m.workflowMonitorCancels[msg.JobID]; old != nil {
+				old()
+			}
+			m.workflowMonitorCancels[msg.JobID] = msg.Cancel
+		}
+		if m.WorkflowStates == nil {
+			m.WorkflowStates = make(map[string]*workflowPaneState)
+		}
+		st, ok := m.WorkflowStates[msg.JobID]
+		if !ok {
+			st = newWorkflowPaneState()
+			m.WorkflowStates[msg.JobID] = st
+		}
+		st.SessionDir = msg.SessionDir
+		st.Err = nil
 		return m, nil
 
 	case workflowAgentLogMsg:
@@ -957,6 +1037,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Reconcile FileSource fallback workflow monitors with the
+		// refreshed job statuses (no-op while the daemon source is active).
+		if cmds := m.syncWorkflowMonitors(); len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
+		}
 		return m, nil
 
 	case ArchiveConfirmedMsg:
