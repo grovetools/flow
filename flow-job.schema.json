@@ -94,6 +94,10 @@
       "type": "string",
       "description": "LLM model to use for this job"
     },
+    "effort": {
+      "type": "string",
+      "description": "Effort level for claude agent jobs; passed to the claude CLI as --effort (claude owns the accepted levels)"
+    },
     "template": {
       "type": "string",
       "description": "Template name for generating the job prompt"
