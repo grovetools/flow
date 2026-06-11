@@ -165,13 +165,13 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if currentNode != nil {
 			workspacePath = currentNode.Path
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.Repos, workspacePath)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.SiblingWorkspaces, workspacePath)
 		if err != nil {
 			return "", err
 		}
 
 		// After creating the worktree(s), apply default context rules.
-		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
+		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.SiblingWorkspaces); err != nil {
 			fmt.Printf("%s  Warning: could not apply default context rules: %v\n", theme.IconWarning, err)
 		}
 
@@ -180,7 +180,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		// once at the ecosystem root using: grove-skills sync --here
 
 		// Configure go.work file for the worktree.
-		if err := configureGoWorkspace(worktreePath, cmd.Repos, sourceGitRoot, provider); err != nil {
+		if err := configureGoWorkspace(worktreePath, cmd.SiblingWorkspaces, sourceGitRoot, provider); err != nil {
 			// This is not a fatal error, but the user should be aware of it.
 			fmt.Printf("%s  Warning: could not configure go.work file: %v\n", theme.IconWarning, err)
 		}
@@ -208,7 +208,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.NoteRef, "", cmd.Playbook, cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.NoteRef, "", cmd.Playbook, cmd.SiblingWorkspaces); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -564,13 +564,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		if currentNode != nil {
 			workspacePath = currentNode.Path
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.Repos, workspacePath)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.SiblingWorkspaces, workspacePath)
 		if err != nil {
 			return err
 		}
 
 		// After creating the worktree(s), apply default context rules.
-		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.Repos); err != nil {
+		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.SiblingWorkspaces); err != nil {
 			fmt.Printf("%s  Warning: could not apply default context rules: %v\n", theme.IconWarning, err)
 		}
 
@@ -579,7 +579,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		// once at the ecosystem root using: grove-skills sync --here
 
 		// Configure go.work file for the worktree.
-		if err := configureGoWorkspace(worktreePath, cmd.Repos, sourceGitRoot, provider); err != nil {
+		if err := configureGoWorkspace(worktreePath, cmd.SiblingWorkspaces, sourceGitRoot, provider); err != nil {
 			// This is not a fatal error, but the user should be aware of it.
 			fmt.Printf("%s  Warning: could not configure go.work file: %v\n", theme.IconWarning, err)
 		}
@@ -770,7 +770,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	// Create a default .grove-plan.yml, using the determined worktree and recipe name
 	// Use recipeVars["model"] which includes workspace config fallback
 	effectiveModel := recipeVars["model"]
-	if err := createDefaultPlanConfig(planPath, effectiveModel, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Playbook, cmd.Repos); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Playbook, cmd.SiblingWorkspaces); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("* Created .grove-plan.yml")
@@ -779,7 +779,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	// Execute init actions after everything is set up (only if --init flag is set)
 	if cmd.RunInit && len(recipe.InitActions) > 0 {
 		fmt.Println("\n▶️  Executing initialization actions from recipe...")
-		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, templateData); err != nil {
+		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, cmd.SiblingWorkspaces, templateData); err != nil {
 			// Log a warning but do not fail the entire plan init
 			fmt.Printf("WARNING:  Warning: one or more init actions failed: %v\n", err)
 		} else {
@@ -981,7 +981,7 @@ func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
 }
 
 // createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
-func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playbook string, repos []string) error {
+func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playbook string, siblingWorkspaces []string) error {
 	var configContent strings.Builder
 
 	// Recipe field (if applicable)
@@ -1014,11 +1014,13 @@ func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playboo
 	}
 	configContent.WriteString("\n")
 
-	// Add repos configuration if specified
-	if len(repos) > 0 {
+	// Add repos configuration if specified. The repos: YAML key is a frozen
+	// persisted format — only the Go identifiers renamed to sibling
+	// workspaces.
+	if len(siblingWorkspaces) > 0 {
 		configContent.WriteString("# Specific repos to include in ecosystem worktree\n")
 		configContent.WriteString("repos:\n")
-		for _, repo := range repos {
+		for _, repo := range siblingWorkspaces {
 			configContent.WriteString(fmt.Sprintf("  - %s\n", repo))
 		}
 	} else {
@@ -1117,7 +1119,7 @@ func applyDefaultContextRulesToWorktree(worktreePath string, explicitRepos []str
 }
 
 // executeInitActions orchestrates the execution of actions defined in a recipe's workspace_init.yml
-func executeInitActions(actions []orchestration.InitAction, worktreeOverride, finalWorktree string, templateData interface{}) error {
+func executeInitActions(actions []orchestration.InitAction, worktreeOverride, finalWorktree string, siblingWorkspaces []string, templateData interface{}) error {
 	var errors []string
 
 	// Determine the base worktree path
@@ -1135,9 +1137,13 @@ func executeInitActions(actions []orchestration.InitAction, worktreeOverride, fi
 		}
 
 		opts := workspace.PrepareOptions{
-			GitRoot:      gitRoot,
-			WorktreeName: finalWorktree,
-			BranchName:   finalWorktree,
+			GitRoot:           gitRoot,
+			WorktreeName:      finalWorktree,
+			BranchName:        finalWorktree,
+			SiblingWorkspaces: siblingWorkspaces,
+			// XDG gate: worktrees with sibling workspaces live under the
+			// XDG data dir.
+			UseXDGWorktrees: len(siblingWorkspaces) > 0,
 		}
 		worktreePath, err = workspace.Prepare(context.Background(), opts)
 		if err != nil {
@@ -1209,7 +1215,7 @@ func executeShellAction(action orchestration.InitAction, workDir string, templat
 // createWorktreeIfRequested creates a git worktree with the given name and
 // returns the created worktree path along with the source repository's git
 // root (needed to configure go.work in a layout-independent way).
-func createWorktreeIfRequested(worktreeName string, repos []string, workspacePath string) (worktreePath, sourceGitRoot string, err error) {
+func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, workspacePath string) (worktreePath, sourceGitRoot string, err error) {
 	// Use workspace path if provided, otherwise fall back to current directory
 	searchPath := workspacePath
 	if searchPath == "" {
@@ -1227,10 +1233,13 @@ func createWorktreeIfRequested(worktreeName string, repos []string, workspacePat
 	}
 
 	opts := workspace.PrepareOptions{
-		GitRoot:      gitRoot,
-		WorktreeName: worktreeName,
-		BranchName:   worktreeName,
-		Repos:        repos,
+		GitRoot:           gitRoot,
+		WorktreeName:      worktreeName,
+		BranchName:        worktreeName,
+		SiblingWorkspaces: siblingWorkspaces,
+		// XDG gate: worktrees with sibling workspaces live under the XDG
+		// data dir; plain single-repo worktrees keep the legacy layout.
+		UseXDGWorktrees: len(siblingWorkspaces) > 0,
 	}
 
 	worktreePath, err = workspace.Prepare(context.Background(), opts, orchestration.CopyProjectFilesToWorktree)

@@ -63,7 +63,7 @@ func planInitCmdToRequest(c *PlanInitCmd) *planinit.Request {
 		Recipe:         c.Recipe,
 		RecipeVars:     c.RecipeVars,
 		RecipeCmd:      c.RecipeCmd,
-		Repos:          c.Repos,
+		SiblingWorkspaces: c.SiblingWorkspaces,
 		NoteRef:        c.NoteRef,
 		FromNote:       c.FromNote,
 		NoteTargetFile: c.NoteTargetFile,
@@ -74,7 +74,7 @@ func planInitCmdToRequest(c *PlanInitCmd) *planinit.Request {
 // requestToPlanInitCmd builds a *PlanInitCmd from the wizard's
 // Request, preserving any CLI-only fields carried on the original
 // initialCmd that the wizard doesn't surface (EnvProfile, RecipeVars,
-// RecipeCmd, Repos, Force, etc.).
+// RecipeCmd, SiblingWorkspaces, Force, etc.).
 func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanInitCmd {
 	cmd := &PlanInitCmd{
 		Dir:            req.Dir,
@@ -87,7 +87,7 @@ func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanI
 		Recipe:         req.Recipe,
 		RecipeVars:     req.RecipeVars,
 		RecipeCmd:      req.RecipeCmd,
-		Repos:          req.Repos,
+		SiblingWorkspaces: req.SiblingWorkspaces,
 		NoteRef:        req.NoteRef,
 		FromNote:       req.FromNote,
 		NoteTargetFile: req.NoteTargetFile,
@@ -106,8 +106,8 @@ func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanI
 		if cmd.RecipeCmd == "" {
 			cmd.RecipeCmd = initialCmd.RecipeCmd
 		}
-		if len(cmd.Repos) == 0 {
-			cmd.Repos = initialCmd.Repos
+		if len(cmd.SiblingWorkspaces) == 0 {
+			cmd.SiblingWorkspaces = initialCmd.SiblingWorkspaces
 		}
 		if cmd.NoteRef == "" {
 			cmd.NoteRef = initialCmd.NoteRef

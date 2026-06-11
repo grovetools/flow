@@ -45,9 +45,9 @@ type Request struct {
 	EnvProfile     string
 	Recipe         string
 	RecipeVars     []string
-	RecipeCmd      string
-	Repos          []string
-	NoteRef        string
+	RecipeCmd         string
+	SiblingWorkspaces []string
+	NoteRef           string
 	FromNote       string
 	NoteTargetFile string
 	RunInit        bool

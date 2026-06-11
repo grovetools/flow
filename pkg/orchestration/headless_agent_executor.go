@@ -235,8 +235,11 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		PlanName:     plan.Name,
 	}
 
+	// XDG gate: a plan with sibling workspaces (persisted repos: key) gets
+	// its worktree under the XDG data dir.
 	if plan.Config != nil && len(plan.Config.Repos) > 0 {
-		opts.Repos = plan.Config.Repos
+		opts.SiblingWorkspaces = plan.Config.Repos
+		opts.UseXDGWorktrees = true
 	}
 
 	return workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)

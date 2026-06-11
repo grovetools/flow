@@ -664,6 +664,7 @@ func formatFinishErrors(errs []finishActionError) string {
 
 // runInitSubprocess shells out to `flow plan init` via tea.ExecProcess
 // so worktree creation / ecosystem bootstrap doesn't block the loop.
+// NOTE: req.SiblingWorkspaces (--sibling-workspaces) is not forwarded yet.
 func runInitSubprocess(req *planinit.Request) tea.Cmd {
 	args := []string{"plan", "init", req.Dir}
 	if req.Recipe != "" {
