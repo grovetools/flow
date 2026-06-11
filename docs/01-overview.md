@@ -8,7 +8,11 @@
 *   **Briefing**: Before execution, it assembles an XML prompt containing system instructions, dependency outputs, and repository context.
 *   **Audit Trail**: Outputs (LLM responses, agent transcripts) are appended directly to the source Markdown file, preserving the history in version control.
 
-**Worktree Isolation**: Jobs can specify a `worktree`. `flow` creates these in `.grove-worktrees/` at the project root, allowing agents to modify code without affecting the main working directory.
+**Worktree Isolation**: Jobs can specify a `worktree`, letting agents modify code without affecting the main working directory. `flow` supports two layouts:
+*   **Legacy (default)**: worktrees are created in `.grove-worktrees/` at the project root.
+*   **XDG sibling-workspaces**: passing `--sibling-workspaces` to `flow plan init` creates an *ecosystem* worktree under the grove data dir (`~/.local/share/grove/worktrees/<repo>-<hash>/<name>`, honoring `$GROVE_HOME`/`$XDG_DATA_HOME`), with the named sibling repos linked in. `--sibling-workspaces grove-core,grove-flow` links specific submodules; omitting the list links all submodules. This replaces the removed `--repos` flag.
+
+Because `--worktree` auto-names when given bare, an explicit worktree name must use the `=` form, e.g. `flow plan init my-plan --worktree=wt1 --sibling-workspaces grove-core` (`--worktree wt1` would treat `wt1` as a positional argument).
 
 ## Features
 
