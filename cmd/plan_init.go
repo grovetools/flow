@@ -165,7 +165,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if currentNode != nil {
 			workspacePath = currentNode.Path
 		}
-		worktreePath, err := createWorktreeIfRequested(worktreeToSet, cmd.Repos, workspacePath)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.Repos, workspacePath)
 		if err != nil {
 			return "", err
 		}
@@ -180,7 +180,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		// once at the ecosystem root using: grove-skills sync --here
 
 		// Configure go.work file for the worktree.
-		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {
+		if err := configureGoWorkspace(worktreePath, cmd.Repos, sourceGitRoot, provider); err != nil {
 			// This is not a fatal error, but the user should be aware of it.
 			fmt.Printf("%s  Warning: could not configure go.work file: %v\n", theme.IconWarning, err)
 		}
@@ -564,7 +564,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		if currentNode != nil {
 			workspacePath = currentNode.Path
 		}
-		worktreePath, err := createWorktreeIfRequested(worktreeOverride, cmd.Repos, workspacePath)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.Repos, workspacePath)
 		if err != nil {
 			return err
 		}
@@ -579,7 +579,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		// once at the ecosystem root using: grove-skills sync --here
 
 		// Configure go.work file for the worktree.
-		if err := configureGoWorkspace(worktreePath, cmd.Repos, provider); err != nil {
+		if err := configureGoWorkspace(worktreePath, cmd.Repos, sourceGitRoot, provider); err != nil {
 			// This is not a fatal error, but the user should be aware of it.
 			fmt.Printf("%s  Warning: could not configure go.work file: %v\n", theme.IconWarning, err)
 		}
@@ -1206,8 +1206,10 @@ func executeShellAction(action orchestration.InitAction, workDir string, templat
 	return cmd.Run()
 }
 
-// createWorktreeIfRequested creates a git worktree with the given name
-func createWorktreeIfRequested(worktreeName string, repos []string, workspacePath string) (string, error) {
+// createWorktreeIfRequested creates a git worktree with the given name and
+// returns the created worktree path along with the source repository's git
+// root (needed to configure go.work in a layout-independent way).
+func createWorktreeIfRequested(worktreeName string, repos []string, workspacePath string) (worktreePath, sourceGitRoot string, err error) {
 	// Use workspace path if provided, otherwise fall back to current directory
 	searchPath := workspacePath
 	if searchPath == "" {
@@ -1216,12 +1218,12 @@ func createWorktreeIfRequested(worktreeName string, repos []string, workspacePat
 
 	gitRoot, err := orchestration.GetGitRootSafe(searchPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to find git root: %w", err)
+		return "", "", fmt.Errorf("failed to find git root: %w", err)
 	}
 
 	// Defensive check: prevent creating worktrees in notebook repos
 	if workspace.IsNotebookRepo(gitRoot) {
-		return "", fmt.Errorf("cannot create worktree: running from within a notebook git repository at %s. Please run this command from your project directory", gitRoot)
+		return "", "", fmt.Errorf("cannot create worktree: running from within a notebook git repository at %s. Please run this command from your project directory", gitRoot)
 	}
 
 	opts := workspace.PrepareOptions{
@@ -1231,12 +1233,12 @@ func createWorktreeIfRequested(worktreeName string, repos []string, workspacePat
 		Repos:        repos,
 	}
 
-	worktreePath, err := workspace.Prepare(context.Background(), opts, orchestration.CopyProjectFilesToWorktree)
+	worktreePath, err = workspace.Prepare(context.Background(), opts, orchestration.CopyProjectFilesToWorktree)
 	if err != nil {
-		return "", fmt.Errorf("failed to create worktree: %w", err)
+		return "", "", fmt.Errorf("failed to create worktree: %w", err)
 	}
 
-	return worktreePath, nil
+	return worktreePath, gitRoot, nil
 }
 
 // setWorktreeActivePlan writes a state file within a worktree to set the active plan.
@@ -1275,7 +1277,14 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		if err != nil {
 			return "", nil
 		}
-		loadPath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
+		found, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+		if !ok {
+			// Surface the miss instead of silently provisioning against a
+			// guessed path (which would quietly load no layered config).
+			return fmt.Sprintf("%s  Warning: worktree %q not found under %s; skipping environment provisioning\n",
+				theme.IconWarning, worktreeName, gitRoot), nil
+		}
+		loadPath = found
 	} else {
 		loadPath, _ = os.Getwd()
 	}

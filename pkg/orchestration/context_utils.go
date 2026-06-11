@@ -25,23 +25,14 @@ func DetermineWorkingDirectory(plan *Plan, job *Job) (string, error) {
 
 	var workDir string
 	if job.Worktree != "" {
-		// Check if we're already in the requested worktree
-		currentPath := gitRoot
-		if strings.HasSuffix(currentPath, filepath.Join(".grove-worktrees", job.Worktree)) {
-			workDir = currentPath
-		} else {
-			// Extract main repository path if we're in a worktree
-			actualGitRoot := gitRoot
-			if strings.Contains(gitRoot, ".grove-worktrees") {
-				parts := strings.Split(gitRoot, ".grove-worktrees")
-				if len(parts) > 0 {
-					actualGitRoot = strings.TrimSuffix(parts[0], string(filepath.Separator))
-				}
-			}
-
-			// Construct worktree path
-			workDir = filepath.Join(actualGitRoot, ".grove-worktrees", job.Worktree)
+		ownerRoot, worktreePath, exists := resolveWorktreeForJob(gitRoot, job.Worktree)
+		if !exists {
+			// Do NOT fall back to a guessed path: silently handing an agent
+			// the main checkout when its worktree is missing is the
+			// highest-risk wrong-cwd failure. Surface it instead.
+			return "", fmt.Errorf("worktree %q not found for repository %s", job.Worktree, ownerRoot)
 		}
+		workDir = worktreePath
 	} else {
 		// No worktree, use the main git repository root
 		workDir = gitRoot
@@ -58,6 +49,31 @@ func DetermineWorkingDirectory(plan *Plan, job *Job) (string, error) {
 	}
 
 	return workDir, nil
+}
+
+// resolveWorktreeForJob resolves the repository that owns a job's worktree and
+// locates the worktree on disk. It is the shared detection logic behind the
+// per-executor determineWorkDir/prepareWorktree helpers.
+//
+//   - ownerRoot is the repository the worktree belongs to: gitRoot itself, or
+//     its owner when gitRoot is already inside a worktree checkout.
+//   - worktreePath is the existing worktree when one is found, otherwise the
+//     legacy creation target for ownerRoot.
+//   - exists reports whether the worktree is present on disk.
+//
+// All layout knowledge is delegated to the core workspace helpers so the same
+// code resolves legacy and (in later phases) XDG worktrees.
+func resolveWorktreeForJob(gitRoot, worktreeName string) (ownerRoot, worktreePath string, exists bool) {
+	ownerRoot = gitRoot
+	if workspace.IsWorktreePath(gitRoot) {
+		if owner, ok := workspace.WorktreeOwner(gitRoot); ok {
+			ownerRoot = owner
+		}
+	}
+	if found, ok := workspace.FindWorktreePath(ownerRoot, worktreeName); ok {
+		return ownerRoot, found, true
+	}
+	return ownerRoot, workspace.ResolveNewWorktreePath(ownerRoot, worktreeName, false), false
 }
 
 // ScopeToSubProject adjusts a working directory to point to a sub-project

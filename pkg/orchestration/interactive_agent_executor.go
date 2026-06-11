@@ -300,38 +300,23 @@ func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Jo
 			return "", fmt.Errorf("could not find git root: %w", err)
 		}
 
-		// Check if we're already in the requested worktree to avoid duplicate paths
-		currentPath := gitRoot
-		if !strings.HasSuffix(currentPath, filepath.Join(".grove-worktrees", job.Worktree)) {
-			// Extract the main repository path if we're in a worktree
-			actualGitRoot := gitRoot
-			if strings.Contains(gitRoot, ".grove-worktrees") {
-				parts := strings.Split(gitRoot, ".grove-worktrees")
-				if len(parts) > 0 {
-					actualGitRoot = strings.TrimSuffix(parts[0], string(filepath.Separator))
-				}
+		// Shared detection resolves the owning repo and whether the worktree
+		// already exists; we only prepare a missing one.
+		ownerRoot, _, exists := resolveWorktreeForJob(gitRoot, job.Worktree)
+		if !exists {
+			opts := workspace.PrepareOptions{
+				GitRoot:      ownerRoot,
+				WorktreeName: job.Worktree,
+				BranchName:   job.Worktree,
+				PlanName:     plan.Name,
 			}
 
-			// Prepare the worktree
-			worktreePath := filepath.Join(actualGitRoot, ".grove-worktrees", job.Worktree)
-			if _, err := os.Stat(worktreePath); err == nil {
-				// Worktree already exists, skip preparation.
-			} else {
-				opts := workspace.PrepareOptions{
-					GitRoot:      actualGitRoot,
-					WorktreeName: job.Worktree,
-					BranchName:   job.Worktree,
-					PlanName:     plan.Name,
-				}
+			if plan.Config != nil && len(plan.Config.Repos) > 0 {
+				opts.Repos = plan.Config.Repos
+			}
 
-				if plan.Config != nil && len(plan.Config.Repos) > 0 {
-					opts.Repos = plan.Config.Repos
-				}
-
-				_, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
-				if err != nil {
-					return "", fmt.Errorf("failed to prepare host worktree: %w", err)
-				}
+			if _, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree); err != nil {
+				return "", fmt.Errorf("failed to prepare host worktree: %w", err)
 			}
 		}
 	}

@@ -255,8 +255,7 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 		if worktree != "" {
 			var gitRoot string
 			if cwdGitRoot != "" {
-				worktreePath := filepath.Join(cwdGitRoot, ".grove-worktrees", worktree)
-				if _, err := os.Stat(worktreePath); err == nil {
+				if _, ok := workspace.FindWorktreePath(cwdGitRoot, worktree); ok {
 					gitRoot = cwdGitRoot
 				}
 			}
@@ -274,8 +273,7 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 			}
 
 			if gitRoot != "" {
-				worktreePath := filepath.Join(gitRoot, ".grove-worktrees", worktree)
-				if _, statErr := os.Stat(worktreePath); statErr == nil {
+				if worktreePath, ok := workspace.FindWorktreePath(gitRoot, worktree); ok {
 					gitStatus, statusErr := git.GetStatus(worktreePath)
 					if statusErr == nil {
 						gitStatus.AheadCount = planutil.CommitCount(worktreePath, "main..HEAD")
@@ -459,8 +457,8 @@ func fastForwardUpdateCmd(plan PlanListItem) tea.Cmd {
 					continue
 				}
 
-				worktreePath := filepath.Join(repoPath, ".grove-worktrees", plan.Worktree)
-				if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+				worktreePath, ok := workspace.FindWorktreePath(repoPath, plan.Worktree)
+				if !ok {
 					continue
 				}
 
@@ -486,7 +484,10 @@ func fastForwardUpdateCmd(plan PlanListItem) tea.Cmd {
 		if err != nil {
 			return fastForwardMsg{err: fmt.Errorf("not in a git repository: %w", err)}
 		}
-		worktreePath := filepath.Join(gitRoot, ".grove-worktrees", plan.Worktree)
+		worktreePath, ok := workspace.FindWorktreePath(gitRoot, plan.Worktree)
+		if !ok {
+			worktreePath = workspace.ResolveNewWorktreePath(gitRoot, plan.Worktree, false)
+		}
 
 		defaultBranch := "main"
 		if err := planutil.RebaseWorktreeBranch(worktreePath, defaultBranch); err != nil {

@@ -146,11 +146,3 @@ func (ctx *ExecutionContext) LogDirectory() string {
 	// Fall back to plan directory
 	return filepath.Join(ctx.PlanDirectory, ".logs")
 }
-
-// WorktreeBaseDirectory returns where worktrees should be created
-func (ctx *ExecutionContext) WorktreeBaseDirectory() string {
-	if ctx.GitRoot != "" {
-		return filepath.Join(ctx.GitRoot, ".grove-worktrees")
-	}
-	return ""
-}

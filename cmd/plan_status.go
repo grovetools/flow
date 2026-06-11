@@ -137,8 +137,9 @@ func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
 	// Build worktree path and check if it exists
 	var worktreePath string
 	if gitRoot != "" {
-		worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		if found, ok := workspace.FindWorktreePath(gitRoot, worktreeName); ok {
+			worktreePath = found
+		} else {
 			// Worktree not found at this git root
 			gitRoot = ""
 		}
@@ -151,8 +152,9 @@ func getWorktreeStatus(plan *orchestration.Plan) (*WorktreeStatus, error) {
 		project, err := workspace.GetProjectByPath(plan.Directory)
 		if err == nil && project != nil {
 			gitRoot = project.Path
-			worktreePath = filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-			if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			if found, ok := workspace.FindWorktreePath(gitRoot, worktreeName); ok {
+				worktreePath = found
+			} else {
 				// Still not found
 				return status, nil
 			}

@@ -8,9 +8,7 @@ package planutil
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/grovetools/core/git"
@@ -138,8 +136,7 @@ func RebaseAndMergeRepo(repoPath, worktreeBranch, defaultBranch string) error {
 		return fmt.Errorf("fast-forward merge failed: %s", strings.TrimSpace(string(output)))
 	}
 
-	worktreePath := filepath.Join(repoPath, ".grove-worktrees", worktreeBranch)
-	if _, err := os.Stat(worktreePath); err == nil {
+	if worktreePath, ok := workspace.FindWorktreePath(repoPath, worktreeBranch); ok {
 		resetCmd := exec.Command("git", "reset", "--hard", defaultBranch)
 		resetCmd.Dir = worktreePath
 		if output, err := resetCmd.CombinedOutput(); err != nil {
@@ -205,73 +202,20 @@ func EcosystemRepoDetails(plan *orchestration.Plan, worktree string, provider *w
 // to render ahead/behind counts for plan list entries.
 func FindGitRootForWorktree(planPath, worktreeName string) string {
 	project, err := workspace.GetProjectByPath(planPath)
-	if err == nil && project != nil {
-		worktreePath := filepath.Join(project.Path, ".grove-worktrees", worktreeName)
-		if _, err := os.Stat(worktreePath); err == nil {
-			return project.Path
-		}
-		if project.ParentProjectPath != "" {
-			worktreePath := filepath.Join(project.ParentProjectPath, ".grove-worktrees", worktreeName)
-			if _, err := os.Stat(worktreePath); err == nil {
-				return project.ParentProjectPath
-			}
-		}
-		if project.RootEcosystemPath != "" {
-			worktreePath := filepath.Join(project.RootEcosystemPath, ".grove-worktrees", worktreeName)
-			if _, err := os.Stat(worktreePath); err == nil {
-				return project.RootEcosystemPath
-			}
-		}
-	}
-
-	parts := strings.Split(planPath, string(filepath.Separator))
-	var workspaceName string
-	for i, part := range parts {
-		if part == "workspaces" && i+1 < len(parts) {
-			workspaceName = parts[i+1]
-			break
-		} else if part == "repos" && i+1 < len(parts) {
-			workspaceName = parts[i+1]
-			break
-		}
-	}
-
-	if workspaceName == "" {
+	if err != nil || project == nil {
 		return ""
 	}
 
-	homeDir, _ := os.UserHomeDir()
-	cwd, _ := os.Getwd()
-
-	var candidates []string
-
-	if workspaceName == "grove-ecosystem" {
-		ecosystemPath := filepath.Join(homeDir, "Code", "grove-ecosystem")
-		candidates = append(candidates, ecosystemPath)
-	} else {
-		candidates = append(candidates,
-			filepath.Join(homeDir, "Code", workspaceName),
-			filepath.Join(homeDir, "Code", "grove-ecosystem", workspaceName),
-			filepath.Join(homeDir, "Code", "grove-ecosystem", ".grove-worktrees", workspaceName),
-		)
-	}
-
-	if strings.Contains(cwd, "grove-ecosystem") {
-		ecosystemRoot := cwd[:strings.Index(cwd, "grove-ecosystem")+len("grove-ecosystem")]
-		if workspaceName == "grove-ecosystem" {
-			candidates = append(candidates, ecosystemRoot)
-		} else {
-			candidates = append(candidates,
-				filepath.Join(ecosystemRoot, workspaceName),
-				filepath.Join(ecosystemRoot, ".grove-worktrees", workspaceName),
-			)
+	// Probe the candidate owner roots (this project, then its parent/ecosystem
+	// roots) for an existing worktree of the requested name. The first root
+	// that owns the worktree wins. Layout knowledge lives in the core helpers,
+	// so this resolves legacy and XDG worktrees alike.
+	for _, root := range []string{project.Path, project.ParentProjectPath, project.RootEcosystemPath} {
+		if root == "" {
+			continue
 		}
-	}
-
-	for _, candidate := range candidates {
-		worktreePath := filepath.Join(candidate, ".grove-worktrees", worktreeName)
-		if _, err := os.Stat(worktreePath); err == nil {
-			return candidate
+		if _, ok := workspace.FindWorktreePath(root, worktreeName); ok {
+			return root
 		}
 	}
 

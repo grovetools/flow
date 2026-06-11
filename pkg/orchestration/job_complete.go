@@ -129,7 +129,11 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 				if gitRootErr == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
 					gitRoot = gitRootInfo.ParentProjectPath
 				}
-				worktreePath = filepath.Join(gitRoot, ".grove-worktrees", job.Worktree)
+				if found, ok := workspace.FindWorktreePath(gitRoot, job.Worktree); ok {
+					worktreePath = found
+				} else {
+					worktreePath = workspace.ResolveNewWorktreePath(gitRoot, job.Worktree, false)
+				}
 				err = nil
 			}
 		}
