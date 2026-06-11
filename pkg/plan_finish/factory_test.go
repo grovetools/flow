@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/paths"
+	"github.com/grovetools/core/pkg/workspace"
 
 	gexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -316,6 +318,63 @@ func TestPathIsUnderGroveWorktrees_SafetyRails(t *testing.T) {
 	}
 	if pathIsUnderGroveWorktrees(filepath.Join(gitRoot, ".grove-worktrees", "foo"), "") {
 		t.Error("empty gitRoot should refuse")
+	}
+}
+
+// TestPathIsUnderGroveWorktrees_XDGSafetyRails extends the guard to the XDG
+// out-of-repo layout, where worktrees live at
+// <DataDir>/worktrees/<DirIdentifier(gitRoot)>/<name>. The guard must accept
+// only paths strictly beneath the gitRoot's OWN identifier dir, and refuse the
+// worktrees base, the identifier dir itself, the grove data root, another
+// repo's identifier dir, and ".grove-worktreesX"-style near-misses — a loose
+// prefix check here could os.RemoveAll every worktree of a repo or a sibling
+// clone's checkouts under the shared XDG base.
+//
+// Sandboxing (mandatory for XDG-touching tests): XDG_DATA_HOME is pinned to a
+// temp dir and GROVE_HOME is cleared so paths.getDataHome() resolves into the
+// sandbox, never the real ~/.local/share/grove.
+func TestPathIsUnderGroveWorktrees_XDGSafetyRails(t *testing.T) {
+	xdgDataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdgDataHome)
+	t.Setenv("GROVE_HOME", "") // GROVE_HOME beats XDG_DATA_HOME in getDataHome()
+
+	gitRoot := "/Users/someone/my-ecosystem"
+	base := paths.WorktreesDir() // <xdgDataHome>/grove/worktrees
+	if base == "" {
+		t.Fatal("WorktreesDir() empty under sandboxed XDG_DATA_HOME")
+	}
+	id := workspace.DirIdentifier(gitRoot)
+	idDir := filepath.Join(base, id)
+	otherID := workspace.DirIdentifier("/Users/someone/other-ecosystem")
+	dataRoot := paths.DataDir() // <xdgDataHome>/grove
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		// Accept: strictly beneath this repo's identifier dir.
+		{"legit xdg worktree", filepath.Join(idDir, "wt1"), true},
+		{"nested under xdg worktree", filepath.Join(idDir, "wt1", "svc-a"), true},
+		{"branch-style xdg name", filepath.Join(idDir, "feature", "x"), true},
+		// Reject: containers and the data root are never removal targets.
+		{"worktrees base itself", base, false},
+		{"identifier dir itself", idDir, false},
+		{"grove data root", dataRoot, false},
+		{"xdg data home", xdgDataHome, false},
+		// Reject: a DIFFERENT repo's identifier dir (cross-clone protection).
+		{"other repo identifier dir", filepath.Join(base, otherID, "wt1"), false},
+		// Reject: near-misses that share a textual prefix but not a path component.
+		{"worktrees-base sibling near-miss", filepath.Join(dataRoot, "worktreesX", id, "wt1"), false},
+		{"identifier-dir suffix near-miss", idDir + "X", false},
+		{"legacy near-miss under gitRoot", filepath.Join(gitRoot, ".grove-worktreesX", "wt1"), false},
+		{"empty path", "", false},
+	}
+	for _, tc := range cases {
+		if got := pathIsUnderGroveWorktrees(tc.path, gitRoot); got != tc.want {
+			t.Errorf("%s: pathIsUnderGroveWorktrees(%q, %q) = %v, want %v",
+				tc.name, tc.path, gitRoot, got, tc.want)
+		}
 	}
 }
 

@@ -29,6 +29,7 @@ func main() {
 		scenarios.TitleBasedRunScenario,
 		scenarios.PlanLifecycleScenario,
 		scenarios.PlanFinishEcosystemScenario,
+		scenarios.SiblingWorkspacesLifecycleScenario,
 		scenarios.JobManagementScenario,
 		scenarios.PlanListTUIScenario,
 		scenarios.PlanInitTUIScenario,
@@ -54,7 +55,7 @@ func main() {
 		scenarios.PlanAddRecipeWithVariablesScenario,
 		scenarios.RecipeInitActionsShellScenario,
 		scenarios.RecipeInitActionsNotebookScenario,
-		// scenarios.RecipeInitActionsEcosystemScenario,
+		scenarios.RecipeInitActionsEcosystemScenario,
 		scenarios.RecipeInitActionsFailureHandlingScenario,
 		scenarios.PlanDomainFilteringScenario,
 		scenarios.RecipeInitFlagScenario,
@@ -68,7 +69,15 @@ func main() {
 		scenarios.RecipeConceptUpdateWithPlansScenario,
 		scenarios.ConceptGatheringScenario,
 		scenarios.ConceptGatheringWithNotesScenario,
-		scenarios.ZombieWorktreeLogRecreationScenario,
+		// ZombieWorktreeLogRecreationScenario retired 2026-06-11 (XDG worktrees P5):
+		// it asserted worktree-local logs (<worktree>/.grove/logs/*.log) that core
+		// stopped writing on 2026-05-06 (e725c88 moved workspace logs to StateDir()).
+		// The behavior it covered — deleted worktrees not resurrected by logging — is
+		// core logging-redirect behavior, owned by the canonical, StateDir-contract
+		// scenario at core/tests/e2e/scenarios_zombie_worktrees.go (plus its XDG
+		// variant). Keeping a copy here would re-couple the flow suite to core's
+		// log-path internals — the coupling that rotted this scenario in the first
+		// place. Flow's XDG worktree coverage now lives in SiblingWorkspacesLifecycleScenario.
 		scenarios.PlanRecipeInheritsDefaultsScenario,
 		scenarios.RecipeTemplateOverridesDefaultsScenario,
 		scenarios.HoistedAddRecipeInheritsDefaultsScenario,
