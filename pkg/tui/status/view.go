@@ -171,15 +171,30 @@ func (m Model) estimateTableWidth() int {
 		}
 	}
 
-	visibleJobs := m.getVisibleJobs()
-	for _, job := range visibleJobs {
+	visibleRows := m.getVisibleRows()
+	for i := range visibleRows {
+		row := &visibleRows[i]
+		if row.Type != RowTypeJob {
+			// Virtual workflow rows occupy the JOB column only.
+			if m.columnVisibility["JOB"] {
+				w := m.virtualRowCellWidth(row)
+				if w > 40 {
+					w = 40
+				}
+				if w > columnWidths["JOB"] {
+					columnWidths["JOB"] = w
+				}
+			}
+			continue
+		}
+		job := row.Job
 		if m.columnVisibility["JOB"] {
 			indent := m.JobIndents[job.ID]
 			treePrefixWidth := 0
 			if indent > 0 {
 				treePrefixWidth = ((indent - 1) * 2) + 3
 			}
-			w := treePrefixWidth + 2 + lipgloss.Width(job.Filename)
+			w := treePrefixWidth + 2 + lipgloss.Width(job.Filename) + m.jobBadgeWidth(job)
 			if w > 40 {
 				w = 40
 			}
@@ -250,11 +265,27 @@ func (m Model) renderTableView() string {
 
 	var rows [][]string
 
-	visibleJobs := m.getVisibleJobs()
+	visibleRows := m.getVisibleRows()
 	statusStyles := getStatusStyles()
 
-	for i, job := range visibleJobs {
+	for i := range visibleRows {
+		dr := &visibleRows[i]
+		job := dr.Job
 		var row []string
+
+		// Virtual workflow rows render their tree label into the JOB
+		// column and leave every other cell empty.
+		if dr.Type != RowTypeJob {
+			for _, colName := range headers {
+				if strings.ToUpper(colName) == "JOB" {
+					row = append(row, m.renderVirtualRowCell(dr))
+				} else {
+					row = append(row, "")
+				}
+			}
+			rows = append(rows, row)
+			continue
+		}
 
 		for _, colName := range headers {
 			var cell string
@@ -274,12 +305,18 @@ func (m Model) renderTableView() string {
 					treePrefix = strings.Repeat("  ", indent-1)
 					globalIndex := m.ScrollOffset + i
 					isLast := true
-					for j := globalIndex + 1; j < len(m.Jobs); j++ {
-						if m.JobIndents[m.Jobs[j].ID] == indent {
+					for j := globalIndex + 1; j < len(m.DisplayRows); j++ {
+						// Sibling scan over job rows only — virtual
+						// workflow rows interleave at deeper depths.
+						if m.DisplayRows[j].Type != RowTypeJob {
+							continue
+						}
+						jIndent := m.JobIndents[m.DisplayRows[j].Job.ID]
+						if jIndent == indent {
 							isLast = false
 							break
 						}
-						if m.JobIndents[m.Jobs[j].ID] < indent {
+						if jIndent < indent {
 							break
 						}
 					}
@@ -297,6 +334,9 @@ func (m Model) renderTableView() string {
 					filename = t.Muted.Render(filename)
 				}
 				cell = fmt.Sprintf("%s%s %s", treePrefix, statusIcon, filename)
+				if badge := m.jobWorkflowBadge(job); badge != "" {
+					cell += " " + badge
+				}
 			case "TITLE":
 				titleText := job.Title
 				if titleText == "" {
@@ -520,8 +560,7 @@ func (m Model) renderStatusPicker() string {
 	var lines []string
 
 	// Add title
-	if m.Cursor < len(m.Jobs) {
-		job := m.Jobs[m.Cursor]
+	if job := m.CurrentJob(); job != nil {
 		title := lipgloss.NewStyle().
 			Bold(true).
 			Render(fmt.Sprintf("Set Status for: %s", job.Filename))
@@ -599,8 +638,7 @@ func (m Model) renderTypePicker() string {
 		count := lipgloss.NewStyle().
 			Render(fmt.Sprintf("(%d jobs selected)", len(m.Selected)))
 		lines = append(lines, count)
-	} else if m.Cursor < len(m.Jobs) {
-		job := m.Jobs[m.Cursor]
+	} else if job := m.CurrentJob(); job != nil {
 		filename := lipgloss.NewStyle().
 			Render(fmt.Sprintf("for: %s", job.Filename))
 		lines = append(lines, filename)
@@ -672,8 +710,7 @@ func (m Model) renderTemplatePicker() string {
 		count := lipgloss.NewStyle().
 			Render(fmt.Sprintf("(%d jobs selected)", len(m.Selected)))
 		lines = append(lines, count)
-	} else if m.Cursor < len(m.Jobs) {
-		job := m.Jobs[m.Cursor]
+	} else if job := m.CurrentJob(); job != nil {
 		filename := lipgloss.NewStyle().
 			Render(fmt.Sprintf("for: %s", job.Filename))
 		lines = append(lines, filename)
@@ -720,10 +757,10 @@ func (m Model) renderTemplatePicker() string {
 }
 
 func (m Model) renderRenameDialog() string {
-	if m.RenameJobIndex < 0 || m.RenameJobIndex >= len(m.Jobs) {
+	job := m.jobAtRow(m.RenameJobIndex)
+	if job == nil {
 		return "Error: Invalid job selected for renaming."
 	}
-	job := m.Jobs[m.RenameJobIndex]
 
 	var b strings.Builder
 	b.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Rename Job: %s", job.Filename)))
@@ -773,8 +810,7 @@ func (m Model) renderClawTargetSelector() string {
 	t := theme.DefaultTheme
 	var lines []string
 
-	if m.ClawDialogJobIndex >= 0 && m.ClawDialogJobIndex < len(m.Jobs) {
-		job := m.Jobs[m.ClawDialogJobIndex]
+	if job := m.jobAtRow(m.ClawDialogJobIndex); job != nil {
 		title := lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("Signal Target: %s", job.Title))
 		lines = append(lines, title)
 		lines = append(lines, "")
@@ -807,10 +843,10 @@ func (m Model) renderClawTargetSelector() string {
 }
 
 func (m Model) renderClawDialog() string {
-	if m.ClawDialogJobIndex < 0 || m.ClawDialogJobIndex >= len(m.Jobs) {
+	job := m.jobAtRow(m.ClawDialogJobIndex)
+	if job == nil {
 		return "Error: Invalid job selected."
 	}
-	job := m.Jobs[m.ClawDialogJobIndex]
 
 	var b strings.Builder
 

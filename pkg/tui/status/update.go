@@ -402,53 +402,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Fall back to polling (already running)
 		return m, nil
 
-	case workflowSessionResolvedMsg:
-		// Discovery finished for a workflow pane. If the pane was closed or
-		// the selection moved on while the cmd was in flight, tear down the
-		// just-started producers and drop the message.
-		if m.ActiveDetailPane != WorkflowPaneDetail || m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID {
-			if msg.Cancel != nil {
-				msg.Cancel()
-			}
-			return m, nil
-		}
-		if msg.Err != nil {
-			m.workflowState = &workflowPaneState{Err: msg.Err}
-			m.refreshWorkflowPane()
-			return m, nil
-		}
-		m.workflowCancel = msg.Cancel
-		if m.workflowState == nil {
-			m.workflowState = newWorkflowPaneState()
-		}
-		m.workflowState.SessionDir = msg.SessionDir
-		m.refreshWorkflowPane()
-		return m, nil
-
-	case workflowEventMsg:
-		if m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID || m.workflowState == nil {
-			return m, nil
-		}
-		applyWorkflowEvent(m.workflowState, msg.Event)
-		if m.ActiveDetailPane == WorkflowPaneDetail {
-			m.refreshWorkflowPane()
-		}
-		return m, nil
-
 	case workflowAgentLogMsg:
-		if m.ActiveLogJob == nil || msg.JobID != m.ActiveLogJob.ID {
-			return m, nil
-		}
 		lines := append(m.workflowAgentLines[msg.AgentID], msg.Lines...)
 		if len(lines) > workflowAgentLineCap {
 			lines = lines[len(lines)-workflowAgentLineCap:]
 		}
 		m.workflowAgentLines[msg.AgentID] = lines
-		if m.ActiveDetailPane == WorkflowPaneDetail && m.workflowSelectedAgentID == msg.AgentID {
-			for _, line := range msg.Lines {
-				m.workflowLogViewer, _ = m.workflowLogViewer.Update(logviewer.LogLineMsg{Line: line, NoPrefix: true})
-			}
-		}
 		return m, nil
 
 	case RetryLoadAgentLogsMsg:
@@ -720,10 +679,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case embed.AppendContextRuleMsg:
 		// Memory panel wants to add a file to the current job's rules.
-		if m.Cursor >= len(m.Jobs) {
+		job := m.CurrentJob()
+		if job == nil {
 			return m, nil
 		}
-		job := m.Jobs[m.Cursor]
 		rule, err := resolveContextAlias(msg.Path)
 		if err != nil {
 			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to resolve alias: %v", err))
@@ -908,12 +867,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshSkillPane()
 		}
 
-		// Adjust cursor if needed
-		if m.Cursor >= len(m.Jobs) {
-			m.Cursor = len(m.Jobs) - 1
-		}
-		if m.Cursor < 0 && len(m.Jobs) > 0 {
-			m.Cursor = 0
+		// Rebuild the display rows from the reloaded jobs. The old rows
+		// held pointers into the previous plan load; rebuildDisplayRows
+		// restores the cursor by stable NodeID (falling back to the
+		// owning job's row, then clamping).
+		if m.EditingDeps {
+			// The EditDeps modal navigates m.Jobs directly, so the cursor
+			// is a job index while it is open — just rebuild rows and
+			// clamp against the jobs slice.
+			m.DisplayRows = m.buildDisplayRows()
+			if m.Cursor >= len(m.Jobs) {
+				m.Cursor = len(m.Jobs) - 1
+			}
+			if m.Cursor < 0 && len(m.Jobs) > 0 {
+				m.Cursor = 0
+			}
+		} else {
+			m.rebuildDisplayRows()
+			m.adjustScrollOffset()
 		}
 
 		// Clear selections that no longer exist
@@ -1042,7 +1013,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editViewport.Width = m.LogViewerWidth
 		m.editViewport.Height = logHeight
 		m.updateSkillViewportSizes()
-		m.updateWorkflowViewportSizes()
 
 		// Re-wrap content for all detail viewports to adapt to the new size
 		if m.frontmatterRawContent != "" {
@@ -1063,13 +1033,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.skillPaneRawContent != "" {
 			m.skillPaneViewport.SetContent(wrapContentForViewport(m.skillPaneRawContent, m.skillPaneViewport.Width-1))
 		}
-		if m.workflowPaneRawContent != "" {
-			m.workflowPaneViewport.SetContent(wrapContentForViewport(m.workflowPaneRawContent, m.workflowPaneViewport.Width-1))
-		}
 
 		// Start log viewer on first window size message if we have jobs and logs are enabled
-		if m.ShowLogs && m.ActiveLogJob == nil && len(m.Jobs) > 0 {
-			job := m.Jobs[m.Cursor]
+		if job := m.CurrentJob(); m.ShowLogs && m.ActiveLogJob == nil && job != nil {
 			m.ActiveLogJob = job // Mark as attempted
 			workDir, err := orchestration.DetermineWorkingDirectory(m.Plan, job)
 			if err == nil {
@@ -1185,9 +1151,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter":
 				m.ClawDialogActive = false
+				clawJob := m.jobAtRow(m.ClawDialogJobIndex)
+				if clawJob == nil {
+					return m, nil
+				}
 				if m.ClawDisabling {
 					// Unclaw
-					return m, unclawJobCmd(m.Plan, m.Jobs[m.ClawDialogJobIndex])
+					return m, unclawJobCmd(m.Plan, clawJob)
 				}
 				// Enable claw
 				idleStr := m.ClawIdleInput.Value()
@@ -1196,7 +1166,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					idleMinutes = n
 				}
 				prompt := m.ClawPromptInput.Value()
-				return m, clawJobCmd(m.Plan, m.Jobs[m.ClawDialogJobIndex], idleMinutes, prompt, m.ClawSelectedTarget)
+				return m, clawJobCmd(m.Plan, clawJob, idleMinutes, prompt, m.ClawSelectedTarget)
 			case "esc":
 				m.ClawDialogActive = false
 				return m, nil
@@ -1227,8 +1197,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Renaming {
 			switch msg.String() {
 			case "enter":
-				if m.RenameJobIndex >= 0 && m.RenameJobIndex < len(m.Jobs) {
-					jobToRename := m.Jobs[m.RenameJobIndex]
+				if jobToRename := m.jobAtRow(m.RenameJobIndex); jobToRename != nil {
 					newTitle := m.RenameInput.Value()
 					m.Renaming = false
 					m.StatusSummary = "Renaming job..."
@@ -1313,7 +1282,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// Handle dependency editing mode
+		// Handle dependency editing mode. While this full-screen modal is
+		// open, m.Cursor indexes m.Jobs directly (the modal lists real jobs
+		// only); it is converted back to a display index on exit.
 		if m.EditingDeps {
 			switch msg.String() {
 			case "enter":
@@ -1328,12 +1299,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.EditingDeps = false
 					m.EditDepsSelected = nil
+					m.exitJobIndexCursor()
 					m.StatusSummary = "Updating dependencies..."
 					return m, updateDepsCmd(jobToEdit, newDeps)
 				}
 			case "esc":
 				m.EditingDeps = false
 				m.EditDepsSelected = nil
+				m.exitJobIndexCursor()
 				m.StatusSummary = ""
 				return m, nil
 			case " ":
@@ -1410,9 +1383,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						setMultipleJobStatus(jobsToUpdate, m.Plan, selectedStatus),
 						refreshPlan(m.PlanDir),
 					)
-				} else if m.Cursor < len(m.Jobs) {
+				} else if job := m.CurrentJob(); job != nil {
 					// Set status for cursor job only
-					job := m.Jobs[m.Cursor]
 					return m, tea.Sequence(
 						setJobStatus(job, m.Plan, selectedStatus),
 						refreshPlan(m.PlanDir),
@@ -1471,9 +1443,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						setMultipleJobType(jobsToUpdate, m.Plan, selectedType),
 						refreshPlan(m.PlanDir),
 					)
-				} else if m.Cursor < len(m.Jobs) {
+				} else if job := m.CurrentJob(); job != nil {
 					// Set type for cursor job only
-					job := m.Jobs[m.Cursor]
 					return m, tea.Sequence(
 						setJobType(job, m.Plan, selectedType),
 						refreshPlan(m.PlanDir),
@@ -1529,9 +1500,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						setMultipleJobTemplate(jobsToUpdate, m.Plan, selectedTemplate),
 						refreshPlan(m.PlanDir),
 					)
-				} else if m.Cursor < len(m.Jobs) {
+				} else if job := m.CurrentJob(); job != nil {
 					// Set template for cursor job only
-					job := m.Jobs[m.Cursor]
 					return m, tea.Sequence(
 						setJobTemplate(job, m.Plan, selectedTemplate),
 						refreshPlan(m.PlanDir),
@@ -1567,8 +1537,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						doArchiveJobs(m.PlanDir, jobsToArchive),
 						refreshPlan(m.PlanDir),
 					)
-				} else if m.Cursor < len(m.Jobs) {
-					job := m.Jobs[m.Cursor]
+				} else if job := m.CurrentJob(); job != nil {
 					return m, func() tea.Msg { return ArchiveConfirmedMsg{Job: job} }
 				}
 			case "n", "N", "ctrl+c", "q":
@@ -1690,7 +1659,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.SwitchFocus):
 			if m.ShowLogs && !m.LogPaneFullscreen {
-				if m.ActiveDetailPane == SkillPane || m.ActiveDetailPane == WorkflowPaneDetail {
+				if m.ActiveDetailPane == SkillPane {
 					// 3-way cycle: Jobs <-> Tree <-> DetailViewport
 					// The Manager only knows "jobs" and "detail", so we handle
 					// the sub-focus (tree ↔ detail viewport) manually.
@@ -1702,7 +1671,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								// tree → detail viewport
 								m.SkillSubFocus = 1
 								m.Focus = FocusDetailSecondary
-								m.refreshActiveTreePane()
+								m.refreshSkillPane()
 								return m, nil
 							}
 							// detail viewport → jobs (let Manager cycle)
@@ -1712,7 +1681,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								// detail viewport → tree
 								m.SkillSubFocus = 0
 								m.Focus = FocusDetailPrimary
-								m.refreshActiveTreePane()
+								m.refreshSkillPane()
 								return m, nil
 							}
 							// tree → jobs (let Manager cycle backward)
@@ -1729,7 +1698,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let the Manager handle the actual focus cycle between jobs ↔ detail
 				m.Manager, cmd = m.Manager.Update(msg)
 				m.syncFocusFromManager()
-				m.refreshActiveTreePane()
+				if m.ActiveDetailPane == SkillPane {
+					m.refreshSkillPane()
+				}
 				return m, cmd
 			}
 
@@ -1739,7 +1710,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.Focus != FocusJobs {
 					m.Manager.ActivePaneIdx = 0
 					m.syncFocusFromManager()
-					m.refreshActiveTreePane()
+					if m.ActiveDetailPane == SkillPane {
+						m.refreshSkillPane()
+					}
 				}
 			}
 			return m, nil
@@ -1750,7 +1723,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.Focus == FocusJobs {
 					m.Manager.ActivePaneIdx = 1
 					m.syncFocusFromManager()
-					m.refreshActiveTreePane()
+					if m.ActiveDetailPane == SkillPane {
+						m.refreshSkillPane()
+					}
 				}
 			} else if m.ActiveDetailPane == NoPane {
 				// No detail pane open — open logs (mimics old `l` behavior)
@@ -1825,7 +1800,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.Down):
-			if m.Cursor < len(m.Jobs)-1 {
+			if m.Cursor < len(m.DisplayRows)-1 {
 				m.Cursor++
 				m.adjustScrollOffset()
 				if m.ActiveDetailPane != NoPane {
@@ -1838,8 +1813,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.Bottom):
-			if len(m.Jobs) > 0 {
-				m.Cursor = len(m.Jobs) - 1
+			if len(m.DisplayRows) > 0 {
+				m.Cursor = len(m.DisplayRows) - 1
 				m.adjustScrollOffset()
 				if m.ActiveDetailPane != NoPane {
 					m, reloadCmd := m.reloadActiveDetailPane()
@@ -1868,8 +1843,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.PageDown):
 			pageSize := 10
 			m.Cursor += pageSize
-			if m.Cursor >= len(m.Jobs) {
-				m.Cursor = len(m.Jobs) - 1
+			if m.Cursor >= len(m.DisplayRows) {
+				m.Cursor = len(m.DisplayRows) - 1
 			}
 			m.adjustScrollOffset()
 			if m.ActiveDetailPane != NoPane {
@@ -1881,8 +1856,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.Select):
-			if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			// Multi-select acts only on real job rows; virtual workflow
+			// rows are not selectable (the orchestrator can't run them).
+			if row := m.currentRow(); row != nil && row.Type == RowTypeJob {
+				job := row.Job
 				if m.Selected[job.ID] {
 					delete(m.Selected, job.ID)
 				} else {
@@ -1900,13 +1877,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.Archive):
 			// Archive selected jobs or current job if none selected
-			if len(m.Selected) > 0 || m.Cursor < len(m.Jobs) {
+			if len(m.Selected) > 0 || m.CurrentJob() != nil {
 				m.ConfirmArchive = true
 			}
 
 		case key.Matches(msg, m.KeyMap.Edit), key.Matches(msg, m.KeyMap.Confirm):
-			if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if row := m.currentRow(); row != nil {
+				// Enter toggles the fold on virtual workflow rows and on
+				// job rows that have workflow children; otherwise it falls
+				// through to editing the job file.
+				if key.Matches(msg, m.KeyMap.Confirm) && m.toggleFoldAtCursor() {
+					return m, nil
+				}
+				job := row.Job
 				if m.Hosted {
 					// Full edit mode: emit EditRequestMsg so the host
 					// hides Flow, mounts $EDITOR in the rail, and restores
@@ -1920,8 +1903,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.CopyPath):
-			if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if job := m.CurrentJob(); job != nil {
 				path := job.FilePath
 				if err := clipboard.WriteAll(path); err != nil {
 					m.StatusSummary = fmt.Sprintf("Error copying path: %v", err)
@@ -1932,8 +1914,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.ViewLogs):
-			if m.Hosted && m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if job := m.CurrentJob(); m.Hosted && job != nil {
 				// If already promoted with a viewport showing logs, toggle off.
 				if m.ActiveDetailPane == LogsPaneDetail && m.Manager.IsPromoted("detail") {
 					cmd := m.closeCurrentDetail()
@@ -1987,9 +1968,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openHostedViewportPane(BriefingPane, "Briefing")
 
 		case key.Matches(msg, m.KeyMap.ViewEdit):
-			if m.Hosted && m.Cursor < len(m.Jobs) {
+			if job := m.CurrentJob(); m.Hosted && job != nil {
 				// Preview mode: open BSP split editor alongside job list.
-				job := m.Jobs[m.Cursor]
 				if m.ActiveDetailPane == EditorPaneDetail && m.Manager.IsPromoted("detail") {
 					cmd := m.closeCurrentDetail()
 					return m, cmd
@@ -2015,8 +1995,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Native agent preview requires groveterm host")
 				return m, nil
 			}
-			if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if job := m.CurrentJob(); job != nil {
 				isAgent := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeIsolatedAgent
 				if isAgent {
 					// If already promoted with an agent, just refocus
@@ -2050,19 +2029,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.openDetailPane(SkillPane)
 
-		case key.Matches(msg, m.KeyMap.ViewWorkflows):
-			if m.ActiveDetailPane == WorkflowPaneDetail {
-				cmd := m.closeCurrentDetail()
-				return m, cmd
-			}
-			return m.openDetailPane(WorkflowPaneDetail)
-
 		case key.Matches(msg, m.KeyMap.ViewContext):
 			if !m.Hosted {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Context panel requires groveterm host")
 				return m, nil
 			}
-			if m.Cursor >= len(m.Jobs) {
+			job := m.CurrentJob()
+			if job == nil {
 				return m, nil
 			}
 			// Toggle off if already showing context pane.
@@ -2070,7 +2043,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.closeCurrentDetail()
 				return m, cmd
 			}
-			job := m.Jobs[m.Cursor]
 
 			// If the job has no rules_file at all, show a placeholder
 			// instead of falling through to resolveJobRulesFile which
@@ -2142,7 +2114,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Memory panel requires groveterm host")
 				return m, nil
 			}
-			if m.Cursor >= len(m.Jobs) {
+			job := m.CurrentJob()
+			if job == nil {
 				return m, nil
 			}
 			// Toggle off if already showing memory pane.
@@ -2150,7 +2123,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.closeCurrentDetail()
 				return m, cmd
 			}
-			job := m.Jobs[m.Cursor]
 			mdl, loadCmd := m.openDetailPane(MemoryPaneDetail)
 			m = mdl.(Model)
 			query := job.Title
@@ -2260,8 +2232,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-			} else if m.Cursor < len(m.Jobs) {
-				candidateJobs = []*orchestration.Job{m.Jobs[m.Cursor]}
+			} else if job := m.CurrentJob(); job != nil {
+				candidateJobs = []*orchestration.Job{job}
 			}
 
 			logger.WithFields(map[string]interface{}{
@@ -2484,8 +2456,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.SetCompleted):
-			if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if job := m.CurrentJob(); job != nil {
 				logger := logging.NewLogger("flow-tui")
 				logger.WithFields(map[string]interface{}{
 					"job_id":     job.ID,
@@ -2514,19 +2485,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.SetStatus):
-			if m.Cursor < len(m.Jobs) {
+			if m.CurrentJob() != nil {
 				m.ShowStatusPicker = true
 				m.StatusPickerCursor = 0
 			}
 
 		case key.Matches(msg, m.KeyMap.SetType):
-			if m.Cursor < len(m.Jobs) || len(m.Selected) > 0 {
+			if m.CurrentJob() != nil || len(m.Selected) > 0 {
 				m.ShowTypePicker = true
 				m.TypePickerCursor = 0
 			}
 
 		case key.Matches(msg, m.KeyMap.SetTemplate):
-			if m.Cursor < len(m.Jobs) || len(m.Selected) > 0 {
+			if m.CurrentJob() != nil || len(m.Selected) > 0 {
 				m.ShowTemplatePicker = true
 				m.TemplatePickerCursor = 0
 			}
@@ -2557,8 +2528,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ti.Width = 50
 				m.CreateJobInput = ti
 				return m, textinput.Blink
-			} else if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			} else if job := m.CurrentJob(); job != nil {
 				// Show dialog to edit job title
 				m.CreatingJob = true
 				m.CreateJobType = "xml"
@@ -2626,8 +2596,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ti.Width = 50
 				m.CreateJobInput = ti
 				return m, textinput.Blink
-			} else if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			} else if job := m.CurrentJob(); job != nil {
 				// Show dialog to edit job title
 				m.CreatingJob = true
 				m.CreateJobType = "impl"
@@ -2670,8 +2639,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ti.Width = 50
 				m.CreateJobInput = ti
 				return m, textinput.Blink
-			} else if m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			} else if job := m.CurrentJob(); job != nil {
 				// Show dialog to edit job title
 				m.CreatingJob = true
 				m.CreateJobType = "agent-from-chat"
@@ -2689,10 +2657,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.Rename):
-			if m.Cursor >= 0 && m.Cursor < len(m.Jobs) {
+			if jobToRename := m.CurrentJob(); jobToRename != nil {
 				m.Renaming = true
 				m.RenameJobIndex = m.Cursor
-				jobToRename := m.Jobs[m.Cursor]
 
 				ti := textinput.New()
 				ti.SetValue(jobToRename.Title)
@@ -2704,8 +2671,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.ToggleClaw):
-			if m.Cursor >= 0 && m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if job := m.CurrentJob(); job != nil {
 				// Only for interactive_agent jobs
 				if job.Type == orchestration.JobTypeInteractiveAgent {
 					// Check if already clawed (has channels)
@@ -2741,8 +2707,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.Resume):
-			if m.Cursor >= 0 && m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if job := m.CurrentJob(); job != nil {
 				if (job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent) && job.Status == orchestration.JobStatusCompleted {
 					return m, executePlanResume(job)
 				}
@@ -2750,10 +2715,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.EditDeps):
-			if m.Cursor >= 0 && m.Cursor < len(m.Jobs) {
+			if jobToEdit := m.CurrentJob(); jobToEdit != nil {
 				m.EditingDeps = true
-				m.EditDepsJobIndex = m.Cursor
-				jobToEdit := m.Jobs[m.Cursor]
+				// The EditDeps modal navigates m.Jobs directly: switch the
+				// cursor to the owning job's index for the modal's lifetime.
+				m.EditDepsJobIndex = m.enterJobIndexCursor()
 
 				// Initialize selection with current dependencies
 				m.EditDepsSelected = make(map[string]bool)
@@ -2770,8 +2736,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.DemoteToNote):
-			if m.Cursor >= 0 && m.Cursor < len(m.Jobs) {
-				job := m.Jobs[m.Cursor]
+			if job := m.CurrentJob(); job != nil {
 				m.StatusSummary = fmt.Sprintf("Demoting '%s' to note...", job.Title)
 				return m, demoteJobCmd(job)
 			}
@@ -2787,11 +2752,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // reloadActiveDetailPane reloads content for the currently active detail pane
 func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
-	if m.Cursor >= len(m.Jobs) || m.ActiveDetailPane == NoPane {
+	job := m.CurrentJob()
+	if job == nil || m.ActiveDetailPane == NoPane {
 		return m, nil
 	}
-
-	job := m.Jobs[m.Cursor]
 	m.ActiveLogJob = job
 
 	// Recalculate layout dimensions since chat input visibility depends on job type
@@ -2856,10 +2820,6 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
 		return m, nil
-	case WorkflowPaneDetail:
-		// Job switched while the workflow pane is open: restart discovery
-		// for the new job's session.
-		return m, m.restartWorkflowMonitor(job)
 	}
 
 	return m, nil
@@ -2906,12 +2866,6 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 
 	var cmds []tea.Cmd
 
-	// Leaving the workflow pane tears down its event source and transcript
-	// collector; reopening rediscovers from scratch.
-	if m.ActiveDetailPane == WorkflowPaneDetail && pane != WorkflowPaneDetail {
-		m.stopWorkflowMonitor()
-	}
-
 	// If switching from promoted -> internal, demote first to close the BSP split.
 	if isCurrentlyPromoted && !isTargetPromoted {
 		var demoteCmd tea.Cmd
@@ -2932,8 +2886,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 
 		// For viewport-promoted logs, still trigger content loading so the
 		// viewport receives initial content via UpdateViewportContentMsg.
-		if pane == LogsPaneDetail && m.Cursor < len(m.Jobs) {
-			job := m.Jobs[m.Cursor]
+		if job := m.CurrentJob(); pane == LogsPaneDetail && job != nil {
 			m.ActiveLogJob = job
 			isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent ||
 				job.Type == orchestration.JobTypeHeadlessAgent ||
@@ -2946,8 +2899,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		}
 
 		// For viewport-promoted frontmatter/briefing, trigger content loading.
-		if m.Cursor < len(m.Jobs) {
-			job := m.Jobs[m.Cursor]
+		if job := m.CurrentJob(); job != nil {
 			m.ActiveLogJob = job
 			switch pane {
 			case FrontmatterPane:
@@ -2977,11 +2929,10 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tea.Batch(closeAgentSplitCmd(), closeEditorSplitCmd(), closeViewportSplitCmd()))
 	}
 
-	if m.Cursor >= len(m.Jobs) {
+	job := m.CurrentJob()
+	if job == nil {
 		return m, tea.Batch(cmds...)
 	}
-
-	job := m.Jobs[m.Cursor]
 	m.ActiveLogJob = job
 
 	// Centralized layout calculation
@@ -3001,7 +2952,6 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
-	m.updateWorkflowViewportSizes()
 
 	// Trigger content loading for the active pane
 	switch pane {
@@ -3031,9 +2981,6 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.skillPaneRawContent = result.treeContent
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
-	case WorkflowPaneDetail:
-		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Discovering workflow runs for %s...", job.Title))
-		cmds = append(cmds, m.restartWorkflowMonitor(job))
 	}
 
 	return m, tea.Batch(cmds...)
@@ -3044,11 +2991,11 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 // without creating a new BSP split. Falls back to internal rendering when
 // not hosted.
 func (m Model) openHostedViewportPane(pane DetailPane, label string) (tea.Model, tea.Cmd) {
-	if !m.Hosted || m.Cursor >= len(m.Jobs) {
+	job := m.CurrentJob()
+	if !m.Hosted || job == nil {
 		return m.openDetailPane(pane)
 	}
 
-	job := m.Jobs[m.Cursor]
 	title := label + ": " + job.Title
 
 	// Cancel any active log stream when switching away from logs.
@@ -3146,9 +3093,6 @@ func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ActiveDetailPane == SkillPane {
 		return m.handleSkillTreeKey(msg)
 	}
-	if m.ActiveDetailPane == WorkflowPaneDetail {
-		return m.handleWorkflowTreeKey(msg)
-	}
 	return m.handleViewportKey(msg, m.ActiveDetailPane)
 }
 
@@ -3156,9 +3100,6 @@ func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleDetailSecondaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ActiveDetailPane == SkillPane {
 		return m.handleArtifactViewportKey(msg)
-	}
-	if m.ActiveDetailPane == WorkflowPaneDetail {
-		return m.handleWorkflowDetailKey(msg)
 	}
 	return m, nil
 }
@@ -3351,10 +3292,10 @@ func (m Model) emitContextScopeUpdate() tea.Cmd {
 	if !m.Hosted || m.ActiveDetailPane != ContextPaneDetail {
 		return nil
 	}
-	if m.Cursor >= len(m.Jobs) {
+	job := m.CurrentJob()
+	if job == nil {
 		return nil
 	}
-	job := m.Jobs[m.Cursor]
 	// Pass empty RulesFile through so the cx panel can show "no rules"
 	// instead of falling back to default.rules.
 	var rulesFile string

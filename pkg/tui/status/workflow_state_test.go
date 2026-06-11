@@ -125,55 +125,35 @@ func TestResolveWorkflowPaneNodes_PhaseGrouping(t *testing.T) {
 	}
 }
 
-func TestRenderWorkflowPane_Scoreboard(t *testing.T) {
-	s := buildWorkflowState()
-	result := renderWorkflowPane(s, 0, 100)
+func TestApplyWorkflowEvent_AdhocMigration(t *testing.T) {
+	s := newWorkflowPaneState()
+	// A daemon-backed source parks run-less agents under the ad-hoc
+	// pseudo-run; later run attribution must migrate them out so the
+	// agent doesn't render twice.
+	applyWorkflowEvent(s, workflowmon.AgentStarted{RunID: adhocRunID, AgentID: "a1"})
+	applyWorkflowEvent(s, workflowmon.AgentStarted{RunID: adhocRunID, AgentID: "a2"})
+	applyWorkflowEvent(s, workflowmon.AgentCompleted{RunID: "wf_real", AgentID: "a1", Result: "done"})
 
-	if len(result.nodes) != 3 {
-		t.Fatalf("nodes = %d", len(result.nodes))
+	if adhoc, ok := s.Runs[adhocRunID]; !ok {
+		t.Fatal("adhoc run should still exist (a2 remains)")
+	} else if _, still := adhoc.Agents["a1"]; still {
+		t.Error("a1 should have migrated out of the adhoc bucket")
 	}
-	for _, want := range []string{"Workflow Runs", "release-survey", "1/2", "1 run(s) • 2 started / 1 completed"} {
-		if !strings.Contains(result.treeContent, want) {
-			t.Errorf("tree missing %q\n---\n%s", want, result.treeContent)
+	if run := s.Runs["wf_real"]; run == nil || !run.Agents["a1"].Completed {
+		t.Errorf("a1 not folded into wf_real: %+v", s.Runs["wf_real"])
+	}
+
+	// Migrating the last adhoc agent removes the pseudo-run entirely.
+	applyWorkflowEvent(s, workflowmon.AgentStarted{RunID: "wf_real", AgentID: "a2"})
+	if _, ok := s.Runs[adhocRunID]; ok {
+		t.Error("empty adhoc run should be removed")
+	}
+	for _, id := range s.RunOrder {
+		if id == adhocRunID {
+			t.Error("adhoc run id should be removed from RunOrder")
 		}
 	}
-	// Run selected: detail shows meta + counts + phases.
-	for _, want := range []string{"release-survey", "Deep survey", "2 started / 1 completed", "Survey", "Verify"} {
-		if !strings.Contains(result.detailContent, want) {
-			t.Errorf("detail missing %q\n---\n%s", want, result.detailContent)
-		}
-	}
-	if strings.Contains(result.treeContent, "interrupted") || strings.Contains(result.detailContent, "interrupted") {
-		t.Error("in-flight agents must never be labelled interrupted")
-	}
 }
-
-func TestRenderWorkflowPane_EmptyAndErrorStates(t *testing.T) {
-	if result := renderWorkflowPane(nil, 0, 80); !strings.Contains(result.treeContent, "Discovering") {
-		t.Errorf("nil state: %q", result.treeContent)
-	}
-
-	errState := &workflowPaneState{Err: errTest}
-	if result := renderWorkflowPane(errState, 0, 80); !strings.Contains(result.treeContent, "Workflow discovery unavailable") {
-		t.Errorf("error state: %q", result.treeContent)
-	}
-
-	empty := newWorkflowPaneState()
-	empty.SessionDir = "/tmp/session"
-	result := renderWorkflowPane(empty, 0, 80)
-	if !strings.Contains(result.treeContent, "No workflow runs discovered yet") {
-		t.Errorf("empty state: %q", result.treeContent)
-	}
-	if len(result.nodes) != 0 {
-		t.Errorf("empty state nodes = %d", len(result.nodes))
-	}
-}
-
-var errTest = &testErr{}
-
-type testErr struct{}
-
-func (*testErr) Error() string { return "no session" }
 
 func TestPromptSummary(t *testing.T) {
 	if got := promptSummary("line one\nline two", 50); got != "line one" {
