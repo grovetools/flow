@@ -117,7 +117,21 @@ func updateWorktreeEcosystem(plan *orchestration.Plan, worktreeName string) erro
 		return fmt.Errorf("failed to discover workspaces: %w", err)
 	}
 	provider := workspace.NewProvider(discoveryResult)
-	ecosystemRoot, _ := git.GetGitRoot(plan.Directory)
+	// Ecosystem plans live in the centralized notebook, NOT inside the
+	// ecosystem repo, so a raw git.GetGitRoot(plan.Directory) resolves the
+	// notebook (or nothing) and every repo comes back "not found locally".
+	// GetProjectGitRoot is notebook-aware and returns the owning ecosystem
+	// root. We then re-resolve it through git so the spelling matches what
+	// workspace discovery records: GetProjectGitRoot canonicalizes case
+	// (e.g. .../T/... -> .../t/...) while discovery keeps the on-disk case,
+	// and LocalWorkspacesInEcosystem matches by exact path.
+	ecosystemRoot, err := orchestration.GetProjectGitRoot(plan.Directory)
+	if err != nil {
+		return fmt.Errorf("failed to resolve ecosystem root for plan %q: %w", plan.Name, err)
+	}
+	if normalized, gerr := git.GetGitRoot(ecosystemRoot); gerr == nil {
+		ecosystemRoot = normalized
+	}
 	localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
 
 	var results []string
