@@ -31,6 +31,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewRunCmd())
 	rootCmd.AddCommand(cmd.NewAddCmd())
 	rootCmd.AddCommand(cmd.NewCompleteCmd())
+	rootCmd.AddCommand(cmd.NewRetryCmd())
 	rootCmd.AddCommand(cmd.NewGraphCmd())
 	rootCmd.AddCommand(cmd.NewStepCmd())
 	rootCmd.AddCommand(cmd.NewOpenCmd())
