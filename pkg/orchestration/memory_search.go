@@ -58,7 +58,7 @@ func FetchRelatedMemories(ctx context.Context, job *Job) []memory.SearchResult {
 		return nil
 	}
 
-	embedder := memory.NewEmbedder(client, "gemini-embedding-001")
+	embedder := memory.NewGeminiEmbedder(client, "gemini-embedding-001")
 
 	queryEmbedding, err := embedder.EmbedQuery(ctx, job.PromptBody)
 	if err != nil {
