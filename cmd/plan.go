@@ -267,6 +267,7 @@ func NewPlanCmd() *cobra.Command {
 	planCmd.AddCommand(planReviewCmd)
 	planCmd.AddCommand(planAddCmd)
 	planCmd.AddCommand(planCompleteCmd)
+	planCmd.AddCommand(planRetryCmd)
 	planCmd.AddCommand(planGraphCmd)
 	planCmd.AddCommand(planStepCmd)
 	planCmd.AddCommand(planOpenCmd)
