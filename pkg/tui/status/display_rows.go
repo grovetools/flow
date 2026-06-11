@@ -1,6 +1,13 @@
 package status
 
 import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/grovetools/core/tui/theme"
+
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -49,8 +56,32 @@ type DisplayRow struct {
 	MoreCnt int // RowTypeMore: number of hidden agents
 }
 
+// maxWorkflowAgentRows caps how many agent rows render per phase (or per
+// flat run scope) before the remainder collapses into a "… +K more" row.
+const maxWorkflowAgentRows = 5
+
+// maxVirtualCellWidth caps the rendered JOB-column cell of a virtual row
+// (tree connectors + label) so deep trees can never wrap the table.
+const maxVirtualCellWidth = 40
+
 // jobNodeID returns the stable NodeID for a job row.
 func jobNodeID(jobID string) string { return "job:" + jobID }
+
+func runNodeID(jobID, runID string) string { return "run:" + jobID + "/" + runID }
+
+func phaseNodeID(jobID, runID, title string) string {
+	return "phase:" + jobID + "/" + runID + "/" + title
+}
+
+func agentNodeID(jobID, runID, agentID string) string {
+	return "agent:" + jobID + "/" + runID + "/" + agentID
+}
+
+// moreNodeID identifies a "… +K more" row; scope is the phase title, or ""
+// for agents sitting directly under the run.
+func moreNodeID(jobID, runID, scope string) string {
+	return "more:" + jobID + "/" + runID + "/" + scope
+}
 
 // buildDisplayRows constructs the display rows from the current jobs slice.
 // Virtual workflow rows are appended under their owning job by the workflow
@@ -189,16 +220,136 @@ func (m *Model) exitJobIndexCursor() {
 }
 
 // appendWorkflowRows appends the job's virtual workflow child rows (runs,
-// phases, agents) to rows. With no workflow state for the job this is a
-// no-op; the full tree builder lands with the workflow registry.
+// phases, agents) to rows, honoring the fold state at every level. With no
+// workflow state for the job this is a no-op.
 func (m *Model) appendWorkflowRows(rows []DisplayRow, job *orchestration.Job) []DisplayRow {
+	st := m.WorkflowStates[job.ID]
+	if st == nil || len(st.RunOrder) == 0 {
+		return rows
+	}
+	jobRow := DisplayRow{Type: RowTypeJob, NodeID: jobNodeID(job.ID), Job: job}
+	if m.isNodeCollapsed(&jobRow) {
+		return rows
+	}
+	for _, runID := range st.RunOrder {
+		run := st.Runs[runID]
+		runRow := DisplayRow{
+			Type:   RowTypeRun,
+			NodeID: runNodeID(job.ID, runID),
+			Job:    job,
+			Depth:  1,
+			RunID:  runID,
+			Run:    run,
+		}
+		rows = append(rows, runRow)
+		if m.isNodeCollapsed(&runRow) {
+			continue
+		}
+		rows = m.appendRunChildRows(rows, job, run)
+	}
+	return rows
+}
+
+// appendRunChildRows appends one run's phase/agent rows, reusing the pure
+// phase-grouping resolver from the retired W pane. Agent rows are capped per
+// phase scope (see appendAgentRows).
+func (m *Model) appendRunChildRows(rows []DisplayRow, job *orchestration.Job, run *workflowRunState) []DisplayRow {
+	nodes := resolveRunChildNodes(run)
+	i := 0
+	for i < len(nodes) {
+		node := nodes[i]
+		if node.Type == "phase" {
+			phaseRow := DisplayRow{
+				Type:   RowTypePhase,
+				NodeID: phaseNodeID(job.ID, run.ID, node.Name),
+				Job:    job,
+				Depth:  1 + node.Depth,
+				RunID:  run.ID,
+				Run:    run,
+				Phase:  node.Name,
+			}
+			rows = append(rows, phaseRow)
+			// Collect the phase's member agents (deeper than the phase).
+			j := i + 1
+			var members []*WorkflowPaneNode
+			for j < len(nodes) && nodes[j].Type == "agent" && nodes[j].Depth > node.Depth {
+				members = append(members, nodes[j])
+				j++
+			}
+			if !m.isNodeCollapsed(&phaseRow) {
+				rows = m.appendAgentRows(rows, job, run, node.Name, members)
+			}
+			i = j
+			continue
+		}
+		// Agents directly under the run (flat runs, or agents without
+		// phase attribution): gather the contiguous span for capping.
+		j := i
+		var span []*WorkflowPaneNode
+		for j < len(nodes) && nodes[j].Type == "agent" && nodes[j].Depth == node.Depth {
+			span = append(span, nodes[j])
+			j++
+		}
+		rows = m.appendAgentRows(rows, job, run, "", span)
+		i = j
+	}
+	return rows
+}
+
+// appendAgentRows appends agent rows for one scope (a phase, or the run
+// itself), capping at maxWorkflowAgentRows with a trailing RowTypeMore.
+// Toggling the more row (FoldState false) reveals the full list.
+func (m *Model) appendAgentRows(rows []DisplayRow, job *orchestration.Job, run *workflowRunState, phase string, nodes []*WorkflowPaneNode) []DisplayRow {
+	if len(nodes) == 0 {
+		return rows
+	}
+	moreID := moreNodeID(job.ID, run.ID, phase)
+	capped := len(nodes) > maxWorkflowAgentRows
+	if capped {
+		// FoldState false = the user expanded the more row (show all).
+		if collapsed, ok := m.FoldState[moreID]; ok && !collapsed {
+			capped = false
+		}
+	}
+	limit := len(nodes)
+	if capped {
+		limit = maxWorkflowAgentRows
+	}
+	for _, node := range nodes[:limit] {
+		rows = append(rows, DisplayRow{
+			Type:   RowTypeAgent,
+			NodeID: agentNodeID(job.ID, run.ID, node.AgentID),
+			Job:    job,
+			Depth:  1 + node.Depth,
+			RunID:  run.ID,
+			Run:    run,
+			Phase:  phase,
+			Agent:  run.Agents[node.AgentID],
+		})
+	}
+	if capped {
+		rows = append(rows, DisplayRow{
+			Type:    RowTypeMore,
+			NodeID:  moreID,
+			Job:     job,
+			Depth:   1 + nodes[0].Depth,
+			RunID:   run.ID,
+			Run:     run,
+			Phase:   phase,
+			MoreCnt: len(nodes) - maxWorkflowAgentRows,
+		})
+	}
 	return rows
 }
 
 // jobHasWorkflowTree reports whether the job has workflow activity that can
 // render as a foldable sub-tree.
 func (m *Model) jobHasWorkflowTree(job *orchestration.Job) bool {
-	return false
+	if job == nil {
+		return false
+	}
+	st := m.WorkflowStates[job.ID]
+	return st != nil && len(st.RunOrder) > 0
 }
 
 // isNodeCollapsed reports whether a foldable row is currently collapsed:
@@ -212,9 +363,22 @@ func (m *Model) isNodeCollapsed(row *DisplayRow) bool {
 }
 
 // defaultCollapsed is the fold default for nodes without an explicit
-// override. The workflow tree builder refines this (running jobs
-// auto-expand); with no workflow trees everything defaults collapsed.
+// override: everything collapsed, except jobs that are currently running
+// (auto-expand so live activity is visible) and phases (visible whenever
+// their run is expanded). Runs collapse when stale or fully completed.
 func (m *Model) defaultCollapsed(row *DisplayRow) bool {
+	switch row.Type {
+	case RowTypeJob:
+		return row.Job == nil || row.Job.Status != orchestration.JobStatusRunning
+	case RowTypeRun:
+		if row.Run == nil || row.Run.Stale {
+			return true
+		}
+		started, completed := row.Run.counts()
+		return started > 0 && started == completed
+	case RowTypePhase:
+		return false
+	}
 	return true
 }
 
@@ -234,9 +398,11 @@ func (m *Model) toggleFoldAtCursor() bool {
 			return false
 		}
 		m.FoldState[row.NodeID] = !m.isNodeCollapsed(row)
-	case RowTypeRun, RowTypePhase:
+	case RowTypeRun, RowTypePhase, RowTypeMore:
+		// For RowTypeMore, "collapsed" means capped at maxWorkflowAgentRows;
+		// toggling reveals (or re-caps) the scope's full agent list.
 		m.FoldState[row.NodeID] = !m.isNodeCollapsed(row)
-	case RowTypeAgent, RowTypeMore:
+	case RowTypeAgent:
 		// Not foldable; consume the key so Enter on a virtual row never
 		// falls through to job-file editing.
 		return true
@@ -249,28 +415,139 @@ func (m *Model) toggleFoldAtCursor() bool {
 }
 
 // renderVirtualRowCell renders the JOB-column cell of a virtual workflow
-// row (tree connectors + icon + label).
-func (m *Model) renderVirtualRowCell(row *DisplayRow) string {
+// row (tree connectors + icon + label). globalIndex is the row's index in
+// DisplayRows (needed for the last-sibling connector scan). Every label is
+// ANSI-truncated so deep trees can never wrap the table.
+func (m *Model) renderVirtualRowCell(globalIndex int, row *DisplayRow) string {
+	cell := m.virtualTreePrefix(globalIndex, row) + m.virtualRowLabel(row, true)
+	return ansi.Truncate(cell, maxVirtualCellWidth, "…")
+}
+
+// virtualTreePrefix draws the tree connectors for a virtual row at the
+// parent job's indent plus the row's virtual depth, mirroring the job-row
+// prefix convention ("  " per level above 1, then "├─ "/"└─ ").
+func (m *Model) virtualTreePrefix(globalIndex int, row *DisplayRow) string {
+	indent := m.JobIndents[row.Job.ID] + row.Depth
+	prefix := ""
+	if indent > 1 {
+		prefix = strings.Repeat("  ", indent-1)
+	}
+	// Last-sibling scan over this job's remaining virtual rows: a virtual
+	// row at the same depth means a following sibling; a shallower virtual
+	// row or the next job row ends the scope.
+	isLast := true
+	for j := globalIndex + 1; j < len(m.DisplayRows); j++ {
+		next := &m.DisplayRows[j]
+		if next.Type == RowTypeJob || next.Depth < row.Depth {
+			break
+		}
+		if next.Depth == row.Depth {
+			isLast = false
+			break
+		}
+	}
+	if isLast {
+		return prefix + "└─ "
+	}
+	return prefix + "├─ "
+}
+
+// virtualRowLabel renders a virtual row's icon + text. With styled=false it
+// returns the plain (ANSI-free) form used for width accounting.
+func (m *Model) virtualRowLabel(row *DisplayRow, styled bool) string {
+	t := theme.DefaultTheme
+	switch row.Type {
+	case RowTypeRun:
+		if row.Run == nil {
+			return ""
+		}
+		started, completed := row.Run.counts()
+		status := row.Run.statusLabel()
+		label := fmt.Sprintf("%s %s %d/%d %s", theme.IconGear, row.Run.displayName(), completed, started, status)
+		if !styled {
+			return label
+		}
+		if status == "running" {
+			return t.Info.Render(label)
+		}
+		return t.Muted.Render(label)
+	case RowTypePhase:
+		label := row.Phase
+		if !styled {
+			return label
+		}
+		return t.Bold.Render(label)
+	case RowTypeAgent:
+		if row.Agent == nil {
+			return ""
+		}
+		icon := theme.IconRunning
+		if row.Agent.Completed {
+			icon = theme.IconSuccess
+		}
+		label := icon + " " + row.Agent.ID
+		if s := promptSummary(row.Agent.Prompt, 24); s != "" {
+			label += " " + s
+		}
+		if !styled {
+			return label
+		}
+		if row.Agent.Completed {
+			return t.Muted.Render(label)
+		}
+		return label
+	case RowTypeMore:
+		label := fmt.Sprintf("… +%d more", row.MoreCnt)
+		if !styled {
+			return label
+		}
+		return t.Muted.Render(label)
+	}
 	return ""
 }
 
 // jobWorkflowBadge renders the "⚙ completed/started" badge appended to a
-// job row's JOB cell, or "" when the job has no workflow activity.
+// job row's JOB cell, or "" when the job has no workflow runs (live or
+// archived).
 func (m *Model) jobWorkflowBadge(job *orchestration.Job) string {
-	return ""
+	if !m.jobHasWorkflowTree(job) {
+		return ""
+	}
+	st := m.WorkflowStates[job.ID]
+	started, completed := 0, 0
+	for _, runID := range st.RunOrder {
+		s, c := st.Runs[runID].counts()
+		started += s
+		completed += c
+	}
+	return theme.DefaultTheme.Muted.Render(fmt.Sprintf("%s %d/%d", theme.IconGear, completed, started))
 }
 
 // jobBadgeWidth returns the rendered width of the job's workflow badge
-// ("⚙ completed/started"), 0 when the job has no workflow activity. Used by
-// the width calculators so the vertical split reserves badge space.
+// including its separating space, 0 when the job has no workflow activity.
+// Used by the width calculators so the vertical split reserves badge space.
 func (m *Model) jobBadgeWidth(job *orchestration.Job) int {
-	return 0
+	badge := m.jobWorkflowBadge(job)
+	if badge == "" {
+		return 0
+	}
+	return lipgloss.Width(badge) + 1 // +1 for the space before the badge
 }
 
 // virtualRowCellWidth returns the JOB-column cell width of a virtual row
-// (tree connectors + icon + label).
+// (tree connectors + icon + label), capped at maxVirtualCellWidth to match
+// the truncation in renderVirtualRowCell.
 func (m *Model) virtualRowCellWidth(row *DisplayRow) int {
-	return 0
+	indent := m.JobIndents[row.Job.ID] + row.Depth
+	prefixWidth := 3 // "└─ "
+	if indent > 1 {
+		prefixWidth += (indent - 1) * 2
+	}
+	w := prefixWidth + lipgloss.Width(m.virtualRowLabel(row, false))
+	if w > maxVirtualCellWidth {
+		w = maxVirtualCellWidth
+	}
+	return w
 }
 
 // getVisibleRows returns the slice of DisplayRows inside the viewport.

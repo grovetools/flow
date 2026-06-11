@@ -278,7 +278,7 @@ func (m Model) renderTableView() string {
 		if dr.Type != RowTypeJob {
 			for _, colName := range headers {
 				if strings.ToUpper(colName) == "JOB" {
-					row = append(row, m.renderVirtualRowCell(dr))
+					row = append(row, m.renderVirtualRowCell(m.ScrollOffset+i, dr))
 				} else {
 					row = append(row, "")
 				}

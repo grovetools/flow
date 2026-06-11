@@ -74,6 +74,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Discard it to prevent race conditions where old content overwrites new.
 			return m, nil
 		}
+		// While a workflow agent's transcript is routed into the viewport,
+		// late job-log content must not overwrite it.
+		if m.workflowSelectedAgentID != "" {
+			return m, nil
+		}
 
 		// Reset markdown state for fresh log loading
 		m.MarkdownInCodeBlock = false
@@ -443,7 +448,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.WorkflowStates[msg.JobID] = st
 		}
 		applyWorkflowEvent(st, msg.Event)
-		return m, nil
+		// Coalesced rebuild: mark the job dirty and let the ~100ms tick
+		// rebuild display rows — never rebuild per event.
+		return m, m.markWorkflowDirty(msg.JobID)
+
+	case workflowRebuildTickMsg:
+		// The coalescing window elapsed: fold all dirty workflow activity
+		// into one display-row rebuild + one transcript viewport refresh.
+		m.workflowRebuildPending = false
+		if len(m.workflowDirtyJobs) > 0 {
+			m.workflowDirtyJobs = make(map[string]bool)
+			if m.EditingDeps {
+				// The EditDeps modal navigates m.Jobs directly; don't
+				// disturb its job-index cursor.
+				m.DisplayRows = m.buildDisplayRows()
+			} else {
+				m.rebuildDisplayRows()
+				m.adjustScrollOffset()
+			}
+		}
+		var tickCmd tea.Cmd
+		if m.workflowTranscriptDirty {
+			m.workflowTranscriptDirty = false
+			tickCmd = m.refreshWorkflowAgentViewer()
+		}
+		return m, tickCmd
+
+	case workflowArchivedRunsMsg:
+		if msg.State == nil {
+			return m, nil
+		}
+		// Never clobber live state that arrived while the load ran.
+		if st, ok := m.WorkflowStates[msg.JobID]; ok && len(st.RunOrder) > 0 {
+			return m, nil
+		}
+		if m.WorkflowStates == nil {
+			m.WorkflowStates = make(map[string]*workflowPaneState)
+		}
+		m.WorkflowStates[msg.JobID] = msg.State
+		// Archived trees default collapsed (the job isn't running); the
+		// rebuild only surfaces the job-row badge.
+		return m, m.markWorkflowDirty(msg.JobID)
 
 	case workflowSessionResolvedMsg:
 		// Outcome of FileSource session discovery for one job.
@@ -488,6 +533,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			lines = lines[len(lines)-workflowAgentLineCap:]
 		}
 		m.workflowAgentLines[msg.AgentID] = lines
+		// If this agent's transcript is routed into the log viewport,
+		// refresh it on the coalescing tick — never re-wrap per line.
+		if msg.AgentID == m.workflowSelectedAgentID && m.ActiveDetailPane == LogsPaneDetail {
+			m.workflowTranscriptDirty = true
+			if !m.workflowRebuildPending {
+				m.workflowRebuildPending = true
+				return m, scheduleWorkflowRebuildCmd()
+			}
+		}
 		return m, nil
 
 	case RetryLoadAgentLogsMsg:
@@ -1038,9 +1092,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Reconcile FileSource fallback workflow monitors with the
-		// refreshed job statuses (no-op while the daemon source is active).
-		if cmds := m.syncWorkflowMonitors(); len(cmds) > 0 {
-			return m, tea.Batch(cmds...)
+		// refreshed job statuses (no-op while the daemon source is active),
+		// and kick off archived-run fallback loads for completed jobs.
+		var wfCmds []tea.Cmd
+		wfCmds = append(wfCmds, m.syncWorkflowMonitors()...)
+		wfCmds = append(wfCmds, m.syncArchivedWorkflowLoads()...)
+		if len(wfCmds) > 0 {
+			return m, tea.Batch(wfCmds...)
 		}
 		return m, nil
 
@@ -1153,6 +1211,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case logviewer.LogLineMsg:
+		// While a workflow agent's transcript is routed into the viewport,
+		// in-flight job-log lines must not append over it.
+		if m.workflowSelectedAgentID != "" {
+			return m, nil
+		}
 		// Delegate log messages to the log viewer only if the message
 		// belongs to the currently active job being viewed.
 		if m.ActiveLogJob != nil && msg.Workspace == m.ActiveLogJob.ID {
@@ -2841,6 +2904,17 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	if job == nil || m.ActiveDetailPane == NoPane {
 		return m, nil
 	}
+
+	// Workflow agent rows route their buffered transcript into the
+	// already-open log viewport. Cursor movement NEVER opens a pane —
+	// this path is only reached when a detail pane is already active.
+	if row := m.currentRow(); m.ActiveDetailPane == LogsPaneDetail &&
+		row != nil && row.Type == RowTypeAgent && row.Agent != nil {
+		return m.routeWorkflowAgentDetail(row)
+	}
+	// Leaving an agent row restores the normal job-log content below.
+	m.workflowSelectedAgentID = ""
+
 	m.ActiveLogJob = job
 
 	// Recalculate layout dimensions since chat input visibility depends on job type
@@ -2908,6 +2982,89 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// routeWorkflowAgentDetail shows the selected workflow agent's buffered
+// transcript in the existing log viewport. It never opens a pane — callers
+// only reach it when LogsPaneDetail is already active.
+func (m Model) routeWorkflowAgentDetail(row *DisplayRow) (Model, tea.Cmd) {
+	m.ActiveLogJob = row.Job
+	m.workflowSelectedAgentID = row.Agent.ID
+	// Stop the job-log stream so late lines can't overwrite the agent
+	// transcript; it restarts when the cursor returns to a job row.
+	if m.StreamCancel != nil {
+		m.StreamCancel()
+		m.StreamCancel = nil
+		m.StreamingJobID = ""
+	}
+	m.CurrentAgentStatus = nil
+	m.updateLayoutDimensions()
+	return m, m.refreshWorkflowAgentViewer()
+}
+
+// refreshWorkflowAgentViewer renders the selected agent's header + buffered
+// transcript into the log viewport (and the hosted BSP viewport when the
+// detail slot is promoted). No-op when no agent row is selected.
+func (m *Model) refreshWorkflowAgentViewer() tea.Cmd {
+	if m.workflowSelectedAgentID == "" || m.ActiveDetailPane != LogsPaneDetail {
+		return nil
+	}
+	content := m.workflowAgentViewerContent(m.workflowSelectedAgentID)
+	m.LogViewer.SetContent(content)
+	if m.Hosted && m.Manager.IsPromoted("detail") {
+		return func() tea.Msg {
+			return embed.UpdateViewportContentMsg{Content: content, Append: false}
+		}
+	}
+	return nil
+}
+
+// workflowAgentViewerContent assembles the agent detail view: a status
+// header, the task prompt, the buffered transcript lines, and the result
+// once completed.
+func (m *Model) workflowAgentViewerContent(agentID string) string {
+	t := theme.DefaultTheme
+
+	var agent *workflowAgentState
+	if m.ActiveLogJob != nil {
+		if st := m.WorkflowStates[m.ActiveLogJob.ID]; st != nil {
+			for _, runID := range st.RunOrder {
+				if a, ok := st.Runs[runID].Agents[agentID]; ok {
+					agent = a
+					break
+				}
+			}
+		}
+	}
+
+	var b strings.Builder
+	header := theme.IconRobot + " agent " + agentID
+	if agent != nil {
+		if agent.Phase != "" {
+			header += "  •  " + agent.Phase
+		}
+		if agent.Completed {
+			header += "  •  completed"
+		} else {
+			header += "  •  running"
+		}
+	}
+	b.WriteString(t.Bold.Render(header) + "\n")
+	if agent != nil && agent.Prompt != "" {
+		b.WriteString(t.Muted.Render(promptSummary(agent.Prompt, 200)) + "\n")
+	}
+	b.WriteString("\n")
+
+	if lines := m.workflowAgentLines[agentID]; len(lines) > 0 {
+		b.WriteString(strings.Join(lines, "\n"))
+	} else {
+		b.WriteString(t.Muted.Render("no transcript buffered for this agent yet"))
+	}
+
+	if agent != nil && agent.Completed && agent.Result != "" {
+		b.WriteString("\n\n" + t.Success.Render("⎿ result") + "\n" + agent.Result)
+	}
+	return b.String()
 }
 
 // closeAgentSplitCmd returns a tea.Cmd that emits AgentSplitClose if the
