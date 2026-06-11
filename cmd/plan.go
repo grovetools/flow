@@ -157,6 +157,8 @@ var (
 	planAddGitChanges          bool
 	planAddSkill               string
 	planAddSkillSequence       []string
+	planAddJSON                bool
+	planAddRun                 bool
 
 	// Graph flags
 	planGraphFormat string
@@ -234,6 +236,8 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
 	planAddCmd.Flags().StringVar(&planAddSkill, "skill", "", "Skill name to inject into the agent context")
 	planAddCmd.Flags().StringSliceVar(&planAddSkillSequence, "skill-sequence", nil, "Comma-separated list of skills to execute in sequence")
+	planAddCmd.Flags().BoolVar(&planAddJSON, "json", false, "Output as JSON (machine-readable {path, id, number, title})")
+	planAddCmd.Flags().BoolVar(&planAddRun, "run", false, "Create job and immediately run it (equivalent to: flow plan add ... && flow plan run)")
 
 	// Graph command flags
 	planGraphCmd.Flags().StringVarP(&planGraphFormat, "format", "f", "mermaid", "Output format: mermaid, dot, ascii")
@@ -367,6 +371,8 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		GitChanges:          planAddGitChanges,
 		Skill:               planAddSkill,
 		SkillSequence:       planAddSkillSequence,
+		JSON:                planAddJSON,
+		RunAfterCreate:      planAddRun,
 	}
 	return RunPlanAddStep(addStepCmd)
 }

@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/grovetools/core/pkg/models"
@@ -41,6 +44,8 @@ type PlanAddStepCmd struct {
 	Channels            []string `flag:"" sep:"," help:"External channels to enable (e.g., signal)"`
 	Autonomous          bool     `flag:"" help:"Enable autonomous idle pinging"`
 	IdleMinutes         int      `flag:"" default:"15" help:"Minutes of inactivity before idle ping"`
+	JSON                bool     `flag:"" help:"Output as JSON (machine-readable {path, id, number, title})"`
+	RunAfterCreate      bool     `flag:"" name:"run" help:"Create job and immediately run it"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -229,11 +234,59 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		return fmt.Errorf("failed to add job: %w", err)
 	}
 
-	// Display success
-	fmt.Println(theme.DefaultTheme.Success.Render("*") + " Created " + filename)
-	fmt.Println("\nNext steps:")
-	fmt.Println("- Review the job file")
-	fmt.Printf("- Run with: flow plan run %s/%s\n", cmd.Dir, filename)
+	// Handle JSON output or text output
+	if cmd.JSON {
+		// Extract job number from filename (format: "02-title.md")
+		numStr := strings.Split(filename, "-")[0]
+		jobNumber := 0
+		if n, err := strconv.Atoi(numStr); err == nil {
+			jobNumber = n
+		}
+
+		// Create JSON output
+		result := map[string]interface{}{
+			"path":   filepath.Join(cmd.Dir, filename),
+			"id":     job.ID,
+			"number": jobNumber,
+			"title":  job.Title,
+		}
+		jsonBytes, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		// Output ONLY the JSON to stdout
+		fmt.Println(string(jsonBytes))
+	} else {
+		// Display success with human-readable output
+		fmt.Println(theme.DefaultTheme.Success.Render("*") + " Created " + filename)
+		fmt.Println("\nNext steps:")
+		fmt.Println("- Review the job file")
+		fmt.Printf("- Run with: flow plan run %s/%s\n", cmd.Dir, filename)
+	}
+
+	// Handle --run flag: create then run the job
+	if cmd.RunAfterCreate {
+		// Invoke the equivalent of: flow plan run <plan-dir>/<job-file>
+		// We print the command for the user to run since we can't directly invoke the run command here
+		jobFile := filepath.Join(planPath, filename)
+
+		// For now, we'll just suggest the command to run
+		// The implementation of actually running it will be done by printing to stderr
+		// so it doesn't interfere with --json output
+		if !cmd.JSON {
+			fmt.Fprintf(os.Stderr, "\nRunning: flow plan run %s\n", jobFile)
+		}
+
+		// Execute the equivalent: flow plan run <jobFile>
+		// We use exec to replace the current process
+		runCmd := exec.Command("flow", "plan", "run", jobFile, "--yes")
+		runCmd.Stdin = os.Stdin
+		runCmd.Stdout = os.Stdout
+		runCmd.Stderr = os.Stderr
+		if err := runCmd.Run(); err != nil {
+			return fmt.Errorf("failed to run job: %w", err)
+		}
+	}
 
 	return nil
 }
