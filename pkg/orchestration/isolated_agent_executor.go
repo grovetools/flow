@@ -171,6 +171,16 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 	}
 
+	// Append per-job flags (--model, --effort) for claude only; other
+	// providers do not accept these flags.
+	if providerName == "claude" {
+		var err error
+		agentArgs, err = appendClaudeJobArgs(agentArgs, job, plan)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Handle source_block reference if present
 	if job.SourceBlock != "" {
 		extractedContent, err := resolveSourceBlock(job.SourceBlock, plan)

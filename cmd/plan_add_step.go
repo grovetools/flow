@@ -28,6 +28,7 @@ type PlanAddStepCmd struct {
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`
+	Effort              string   `flag:"" help:"Effort level for claude agent jobs (passed to the claude CLI as --effort)"`
 	Inline              []string `flag:"" sep:"," help:"File types to inline in prompt: dependencies, include, context, all, files, none (comma-separated)"`
 	PrependDependencies bool     `flag:"" help:"[DEPRECATED] Use --inline=dependencies instead. Inline dependency content into prompt body."`
 	Recipe              string   `flag:"" help:"Name of a recipe to add to the plan"`
@@ -586,6 +587,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if model, ok := template.Frontmatter["model"].(string); ok {
 		job.Model = model
 	}
+	if effort, ok := template.Frontmatter["effort"].(string); ok {
+		job.Effort = effort
+	}
 	if genPlan, ok := template.Frontmatter["generate_plan_from"].(bool); ok {
 		job.GeneratePlanFrom = genPlan
 	}
@@ -641,6 +645,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if cmd.Model != "" {
 		job.Model = cmd.Model
+	}
+	if cmd.Effort != "" {
+		job.Effort = cmd.Effort
 	}
 	// New inline flag overrides template and plan defaults
 	if len(cmd.Inline) > 0 {

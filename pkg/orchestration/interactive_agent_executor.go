@@ -256,6 +256,16 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		}
 	}
 
+	// Append per-job flags (--model, --effort) for claude only; other
+	// providers do not accept these flags.
+	if providerName == "claude" {
+		var err error
+		agentArgs, err = appendClaudeJobArgs(agentArgs, job, plan)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Handle source_block reference if present
 	// Resolve it before launching the agent so the agent has the content to work with
 	if job.SourceBlock != "" {
@@ -784,6 +794,56 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	return nil
+}
+
+// appendClaudeJobArgs appends per-job claude CLI flags to the static provider
+// args from grove.toml: --model (job frontmatter, falling back to the
+// plan-level config model like the oneshot/chat executors) and --effort (job
+// frontmatter only). Values are passed through without validating against
+// claude's accepted set, but are rejected if they contain characters that
+// would need shell quoting, since several launch paths join args into a raw
+// shell command string. Only call this when the effective provider is claude.
+func appendClaudeJobArgs(agentArgs []string, job *Job, plan *Plan) ([]string, error) {
+	model := job.Model
+	if model == "" && plan != nil && plan.Config != nil {
+		model = plan.Config.Model
+	}
+	if model == "" && job.Effort == "" {
+		return agentArgs, nil
+	}
+
+	// Copy so we never mutate the shared provider config slice
+	// (jobs may build args concurrently from the same FlowConfig).
+	args := make([]string, len(agentArgs), len(agentArgs)+4)
+	copy(args, agentArgs)
+
+	if model != "" {
+		if !isShellSafeArgValue(model) {
+			return nil, fmt.Errorf("model %q contains characters that are unsafe in a shell command; use a plain model name/alias", model)
+		}
+		args = append(args, "--model", model)
+	}
+	if job.Effort != "" {
+		if !isShellSafeArgValue(job.Effort) {
+			return nil, fmt.Errorf("effort %q contains characters that are unsafe in a shell command; use a plain effort level", job.Effort)
+		}
+		args = append(args, "--effort", job.Effort)
+	}
+	return args, nil
+}
+
+// isShellSafeArgValue reports whether s can be embedded unquoted in the
+// shell command strings built by the agent providers.
+func isShellSafeArgValue(s string) bool {
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == ':' || r == '/' || r == '@' || r == ',' || r == '+':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // buildAgentCommand constructs the agent command for the interactive session.
