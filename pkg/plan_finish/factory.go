@@ -1305,6 +1305,15 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 	if err := os.RemoveAll(ecosystemDir); err != nil {
 		return fmt.Errorf("failed to remove ecosystem directory: %w", err)
 	}
+	// The ecosystem worktree dir is removed with os.RemoveAll (not `git
+	// worktree remove`), so the ecosystem repo still carries a stale worktree
+	// registration pointing at the now-deleted dir. Prune it, otherwise a
+	// later `git branch -d <worktree>` (the delete-branch finish step) is
+	// refused with "cannot delete branch ... used by worktree".
+	pruneCmd := exec.CommandContext(ctx, "git", "-C", gitRoot, "worktree", "prune")
+	if output, err := pruneCmd.CombinedOutput(); err != nil {
+		fmt.Printf("    Warning: failed to prune stale worktree registration in %s: %s\n", gitRoot, string(output))
+	}
 	fmt.Printf("    * Ecosystem worktree removed successfully\n")
 	return nil
 }
