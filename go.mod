@@ -2,6 +2,8 @@ module github.com/grovetools/flow
 
 go 1.24.4
 
+replace github.com/grovetools/core => /Users/solair/Code/grovetools/core
+
 require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbles v0.21.0
@@ -10,7 +12,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/google/uuid v1.6.0
 	github.com/grovetools/compositor v0.0.1
-	github.com/grovetools/core v0.6.4-0.20260402212142-fb475a947edc
+	github.com/grovetools/core v0.6.4-0.20260521140340-5660efd35db0
 	github.com/grovetools/cx v0.6.0
 	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/grove-gemini v0.6.1
