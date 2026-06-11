@@ -2,60 +2,38 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/grovetools/agentlogs/pkg/transcript"
+	agentworkflow "github.com/grovetools/agentlogs/pkg/workflow"
+	"github.com/grovetools/core/pkg/workflows"
 )
 
-func TestParseWorkflowJournal_Complete(t *testing.T) {
-	events, err := parseWorkflowJournal(filepath.Join("testdata", "workflows", "journal_complete.jsonl"))
-	if err != nil {
-		t.Fatalf("parseWorkflowJournal() error = %v", err)
-	}
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d", len(events))
-	}
-	if events[0].Type != "started" || events[0].AgentID != "a6053d9fe85440cfe" {
-		t.Errorf("unexpected first event: %+v", events[0])
-	}
-	if !strings.HasPrefix(events[0].Key, "v2:") {
-		t.Errorf("expected v2: key prefix, got %q", events[0].Key)
-	}
-	if events[2].Type != "result" || len(events[2].Result) == 0 {
-		t.Errorf("expected result event with payload, got %+v", events[2])
-	}
-	if events[1].Result != nil {
-		t.Errorf("started event should have no result, got %s", events[1].Result)
-	}
-}
-
-func TestParseWorkflowJournal_SkipsMalformedLines(t *testing.T) {
-	events, err := parseWorkflowJournal(filepath.Join("testdata", "workflows", "journal_malformed.jsonl"))
-	if err != nil {
-		t.Fatalf("parseWorkflowJournal() error = %v", err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("expected 2 parseable events, got %d", len(events))
-	}
-	if events[0].Type != "started" || events[1].Type != "result" {
-		t.Errorf("unexpected events: %+v", events)
-	}
-}
-
-func TestParseWorkflowJournal_MissingFile(t *testing.T) {
-	if _, err := parseWorkflowJournal(filepath.Join(t.TempDir(), "nope.jsonl")); err == nil {
-		t.Fatal("expected error for missing file")
+// userEntry builds a minimal user transcript entry with one text part.
+func userEntry(text string) transcript.UnifiedEntry {
+	return transcript.UnifiedEntry{
+		Role:  "user",
+		Parts: []transcript.UnifiedPart{{Type: "text", Content: transcript.UnifiedTextContent{Text: text}}},
 	}
 }
 
 func TestGenerateWorkflowSummary_Complete(t *testing.T) {
-	events, err := parseWorkflowJournal(filepath.Join("testdata", "workflows", "journal_complete.jsonl"))
-	if err != nil {
-		t.Fatal(err)
+	run := &agentworkflow.WorkflowRun{
+		RunID: "wf_4650c05a-c39",
+		Agents: map[string]*agentworkflow.AgentRun{
+			"a6053d9fe85440cfe": {Started: true, Result: json.RawMessage(`{"summary":"first agent finding","files":["a.go","b.go"]}`)},
+			"a9172cda79b99f9ad": {Started: true, Result: json.RawMessage(`"plain text result from a schemaless agent"`)},
+		},
 	}
 
-	summary := generateWorkflowSummary("release-survey", "wf_4650c05a-c39", events)
+	summary := generateWorkflowSummary("release-survey", "wf_4650c05a-c39", run,
+		map[string]bool{"a6053d9fe85440cfe": true})
 
 	for _, want := range []string{
 		"# Workflow Run: release-survey",
@@ -64,6 +42,7 @@ func TestGenerateWorkflowSummary_Complete(t *testing.T) {
 		"Agents completed: 2",
 		"## Results",
 		"### Agent `a6053d9fe85440cfe`",
+		"[Transcript](agents/agent-a6053d9fe85440cfe.md)",
 		`"summary": "first agent finding"`,
 		"plain text result from a schemaless agent",
 	} {
@@ -79,15 +58,23 @@ func TestGenerateWorkflowSummary_Complete(t *testing.T) {
 	if strings.Contains(summary, `"plain text result`) {
 		t.Error("string result rendered as quoted JSON instead of plain text")
 	}
+	// The second agent has no rendered markdown transcript; no link.
+	if strings.Contains(summary, "agents/agent-a9172cda79b99f9ad.md") {
+		t.Error("transcript link rendered for an agent without a markdown doc")
+	}
 }
 
 func TestGenerateWorkflowSummary_Interrupted(t *testing.T) {
-	events, err := parseWorkflowJournal(filepath.Join("testdata", "workflows", "journal_interrupted.jsonl"))
-	if err != nil {
-		t.Fatal(err)
+	run := &agentworkflow.WorkflowRun{
+		RunID: "wf_2dc6d7f2-bab",
+		Agents: map[string]*agentworkflow.AgentRun{
+			"agent-one":   {Started: true, Result: json.RawMessage(`{"ok":true}`)},
+			"agent-two":   {Started: true},
+			"agent-three": {Started: true},
+		},
 	}
 
-	summary := generateWorkflowSummary("verify-round", "wf_2dc6d7f2-bab", events)
+	summary := generateWorkflowSummary("verify-round", "wf_2dc6d7f2-bab", run, nil)
 
 	for _, want := range []string{
 		"Agents started: 3",
@@ -102,8 +89,9 @@ func TestGenerateWorkflowSummary_Interrupted(t *testing.T) {
 	}
 }
 
-func TestGenerateWorkflowSummary_NoEvents(t *testing.T) {
-	summary := generateWorkflowSummary("wf_empty-run", "wf_empty-run", nil)
+func TestGenerateWorkflowSummary_NoAgents(t *testing.T) {
+	run := &agentworkflow.WorkflowRun{RunID: "wf_empty-run", Agents: map[string]*agentworkflow.AgentRun{}}
+	summary := generateWorkflowSummary("wf_empty-run", "wf_empty-run", run, nil)
 	for _, want := range []string{
 		"# Workflow Run: wf_empty-run",
 		"Agents started: 0",
@@ -138,8 +126,15 @@ func TestFindWorkflowScript(t *testing.T) {
 	}
 }
 
+// sampleAgentTranscript is a minimal Claude agent transcript: one user
+// prompt and one assistant text response.
+const sampleAgentTranscript = `{"type":"user","isSidechain":true,"message":{"role":"user","content":"Survey the nb module for release readiness"}}
+{"type":"assistant","isSidechain":true,"message":{"id":"msg_1","content":[{"type":"text","text":"Survey complete."}]}}
+`
+
 // buildWorkflowRunDir assembles a fake wf_* source directory from a journal
-// fixture plus agent transcript stubs.
+// fixture plus agent transcript stubs (a parseable transcript for the first
+// fixture agent, and a meta.json sidecar).
 func buildWorkflowRunDir(t *testing.T, journalFixture string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -154,15 +149,16 @@ func buildWorkflowRunDir(t *testing.T, journalFixture string) string {
 	if err := os.WriteFile(filepath.Join(runDir, "journal.jsonl"), journal, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"agent-a6053d9fe85440cfe.jsonl", "agent-a6053d9fe85440cfe.meta.json"} {
-		if err := os.WriteFile(filepath.Join(runDir, name), []byte("{}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(runDir, "agent-a6053d9fe85440cfe.jsonl"), []byte(sampleAgentTranscript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "agent-a6053d9fe85440cfe.meta.json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	return runDir
 }
 
-func TestArchiveWorkflowRun_DefaultSkipsTranscripts(t *testing.T) {
+func TestArchiveWorkflowRun_DefaultSkipsRawTranscripts(t *testing.T) {
 	runDir := buildWorkflowRunDir(t, "journal_complete.jsonl")
 	scriptsDir := t.TempDir()
 	scriptContent := "export const meta = { name: 'release-survey' }"
@@ -171,7 +167,8 @@ func TestArchiveWorkflowRun_DefaultSkipsTranscripts(t *testing.T) {
 	}
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{scriptsDir}, destDir); err != nil {
+	ar, err := archiveWorkflowRun(context.Background(), runDir, []string{scriptsDir}, destDir, t.TempDir(), false)
+	if err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -192,33 +189,44 @@ func TestArchiveWorkflowRun_DefaultSkipsTranscripts(t *testing.T) {
 	if !strings.Contains(string(summary), "# Workflow Run: release-survey") {
 		t.Errorf("summary missing script-derived title:\n%s", summary)
 	}
-	// Agent transcripts are now always archived (gate removed).
-	if _, err := os.Stat(filepath.Join(destDir, "agents")); os.IsNotExist(err) {
-		t.Error("agent transcripts should always be archived now")
+	if !strings.Contains(string(summary), "[Transcript](agents/agent-a6053d9fe85440cfe.md)") {
+		t.Errorf("summary missing agent markdown transcript link:\n%s", summary)
+	}
+
+	// Rendered markdown transcript is always on...
+	agentMD, err := os.ReadFile(filepath.Join(destDir, "agents", "agent-a6053d9fe85440cfe.md"))
+	if err != nil {
+		t.Fatalf("agent markdown transcript not rendered: %v", err)
+	}
+	for _, want := range []string{"**User:**", "Survey the nb module", "**Assistant:**", "Survey complete."} {
+		if !strings.Contains(string(agentMD), want) {
+			t.Errorf("agent markdown missing %q:\n%s", want, agentMD)
+		}
+	}
+	if !ar.AgentDocs["a6053d9fe85440cfe"] {
+		t.Error("AgentDocs missing rendered agent")
+	}
+
+	// ...but raw jsonl copies stay behind archive_agent_transcripts.
+	for _, name := range []string{"agent-a6053d9fe85440cfe.jsonl", "agent-a6053d9fe85440cfe.meta.json"} {
+		if _, err := os.Stat(filepath.Join(destDir, "agents", name)); !os.IsNotExist(err) {
+			t.Errorf("raw transcript %s archived despite archive_agent_transcripts=false", name)
+		}
 	}
 }
 
-func TestArchiveWorkflowRun_TranscriptsAlwaysArchived(t *testing.T) {
+func TestArchiveWorkflowRun_RawTranscriptsOptIn(t *testing.T) {
 	runDir := buildWorkflowRunDir(t, "journal_complete.jsonl")
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir); err != nil {
+	if _, err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, t.TempDir(), true); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
-	// Transcripts are now always archived (gate removed) as both .jsonl and .md
-	agentsDir := filepath.Join(destDir, "agents")
-	if _, err := os.Stat(agentsDir); os.IsNotExist(err) {
-		t.Fatal("agents directory should exist")
-	}
-	// The naming now uses precedence: label → prompt slug → agent-ID
-	// At minimum we should have some files in agents/
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil {
-		t.Fatalf("failed to read agents dir: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Error("expected archived transcripts in agents dir")
+	for _, name := range []string{"agent-a6053d9fe85440cfe.jsonl", "agent-a6053d9fe85440cfe.meta.json", "agent-a6053d9fe85440cfe.md"} {
+		if _, err := os.Stat(filepath.Join(destDir, "agents", name)); err != nil {
+			t.Errorf("expected archived transcript %s: %v", name, err)
+		}
 	}
 }
 
@@ -227,7 +235,7 @@ func TestArchiveWorkflowRun_MissingScriptFallsBackToRunID(t *testing.T) {
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
 	// Empty scripts dir: title must fall back to the run ID.
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir); err != nil {
+	if _, err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, t.TempDir(), false); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -243,6 +251,221 @@ func TestArchiveWorkflowRun_MissingScriptFallsBackToRunID(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destDir, "script.js")); !os.IsNotExist(err) {
 		t.Error("script.js should not exist when no script matched")
+	}
+}
+
+func TestArchiveWorkflowRun_CopiesDaemonEventsAndDurations(t *testing.T) {
+	runDir := buildWorkflowRunDir(t, "journal_complete.jsonl")
+	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
+
+	daemonDir := t.TempDir()
+	events := `{"event":{"kind":"agent_started","agent_id":"a6053d9fe85440cfe","timestamp":"2026-06-10T10:00:00Z"}}
+{"event":{"kind":"agent_completed","agent_id":"a6053d9fe85440cfe","timestamp":"2026-06-10T10:03:20Z"}}
+{"event":{"kind":"agent_started","agent_id":"a9172cda79b99f9ad","timestamp":"2026-06-10T10:00:05Z"}}
+`
+	if err := os.WriteFile(filepath.Join(daemonDir, "wf_4650c05a-c39.jsonl"), []byte(events), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ar, err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, daemonDir, false)
+	if err != nil {
+		t.Fatalf("archiveWorkflowRun() error = %v", err)
+	}
+
+	copied, err := os.ReadFile(filepath.Join(destDir, "events.jsonl"))
+	if err != nil {
+		t.Fatalf("daemon events not merged as events.jsonl: %v", err)
+	}
+	if string(copied) != events {
+		t.Errorf("events.jsonl content mismatch:\n%s", copied)
+	}
+
+	if d := ar.Durations["a6053d9fe85440cfe"]; d != 3*time.Minute+20*time.Second {
+		t.Errorf("duration = %v, want 3m20s", d)
+	}
+	// Started but never completed: no duration entry.
+	if _, ok := ar.Durations["a9172cda79b99f9ad"]; ok {
+		t.Error("duration computed for agent without a completed event")
+	}
+}
+
+func TestWorkflowRunsSection_Golden(t *testing.T) {
+	run := &agentworkflow.WorkflowRun{
+		RunID: "wf_run1",
+		Meta: &workflows.ScriptMeta{
+			Name:   "release-survey",
+			Phases: []workflows.PhaseMeta{{Title: "Survey"}, {Title: "Critique"}},
+		},
+		Agents: map[string]*agentworkflow.AgentRun{
+			"agent-one": {
+				Started: true,
+				Result:  json.RawMessage(`"all good\nsecond line"`),
+				Entries: []transcript.UnifiedEntry{userEntry("Survey the nb module\nwith extra detail")},
+			},
+			"agent-two": {Started: true},
+		},
+	}
+	ar := &archivedWorkflowRun{
+		RunID:     "wf_run1",
+		Title:     "release-survey",
+		Run:       run,
+		Durations: map[string]time.Duration{"agent-one": 3*time.Minute + 20*time.Second},
+		AgentDocs: map[string]bool{"agent-one": true},
+	}
+
+	got := renderWorkflowRunsSection("job-1", []*archivedWorkflowRun{ar})
+
+	want := "## Workflow Run: release-survey\n" +
+		"\n" +
+		"- Run ID: `wf_run1`\n" +
+		"- Agents: 2 started / 1 completed\n" +
+		"- Phases: Survey → Critique\n" +
+		"- Artifacts: [.artifacts/job-1/workflows/wf_run1/](.artifacts/job-1/workflows/wf_run1/)\n" +
+		"\n" +
+		"### Agents\n" +
+		"\n" +
+		"#### `agent-one`\n" +
+		"\n" +
+		"- Prompt: Survey the nb module\n" +
+		"- Duration: 3m20s\n" +
+		"- Transcript: [agent-agent-one.md](.artifacts/job-1/workflows/wf_run1/agents/agent-agent-one.md)\n" +
+		"- Result:\n" +
+		"\n" +
+		"    all good\n" +
+		"    second line\n" +
+		"\n" +
+		"#### `agent-two`\n" +
+		"\n" +
+		"- Result: _(none — agent never returned a result)_\n"
+
+	if got != want {
+		t.Errorf("section mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestWorkflowRunsSection_ResultCapTruncation(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	result, err := json.Marshal(strings.Join(lines, "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ar := &archivedWorkflowRun{
+		RunID: "wf_run1",
+		Title: "big-results",
+		Run: &agentworkflow.WorkflowRun{
+			RunID: "wf_run1",
+			Agents: map[string]*agentworkflow.AgentRun{
+				"agent-one": {Started: true, Result: json.RawMessage(result)},
+			},
+		},
+	}
+
+	got := renderWorkflowRunsSection("job-1", []*archivedWorkflowRun{ar})
+
+	if !strings.Contains(got, "    line 15\n") {
+		t.Errorf("line 15 (cap boundary) missing:\n%s", got)
+	}
+	if strings.Contains(got, "line 16") {
+		t.Errorf("result not capped at %d lines:\n%s", workflowResultCapLines, got)
+	}
+	wantLink := "[full result in .artifacts/job-1/workflows/wf_run1/summary.md](.artifacts/job-1/workflows/wf_run1/summary.md)"
+	if !strings.Contains(got, wantLink) {
+		t.Errorf("truncation link missing %q:\n%s", wantLink, got)
+	}
+}
+
+func TestArchiveWorkflowRunsFromDirs_NoRunsNoSection(t *testing.T) {
+	job := writeTranscriptTestJob(t, transcriptTestJobContent)
+	before, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan := &Plan{Directory: t.TempDir()}
+	// Session dir exists but holds no wf_* runs.
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{t.TempDir()}, t.TempDir(), false); err != nil {
+		t.Fatalf("archiveWorkflowRunsFromDirs() error = %v", err)
+	}
+
+	after, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("job file modified despite no workflow runs:\n%s", after)
+	}
+	if strings.Contains(string(after), workflowRunsSectionHeader) {
+		t.Error("workflow runs section written for a run-less session")
+	}
+}
+
+func TestArchiveWorkflowRunsFromDirs_SectionIdempotentReArchive(t *testing.T) {
+	slug := t.TempDir()
+	runDir := filepath.Join(slug, "subagents", "workflows", "wf_aaa")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := os.ReadFile(filepath.Join("testdata", "workflows", "journal_complete.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "journal.jsonl"), journal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "agent-a6053d9fe85440cfe.jsonl"), []byte(sampleAgentTranscript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	job := writeTranscriptTestJob(t, transcriptTestJobContent+"\n# Agent Chat Transcript\n\nthe transcript\n")
+	plan := &Plan{Directory: t.TempDir()}
+
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slug}, t.TempDir(), false); err != nil {
+		t.Fatalf("archiveWorkflowRunsFromDirs() error = %v", err)
+	}
+
+	first, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(first)
+	secIdx := strings.Index(got, workflowRunsSectionHeader)
+	trIdx := strings.Index(got, transcriptSectionHeader)
+	if secIdx == -1 {
+		t.Fatalf("workflow runs section missing:\n%s", got)
+	}
+	if trIdx == -1 || secIdx > trIdx {
+		t.Errorf("section not inserted before the transcript section:\n%s", got)
+	}
+	for _, want := range []string{
+		"## Workflow Run: wf_aaa",
+		"- Agents: 2 started / 2 completed",
+		"- Prompt: Survey the nb module for release readiness",
+		"[agent-a6053d9fe85440cfe.md](.artifacts/test-job/workflows/wf_aaa/agents/agent-a6053d9fe85440cfe.md)",
+		"the transcript",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("job file missing %q\n---\n%s", want, got)
+		}
+	}
+
+	// Re-archiving rebuilds the section wholesale: no duplicate sections,
+	// byte-identical file.
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slug}, t.TempDir(), false); err != nil {
+		t.Fatalf("repeat archiveWorkflowRunsFromDirs() error = %v", err)
+	}
+	second, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Errorf("re-archive changed the job file:\n--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+	if n := strings.Count(string(second), workflowRunsSectionHeader); n != 1 {
+		t.Errorf("expected exactly one workflow runs section, got %d", n)
 	}
 }
 
@@ -283,7 +506,7 @@ func TestArchiveWorkflowRunsFromDirs_MergesAcrossSlugDirs(t *testing.T) {
 	job := &Job{ID: "job-merge", Type: JobTypeHeadlessAgent}
 	plan := &Plan{Directory: planDir}
 
-	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}); err != nil {
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}, t.TempDir(), false); err != nil {
 		t.Fatalf("archiveWorkflowRunsFromDirs() error = %v", err)
 	}
 
@@ -317,7 +540,7 @@ func TestArchiveWorkflowRunsFromDirs_MergesAcrossSlugDirs(t *testing.T) {
 	}
 
 	// Re-archiving is an idempotent overwrite, not an error.
-	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}); err != nil {
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}, t.TempDir(), false); err != nil {
 		t.Fatalf("repeat archiveWorkflowRunsFromDirs() error = %v", err)
 	}
 }
@@ -326,7 +549,7 @@ func TestArchiveWorkflowRun_MalformedJournalStillWritesSummary(t *testing.T) {
 	runDir := buildWorkflowRunDir(t, "journal_malformed.jsonl")
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir); err != nil {
+	if _, err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, t.TempDir(), false); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -334,8 +557,9 @@ func TestArchiveWorkflowRun_MalformedJournalStillWritesSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only the two well-formed lines should be counted.
-	if !strings.Contains(string(summary), "Agents started: 1") {
+	// Only the parseable journal lines should be counted (agent-one started
+	// and completed; the transcript-only agent adds another started entry).
+	if !strings.Contains(string(summary), "Agents completed: 1") {
 		t.Errorf("summary should count only parseable events:\n%s", summary)
 	}
 }
