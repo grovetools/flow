@@ -2,12 +2,14 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/grovetools/core/config"
@@ -328,14 +330,19 @@ func (e *HeadlessAgentExecutor) registerSessionIntent(ctx context.Context, job *
 
 // buildHeadlessCommand constructs the exec.Cmd for a provider's headless mode.
 // Returns an error for providers that have no headless execution mode.
+// PHASE 2 CHANGE: Uses exec.Command (not CommandContext) for process detachment.
+// Agents are detached from the daemon and will be adopted on daemon restart.
 func buildHeadlessCommand(ctx context.Context, providerName, prompt string, agentArgs []string) (*exec.Cmd, error) {
 	switch providerName {
 	case "claude":
 		// Claude Code headless: prompt is piped via stdin.
 		args := []string{"--dangerously-skip-permissions"}
 		args = append(args, agentArgs...)
-		cmd := exec.CommandContext(ctx, "claude", args...)
+		cmd := exec.Command("claude", args...)
 		cmd.Stdin = strings.NewReader(prompt)
+		// Detach the process: place it in its own process group so signals
+		// sent to the daemon don't propagate to the agent.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		return cmd, nil
 	case "opencode":
 		// Opencode headless: 'opencode run' executes the prompt and exits
@@ -344,7 +351,9 @@ func buildHeadlessCommand(ctx context.Context, providerName, prompt string, agen
 		args := []string{"run"}
 		args = append(args, agentArgs...)
 		args = append(args, prompt)
-		return exec.CommandContext(ctx, "opencode", args...), nil
+		cmd := exec.Command("opencode", args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		return cmd, nil
 	default:
 		return nil, fmt.Errorf("provider %q does not support headless execution (no headless mode implemented); supported headless providers: claude, opencode — set flow.interactive_provider in grove.toml to a supported provider or run this job as interactive_agent", providerName)
 	}
@@ -415,26 +424,94 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		Field("GROVE_FLOW_JOB_TITLE", escapedTitle).
 		Log(ctx)
 
-	// We use cmd.Run() and don't capture output. The agent process itself handles logging.
-	// We also redirect stdout/stderr to /dev/null to prevent cluttering the main process output.
-	// The real logs are accessed via `aglogs`.
+	// PHASE 2: Redirect stdout/stderr to /dev/null to prevent cluttering the main process output.
+	// The real logs are accessed via `aglogs`. Agent process handles its own logging.
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 
-	if err := cmd.Run(); err != nil {
-		ulog.Error("[HEADLESS] Agent CLI execution failed").
+	// PHASE 2: Use Start() instead of Run() to detach the process and return immediately.
+	// The agent is now in its own process group (Setpgid=true) and will survive daemon restart.
+	if err := cmd.Start(); err != nil {
+		ulog.Error("[HEADLESS] Agent CLI startup failed").
 			Field("job_id", job.ID).
 			Field("provider", providerName).
 			Err(err).
 			Log(ctx)
-		return fmt.Errorf("agent execution failed: %w", err)
+		return fmt.Errorf("agent startup failed: %w", err)
 	}
 
-	ulog.Debug("[HEADLESS] Agent CLI execution completed").
+	// PHASE 2: Spawn a goroutine to wait for the agent's completion and write .status file.
+	// This allows the executor to return immediately while the agent runs detached.
+	go e.waitAndWriteStatus(ctx, job, plan, cmd)
+
+	ulog.Debug("[HEADLESS] Agent detached").
 		Field("job_id", job.ID).
 		Field("provider", providerName).
+		Field("pid", cmd.Process.Pid).
 		Log(ctx)
 	return nil
+}
+
+// waitAndWriteStatus waits for an agent process to complete and writes its exit status to a .status file.
+// PHASE 2: This allows the daemon to adopt orphaned processes on restart by reading the .status file.
+// The file is written to the job's artifact directory with format: {"exit_code": <int>, "timestamp": <RFC3339>}
+func (e *HeadlessAgentExecutor) waitAndWriteStatus(ctx context.Context, job *Job, plan *Plan, cmd *exec.Cmd) {
+	err := cmd.Wait()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			// Non-exit error (shouldn't happen with detached process)
+			exitCode = -1
+		}
+	}
+
+	// Construct the .status file path in the job's artifacts directory
+	// The path follows: .artifacts/<job-id>/.status
+	statusPath := filepath.Join(plan.Directory, ".artifacts", job.ID, ".status")
+	statusDir := filepath.Dir(statusPath)
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(statusDir, 0755); err != nil {
+		ulog.Error("[HEADLESS] Failed to create status directory").
+			Field("job_id", job.ID).
+			Field("path", statusDir).
+			Err(err).
+			Log(ctx)
+		return
+	}
+
+	// Write the status file with JSON format
+	statusData := map[string]interface{}{
+		"exit_code": exitCode,
+		"timestamp": time.Now().Format(time.RFC3339),
+		"job_id":    job.ID,
+	}
+
+	data, err := json.Marshal(statusData)
+	if err != nil {
+		ulog.Error("[HEADLESS] Failed to marshal status").
+			Field("job_id", job.ID).
+			Err(err).
+			Log(ctx)
+		return
+	}
+
+	if err := os.WriteFile(statusPath, data, 0644); err != nil {
+		ulog.Error("[HEADLESS] Failed to write status file").
+			Field("job_id", job.ID).
+			Field("path", statusPath).
+			Err(err).
+			Log(ctx)
+		return
+	}
+
+	ulog.Debug("[HEADLESS] Status file written").
+		Field("job_id", job.ID).
+		Field("exit_code", exitCode).
+		Field("path", statusPath).
+		Log(ctx)
 }
 
 // gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
