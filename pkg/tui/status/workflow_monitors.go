@@ -64,6 +64,21 @@ func (m *Model) syncWorkflowMonitors() []tea.Cmd {
 	return cmds
 }
 
+// markWorkflowDirty records that a job's workflow tree changed and returns
+// the coalescing tick command when one isn't already pending. Display rows
+// are rebuilt by the tick handler, never per event.
+func (m *Model) markWorkflowDirty(jobID string) tea.Cmd {
+	if m.workflowDirtyJobs == nil {
+		m.workflowDirtyJobs = make(map[string]bool)
+	}
+	m.workflowDirtyJobs[jobID] = true
+	if m.workflowRebuildPending {
+		return nil
+	}
+	m.workflowRebuildPending = true
+	return scheduleWorkflowRebuildCmd()
+}
+
 // closeWorkflowMonitors tears down the daemon source and every FileSource
 // fallback monitor. Called from Model.Close().
 func (m *Model) closeWorkflowMonitors() {

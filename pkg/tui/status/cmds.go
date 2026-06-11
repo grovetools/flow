@@ -201,6 +201,22 @@ type workflowAgentLogMsg struct {
 	Lines   []string
 }
 
+// workflowRebuildTickMsg fires the coalesced display-row rebuild after
+// workflow activity marked jobs dirty. At most one tick is in flight at a
+// time (workflowRebuildPending) — display rows are never rebuilt per event.
+type workflowRebuildTickMsg struct{}
+
+// workflowRebuildInterval is the coalescing window for workflow-driven
+// display-row rebuilds and transcript viewport refreshes.
+const workflowRebuildInterval = 100 * time.Millisecond
+
+// scheduleWorkflowRebuildCmd schedules the next coalesced rebuild tick.
+func scheduleWorkflowRebuildCmd() tea.Cmd {
+	return tea.Tick(workflowRebuildInterval, func(time.Time) tea.Msg {
+		return workflowRebuildTickMsg{}
+	})
+}
+
 // startWorkflowMonitorCmd resolves the job's Claude session directories via
 // the hooks session registry and starts background producers feeding MsgCh:
 // a workflowmon.FileSource per directory forwarding typed lifecycle events,

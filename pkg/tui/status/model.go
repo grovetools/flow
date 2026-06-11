@@ -154,6 +154,26 @@ type Model struct {
 	// workflowMonitorPending marks jobs whose FileSource session discovery
 	// is in flight, so the 2s refresh doesn't double-start monitors.
 	workflowMonitorPending map[string]bool
+	// workflowSelectedAgentID is the workflow agent whose buffered
+	// transcript is routed into the already-open log viewport while the
+	// cursor rests on its row. Empty when the cursor is not on an agent
+	// row (the viewport shows the job log as usual).
+	workflowSelectedAgentID string
+	// workflowDirtyJobs marks jobs whose workflow state changed since the
+	// last display-row rebuild. Rebuilds are coalesced on a ~100ms tick
+	// (workflowRebuildTickMsg) — never per event.
+	workflowDirtyJobs map[string]bool
+	// workflowRebuildPending is true while a coalescing rebuild tick is
+	// already scheduled.
+	workflowRebuildPending bool
+	// workflowTranscriptDirty marks that the selected agent's buffered
+	// transcript grew since the log viewport last refreshed; the refresh
+	// rides the same coalescing tick.
+	workflowTranscriptDirty bool
+	// workflowArchiveChecked marks completed jobs whose archived-run
+	// fallback load (.artifacts/<job-id>/workflows/) has been attempted,
+	// so each job is loaded at most once per TUI session.
+	workflowArchiveChecked map[string]bool
 
 	// Claw dialog
 	ClawDialogActive         bool
@@ -274,6 +294,7 @@ func (m *Model) closeCurrentDetail() tea.Cmd {
 			m.StreamCancel = nil
 			m.StreamingJobID = ""
 		}
+		m.workflowSelectedAgentID = ""
 		return demoteCmd
 	}
 
@@ -284,6 +305,7 @@ func (m *Model) closeCurrentDetail() tea.Cmd {
 		m.StreamCancel = nil
 	}
 	m.StreamingJobID = ""
+	m.workflowSelectedAgentID = ""
 	m.ShowLogs = false
 	m.Manager, _ = m.Manager.SetHidden("detail", true)
 	m.Focus = FocusJobs
@@ -675,6 +697,8 @@ func New(cfg Config) Model {
 		WorkflowStates:           make(map[string]*workflowPaneState),
 		workflowMonitorCancels:   make(map[string]context.CancelFunc),
 		workflowMonitorPending:   make(map[string]bool),
+		workflowDirtyJobs:        make(map[string]bool),
+		workflowArchiveChecked:   make(map[string]bool),
 		skillSearchInput:         skillSearch,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
