@@ -125,7 +125,7 @@ func TestFindWorkflowScript(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, title := findWorkflowScript(scriptsDir, "wf_4650c05a-c39")
+	path, title := findWorkflowScript([]string{scriptsDir}, "wf_4650c05a-c39")
 	if path != scriptPath {
 		t.Errorf("path = %q, want %q", path, scriptPath)
 	}
@@ -133,7 +133,7 @@ func TestFindWorkflowScript(t *testing.T) {
 		t.Errorf("title = %q, want %q", title, "release-survey")
 	}
 
-	if path, title := findWorkflowScript(scriptsDir, "wf_other-run"); path != "" || title != "" {
+	if path, title := findWorkflowScript([]string{scriptsDir}, "wf_other-run"); path != "" || title != "" {
 		t.Errorf("expected no match, got path=%q title=%q", path, title)
 	}
 }
@@ -171,7 +171,7 @@ func TestArchiveWorkflowRun_DefaultSkipsTranscripts(t *testing.T) {
 	}
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, scriptsDir, destDir, false); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{scriptsDir}, destDir, false); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -201,7 +201,7 @@ func TestArchiveWorkflowRun_TranscriptsOptIn(t *testing.T) {
 	runDir := buildWorkflowRunDir(t, "journal_complete.jsonl")
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, t.TempDir(), destDir, true); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, true); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestArchiveWorkflowRun_MissingScriptFallsBackToRunID(t *testing.T) {
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
 	// Empty scripts dir: title must fall back to the run ID.
-	if err := archiveWorkflowRun(context.Background(), runDir, t.TempDir(), destDir, false); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, false); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -236,11 +236,87 @@ func TestArchiveWorkflowRun_MissingScriptFallsBackToRunID(t *testing.T) {
 	}
 }
 
+func TestArchiveWorkflowRunsFromDirs_MergesAcrossSlugDirs(t *testing.T) {
+	// Simulate slug fragmentation: the session id appears under two
+	// ~/.claude/projects/<slug>/ dirs. Slug A holds run wf_aaa (no scripts);
+	// slug B holds run wf_bbb AND the workflows/scripts dir containing the
+	// script for wf_aaa.
+	slugA := t.TempDir()
+	slugB := t.TempDir()
+
+	journal, err := os.ReadFile(filepath.Join("testdata", "workflows", "journal_complete.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runA := filepath.Join(slugA, "subagents", "workflows", "wf_aaa")
+	runB := filepath.Join(slugB, "subagents", "workflows", "wf_bbb")
+	for _, dir := range []string{runA, runB} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "journal.jsonl"), journal, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scriptsB := filepath.Join(slugB, "workflows", "scripts")
+	if err := os.MkdirAll(scriptsB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsB, "cross-slug-flow-wf_aaa.js"),
+		[]byte("export const meta = { name: 'cross-slug-flow' }"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	planDir := t.TempDir()
+	job := &Job{ID: "job-merge", Type: JobTypeHeadlessAgent}
+	plan := &Plan{Directory: planDir}
+
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}, false); err != nil {
+		t.Fatalf("archiveWorkflowRunsFromDirs() error = %v", err)
+	}
+
+	// Run from slug A was archived, with its script found under slug B.
+	destA := filepath.Join(planDir, ".artifacts", "job-merge", "workflows", "wf_aaa")
+	if _, err := os.Stat(filepath.Join(destA, "journal.jsonl")); err != nil {
+		t.Errorf("wf_aaa journal not archived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(destA, "script.js")); err != nil {
+		t.Errorf("wf_aaa script not found across slug dirs: %v", err)
+	}
+	summaryA, err := os.ReadFile(filepath.Join(destA, "summary.md"))
+	if err != nil {
+		t.Fatalf("wf_aaa summary.md not written: %v", err)
+	}
+	if !strings.Contains(string(summaryA), "# Workflow Run: cross-slug-flow") {
+		t.Errorf("wf_aaa summary missing cross-slug script title:\n%s", summaryA)
+	}
+
+	// Run from slug B was archived too (no script: run-ID fallback title).
+	destB := filepath.Join(planDir, ".artifacts", "job-merge", "workflows", "wf_bbb")
+	if _, err := os.Stat(filepath.Join(destB, "journal.jsonl")); err != nil {
+		t.Errorf("wf_bbb journal not archived: %v", err)
+	}
+	summaryB, err := os.ReadFile(filepath.Join(destB, "summary.md"))
+	if err != nil {
+		t.Fatalf("wf_bbb summary.md not written: %v", err)
+	}
+	if !strings.Contains(string(summaryB), "# Workflow Run: wf_bbb") {
+		t.Errorf("wf_bbb summary missing runId fallback title:\n%s", summaryB)
+	}
+
+	// Re-archiving is an idempotent overwrite, not an error.
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}, false); err != nil {
+		t.Fatalf("repeat archiveWorkflowRunsFromDirs() error = %v", err)
+	}
+}
+
 func TestArchiveWorkflowRun_MalformedJournalStillWritesSummary(t *testing.T) {
 	runDir := buildWorkflowRunDir(t, "journal_malformed.jsonl")
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, t.TempDir(), destDir, false); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, false); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 

@@ -152,11 +152,17 @@ type workflowAgentLogMsg struct {
 	Lines   []string
 }
 
-// startWorkflowMonitorCmd resolves the job's Claude session directory via the
-// hooks session registry and starts two background producers feeding MsgCh:
-// a workflowmon.FileSource forwarding typed lifecycle events, and an
-// agentstream.StreamWorkflow collector forwarding formatted transcript lines
-// tagged by agent ID. The returned msg carries the cancel func owning both.
+// startWorkflowMonitorCmd resolves the job's Claude session directories via
+// the hooks session registry and starts background producers feeding MsgCh:
+// a workflowmon.FileSource per directory forwarding typed lifecycle events,
+// and an agentstream.StreamWorkflow collector per directory forwarding
+// formatted transcript lines tagged by agent ID. The returned msg carries
+// the cancel func owning all of them.
+//
+// Session artifacts fragment across ~/.claude/projects/ project-slug dirs
+// when the shell cwd changes mid-session, so every resolved dir is watched;
+// the path constructed next to the transcript is merged in so a session
+// whose dir hasn't been created yet is still polled until it appears.
 func startWorkflowMonitorCmd(job *orchestration.Job, msgCh chan tea.Msg) tea.Cmd {
 	jobID := job.ID
 	return func() tea.Msg {
@@ -173,29 +179,51 @@ func startWorkflowMonitorCmd(job *orchestration.Job, msgCh chan tea.Msg) tea.Cmd
 		}
 		// Transcript lives at ~/.claude/projects/<slug>/<session-id>.jsonl;
 		// workflow runs live in the sibling <session-id>/ directory.
-		sessionDir := filepath.Join(filepath.Dir(metadata.TranscriptPath), metadata.ClaudeSessionID)
+		primaryDir := filepath.Join(filepath.Dir(metadata.TranscriptPath), metadata.ClaudeSessionID)
+		sessionDirs, _ := sessions.ResolveClaudeSessionDirs(metadata.ClaudeSessionID)
+		hasPrimary := false
+		for _, dir := range sessionDirs {
+			if dir == primaryDir {
+				hasPrimary = true
+				break
+			}
+		}
+		if !hasPrimary {
+			sessionDirs = append(sessionDirs, primaryDir)
+		}
+
+		// A run discovered under one slug may have its script persisted
+		// under another; let every source search all scripts dirs.
+		scriptsDirs := make([]string, 0, len(sessionDirs))
+		for _, dir := range sessionDirs {
+			scriptsDirs = append(scriptsDirs, filepath.Join(dir, "workflows", "scripts"))
+		}
 
 		ctx, cancel := context.WithCancel(context.Background())
 
 		claudeSessionID := metadata.ClaudeSessionID
-		source := workflowmon.NewFileSource(sessionDir, workflowmon.FileSourceOptions{
-			SessionAlive: func() bool {
-				alive, err := registry.IsAlive(claudeSessionID)
-				return err == nil && alive
-			},
-		})
-		go func() {
-			<-ctx.Done()
-			_ = source.Close()
-		}()
-		go func() {
-			for ev := range source.Events() {
-				sendToMsgChBlocking(ctx, msgCh, workflowEventMsg{JobID: jobID, Event: ev})
-			}
-		}()
-		go collectWorkflowTranscripts(ctx, sessionDir, jobID, msgCh)
+		sessionAlive := func() bool {
+			alive, err := registry.IsAlive(claudeSessionID)
+			return err == nil && alive
+		}
+		for _, sessionDir := range sessionDirs {
+			source := workflowmon.NewFileSource(sessionDir, workflowmon.FileSourceOptions{
+				SessionAlive: sessionAlive,
+				ScriptsDirs:  scriptsDirs,
+			})
+			go func() {
+				<-ctx.Done()
+				_ = source.Close()
+			}()
+			go func() {
+				for ev := range source.Events() {
+					sendToMsgChBlocking(ctx, msgCh, workflowEventMsg{JobID: jobID, Event: ev})
+				}
+			}()
+			go collectWorkflowTranscripts(ctx, sessionDir, jobID, msgCh)
+		}
 
-		return workflowSessionResolvedMsg{JobID: jobID, SessionDir: sessionDir, Cancel: cancel}
+		return workflowSessionResolvedMsg{JobID: jobID, SessionDir: strings.Join(sessionDirs, ", "), Cancel: cancel}
 	}
 }
 
@@ -235,6 +263,13 @@ func sendToMsgChBlocking(ctx context.Context, ch chan<- tea.Msg, msg tea.Msg) {
 	case <-ctx.Done():
 	}
 }
+
+// unverifiedBindingNotice is shown instead of a transcript when the hooks
+// session registry has no native session id recorded for the job. Streaming
+// by plan/job name is NOT a safe fallback — aglogs resolves such specs to
+// ANY session that ever matched, which can bind another agent's transcript
+// to this job (see issue: wrong-session-logs-bound-to-headless-tuimux-jobs).
+const unverifiedBindingNotice = "session binding unverified — transcript not streamed"
 
 // retryLoadAgentLogsAfterDelay creates a command that waits and then triggers a retry
 func retryLoadAgentLogsAfterDelay() tea.Cmd {
@@ -368,13 +403,29 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
-		jobSpec := fmt.Sprintf("%s/%s", plan.Name, job.Filename)
+
+		// Resolve the session binding ONCE via the hooks session registry.
+		// There is NO plan/job-name aglogs fallback: aglogs resolves such
+		// specs to ANY session that ever matched the plan/job name, which
+		// can silently stream another agent's transcript into this job's
+		// log (the completion path dropped the same fallback in f21cc59).
+		var claudeSessionID, transcriptPath string
+		if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
+			if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata != nil {
+				claudeSessionID = metadata.ClaudeSessionID
+				transcriptPath = metadata.TranscriptPath
+			}
+		}
+		// The binding is verified only when the registry recorded the
+		// agent's native session id for this job.
+		verified := claudeSessionID != ""
 
 		logger.WithFields(map[string]interface{}{
-			"job_spec":   jobSpec,
-			"job_id":     job.ID,
-			"job_status": job.Status,
-			"job_type":   job.Type,
+			"job_id":            job.ID,
+			"job_status":        job.Status,
+			"job_type":          job.Type,
+			"binding_verified":  verified,
+			"claude_session_id": claudeSessionID,
 		}).Info("loadAndStreamAgentLogsCmd executing")
 
 		// Fast path: read from job.log which contains ANSI-formatted output (for both completed and running jobs)
@@ -420,16 +471,21 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 					shouldStream := job.Status == orchestration.JobStatusRunning || job.Status == orchestration.JobStatusIdle
 
 					if shouldStream {
-						// Get the direct transcript path for streaming
-						var logSpec string = jobSpec
-						if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
-							if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata.TranscriptPath != "" {
-								logger.WithFields(map[string]interface{}{
-									"job_id":          job.ID,
-									"transcript_path": metadata.TranscriptPath,
-								}).Debug("Found direct transcript path from session registry for streaming")
-								logSpec = metadata.TranscriptPath
+						if !verified {
+							// No verified binding yet — never fall back to a
+							// plan/job-name spec. Retry: the registry entry
+							// may appear once the session registers.
+							return LogContentLoadedMsg{
+								Content:     contentStr + "\n" + unverifiedBindingNotice,
+								ShouldRetry: true,
+								JobID:       job.ID,
 							}
+						}
+
+						// Prefer the direct transcript path for streaming.
+						logSpec := claudeSessionID
+						if transcriptPath != "" {
+							logSpec = transcriptPath
 						}
 
 						// Fetch historical transcript via aglogs read to show full history.
@@ -503,34 +559,22 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		}).Info("Checking if job should use streaming fallback")
 
 		if isRunning || isIdle || (isPending && isAgentJob) {
-			// Try to get session ID from session registry for aglogs
-			var logSpec string = jobSpec
-			if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
-				if metadata, findErr := registry.Find(job.ID); findErr == nil {
-					// Use ClaudeSessionID for aglogs - this is the native session ID
-					// (e.g., ses_xxx for opencode, UUID for claude)
-					if metadata.ClaudeSessionID != "" {
-						logger.WithFields(map[string]interface{}{
-							"job_id":            job.ID,
-							"claude_session_id": metadata.ClaudeSessionID,
-							"provider":          metadata.Provider,
-						}).Info("Fast path: found session ID from registry")
-						logSpec = metadata.ClaudeSessionID
-					} else if metadata.TranscriptPath != "" {
-						// Fallback to transcript path for legacy sessions
-						logger.WithFields(map[string]interface{}{
-							"job_id":          job.ID,
-							"transcript_path": metadata.TranscriptPath,
-						}).Info("Fast path: using transcript path (no session ID)")
-						logSpec = metadata.TranscriptPath
-					}
-				} else {
-					logger.WithFields(map[string]interface{}{
-						"job_id":     job.ID,
-						"find_error": findErr,
-					}).Info("Session not found in registry yet")
+			if !verified {
+				// Session not registered (yet). Never fall back to a
+				// plan/job-name spec; retry until the registry entry shows up.
+				logger.WithFields(map[string]interface{}{
+					"job_id": job.ID,
+				}).Info("Session binding unverified; not streaming")
+				return LogContentLoadedMsg{
+					Content:     unverifiedBindingNotice + "\n(Waiting for the hooks session registry entry; this may take a few seconds)\n",
+					ShouldRetry: true,
+					JobID:       job.ID,
 				}
 			}
+
+			// Use the native session id recorded by the registry
+			// (e.g., ses_xxx for opencode, UUID for claude).
+			logSpec := claudeSessionID
 
 			// Try to read historical logs using aglogs read
 			readCmd := delegation.Command("aglogs", "read", logSpec)
@@ -566,33 +610,41 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			}
 		}
 
-		// Fallback for completed jobs: try aglogs read
-		// This handles the case where the job completed but job.log doesn't have formatted transcript yet
-		logger.WithFields(map[string]interface{}{
-			"job_id":     job.ID,
-			"job_spec":   jobSpec,
-			"job_status": job.Status,
-		}).Info("Trying aglogs read fallback for completed job")
-
-		readCmd := delegation.Command("aglogs", "read", jobSpec)
-		readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
-		readOutput, readErr := readCmd.Output()
-
-		logger.WithFields(map[string]interface{}{
-			"job_id":     job.ID,
-			"job_spec":   jobSpec,
-			"output_len": len(readOutput),
-			"error":      readErr,
-		}).Info("aglogs read fallback result")
-
-		if readErr == nil && len(readOutput) > 0 {
+		// Fallback for completed jobs: aglogs read on the verified session id.
+		// This handles the case where the job completed but job.log doesn't
+		// have the formatted transcript yet.
+		if verified {
 			logger.WithFields(map[string]interface{}{
-				"job_spec":   jobSpec,
+				"job_id":            job.ID,
+				"claude_session_id": claudeSessionID,
+				"job_status":        job.Status,
+			}).Info("Trying aglogs read fallback for completed job")
+
+			readCmd := delegation.Command("aglogs", "read", claudeSessionID)
+			readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
+			readOutput, readErr := readCmd.Output()
+
+			logger.WithFields(map[string]interface{}{
+				"job_id":     job.ID,
 				"output_len": len(readOutput),
-			}).Info("Loaded completed job logs via aglogs read fallback")
+				"error":      readErr,
+			}).Info("aglogs read fallback result")
+
+			if readErr == nil && len(readOutput) > 0 {
+				return LogContentLoadedMsg{
+					Content:     string(readOutput),
+					ShouldRetry: false,
+					JobID:       job.ID,
+				}
+			}
+		} else {
+			logger.WithFields(map[string]interface{}{
+				"job_id":    job.ID,
+				"job_title": job.Title,
+			}).Warn("Session binding unverified for completed job; transcript not loaded")
 
 			return LogContentLoadedMsg{
-				Content:     string(readOutput),
+				Content:     theme.DefaultTheme.Muted.Render(unverifiedBindingNotice),
 				ShouldRetry: false,
 				JobID:       job.ID,
 			}
@@ -601,7 +653,6 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		// Completed job with no logs
 		logger.WithFields(map[string]interface{}{
 			"job_id":    job.ID,
-			"job_spec":  jobSpec,
 			"job_title": job.Title,
 		}).Warn("No agent logs found for completed job")
 

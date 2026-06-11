@@ -248,9 +248,15 @@ type JournalEvent struct {
 
 // ArchiveWorkflowRuns copies Claude Code workflow run artifacts (journal,
 // orchestration script, generated summary, and optionally per-agent
-// transcripts) from the session's directory under ~/.claude/projects/ into
+// transcripts) from the session's directories under ~/.claude/projects/ into
 // plans/<plan>/.artifacts/<job-id>/workflows/<runId>/. Sessions with no
 // workflow runs are a silent no-op.
+//
+// Session artifacts fragment across project-slug dirs when the shell cwd
+// changes mid-session (a workflow's runs can land under the worktree slug
+// while its scripts land under a submodule slug), so discovery resolves
+// every slug dir holding this session and merges what it finds, rather than
+// constructing a single path from the transcript location.
 func ArchiveWorkflowRuns(job *Job, plan *Plan) error {
 	ctx := context.Background()
 
@@ -275,48 +281,68 @@ func ArchiveWorkflowRuns(job *Job, plan *Plan) error {
 		return nil
 	}
 
-	// The transcript lives at ~/.claude/projects/<slug>/<session-id>.jsonl;
-	// workflow runs live in the sibling <session-id>/ directory.
-	sessionDir := filepath.Join(filepath.Dir(metadata.TranscriptPath), metadata.ClaudeSessionID)
-	runsDir := filepath.Join(sessionDir, "subagents", "workflows")
-
-	runs, err := os.ReadDir(runsDir)
-	if err != nil {
-		// No subagents/workflows directory means no workflow runs.
-		return nil
+	sessionDirs, dirsErr := coresessions.ResolveClaudeSessionDirs(metadata.ClaudeSessionID)
+	if dirsErr != nil || len(sessionDirs) == 0 {
+		// Fall back to the single path constructed next to the transcript
+		// (~/.claude/projects/<slug>/<session-id>.jsonl with workflow runs
+		// in the sibling <session-id>/ directory).
+		sessionDirs = []string{filepath.Join(filepath.Dir(metadata.TranscriptPath), metadata.ClaudeSessionID)}
 	}
 
-	scriptsDir := filepath.Join(sessionDir, "workflows", "scripts")
 	includeTranscripts := plan.Config != nil && plan.Config.ArchiveAgentTranscripts
+	return archiveWorkflowRunsFromDirs(ctx, job, plan, sessionDirs, includeTranscripts)
+}
 
-	for _, run := range runs {
-		if !run.IsDir() || !strings.HasPrefix(run.Name(), "wf_") {
+// archiveWorkflowRunsFromDirs archives every wf_* run found under any of the
+// resolved session dirs, searching all dirs' workflows/scripts/ for each
+// run's persisted script. Runs are deduped by run ID across dirs.
+func archiveWorkflowRunsFromDirs(ctx context.Context, job *Job, plan *Plan, sessionDirs []string, includeTranscripts bool) error {
+	var scriptsDirs []string
+	for _, dir := range sessionDirs {
+		scriptsDirs = append(scriptsDirs, filepath.Join(dir, "workflows", "scripts"))
+	}
+
+	seen := make(map[string]bool)
+	for _, dir := range sessionDirs {
+		runsDir := filepath.Join(dir, "subagents", "workflows")
+		runs, err := os.ReadDir(runsDir)
+		if err != nil {
+			// No subagents/workflows directory under this slug.
 			continue
 		}
-		srcRunDir := filepath.Join(runsDir, run.Name())
-		destRunDir := filepath.Join(plan.Directory, ".artifacts", job.ID, "workflows", run.Name())
-		if err := archiveWorkflowRun(ctx, srcRunDir, scriptsDir, destRunDir, includeTranscripts); err != nil {
-			// Never fail job completion over a single run's artifacts.
-			ulog.Warn("[ARCHIVE] Failed to archive workflow run").
+
+		for _, run := range runs {
+			if !run.IsDir() || !strings.HasPrefix(run.Name(), "wf_") || seen[run.Name()] {
+				continue
+			}
+			seen[run.Name()] = true
+			srcRunDir := filepath.Join(runsDir, run.Name())
+			destRunDir := filepath.Join(plan.Directory, ".artifacts", job.ID, "workflows", run.Name())
+			if err := archiveWorkflowRun(ctx, srcRunDir, scriptsDirs, destRunDir, includeTranscripts); err != nil {
+				// Never fail job completion over a single run's artifacts.
+				ulog.Warn("[ARCHIVE] Failed to archive workflow run").
+					Field("job_id", job.ID).
+					Field("run_id", run.Name()).
+					Err(err).
+					Log(ctx)
+				continue
+			}
+			ulog.Debug("[ARCHIVE] Workflow run archived").
 				Field("job_id", job.ID).
 				Field("run_id", run.Name()).
-				Err(err).
+				Field("dest", destRunDir).
 				Log(ctx)
-			continue
 		}
-		ulog.Debug("[ARCHIVE] Workflow run archived").
-			Field("job_id", job.ID).
-			Field("run_id", run.Name()).
-			Field("dest", destRunDir).
-			Log(ctx)
 	}
 
 	return nil
 }
 
 // archiveWorkflowRun copies one wf_* run directory's durable artifacts into
-// destRunDir and writes a generated summary.md.
-func archiveWorkflowRun(ctx context.Context, srcRunDir, scriptsDir, destRunDir string, includeTranscripts bool) error {
+// destRunDir and writes a generated summary.md. The run's persisted script
+// is searched across all scriptsDirs (slug fragmentation can put it in a
+// different session dir than the run itself).
+func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []string, destRunDir string, includeTranscripts bool) error {
 	runID := filepath.Base(srcRunDir)
 
 	if err := os.MkdirAll(destRunDir, 0o755); err != nil {
@@ -332,7 +358,7 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir, scriptsDir, destRunDir s
 		}
 	}
 
-	scriptPath, title := findWorkflowScript(scriptsDir, runID)
+	scriptPath, title := findWorkflowScript(scriptsDirs, runID)
 	if scriptPath != "" {
 		if err := fs.CopyFile(scriptPath, filepath.Join(destRunDir, "script.js")); err != nil {
 			return fmt.Errorf("failed to copy workflow script: %w", err)
@@ -386,17 +412,21 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir, scriptsDir, destRunDir s
 	return nil
 }
 
-// findWorkflowScript locates the persisted orchestration script for a run.
-// Scripts are saved as <name>-<runId>.js; the <name> prefix becomes the
-// run's human-readable title. Returns "", "" when no script matches.
-func findWorkflowScript(scriptsDir, runID string) (path, title string) {
-	matches, err := filepath.Glob(filepath.Join(scriptsDir, "*-"+runID+".js"))
-	if err != nil || len(matches) == 0 {
-		return "", ""
+// findWorkflowScript locates the persisted orchestration script for a run,
+// searching each scripts dir in order. Scripts are saved as
+// <name>-<runId>.js; the <name> prefix becomes the run's human-readable
+// title. Returns "", "" when no script matches.
+func findWorkflowScript(scriptsDirs []string, runID string) (path, title string) {
+	for _, dir := range scriptsDirs {
+		matches, err := filepath.Glob(filepath.Join(dir, "*-"+runID+".js"))
+		if err != nil || len(matches) == 0 {
+			continue
+		}
+		path = matches[0]
+		title = strings.TrimSuffix(filepath.Base(path), "-"+runID+".js")
+		return path, title
 	}
-	path = matches[0]
-	title = strings.TrimSuffix(filepath.Base(path), "-"+runID+".js")
-	return path, title
+	return "", ""
 }
 
 // parseWorkflowJournal reads journal.jsonl, skipping lines that fail to

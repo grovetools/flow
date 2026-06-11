@@ -151,18 +151,10 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 
 		// This is the expected case for a job that was never run.
 		// Append a note to the job file instead of treating it as a failure.
-		content, readErr := os.ReadFile(job.FilePath)
-		if readErr != nil {
-			return fmt.Errorf("reading job file %s: %w", job.FilePath, readErr)
-		}
-
-		// Only append if transcript section doesn't already exist.
-		if !strings.Contains(string(content), "# Agent Chat Transcript") && !strings.Contains(string(content), "## Transcript") {
-			note := "\n# Agent Chat Transcript\n\n*This interactive agent job was never run.*"
-			newContent := string(content) + note
-			if writeErr := os.WriteFile(job.FilePath, []byte(newContent), 0o600); writeErr != nil {
-				return fmt.Errorf("writing note to job file %s: %w", job.FilePath, writeErr)
-			}
+		// onlyIfMissing keeps an existing transcript section untouched.
+		note := "*This interactive agent job was never run.*"
+		if _, writeErr := NewStatePersister().UpdateJobTranscript(job, note, true); writeErr != nil {
+			return fmt.Errorf("writing note to job file %s: %w", job.FilePath, writeErr)
 		}
 
 		return nil // Not an error.
@@ -173,57 +165,21 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		Field("output_len", len(outputStr)).
 		Log(ctx)
 
-	// Transcript was found, so proceed with appending it.
-	content, err := os.ReadFile(job.FilePath)
+	// Transcript was found; splice it into the job file under the job-file
+	// lock via StatePersister.UpdateJobTranscript. groved's jobrunner calls
+	// AppendAgentTranscript from the daemon process concurrently with
+	// flow-side writers, so the unlocked full-file rewrite this used to do
+	// raced StatePersister's frontmatter updates.
+	transcriptOutput := plainStr // plain text for the .md file
+	changed, err := NewStatePersister().UpdateJobTranscript(job, transcriptOutput, false)
 	if err != nil {
-		return fmt.Errorf("reading job file %s: %w", job.FilePath, err)
+		return fmt.Errorf("writing transcript to job file %s: %w", job.FilePath, err)
 	}
-
-	var newContent string
-	// Use plain text for .md file
-	transcriptOutput := plainStr
-
-	// Check for both old and new header formats
-	existingContent := string(content)
-	transcriptIdx := strings.Index(existingContent, "# Agent Chat Transcript")
-	if transcriptIdx == -1 {
-		transcriptIdx = strings.Index(existingContent, "## Transcript")
-	}
-
-	if transcriptIdx != -1 {
-		// Transcript section exists, update it
-		existingTranscript := existingContent[transcriptIdx:]
-
-		// Try to extract existing content (handle both header formats)
-		var existingTranscriptContent string
-		if strings.HasPrefix(existingTranscript, "# Agent Chat Transcript\n\n") {
-			existingTranscriptContent = strings.TrimSpace(strings.TrimPrefix(existingTranscript, "# Agent Chat Transcript\n\n"))
-		} else {
-			existingTranscriptContent = strings.TrimSpace(strings.TrimPrefix(existingTranscript, "## Transcript\n\n"))
-		}
-		newTranscriptContent := strings.TrimSpace(transcriptOutput)
-
-		if existingTranscriptContent == newTranscriptContent {
-			ulog.Info("Transcript unchanged, skipping").
-				Field("filename", job.Filename).
-				Log(ctx)
-			return nil
-		}
-
-		ulog.Info("Updating transcript (resumed session detected)").
+	if !changed {
+		ulog.Info("Transcript unchanged, skipping").
 			Field("filename", job.Filename).
 			Log(ctx)
-		beforeTranscript := existingContent[:transcriptIdx]
-		transcriptHeader := "\n# Agent Chat Transcript\n\n"
-		newContent = beforeTranscript + transcriptHeader + transcriptOutput
-	} else {
-		// No transcript section exists, append it
-		transcriptHeader := "\n# Agent Chat Transcript\n\n"
-		newContent = string(content) + transcriptHeader + transcriptOutput
-	}
-
-	if err := os.WriteFile(job.FilePath, []byte(newContent), 0o600); err != nil {
-		return fmt.Errorf("writing transcript to job file %s: %w", job.FilePath, err)
+		return nil
 	}
 
 	ulog.Debug("[TRANSCRIPT] Successfully wrote transcript to job file").
