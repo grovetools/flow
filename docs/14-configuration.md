@@ -40,6 +40,7 @@ This section describes the schema for Grove Flow jobs. These properties are typi
 | `created_at` | (string, optional) <br> **System Managed.** The timestamp marking when the job was created. |
 | `depends_on` | (array of strings, optional) <br> A list of job IDs or filenames that this job depends on. This job will not execute until all listed dependencies have successfully completed. |
 | `duration` | (integer, optional) <br> **System Managed.** The duration of the job execution in nanoseconds. |
+| `effort` | (string, optional) <br> Effort level for claude agent jobs, passed to the claude CLI as `--effort <level>`. The claude CLI owns the accepted set of levels. Ignored by non-claude providers. |
 | `gather_concept_notes` | (boolean, optional) <br> If `true`, the job will attempt to gather related notes from the knowledge base (concepts) and include them in the context. |
 | `gather_concept_plans` | (boolean, optional) <br> If `true`, the job will attempt to gather related plans from the knowledge base and include them in the context. |
 | `generate_plan_from` | (boolean, optional) <br> Indicates that this job is intended to generate a new execution plan based on the output of its dependencies. |
