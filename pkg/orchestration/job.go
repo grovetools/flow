@@ -144,6 +144,9 @@ type Job struct {
 
 	// Lifecycle hooks
 	OnCompleteStatus string `yaml:"on_complete_status,omitempty" json:"on_complete_status,omitempty" jsonschema:"description=Status to set on dependent jobs when this job completes"`
+	NotifyOnComplete string `yaml:"notify_on_complete,omitempty" json:"notify_on_complete,omitempty" jsonschema:"description=Channel to notify when job reaches terminal state"`
+	AutoComplete     bool   `yaml:"auto_complete,omitempty" json:"auto_complete,omitempty" jsonschema:"description=For chat jobs: transition to completed instead of pending_user (bypassing review gate)"`
+	RetryTransient   int    `yaml:"retry_transient,omitempty" json:"retry_transient,omitempty" jsonschema:"description=Number of retries for transient failures (default 1)"`
 
 	// Timestamps (auto-managed)
 	CreatedAt   time.Time     `yaml:"created_at,omitempty" json:"created_at,omitempty" jsonschema:"description=When the job was created"`

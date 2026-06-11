@@ -186,11 +186,30 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 
 					jobsToRun = append(jobsToRun, job)
 					validTargetJobs = append(validTargetJobs, jobFile)
-				} else if job.Status == orchestration.JobStatusCompleted {
-					fmt.Printf("%s Skipping job '%s' (already completed)\n",
-						color.YellowString(theme.IconWarning),
-						job.Title)
-					continue
+				} else if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusPendingUser {
+					// Check if chat job has new user content that warrants reopening
+					jobContent, err := os.ReadFile(job.FilePath)
+					if err == nil && orchestration.HasNewUserContent(jobContent) {
+						fmt.Printf("%s Auto-reopening job '%s' (new user content detected)\n",
+							color.CyanString("↺"),
+							job.Title)
+
+						// Transition back to pending
+						if err := job.UpdateStatus(persister, orchestration.JobStatusPending); err != nil {
+							fmt.Printf("%s Warning: could not reopen job '%s': %v\n",
+								color.YellowString(theme.IconWarning),
+								job.Title, err)
+							continue
+						}
+
+						jobsToRun = append(jobsToRun, job)
+						validTargetJobs = append(validTargetJobs, jobFile)
+					} else {
+						fmt.Printf("%s Skipping job '%s' (already completed)\n",
+							color.YellowString(theme.IconWarning),
+							job.Title)
+						continue
+					}
 				} else {
 					jobsToRun = append(jobsToRun, job)
 					validTargetJobs = append(validTargetJobs, jobFile)

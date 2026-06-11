@@ -140,8 +140,10 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 	if newStatus == JobStatusRunning && job.StartTime.IsZero() {
 		job.StartTime = time.Now()
 	}
-	if newStatus == JobStatusCompleted || newStatus == JobStatusFailed {
+	if newStatus == JobStatusCompleted || newStatus == JobStatusFailed || newStatus == JobStatusAbandoned {
 		job.EndTime = time.Now()
+		// Fire notification on terminal status transition
+		FireNotificationOnComplete(job, newStatus)
 	}
 
 	return nil

@@ -207,6 +207,7 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		job.Status = JobStatusCompleted
 
 		// Use the state persister to update the job file
+		// (UpdateJobStatus will fire notify_on_complete if configured)
 		persister := NewStatePersister()
 		if err := persister.UpdateJobStatus(job, JobStatusCompleted); err != nil {
 			return fmt.Errorf("update job status: %w", err)

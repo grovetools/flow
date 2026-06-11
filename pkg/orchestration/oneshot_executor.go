@@ -317,7 +317,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		"model_source": modelSource,
 	}).Debug("Resolved model for job execution")
 
-	// Call LLM based on model type
+	// Call LLM based on model type, with automatic retry for transient failures
 	var response string
 	if effectiveModel == "mock" {
 		// Use mock response for testing
@@ -326,13 +326,17 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	} else if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
 		// Check if mocking is enabled - if so, always use llmClient regardless of model
 		// Use traditional llm command which is mocked
-		llmOpts := LLMOptions{
-			Model:        effectiveModel,
-			WorkingDir:   workDir,
-			ContextFiles: contextFiles,
-			IncludeFiles: promptSourceFiles,
-		}
-		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
+		err = e.executeWithRetry(ctx, job, func() error {
+			llmOpts := LLMOptions{
+				Model:        effectiveModel,
+				WorkingDir:   workDir,
+				ContextFiles: contextFiles,
+				IncludeFiles: promptSourceFiles,
+			}
+			var innerErr error
+			response, innerErr = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
+			return innerErr
+		})
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Resolve API key here where we have the correct execution context
 		apiKey, geminiErr := geminiconfig.ResolveAPIKey()
@@ -340,55 +344,67 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			// Don't fail immediately, let the runner handle it for a more consistent error
 			apiKey = ""
 		}
-		// Use grove-gemini package for Gemini models
-		opts := gemini.RequestOptions{
-			Model:            effectiveModel,
-			Prompt:           prompt,            // Only template and prompt body
-			PromptFiles:      promptSourceFiles, // Pass resolved source file paths
-			WorkDir:          workDir,
-			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
-			APIKey:           apiKey,                   // Pass the resolved API key
-			// Pass context for better logging
-			Caller:   "grove-flow-oneshot",
-			JobID:    job.ID,
-			PlanName: plan.Name,
-		}
-		response, err = e.geminiRunner.Run(ctx, opts)
+		// Use grove-gemini package for Gemini models with retry
+		err = e.executeWithRetry(ctx, job, func() error {
+			opts := gemini.RequestOptions{
+				Model:            effectiveModel,
+				Prompt:           prompt,            // Only template and prompt body
+				PromptFiles:      promptSourceFiles, // Pass resolved source file paths
+				WorkDir:          workDir,
+				SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
+				APIKey:           apiKey,                   // Pass the resolved API key
+				// Pass context for better logging
+				Caller:   "grove-flow-oneshot",
+				JobID:    job.ID,
+				PlanName: plan.Name,
+			}
+			var innerErr error
+			response, innerErr = e.geminiRunner.Run(ctx, opts)
+			return innerErr
+		})
 	} else if strings.HasPrefix(effectiveModel, "claude") {
 		// Resolve API key here where we have the correct execution context
 		apiKey, anthropicErr := anthropicconfig.ResolveAPIKey()
 		if anthropicErr != nil {
 			err = fmt.Errorf("resolving Anthropic API key: %w", anthropicErr)
 		} else {
-			// Use grove-anthropic package for Claude models
-			opts := anthropic.RequestOptions{
-				Model:        effectiveModel,
-				Prompt:       prompt,
-				ContextFiles: append(promptSourceFiles, contextFiles...),
-				WorkDir:      workDir,
-				APIKey:       apiKey,
-				MaxTokens:    anthropicMaxTokens(effectiveModel),
-				Caller:       "grove-flow-oneshot",
-				JobID:        job.ID,
-				PlanName:     plan.Name,
-			}
-			if isTUIMode() {
-				fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
-			}
-			response, err = e.anthropicRunner.Run(ctx, opts)
+			// Use grove-anthropic package for Claude models with retry
+			err = e.executeWithRetry(ctx, job, func() error {
+				opts := anthropic.RequestOptions{
+					Model:        effectiveModel,
+					Prompt:       prompt,
+					ContextFiles: append(promptSourceFiles, contextFiles...),
+					WorkDir:      workDir,
+					APIKey:       apiKey,
+					MaxTokens:    anthropicMaxTokens(effectiveModel),
+					Caller:       "grove-flow-oneshot",
+					JobID:        job.ID,
+					PlanName:     plan.Name,
+				}
+				if isTUIMode() {
+					fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
+				}
+				var innerErr error
+				response, innerErr = e.anthropicRunner.Run(ctx, opts)
+				return innerErr
+			})
 		}
 	} else {
-		// Use traditional llm command for other models
-		llmOpts := LLMOptions{
-			Model:        effectiveModel,
-			WorkingDir:   workDir,
-			ContextFiles: contextFiles,
-			IncludeFiles: promptSourceFiles,
-		}
-		if isTUIMode() {
-			fmt.Fprintf(output, "\n󰚩 Calling LLM API with model: %s\n\n", effectiveModel)
-		}
-		response, err = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
+		// Use traditional llm command for other models with retry
+		err = e.executeWithRetry(ctx, job, func() error {
+			llmOpts := LLMOptions{
+				Model:        effectiveModel,
+				WorkingDir:   workDir,
+				ContextFiles: contextFiles,
+				IncludeFiles: promptSourceFiles,
+			}
+			if isTUIMode() {
+				fmt.Fprintf(output, "\n󰚩 Calling LLM API with model: %s\n\n", effectiveModel)
+			}
+			var innerErr error
+			response, innerErr = e.llmClient.Complete(ctx, job, plan, prompt, llmOpts, output)
+			return innerErr
+		})
 	}
 	if err != nil {
 		job.Status = JobStatusFailed
@@ -1698,7 +1714,7 @@ interpret and continue through YOUR current system instructions.
 			Log(ctx)
 	}
 
-	// Call LLM based on model type
+	// Call LLM based on model type with automatic retry for transient failures
 	log.WithField("model", effectiveModel).Debug("Calling LLM")
 	var response string
 	var apiKey string
@@ -1713,24 +1729,28 @@ interpret and continue through YOUR current system instructions.
 			// Don't fail immediately, let the runner handle it for a more consistent error
 			apiKey = ""
 		}
-		// Use grove-gemini package for Gemini models
-		allFilesToUpload := append(allIncludeFiles, validContextPaths...)
-		opts := gemini.RequestOptions{
-			Model:            llmOpts.Model,
-			Prompt:           fullPrompt,
-			APIKey:           apiKey,           // Pass the resolved API key
-			PromptFiles:      allFilesToUpload, // Pass all dependency, include, and context files to be uploaded
-			WorkDir:          contextDir,
-			SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
-			// Pass context for better logging
-			Caller:   "grove-flow-chat",
-			JobID:    job.ID,
-			PlanName: plan.Name,
-		}
-		if isTUIMode() {
-			fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
-		}
-		response, err = e.geminiRunner.Run(ctx, opts)
+		// Use grove-gemini package for Gemini models with retry
+		err = e.executeWithRetry(ctx, job, func() error {
+			allFilesToUpload := append(allIncludeFiles, validContextPaths...)
+			opts := gemini.RequestOptions{
+				Model:            llmOpts.Model,
+				Prompt:           fullPrompt,
+				APIKey:           apiKey,           // Pass the resolved API key
+				PromptFiles:      allFilesToUpload, // Pass all dependency, include, and context files to be uploaded
+				WorkDir:          contextDir,
+				SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
+				// Pass context for better logging
+				Caller:   "grove-flow-chat",
+				JobID:    job.ID,
+				PlanName: plan.Name,
+			}
+			if isTUIMode() {
+				fmt.Fprintf(output, "\n󰚩 Calling Gemini API with model: %s\n\n", effectiveModel)
+			}
+			var innerErr error
+			response, innerErr = e.geminiRunner.Run(ctx, opts)
+			return innerErr
+		})
 		if err != nil {
 			ulog.Error("Gemini API call failed").
 				Err(err).
@@ -1745,22 +1765,26 @@ interpret and continue through YOUR current system instructions.
 		if anthropicErr != nil {
 			err = fmt.Errorf("resolving Anthropic API key: %w", anthropicErr)
 		} else {
-			// Use grove-anthropic package for Claude models
-			opts := anthropic.RequestOptions{
-				Model:        effectiveModel,
-				Prompt:       fullPrompt,
-				ContextFiles: append(allIncludeFiles, validContextPaths...),
-				WorkDir:      contextDir,
-				APIKey:       apiKey,
-				MaxTokens:    anthropicMaxTokens(effectiveModel),
-				Caller:       "grove-flow-chat",
-				JobID:        job.ID,
-				PlanName:     plan.Name,
-			}
-			if isTUIMode() {
-				fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
-			}
-			response, err = e.anthropicRunner.Run(ctx, opts)
+			// Use grove-anthropic package for Claude models with retry
+			err = e.executeWithRetry(ctx, job, func() error {
+				opts := anthropic.RequestOptions{
+					Model:        effectiveModel,
+					Prompt:       fullPrompt,
+					ContextFiles: append(allIncludeFiles, validContextPaths...),
+					WorkDir:      contextDir,
+					APIKey:       apiKey,
+					MaxTokens:    anthropicMaxTokens(effectiveModel),
+					Caller:       "grove-flow-chat",
+					JobID:        job.ID,
+					PlanName:     plan.Name,
+				}
+				if isTUIMode() {
+					fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
+				}
+				var innerErr error
+				response, innerErr = e.anthropicRunner.Run(ctx, opts)
+				return innerErr
+			})
 		}
 		if err != nil {
 			ulog.Error("Anthropic API call failed").
@@ -1812,15 +1836,74 @@ interpret and continue through YOUR current system instructions.
 		Field("chat_file", job.FilePath).
 		Pretty(theme.IconSuccess + " Added LLM response to chat: " + theme.DefaultTheme.Accent.Render(job.FilePath)).
 		Log(ctx)
-	ulog.Success("Chat job awaiting user input").
-		Field("status", "pending_user").
-		Pretty(theme.IconSuccess + " Chat job is now waiting for user input").
+	// Determine final status based on auto_complete flag
+	finalStatus := JobStatusPendingUser
+	statusMessage := "Chat job is now waiting for user input"
+	if job.AutoComplete {
+		finalStatus = JobStatusCompleted
+		statusMessage = "Chat job auto-completed (bypassing review gate)"
+	}
+
+	ulog.Success("Chat job response added").
+		Field("status", string(finalStatus)).
+		Pretty(theme.IconSuccess + " " + statusMessage).
 		Log(ctx)
 
-	// Update job status - chat jobs always go to pending_user (not completed)
-	job.Status = JobStatusPendingUser
+	// Update job status - respect the auto_complete flag
+	job.Status = finalStatus
 	job.EndTime = time.Now()
 	_ = updateJobFile(job)
 
 	return nil
+}
+
+// executeWithRetry wraps an LLM execution function with automatic retry logic for transient failures.
+// It respects the job's RetryTransient setting (default 1 = no retries on top of initial attempt).
+func (e *OneShotExecutor) executeWithRetry(ctx context.Context, job *Job, fn func() error) error {
+	maxAttempts := 1 // Initial attempt
+	if job.RetryTransient > 0 {
+		maxAttempts += job.RetryTransient
+	}
+
+	attempt := 0
+	var lastErr error
+
+	for attempt < maxAttempts {
+		attempt++
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		// If not a transient error, fail immediately
+		if !IsTransientError(err) {
+			return err
+		}
+
+		// If this was the last attempt, return the error
+		if attempt >= maxAttempts {
+			return err
+		}
+
+		// Exponential backoff: 1s, 2s, 4s, etc.
+		backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+		ulog.Warn("Transient error, retrying").
+			Err(err).
+			Field("job_id", job.ID).
+			Field("attempt", attempt).
+			Field("max_attempts", maxAttempts).
+			Field("backoff", backoff.String()).
+			Log(ctx)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+			// Continue to next attempt
+		}
+	}
+
+	return lastErr
 }
