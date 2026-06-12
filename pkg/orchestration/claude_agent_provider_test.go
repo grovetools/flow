@@ -82,12 +82,47 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	})
 
 	t.Run("model falls back to plan config", func(t *testing.T) {
-		plan := &Plan{Config: &PlanConfig{Model: "plan-default"}}
+		plan := &Plan{Config: &PlanConfig{Model: "claude-sonnet-4-6"}}
 		args, err := appendClaudeJobArgs(nil, &Job{ID: "j"}, plan)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		want := []string{"--model", "plan-default"}
+		want := []string{"--model", "claude-sonnet-4-6"}
+		if strings.Join(args, " ") != strings.Join(want, " ") {
+			t.Errorf("expected %v, got %v", want, args)
+		}
+	})
+
+	t.Run("non-claude plan config model is dropped", func(t *testing.T) {
+		// Plan-level model defaults (meant for chat/oneshot jobs) must never
+		// reach the claude CLI as --model.
+		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
+		args, err := appendClaudeJobArgs(baseArgs, &Job{ID: "j"}, plan)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Contains(strings.Join(args, " "), "--model") {
+			t.Errorf("expected no --model flag for non-claude plan default, got %v", args)
+		}
+	})
+
+	t.Run("non-claude job model is dropped", func(t *testing.T) {
+		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "gemini-3.1-pro-preview"}, &Plan{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(args) != 0 {
+			t.Errorf("expected no args for non-claude job model, got %v", args)
+		}
+	})
+
+	t.Run("non-claude model dropped but effort kept", func(t *testing.T) {
+		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
+		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Effort: "high"}, plan)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{"--effort", "high"}
 		if strings.Join(args, " ") != strings.Join(want, " ") {
 			t.Errorf("expected %v, got %v", want, args)
 		}
@@ -136,6 +171,29 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 		}
 		if _, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "opus[1m]"}, &Plan{}); err == nil {
 			t.Error("expected error for glob characters in model")
+		}
+	})
+
+	t.Run("isClaudeFamilyModel classification", func(t *testing.T) {
+		cases := map[string]bool{
+			"claude-sonnet-4-6":                   true,
+			"claude-opus-4-8":                     true,
+			"claude-3-haiku":                      true, // alias resolution
+			"us.anthropic.claude-sonnet-4-6-v1:0": true, // gateway form
+			"opus":                                true,
+			"sonnet":                              true,
+			"haiku":                               true,
+			"fable":                               true,
+			"opusplan":                            true,
+			"gemini-3.5-flash":                    false,
+			"gemini-3.1-pro-preview":              false,
+			"gpt-5.2":                             false,
+			"plan-default":                        false,
+		}
+		for model, want := range cases {
+			if got := isClaudeFamilyModel(model); got != want {
+				t.Errorf("isClaudeFamilyModel(%q) = %v, want %v", model, got, want)
+			}
 		}
 	})
 

@@ -791,10 +791,27 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 // claude's accepted set, but are rejected if they contain characters that
 // would need shell quoting, since several launch paths join args into a raw
 // shell command string. Only call this when the effective provider is claude.
+//
+// Non-claude models are never forwarded: plan-level and global model defaults
+// (e.g. gemini-* for chat/oneshot jobs) leak into agent job frontmatter via
+// the plan-default inheritance in `flow plan add`, and passing them as
+// --model would make the claude CLI run with another provider's model. When
+// the resolved model isn't claude-family, the flag is dropped and the claude
+// CLI falls back to its own configured default.
 func appendClaudeJobArgs(agentArgs []string, job *Job, plan *Plan) ([]string, error) {
 	model := job.Model
+	modelSource := "job frontmatter"
 	if model == "" && plan != nil && plan.Config != nil {
 		model = plan.Config.Model
+		modelSource = "plan config"
+	}
+	if model != "" && !isClaudeFamilyModel(model) {
+		logrus.WithFields(logrus.Fields{
+			"job_id":       job.ID,
+			"model":        model,
+			"model_source": modelSource,
+		}).Warn("Ignoring non-claude model for claude agent job; the claude CLI default will be used. Plan/global model defaults only apply to chat/oneshot jobs.")
+		model = ""
 	}
 	if model == "" && job.Effort == "" {
 		return agentArgs, nil
@@ -818,6 +835,24 @@ func appendClaudeJobArgs(agentArgs []string, job *Job, plan *Plan) ([]string, er
 		args = append(args, "--effort", job.Effort)
 	}
 	return args, nil
+}
+
+// isClaudeFamilyModel reports whether model is usable with the claude CLI's
+// --model flag: a claude-* ID (including gateway forms like
+// us.anthropic.claude-*), a registered alias, or a bare family alias such as
+// "opus"/"sonnet"/"haiku"/"fable" (prefix match so variants like "opusplan"
+// pass). Anything else (gemini-*, gpt-*, ...) belongs to another provider.
+func isClaudeFamilyModel(model string) bool {
+	m := strings.ToLower(resolveModelAlias(model))
+	if strings.Contains(m, "claude") {
+		return true
+	}
+	for _, family := range []string{"opus", "sonnet", "haiku", "fable"} {
+		if strings.HasPrefix(m, family) {
+			return true
+		}
+	}
+	return false
 }
 
 // isShellSafeArgValue reports whether s can be embedded unquoted in the
