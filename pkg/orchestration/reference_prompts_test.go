@@ -39,7 +39,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		prompt, _, _, err := executor.buildPrompt(job, plan, "")
+		prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
 		if err != nil {
 			t.Fatalf("buildPrompt() error = %v", err)
 		}
@@ -69,7 +69,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		prompt, _, _, err := executor.buildPrompt(job, plan, "")
+		prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
 		// The test might fail if the template doesn't exist, but we can verify
 		// that it's attempting to use the reference-based path
 		if err != nil {
@@ -101,7 +101,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		_, _, _, err := executor.buildPrompt(job, plan, "")
+		_, _, _, err := executor.buildPrompt(job, plan, "", nil)
 
 		// Should handle empty include files gracefully
 		if err != nil && !strings.Contains(err.Error(), "template") {
@@ -117,7 +117,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		_, _, _, err := executor.buildPrompt(job, plan, "")
+		_, _, _, err := executor.buildPrompt(job, plan, "", nil)
 
 		if err == nil {
 			t.Errorf("Expected error for missing include file")
@@ -146,7 +146,7 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		prompt, _, _, err := executor.buildPrompt(job, plan, "")
+		prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
 		if err != nil {
 			t.Fatalf("buildPrompt() error = %v", err)
 		}
@@ -287,7 +287,7 @@ func TestEdgeCases(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		_, _, _, err := executor.buildPrompt(job, plan, "")
+		_, _, _, err := executor.buildPrompt(job, plan, "", nil)
 
 		// Should handle binary files gracefully (either skip or encode)
 		if err != nil {
@@ -313,7 +313,7 @@ func TestEdgeCases(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		prompt, _, _, err := executor.buildPrompt(job, plan, "")
+		prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
 
 		if err != nil {
 			t.Errorf("Failed to process symlink: %v", err)
@@ -336,7 +336,7 @@ func TestEdgeCases(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		_, _, _, err := executor.buildPrompt(job, plan, "")
+		_, _, _, err := executor.buildPrompt(job, plan, "", nil)
 
 		// Should handle long filenames gracefully
 		if err != nil && !strings.Contains(err.Error(), "too long") {

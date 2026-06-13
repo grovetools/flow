@@ -159,7 +159,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	}
 
 	// Always regenerate context to ensure oneshot has latest view
-	usedRulesPath, err := e.regenerateContextInWorktree(ctx, workDir, "oneshot", job, plan)
+	usedRulesPath, jobCtx, err := e.regenerateContextInWorktree(ctx, workDir, "oneshot", job, plan)
 	if err != nil {
 		// Log warning but don't fail the job
 		ulog.Warn("Failed to regenerate context").
@@ -191,11 +191,19 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	workDir = ScopeToSubProject(workDir, job)
 
 	// We need to gather context files first for BuildXMLPrompt
-	_, _, contextFiles, err := e.buildPrompt(job, plan, workDir)
+	_, _, contextFiles, err := e.buildPrompt(job, plan, workDir, jobCtx)
 	if err != nil {
 		// Log warning but don't fail - context files are optional
 		log.WithError(err).Warn("Could not determine context files")
 	}
+
+	// Resolve the job-scoped context paths to hand explicitly to the LLM
+	// runners. The grove-gemini/grove-anthropic runners otherwise re-resolve
+	// context from WorkDir, which is plan-scoped and shared across concurrent
+	// jobs — passing these makes each job upload its OWN context. Empty when
+	// generation produced nothing, in which case the runners fall back to
+	// their default WorkDir resolution.
+	hotCtxFile, coldCtxFile := jobCtx.existingPaths()
 
 	// Query memory database for related memories
 	memories := FetchRelatedMemories(ctx, job)
@@ -273,9 +281,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Log(ctx)
 	}
 
-	// Set environment for mock LLM if needed
-	os.Setenv("GROVE_CURRENT_JOB_PATH", job.FilePath)
-	defer os.Unsetenv("GROVE_CURRENT_JOB_PATH")
+	// NOTE: GROVE_CURRENT_JOB_PATH is intentionally NOT set here. os.Setenv is
+	// process-global, and runJobsConcurrently dispatches jobs as goroutines in
+	// one process, so concurrent jobs would clobber each other's value — a data
+	// race. Nothing in the production LLM integrations reads it, so it is safe
+	// to drop; per-job identity flows through the Job/Plan values and context.
 
 	// Propagate request ID to child processes
 	if requestID != "" {
@@ -352,6 +362,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 				Prompt:           prompt,            // Only template and prompt body
 				PromptFiles:      promptSourceFiles, // Pass resolved source file paths
 				WorkDir:          workDir,
+				HotContextFile:   hotCtxFile,               // Job-scoped, avoids cross-job race
+				ColdContextFile:  coldCtxFile,              // Job-scoped, avoids cross-job race
 				SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 				APIKey:           apiKey,                   // Pass the resolved API key
 				// Pass context for better logging
@@ -372,15 +384,17 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			// Use grove-anthropic package for Claude models with retry
 			err = e.executeWithRetry(ctx, job, func() error {
 				opts := anthropic.RequestOptions{
-					Model:        effectiveModel,
-					Prompt:       prompt,
-					ContextFiles: append(promptSourceFiles, contextFiles...),
-					WorkDir:      workDir,
-					APIKey:       apiKey,
-					MaxTokens:    anthropicMaxTokens(effectiveModel),
-					Caller:       "grove-flow-oneshot",
-					JobID:        job.ID,
-					PlanName:     plan.Name,
+					Model:           effectiveModel,
+					Prompt:          prompt,
+					ContextFiles:    append(promptSourceFiles, contextFiles...),
+					WorkDir:         workDir,
+					HotContextFile:  hotCtxFile,  // Job-scoped, avoids cross-job race
+					ColdContextFile: coldCtxFile, // Job-scoped, avoids cross-job race
+					APIKey:          apiKey,
+					MaxTokens:       anthropicMaxTokens(effectiveModel),
+					Caller:          "grove-flow-oneshot",
+					JobID:           job.ID,
+					PlanName:        plan.Name,
 				}
 				if isTUIMode() {
 					fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
@@ -444,7 +458,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 }
 
 // buildPrompt constructs the prompt from job sources and returns context file paths separately.
-func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string) (string, []string, []string, error) {
+func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string, jobCtx *jobContextPaths) (string, []string, []string, error) {
 	var parts []string
 	var promptSourceFiles []string // Resolved paths for prompt source files
 	var contextFiles []string      // Context files (.grove/context, CLAUDE.md)
@@ -568,31 +582,9 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 				strings.TrimSpace(finalPromptBody)))
 		}
 
-		// Collect Grove context files (just paths)
-		// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
-		contextDir := ScopeToSubProject(worktreePath, job)
-
-		if contextDir != "" {
-			// When using a worktree/context dir, ONLY use context from that directory
-			ctxMgr := grovecontext.NewManager(contextDir)
-			contextPath := ctxMgr.ResolveContextPath()
-
-			if _, err := os.Stat(contextPath); err == nil {
-				contextFiles = append(contextFiles, contextPath)
-			}
-
-			claudePath := filepath.Join(contextDir, "CLAUDE.md")
-			if _, err := os.Stat(claudePath); err == nil {
-				contextFiles = append(contextFiles, claudePath)
-			}
-		} else {
-			// No worktree, use the default context search
-			for _, contextPath := range FindContextFiles(plan) {
-				if _, err := os.Stat(contextPath); err == nil {
-					contextFiles = append(contextFiles, contextPath)
-				}
-			}
-		}
+		// Collect Grove context files — prefer the job-scoped generated context
+		// (under .artifacts/<job-id>/) over the shared plan-level file.
+		contextFiles = append(contextFiles, e.collectContextFiles(job, plan, worktreePath, jobCtx)...)
 
 		// Close the XML prompt structure (template path)
 		parts = append(parts, "</prompt>")
@@ -645,31 +637,9 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 			parts = append(parts, fmt.Sprintf("<user_request priority=\"high\">\n<instruction>Please focus on addressing the following user request:</instruction>\n<content>\n%s\n</content>\n</user_request>", finalPromptBody))
 		}
 
-		// Collect Grove context files (just paths)
-		// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
-		contextDir := ScopeToSubProject(worktreePath, job)
-
-		if contextDir != "" {
-			// When using a worktree/context dir, ONLY use context from that directory
-			ctxMgr := grovecontext.NewManager(contextDir)
-			contextPath := ctxMgr.ResolveContextPath()
-
-			if _, err := os.Stat(contextPath); err == nil {
-				contextFiles = append(contextFiles, contextPath)
-			}
-
-			claudePath := filepath.Join(contextDir, "CLAUDE.md")
-			if _, err := os.Stat(claudePath); err == nil {
-				contextFiles = append(contextFiles, claudePath)
-			}
-		} else {
-			// No worktree, use the default context search
-			for _, contextPath := range FindContextFiles(plan) {
-				if _, err := os.Stat(contextPath); err == nil {
-					contextFiles = append(contextFiles, contextPath)
-				}
-			}
-		}
+		// Collect Grove context files — prefer the job-scoped generated context
+		// (under .artifacts/<job-id>/) over the shared plan-level file.
+		contextFiles = append(contextFiles, e.collectContextFiles(job, plan, worktreePath, jobCtx)...)
 
 		// Close the XML prompt structure (non-template path)
 		parts = append(parts, "</prompt>")
@@ -681,6 +651,49 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string)
 
 		return prompt, promptSourceFiles, contextFiles, nil
 	}
+}
+
+// collectContextFiles returns the context file paths to attach for a job. It
+// prefers the job-scoped generated context (hot/cold under .artifacts/<job-id>/)
+// when available — this is what isolates concurrent jobs in one plan from each
+// other — and otherwise falls back to the shared plan-level lookup. CLAUDE.md
+// from the context dir is always included when present.
+func (e *OneShotExecutor) collectContextFiles(job *Job, plan *Plan, worktreePath string, jobCtx *jobContextPaths) []string {
+	var contextFiles []string
+	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
+	contextDir := ScopeToSubProject(worktreePath, job)
+
+	if jobFiles := jobCtx.uploadFiles(); len(jobFiles) > 0 {
+		contextFiles = append(contextFiles, jobFiles...)
+		if contextDir != "" {
+			claudePath := filepath.Join(contextDir, "CLAUDE.md")
+			if _, err := os.Stat(claudePath); err == nil {
+				contextFiles = append(contextFiles, claudePath)
+			}
+		}
+		return contextFiles
+	}
+
+	if contextDir != "" {
+		// When using a worktree/context dir, ONLY use context from that directory
+		ctxMgr := grovecontext.NewManager(contextDir)
+		contextPath := ctxMgr.ResolveContextPath()
+		if _, err := os.Stat(contextPath); err == nil {
+			contextFiles = append(contextFiles, contextPath)
+		}
+		claudePath := filepath.Join(contextDir, "CLAUDE.md")
+		if _, err := os.Stat(claudePath); err == nil {
+			contextFiles = append(contextFiles, claudePath)
+		}
+	} else {
+		// No worktree, use the default context search
+		for _, contextPath := range FindContextFiles(plan) {
+			if _, err := os.Stat(contextPath); err == nil {
+				contextFiles = append(contextFiles, contextPath)
+			}
+		}
+	}
+	return contextFiles
 }
 
 // appendToJobFile appends output to the job file.
@@ -821,8 +834,61 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 	return worktreePath, nil
 }
 
+// jobContextPaths holds the per-job, isolated context output paths produced by
+// regenerateContextInWorktree. Each concurrently dispatched job writes its
+// generated/cached context under <plan>/.artifacts/<job-id>/context/ instead
+// of the shared plan-scoped <plan>/context/, so jobs in one plan never clobber
+// each other's context (the cross-job last-writer-wins race).
+type jobContextPaths struct {
+	Hot       string // generated hot context file
+	Cold      string // generated cold (cached) context file
+	FilesList string // hot context files list (for stats display)
+}
+
+// existingPaths returns the hot and cold context paths that actually exist on
+// disk (empty string for any that don't, or when the receiver is nil). Used to
+// hand explicit, job-scoped context paths to the LLM runners while gracefully
+// degrading to their default WorkDir resolution when generation produced
+// nothing.
+func (j *jobContextPaths) existingPaths() (hot, cold string) {
+	if j == nil {
+		return "", ""
+	}
+	if j.Hot != "" {
+		if _, err := os.Stat(j.Hot); err == nil {
+			hot = j.Hot
+		}
+	}
+	if j.Cold != "" {
+		if _, err := os.Stat(j.Cold); err == nil {
+			cold = j.Cold
+		}
+	}
+	return hot, cold
+}
+
+// uploadFiles returns the existing job-scoped context files (hot then cold) to
+// attach for runners that take an explicit context-file list (mock/command and
+// grove-anthropic paths). Returns nil when the receiver is nil so callers can
+// fall back to the shared plan-level lookup.
+func (j *jobContextPaths) uploadFiles() []string {
+	hot, cold := j.existingPaths()
+	var files []string
+	if hot != "" {
+		files = append(files, hot)
+	}
+	if cold != "" {
+		files = append(files, cold)
+	}
+	return files
+}
+
 // regenerateContextInWorktree regenerates the context within a worktree.
-func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath, jobType string, job *Job, plan *Plan) (string, error) {
+//
+// It returns the rules file path that was used and, when context was generated
+// for an identifiable job, the job-scoped paths it was written to (nil
+// otherwise — callers then fall back to the shared plan-level lookup).
+func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath, jobType string, job *Job, plan *Plan) (string, *jobContextPaths, error) {
 	writer := grovelogging.GetWriter(ctx)
 	ulog.Info("Checking context in worktree").
 		Field("job_type", jobType).
@@ -839,8 +905,25 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			Log(ctx)
 	}
 
-	// Create context manager for the worktree (or sub-project)
-	ctxMgr := grovecontext.NewManager(contextDir)
+	// Build a context manager whose generated/cached output is pinned to a
+	// per-job artifacts directory, isolating concurrent jobs in the same plan.
+	// NewManagerWithPathsOverride returns a fresh, uncached instance, so the
+	// override state is never shared across goroutines. When we have no job id
+	// to scope by, fall back to the default (shared, plan-scoped) manager.
+	var ctxMgr *grovecontext.Manager
+	var jobCtx *jobContextPaths
+	if job != nil && job.ID != "" {
+		artifactsDir := filepath.Join(plan.Directory, ".artifacts", job.ID, "context")
+		jobCtx = &jobContextPaths{
+			Hot:       filepath.Join(artifactsDir, "context"),
+			Cold:      filepath.Join(artifactsDir, "cached-context"),
+			FilesList: filepath.Join(artifactsDir, "context-files"),
+		}
+		coldList := filepath.Join(artifactsDir, "cached-context-files")
+		ctxMgr = grovecontext.NewManagerWithPathsOverride(contextDir, jobCtx.Hot, jobCtx.Cold, jobCtx.FilesList, coldList)
+	} else {
+		ctxMgr = grovecontext.NewManager(contextDir)
+	}
 
 	// Check if job has a custom rules file specified
 	if job != nil && job.RulesFile != "" {
@@ -906,21 +989,21 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		}
 
 		if !foundPath {
-			return "", fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
+			return "", nil, fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
 		}
 
 		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
 		fmt.Fprintf(writer, "Using job-specific context from: %s\n", rulesFilePath)
 
-		// Generate context using the custom rules file
+		// Generate context using the custom rules file (job-scoped output)
 		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
-			return rulesFilePath, fmt.Errorf("failed to generate job-specific context: %w", err)
+			return rulesFilePath, nil, fmt.Errorf("failed to generate job-specific context: %w", err)
 		}
 
 		// Mirror the context summary to the per-job writer so callers
 		// capturing job.log see the same "Context Summary: N files, …"
 		// header that the default-rules branch emits.
-		if files, ferr := ctxMgr.ReadFilesList(grovecontext.FilesListFile); ferr == nil {
+		if files, ferr := ctxMgr.ReadFilesList(ctxMgr.ResolveContextFilesListPath()); ferr == nil {
 			if stats, serr := ctxMgr.GetStats("oneshot", files, 10); serr == nil {
 				fmt.Fprintf(writer, "%s Context Summary: %d files, %s tokens, %s\n",
 					theme.IconFileTree,
@@ -930,7 +1013,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			}
 		}
 
-		return rulesFilePath, e.displayContextInfo(ctx, contextDir)
+		return rulesFilePath, jobCtx, e.displayContextInfo(ctx, contextDir)
 	}
 
 	// Check if rules file exists for default context generation
@@ -980,14 +1063,14 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 					fmt.Fprintf(writer, "Warning: Could not create .grove/rules file.\n")
 					fmt.Fprintf(writer, "Skipping interactive prompt and proceeding without context for %s job\n", jobType)
 					log.WithField("job_type", jobType).Info(fmt.Sprintf("Skipping interactive prompt and proceeding without context for %s job", jobType))
-					return "", e.displayContextInfo(ctx, contextDir)
+					return "", nil, e.displayContextInfo(ctx, contextDir)
 				}
 
 				// Check if we have a TTY before prompting
 				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
 					fmt.Fprintf(writer, "Warning: Could not create .grove/rules file.\n")
 					log.WithField("job_type", jobType).Info("No TTY available, proceeding without context")
-					return "", e.displayContextInfo(ctx, contextDir)
+					return "", nil, e.displayContextInfo(ctx, contextDir)
 				}
 
 				// Prompt user when rules file is missing
@@ -1048,10 +1131,10 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 					case "p", "proceed":
 						fmt.Fprintf(writer, "Warning: Proceeding without context from rules.\n")
 						fmt.Fprintf(writer, "Tip: To add context for future runs, open a new terminal, navigate to the context directory, and run 'cx edit'.\n")
-						return "", e.displayContextInfo(ctx, contextDir)
+						return "", nil, e.displayContextInfo(ctx, contextDir)
 
 					case "c", "cancel":
-						return "", fmt.Errorf("job canceled by user: .grove/rules file not found")
+						return "", nil, fmt.Errorf("job canceled by user: .grove/rules file not found")
 
 					default:
 						fmt.Fprintf(writer, "Error: Invalid choice '%s'. Please choose E, P, or C.\n", choice)
@@ -1063,7 +1146,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 				}
 			}
 		} else {
-			return "", fmt.Errorf("checking .grove/rules: %w", err)
+			return "", nil, fmt.Errorf("checking .grove/rules: %w", err)
 		}
 	}
 
@@ -1077,17 +1160,17 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 	// Update context from rules
 	if err := ctxMgr.UpdateFromRules(); err != nil {
-		return rulesPath, fmt.Errorf("update context from rules: %w", err)
+		return rulesPath, nil, fmt.Errorf("update context from rules: %w", err)
 	}
 
 	// Generate context file
 	if err := ctxMgr.GenerateContext(true); err != nil {
-		return rulesPath, fmt.Errorf("generate context: %w", err)
+		return rulesPath, nil, fmt.Errorf("generate context: %w", err)
 	}
 
 	// Get and display context statistics
 	// Read the files list that was just generated
-	files, _ := ctxMgr.ReadFilesList(grovecontext.FilesListFile)
+	files, _ := ctxMgr.ReadFilesList(ctxMgr.ResolveContextFilesListPath())
 	stats, err := ctxMgr.GetStats("oneshot", files, 10) // Show top 10 files
 	if err != nil {
 		ulog.Warn("Failed to get context stats").Err(err).Log(ctx)
@@ -1152,7 +1235,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		}
 	}
 
-	return rulesPath, nil
+	return rulesPath, jobCtx, nil
 }
 
 // displayContextInfo displays information about available context files
@@ -1322,6 +1405,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// Determine the working directory for the job
 	var worktreePath string
 	var chatUsedRulesPath string
+	var chatJobCtx *jobContextPaths
 	if job.Worktree != "" {
 		// Prepare git worktree only if explicitly specified
 		path, err := e.prepareWorktree(ctx, job, plan)
@@ -1332,7 +1416,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		worktreePath = path
 
 		// Regenerate context in the worktree to ensure chat has latest view
-		chatUsedRulesPath, err = e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan)
+		chatUsedRulesPath, chatJobCtx, err = e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan)
 		if err != nil {
 			// Log warning but don't fail the job
 			ulog.Warn("Failed to regenerate context in worktree").Err(err).Log(ctx)
@@ -1350,7 +1434,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 
 		// Also regenerate context for non-worktree case if .grove/rules exists
-		chatUsedRulesPath, err = e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan)
+		chatUsedRulesPath, chatJobCtx, err = e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan)
 		if err != nil {
 			// Log warning but don't fail the job
 			ulog.Warn("Failed to regenerate context").Err(err).Log(ctx)
@@ -1452,41 +1536,15 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	templateContent := []byte(template.Prompt)
 
-	// Add Grove context files
-	var contextPaths []string
-
+	// Add Grove context files — prefer the job-scoped generated context (under
+	// .artifacts/<job-id>/) over the shared plan-level file so concurrent chat
+	// turns in one plan don't upload each other's context.
 	log.WithField("worktree", worktreePath).Debug("Worktree path for chat job")
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
 
-	if contextDir != "" {
-		// When using a worktree/context dir, ONLY use context from that directory
-		ctxMgr := grovecontext.NewManager(contextDir)
-		contextPath := ctxMgr.ResolveContextPath()
-		if _, err := os.Stat(contextPath); err == nil {
-			contextPaths = append(contextPaths, contextPath)
-			log.WithField("file", contextPath).Debug("Found context file")
-		} else {
-			log.WithFields(logrus.Fields{
-				"file":  contextPath,
-				"error": err,
-			}).Debug("Context file not found")
-		}
-
-		// Check for CLAUDE.md
-		claudePath := filepath.Join(contextDir, "CLAUDE.md")
-		if _, err := os.Stat(claudePath); err == nil {
-			contextPaths = append(contextPaths, claudePath)
-			log.WithField("file", claudePath).Debug("Found context file")
-		} else {
-			log.WithFields(logrus.Fields{"file": claudePath, "error": err}).Debug("Context file not found")
-		}
-	} else {
-		// No worktree, use the default context search
-		log.Debug("No worktree path, using default context search")
-		contextPaths = FindContextFiles(plan)
-	}
+	contextPaths := e.collectContextFiles(job, plan, worktreePath, chatJobCtx)
 
 	// Verify context files exist and collect valid paths
 	var validContextPaths []string
@@ -1663,59 +1721,14 @@ interpret and continue through YOUR current system instructions.
 		log.WithField("file", cf).Debug(fmt.Sprintf("Context file %d", i+1))
 	}
 
-	// Only run cx generate if we don't have a custom rules file
-	// Custom rules files have already generated the correct context via regenerateContextInWorktree
-	// Running cx generate would overwrite it with the wrong rules
-	if job.RulesFile == "" {
-		// For jobs without custom rules, cx generate ensures we have the latest context
-		ulog.Info("Running cx generate before submission").Log(ctx)
-
-		// Create a log file for the cx generate output
-		logDir := ResolveLogDirectory(plan, job)
-		logFileName := fmt.Sprintf("%s-%s-cx.log", job.ID, time.Now().Format("150405"))
-		logFilePath := filepath.Join(logDir, logFileName)
-		logFile, logErr := os.Create(logFilePath)
-		if logErr == nil {
-			defer logFile.Close()
-			ulog.Info("cx generate output logged").
-				Field("log_file", logFilePath).
-				Pretty("`cx generate` output is being logged to: " + theme.DefaultTheme.Muted.Render(logFilePath)).
-				Log(ctx)
-		}
-
-		// Try grove cx generate first
-		cxCmd := delegation.CommandContext(ctx, "cx", "--dir", contextDir, "generate")
-		cxCmd.Dir = contextDir
-		ctxWriter := grovelogging.GetWriter(ctx)
-		if logFile != nil {
-			cxCmd.Stdout = logFile
-			cxCmd.Stderr = logFile
-		} else {
-			cxCmd.Stdout = ctxWriter
-			cxCmd.Stderr = ctxWriter
-		}
-		groveErr := cxCmd.Run()
-
-		if groveErr != nil {
-			// Try cx generate directly as fallback
-			// Fallback removed - always use grove cx for workspace awareness
-			cxCmd.Dir = contextDir
-			if logFile != nil {
-				cxCmd.Stdout = logFile
-				cxCmd.Stderr = logFile
-			} else {
-				cxCmd.Stdout = ctxWriter
-				cxCmd.Stderr = ctxWriter
-			}
-			if err := cxCmd.Run(); err != nil {
-				ulog.Warn("Failed to run cx generate").Err(err).Log(ctx)
-			}
-		}
-	} else {
-		ulog.Info("Skipping cx generate (using custom rules file)").
-			Field("rules_file", job.RulesFile).
-			Log(ctx)
-	}
+	// NOTE: We intentionally do NOT shell out to `cx generate` here.
+	// regenerateContextInWorktree (called above) already generated this job's
+	// context in-process and wrote it to the job-scoped .artifacts/<job-id>/
+	// paths. A `cx` subprocess cannot see the in-memory path override, so it
+	// would (a) regenerate into the shared plan-scoped file and (b) race with
+	// other concurrent jobs — exactly the bug this change fixes. The job-scoped
+	// paths are handed to the runners explicitly via chatHotCtx/chatColdCtx.
+	chatHotCtx, chatColdCtx := chatJobCtx.existingPaths()
 
 	// Call LLM based on model type with automatic retry for transient failures
 	log.WithField("model", effectiveModel).Debug("Calling LLM")
@@ -1734,13 +1747,18 @@ interpret and continue through YOUR current system instructions.
 		}
 		// Use grove-gemini package for Gemini models with retry
 		err = e.executeWithRetry(ctx, job, func() error {
-			allFilesToUpload := append(allIncludeFiles, validContextPaths...)
+			// The grove context (hot/cold) is passed explicitly via
+			// HotContextFile/ColdContextFile below, so PromptFiles carries only
+			// dependency + include attachments — avoids uploading the context
+			// twice and keeps it job-scoped.
 			opts := gemini.RequestOptions{
 				Model:            llmOpts.Model,
 				Prompt:           fullPrompt,
-				APIKey:           apiKey,           // Pass the resolved API key
-				PromptFiles:      allFilesToUpload, // Pass all dependency, include, and context files to be uploaded
+				APIKey:           apiKey,          // Pass the resolved API key
+				PromptFiles:      allIncludeFiles, // Dependency + include attachments
 				WorkDir:          contextDir,
+				HotContextFile:   chatHotCtx,               // Job-scoped, avoids cross-job race
+				ColdContextFile:  chatColdCtx,              // Job-scoped, avoids cross-job race
 				SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 				// Pass context for better logging
 				Caller:   "grove-flow-chat",
@@ -1771,15 +1789,17 @@ interpret and continue through YOUR current system instructions.
 			// Use grove-anthropic package for Claude models with retry
 			err = e.executeWithRetry(ctx, job, func() error {
 				opts := anthropic.RequestOptions{
-					Model:        effectiveModel,
-					Prompt:       fullPrompt,
-					ContextFiles: append(allIncludeFiles, validContextPaths...),
-					WorkDir:      contextDir,
-					APIKey:       apiKey,
-					MaxTokens:    anthropicMaxTokens(effectiveModel),
-					Caller:       "grove-flow-chat",
-					JobID:        job.ID,
-					PlanName:     plan.Name,
+					Model:           effectiveModel,
+					Prompt:          fullPrompt,
+					ContextFiles:    allIncludeFiles, // hot/cold passed explicitly below
+					WorkDir:         contextDir,
+					HotContextFile:  chatHotCtx,  // Job-scoped, avoids cross-job race
+					ColdContextFile: chatColdCtx, // Job-scoped, avoids cross-job race
+					APIKey:          apiKey,
+					MaxTokens:       anthropicMaxTokens(effectiveModel),
+					Caller:          "grove-flow-chat",
+					JobID:           job.ID,
+					PlanName:        plan.Name,
 				}
 				if isTUIMode() {
 					fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
