@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/grovetools/agentlogs/pkg/agentstream"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
@@ -77,20 +78,32 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 
 	var execErr error
 
-	// Defer final status update
+	// Defer terminal-status handling for the SETUP phase only.
+	//
+	// Headless agents detach: runAgentInWorktree starts the process and
+	// returns immediately, leaving a waitAndWriteStatus goroutine to observe
+	// the real exit. So this defer must NOT mark the job completed at detach —
+	// that was the bug (premature "completed" with a sub-second duration, a
+	// completed→pending flap, and duplicate ad-hoc session records). Real
+	// completion (status, duration, EndSession, archive, transcript) is done
+	// by the goroutine via CompleteJob once the process actually exits.
+	//
+	// This defer therefore only finalizes FAILURES that occur before the
+	// agent process is successfully launched (worktree prep, prompt build,
+	// startup error). On the success path execErr is nil and the agent is
+	// still running, so we leave the job in `running` for the goroutine.
 	defer func() {
-		finalStatus := JobStatusCompleted
-		if execErr != nil {
-			finalStatus = JobStatusFailed
+		if execErr == nil {
+			return
 		}
 		job.EndTime = time.Now()
-		_ = job.UpdateStatus(persister, finalStatus)
+		_ = job.UpdateStatus(persister, JobStatusFailed)
 
-		// Clean up daemon session record for this headless agent.
+		// Clean up the daemon session record for the failed-to-launch agent.
 		if client := daemon.New(); client != nil {
 			endCtx, endCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer endCancel()
-			_ = client.EndSession(endCtx, job.ID, string(finalStatus))
+			_ = client.EndSession(endCtx, job.ID, string(JobStatusFailed))
 		}
 	}()
 
@@ -164,50 +177,18 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 			Field("job_id", job.ID).
 			Err(err).
 			Log(ctx)
-	} else {
-		ulog.Debug("[HEADLESS] Agent execution completed successfully").
-			Field("job_id", job.ID).
-			Log(ctx)
+		return execErr
 	}
 
-	// After agent completes, archive its session artifacts
-	ulog.Debug("[HEADLESS] Archiving session artifacts").
+	// The agent is now detached and running. Archiving, transcript capture,
+	// and terminal-status finalization happen in the waitAndWriteStatus
+	// goroutine (via CompleteJob) once the process actually exits — NOT here,
+	// where the agent has barely started. See the SETUP-phase defer above.
+	ulog.Debug("[HEADLESS] Agent launched; completion deferred to exit watcher").
 		Field("job_id", job.ID).
 		Log(ctx)
-	if err := ArchiveInteractiveSession(job, plan); err != nil {
-		ulog.Warn("[HEADLESS] Failed to archive session artifacts for headless agent job").
-			Err(err).
-			Log(ctx)
-	} else {
-		ulog.Debug("[HEADLESS] Session artifacts archived successfully").
-			Field("job_id", job.ID).
-			Log(ctx)
-	}
 
-	// Archive any Claude Code workflow runs the agent spawned. Without this,
-	// headless jobs — whose deferred status update marks them completed
-	// before CompleteJob ever runs — lose their workflow artifacts entirely.
-	if err := ArchiveWorkflowRuns(job, plan); err != nil {
-		ulog.Warn("[HEADLESS] Failed to archive workflow runs for headless agent job").
-			Err(err).
-			Log(ctx)
-	}
-
-	// Append the formatted transcript using the generalized function
-	ulog.Debug("[HEADLESS] Appending formatted transcript").
-		Field("job_id", job.ID).
-		Log(ctx)
-	if err := AppendAgentTranscript(job, plan); err != nil {
-		ulog.Warn("[HEADLESS] Failed to append transcript to job file").
-			Err(err).
-			Log(ctx)
-	} else {
-		ulog.Debug("[HEADLESS] Formatted transcript appended successfully").
-			Field("job_id", job.ID).
-			Log(ctx)
-	}
-
-	return execErr
+	return nil
 }
 
 // prepareWorktree ensures the worktree exists and is ready.
@@ -446,12 +427,97 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 	// This allows the executor to return immediately while the agent runs detached.
 	go e.waitAndWriteStatus(ctx, job, plan, cmd)
 
+	// Confirm the daemon session with the REAL agent PID (and, for claude, the
+	// native session id + transcript) in the background. Unlike interactive
+	// agents — which run inside a mux pane and must discover their PID — a
+	// headless agent is a direct child, so cmd.Process.Pid IS the agent PID.
+	// Confirming upgrades the pre-registered intent into a confirmed session;
+	// without it the daemon keeps an unconfirmed intent and, when the agent
+	// fires workflow/tool hooks, spawns duplicate ad-hoc agent records for the
+	// single run.
+	go e.confirmSessionAsync(job, plan, worktreePath, providerName, cmd.Process.Pid, job.StartTime)
+
 	ulog.Debug("[HEADLESS] Agent detached").
 		Field("job_id", job.ID).
 		Field("provider", providerName).
 		Field("pid", cmd.Process.Pid).
 		Log(ctx)
 	return nil
+}
+
+// confirmSessionAsync confirms the headless session with the daemon using the
+// real agent PID. It mirrors ClaudeAgentProvider.discoverAndRegisterSessionAsync
+// but is simpler: the PID is already known (direct child process), so only the
+// native session id + transcript need discovering. Designed to run in a
+// goroutine; all failures are logged warnings and never fatal.
+func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDir, providerName string, pid int, startTime time.Time) {
+	ctx := context.Background()
+
+	if startTime.IsZero() {
+		startTime = time.Now()
+	}
+
+	// Transcript/native-session discovery is provider-specific; today only the
+	// claude provider writes a discoverable ~/.claude transcript. For other
+	// providers we still confirm with the PID so the session is de-duped.
+	var transcriptPath string
+	if providerName == "claude" {
+		var err error
+		transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+			Provider:  "claude",
+			WorkDir:   workDir,
+			AfterTime: startTime,
+		})
+		if err != nil {
+			// Retry with backoff — the transcript file appears a beat after the
+			// process starts.
+			for i := 0; i < 10; i++ {
+				time.Sleep(1 * time.Second)
+				transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+					Provider:  "claude",
+					WorkDir:   workDir,
+					AfterTime: startTime,
+				})
+				if err == nil {
+					break
+				}
+			}
+			if err != nil {
+				ulog.Warn("[HEADLESS] Transcript discovery failed; confirming session with PID only").
+					Field("job_id", job.ID).
+					Err(err).
+					Log(ctx)
+			}
+		}
+	}
+
+	var nativeID string
+	if transcriptPath != "" {
+		nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+	}
+
+	daemonClient := daemon.NewWithAutoStart()
+	defer daemonClient.Close()
+
+	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
+		JobID:          job.ID,
+		NativeID:       nativeID,
+		PID:            pid,
+		TranscriptPath: transcriptPath,
+	}); err != nil {
+		ulog.Warn("[HEADLESS] Failed to confirm session with daemon").
+			Field("job_id", job.ID).
+			Field("pid", pid).
+			Err(err).
+			Log(ctx)
+		return
+	}
+
+	ulog.Debug("[HEADLESS] Session confirmed with daemon").
+		Field("job_id", job.ID).
+		Field("pid", pid).
+		Field("native_id", nativeID).
+		Log(ctx)
 }
 
 // waitAndWriteStatus waits for an agent process to complete and writes its exit status to a .status file.
@@ -475,7 +541,7 @@ func (e *HeadlessAgentExecutor) waitAndWriteStatus(ctx context.Context, job *Job
 	statusDir := filepath.Dir(statusPath)
 
 	// Ensure the directory exists
-	if err := os.MkdirAll(statusDir, 0755); err != nil {
+	if err := os.MkdirAll(statusDir, 0o755); err != nil {
 		ulog.Error("[HEADLESS] Failed to create status directory").
 			Field("job_id", job.ID).
 			Field("path", statusDir).
@@ -500,7 +566,7 @@ func (e *HeadlessAgentExecutor) waitAndWriteStatus(ctx context.Context, job *Job
 		return
 	}
 
-	if err := os.WriteFile(statusPath, data, 0644); err != nil {
+	if err := os.WriteFile(statusPath, data, 0o644); err != nil {
 		ulog.Error("[HEADLESS] Failed to write status file").
 			Field("job_id", job.ID).
 			Field("path", statusPath).
@@ -514,6 +580,34 @@ func (e *HeadlessAgentExecutor) waitAndWriteStatus(ctx context.Context, job *Job
 		Field("exit_code", exitCode).
 		Field("path", statusPath).
 		Log(ctx)
+
+	// Finalize the job now that the agent has REALLY exited. CompleteJob is the
+	// unified completion handler: it flips status to completed (writing an
+	// accurate completed_at + duration measured from job.StartTime), notifies
+	// the daemon to end the session, archives session artifacts + workflow
+	// runs, and appends the transcript. Doing this here — rather than in a
+	// detach-time defer — is the core of the lifecycle fix: status, duration,
+	// and process lifetime finally agree, and the completed→pending flap and
+	// duplicate ad-hoc session records disappear.
+	//
+	// CAVEAT (CLI-spawned jobs): when a headless job is launched by `flow plan
+	// run`, this goroutine lives in the short-lived CLI process and is killed
+	// when the CLI exits — so CompleteJob may never run for that path. The
+	// .status file written just above is the durable source of truth a daemon
+	// collector can reconcile from. For daemon-spawned jobs (JobRunner), the
+	// executor runs inside the long-lived groved process, so this goroutine
+	// survives until the agent exits and completion happens here as intended.
+	//
+	// CompleteJob is idempotent for agent jobs (archival/transcript re-runs are
+	// overwrites/no-ops), so a later `flow plan complete` recovering a
+	// CLI-spawned job does no harm.
+	if err := CompleteJob(job, plan, true); err != nil {
+		ulog.Warn("[HEADLESS] Failed to finalize job after agent exit").
+			Field("job_id", job.ID).
+			Field("exit_code", exitCode).
+			Err(err).
+			Log(ctx)
+	}
 }
 
 // gatherContextFiles collects context files (.grove/context, CLAUDE.md, etc.) for the job.
