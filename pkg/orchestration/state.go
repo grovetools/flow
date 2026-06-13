@@ -149,6 +149,51 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 	return nil
 }
 
+// UpdateJobModel sets the job's `model:` frontmatter to the actual model the
+// agent launched with, used by the executors to backfill the resolved model so
+// the field reflects reality rather than a creation-time default.
+//
+// Unlike the other StatePersister writers, this uses the package-level
+// UpdateFrontmatter (the yaml.Node-based writer) so existing key order and
+// formatting are preserved — the job file is human-curated and we patch a
+// single key. It also bumps updated_at. No-op when newModel is empty.
+func (sp *StatePersister) UpdateJobModel(job *Job, newModel string) error {
+	if newModel == "" {
+		return nil
+	}
+
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("read job file: %w", err)
+	}
+
+	updates := map[string]interface{}{
+		"model":      newModel,
+		"updated_at": time.Now().Format(time.RFC3339),
+	}
+
+	newContent, err := UpdateFrontmatter(content, updates)
+	if err != nil {
+		return fmt.Errorf("update frontmatter: %w", err)
+	}
+
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	job.Model = newModel
+	return nil
+}
+
 // UpdateJobType updates the type of a job in its markdown file.
 func (sp *StatePersister) UpdateJobType(job *Job, newType JobType) error {
 	sp.mu.Lock()

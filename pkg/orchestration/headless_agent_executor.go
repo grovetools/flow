@@ -259,6 +259,9 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		if err != nil {
 			return err
 		}
+		// Record the model the agent will actually run with (or claude's
+		// default when none was passed) into the job frontmatter.
+		backfillClaudeAgentModel(job)
 	}
 
 	// Pre-register the session intent with the daemon BEFORE launching the

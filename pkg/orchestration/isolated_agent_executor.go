@@ -179,6 +179,9 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		if err != nil {
 			return err
 		}
+		// Record the model the agent will actually run with (or claude's
+		// default when none was passed) into the job frontmatter.
+		backfillClaudeAgentModel(job)
 	}
 
 	// Handle source_block reference if present

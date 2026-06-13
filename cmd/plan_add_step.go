@@ -449,7 +449,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		}
 
 		// Apply plan-level defaults if not set
-		if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+		if job.Model == "" && planModelAppliesTo(job.Type) && plan.Config != nil && plan.Config.Model != "" {
 			job.Model = plan.Config.Model
 		}
 		if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
@@ -539,7 +539,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	}
 
 	// Apply plan-level defaults if not set
-	if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+	if job.Model == "" && planModelAppliesTo(job.Type) && plan.Config != nil && plan.Config.Model != "" {
 		job.Model = plan.Config.Model
 	}
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
@@ -557,6 +557,18 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 	return job, nil
 }
 
+// planModelAppliesTo reports whether a plan-level default model should be
+// stamped onto a newly created job of this type. Only oneshot/chat jobs have
+// flow itself resolve a model and pass it to an LLM, so the plan default
+// (typically a gemini-* chat model) belongs to them. Agent jobs
+// (interactive/headless/isolated) run a CLI agent that selects its own model;
+// the actual model is recorded at launch via the executor backfill. Stamping
+// the chat/oneshot default onto an agent job made its `model:` frontmatter
+// advertise a model it never ran.
+func planModelAppliesTo(jobType orchestration.JobType) bool {
+	return jobType == orchestration.JobTypeOneshot || jobType == orchestration.JobTypeChat
+}
+
 func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orchestration.Job, error) {
 	// Run the add-job wizard via its embeddable package. Note that
 	// worktree is no longer configurable in the TUI — cmd.Worktree is
@@ -567,7 +579,7 @@ func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orc
 	}
 
 	// Apply plan defaults if not set by user
-	if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+	if job.Model == "" && planModelAppliesTo(job.Type) && plan.Config != nil && plan.Config.Model != "" {
 		job.Model = plan.Config.Model
 	}
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
@@ -845,7 +857,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 
 	// Apply plan-level defaults if not set (CLI > Template > Plan config)
-	if job.Model == "" && plan.Config != nil && plan.Config.Model != "" {
+	if job.Model == "" && planModelAppliesTo(job.Type) && plan.Config != nil && plan.Config.Model != "" {
 		job.Model = plan.Config.Model
 	}
 	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {

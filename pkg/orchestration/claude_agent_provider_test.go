@@ -81,21 +81,23 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("model falls back to plan config", func(t *testing.T) {
+	t.Run("plan config model is not consulted for agent jobs", func(t *testing.T) {
+		// The agent model comes from job frontmatter only. Plan-level defaults
+		// belong to chat/oneshot jobs and `flow plan add` no longer stamps them
+		// onto agent jobs, so appendClaudeJobArgs must not resurrect them.
 		plan := &Plan{Config: &PlanConfig{Model: "claude-sonnet-4-6"}}
 		args, err := appendClaudeJobArgs(nil, &Job{ID: "j"}, plan)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		want := []string{"--model", "claude-sonnet-4-6"}
-		if strings.Join(args, " ") != strings.Join(want, " ") {
-			t.Errorf("expected %v, got %v", want, args)
+		if len(args) != 0 {
+			t.Errorf("expected no args when only a plan-config model is set, got %v", args)
 		}
 	})
 
-	t.Run("non-claude plan config model is dropped", func(t *testing.T) {
-		// Plan-level model defaults (meant for chat/oneshot jobs) must never
-		// reach the claude CLI as --model.
+	t.Run("non-claude plan config model is ignored, not errored", func(t *testing.T) {
+		// A gemini plan default must neither reach the claude CLI nor error —
+		// it simply isn't an agent-job model.
 		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
 		args, err := appendClaudeJobArgs(baseArgs, &Job{ID: "j"}, plan)
 		if err != nil {
@@ -106,17 +108,19 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("non-claude job model is dropped", func(t *testing.T) {
-		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "gemini-3.1-pro-preview"}, &Plan{})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	t.Run("non-claude job model is a hard error", func(t *testing.T) {
+		// A non-claude model EXPLICITLY set on a claude agent job must fail
+		// loudly instead of silently running a default claude agent.
+		_, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "gemini-3.1-pro-preview"}, &Plan{})
+		if err == nil {
+			t.Fatal("expected hard error for non-claude job model, got nil")
 		}
-		if len(args) != 0 {
-			t.Errorf("expected no args for non-claude job model, got %v", args)
+		if !strings.Contains(err.Error(), "interactive_provider") {
+			t.Errorf("error should point at flow.interactive_provider, got: %v", err)
 		}
 	})
 
-	t.Run("non-claude model dropped but effort kept", func(t *testing.T) {
+	t.Run("non-claude plan model ignored but effort kept", func(t *testing.T) {
 		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
 		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Effort: "high"}, plan)
 		if err != nil {
@@ -128,8 +132,8 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("job model wins over plan config", func(t *testing.T) {
-		plan := &Plan{Config: &PlanConfig{Model: "plan-default"}}
+	t.Run("job model used regardless of plan config", func(t *testing.T) {
+		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
 		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "opus"}, plan)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -174,6 +178,17 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("explicit claude-family job model is honored, not errored", func(t *testing.T) {
+		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "claude-opus-4-6"}, &Plan{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{"--model", "claude-opus-4-6"}
+		if strings.Join(args, " ") != strings.Join(want, " ") {
+			t.Errorf("expected %v, got %v", want, args)
+		}
+	})
+
 	t.Run("isClaudeFamilyModel classification", func(t *testing.T) {
 		cases := map[string]bool{
 			"claude-sonnet-4-6":                   true,
@@ -208,4 +223,20 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 			t.Error("expected a copied slice when appending per-job flags")
 		}
 	})
+}
+
+func TestCanonicalClaudeModel(t *testing.T) {
+	cases := map[string]string{
+		"":                           "",
+		"claude-opus-4-6":            "claude-opus-4-6",   // alias passes through
+		"claude-opus-4-6-20260115":   "claude-opus-4-6",   // dated id collapses to alias
+		"claude-sonnet-4-6-20260115": "claude-sonnet-4-6", // dated id collapses to alias
+		"opus":                       "opus",              // bare family alias unknown to registry
+		"gemini-3.5-flash":           "gemini-3.5-flash",  // foreign id unchanged
+	}
+	for in, want := range cases {
+		if got := canonicalClaudeModel(in); got != want {
+			t.Errorf("canonicalClaudeModel(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

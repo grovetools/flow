@@ -348,6 +348,43 @@ func TestCollectJobDetails(t *testing.T) {
 				}
 			},
 		},
+		{
+			// oneshot jobs DO inherit the plan-level default model.
+			name: "oneshot inherits plan default model",
+			cmd: &PlanAddStepCmd{
+				Title:      "Oneshot Job",
+				Type:       "oneshot",
+				PromptFile: createTempFile(t, "Test prompt"),
+			},
+			plan: &orchestration.Plan{
+				Config: &orchestration.PlanConfig{Model: "gemini-3.1-pro-preview"},
+			},
+			wantErr: false,
+			check: func(t *testing.T, job *orchestration.Job) {
+				if job.Model != "gemini-3.1-pro-preview" {
+					t.Errorf("expected oneshot to inherit plan model, got %q", job.Model)
+				}
+			},
+		},
+		{
+			// Agent jobs must NOT be stamped with the chat/oneshot default —
+			// they run a CLI agent whose model is backfilled at launch.
+			name: "agent job does not inherit plan default model",
+			cmd: &PlanAddStepCmd{
+				Title:      "Agent Job",
+				Type:       "headless_agent",
+				PromptFile: createTempFile(t, "Test prompt"),
+			},
+			plan: &orchestration.Plan{
+				Config: &orchestration.PlanConfig{Model: "gemini-3.1-pro-preview"},
+			},
+			wantErr: false,
+			check: func(t *testing.T, job *orchestration.Job) {
+				if job.Model != "" {
+					t.Errorf("expected agent job model to stay empty, got %q", job.Model)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
