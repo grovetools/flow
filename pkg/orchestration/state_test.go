@@ -405,6 +405,73 @@ func TestStatePersister_UpdateJobMetadata(t *testing.T) {
 	}
 }
 
+func TestStatePersister_UpdateJobModel(t *testing.T) {
+	dir := t.TempDir()
+	job := &Job{
+		ID:       "model-job",
+		Title:    "Model Test Job",
+		Status:   JobStatusRunning,
+		FilePath: filepath.Join(dir, "model-job.md"),
+	}
+
+	// A curated job file with a specific key order and a comment to ensure the
+	// order/comment-preserving writer is used (not the map-based rewrite).
+	content := []byte(`---
+id: model-job
+title: "Model Test Job"
+status: running
+type: headless_agent
+model: gemini-3.1-pro-preview
+---
+
+<!-- grove: keep me -->
+
+# Model Test Job
+`)
+	if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sp := NewStatePersister()
+	if err := sp.UpdateJobModel(job, "claude-sonnet-4-6"); err != nil {
+		t.Fatalf("UpdateJobModel() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(updated)
+
+	if !strings.Contains(s, "model: claude-sonnet-4-6") {
+		t.Errorf("expected model rewritten to claude-sonnet-4-6, got:\n%s", s)
+	}
+	if strings.Contains(s, "gemini-3.1-pro-preview") {
+		t.Errorf("old model should be gone, got:\n%s", s)
+	}
+	if !strings.Contains(s, "updated_at:") {
+		t.Errorf("expected updated_at to be set, got:\n%s", s)
+	}
+	// Order/comment preservation: id stays first, the HTML comment survives.
+	if idIdx, statusIdx := strings.Index(s, "id: model-job"), strings.Index(s, "status: running"); idIdx == -1 || statusIdx == -1 || idIdx > statusIdx {
+		t.Errorf("expected original key order preserved (id before status), got:\n%s", s)
+	}
+	if !strings.Contains(s, "<!-- grove: keep me -->") {
+		t.Errorf("expected body comment preserved, got:\n%s", s)
+	}
+	if job.Model != "claude-sonnet-4-6" {
+		t.Errorf("expected in-memory job.Model updated, got %q", job.Model)
+	}
+
+	// Empty model is a no-op (and must not error).
+	if err := sp.UpdateJobModel(job, ""); err != nil {
+		t.Fatalf("UpdateJobModel(\"\") should be a no-op, got error %v", err)
+	}
+	if job.Model != "claude-sonnet-4-6" {
+		t.Errorf("empty UpdateJobModel must not change job.Model, got %q", job.Model)
+	}
+}
+
 // Helper function to create job file content
 func createJobFile(job *Job) []byte {
 	return []byte(fmt.Sprintf(`---

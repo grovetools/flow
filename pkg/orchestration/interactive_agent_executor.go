@@ -24,6 +24,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	grovecontext "github.com/grovetools/cx/pkg/context"
+	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/sirupsen/logrus"
@@ -264,6 +265,9 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			return err
 		}
+		// Record the model the agent will actually run with (or claude's
+		// default when none was passed) into the job frontmatter.
+		backfillClaudeAgentModel(job)
 	}
 
 	// Handle source_block reference if present
@@ -785,33 +789,30 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 }
 
 // appendClaudeJobArgs appends per-job claude CLI flags to the static provider
-// args from grove.toml: --model (job frontmatter, falling back to the
-// plan-level config model like the oneshot/chat executors) and --effort (job
-// frontmatter only). Values are passed through without validating against
-// claude's accepted set, but are rejected if they contain characters that
-// would need shell quoting, since several launch paths join args into a raw
-// shell command string. Only call this when the effective provider is claude.
+// args from grove.toml: --model and --effort, both read from job frontmatter
+// only. Values are passed through without validating against claude's accepted
+// set, but are rejected if they contain characters that would need shell
+// quoting, since several launch paths join args into a raw shell command
+// string. Only call this when the effective provider is claude.
 //
-// Non-claude models are never forwarded: plan-level and global model defaults
-// (e.g. gemini-* for chat/oneshot jobs) leak into agent job frontmatter via
-// the plan-default inheritance in `flow plan add`, and passing them as
-// --model would make the claude CLI run with another provider's model. When
-// the resolved model isn't claude-family, the flag is dropped and the claude
-// CLI falls back to its own configured default.
+// The agent model is resolved from job frontmatter — NOT from the plan-level
+// default. Plan/global model defaults (e.g. gemini-* for chat/oneshot jobs)
+// only apply to oneshot/chat jobs; `flow plan add` no longer stamps them onto
+// agent jobs (see planModelAppliesTo). An empty model means "let the claude
+// CLI use its own configured default", which the executor then records into
+// the job frontmatter via backfillClaudeAgentModel.
+//
+// A non-claude model set on a claude agent job is a hard error rather than a
+// silent fallback: previously such a model (e.g. gemini-3.5-flash) was dropped
+// and the job quietly ran a DEFAULT CLAUDE agent while its frontmatter still
+// advertised the gemini model. Surfacing the error tells the user to route to
+// the right provider via flow.interactive_provider instead of masquerading.
 func appendClaudeJobArgs(agentArgs []string, job *Job, plan *Plan) ([]string, error) {
 	model := job.Model
-	modelSource := "job frontmatter"
-	if model == "" && plan != nil && plan.Config != nil {
-		model = plan.Config.Model
-		modelSource = "plan config"
-	}
 	if model != "" && !isClaudeFamilyModel(model) {
-		logrus.WithFields(logrus.Fields{
-			"job_id":       job.ID,
-			"model":        model,
-			"model_source": modelSource,
-		}).Warn("Ignoring non-claude model for claude agent job; the claude CLI default will be used. Plan/global model defaults only apply to chat/oneshot jobs.")
-		model = ""
+		return nil, fmt.Errorf("model %q is not a Claude model but this job runs the claude agent CLI; "+
+			"plan/global defaults apply only to chat/oneshot jobs. To run a different provider, set "+
+			"flow.interactive_provider in grove.toml, or set a claude-family model on the job", model)
 	}
 	if model == "" && job.Effort == "" {
 		return agentArgs, nil
@@ -853,6 +854,52 @@ func isClaudeFamilyModel(model string) bool {
 		}
 	}
 	return false
+}
+
+// canonicalClaudeModel normalizes a claude model name to its canonical short
+// alias via the grove-anthropic model registry: a full API id
+// ("claude-opus-4-6-20260115") collapses to its alias ("claude-opus-4-6"), an
+// alias is returned unchanged, and anything the registry doesn't know (e.g. a
+// bare family alias like "opus") is returned as-is. Used to record a stable,
+// human-meaningful model in job frontmatter rather than a churny dated id.
+func canonicalClaudeModel(model string) string {
+	if model == "" {
+		return ""
+	}
+	fullID := anthropicmodels.ResolveAlias(model) // alias -> id, or unchanged
+	for alias, id := range anthropicmodels.Aliases() {
+		if id == fullID {
+			return alias
+		}
+	}
+	return model
+}
+
+// backfillClaudeAgentModel records the model a claude agent job will ACTUALLY
+// run with into the job's frontmatter, so the `model:` field stops lying.
+//
+//   - Empty job.Model: no --model was passed, so the claude CLI self-selects
+//     its configured default. We record the registry's canonical default alias
+//     (anthropicmodels.DefaultAlias) instead of leaving the field blank.
+//   - Non-empty job.Model: normalize it to its canonical alias.
+//
+// The write is skipped when the value is already canonical (no churn). This is
+// best-effort: a frontmatter write failure is logged, never fatal — the agent
+// is already launching. Only call this for the claude provider.
+func backfillClaudeAgentModel(job *Job) {
+	resolved := canonicalClaudeModel(job.Model)
+	if resolved == "" {
+		resolved = anthropicmodels.DefaultAlias
+	}
+	if resolved == job.Model {
+		return // already canonical; nothing to write
+	}
+	if err := NewStatePersister().UpdateJobModel(job, resolved); err != nil {
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"job_id": job.ID,
+			"model":  resolved,
+		}).Warn("Failed to backfill resolved agent model into job frontmatter")
+	}
 }
 
 // isShellSafeArgValue reports whether s can be embedded unquoted in the
