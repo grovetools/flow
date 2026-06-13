@@ -2,8 +2,6 @@ module github.com/grovetools/flow
 
 go 1.24.4
 
-replace github.com/grovetools/core => /Users/solair/Code/grovetools/core
-
 require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbles v0.21.0
