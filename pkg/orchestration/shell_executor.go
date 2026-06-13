@@ -86,7 +86,7 @@ func (e *ShellExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error
 
 	// Always regenerate context to ensure shell job has latest view, similar to oneshot executor
 	oneShotExec := NewOneShotExecutor(NewCommandLLMClient(nil), e.config) // Pass config for SkipInteractive
-	usedRulesPath, ctxErr := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan)
+	usedRulesPath, _, ctxErr := oneShotExec.regenerateContextInWorktree(ctx, workDir, "shell", job, plan)
 	if ctxErr != nil {
 		// Warn but do not fail the job for a context error
 		ulog.Warn("Failed to generate context for shell job").
