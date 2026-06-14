@@ -321,6 +321,17 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// In the daemon-less LocalRuntime path no daemon owns the spawned agents,
+	// so have the headless executor persist a daemon JobInfo (with the agent
+	// PID) for each launch. A later daemon then adopts and reconciles these
+	// detached agents from their JobInfo + .status files. When a daemon IS
+	// running, plan_run delegates via DaemonRuntime and the daemon's own
+	// persister manages jobs/<id>.json, so we leave this false to avoid a
+	// double-writer clobbering the daemon's lifecycle-managed record.
+	if daemonClient == nil {
+		orchConfig.DaemonJobPersist = true
+	}
+
 	// Create orchestrator (uses LocalRuntime by default)
 	orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 	if err != nil {
