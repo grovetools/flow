@@ -202,15 +202,9 @@ func runJobsExtract(title, file string, blockIDs, dependsOn []string, worktree, 
 		job.Model = model
 	}
 
-	// Inherit values from plan config (only if not explicitly set)
-	if currentPlan.Config != nil {
-		if job.Model == "" && job.Type.InheritsPlanModel() && currentPlan.Config.Model != "" {
-			job.Model = currentPlan.Config.Model
-		}
-		if job.Worktree == "" && currentPlan.Config.Worktree != "" {
-			job.Worktree = currentPlan.Config.Worktree
-		}
-	}
+	// Inherit plan-config defaults (model gated to oneshot/chat) for anything not
+	// set by the explicit flags above.
+	orchestration.ApplyPlanDefaults(currentPlan, job)
 
 	// Add the job to the current plan
 	filename, err := orchestration.AddJob(currentPlan, job)
