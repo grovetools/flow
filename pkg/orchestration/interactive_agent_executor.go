@@ -797,8 +797,8 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 //
 // The agent model is resolved from job frontmatter — NOT from the plan-level
 // default. Plan/global model defaults (e.g. gemini-* for chat/oneshot jobs)
-// only apply to oneshot/chat jobs; `flow plan add` no longer stamps them onto
-// agent jobs (see planModelAppliesTo). An empty model means "let the claude
+// only apply to oneshot/chat jobs; no job-creation path stamps them onto
+// agent jobs (see JobType.InheritsPlanModel). An empty model means "let the claude
 // CLI use its own configured default", which the executor then records into
 // the job frontmatter via backfillClaudeAgentModel.
 //

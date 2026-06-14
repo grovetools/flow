@@ -204,7 +204,7 @@ func runJobsExtract(title, file string, blockIDs, dependsOn []string, worktree, 
 
 	// Inherit values from plan config (only if not explicitly set)
 	if currentPlan.Config != nil {
-		if job.Model == "" && currentPlan.Config.Model != "" {
+		if job.Model == "" && job.Type.InheritsPlanModel() && currentPlan.Config.Model != "" {
 			job.Model = currentPlan.Config.Model
 		}
 		if job.Worktree == "" && currentPlan.Config.Worktree != "" {

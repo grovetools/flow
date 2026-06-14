@@ -751,7 +751,7 @@ func AddJobsFromRecipe(plan *Plan, recipe *Recipe, externalDeps []string, templa
 
 		// Apply plan-level defaults if they are not set in the recipe's frontmatter.
 		if plan.Config != nil {
-			if job.Model == "" && plan.Config.Model != "" {
+			if job.Model == "" && job.Type.InheritsPlanModel() && plan.Config.Model != "" {
 				job.Model = plan.Config.Model
 			}
 			if job.Worktree == "" && plan.Config.Worktree != "" {

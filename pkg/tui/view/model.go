@@ -487,7 +487,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					plan := m.s.statusModel.Plan
 					// Apply plan config defaults that the wizard doesn't set.
 					if plan.Config != nil {
-						if job.Model == "" && plan.Config.Model != "" {
+						if job.Model == "" && job.Type.InheritsPlanModel() && plan.Config.Model != "" {
 							job.Model = plan.Config.Model
 						}
 						if job.Worktree == "" && plan.Config.Worktree != "" {

@@ -107,6 +107,19 @@ const (
 	JobTypeFile             JobType = "file" // Non-executable job for storing context/reference content
 )
 
+// InheritsPlanModel reports whether a plan-level default model should be
+// stamped onto a newly created job of this type. Only oneshot/chat jobs have
+// flow itself resolve a model and pass it to an LLM, so the plan default
+// (typically a gemini-* chat model) belongs to them. Agent jobs
+// (interactive/headless/isolated) run a CLI agent that selects its own model;
+// the actual model is recorded at launch via the executor backfill. Stamping
+// the chat/oneshot default onto an agent job made its `model:` frontmatter
+// advertise a model it never ran. This predicate must be applied at EVERY job
+// creation site (CLI add, TUI add-job wizard, recipe expansion, plan extract).
+func (t JobType) InheritsPlanModel() bool {
+	return t == JobTypeOneshot || t == JobTypeChat
+}
+
 // Job represents a single orchestration job.
 type Job struct {
 	// Core fields
