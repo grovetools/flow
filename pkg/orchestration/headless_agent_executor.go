@@ -440,12 +440,78 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 	// single run.
 	go e.confirmSessionAsync(job, plan, worktreePath, providerName, cmd.Process.Pid, job.StartTime)
 
+	// Daemon-less reconcile bridge: when this executor runs standalone (the
+	// `flow plan run` LocalRuntime fallback, no daemon present), persist a
+	// minimal daemon JobInfo carrying the real agent PID into the same jobs dir
+	// the daemon's persistence layer loads from. A later daemon boot will then
+	// adopt and reconcile this detached agent via AdoptRunningAgents (PID
+	// liveness + the .status file written on exit). The flag is false when the
+	// daemon hosts the executor in-process, so we never clobber the daemon's
+	// own lifecycle-managed jobs/<id>.json. ID must equal the .status writer's
+	// key (job.ID) so adoption's status path resolves.
+	if e.config != nil && e.config.DaemonJobPersist {
+		e.persistDaemonJobInfo(ctx, job, plan, cmd.Process.Pid)
+	}
+
 	ulog.Debug("[HEADLESS] Agent detached").
 		Field("job_id", job.ID).
 		Field("provider", providerName).
 		Field("pid", cmd.Process.Pid).
 		Log(ctx)
 	return nil
+}
+
+// persistDaemonJobInfo writes a minimal daemon JobInfo record for a
+// standalone (daemon-less) headless agent launch. See the DaemonJobPersist
+// guard in runOnHost for why this is gated. All failures are best-effort: a
+// missed write simply means the job won't be adopted, which is no worse than
+// today's behavior.
+func (e *HeadlessAgentExecutor) persistDaemonJobInfo(ctx context.Context, job *Job, plan *Plan, pid int) {
+	daemonJobsDir := filepath.Join(paths.StateDir(), "daemon", "jobs")
+	if err := os.MkdirAll(daemonJobsDir, 0o755); err != nil {
+		ulog.Warn("[HEADLESS] Failed to create daemon jobs dir for adoption record").
+			Field("job_id", job.ID).
+			Field("dir", daemonJobsDir).
+			Err(err).
+			Log(ctx)
+		return
+	}
+
+	info := &models.JobInfo{
+		ID:          job.ID,
+		PlanDir:     plan.Directory,
+		JobFile:     filepath.Base(job.FilePath),
+		Status:      "running",
+		Type:        models.JobType("headless_agent"),
+		PID:         pid,
+		SubmittedAt: job.StartTime,
+		StartedAt:   &job.StartTime,
+	}
+
+	data, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		ulog.Warn("[HEADLESS] Failed to marshal daemon JobInfo for adoption record").
+			Field("job_id", job.ID).
+			Err(err).
+			Log(ctx)
+		return
+	}
+
+	jobPath := filepath.Join(daemonJobsDir, job.ID+".json")
+	if err := os.WriteFile(jobPath, data, 0o644); err != nil {
+		ulog.Warn("[HEADLESS] Failed to write daemon JobInfo for adoption record").
+			Field("job_id", job.ID).
+			Field("path", jobPath).
+			Err(err).
+			Log(ctx)
+		return
+	}
+
+	ulog.Debug("[HEADLESS] Wrote daemon JobInfo for adoption record").
+		Field("job_id", job.ID).
+		Field("pid", pid).
+		Field("path", jobPath).
+		Log(ctx)
 }
 
 // confirmSessionAsync confirms the headless session with the daemon using the

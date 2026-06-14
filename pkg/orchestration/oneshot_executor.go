@@ -61,6 +61,16 @@ type ExecutorConfig struct {
 	Model           string
 	ModelOverride   string // Override model from CLI
 	SkipInteractive bool   // Skip interactive prompts
+
+	// DaemonJobPersist, when true, makes the headless agent executor write a
+	// minimal daemon JobInfo record (with the agent PID) to the daemon jobs
+	// directory after launching the agent. It must be set ONLY for the
+	// daemon-less `flow plan run` fallback path: in that mode no daemon owns
+	// the job, so persisting a JobInfo lets a later daemon adopt and reconcile
+	// the detached agent. When the daemon itself runs the executor in-process,
+	// this stays false to avoid clobbering the daemon's own lifecycle-managed
+	// jobs/<id>.json record.
+	DaemonJobPersist bool
 }
 
 // OneShotExecutor executes oneshot jobs.

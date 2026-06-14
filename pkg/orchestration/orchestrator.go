@@ -30,6 +30,12 @@ type OrchestratorConfig struct {
 	SkipInteractive     bool             // Skip interactive agent jobs
 	CommandExecutor     command.Executor // For dependency injection
 	Runtime             Runtime          // Defines how jobs are executed; defaults to LocalRuntime
+
+	// DaemonJobPersist is forwarded to the default LocalRuntime's
+	// ExecutorConfig. Set true only by the daemon-less `flow plan run` path so
+	// the headless executor persists a daemon JobInfo for later adoption. See
+	// ExecutorConfig.DaemonJobPersist.
+	DaemonJobPersist bool
 }
 
 // Orchestrator coordinates job execution and manages state.
@@ -88,12 +94,13 @@ func NewOrchestrator(plan *Plan, config *OrchestratorConfig) (*Orchestrator, err
 	// Initialize LocalRuntime if no runtime is provided
 	if orch.config.Runtime == nil {
 		execConfig := &ExecutorConfig{
-			MaxPromptLength: 1000000,
-			Timeout:         30 * time.Minute,
-			RetryCount:      2,
-			Model:           "default",
-			ModelOverride:   orch.config.ModelOverride,
-			SkipInteractive: orch.config.SkipInteractive,
+			MaxPromptLength:  1000000,
+			Timeout:          30 * time.Minute,
+			RetryCount:       2,
+			Model:            "default",
+			ModelOverride:    orch.config.ModelOverride,
+			SkipInteractive:  orch.config.SkipInteractive,
+			DaemonJobPersist: orch.config.DaemonJobPersist,
 		}
 		orch.config.Runtime = NewLocalRuntime(execConfig, orch.config.CommandExecutor, orch, orch.logger)
 	}
