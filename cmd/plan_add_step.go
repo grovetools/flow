@@ -448,21 +448,9 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			job.Worktree = worktreeToUse
 		}
 
-		// Apply plan-level defaults if not set
-		if job.Model == "" && job.Type.InheritsPlanModel() && plan.Config != nil && plan.Config.Model != "" {
-			job.Model = plan.Config.Model
-		}
-		if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
-			job.Worktree = plan.Config.Worktree
-		}
-		// Apply inline defaults from plan config if not explicitly set via flag
-		if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
-			job.Inline = plan.Config.Inline
-		}
-		// Backwards compat: apply prepend_dependencies default if not explicitly set
-		if !cmd.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
-			job.PrependDependencies = true
-		}
+		// Apply plan-level defaults (model gated to oneshot/chat) for anything
+		// not explicitly set above.
+		orchestration.ApplyPlanDefaults(plan, job)
 
 		return job, nil
 	}
@@ -538,21 +526,9 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		job.Worktree = worktreeToUse
 	}
 
-	// Apply plan-level defaults if not set
-	if job.Model == "" && job.Type.InheritsPlanModel() && plan.Config != nil && plan.Config.Model != "" {
-		job.Model = plan.Config.Model
-	}
-	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
-		job.Worktree = plan.Config.Worktree
-	}
-	// Apply inline defaults from plan config if not explicitly set via flag
-	if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
-		job.Inline = plan.Config.Inline
-	}
-	// Backwards compat: apply prepend_dependencies default if not explicitly set
-	if !cmd.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
-		job.PrependDependencies = true
-	}
+	// Apply plan-level defaults (model gated to oneshot/chat) for anything
+	// not explicitly set above.
+	orchestration.ApplyPlanDefaults(plan, job)
 
 	return job, nil
 }
@@ -566,21 +542,9 @@ func interactiveJobCreation(plan *orchestration.Plan, cmd *PlanAddStepCmd) (*orc
 		return nil, err
 	}
 
-	// Apply plan defaults if not set by user
-	if job.Model == "" && job.Type.InheritsPlanModel() && plan.Config != nil && plan.Config.Model != "" {
-		job.Model = plan.Config.Model
-	}
-	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
-		job.Worktree = plan.Config.Worktree
-	}
-	// Apply inline defaults from plan config
-	if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
-		job.Inline = plan.Config.Inline
-	}
-	// Backwards compat: apply prepend_dependencies default from plan config
-	if !job.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
-		job.PrependDependencies = true
-	}
+	// Apply plan-level defaults (model gated to oneshot/chat) for anything the
+	// wizard did not set.
+	orchestration.ApplyPlanDefaults(plan, job)
 
 	return job, nil
 }
@@ -844,21 +808,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		job.Worktree = worktreeToUse
 	}
 
-	// Apply plan-level defaults if not set (CLI > Template > Plan config)
-	if job.Model == "" && job.Type.InheritsPlanModel() && plan.Config != nil && plan.Config.Model != "" {
-		job.Model = plan.Config.Model
-	}
-	if job.Worktree == "" && plan.Config != nil && plan.Config.Worktree != "" {
-		job.Worktree = plan.Config.Worktree
-	}
-	// Apply inline defaults from plan config if not explicitly set via flag or template
-	if job.Inline.IsEmpty() && plan.Config != nil && !plan.Config.Inline.IsEmpty() {
-		job.Inline = plan.Config.Inline
-	}
-	// Backwards compat: apply prepend_dependencies default if not explicitly set via flag
-	if !cmd.PrependDependencies && job.Inline.IsEmpty() && plan.Config != nil && plan.Config.PrependDependencies {
-		job.PrependDependencies = true
-	}
+	// Apply plan-level defaults (model gated to oneshot/chat) for anything not
+	// set by flag or template (CLI > Template > Plan config).
+	orchestration.ApplyPlanDefaults(plan, job)
 
 	return job, nil
 }

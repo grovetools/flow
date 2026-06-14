@@ -485,18 +485,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Result != nil && m.s.statusModel != nil {
 				if job, ok := msg.Result.(*orchestration.Job); ok && job != nil {
 					plan := m.s.statusModel.Plan
-					// Apply plan config defaults that the wizard doesn't set.
-					if plan.Config != nil {
-						if job.Model == "" && job.Type.InheritsPlanModel() && plan.Config.Model != "" {
-							job.Model = plan.Config.Model
-						}
-						if job.Worktree == "" && plan.Config.Worktree != "" {
-							job.Worktree = plan.Config.Worktree
-						}
-						if job.Inline.IsEmpty() && !plan.Config.Inline.IsEmpty() {
-							job.Inline = plan.Config.Inline
-						}
-					}
+					// Apply plan config defaults that the wizard doesn't set
+					// (model gated to oneshot/chat).
+					orchestration.ApplyPlanDefaults(plan, job)
 					if _, err := orchestration.AddJob(plan, job); err == nil {
 						m.finishTransient = "Added job: " + job.Title
 						return m, func() tea.Msg { return status.RefreshMsg{} }
