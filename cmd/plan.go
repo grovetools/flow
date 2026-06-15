@@ -183,7 +183,8 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitRecipe, "recipe", "", "Name of a plan recipe to initialize from (e.g., standard-feature). When using --recipe-cmd, this can be omitted if the command provides only one recipe")
 	planInitCmd.Flags().StringArrayVar(&planInitRecipeVars, "recipe-vars", nil, "Variables to pass to recipe templates. Can be used multiple times or comma-delimited (e.g., --recipe-vars model=gemini-2.5-pro --recipe-vars rules_file=docs.rules OR --recipe-vars \"model=gemini-2.5-pro,rules_file=docs.rules,output_dir=docs\")")
 	planInitCmd.Flags().StringVar(&planInitRecipeCmd, "recipe-cmd", "", "Command that outputs JSON recipe definitions (overrides grove.yml's get_recipe_cmd)")
-	planInitCmd.Flags().StringSliceVar(&planInitSiblingWorkspaces, "sibling-workspaces", nil, "Sibling workspaces to link into the ecosystem worktree (e.g., --sibling-workspaces grove-core,grove-flow). Worktrees with sibling workspaces are created under the XDG data dir. If not specified, all submodules are included")
+	planInitCmd.Flags().StringSliceVar(&planInitSiblingWorkspaces, "sibling-workspaces", nil, "Sibling workspaces to link into the ecosystem worktree (e.g., --sibling-workspaces grove-core,grove-flow). Worktrees with sibling workspaces are created under the XDG data dir. A bare --sibling-workspaces (no value) links ALL discovered direct-child repos of the ecosystem. If not specified, all submodules are included")
+	planInitCmd.Flags().Lookup("sibling-workspaces").NoOptDefVal = "__ALL__" // Bare flag => link all discovered direct-child repos
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 	planInitCmd.Flags().StringVar(&planInitNoteRef, "note-ref", "", "Path to the source note to link to this plan")
 	planInitCmd.Flags().StringVar(&planInitFromNote, "from-note", "", "Path to a note file whose body will be used as the prompt for the first job")

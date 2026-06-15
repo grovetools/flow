@@ -133,6 +133,16 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		provider = workspace.NewProvider(discoveryResult)
 	}
 
+	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
+	// before any worktree creation / plan config writing consumes it.
+	{
+		var sp string
+		if currentNode != nil {
+			sp = currentNode.Path
+		}
+		resolveSiblingWorkspacesAll(cmd, provider, sp)
+	}
+
 	var result strings.Builder
 
 	// NEW: Recipe-based initialization (can be combined with extraction)
@@ -402,6 +412,16 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	var provider *workspace.Provider
 	if discoveryResult != nil {
 		provider = workspace.NewProvider(discoveryResult)
+	}
+
+	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
+	// before any worktree creation / plan config writing consumes it.
+	{
+		var sp string
+		if currentNode != nil {
+			sp = currentNode.Path
+		}
+		resolveSiblingWorkspacesAll(cmd, provider, sp)
 	}
 
 	// Determine the recipe command to use
@@ -839,6 +859,71 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	}
 
 	return nil
+}
+
+// resolveSiblingWorkspacesAll resolves the bare `--sibling-workspaces` sentinel
+// (["__ALL__"]) into a concrete list of all discovered DIRECT-CHILD repos of the
+// ecosystem git root. It mutates cmd.SiblingWorkspaces in place.
+//
+// It deliberately produces a concrete, non-empty slice (never nil): downstream,
+// len(siblingWorkspaces) > 0 is load-bearing — it drives isEcosystem in
+// core/pkg/workspace/prepare.go, the plan's repos: block, and the go.work
+// ecosystem branch. A nil/empty slice would silently yield a non-ecosystem
+// worktree and defeat ecosystem teardown cleanup.
+//
+// The same discovery source SetupSubmodules uses (the workspace provider) is the
+// authority here. Direct-child filtering is case-insensitive to match the rest
+// of the codebase on macOS. If resolution yields zero repos we fall back to
+// legacy single-repo behavior (clear the sentinel) rather than crashing.
+func resolveSiblingWorkspacesAll(cmd *PlanInitCmd, provider *workspace.Provider, searchPath string) {
+	if !(len(cmd.SiblingWorkspaces) == 1 && cmd.SiblingWorkspaces[0] == "__ALL__") {
+		return
+	}
+
+	// Resolve the ecosystem git root from the provided search path.
+	if searchPath == "" {
+		searchPath = "."
+	}
+	gitRoot, err := orchestration.GetGitRootSafe(searchPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: --sibling-workspaces (all) could not resolve git root: %v; treating as single-repo worktree\n", err)
+		cmd.SiblingWorkspaces = nil
+		return
+	}
+
+	// Ensure a provider exists (construct one the same way the surrounding code does).
+	if provider == nil {
+		logger := logrus.New()
+		logger.SetLevel(logrus.WarnLevel)
+		ds := workspace.NewDiscoveryService(logger)
+		if res, derr := ds.DiscoverAll(); derr == nil && res != nil {
+			provider = workspace.NewProvider(res)
+		}
+	}
+	if provider == nil {
+		fmt.Fprintf(os.Stderr, "Warning: --sibling-workspaces (all) could not build a workspace provider; treating as single-repo worktree\n")
+		cmd.SiblingWorkspaces = nil
+		return
+	}
+
+	// Collect direct-child repos of the ecosystem git root (case-insensitive
+	// dir comparison for macOS), mirroring SetupSubmodules.
+	var repos []string
+	for name, localPath := range provider.LocalWorkspaces() {
+		if strings.EqualFold(filepath.Dir(localPath), gitRoot) {
+			repos = append(repos, name)
+		}
+	}
+	sort.Strings(repos)
+
+	if len(repos) == 0 {
+		fmt.Fprintf(os.Stderr, "Warning: --sibling-workspaces (all) found no direct-child repos under %s; treating as single-repo worktree\n", gitRoot)
+		cmd.SiblingWorkspaces = nil
+		return
+	}
+
+	cmd.SiblingWorkspaces = repos
+	fmt.Printf("* --sibling-workspaces (all): linking %d repos: %s\n", len(repos), strings.Join(repos, ", "))
 }
 
 // validateInitInputs validates the command inputs.

@@ -1237,6 +1237,26 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		repoWorktreePath := filepath.Join(ecosystemDir, repo)
 		fmt.Printf("    • %s: removing worktree and branch\n", repo)
 		repoPath, exists := localWorkspaces[repo]
+		// fellBackToGitRoot tracks the case where the provider missed the repo
+		// but we located its source checkout as a direct child of gitRoot. Such
+		// repos (e.g. `workspaces=["*"]` siblings without a grove.toml) aren't
+		// discoverable, but their worktree/branch still need cleaning up. We mark
+		// this so the post-remove prune below only runs for the fallback path
+		// where a force os.RemoveAll may have left a dangling registration.
+		fellBackToGitRoot := false
+		if !exists {
+			// Fallback: a non-grove sibling repo won't be in local workspaces,
+			// but its source checkout is a direct child of the ecosystem git
+			// root. If that checkout exists, treat it as the source repo and
+			// fall through to the normal remove+branch-delete path instead of
+			// skipping (which previously orphaned the worktree and branch).
+			candidate := filepath.Join(gitRoot, repo)
+			if _, statErr := os.Stat(filepath.Join(candidate, ".git")); statErr == nil {
+				repoPath = candidate
+				exists = true
+				fellBackToGitRoot = true
+			}
+		}
 		if !exists {
 			fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping branch cleanup\n", repo)
 			if force {
@@ -1292,6 +1312,19 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 			}
 		} else {
 			fmt.Printf("      * Deleted branch '%s'\n", worktreeName)
+		}
+
+		// In the fallback path the worktree dir may have been force-removed via
+		// os.RemoveAll (rather than `git worktree remove`), leaving a dangling
+		// 'prunable' registration in the source repo. Scrub it so a subsequent
+		// `git branch -d` isn't refused with "used by worktree". Only the
+		// fallback path needs this; provider-discovered repos use `git worktree
+		// remove`, which deregisters cleanly.
+		if fellBackToGitRoot {
+			prune := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "prune")
+			if output, err := prune.CombinedOutput(); err != nil {
+				fmt.Printf("      Warning: failed to prune stale worktree registration in %s: %s\n", repoPath, string(output))
+			}
 		}
 	}
 	if firstErr != nil {
