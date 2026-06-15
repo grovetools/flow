@@ -72,12 +72,15 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 			PlanName:     plan.Name,
 		}
 
-		// XDG gate: a plan with sibling workspaces (persisted repos: key)
-		// gets its worktree under the XDG data dir.
-		if plan.Config != nil && len(plan.Config.Repos) > 0 {
+		// Layout is decoupled from selection: the resolved layout (default
+		// xdg for ecosystem plans, i.e. those with a persisted repos: key)
+		// decides the on-disk location. Honors GROVE_WORKTREE_LAYOUT and
+		// grove.toml [worktree] layout via resolveWorktreeLayout.
+		isEcosystem := plan.Config != nil && len(plan.Config.Repos) > 0
+		if isEcosystem {
 			opts.SiblingWorkspaces = plan.Config.Repos
-			opts.UseXDGWorktrees = true
 		}
+		opts.UseXDGWorktrees = resolveWorktreeLayout("", gitRoot, isEcosystem) == "xdg"
 
 		worktreePath, err = workspace.Prepare(ctx, opts)
 		if err != nil {
