@@ -343,10 +343,17 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		commandToRun := []string{"flow", "plan", "status", "-t"}
 
 		if worktreeToSet != "" {
-			// Launch session with worktree - need to create a minimal plan object
+			// Launch session with worktree - need to create a minimal plan object.
+			// Carry the resolved sibling/repo list onto the plan config so the
+			// session helper resolves the SAME worktree layout that
+			// createWorktreeIfRequested already used above. Without this the
+			// helper sees Config == nil, re-derives the "legacy" layout for a
+			// standalone repo, and calls workspace.Prepare a second time at a
+			// DIFFERENT path — producing a duplicate worktree (XDG + legacy).
 			plan := &orchestration.Plan{
 				Name:      planName,
 				Directory: planPath,
+				Config:    &orchestration.PlanConfig{Repos: cmd.SiblingWorkspaces},
 			}
 			if err := CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeToSet, commandToRun); err != nil {
 				// Log the error but don't fail the init command, as the primary goal was completed
@@ -864,10 +871,15 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		worktreeToSet := finalWorktree
 
 		if worktreeToSet != "" {
-			// Launch session with worktree - need to create a minimal plan object
+			// Launch session with worktree - need to create a minimal plan object.
+			// Carry the resolved sibling/repo list onto the plan config so the
+			// session helper resolves the SAME worktree layout that
+			// createWorktreeIfRequested already used above (otherwise a
+			// duplicate legacy worktree is created alongside the XDG one).
 			plan := &orchestration.Plan{
 				Name:      planName,
 				Directory: planPath,
+				Config:    &orchestration.PlanConfig{Repos: cmd.SiblingWorkspaces},
 			}
 			if err := CreateOrSwitchToWorktreeSessionAndRunCommand(ctx, plan, worktreeToSet, commandToRun); err != nil {
 				fmt.Printf("WARNING:  Warning: Failed to launch tmux session: %v\n", err)
