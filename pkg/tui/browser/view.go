@@ -18,7 +18,10 @@ func (m Model) View() string {
 		padStyle = padStyle.MaxWidth(m.width)
 	}
 
-	if m.loading {
+	// Only show the placeholder before the first load of the current
+	// workspace context. Background refreshes (loading=true after
+	// initialLoaded) keep the existing list rendered to avoid flicker.
+	if m.loading && !m.initialLoaded {
 		return padStyle.Render("Loading plans...\n")
 	}
 

@@ -76,12 +76,17 @@ type Config struct {
 type Model struct {
 	cfg Config
 
-	plans          []PlanListItem
-	cursor         int
-	width          int
-	height         int
-	err            error
-	loading        bool
+	plans   []PlanListItem
+	cursor  int
+	width   int
+	height  int
+	err     error
+	loading bool
+	// initialLoaded becomes true once the current workspace context has
+	// completed at least one load. The "Loading plans..." placeholder is
+	// gated on !initialLoaded so background refreshes (every refreshInterval)
+	// refresh the list in place instead of flickering back to the placeholder.
+	initialLoaded  bool
 	focused        bool
 	plansDirectory string
 	cwdGitRoot     string
