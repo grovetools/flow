@@ -137,26 +137,73 @@ func GetProjectRoot() (string, error) {
 	return filepath.Dir(configPath), nil
 }
 
-// GetGitRootSafe attempts to find git root with multiple fallback strategies
+// GetGitRootSafe attempts to find git root with multiple fallback strategies.
+//
+// planDir is the authoritative input: each git-based and container-based
+// strategy is applied to planDir BEFORE falling back to the current working
+// directory. This ordering matters because an unrelated cwd (e.g. the repo a
+// tool was launched from) must never mask a worktree container passed as
+// planDir.
 func GetGitRootSafe(planDir string) (string, error) {
-	// Strategy 1: Try from plan directory
-	if gitRoot, err := git.GetGitRoot(planDir); err == nil {
-		return gitRoot, nil
+	// planDir first (authoritative), then cwd as a last resort.
+	candidates := []string{planDir}
+	if cwd, err := os.Getwd(); err == nil && cwd != planDir {
+		candidates = append(candidates, cwd)
 	}
 
-	// Strategy 2: Try from current working directory
-	if cwd, err := os.Getwd(); err == nil {
-		if gitRoot, err := git.GetGitRoot(cwd); err == nil {
+	for _, dir := range candidates {
+		// Standard git-root lookup.
+		if gitRoot, err := git.GetGitRoot(dir); err == nil {
 			return gitRoot, nil
+		}
+		// Grove worktree container fallback (see resolveWorktreeContainerRoot).
+		if root, ok := resolveWorktreeContainerRoot(dir); ok {
+			return root, nil
 		}
 	}
 
-	// Strategy 3: If plan directory is in a known structure (e.g., nb repos),
-	// try to find git root by looking for grove.yml
-	// This handles cases like ~/Documents/nb/repos/myrepo/main/plans
-	// where the git root might be at ~/Code/myrepo
-
 	return "", fmt.Errorf("could not find git root from plan directory or current directory")
+}
+
+// resolveWorktreeContainerRoot resolves the git/ecosystem root for a Grove
+// worktree container — the synthetic shape introduced by unified-worktrees
+// Phase 1.
+//
+// A worktree created by `flow plan init --worktree` is now a synthetic
+// CONTAINER: a directory under a worktree base (.grove-worktrees/ or the XDG
+// base) holding a root grove.toml (workspaces=["*"]), a .grove/workspace
+// marker, and one or more <repo>/ checkouts. The container itself has NO root
+// .git, so the standard git-root lookup fails when dir IS (or is nested under)
+// the container.
+//
+// We resolve via the workspace model: GetProjectByPath classifies the
+// container as an ecosystem (Phase 1 writes the synthetic grove.toml that
+// triggers this) and walks up from nested paths, so node.Path IS the container
+// root — the correct "ecosystem/worktree root to operate on". This is the same
+// path workspace.ResolveScope returns for the container, so daemon scope and
+// git-root resolution agree. Downstream helpers that need the OWNER source repo
+// (e.g. resolveWorktreeForJob, plan_session) already bubble up from a container
+// via IsWorktreePath/WorktreeOwner/ParentProjectPath, so returning the
+// container preserves their behavior while NOT discarding the container
+// identity that scope- and context-generation callers require.
+//
+// Only when the workspace model does not classify dir as a worktree-rooted
+// ecosystem (e.g. a missing/partial grove.toml) do we fall back to the marker
+// owner, so resolution still yields a real git root rather than erroring.
+func resolveWorktreeContainerRoot(dir string) (string, bool) {
+	if node, err := workspace.GetProjectByPath(dir); err == nil && node != nil &&
+		node.IsEcosystem() && workspace.IsWorktreePath(node.Path) {
+		if canonical, cerr := pathutil.CanonicalPath(node.Path); cerr == nil {
+			return canonical, true
+		}
+		return node.Path, true
+	}
+	if workspace.IsWorktreePath(dir) {
+		if owner, ok := workspace.WorktreeOwner(dir); ok {
+			return owner, true
+		}
+	}
+	return "", false
 }
 
 // GetProjectGitRoot returns the git root for the project associated with a plan.
