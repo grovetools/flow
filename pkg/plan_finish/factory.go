@@ -657,6 +657,25 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				if worktreeName == "" || gitRoot == "" {
 					return "N/A", nil
 				}
+				// Container worktrees (every worktree now carries repos: >= 1)
+				// are NOT a git worktree of gitRoot — the container dir is a
+				// plain dir (synthetic) or an ecosystem worktree, and the only
+				// registered worktrees are the per-repo subdirs whose paths end
+				// in /<repo>, not /<worktreeName>. So the suffix-match over
+				// ListWorktrees below misses them entirely. Detect existence by
+				// the container dir on disk instead, so the Action (which routes
+				// to cleanupEcosystemWorktree) actually runs and deregisters the
+				// child worktrees before the branch-delete step.
+				if plan.Config != nil && len(plan.Config.Repos) > 0 {
+					containerDir, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+					if !ok {
+						return "Not found", nil
+					}
+					if _, err := os.Stat(containerDir); err != nil {
+						return "Not found", nil
+					}
+					return color.YellowString("Exists"), nil
+				}
 				worktrees, err := wm.ListWorktrees(context.Background(), gitRoot)
 				if err != nil {
 					return "Error", err
@@ -910,7 +929,16 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			Action: func() error {
 				err := executor.Execute("git", "-C", gitRoot, "branch", "-d", branchName)
 				if err != nil {
-					if strings.Contains(err.Error(), "checked out at") {
+					if strings.Contains(err.Error(), "not found") {
+						// Idempotent: the branch is already gone. For a
+						// container worktree the prune step's per-repo
+						// cleanup (cleanupEcosystemWorktree) deletes the
+						// owner repo's branch as part of deregistering its
+						// child worktree, so by the time this step runs the
+						// owner branch (gitRoot == owner repo) has already
+						// been removed. Nothing left to delete is success.
+						return nil
+					} else if strings.Contains(err.Error(), "checked out at") {
 						// Worktree was pruned earlier in the cleanup
 						// sequence; the branch ref just has a stale
 						// worktree pointer, so -D here does not lose
@@ -1255,6 +1283,49 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 				repoPath = candidate
 				exists = true
 				fellBackToGitRoot = true
+			}
+		}
+		if !exists && filepath.Base(gitRoot) == repo {
+			// Single-repo container owned by the repo itself: gitRoot IS the
+			// repo's source checkout (there is no gitRoot/<repo> subdir), and
+			// the provider does not list a repo under its own ecosystem path.
+			// Without this branch the repo fell into the skip path below, which
+			// os.RemoveAll'd the child worktree dir WITHOUT `git worktree
+			// remove`, leaving a stale registration in gitRoot. The subsequent
+			// `git branch -d <name>` (delete-local-branch finish step) was then
+			// refused with "cannot delete branch ... used by worktree at
+			// <container>/<repo>". Routing through the normal path deregisters
+			// the child worktree (git worktree remove) BEFORE any branch delete.
+			if _, statErr := os.Stat(filepath.Join(gitRoot, ".git")); statErr == nil {
+				repoPath = gitRoot
+				exists = true
+				fellBackToGitRoot = true
+			}
+		}
+		if !exists && provider != nil {
+			// A repo linked in from a DIFFERENT ecosystem (e.g. `core` grown
+			// into a `notify` container via `flow plan add-worktrees`) is not
+			// returned by LocalWorkspacesInEcosystem(gitRoot) — its
+			// RootEcosystemPath points at its own ecosystem, not gitRoot — and
+			// it has no gitRoot/<repo> checkout. Resolve its real source via the
+			// provider so it too goes through `git worktree remove` (deregister)
+			// before any branch delete, instead of the os.RemoveAll-only skip
+			// path that orphans the registration and branch.
+			//
+			// FindByName returns the FIRST node with the name, which is often a
+			// worktree (a repo has one source + many worktree children all
+			// sharing its name). Scan All() for the non-worktree SOURCE node so
+			// we deregister against the source repo, not a worktree subdir.
+			for _, node := range provider.All() {
+				if node.Name != repo || node.IsWorktree() {
+					continue
+				}
+				if _, statErr := os.Stat(filepath.Join(node.Path, ".git")); statErr == nil {
+					repoPath = node.Path
+					exists = true
+					fellBackToGitRoot = true
+					break
+				}
 			}
 		}
 		if !exists {
