@@ -109,12 +109,12 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
-	// The worktree must exist and be an ecosystem worktree.
+	// The worktree must exist. Every worktree is now a container holding
+	// repos: >= 1 (a single-repo worktree is just a 1-repo container), so
+	// there is no "ecosystem vs single-repo" distinction to reject on —
+	// growing a 1-repo container works the same as growing an N-repo one.
 	if plan.Config == nil || plan.Config.Worktree == "" {
 		return fmt.Errorf("plan '%s' has no associated worktree", plan.Name)
-	}
-	if len(plan.Config.Repos) == 0 {
-		return fmt.Errorf("plan '%s' is not an ecosystem worktree (no repos in config); add-worktrees only grows ecosystem worktrees", plan.Name)
 	}
 	worktreeName := plan.Config.Worktree
 
