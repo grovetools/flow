@@ -86,7 +86,15 @@ func configureGoWorkspace(worktreePath string, repos []string, sourceGitRoot str
 		var content strings.Builder
 		content.WriteString(goVersion + "\n\n")
 		content.WriteString("use (\n")
-		content.WriteString("\t.\n") // The root of an ecosystem worktree can also be a module.
+		// The root of an ecosystem worktree is only a module if it has its own
+		// go.mod (some ecosystems are a Go module at the root; most, like
+		// grovetools, are not). Emitting a bare `use .` when no root go.mod
+		// exists produces an invalid go.work that breaks `go build` in every
+		// sub-project (the missing root module is reported as `../go.mod` from
+		// a sub-dir). Guard it with the same stat check the repos get below.
+		if _, err := os.Stat(filepath.Join(worktreePath, "go.mod")); err == nil {
+			content.WriteString("\t.\n")
+		}
 		for _, repo := range goRepos {
 			content.WriteString(fmt.Sprintf("\t./%s\n", repo))
 		}
