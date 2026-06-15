@@ -19,7 +19,11 @@ import (
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
-var planAddWorktreesAll bool
+var (
+	planAddWorktreesAll        bool
+	planAddWorktreesPlan       string
+	planAddWorktreesWorkspaces []string
+)
 
 // planAddWorktreesCmd implements the `flow plan add-worktrees` command, which
 // links ADDITIONAL sibling repos into an EXISTING ecosystem worktree that was
@@ -39,47 +43,63 @@ worktree's .grove/workspace marker are updated to the new union of repos.
 Pass --all to fill the worktree out to every direct-child repo of the
 ecosystem.
 
+Repos to add may be given as a positional comma-separated list or via
+-w/--workspaces (matching the workspace-name scoping used elsewhere, e.g.
+'core logs -w'). Target a specific plan with -p/--plan; otherwise the active
+plan in the --dir context (default cwd) is used.
+
 Examples:
   flow plan add-worktrees nav,treemux
+  flow plan add-worktrees -w nav,treemux --plan my-feature
   flow plan add-worktrees nav,treemux --dir ~/Code/myapp
-  flow plan add-worktrees --all`,
+  flow plan add-worktrees --all --plan my-feature`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPlanAddWorktrees,
 }
 
 func init() {
 	planAddWorktreesCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	planAddWorktreesCmd.Flags().StringVarP(&planAddWorktreesPlan, "plan", "p", "", "Target plan slug or directory (defaults to the active plan in --dir)")
+	planAddWorktreesCmd.Flags().StringSliceVarP(&planAddWorktreesWorkspaces, "workspaces", "w", nil, "Workspaces (repos) to link, comma-separated (alternative to the positional arg)")
 	planAddWorktreesCmd.Flags().BoolVar(&planAddWorktreesAll, "all", false, "Link every direct-child repo of the ecosystem")
 	planCmd.AddCommand(planAddWorktreesCmd)
 }
 
 func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
-	// Parse the requested repos from the positional argument (comma-separated).
+	// Collect requested repos from the positional arg AND -w/--workspaces
+	// (both comma-separated); the union is what we link.
 	var requestedRepos []string
-	if len(args) > 0 {
-		for _, r := range strings.Split(args[0], ",") {
+	for _, src := range append([]string{}, args...) {
+		for _, r := range strings.Split(src, ",") {
 			if r = strings.TrimSpace(r); r != "" {
 				requestedRepos = append(requestedRepos, r)
 			}
 		}
 	}
+	for _, r := range planAddWorktreesWorkspaces {
+		if r = strings.TrimSpace(r); r != "" {
+			requestedRepos = append(requestedRepos, r)
+		}
+	}
 	if len(requestedRepos) == 0 && !planAddWorktreesAll {
-		return fmt.Errorf("specify repos to add (comma-separated) or pass --all")
+		return fmt.Errorf("specify repos to add (positional or -w/--workspaces, comma-separated) or pass --all")
 	}
 
-	// Resolve the target plan. Unlike update-worktree, the positional arg here
-	// is the repo list, so the plan is resolved from the active plan in the
-	// --dir context (defaulting to cwd). Running from inside the worktree, or
-	// pointing --dir at the ecosystem root, both resolve the worktree's plan.
+	// Resolve the target plan: an explicit -p/--plan wins; otherwise fall back
+	// to the active plan in the --dir context (default cwd). The explicit flag
+	// avoids silently grabbing a stale active-plan pointer.
 	contextDir := planContextDir
 	if contextDir == "" {
 		contextDir = "."
 	}
-	activePlanName := coreplan.ActivePlan(contextDir)
-	if activePlanName == "" {
-		return fmt.Errorf("no active plan in %s; run from inside the worktree or pass --dir pointing at the workspace", contextDir)
+	planRef := planAddWorktreesPlan
+	if planRef == "" {
+		planRef = coreplan.ActivePlan(contextDir)
+		if planRef == "" {
+			return fmt.Errorf("no plan specified and no active plan in %s; pass -p/--plan or run from inside the worktree", contextDir)
+		}
 	}
-	planPath, err := resolvePlanPath(activePlanName, contextDir)
+	planPath, err := resolvePlanPath(planRef, contextDir)
 	if err != nil {
 		return err
 	}
