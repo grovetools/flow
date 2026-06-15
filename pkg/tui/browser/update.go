@@ -53,7 +53,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the plans directory.
 			m.plansDirectory = filepath.Dir(planPath)
 		}
+		// Switching workspace changes the entire context; show the
+		// placeholder for the new workspace's first load.
 		m.loading = true
+		m.initialLoaded = false
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
 			fetchGitLogCmd(m.cwdGitRoot),
@@ -87,10 +90,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case planListLoadCompleteMsg:
 		m.loading = false
+		// Mark the context loaded regardless of success/failure so a
+		// transient failing background tick doesn't drop the user back to
+		// the loading placeholder for an already-populated list.
+		m.initialLoaded = true
 		if msg.error != nil {
 			m.err = msg.error
 			return m, nil
 		}
+		// Clear any prior error on a successful (re)load — recovery path.
+		m.err = nil
 		m.plans = msg.plans
 		activePlan, _ := state.GetString(coreplan.StateKey)
 		m.activePlan = activePlan
