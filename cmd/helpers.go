@@ -55,83 +55,73 @@ func configureDefaultContextRules(repoPath string) error {
 	return nil
 }
 
-// configureGoWorkspace creates a go.work file for both ecosystem and single-repo worktrees.
+// configureGoWorkspace creates a go.work file for a worktree container.
 // sourceGitRoot is the git root of the ORIGINAL checkout the worktree was made
-// from; it is used to locate the root go.work (and thus the go version) and to
-// drive single-repo dependency resolution. Resolving from the source rather
-// than from the worktree itself keeps this correct regardless of where the
-// worktree lives on disk (legacy in-repo or XDG).
+// from; it is used to locate the root go.work (and thus the go version).
+// Resolving from the source rather than from the worktree itself keeps this
+// correct regardless of where the worktree lives on disk (legacy in-repo or
+// XDG).
+//
+// Every worktree is now a container holding repos as <repo>/ subdirs (a
+// single-repo worktree is just a 1-repo container), so this always emits the
+// container-style `use ( ./<repo> ... )` block. The legacy single-repo path
+// (worktree dir == repo checkout, via SetupGoWorkspaceForWorktree) is gone:
+// new worktrees always pass repos >= 1. The empty-repos guard below covers the
+// residual edge where the caller could not resolve any repo (e.g. plan init
+// from a path with no workspace node, or a failed --sibling-workspaces
+// expansion) — there is nothing to wire, so we skip go.work generation rather
+// than synthesize an invalid file.
 func configureGoWorkspace(worktreePath string, repos []string, sourceGitRoot string, provider *workspace.Provider) error {
-	if len(repos) > 0 { // Case 1: Ecosystem worktree.
-		// Find the root go.work (from the source repo) to get the go version.
-		goWorkConfig, err := workspace.FindRootGoWorkspace(sourceGitRoot)
-		goVersion := "go 1.24.4" // Fallback.
-		if err == nil && goWorkConfig != nil && goWorkConfig.GoVersion != "" {
-			goVersion = goWorkConfig.GoVersion
-		}
+	if len(repos) == 0 {
+		return nil
+	}
 
-		// Check which of the repos are Go modules.
-		var goRepos []string
-		for _, repo := range repos {
-			repoGoModPath := filepath.Join(worktreePath, repo, "go.mod")
-			if _, err := os.Stat(repoGoModPath); err == nil {
-				goRepos = append(goRepos, repo)
-			}
-		}
+	// Find the root go.work (from the source repo) to get the go version.
+	goWorkConfig, err := workspace.FindRootGoWorkspace(sourceGitRoot)
+	goVersion := "go 1.24.4" // Fallback.
+	if err == nil && goWorkConfig != nil && goWorkConfig.GoVersion != "" {
+		goVersion = goWorkConfig.GoVersion
+	}
 
-		if len(goRepos) == 0 {
-			return nil
-		}
-
-		var content strings.Builder
-		content.WriteString(goVersion + "\n\n")
-		content.WriteString("use (\n")
-		// The root of an ecosystem worktree is only a module if it has its own
-		// go.mod (some ecosystems are a Go module at the root; most, like
-		// grovetools, are not). Emitting a bare `use .` when no root go.mod
-		// exists produces an invalid go.work that breaks `go build` in every
-		// sub-project (the missing root module is reported as `../go.mod` from
-		// a sub-dir). Guard it with the same stat check the repos get below.
-		if _, err := os.Stat(filepath.Join(worktreePath, "go.mod")); err == nil {
-			content.WriteString("\t.\n")
-		}
-		for _, repo := range goRepos {
-			content.WriteString(fmt.Sprintf("\t./%s\n", repo))
-		}
-		content.WriteString(")\n")
-
-		if err := os.WriteFile(filepath.Join(worktreePath, "go.work"), []byte(content.String()), 0o600); err != nil {
-			return fmt.Errorf("failed to write go.work for ecosystem worktree: %w", err)
-		}
-		ctx := context.Background()
-		helpersUlog.Success("Configured go.work in ecosystem worktree").
-			Field("worktree_path", worktreePath).
-			Field("go_modules_count", len(goRepos)).
-			Field("go_modules", goRepos).
-			Pretty(fmt.Sprintf(theme.IconSuccess+" Configured go.work in ecosystem worktree with %d Go modules.", len(goRepos))).
-			Log(ctx)
-	} else {
-		// Case 2: Single-repo worktree.
-		// Use the SetupGoWorkspaceForWorktree function which parses go.mod
-		// and filters to only include required dependencies. The source git
-		// root locates go.mod independent of the worktree's location.
-		if err := workspace.SetupGoWorkspaceForWorktree(worktreePath, sourceGitRoot); err != nil {
-			return fmt.Errorf("failed to setup go workspace for worktree: %w", err)
-		}
-
-		// Only print success message if a go.work file was actually created
-		goWorkPath := filepath.Join(worktreePath, "go.work")
-		if _, err := os.Stat(goWorkPath); err == nil {
-			// Read the file to count dependencies (optional, for better messaging)
-			config, _ := workspace.FindRootGoWorkspace(sourceGitRoot)
-			if config != nil {
-				ctx := context.Background()
-				helpersUlog.Success("Configured go.work with workspace dependencies").
-					Field("worktree_path", worktreePath).
-					Pretty(theme.IconSuccess + " Configured go.work with workspace dependencies.").
-					Log(ctx)
-			}
+	// Check which of the repos are Go modules.
+	var goRepos []string
+	for _, repo := range repos {
+		repoGoModPath := filepath.Join(worktreePath, repo, "go.mod")
+		if _, err := os.Stat(repoGoModPath); err == nil {
+			goRepos = append(goRepos, repo)
 		}
 	}
+
+	if len(goRepos) == 0 {
+		return nil
+	}
+
+	var content strings.Builder
+	content.WriteString(goVersion + "\n\n")
+	content.WriteString("use (\n")
+	// The container root is only a module if it has its own go.mod (some
+	// ecosystems are a Go module at the root; most, like grovetools, are
+	// not). Emitting a bare `use .` when no root go.mod exists produces an
+	// invalid go.work that breaks `go build` in every sub-project (the
+	// missing root module is reported as `../go.mod` from a sub-dir). Guard
+	// it with the same stat check the repos get below.
+	if _, err := os.Stat(filepath.Join(worktreePath, "go.mod")); err == nil {
+		content.WriteString("\t.\n")
+	}
+	for _, repo := range goRepos {
+		content.WriteString(fmt.Sprintf("\t./%s\n", repo))
+	}
+	content.WriteString(")\n")
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "go.work"), []byte(content.String()), 0o600); err != nil {
+		return fmt.Errorf("failed to write go.work for worktree container: %w", err)
+	}
+	ctx := context.Background()
+	helpersUlog.Success("Configured go.work in worktree container").
+		Field("worktree_path", worktreePath).
+		Field("go_modules_count", len(goRepos)).
+		Field("go_modules", goRepos).
+		Pretty(fmt.Sprintf(theme.IconSuccess+" Configured go.work in worktree container with %d Go modules.", len(goRepos))).
+		Log(ctx)
 	return nil
 }
