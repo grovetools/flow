@@ -31,9 +31,32 @@ func CopyProjectFilesToWorktree(worktreePath, gitRoot string) error {
 	var dirsToCopy []string
 
 	ctx := context.Background()
-	worktreeUlog.Progress("Copying project configuration to new worktree").
-		Pretty("› Copying project configuration to new worktree...").
-		Log(ctx)
+
+	// Only announce the copy when there is actually something to copy. The
+	// handler runs once per child repo (via SetupSubmodules) AND once for the
+	// container root (via Prepare); gating the progress line on a present
+	// source file de-dupes the log to the run(s) that copy a file, without
+	// suppressing the per-child copy itself.
+	anyToCopy := false
+	for _, file := range filesToCopy {
+		if _, err := os.Stat(filepath.Join(gitRoot, file)); err == nil {
+			anyToCopy = true
+			break
+		}
+	}
+	if !anyToCopy {
+		for _, dir := range dirsToCopy {
+			if _, err := os.Stat(filepath.Join(gitRoot, dir)); err == nil {
+				anyToCopy = true
+				break
+			}
+		}
+	}
+	if anyToCopy {
+		worktreeUlog.Progress("Copying project configuration to new worktree").
+			Pretty("› Copying project configuration to new worktree...").
+			Log(ctx)
+	}
 
 	// Copy files
 	for _, file := range filesToCopy {
