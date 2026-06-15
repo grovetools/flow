@@ -137,9 +137,15 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	// ecosystem root, so a plain `--worktree` (no --sibling-workspaces) gets a
 	// full-ecosystem XDG worktree with every repo linked. The bare-flag
 	// sentinel (["__ALL__"]) is then expanded on disk by
-	// resolveSiblingWorkspacesAll below.
-	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil && currentNode.IsEcosystem() {
-		cmd.SiblingWorkspaces = []string{"__ALL__"}
+	// resolveSiblingWorkspacesAll below. For a standalone (non-ecosystem)
+	// project, seed the list with the project's own name so the worktree is
+	// always built as a unified container holding that one repo.
+	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil {
+		if currentNode.IsEcosystem() {
+			cmd.SiblingWorkspaces = []string{"__ALL__"}
+		} else {
+			cmd.SiblingWorkspaces = []string{filepath.Base(currentNode.Path)}
+		}
 	}
 
 	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
@@ -425,9 +431,15 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 
 	// Default an empty sibling list to ALL repos when running from an
 	// ecosystem root, so a plain `--worktree` (no --sibling-workspaces) gets a
-	// full-ecosystem XDG worktree with every repo linked.
-	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil && currentNode.IsEcosystem() {
-		cmd.SiblingWorkspaces = []string{"__ALL__"}
+	// full-ecosystem XDG worktree with every repo linked. For a standalone
+	// (non-ecosystem) project, seed the list with the project's own name so the
+	// worktree is always built as a unified container holding that one repo.
+	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil {
+		if currentNode.IsEcosystem() {
+			cmd.SiblingWorkspaces = []string{"__ALL__"}
+		} else {
+			cmd.SiblingWorkspaces = []string{filepath.Base(currentNode.Path)}
+		}
 	}
 
 	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
