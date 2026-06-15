@@ -862,8 +862,8 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 }
 
 // resolveSiblingWorkspacesAll resolves the bare `--sibling-workspaces` sentinel
-// (["__ALL__"]) into a concrete list of all discovered DIRECT-CHILD repos of the
-// ecosystem git root. It mutates cmd.SiblingWorkspaces in place.
+// (["__ALL__"]) into a concrete list of all DIRECT-CHILD repos of the ecosystem
+// git root. It mutates cmd.SiblingWorkspaces in place.
 //
 // It deliberately produces a concrete, non-empty slice (never nil): downstream,
 // len(siblingWorkspaces) > 0 is load-bearing — it drives isEcosystem in
@@ -871,10 +871,20 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 // ecosystem branch. A nil/empty slice would silently yield a non-ecosystem
 // worktree and defeat ecosystem teardown cleanup.
 //
-// The same discovery source SetupSubmodules uses (the workspace provider) is the
-// authority here. Direct-child filtering is case-insensitive to match the rest
-// of the codebase on macOS. If resolution yields zero repos we fall back to
-// legacy single-repo behavior (clear the sentinel) rather than crashing.
+// Authority: an ON-DISK scan of the ecosystem git root's immediate children.
+// "All repos in THIS ecosystem" means every immediate subdirectory of gitRoot
+// that is itself a git repo (has a `.git` dir/file) — the exact authority that
+// plan finish's path-based fallback trusts (factory.go: stat
+// filepath.Join(gitRoot, repo, ".git")). This is robust for `workspaces=["*"]`
+// ecosystems whose sibling repos have no grove.toml and are therefore NOT
+// promoted by runtime discovery: relying on the workspace provider alone
+// silently fell back to a legacy single-repo worktree (Bug 2).
+//
+// The on-disk scan is unioned with provider-discovered direct children so that
+// grove-marked repos that happen to live elsewhere still count. Only if BOTH
+// yield zero do we fall back to legacy single-repo behavior (clear the
+// sentinel). Direct-child comparison is case-insensitive to match the rest of
+// the codebase on macOS.
 func resolveSiblingWorkspacesAll(cmd *PlanInitCmd, provider *workspace.Provider, searchPath string) {
 	if !(len(cmd.SiblingWorkspaces) == 1 && cmd.SiblingWorkspaces[0] == "__ALL__") {
 		return
@@ -891,7 +901,32 @@ func resolveSiblingWorkspacesAll(cmd *PlanInitCmd, provider *workspace.Provider,
 		return
 	}
 
-	// Ensure a provider exists (construct one the same way the surrounding code does).
+	// Backbone: scan gitRoot's immediate children on disk. Include any dir whose
+	// `.git` (dir or file) exists, skipping dotdirs (.grove, .git) and the
+	// legacy worktree-output dir. Dedupe via a set.
+	repoSet := make(map[string]struct{})
+	if entries, rerr := os.ReadDir(gitRoot); rerr == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			// Resolve symlinked dirs too (entry.IsDir is false for a symlink).
+			info, ierr := os.Stat(filepath.Join(gitRoot, name))
+			if ierr != nil || !info.IsDir() {
+				continue
+			}
+			if strings.HasPrefix(name, ".") || name == ".grove-worktrees" {
+				continue
+			}
+			if _, statErr := os.Stat(filepath.Join(gitRoot, name, ".git")); statErr != nil {
+				continue
+			}
+			repoSet[name] = struct{}{}
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: --sibling-workspaces (all) could not scan %s: %v\n", gitRoot, rerr)
+	}
+
+	// Union with provider-discovered direct children (grove-marked repos that
+	// may live elsewhere but are registered as direct children of the git root).
 	if provider == nil {
 		logger := logrus.New()
 		logger.SetLevel(logrus.WarnLevel)
@@ -900,19 +935,17 @@ func resolveSiblingWorkspacesAll(cmd *PlanInitCmd, provider *workspace.Provider,
 			provider = workspace.NewProvider(res)
 		}
 	}
-	if provider == nil {
-		fmt.Fprintf(os.Stderr, "Warning: --sibling-workspaces (all) could not build a workspace provider; treating as single-repo worktree\n")
-		cmd.SiblingWorkspaces = nil
-		return
+	if provider != nil {
+		for name, localPath := range provider.LocalWorkspaces() {
+			if strings.EqualFold(filepath.Dir(localPath), gitRoot) {
+				repoSet[name] = struct{}{}
+			}
+		}
 	}
 
-	// Collect direct-child repos of the ecosystem git root (case-insensitive
-	// dir comparison for macOS), mirroring SetupSubmodules.
-	var repos []string
-	for name, localPath := range provider.LocalWorkspaces() {
-		if strings.EqualFold(filepath.Dir(localPath), gitRoot) {
-			repos = append(repos, name)
-		}
+	repos := make([]string, 0, len(repoSet))
+	for name := range repoSet {
+		repos = append(repos, name)
 	}
 	sort.Strings(repos)
 
