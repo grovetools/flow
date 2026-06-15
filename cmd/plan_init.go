@@ -133,6 +133,15 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		provider = workspace.NewProvider(discoveryResult)
 	}
 
+	// Default an empty sibling list to ALL repos when running from an
+	// ecosystem root, so a plain `--worktree` (no --sibling-workspaces) gets a
+	// full-ecosystem XDG worktree with every repo linked. The bare-flag
+	// sentinel (["__ALL__"]) is then expanded on disk by
+	// resolveSiblingWorkspacesAll below.
+	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil && currentNode.IsEcosystem() {
+		cmd.SiblingWorkspaces = []string{"__ALL__"}
+	}
+
 	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
 	// before any worktree creation / plan config writing consumes it.
 	{
@@ -175,7 +184,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if currentNode != nil {
 			workspacePath = currentNode.Path
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.SiblingWorkspaces, workspacePath)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.SiblingWorkspaces, workspacePath, cmd.Layout)
 		if err != nil {
 			return "", err
 		}
@@ -414,6 +423,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		provider = workspace.NewProvider(discoveryResult)
 	}
 
+	// Default an empty sibling list to ALL repos when running from an
+	// ecosystem root, so a plain `--worktree` (no --sibling-workspaces) gets a
+	// full-ecosystem XDG worktree with every repo linked.
+	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil && currentNode.IsEcosystem() {
+		cmd.SiblingWorkspaces = []string{"__ALL__"}
+	}
+
 	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
 	// before any worktree creation / plan config writing consumes it.
 	{
@@ -584,7 +600,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		if currentNode != nil {
 			workspacePath = currentNode.Path
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.SiblingWorkspaces, workspacePath)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.SiblingWorkspaces, workspacePath, cmd.Layout)
 		if err != nil {
 			return err
 		}
@@ -799,7 +815,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	// Execute init actions after everything is set up (only if --init flag is set)
 	if cmd.RunInit && len(recipe.InitActions) > 0 {
 		fmt.Println("\n▶️  Executing initialization actions from recipe...")
-		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, cmd.SiblingWorkspaces, templateData); err != nil {
+		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, cmd.SiblingWorkspaces, cmd.Layout, templateData); err != nil {
 			// Log a warning but do not fail the entire plan init
 			fmt.Printf("WARNING:  Warning: one or more init actions failed: %v\n", err)
 		} else {
@@ -1237,7 +1253,7 @@ func applyDefaultContextRulesToWorktree(worktreePath string, explicitRepos []str
 }
 
 // executeInitActions orchestrates the execution of actions defined in a recipe's workspace_init.yml
-func executeInitActions(actions []orchestration.InitAction, worktreeOverride, finalWorktree string, siblingWorkspaces []string, templateData interface{}) error {
+func executeInitActions(actions []orchestration.InitAction, worktreeOverride, finalWorktree string, siblingWorkspaces []string, layout string, templateData interface{}) error {
 	var errors []string
 
 	// Determine the base worktree path
@@ -1259,9 +1275,9 @@ func executeInitActions(actions []orchestration.InitAction, worktreeOverride, fi
 			WorktreeName:      finalWorktree,
 			BranchName:        finalWorktree,
 			SiblingWorkspaces: siblingWorkspaces,
-			// XDG gate: worktrees with sibling workspaces live under the
-			// XDG data dir.
-			UseXDGWorktrees: len(siblingWorkspaces) > 0,
+			// Layout is decoupled from selection: the resolved layout value
+			// (default xdg for ecosystems) decides the on-disk location.
+			UseXDGWorktrees: resolveWorktreeLayout(layout, gitRoot, len(siblingWorkspaces) > 0) == "xdg",
 		}
 		worktreePath, err = workspace.Prepare(context.Background(), opts)
 		if err != nil {
@@ -1330,10 +1346,45 @@ func executeShellAction(action orchestration.InitAction, workDir string, templat
 	return cmd.Run()
 }
 
+// resolveWorktreeLayout decides whether a new worktree uses the "xdg" layout
+// (under the XDG data dir) or the "legacy" layout (in-repo .grove-worktrees/).
+//
+// Precedence (highest first):
+//  1. explicit --layout flag value (flag)
+//  2. GROVE_WORKTREE_LAYOUT environment variable
+//  3. grove.toml [worktree] layout (loaded from gitRoot)
+//  4. built-in default: "xdg" for ecosystems, "legacy" for standalone repos
+//
+// (Phase 2 will flip the standalone default to "xdg".) Any invalid value at a
+// given level is ignored, falling through to the next level.
+func resolveWorktreeLayout(flag, gitRoot string, isEcosystem bool) string {
+	valid := func(v string) bool { return v == "xdg" || v == "legacy" }
+
+	if valid(flag) {
+		return flag
+	}
+	if env := os.Getenv("GROVE_WORKTREE_LAYOUT"); valid(env) {
+		return env
+	}
+	if gitRoot != "" {
+		if cfg, err := config.LoadFrom(gitRoot); err == nil && cfg != nil && cfg.Worktree != nil && valid(cfg.Worktree.Layout) {
+			return cfg.Worktree.Layout
+		}
+	}
+	if isEcosystem {
+		return "xdg"
+	}
+	return "legacy"
+}
+
 // createWorktreeIfRequested creates a git worktree with the given name and
 // returns the created worktree path along with the source repository's git
 // root (needed to configure go.work in a layout-independent way).
-func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, workspacePath string) (worktreePath, sourceGitRoot string, err error) {
+//
+// layout is the resolved --layout value ("xdg"/"legacy"/"") threaded in from
+// the caller; createWorktreeIfRequested has no access to the cmd, so the final
+// layout is resolved here against the discovered git root.
+func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, workspacePath, layout string) (worktreePath, sourceGitRoot string, err error) {
 	// Use workspace path if provided, otherwise fall back to current directory
 	searchPath := workspacePath
 	if searchPath == "" {
@@ -1355,9 +1406,10 @@ func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, 
 		WorktreeName:      worktreeName,
 		BranchName:        worktreeName,
 		SiblingWorkspaces: siblingWorkspaces,
-		// XDG gate: worktrees with sibling workspaces live under the XDG
-		// data dir; plain single-repo worktrees keep the legacy layout.
-		UseXDGWorktrees: len(siblingWorkspaces) > 0,
+		// Layout is decoupled from selection: the resolved --layout/env/config
+		// value (default xdg for ecosystems) decides the on-disk location, not
+		// the presence of sibling workspaces.
+		UseXDGWorktrees: resolveWorktreeLayout(layout, gitRoot, len(siblingWorkspaces) > 0) == "xdg",
 	}
 
 	worktreePath, err = workspace.Prepare(context.Background(), opts, orchestration.CopyProjectFilesToWorktree)

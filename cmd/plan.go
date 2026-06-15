@@ -130,6 +130,7 @@ var (
 	planInitNoteTargetFile string
 	planInitRunInit        bool
 	planInitPlaybook       string
+	planInitLayout         string
 	planRunDir             string
 	planRunAll             bool
 	planRunNext            bool
@@ -191,6 +192,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitNoteTargetFile, "note-target-file", "", "Filename of the job within the recipe to apply the --from-note content and reference to")
 	planInitCmd.Flags().BoolVar(&planInitRunInit, "init", false, "Execute init actions from the recipe's workspace_init.yml")
 	planInitCmd.Flags().StringVar(&planInitPlaybook, "playbook", "", "Name of a playbook whose skills, prompts, and recipes scope this plan (e.g., gdv2). Written to .grove-plan.yml; jobs in the plan inherit $PLAYBOOK_ROOT at execution time.")
+	planInitCmd.Flags().StringVar(&planInitLayout, "layout", "", "Worktree layout: 'xdg' (XDG data dir, default for ecosystems) or 'legacy' (in-repo .grove-worktrees/). Overrides GROVE_WORKTREE_LAYOUT and grove.toml [worktree] layout.")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -320,6 +322,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		NoteTargetFile: planInitNoteTargetFile,
 		RunInit:        planInitRunInit,
 		Playbook:       planInitPlaybook,
+		Layout:         planInitLayout,
 	}
 
 	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
@@ -410,4 +413,5 @@ type PlanInitCmd struct {
 	NoteTargetFile string
 	RunInit        bool // Run init actions from workspace_init.yml
 	Playbook       string
+	Layout         string // Worktree layout: "xdg" or "legacy" (empty = resolver default)
 }
