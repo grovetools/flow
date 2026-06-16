@@ -114,29 +114,30 @@ Examples:
 
 // Command flags
 var (
-	planInitForce          bool
-	planInitModel          string
-	planInitWorktree       string
-	planInitExtractAllFrom string
-	planInitOpenSession    bool
-	planInitEnvProfile     string
-	planInitRecipe         string
-	planInitTUI            bool
-	planInitRecipeVars     []string
-	planInitRecipeCmd      string
+	planInitForce             bool
+	planInitModel             string
+	planInitWorktree          string
+	planInitExtractAllFrom    string
+	planInitOpenSession       bool
+	planInitEnvProfile        string
+	planInitRecipe            string
+	planInitTUI               bool
+	planInitRecipeVars        []string
+	planInitRecipeCmd         string
 	planInitSiblingWorkspaces []string
-	planInitNoteRef        string
-	planInitFromNote       string
-	planInitNoteTargetFile string
-	planInitRunInit        bool
-	planInitPlaybook       string
-	planInitLayout         string
-	planRunDir             string
-	planRunAll             bool
-	planRunNext            bool
-	planRunModel           string
-	planRunLocal           bool // Force local execution (skip daemon)
-	planRunBackground      bool // Submit to daemon and exit without waiting
+	planInitNoteRef           string
+	planInitFromNote          string
+	planInitNoteTargetFile    string
+	planInitRunInit           bool
+	planInitPlaybook          string
+	planInitLayout            string
+	planInitAnchor            string
+	planRunDir                string
+	planRunAll                bool
+	planRunNext               bool
+	planRunModel              string
+	planRunLocal              bool // Force local execution (skip daemon)
+	planRunBackground         bool // Submit to daemon and exit without waiting
 
 	// Add flags
 	planAddTemplate            string
@@ -193,6 +194,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().BoolVar(&planInitRunInit, "init", false, "Execute init actions from the recipe's workspace_init.yml")
 	planInitCmd.Flags().StringVar(&planInitPlaybook, "playbook", "", "Name of a playbook whose skills, prompts, and recipes scope this plan (e.g., gdv2). Written to .grove-plan.yml; jobs in the plan inherit $PLAYBOOK_ROOT at execution time.")
 	planInitCmd.Flags().StringVar(&planInitLayout, "layout", "", "Worktree layout: 'xdg' (XDG data dir, default for ecosystems) or 'legacy' (in-repo .grove-worktrees/). Overrides GROVE_WORKTREE_LAYOUT and grove.toml [worktree] layout.")
+	planInitCmd.Flags().StringVar(&planInitAnchor, "anchor", "", "Repo to anchor the worktree to (driving repo). The worktree will be placed under this repo's XDG base directory. Auto-inferred when run from inside a sub-project.")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -306,23 +308,24 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 	// This is the command object built from CLI flags.
 	// It will be used for both direct CLI execution and to pre-populate the TUI.
 	cliCmd := &PlanInitCmd{
-		Dir:            dir,
-		Force:          planInitForce,
-		Model:          planInitModel,
-		Worktree:       planInitWorktree,
-		ExtractAllFrom: planInitExtractAllFrom,
-		OpenSession:    planInitOpenSession,
-		EnvProfile:     planInitEnvProfile,
-		Recipe:         planInitRecipe,
-		RecipeVars:     planInitRecipeVars,
-		RecipeCmd:      planInitRecipeCmd,
+		Dir:               dir,
+		Force:             planInitForce,
+		Model:             planInitModel,
+		Worktree:          planInitWorktree,
+		ExtractAllFrom:    planInitExtractAllFrom,
+		OpenSession:       planInitOpenSession,
+		EnvProfile:        planInitEnvProfile,
+		Recipe:            planInitRecipe,
+		RecipeVars:        planInitRecipeVars,
+		RecipeCmd:         planInitRecipeCmd,
 		SiblingWorkspaces: planInitSiblingWorkspaces,
-		NoteRef:        planInitNoteRef,
-		FromNote:       planInitFromNote,
-		NoteTargetFile: planInitNoteTargetFile,
-		RunInit:        planInitRunInit,
-		Playbook:       planInitPlaybook,
-		Layout:         planInitLayout,
+		Anchor:            planInitAnchor,
+		NoteRef:           planInitNoteRef,
+		FromNote:          planInitFromNote,
+		NoteTargetFile:    planInitNoteTargetFile,
+		RunInit:           planInitRunInit,
+		Playbook:          planInitPlaybook,
+		Layout:            planInitLayout,
 	}
 
 	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
@@ -397,21 +400,22 @@ func runPlanGraph(cmd *cobra.Command, args []string) error {
 
 // PlanInitCmd holds the parameters for the init command.
 type PlanInitCmd struct {
-	Dir            string
-	Force          bool
-	Model          string
-	Worktree       string
-	ExtractAllFrom string
-	OpenSession    bool
-	EnvProfile     string // Named environment profile (--env flag)
-	Recipe         string
-	RecipeVars     []string
-	RecipeCmd      string
+	Dir               string
+	Force             bool
+	Model             string
+	Worktree          string
+	ExtractAllFrom    string
+	OpenSession       bool
+	EnvProfile        string // Named environment profile (--env flag)
+	Recipe            string
+	RecipeVars        []string
+	RecipeCmd         string
 	SiblingWorkspaces []string // Sibling workspaces to link into the ecosystem worktree
-	NoteRef        string
-	FromNote       string
-	NoteTargetFile string
-	RunInit        bool // Run init actions from workspace_init.yml
-	Playbook       string
-	Layout         string // Worktree layout: "xdg" or "legacy" (empty = resolver default)
+	NoteRef           string
+	FromNote          string
+	NoteTargetFile    string
+	RunInit           bool // Run init actions from workspace_init.yml
+	Playbook          string
+	Layout            string // Worktree layout: "xdg" or "legacy" (empty = resolver default)
+	Anchor            string // Repo name to anchor the worktree to (driving repo)
 }
