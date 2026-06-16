@@ -30,6 +30,7 @@ func main() {
 		scenarios.PlanLifecycleScenario,
 		scenarios.PlanFinishEcosystemScenario,
 		scenarios.SiblingWorkspacesLifecycleScenario,
+		scenarios.AnchorRegistryScenario,
 		scenarios.JobManagementScenario,
 		scenarios.PlanListTUIScenario,
 		scenarios.PlanInitTUIScenario,
