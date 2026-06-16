@@ -1404,19 +1404,56 @@ func resolveWorktreeLayout(flag, gitRoot string, isEcosystem bool) string {
 // resolveAnchorPath determines the anchor path for worktree creation.
 // Priority: explicit --anchor flag → auto-infer from sub-project currentNode → currentNode.Path (ecosystem root).
 // Returns an error when an explicit --anchor name is given but cannot be resolved.
+//
+// An explicit --anchor <name> MUST resolve to the CANONICAL sub-project of the
+// CURRENT ecosystem — the real checkout directly under the ecosystem root — and
+// NEVER to a worktree copy or a sub-project belonging to a different ecosystem.
+// Using the bare provider.FindByName here was the bug: it returns the FIRST
+// node with the name regardless of kind/ecosystem, so an anchor could resolve
+// to e.g. <eco>/.grove-worktrees/<other-plan>/<name>, placing the new worktree
+// under the wrong repo's XDG base. We resolve against the current ecosystem via
+// FindSubProjectByName instead.
 func resolveAnchorPath(anchor string, currentNode *workspace.WorkspaceNode, provider *workspace.Provider) (string, error) {
+	ecosystemRoot := currentEcosystemRoot(currentNode)
+
 	if anchor != "" {
 		if provider != nil {
-			if node := provider.FindByName(anchor); node != nil {
+			// Prefer the canonical sub-project of the current ecosystem.
+			if node := provider.FindSubProjectByName(anchor, ecosystemRoot); node != nil {
 				return node.Path, nil
 			}
+			// Fallback for the no-ecosystem-context case (e.g. standalone repo):
+			// accept a non-worktree match by name so a sensible anchor still
+			// resolves, but never a worktree copy.
+			if ecosystemRoot == "" {
+				if node := provider.FindByName(anchor); node != nil && !node.IsWorktree() {
+					return node.Path, nil
+				}
+			}
 		}
-		return "", fmt.Errorf("anchor repo %q not found in discovered workspaces", anchor)
+		return "", fmt.Errorf("anchor repo %q not found as a sub-project of the current ecosystem", anchor)
 	}
 	if currentNode == nil {
 		return "", nil
 	}
 	return currentNode.Path, nil
+}
+
+// currentEcosystemRoot returns the path of the ecosystem that currentNode
+// belongs to: the node's own path when it IS an ecosystem (root or worktree),
+// otherwise its RootEcosystemPath (falling back to ParentEcosystemPath). Returns
+// "" when there is no ecosystem context (standalone project or nil node).
+func currentEcosystemRoot(currentNode *workspace.WorkspaceNode) string {
+	if currentNode == nil {
+		return ""
+	}
+	if currentNode.IsEcosystem() {
+		return currentNode.Path
+	}
+	if currentNode.RootEcosystemPath != "" {
+		return currentNode.RootEcosystemPath
+	}
+	return currentNode.ParentEcosystemPath
 }
 
 // createWorktreeIfRequested creates a git worktree with the given name and

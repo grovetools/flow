@@ -56,8 +56,15 @@ var PlanFinishEcosystemScenario = harness.NewScenario(
 			ctx.Set("plan_path", planPath)
 			ctx.Set("plan_name", "my-eco-plan")
 
-			// Verify worktree was created
-			worktreePath := filepath.Join(projectDir, ".grove-worktrees", "my-eco-plan")
+			// Verify worktree was created. A bare `--worktree` on a standalone
+			// project now seeds the project's own name as a sibling workspace
+			// (flow 0c2977c), which drives the unified XDG container layout
+			// (flow 8681485): the worktree CONTAINER lands under the project's
+			// XDG base (paths.WorktreesDir()/DirIdentifier(projectDir)/<name>)
+			// with the repo checked out as a subdir inside it — NOT the legacy
+			// in-repo <projectDir>/.grove-worktrees/<name>. Mirror how
+			// sibling_workspaces_lifecycle.go / anchor_registry.go locate it.
+			worktreePath := expectedWorktreePath(ctx, projectDir, "my-eco-plan", true /* XDG */)
 			ctx.Set("worktree_path", worktreePath)
 			return fs.AssertExists(worktreePath)
 		}),
