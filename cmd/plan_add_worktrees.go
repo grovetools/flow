@@ -129,10 +129,25 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 		ecosystemRoot = normalized
 	}
 
-	// Find where the ecosystem worktree actually lives (XDG or legacy).
-	worktreePath, ok := workspace.FindWorktreePath(ecosystemRoot, worktreeName)
+	// Build a workspace provider once for the worktree lookup, submodule setup,
+	// and --all discovery.
+	logger := logrus.New()
+	logger.SetLevel(logrus.WarnLevel)
+	discoveryService := workspace.NewDiscoveryService(logger)
+	discoveryResult, err := discoveryService.DiscoverAll()
+	if err != nil {
+		return fmt.Errorf("failed to discover workspaces: %w", err)
+	}
+	provider := workspace.NewProvider(discoveryResult)
+
+	// Find where the ecosystem worktree actually lives (XDG or legacy). Use the
+	// registry-first resolver so an anchored worktree (`--anchor <sub-repo>`,
+	// which lives under the anchor repo's XDG base rather than ecosystemRoot's)
+	// is found too. Owners accepted: the ecosystem root plus every local
+	// workspace, scoping the registry match to this ecosystem.
+	worktreePath, ok := workspace.ResolveWorktreePathByName(ecosystemRoot, worktreeName, ecosystemWorktreeOwners(ecosystemRoot, provider))
 	if !ok {
-		return fmt.Errorf("worktree '%s' not found under either layout base of %s", worktreeName, ecosystemRoot)
+		return fmt.Errorf("worktree '%s' not found under any layout base of %s or its sub-repos", worktreeName, ecosystemRoot)
 	}
 
 	// Resolve the owner of the worktree (layout-independent).
@@ -146,16 +161,6 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 	// Resolve the branch from the existing worktree HEAD, falling back to the
 	// worktree name (which is also the branch name at creation time).
 	branch := resolveWorktreeBranch(worktreePath, plan.Config.Repos, worktreeName)
-
-	// Build a workspace provider once for submodule setup and --all discovery.
-	logger := logrus.New()
-	logger.SetLevel(logrus.WarnLevel)
-	discoveryService := workspace.NewDiscoveryService(logger)
-	discoveryResult, err := discoveryService.DiscoverAll()
-	if err != nil {
-		return fmt.Errorf("failed to discover workspaces: %w", err)
-	}
-	provider := workspace.NewProvider(discoveryResult)
 
 	// Determine the repos to add: explicit list, or the full discovered
 	// direct-child set when --all.
