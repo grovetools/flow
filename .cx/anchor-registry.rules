@@ -1,0 +1,10 @@
+# Anchored worktree placement + per-worktree XDG registry rules
+# Scopes the source that decides where a --worktree --anchor container lands
+# (the anchor-path resolution + worktree Prepare call) and the plan-finish
+# registry-prune path. Changes here should trigger the anchor-registry E2E
+# scenario.
+
+cmd/plan.go
+cmd/plan_init.go
+pkg/plan_finish/factory.go
+tests/e2e/tend/scenarios/anchor_registry.go

@@ -33,6 +33,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/pkg/worktreeregistry"
 	"github.com/grovetools/core/util/pathutil"
@@ -669,7 +670,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// to cleanupEcosystemWorktree) actually runs and deregisters the
 				// child worktrees before the branch-delete step.
 				if plan.Config != nil && len(plan.Config.Repos) > 0 {
-					containerDir, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+					containerDir, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
 					if !ok {
 						return "Not found", nil
 					}
@@ -698,7 +699,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return "Not found", nil
 			},
 			Action: func() error {
-				wPath, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+				wPath, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
 				if !ok {
 					wPath = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
 				}
@@ -1245,8 +1246,60 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 // When force is false, destructive git operations (worktree remove --force, branch -D)
 // are downgraded to their safe variants so that uncommitted work and unmerged commits
 // survive; failures surface to the caller instead of being papered over with os.RemoveAll.
+// resolveContainerWorktreePath locates the on-disk container directory for the
+// worktree named worktreeName belonging to the ecosystem at gitRoot.
+//
+// FindWorktreePath only probes gitRoot's OWN worktree bases, so it misses
+// worktrees created with `--anchor <sub-repo>` — those live under the anchor
+// repo's XDG base (paths.WorktreesDir()/DirIdentifier(anchor)/<name>), not the
+// ecosystem's. When the direct probe misses, this falls back to the
+// per-worktree registry: it returns the AbsPath of a registry entry whose
+// basename matches worktreeName AND whose Owner is one of this ecosystem's
+// local workspaces (the only repos an --anchor in this ecosystem could name),
+// which keeps the match scoped and unambiguous. Returns ("", false) when no
+// container can be resolved.
+func resolveContainerWorktreePath(gitRoot, worktreeName string, provider *workspace.Provider) (string, bool) {
+	if dir, ok := workspace.FindWorktreePath(gitRoot, worktreeName); ok {
+		return dir, true
+	}
+	if provider == nil {
+		return "", false
+	}
+	// Owners we accept: the ecosystem root itself plus every local workspace
+	// (sub-repo) of this ecosystem — any of which could be an --anchor target.
+	owners := map[string]struct{}{}
+	if abs, err := filepath.Abs(gitRoot); err == nil {
+		owners[abs] = struct{}{}
+	}
+	for _, p := range provider.LocalWorkspacesInEcosystem(gitRoot) {
+		if abs, err := filepath.Abs(p); err == nil {
+			owners[abs] = struct{}{}
+		}
+	}
+	entries, err := worktreeregistry.ListAll()
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e == nil || e.AbsPath == "" || filepath.Base(e.AbsPath) != worktreeName {
+			continue
+		}
+		ownerAbs := e.Owner
+		if abs, aerr := filepath.Abs(e.Owner); aerr == nil {
+			ownerAbs = abs
+		}
+		if _, ok := owners[ownerAbs]; !ok {
+			continue
+		}
+		if _, statErr := os.Stat(e.AbsPath); statErr == nil {
+			return e.AbsPath, true
+		}
+	}
+	return "", false
+}
+
 func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider, force bool) error {
-	ecosystemDir, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+	ecosystemDir, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
 	if !ok {
 		ecosystemDir = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
 	}
@@ -1455,6 +1508,25 @@ func pathIsUnderGroveWorktrees(wPath, gitRoot string) bool {
 		}
 		if strings.HasPrefix(wPathClean, container+string(filepath.Separator)) {
 			return true
+		}
+	}
+	// Anchored worktrees (`--anchor <sub-repo>`) live under the anchor repo's
+	// XDG base, not gitRoot's, so the gitRoot-scoped check above misses them.
+	// They still live inside the global XDG worktrees tree
+	// (WorktreesDir()/<identifier>/<name>), which IS the grove-managed boundary
+	// this guard exists to enforce. Accept a path that is a LEAF (>= 2 levels
+	// below the root: an identifier dir and the worktree name), never the root
+	// or a bare identifier dir.
+	if wtd := paths.WorktreesDir(); wtd != "" {
+		root := filepath.Clean(wtd)
+		if strings.HasPrefix(wPathClean, root+string(filepath.Separator)) {
+			rel, err := filepath.Rel(root, wPathClean)
+			if err == nil {
+				depth := len(strings.Split(rel, string(filepath.Separator)))
+				if depth >= 2 {
+					return true
+				}
+			}
 		}
 	}
 	return false
