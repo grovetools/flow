@@ -185,12 +185,12 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 	// Create the actual worktree if requested (but skip if it's inherited)
 	if worktreeToSet != "" && !isInheritedWorktree {
-		// Use the workspace path from currentNode to find the git root
-		var workspacePath string
-		if currentNode != nil {
-			workspacePath = currentNode.Path
+		// Resolve the anchor path: --anchor flag > auto-infer from sub-project > fallback to ecosystem root.
+		anchorPath, err := resolveAnchorPath(cmd.Anchor, currentNode, provider)
+		if err != nil {
+			return "", err
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.SiblingWorkspaces, workspacePath, cmd.Layout)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.SiblingWorkspaces, anchorPath, cmd.Layout)
 		if err != nil {
 			return "", err
 		}
@@ -614,12 +614,12 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 
 	// Create the actual worktree if requested (but skip if it's inherited)
 	if worktreeOverride != "" && !isInheritedWorktree {
-		// Use the workspace path from currentNode to find the git root
-		var workspacePath string
-		if currentNode != nil {
-			workspacePath = currentNode.Path
+		// Resolve the anchor path: --anchor flag > auto-infer from sub-project > fallback to ecosystem root.
+		anchorPath, err := resolveAnchorPath(cmd.Anchor, currentNode, provider)
+		if err != nil {
+			return err
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.SiblingWorkspaces, workspacePath, cmd.Layout)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.SiblingWorkspaces, anchorPath, cmd.Layout)
 		if err != nil {
 			return err
 		}
@@ -1399,6 +1399,24 @@ func resolveWorktreeLayout(flag, gitRoot string, isEcosystem bool) string {
 		return "xdg"
 	}
 	return "legacy"
+}
+
+// resolveAnchorPath determines the anchor path for worktree creation.
+// Priority: explicit --anchor flag → auto-infer from sub-project currentNode → currentNode.Path (ecosystem root).
+// Returns an error when an explicit --anchor name is given but cannot be resolved.
+func resolveAnchorPath(anchor string, currentNode *workspace.WorkspaceNode, provider *workspace.Provider) (string, error) {
+	if anchor != "" {
+		if provider != nil {
+			if node := provider.FindByName(anchor); node != nil {
+				return node.Path, nil
+			}
+		}
+		return "", fmt.Errorf("anchor repo %q not found in discovered workspaces", anchor)
+	}
+	if currentNode == nil {
+		return "", nil
+	}
+	return currentNode.Path, nil
 }
 
 // createWorktreeIfRequested creates a git worktree with the given name and
