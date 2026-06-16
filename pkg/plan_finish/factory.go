@@ -1259,43 +1259,18 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 // which keeps the match scoped and unambiguous. Returns ("", false) when no
 // container can be resolved.
 func resolveContainerWorktreePath(gitRoot, worktreeName string, provider *workspace.Provider) (string, bool) {
-	if dir, ok := workspace.FindWorktreePath(gitRoot, worktreeName); ok {
-		return dir, true
-	}
-	if provider == nil {
-		return "", false
-	}
-	// Owners we accept: the ecosystem root itself plus every local workspace
-	// (sub-repo) of this ecosystem — any of which could be an --anchor target.
-	owners := map[string]struct{}{}
-	if abs, err := filepath.Abs(gitRoot); err == nil {
-		owners[abs] = struct{}{}
-	}
-	for _, p := range provider.LocalWorkspacesInEcosystem(gitRoot) {
-		if abs, err := filepath.Abs(p); err == nil {
-			owners[abs] = struct{}{}
+	// Delegate to the shared, registry-first resolver in core so every consumer
+	// (create-time provisioning, add-worktrees, and this prune path) agrees on
+	// where the worktree named worktreeName lives — including anchored worktrees
+	// under a sub-repo's XDG base. Owners accepted: the ecosystem root plus every
+	// local workspace, any of which could be an --anchor target.
+	owners := []string{gitRoot}
+	if provider != nil {
+		for _, p := range provider.LocalWorkspacesInEcosystem(gitRoot) {
+			owners = append(owners, p)
 		}
 	}
-	entries, err := worktreeregistry.ListAll()
-	if err != nil {
-		return "", false
-	}
-	for _, e := range entries {
-		if e == nil || e.AbsPath == "" || filepath.Base(e.AbsPath) != worktreeName {
-			continue
-		}
-		ownerAbs := e.Owner
-		if abs, aerr := filepath.Abs(e.Owner); aerr == nil {
-			ownerAbs = abs
-		}
-		if _, ok := owners[ownerAbs]; !ok {
-			continue
-		}
-		if _, statErr := os.Stat(e.AbsPath); statErr == nil {
-			return e.AbsPath, true
-		}
-	}
-	return "", false
+	return workspace.ResolveWorktreePathByName(gitRoot, worktreeName, owners)
 }
 
 func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider, force bool) error {

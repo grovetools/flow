@@ -1524,6 +1524,22 @@ func setWorktreeActivePlan(worktreePath, planName string) error {
 	return nil
 }
 
+// ecosystemWorktreeOwners returns the set of repo roots that may legitimately
+// OWN a worktree of the ecosystem rooted at gitRoot: the ecosystem root itself
+// plus every local workspace (sub-repo), any of which an `--anchor <repo>` could
+// name. It is the owner-scope passed to workspace.ResolveWorktreePathByName so
+// the registry lookup stays scoped to this ecosystem and never matches a
+// same-named worktree owned by an unrelated ecosystem.
+func ecosystemWorktreeOwners(gitRoot string, wsProvider *workspace.Provider) []string {
+	owners := []string{gitRoot}
+	if wsProvider != nil {
+		for _, p := range wsProvider.LocalWorkspacesInEcosystem(gitRoot) {
+			owners = append(owners, p)
+		}
+	}
+	return owners
+}
+
 // provisionEnvironment checks the layered config for an environment provider and
 // provisions it if configured. Returns a string with status messages to append to the result.
 func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.Provider, envProfile string) (string, error) {
@@ -1535,7 +1551,13 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 		if err != nil {
 			return "", nil
 		}
-		found, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+		// Registry-aware lookup: an anchored worktree (`--anchor <sub-repo>`)
+		// lives under the ANCHOR repo's XDG base, not gitRoot's, so the plain
+		// FindWorktreePath(gitRoot, ...) probe misses it and would emit a false
+		// "not found; skipping provisioning" warning. ResolveWorktreePathByName
+		// consults the per-worktree registry first (owner-scoped to this
+		// ecosystem's sub-repos) so anchored worktrees resolve too.
+		found, ok := workspace.ResolveWorktreePathByName(gitRoot, worktreeName, ecosystemWorktreeOwners(gitRoot, wsProvider))
 		if !ok {
 			// Surface the miss instead of silently provisioning against a
 			// guessed path (which would quietly load no layered config).
