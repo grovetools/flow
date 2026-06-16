@@ -34,6 +34,8 @@ import (
 	"github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/pkg/worktreeregistry"
+	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -701,7 +703,11 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					wPath = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
 				}
 				if plan.Config != nil && len(plan.Config.Repos) > 0 {
-					return cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos, provider, opts.Force)
+					if err := cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos, provider, opts.Force); err != nil {
+						return err
+					}
+					_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
+					return nil
 				}
 				hasSubmodules := false
 				if _, err := os.Stat(filepath.Join(wPath, ".gitmodules")); err == nil {
@@ -767,6 +773,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						fmt.Printf("    Warning: failed to prune linked submodule worktree metadata: %v\n", subErr)
 					}
 				}
+				_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
 				return nil
 			},
 		},
