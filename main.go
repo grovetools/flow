@@ -16,6 +16,10 @@ func main() {
 		"Job orchestration and workflows",
 	)
 
+	// Register the unified `--at` target flag + the PersistentPreRunE
+	// chokepoint that resolves it into a *plan.ResolvedTarget on the context.
+	cmd.SetupTargetFlag(rootCmd)
+
 	vInfo := version.GetInfo()
 	rootCmd.Version = vInfo.Version
 	cli.SetVersionTemplate(rootCmd, cli.VersionInfo{
