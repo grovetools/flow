@@ -303,6 +303,14 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// Only set model override if explicitly provided via CLI flag
 	modelOverride := planRunModel
 
+	// Validate the model override early so the user gets a clear error
+	// before any jobs are dispatched.
+	if modelOverride != "" {
+		if err := orchestration.ValidateModelKnown(modelOverride); err != nil {
+			return fmt.Errorf("invalid --model override: %w", err)
+		}
+	}
+
 	// Create orchestrator config
 	maxSteps := 20 // Default
 	if flowCfg.MaxConsecutiveSteps > 0 {
