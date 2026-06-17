@@ -132,8 +132,9 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
-		// Always enable env teardown, submodule merge, mark-finished.
+		// Always enable env teardown, agent cleanup, submodule merge, mark-finished.
 		enable(plan_finish.ItemEnvTeardown, true)
+		enable(plan_finish.ItemKillBoundAgents, true)
 		enable(plan_finish.ItemMergeSubmodules, true)
 		enable(plan_finish.ItemMarkFinished, true)
 		enable(plan_finish.ItemCloseSession, opts.CloseSession)
