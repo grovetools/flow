@@ -234,10 +234,12 @@ Examples:
 Available actions are defined in the recipe's workspace_init.yml under the 'actions' key.
 The special action 'init' runs the actions defined under the 'init' key.
 
-Plans can be referenced by slug from any directory. Use --dir to specify the workspace context.
+Plans can be referenced by slug from any directory. Prefer the persistent
+--at <target> flag (plan name, container path, or <container-id>/<name>) to
+operate on a plan/worktree from outside it. --dir is deprecated in favor of --at.
 
-  # Run an action from any directory with --dir
-  flow action start-dev my-plan --dir ~/Code/myapp`,
+  # Run an action against a plan from any directory with --at
+  flow action start-dev --at my-plan`,
 		Args: cobra.RangeArgs(0, 2),
 		RunE: runPlanAction,
 	}
