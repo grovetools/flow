@@ -126,10 +126,29 @@ var CoordinatorWorkflowScenario = harness.NewScenario(
 			if w, werr := filepath.EvalSymlinks(wantOwner); werr == nil {
 				wantOwner = w
 			}
+
+			// Claude folder-trust pre-seed: Prepare seeds ~/.claude.json (in the
+			// sandbox HOME) so agents launched inside the worktree skip the
+			// interactive trust prompt. Trust is per-exact-path and keyed by the
+			// CANONICAL path (the same form flow hands Claude), so canonicalize
+			// the expected keys. Both the container AND the <worktree>/<repo>
+			// subdir (svc-a, the anchor member) must be trusted.
+			claudeJSONPath := filepath.Join(ctx.HomeDir(), ".claude.json")
+			claudeData, claudeErr := fs.ReadString(claudeJSONPath)
+			claudeTrust := map[string]any{}
+			if claudeErr == nil {
+				_ = json.Unmarshal([]byte(claudeData), &claudeTrust)
+			}
+			wantContainerKey, _ := pathutil.CanonicalPath(worktreePath)
+			wantRepoKey, _ := pathutil.CanonicalPath(filepath.Join(worktreePath, "svc-a"))
+
 			return ctx.Verify(func(v *verify.Collector) {
 				v.Equal("registry Entry.Plan links to the feat plan", "feat", entry.Plan)
 				v.Equal("registry owner is the anchor (svc-a)", wantOwner, gotOwner)
 				v.True("registry repos populated", len(entry.Repos) > 0)
+				v.True("Claude trust file (~/.claude.json) seeded in sandbox HOME", claudeErr == nil)
+				v.True("Claude trust seeded for the worktree container", claudeTrustAccepted(claudeTrust, wantContainerKey))
+				v.True("Claude trust seeded for the anchor repo subdir (svc-a)", claudeTrustAccepted(claudeTrust, wantRepoKey))
 			})
 		}),
 
@@ -400,3 +419,17 @@ var CoordinatorWorkflowScenario = harness.NewScenario(
 		}),
 	},
 )
+
+// claudeTrustAccepted reports whether the parsed ~/.claude.json marks the given
+// path as folder-trusted: projects[path].hasTrustDialogAccepted == true.
+func claudeTrustAccepted(root map[string]any, path string) bool {
+	projects, ok := root["projects"].(map[string]any)
+	if !ok {
+		return false
+	}
+	entry, ok := projects[path].(map[string]any)
+	if !ok {
+		return false
+	}
+	return entry["hasTrustDialogAccepted"] == true
+}

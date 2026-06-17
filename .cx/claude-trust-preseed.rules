@@ -1,0 +1,12 @@
+# Claude folder-trust pre-seed rules
+# Scopes the core source that pre-seeds ~/.claude.json folder-trust at worktree
+# creation (the new claudetrust leaf package + its single call site in Prepare)
+# plus the E2E scenario that asserts the seeded trust keys. Changes to these
+# should trigger the coordinator-workflow scenario, which drives a real
+# `plan init --worktree --anchor` and verifies the per-path trust keys land in
+# the sandbox ~/.claude.json. Paths are relative to the flow repo root.
+
+../core/pkg/claudetrust/seeder.go
+../core/pkg/workspace/prepare.go
+../core/util/pathutil/normalize.go
+tests/e2e/tend/scenarios/coordinator_workflow.go

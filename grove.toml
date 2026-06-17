@@ -19,6 +19,11 @@ name = "at-target"
 rules = ".cx/at-target.rules"
 scenarios = ["at-target", "coordinator-workflow"]
 
+[[test_scopes]]
+name = "claude-trust-preseed"
+rules = ".cx/claude-trust-preseed.rules"
+scenarios = ["coordinator-workflow"]
+
 [[hooks.on_stop]]
 name = "Auto-format"
 command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"
