@@ -48,6 +48,7 @@ func SetupTargetFlag(rootCmd *cobra.Command) {
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		ref, _ := cmd.Flags().GetString(TargetFlagName)
+		explicit := ref != ""
 
 		// Alias + deprecation-warn: when --at is empty, fall back to the
 		// legacy --dir/--plan/--workspace flags (if present) and route their
@@ -62,7 +63,18 @@ func SetupTargetFlag(rootCmd *cobra.Command) {
 
 		target, err := plan.ResolveTarget(ref)
 		if err != nil {
-			return fmt.Errorf("resolve --at target %q: %w", ref, err)
+			// An explicit --at that fails to resolve is a hard error. A legacy
+			// --dir/--plan/--workspace alias is best-effort convenience, NOT a
+			// gate: commands like `plan review`/`finish` use --dir as a plain
+			// working-directory context (the ecosystem root, which is not a
+			// registered worktree), so a resolution miss must fall through to
+			// the command's own flag handling rather than abort it. Aliasing
+			// it to --at only when it genuinely resolves to a worktree keeps
+			// the convenience without breaking the directory-context use.
+			if explicit {
+				return fmt.Errorf("resolve --at target %q: %w", ref, err)
+			}
+			return nil
 		}
 		cmd.SetContext(context.WithValue(cmd.Context(), TargetContextKey, target))
 		return nil

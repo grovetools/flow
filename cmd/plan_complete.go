@@ -109,6 +109,12 @@ func runPlanComplete(cmd *cobra.Command, args []string) error {
 		} else {
 			planDir = resolvedPath
 		}
+	} else if unified, ok := TargetFromContext(cmd.Context()); ok && unified.PlanDir != "" {
+		// Honor the unified --at target when no explicit plan slug/flag was
+		// given, so `plan complete --at <target> <job.md>` resolves the bare
+		// job filename against the target plan dir — parity with run/wait/status
+		// (the --at funnel fix, flow 1ba7e62, missed complete).
+		planDir = unified.PlanDir
 	} else {
 		planDir = "."
 	}

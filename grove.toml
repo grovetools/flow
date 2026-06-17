@@ -17,7 +17,7 @@ scenarios = ["anchor-registry", "anchor-registry-multi"]
 [[test_scopes]]
 name = "at-target"
 rules = ".cx/at-target.rules"
-scenarios = ["at-target"]
+scenarios = ["at-target", "coordinator-workflow"]
 
 [[hooks.on_stop]]
 name = "Auto-format"

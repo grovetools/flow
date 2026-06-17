@@ -33,6 +33,7 @@ func main() {
 		scenarios.AnchorRegistryScenario,
 		scenarios.AnchorRegistryMultiScenario,
 		scenarios.ATTargetScenario,
+		scenarios.CoordinatorWorkflowScenario,
 		scenarios.JobManagementScenario,
 		scenarios.PlanListTUIScenario,
 		scenarios.PlanInitTUIScenario,
