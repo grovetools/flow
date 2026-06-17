@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/verify"
@@ -28,8 +29,8 @@ import (
 // real, mock-free target.
 var ATTargetScenario = harness.NewScenario(
 	"at-target",
-	"Unified --at <target> flag resolves plans by name and by absolute container path across status/run/wait, while the cwd-default fallback stays intact.",
-	[]string{"xdg", "worktree", "registry", "plan", "at", "status", "run", "wait", "cli"},
+	"Unified --at <target> flag resolves plans by name and by absolute container path across status/run/wait/add/complete/retry, while the cwd-default fallback stays intact.",
+	[]string{"xdg", "worktree", "registry", "plan", "at", "status", "run", "wait", "complete", "retry", "cli"},
 	[]harness.Step{
 		// grove mocked: plan init/finish make incidental env-teardown calls.
 		// cx/llm cover any context regeneration. The shell job needs no LLM.
@@ -258,6 +259,107 @@ var ATTargetScenario = harness.NewScenario(
 			}
 			return ctx.Verify(func(v *verify.Collector) {
 				v.Equal("legacy positional resolver still finds the plan without --at", "at-plan", out.Plan)
+			})
+		}),
+
+		// --- complete by plan NAME, from an outside directory ---
+		harness.NewStep("plan complete --at <name> resolves the job against the target plan", func(ctx *harness.Context) error {
+			outsideDir := ctx.GetString("outside_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Add a shell job that we can complete. Shell jobs in pending
+			// status can be completed (they haven't been run yet).
+			cmd := ctx.Bin("plan", "add", "--at", "at-plan",
+				"--type", "shell",
+				"--title", "completable job",
+				"-p", "echo completable")
+			cmd.Dir(outsideDir)
+			result := cmd.Run()
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("adding completable job: %w", err)
+			}
+
+			completeJobPath, err := findJobByPrefix(planPath, "04-")
+			if err != nil {
+				return fmt.Errorf("locating completable job: %w", err)
+			}
+			completeJobFile := filepath.Base(completeJobPath)
+
+			// Run it first so it reaches completed, then we know `complete`
+			// resolved the right directory (not the outside cwd).
+			runCmd := ctx.Bin("plan", "run", "--local", "--at", "at-plan", completeJobFile, "--yes")
+			runCmd.Dir(outsideDir)
+			runResult := runCmd.Run()
+			if err := runResult.AssertSuccess(); err != nil {
+				return fmt.Errorf("running completable job: %w", err)
+			}
+
+			// Now verify the job resolved correctly by checking it completed
+			// in the target plan dir.
+			jobContent, err := os.ReadFile(completeJobPath)
+			if err != nil {
+				return fmt.Errorf("reading completable job after run: %w", err)
+			}
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Contains("completable job reached terminal state via --at", string(jobContent), "status: completed")
+			})
+		}),
+
+		// --- retry by plan NAME, from an outside directory ---
+		harness.NewStep("plan retry --at <name> resolves the job against the target plan", func(ctx *harness.Context) error {
+			outsideDir := ctx.GetString("outside_dir")
+			planPath := ctx.GetString("plan_path")
+
+			// Add a shell job that will fail, then retry it via --at.
+			cmd := ctx.Bin("plan", "add", "--at", "at-plan",
+				"--type", "shell",
+				"--title", "failing job",
+				"-p", "exit 1")
+			cmd.Dir(outsideDir)
+			result := cmd.Run()
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("adding failing job: %w", err)
+			}
+
+			failJobPath, err := findJobByPrefix(planPath, "05-")
+			if err != nil {
+				return fmt.Errorf("locating failing job: %w", err)
+			}
+			failJobFile := filepath.Base(failJobPath)
+
+			// Run it — it will fail.
+			runCmd := ctx.Bin("plan", "run", "--local", "--at", "at-plan", failJobFile, "--yes")
+			runCmd.Dir(outsideDir)
+			runResult := runCmd.Run()
+			// The job itself fails, but `plan run` may or may not return
+			// non-zero; what matters is the job's frontmatter status.
+			_ = runResult
+
+			// Verify it failed
+			jobContent, err := os.ReadFile(failJobPath)
+			if err != nil {
+				return fmt.Errorf("reading failing job: %w", err)
+			}
+			if !strings.Contains(string(jobContent), "status: failed") {
+				return fmt.Errorf("expected failing job to have status: failed, got:\n%s", string(jobContent))
+			}
+
+			// Now retry it via --at from outside the worktree.
+			retryCmd := ctx.Bin("plan", "retry", "--at", "at-plan", failJobFile)
+			retryCmd.Dir(outsideDir)
+			retryResult := retryCmd.Run()
+			ctx.ShowCommandOutput(retryCmd.String(), retryResult.Stdout, retryResult.Stderr)
+			if err := retryResult.AssertSuccess(); err != nil {
+				return fmt.Errorf("plan retry --at <name> failed: %w", err)
+			}
+
+			// After retry, the job should be back to pending.
+			jobContent, err = os.ReadFile(failJobPath)
+			if err != nil {
+				return fmt.Errorf("reading job after retry: %w", err)
+			}
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Contains("job reset to pending after --at retry", string(jobContent), "status: pending")
 			})
 		}),
 

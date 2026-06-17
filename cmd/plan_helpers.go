@@ -76,11 +76,11 @@ func resolvePlanPath(planName, contextDir string) (string, error) {
 		return matches[0], nil
 	}
 	if len(matches) > 1 {
-		return "", fmt.Errorf("multiple plans found named '%s'. Please specify the absolute path or use --dir to specify the workspace", planName)
+		return "", fmt.Errorf("multiple plans found named '%s'. Please specify the absolute path or use --at to target the plan", planName)
 	}
 
 	// 4. Provide a clear, actionable error message if not found
-	return "", fmt.Errorf("plan '%s' not found.\nHint: run from the project directory, or use --dir /path/to/workspace", planName)
+	return "", fmt.Errorf("plan '%s' not found.\nHint: run from the project directory, or use --at <plan-name>", planName)
 }
 
 // resolveChatsDir determines the absolute path to the chats directory for the current workspace.

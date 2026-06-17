@@ -27,7 +27,10 @@ Examples:
   flow plan complete --plan my-project my-job.md
 
   # Complete a job using a path
-  flow plan complete my-project/my-job.md`,
+  flow plan complete my-project/my-job.md
+
+  # Complete a job using the unified --at target
+  flow plan complete --at my-feature my-job.md`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runPlanComplete,
 }
@@ -55,7 +58,10 @@ Examples:
   flow complete --plan my-project my-job.md
 
   # Complete a job using a path
-  flow complete my-project/my-job.md`,
+  flow complete my-project/my-job.md
+
+  # Complete a job using the unified --at target
+  flow complete --at my-feature my-job.md`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: runPlanComplete,
 	}

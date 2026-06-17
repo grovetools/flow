@@ -34,6 +34,9 @@ Examples:
   # Force reset a running job
   flow plan retry --force --plan my-project my-job.md
 
+  # Reset a job using the unified --at target
+  flow plan retry --at my-feature my-job.md
+
   # Using the flow retry alias
   flow retry my-job.md`,
 	Args: cobra.RangeArgs(1, 2),
@@ -70,7 +73,10 @@ Examples:
   flow retry --run my-job.md
 
   # Force reset a running job
-  flow retry --force --plan my-project my-job.md`,
+  flow retry --force --plan my-project my-job.md
+
+  # Reset a job using the unified --at target
+  flow retry --at my-feature my-job.md`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: runPlanRetry,
 	}
@@ -128,6 +134,8 @@ func runPlanRetry(cmd *cobra.Command, args []string) error {
 		} else {
 			planDir = resolvedPath
 		}
+	} else if unified, ok := TargetFromContext(cmd.Context()); ok && unified.PlanDir != "" {
+		planDir = unified.PlanDir
 	} else {
 		planDir = "."
 	}
