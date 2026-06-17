@@ -1,0 +1,131 @@
+package orchestration
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestLookupModelProvider(t *testing.T) {
+	tests := []struct {
+		model    string
+		wantProv string
+		wantOK   bool
+	}{
+		{"claude-opus-4-8", "Anthropic", true},
+		{"claude-opus-4-8-20260612", "Anthropic", true},
+		{"claude-sonnet-4-6", "Anthropic", true},
+		{"claude-sonnet-4-6-20260115", "Anthropic", true},
+		{"claude-haiku-4-5", "Anthropic", true},
+		{"gemini-2.5-pro", "Google", true},
+		{"gemini-3.1-pro-preview", "Google", true},
+		{"gpt-4o", "", false},
+		{"nonexistent-model", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			prov, ok := LookupModelProvider(tt.model)
+			if ok != tt.wantOK {
+				t.Errorf("LookupModelProvider(%q) found=%v, want %v", tt.model, ok, tt.wantOK)
+			}
+			if prov != tt.wantProv {
+				t.Errorf("LookupModelProvider(%q) provider=%q, want %q", tt.model, prov, tt.wantProv)
+			}
+		})
+	}
+}
+
+func TestValidateModelForJob_UnknownModel(t *testing.T) {
+	err := ValidateModelForJob("totally-fake-model", JobTypeHeadlessAgent)
+	if err == nil {
+		t.Fatal("expected error for unknown model, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown model") {
+		t.Errorf("expected 'unknown model' in error, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "flow models") {
+		t.Errorf("expected 'flow models' suggestion in error, got: %s", err.Error())
+	}
+}
+
+func TestValidateModelForJob_GeminiOnAgentJob(t *testing.T) {
+	for _, jt := range []JobType{JobTypeInteractiveAgent, JobTypeHeadlessAgent} {
+		t.Run(string(jt), func(t *testing.T) {
+			err := ValidateModelForJob("gemini-2.5-pro", jt)
+			if err == nil {
+				t.Fatal("expected error for gemini model on agent job, got nil")
+			}
+			if !strings.Contains(err.Error(), "Google model") {
+				t.Errorf("expected 'Google model' in error, got: %s", err.Error())
+			}
+			if !strings.Contains(err.Error(), "Claude CLI") {
+				t.Errorf("expected 'Claude CLI' in error, got: %s", err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateModelForJob_ClaudeOnAgentJob(t *testing.T) {
+	// Claude models should be accepted for agent jobs (provider auth check may
+	// fail in CI where no API key is configured, so we just check it doesn't
+	// fail with "unknown" or "wrong provider").
+	err := ValidateModelForJob("claude-opus-4-8", JobTypeHeadlessAgent)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "unknown model") || strings.Contains(errStr, "Google model") {
+			t.Errorf("claude model should not be rejected as unknown/wrong-provider: %s", errStr)
+		}
+	}
+}
+
+func TestValidateModelForJob_EmptyModel(t *testing.T) {
+	err := ValidateModelForJob("", JobTypeHeadlessAgent)
+	if err != nil {
+		t.Errorf("empty model should be valid, got: %s", err.Error())
+	}
+}
+
+func TestValidateModelForJob_GeminiOnChatJob(t *testing.T) {
+	// Gemini models on chat/oneshot jobs should NOT trigger the provider
+	// mismatch error — only agent jobs enforce claude-only.
+	err := ValidateModelForJob("gemini-2.5-pro", JobTypeChat)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "Claude CLI") {
+			t.Errorf("gemini on chat job should not get agent-only error: %s", errStr)
+		}
+	}
+}
+
+func TestValidateModelKnown(t *testing.T) {
+	tests := []struct {
+		model   string
+		wantErr bool
+	}{
+		{"claude-opus-4-8", false},
+		{"claude-sonnet-4-6", false},
+		{"gemini-2.5-pro", false},
+		{"totally-fake-model", true},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			err := ValidateModelKnown(tt.model)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateModelKnown(%q) error=%v, wantErr=%v", tt.model, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateModelKnown_DidYouMean(t *testing.T) {
+	// Use a non-claude typo so isClaudeFamilyModel doesn't short-circuit
+	err := ValidateModelKnown("gemini-2.5-por")
+	if err == nil {
+		t.Fatal("expected error for unknown model")
+	}
+	if !strings.Contains(err.Error(), "Did you mean") {
+		t.Errorf("expected 'Did you mean' suggestion, got: %s", err.Error())
+	}
+}

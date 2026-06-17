@@ -232,6 +232,12 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		return fmt.Errorf("failed to create job: no job details collected")
 	}
 
+	// Validate the model for this job type: reject unknown models and
+	// provider mismatches (e.g. gemini model on a claude agent job) early.
+	if err := orchestration.ValidateModelForJob(job.Model, job.Type); err != nil {
+		return fmt.Errorf("invalid --model: %w", err)
+	}
+
 	// If a skill is set but no skill_sequence, inherit from the skill's frontmatter.
 	// Use the CWD captured at function entry (before flow changes directories)
 	inheritSkillSequence(job, startingDir)
