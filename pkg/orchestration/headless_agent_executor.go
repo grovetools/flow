@@ -51,6 +51,20 @@ func (e *HeadlessAgentExecutor) Name() string {
 
 // Execute runs an agent job in a worktree.
 func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Validate model before any setup work so the user gets an actionable
+	// error instead of a generic "Agent execution failed" after 2+ seconds.
+	if err := ValidateModelForJob(job.Model, job.Type); err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		ulog.Error("[HEADLESS] Model validation failed").
+			Field("job_id", job.ID).
+			Field("model", job.Model).
+			Err(err).
+			Pretty(" " + err.Error()).
+			Log(ctx)
+		return fmt.Errorf("model validation: %w", err)
+	}
+
 	ulog.Debug("[HEADLESS] Starting execution").
 		Field("job_id", job.ID).
 		Field("job_title", job.Title).

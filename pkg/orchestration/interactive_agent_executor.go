@@ -76,6 +76,20 @@ func (e *InteractiveAgentExecutor) Name() string {
 // Execute runs an interactive agent job in a tmux session and blocks until completion.
 // The output writer is ignored for interactive agents as they run in a separate tmux session.
 func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Validate model before any setup work so the user gets an actionable
+	// error instead of a generic failure after the agent tries to launch.
+	if err := ValidateModelForJob(job.Model, job.Type); err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		e.ulog.Error("Model validation failed").
+			Field("job_id", job.ID).
+			Field("model", job.Model).
+			Err(err).
+			Pretty(" " + err.Error()).
+			Log(ctx)
+		return fmt.Errorf("model validation: %w", err)
+	}
+
 	// Determine workDir first, as it's needed for briefing file generation
 	workDir, err := e.determineWorkDir(ctx, job, plan)
 	if err != nil {
