@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/paths"
-	grovelogging "github.com/grovetools/core/logging"
 	"github.com/sirupsen/logrus"
 )
 
