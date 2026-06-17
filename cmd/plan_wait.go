@@ -32,9 +32,13 @@ var planWaitCmd = &cobra.Command{
 By default, waits for the specified job to complete. Use --any to wait for the first
 of multiple jobs to finish. Use --timeout to set a maximum wait duration.
 
+Use the persistent --at <target> flag to resolve relative job filenames against
+a plan/worktree from outside it (plan name, container path, or
+<container-id>/<name>).
+
 Examples:
   flow plan wait my-job.md
-  flow plan wait my-job.md --timeout 30s
+  flow plan wait --at my-feature my-job.md --timeout 30s
   flow plan wait job1.md job2.md --any --timeout 5m`,
 	RunE: runPlanWait,
 }
