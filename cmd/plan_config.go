@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,10 @@ type PlanConfigCmd struct {
 	Set  []string
 	Get  string
 	JSON bool
+
+	// Ctx carries the cobra command context so RunPlanConfig can honor the
+	// unified `--at` target. Nil-safe: the ctx-aware resolver falls back to legacy.
+	Ctx context.Context
 }
 
 // NewPlanConfigCmd creates a new plan config command
@@ -57,6 +62,7 @@ Examples:
 				Set:  setFlags,
 				Get:  getFlag,
 				JSON: jsonFlag,
+				Ctx:  cmd.Context(),
 			}
 			return RunPlanConfig(configCmd)
 		},
@@ -71,14 +77,15 @@ Examples:
 
 // RunPlanConfig executes the plan config command
 func RunPlanConfig(cmd *PlanConfigCmd) error {
-	// Resolve the plan path
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir, ".")
+	// Resolve the plan path, honoring a unified `--at` target when present.
+	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Ctx, cmd.Dir, ".")
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
 
-	// For absolute paths, use them directly
-	if filepath.IsAbs(cmd.Dir) {
+	// For absolute paths, use them directly — but only when no `--at` target is
+	// set, so `--at` wins over a bare absolute Dir.
+	if _, hasAtTarget := TargetFromContext(cmd.Ctx); !hasAtTarget && filepath.IsAbs(cmd.Dir) {
 		planPath = cmd.Dir
 	}
 

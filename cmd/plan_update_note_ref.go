@@ -23,7 +23,7 @@ func runPlanUpdateNoteRef(cmd *cobra.Command, args []string) error {
 	planName := args[0]
 	newNotePath := args[1]
 
-	planPath, err := resolvePlanPathWithActiveJob(planName, ".")
+	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Context(), planName, ".")
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,23 @@
+# Unified --at <target> funnel rules
+# Scopes the per-subcommand plan-path resolvers that must route through the
+# ctx-aware front doors (resolvePlanPathCtx / resolvePlanPathWithActiveJobCtx)
+# so the persistent --at target is honored, plus the scenario that pins the
+# behavior. Changes here should trigger the at-target E2E scenario.
+
+cmd/plan_helpers.go
+cmd/target.go
+cmd/plan.go
+cmd/plan_add_step.go
+cmd/plan_graph.go
+cmd/plan_config.go
+cmd/plan_extract.go
+cmd/plan_open.go
+cmd/plan_complete.go
+cmd/plan_retry.go
+cmd/plan_action.go
+cmd/plan_add_worktrees.go
+cmd/plan_update_worktree.go
+cmd/plan_merge_worktree.go
+cmd/plan_update_note_ref.go
+cmd/plan_step.go
+tests/e2e/tend/scenarios/at_target.go

@@ -121,7 +121,7 @@ func runPlanRetry(cmd *cobra.Command, args []string) error {
 	}
 
 	if planName != "" {
-		resolvedPath, err := resolvePlanPath(planName, ".")
+		resolvedPath, err := resolvePlanPathCtx(cmd.Context(), planName, ".")
 		if err != nil {
 			// If resolution fails, try using planName directly as a path
 			planDir = planName

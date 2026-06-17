@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -20,6 +21,10 @@ type PlanGraphCmd struct {
 	Port       int    `flag:"p" default:"8080" help:"Port for web server"`
 	Output     string `flag:"o" help:"Output file (stdout if not specified)"`
 	ContextDir string `flag:"d" help:"Workspace or plan directory context"`
+
+	// Ctx carries the cobra command context so RunPlanGraph can honor the
+	// unified `--at` target. Nil-safe: the ctx-aware resolver falls back to legacy.
+	Ctx context.Context `kong:"-"`
 }
 
 func (c *PlanGraphCmd) Run() error {
@@ -58,7 +63,7 @@ func RunPlanGraph(cmd *PlanGraphCmd) error {
 	if contextDir == "" {
 		contextDir = "."
 	}
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Directory, contextDir)
+	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Ctx, cmd.Directory, contextDir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

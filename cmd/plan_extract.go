@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -50,7 +51,7 @@ Examples:
 			// Check if this is a list command
 			if len(args) == 1 && args[0] == "list" {
 				jsonFlag, _ := cmd.Flags().GetBool("json")
-				return runJobsExtractList(file, jsonFlag)
+				return runJobsExtractList(cmd.Context(), file, jsonFlag)
 			}
 
 			// For extract command, title is required
@@ -59,7 +60,7 @@ Examples:
 			}
 
 			// Otherwise, run the normal extract command
-			return runJobsExtract(title, file, args, dependsOn, worktree, model, outputType)
+			return runJobsExtract(cmd.Context(), title, file, args, dependsOn, worktree, model, outputType)
 		},
 	}
 
@@ -74,9 +75,9 @@ Examples:
 	return cmd
 }
 
-func runJobsExtract(title, file string, blockIDs, dependsOn []string, worktree, model, outputType string) error {
+func runJobsExtract(ctx context.Context, title, file string, blockIDs, dependsOn []string, worktree, model, outputType string) error {
 	// Get the current plan directory
-	currentPlanPath, err := resolvePlanPathWithActiveJob("", ".")
+	currentPlanPath, err := resolvePlanPathWithActiveJobCtx(ctx, "", ".")
 	if err != nil {
 		// If we can't resolve from active job, check if we're in a plan directory
 		if _, err := os.Stat(".grove-plan.yml"); err == nil {
@@ -250,7 +251,7 @@ func sanitizeForFilename(s string) string {
 }
 
 // runJobsExtractList lists available block IDs in a chat file
-func runJobsExtractList(file string, jsonOutput bool) error {
+func runJobsExtractList(ctx context.Context, file string, jsonOutput bool) error {
 	// Get the file path
 	var chatFilePath string
 	if filepath.IsAbs(file) {
@@ -258,7 +259,7 @@ func runJobsExtractList(file string, jsonOutput bool) error {
 		chatFilePath = file
 	} else {
 		// Try to resolve from current plan directory
-		currentPlanPath, err := resolvePlanPathWithActiveJob("", ".")
+		currentPlanPath, err := resolvePlanPathWithActiveJobCtx(ctx, "", ".")
 		if err != nil {
 			// If we can't resolve from active job, check if we're in a plan directory
 			if _, err := os.Stat(".grove-plan.yml"); err == nil {
