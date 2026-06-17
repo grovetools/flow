@@ -109,6 +109,7 @@ const (
 	ItemEnvTeardown             = "env_teardown"
 	ItemMergeSubmodules         = "merge_submodules"
 	ItemMarkFinished            = "mark_finished"
+	ItemKillBoundAgents         = "kill_bound_agents"
 	ItemCloseSession            = "close_session"
 	ItemPruneWorktree           = "prune_worktree"
 	ItemCleanDevLinks           = "clean_dev_links"
@@ -628,6 +629,48 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		envTeardownItem,
 		pruneItem,
 		mergeItem,
+		{
+			ID:   ItemKillBoundAgents,
+			Name: "Kill bound agents",
+			Check: func() (string, error) {
+				ctx := context.Background()
+				client := daemon.New()
+				defer client.Close()
+				sessions, err := client.GetSessions(ctx)
+				if err != nil {
+					return "Daemon unavailable", nil
+				}
+				planBaseName := filepath.Base(planPath)
+				count := 0
+				for _, s := range sessions {
+					if s.PlanName == planBaseName && (s.Status == "running" || s.Status == "idle" || s.Status == "pending_user") {
+						count++
+					}
+				}
+				if count == 0 {
+					return "None running", nil
+				}
+				return color.YellowString("%d running", count), nil
+			},
+			Action: func() error {
+				ctx := context.Background()
+				client := daemon.New()
+				defer client.Close()
+				sessions, err := client.GetSessions(ctx)
+				if err != nil {
+					return nil // daemon not running; nothing to kill
+				}
+				planBaseName := filepath.Base(planPath)
+				for _, s := range sessions {
+					if s.PlanName == planBaseName && (s.Status == "running" || s.Status == "idle" || s.Status == "pending_user") {
+						if killErr := client.KillSession(ctx, s.ID); killErr != nil {
+							fmt.Printf("    Note: could not kill session %s (%s): %v\n", s.JobTitle, s.ID, killErr)
+						}
+					}
+				}
+				return nil
+			},
+		},
 		{
 			ID:   ItemCloseSession,
 			Name: "Close session",

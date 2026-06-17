@@ -54,6 +54,7 @@ Commands that target a specific agent accept either:
 	cmd.AddCommand(newAgentUnclawCmd())
 	cmd.AddCommand(newAgentDetachCmd())
 	cmd.AddCommand(newAgentAttachCmd())
+	cmd.AddCommand(newAgentKillCmd())
 
 	return cmd
 }
@@ -628,6 +629,45 @@ Falls back to the job log in the plan's .artifacts directory.`,
 		},
 	}
 
+	return cmd
+}
+
+func newAgentKillCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "kill <slug> <job>",
+		Short: "Terminate a running interactive agent and close its pane",
+		Long: `Sends SIGTERM to the agent process, closes its out-of-process PTY,
+and marks the session as interrupted in the daemon registry.
+
+The treemux pane closes automatically once the PTY receives EOF —
+no daemon restart required.
+
+Unlike 'flow plan complete', this command targets a single agent by
+plan slug and job name rather than operating on the whole plan.`,
+		Example: `  # Kill the coordinator agent for a plan
+  flow agent kill agent-lifecycle-reaping coordinate-agent-lifecycle-reaping
+
+  # Kill an implementation agent
+  flow agent kill my-feature impl-my-feature`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, job, err := resolveAgentTarget(args[0], args[1])
+			if err != nil {
+				return err
+			}
+
+			ctx := context.Background()
+			client := daemon.NewWithAutoStart()
+			defer client.Close()
+
+			if err := client.KillSession(ctx, job.ID); err != nil {
+				return fmt.Errorf("kill agent: %w", err)
+			}
+
+			fmt.Printf("Agent %q killed.\n", job.Title)
+			return nil
+		},
+	}
 	return cmd
 }
 
