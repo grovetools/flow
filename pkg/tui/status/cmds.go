@@ -1,6 +1,7 @@
 package status
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/agentlogs/pkg/agentstream"
 	"github.com/grovetools/agentlogs/pkg/display"
+	"github.com/grovetools/agentlogs/pkg/transcript"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
@@ -201,6 +203,14 @@ type workflowAgentLogMsg struct {
 	Lines   []string
 }
 
+// workflowAgentTranscriptLoadedMsg carries a fully-loaded historical
+// transcript (rendered to Markdown) for a completed workflow agent.
+type workflowAgentTranscriptLoadedMsg struct {
+	AgentID  string
+	Markdown string
+	Err      error
+}
+
 // workflowRebuildTickMsg fires the coalesced display-row rebuild after
 // workflow activity marked jobs dirty. At most one tick is in flight at a
 // time (workflowRebuildPending) — display rows are never rebuilt per event.
@@ -311,6 +321,129 @@ func collectWorkflowTranscripts(ctx context.Context, sessionDir, jobID string, m
 		}
 		sendToMsgChBlocking(ctx, msgCh, workflowAgentLogMsg{JobID: jobID, AgentID: entry.AgentID, Lines: lines})
 	}
+}
+
+// loadHistoricalWorkflowTranscriptCmd reads an agent's transcript jsonl from
+// disk, normalizes it, and renders it as Markdown. It handles BOTH on-disk
+// locations: simple subagents at <sessionDir>/subagents/agent-<id>.jsonl AND
+// workflow subagents at <sessionDir>/subagents/workflows/wf_*/agent-<id>.jsonl.
+func loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID string) tea.Cmd {
+	return func() tea.Msg {
+		// Try both locations: simple subagent and workflow subagent
+		paths := []string{
+			filepath.Join(sessionDir, "subagents", "agent-"+agentID+".jsonl"),
+		}
+		// Also search workflow run directories
+		workflowsDir := filepath.Join(sessionDir, "subagents", "workflows")
+		if dirEntries, err := os.ReadDir(workflowsDir); err == nil {
+			for _, e := range dirEntries {
+				if e.IsDir() && strings.HasPrefix(e.Name(), "wf_") {
+					paths = append(paths, filepath.Join(workflowsDir, e.Name(), "agent-"+agentID+".jsonl"))
+				}
+			}
+		}
+
+		var transcriptPath string
+		for _, p := range paths {
+			if _, err := os.Stat(p); err == nil {
+				transcriptPath = p
+				break
+			}
+		}
+		if transcriptPath == "" {
+			return workflowAgentTranscriptLoadedMsg{
+				AgentID: agentID,
+				Err:     fmt.Errorf("no transcript found for agent %s", agentID),
+			}
+		}
+
+		// Read and normalize the transcript
+		entries, err := normalizeTranscriptFile(transcriptPath)
+		if err != nil {
+			return workflowAgentTranscriptLoadedMsg{
+				AgentID: agentID,
+				Err:     err,
+			}
+		}
+
+		// Render to Markdown using the shared formatter
+		md := display.FormatWorkflowMarkdown(entries)
+		return workflowAgentTranscriptLoadedMsg{
+			AgentID:  agentID,
+			Markdown: md,
+		}
+	}
+}
+
+// normalizeTranscriptFile reads a jsonl transcript file and normalizes each
+// line using the Claude normalizer.
+func normalizeTranscriptFile(path string) ([]transcript.UnifiedEntry, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var entries []transcript.UnifiedEntry
+	normalizer := transcript.NewClaudeNormalizer()
+
+	// Use a scanner with a larger buffer for long lines
+	scanner := newLargeLineScanner(f)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		entry, err := normalizer.NormalizeLine(line)
+		if err != nil || entry == nil {
+			continue
+		}
+		entries = append(entries, *entry)
+	}
+
+	// Flush any buffered entries (e.g., tool calls awaiting results)
+	for _, entry := range normalizer.Flush() {
+		entries = append(entries, *entry)
+	}
+
+	return entries, scanner.Err()
+}
+
+// newLargeLineScanner creates a bufio.Scanner with a large buffer for
+// transcript lines that can be several MB (e.g., tool results).
+func newLargeLineScanner(r io.Reader) *largeLineScanner {
+	s := &largeLineScanner{r: r, buf: make([]byte, 0, 64*1024)}
+	return s
+}
+
+// largeLineScanner wraps bufio.Scanner with a larger buffer and line limit.
+type largeLineScanner struct {
+	r    io.Reader
+	s    *bufio.Scanner
+	buf  []byte
+	once sync.Once
+}
+
+func (l *largeLineScanner) init() {
+	l.s = bufio.NewScanner(l.r)
+	l.s.Buffer(l.buf, 16*1024*1024) // 16MB max line size
+}
+
+func (l *largeLineScanner) Scan() bool {
+	l.once.Do(l.init)
+	return l.s.Scan()
+}
+
+func (l *largeLineScanner) Bytes() []byte {
+	return l.s.Bytes()
+}
+
+func (l *largeLineScanner) Err() error {
+	if l.s == nil {
+		return nil
+	}
+	return l.s.Err()
 }
 
 // sendToMsgChBlocking sends a tea.Msg to the Model's stream channel, blocking

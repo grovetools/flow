@@ -174,6 +174,14 @@ type Model struct {
 	// fallback load (.artifacts/<job-id>/workflows/) has been attempted,
 	// so each job is loaded at most once per TUI session.
 	workflowArchiveChecked map[string]bool
+	// workflowAgentMarkdown caches historical transcript markdown loaded
+	// by loadHistoricalWorkflowTranscriptCmd for completed agents, keyed
+	// by agent ID. This allows detail view on completed agents without
+	// live streaming.
+	workflowAgentMarkdown map[string]string
+	// workflowAgentLoading tracks which agent IDs are currently loading
+	// their historical transcripts to avoid duplicate loads.
+	workflowAgentLoading map[string]bool
 
 	// Claw dialog
 	ClawDialogActive         bool
@@ -699,6 +707,8 @@ func New(cfg Config) Model {
 		workflowMonitorPending:   make(map[string]bool),
 		workflowDirtyJobs:        make(map[string]bool),
 		workflowArchiveChecked:   make(map[string]bool),
+		workflowAgentMarkdown:    make(map[string]string),
+		workflowAgentLoading:     make(map[string]bool),
 		skillSearchInput:         skillSearch,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,

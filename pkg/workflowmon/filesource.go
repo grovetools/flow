@@ -61,6 +61,7 @@ type fileRunState struct {
 	completed     map[string]bool // agents with an emitted AgentCompleted
 	promptPending map[string]bool // started agents whose transcript had no prompt yet
 	staleEmitted  bool
+	meta          *ScriptMeta // parsed script meta (for AgentLabels lookup)
 }
 
 // journalEvent mirrors one journal.jsonl line: {type, key, agentId} for
@@ -143,18 +144,19 @@ func (s *FileSource) poll(ctx context.Context, runs map[string]*fileRunState) {
 		runID := entry.Name()
 		rs, known := runs[runID]
 		if !known {
-			rs = &fileRunState{
-				started:       make(map[string]bool),
-				completed:     make(map[string]bool),
-				promptPending: make(map[string]bool),
-			}
-			runs[runID] = rs
 			var meta *ScriptMeta
 			for _, scriptsDir := range s.opts.ScriptsDirs {
 				if meta = LoadRunMeta(scriptsDir, runID); meta != nil {
 					break
 				}
 			}
+			rs = &fileRunState{
+				started:       make(map[string]bool),
+				completed:     make(map[string]bool),
+				promptPending: make(map[string]bool),
+				meta:          meta,
+			}
+			runs[runID] = rs
 			if !s.emit(ctx, RunDiscovered{RunID: runID, Meta: meta}) {
 				return
 			}
@@ -218,7 +220,8 @@ func (s *FileSource) pollJournal(ctx context.Context, runDir, runID string, rs *
 			if prompt == "" {
 				rs.promptPending[ev.AgentID] = true
 			}
-			if !s.emit(ctx, AgentStarted{RunID: runID, AgentID: ev.AgentID, Prompt: prompt}) {
+			name := matchAgentLabel(rs.meta, prompt)
+			if !s.emit(ctx, AgentStarted{RunID: runID, AgentID: ev.AgentID, Name: name, Prompt: prompt}) {
 				return false
 			}
 		case "result":
@@ -244,7 +247,8 @@ func (s *FileSource) retryPrompts(ctx context.Context, runDir, runID string, rs 
 			continue
 		}
 		delete(rs.promptPending, agentID)
-		if !s.emit(ctx, AgentStarted{RunID: runID, AgentID: agentID, Prompt: prompt}) {
+		name := matchAgentLabel(rs.meta, prompt)
+		if !s.emit(ctx, AgentStarted{RunID: runID, AgentID: agentID, Name: name, Prompt: prompt}) {
 			return false
 		}
 	}
@@ -358,4 +362,19 @@ func renderResult(raw json.RawMessage) string {
 		return buf.String()
 	}
 	return string(raw)
+}
+
+// matchAgentLabel looks up the agent's name from the script meta's AgentLabels
+// map by checking if the prompt contains any of the tracked prompt substrings.
+// Returns "" when no match is found or meta is nil.
+func matchAgentLabel(meta *ScriptMeta, prompt string) string {
+	if meta == nil || len(meta.AgentLabels) == 0 || prompt == "" {
+		return ""
+	}
+	for key, label := range meta.AgentLabels {
+		if strings.Contains(prompt, key) {
+			return label
+		}
+	}
+	return ""
 }

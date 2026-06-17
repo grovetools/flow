@@ -226,6 +226,7 @@ func decodeWorkflowUpdate(u daemon.StateUpdate) []Event {
 			JobID:     ev.JobID,
 			RunID:     runID,
 			AgentID:   ev.AgentID,
+			Name:      ev.Name,
 			Prompt:    ev.Prompt,
 			Phase:     ev.Phase,
 			StartedAt: ev.Timestamp,
@@ -310,6 +311,7 @@ func agentSnapshotEvents(jobID, runID string, agent *models.Subagent) []Event {
 		JobID:     jobID,
 		RunID:     runID,
 		AgentID:   agent.ID,
+		Name:      agent.Name,
 		Prompt:    agent.TaskDescription,
 		StartedAt: agent.StartedAt,
 	}}

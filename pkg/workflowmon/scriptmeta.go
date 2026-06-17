@@ -13,6 +13,10 @@ type ScriptMeta struct {
 	Name        string
 	Description string
 	Phases      []PhaseMeta
+	// AgentLabels maps prompt substrings to agent labels extracted from
+	// static label: 'value' patterns near agent() calls. Best-effort: labels
+	// using dynamic template literals (backticks) cannot be recovered.
+	AgentLabels map[string]string
 }
 
 // PhaseMeta is one entry of the meta block's phases array.
@@ -28,6 +32,13 @@ var (
 	phasesRe      = regexp.MustCompile(`phases\s*:\s*\[`)
 	titleRe       = regexp.MustCompile(`title\s*:\s*['"` + "`" + `]([^'"` + "`" + `]*)['"` + "`" + `]`)
 	detailRe      = regexp.MustCompile(`detail\s*:\s*['"` + "`" + `]([^'"` + "`" + `]*)['"` + "`" + `]`)
+	// agentCallRe matches agent() calls (the harness function).
+	agentCallRe = regexp.MustCompile(`\bagent\s*\(`)
+	// staticLabelRe extracts static single/double-quoted labels only —
+	// backtick template literals are dynamic and cannot be recovered.
+	staticLabelRe = regexp.MustCompile(`label\s*:\s*['"]([^'"]+)['"]`)
+	// staticPhaseRe extracts static single/double-quoted phase values.
+	staticPhaseRe = regexp.MustCompile(`phase\s*:\s*['"]([^'"]+)['"]`)
 )
 
 // ParseScriptMeta extracts the meta block from a persisted workflow script.
@@ -66,7 +77,12 @@ func ParseScriptMeta(src []byte) *ScriptMeta {
 			}
 		}
 	}
-	if meta.Name == "" && meta.Description == "" && len(meta.Phases) == 0 {
+
+	// Extract agent labels from agent() calls — best-effort for static
+	// single/double-quoted labels only.
+	meta.AgentLabels = extractAgentLabels(src)
+
+	if meta.Name == "" && meta.Description == "" && len(meta.Phases) == 0 && len(meta.AgentLabels) == 0 {
 		return nil
 	}
 	return meta
@@ -149,4 +165,82 @@ func splitObjectEntries(arrayBlock string) []string {
 		entries = append(entries, obj)
 		rest = rest[idx+len(obj):]
 	}
+}
+
+// extractAgentLabels scans the entire script for agent() calls and extracts
+// any static label: 'value' patterns from their options object. Returns a
+// map from a prompt substring (the first ~100 chars of any static string
+// literal argument) to the label. This is best-effort: dynamic template
+// literals and variable prompts cannot be recovered.
+func extractAgentLabels(src []byte) map[string]string {
+	labels := make(map[string]string)
+	srcStr := string(src)
+	matches := agentCallRe.FindAllStringIndex(srcStr, -1)
+
+	for _, loc := range matches {
+		// Extract the agent() call's arguments: balanced parens from the '('.
+		callStart := loc[1] - 1 // back up to include the '('
+		if callStart >= len(srcStr) {
+			continue
+		}
+		args := balancedSlice([]byte(srcStr[callStart:]), '(', ')')
+		if args == "" {
+			continue
+		}
+
+		// Look for a static label in the options object
+		labelMatch := staticLabelRe.FindStringSubmatch(args)
+		if labelMatch == nil {
+			continue
+		}
+		label := labelMatch[1]
+
+		// Try to extract the prompt argument — first string literal before
+		// the options object (very heuristic: just grab the first quoted
+		// string in the args, up to ~100 chars).
+		promptKey := extractPromptKey(args)
+		if promptKey == "" {
+			continue
+		}
+		labels[promptKey] = label
+	}
+	return labels
+}
+
+// extractPromptKey extracts a key substring from the prompt argument of an
+// agent() call — the first ~100 chars of the first string literal found.
+// Returns "" when no static prompt is found.
+func extractPromptKey(args string) string {
+	// Try single quotes first, then double quotes.
+	// Skip the leading '(' if present.
+	s := strings.TrimPrefix(args, "(")
+
+	for _, quote := range []byte{'"', '\''} {
+		idx := strings.IndexByte(s, quote)
+		if idx < 0 {
+			continue
+		}
+		// Find the end of the string, handling escapes.
+		end := idx + 1
+		for end < len(s) {
+			if s[end] == '\\' {
+				end += 2
+				continue
+			}
+			if s[end] == quote {
+				break
+			}
+			end++
+		}
+		if end >= len(s) {
+			continue
+		}
+		prompt := s[idx+1 : end]
+		// Truncate to ~100 chars for the key.
+		if len(prompt) > 100 {
+			prompt = prompt[:100]
+		}
+		return prompt
+	}
+	return ""
 }

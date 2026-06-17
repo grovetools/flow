@@ -32,6 +32,7 @@ type WorkflowPaneNode struct {
 // purely from workflowmon events.
 type workflowAgentState struct {
 	ID        string
+	Name      string // descriptive name (from daemon/hooks or script label)
 	Prompt    string
 	Phase     string
 	Result    string
@@ -98,6 +99,9 @@ func applyWorkflowEvent(s *workflowPaneState, ev workflowmon.Event) {
 			run.AgentOrder = append(run.AgentOrder, ev.AgentID)
 		}
 		// Upsert semantics: a re-emitted AgentStarted enriches fields.
+		if ev.Name != "" {
+			agent.Name = ev.Name
+		}
 		if ev.Prompt != "" {
 			agent.Prompt = ev.Prompt
 		}
@@ -265,9 +269,57 @@ func agentNode(runID string, agent *workflowAgentState, depth int) *WorkflowPane
 		Type:    "agent",
 		RunID:   runID,
 		AgentID: agent.ID,
-		Name:    agent.ID,
+		Name:    agentDisplayName(agent),
 		Depth:   depth,
 	}
+}
+
+// agentDisplayName returns the human-readable name for an agent using the
+// display precedence: (1) recovered static label, (2) phase + prompt slug,
+// (3) raw agent ID.
+func agentDisplayName(agent *workflowAgentState) string {
+	// 1. Recovered static label (from meta.json description or script label)
+	if agent.Name != "" {
+		return agent.Name
+	}
+	// 2. Phase + prompt slug (first ~6 words of the prompt)
+	if agent.Phase != "" || agent.Prompt != "" {
+		slug := promptSlug(agent.Prompt, 6)
+		if agent.Phase != "" && slug != "" {
+			return agent.Phase + ": " + slug
+		}
+		if agent.Phase != "" {
+			return agent.Phase
+		}
+		if slug != "" {
+			return slug
+		}
+	}
+	// 3. Raw agent ID
+	return agent.ID
+}
+
+// promptSlug returns the first N words of a prompt, truncated for display.
+func promptSlug(prompt string, maxWords int) string {
+	if prompt == "" {
+		return ""
+	}
+	// Take first line only
+	line := strings.TrimSpace(prompt)
+	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+		line = line[:idx]
+	}
+	// Split into words and take first N
+	words := strings.Fields(line)
+	if len(words) > maxWords {
+		words = words[:maxWords]
+	}
+	result := strings.Join(words, " ")
+	// Truncate to ~60 chars max
+	if len(result) > 60 {
+		result = result[:57] + "..."
+	}
+	return result
 }
 
 // promptSummary collapses a prompt to a single truncated line for tree rows.
