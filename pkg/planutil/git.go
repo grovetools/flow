@@ -9,6 +9,7 @@ package planutil
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/grovetools/core/git"
@@ -147,10 +148,28 @@ func RebaseAndMergeRepo(repoPath, worktreeBranch, defaultBranch string) error {
 	return nil
 }
 
+// ResolveWorktreePath resolves a worktree container path using the
+// registry-first resolver. This handles anchored worktrees that live under a
+// sub-repo's XDG base rather than the ecosystem root's base, which the simpler
+// workspace.FindWorktreePath misses. Follows the same pattern as
+// plan_finish.resolveContainerWorktreePath.
+func ResolveWorktreePath(gitRoot, worktreeName string, provider *workspace.Provider) (string, bool) {
+	owners := []string{gitRoot}
+	if provider != nil {
+		for _, p := range provider.LocalWorkspacesInEcosystem(gitRoot) {
+			owners = append(owners, p)
+		}
+	}
+	return workspace.ResolveWorktreePathByName(gitRoot, worktreeName, owners)
+}
+
 // EcosystemRepoDetails fetches detailed git and merge status for each repo
 // in an ecosystem plan, along with a rollup summary string suitable for
-// display in a list.
-func EcosystemRepoDetails(plan *orchestration.Plan, worktree string, provider *workspace.Provider) ([]EcosystemRepoStatus, string) {
+// display in a list. worktreePath is the resolved container directory of the
+// ecosystem worktree; when non-empty, repo status is read from the sub-repo
+// directories inside it (which works for anchored worktrees). Falls back to
+// the main checkout's repos via provider discovery when worktreePath is empty.
+func EcosystemRepoDetails(plan *orchestration.Plan, worktree, worktreePath string, provider *workspace.Provider) ([]EcosystemRepoStatus, string) {
 	if provider == nil {
 		return nil, "err (no provider)"
 	}
@@ -162,14 +181,31 @@ func EcosystemRepoDetails(plan *orchestration.Plan, worktree string, provider *w
 
 	for _, repoName := range plan.Config.Repos {
 		repoPath, exists := localWorkspaces[repoName]
-		if !exists {
+		if !exists && worktreePath == "" {
 			details = append(details, EcosystemRepoStatus{Name: repoName, MergeStatus: "not found"})
 			statusCounts["err"]++
 			continue
 		}
 
-		gitStatus, _ := git.GetStatus(repoPath)
-		mergeStatus := MergeStatus(repoPath, worktree)
+		// For git status/merge checking, use the source repo (main checkout)
+		// because that's where branch refs live. The worktree sub-dirs share
+		// the same ref namespace as their source repos (linked worktrees), so
+		// MergeStatus works against either path. Prefer the source repo when
+		// available; fall back to the worktree container sub-dir.
+		checkPath := repoPath
+		if !exists && worktreePath != "" {
+			candidate := filepath.Join(worktreePath, repoName)
+			if git.IsGitRepo(candidate) {
+				checkPath = candidate
+			} else {
+				details = append(details, EcosystemRepoStatus{Name: repoName, MergeStatus: "not found"})
+				statusCounts["err"]++
+				continue
+			}
+		}
+
+		gitStatus, _ := git.GetStatus(checkPath)
+		mergeStatus := MergeStatus(checkPath, worktree)
 		details = append(details, EcosystemRepoStatus{
 			Name:        repoName,
 			MergeStatus: mergeStatus,
@@ -215,6 +251,18 @@ func FindGitRootForWorktree(planPath, worktreeName string) string {
 			continue
 		}
 		if _, ok := workspace.FindWorktreePath(root, worktreeName); ok {
+			return root
+		}
+	}
+
+	// Registry-aware fallback for anchored worktrees: FindWorktreePath only
+	// probes gitRoot's own bases, missing worktrees under a sub-repo's XDG
+	// base. ResolveWorktreePathByName consults the worktree registry first.
+	for _, root := range []string{project.Path, project.ParentProjectPath, project.RootEcosystemPath} {
+		if root == "" {
+			continue
+		}
+		if _, ok := workspace.ResolveWorktreePathByName(root, worktreeName, nil); ok {
 			return root
 		}
 	}
