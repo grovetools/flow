@@ -70,10 +70,26 @@ func resolveWorktreeForJob(gitRoot, worktreeName string) (ownerRoot, worktreePat
 			ownerRoot = owner
 		}
 	}
-	if found, ok := workspace.FindWorktreePath(ownerRoot, worktreeName); ok {
+	// Registry-first resolver so ANCHORED worktrees (created with
+	// `--anchor <sub-repo>`, which live under the anchor repo's XDG base rather
+	// than ownerRoot's) are found. Owner-scope is ownerRoot:
+	// ResolveWorktreePathByName accepts any owner under it.
+	if found, ok := workspace.ResolveWorktreePathByName(ownerRoot, worktreeName, []string{ownerRoot}); ok {
 		return ownerRoot, found, true
 	}
 	return ownerRoot, workspace.ResolveNewWorktreePath(ownerRoot, worktreeName, false), false
+}
+
+// workspaceIsEcosystem reports whether gitRoot is an ecosystem root. Used to
+// decide worktree layout (XDG for ecosystems, legacy for standalone) WITHOUT
+// gating on the sibling list — an anchored full-ecosystem worktree persists an
+// empty repos: yet must live in the XDG layout. Mirrors resolveWorktreeLayout's
+// default and the ecosystem check workspace.Prepare itself uses.
+func workspaceIsEcosystem(gitRoot string) bool {
+	if node, _ := workspace.GetProjectByPath(gitRoot); node != nil {
+		return node.IsEcosystem()
+	}
+	return false
 }
 
 // ScopeToSubProject adjusts a working directory to point to a sub-project

@@ -204,7 +204,10 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 
 	// Check if the worktree already exists. If so, skip preparation.
 	// This prevents errors when multiple jobs in a plan share the same worktree.
-	if existing, ok := workspace.FindWorktreePath(gitRoot, job.Worktree); ok {
+	// Registry-first resolver so ANCHORED worktrees (created with
+	// `--anchor <sub-repo>`, living under the anchor repo's XDG base rather than
+	// gitRoot's) are found and re-preparation is correctly skipped.
+	if existing, ok := workspace.ResolveWorktreePathByName(gitRoot, job.Worktree, []string{gitRoot}); ok {
 		return existing, nil
 	}
 
@@ -216,12 +219,12 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		PlanName:     plan.Name,
 	}
 
-	// XDG gate: a plan with sibling workspaces (persisted repos: key) gets
-	// its worktree under the XDG data dir.
 	if plan.Config != nil && len(plan.Config.Repos) > 0 {
 		opts.SiblingWorkspaces = plan.Config.Repos
-		opts.UseXDGWorktrees = true
 	}
+	// Layout is decided by ecosystem-ness, NOT the sibling list: an anchored
+	// full-ecosystem worktree persists an empty repos: yet lives in the XDG layout.
+	opts.UseXDGWorktrees = workspaceIsEcosystem(gitRoot)
 
 	return workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree)
 }
