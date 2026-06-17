@@ -41,7 +41,7 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 	if contextDir == "" {
 		contextDir = "."
 	}
-	resolvedPath, err := resolvePlanPathWithActiveJob(planDir, contextDir)
+	resolvedPath, err := resolvePlanPathWithActiveJobCtx(cmd.Context(), planDir, contextDir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

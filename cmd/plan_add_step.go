@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,6 +47,11 @@ type PlanAddStepCmd struct {
 	IdleMinutes         int      `flag:"" default:"15" help:"Minutes of inactivity before idle ping"`
 	JSON                bool     `flag:"" help:"Output as JSON (machine-readable {path, id, number, title})"`
 	RunAfterCreate      bool     `flag:"" name:"run" help:"Create job and immediately run it"`
+
+	// Ctx carries the cobra command context so RunPlanAddStep can honor the
+	// unified `--at` target. The kong-style (*PlanAddStepCmd).Run() path leaves
+	// this nil; the ctx-aware resolver is nil-safe and falls back to legacy.
+	Ctx context.Context `kong:"-"`
 }
 
 func (c *PlanAddStepCmd) Run() error {
@@ -124,14 +130,16 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	// Capture CWD early before any directory changes (needed for skill resolution)
 	startingDir, _ := os.Getwd()
 
-	// Resolve the plan path with active job support
-	planPath, err := resolvePlanPathWithActiveJob(cmd.Dir, ".")
+	// Resolve the plan path with active job support, honoring a unified `--at`
+	// target when present on the context (nil-safe: falls back to legacy).
+	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Ctx, cmd.Dir, ".")
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}
 
-	// For absolute paths, use them directly (important for tests)
-	if filepath.IsAbs(cmd.Dir) {
+	// For absolute paths, use them directly (important for tests) — but only
+	// when no `--at` target is set, so `--at` wins over a bare absolute Dir.
+	if _, hasAtTarget := TargetFromContext(cmd.Ctx); !hasAtTarget && filepath.IsAbs(cmd.Dir) {
 		planPath = cmd.Dir
 	}
 
@@ -245,7 +253,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 
 		// Create JSON output
 		result := map[string]interface{}{
-			"path":   filepath.Join(cmd.Dir, filename),
+			"path":   filepath.Join(planPath, filename),
 			"id":     job.ID,
 			"number": jobNumber,
 			"title":  job.Title,

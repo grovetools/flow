@@ -99,7 +99,7 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("no plan specified and no active plan in %s; pass -p/--plan or run from inside the worktree", contextDir)
 		}
 	}
-	planPath, err := resolvePlanPath(planRef, contextDir)
+	planPath, err := resolvePlanPathCtx(cmd.Context(), planRef, contextDir)
 	if err != nil {
 		return err
 	}

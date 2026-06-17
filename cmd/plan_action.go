@@ -79,7 +79,7 @@ func runPlanAction(cmd *cobra.Command, args []string) error {
 	if contextDir == "" {
 		contextDir = "."
 	}
-	planPath, err := resolvePlanPath(planName, contextDir)
+	planPath, err := resolvePlanPathCtx(cmd.Context(), planName, contextDir)
 	if err != nil {
 		return fmt.Errorf("could not resolve plan path: %w", err)
 	}

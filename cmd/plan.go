@@ -380,6 +380,7 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		SkillSequence:       planAddSkillSequence,
 		JSON:                planAddJSON,
 		RunAfterCreate:      planAddRun,
+		Ctx:                 cmd.Context(),
 	}
 	return RunPlanAddStep(addStepCmd)
 }
@@ -391,6 +392,7 @@ func runPlanGraph(cmd *cobra.Command, args []string) error {
 		Port:       planGraphPort,
 		Output:     planGraphOutput,
 		ContextDir: planContextDir,
+		Ctx:        cmd.Context(),
 	}
 	if len(args) > 0 {
 		graphCmd.Directory = args[0]

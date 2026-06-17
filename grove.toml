@@ -14,6 +14,11 @@ name = "anchor-registry"
 rules = ".cx/anchor-registry.rules"
 scenarios = ["anchor-registry", "anchor-registry-multi"]
 
+[[test_scopes]]
+name = "at-target"
+rules = ".cx/at-target.rules"
+scenarios = ["at-target"]
+
 [[hooks.on_stop]]
 name = "Auto-format"
 command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"

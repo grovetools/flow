@@ -179,6 +179,44 @@ var ATTargetScenario = harness.NewScenario(
 			})
 		}),
 
+		// --- add by plan NAME, from an outside directory: the job must land in
+		// the --at plan dir, NOT the active/cwd plan. This pins the funnel fix
+		// where `plan add` previously called the non-ctx resolver and silently
+		// wrote the job into the active plan instead of the --at target. ---
+		harness.NewStep("plan add --at <name> creates the job in the targeted plan from outside", func(ctx *harness.Context) error {
+			outsideDir := ctx.GetString("outside_dir")
+			planPath := ctx.GetString("plan_path")
+
+			cmd := ctx.Bin("plan", "add", "--at", "at-plan",
+				"--type", "shell",
+				"--title", "second at job",
+				"-p", "echo another")
+			cmd.Dir(outsideDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("plan add --at <name> failed: %w", err)
+			}
+
+			// The new job must exist in the target plan dir...
+			jobPath, err := findJobByPrefix(planPath, "02-")
+			if err != nil {
+				return fmt.Errorf("locating job added via --at in target plan: %w", err)
+			}
+			jobContent, err := os.ReadFile(jobPath)
+			if err != nil {
+				return fmt.Errorf("reading job added via --at: %w", err)
+			}
+
+			// ...and must NOT have been misdirected into the outside cwd.
+			_, outsideStatErr := findJobByPrefix(outsideDir, "02-")
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Contains("job added via --at carries its title in the target plan", string(jobContent), "second at job")
+				v.True("no job file leaked into the outside cwd", outsideStatErr != nil)
+			})
+		}),
+
 		// --- wait by plan NAME resolves the job relative to the target plan ---
 		harness.NewStep("plan wait --at <name> resolves the job file against the target plan", func(ctx *harness.Context) error {
 			outsideDir := ctx.GetString("outside_dir")
