@@ -65,7 +65,7 @@ Examples:
 
 	cmd.Flags().StringVar(&title, "title", "", "Title for the new chat job (required for extract)")
 	cmd.Flags().StringVar(&file, "file", "plan.md", "Chat file to extract from (default: plan.md)")
-	cmd.Flags().StringSliceVarP(&dependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
+	cmd.Flags().StringSliceVar(&dependsOn, "depends-on", nil, "Dependencies (job filenames)")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "Explicitly set the worktree name (overrides automatic inference)")
 	cmd.Flags().StringVar(&model, "model", "", "LLM model to use for this job")
 	cmd.Flags().StringVar(&outputType, "output", "file", "Output type: file, commit, or none")

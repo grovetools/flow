@@ -219,7 +219,7 @@ func NewPlanCmd() *cobra.Command {
    • isolated_agent   - Background agent in isolated tmux server with TUI input
    • file             - Static file content, no execution`)
 	planAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
-	planAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
+	planAddCmd.Flags().StringSliceVar(&planAddDependsOn, "depends-on", nil, "Dependencies (job filenames)")
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
 	planAddCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
