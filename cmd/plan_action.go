@@ -143,7 +143,7 @@ func runPlanAction(cmd *cobra.Command, args []string) error {
 	}
 
 	// Execute the actions
-	if err := executeInitActions(actionsToRun, plan.Config.Worktree, plan.Config.Worktree, plan.Config.Repos, "", templateData); err != nil {
+	if err := executeInitActions(actionsToRun, plan.Config.Worktree, plan.Config.Worktree, plan.Config.Repos, "", planName, templateData); err != nil {
 		return fmt.Errorf("failed to execute action '%s': %w", actionName, err)
 	}
 

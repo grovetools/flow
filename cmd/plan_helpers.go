@@ -91,7 +91,7 @@ func resolveChatsDir() (string, error) {
 // getActivePlanWithMigration gets the active plan using the shared core/pkg/plan detection.
 // This handles state lookup, legacy key migration, and branch-to-plan matching.
 func getActivePlanWithMigration() (string, error) {
-	name := plan.ActivePlan(".")
+	name := plan.ActivePlanForPath(".")
 	return name, nil
 }
 
