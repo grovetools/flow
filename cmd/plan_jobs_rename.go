@@ -40,8 +40,10 @@ func runPlanJobsRename(cmd *cobra.Command, args []string) error {
 		// Extract directory and filename
 		planDir = filepath.Dir(jobPath)
 		jobFile = filepath.Base(jobPath)
+	} else if unified, ok := TargetFromContext(cmd.Context()); ok && unified.PlanDir != "" {
+		planDir = unified.PlanDir
+		jobFile = jobPath
 	} else {
-		// Just a filename, use current directory
 		planDir = "."
 		jobFile = jobPath
 	}
