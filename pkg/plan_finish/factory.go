@@ -241,11 +241,13 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 	// details; copied onto mergeItem.Details after Check runs.
 	var sharedRepoDetails []finish.RepoStatus
 
-	// Determine worktree path for state lookups. A miss leaves worktreePath
-	// empty, which routes state lookups to the legacy plan-local fallback.
+	// Determine worktree path for state lookups. Use the registry-aware
+	// resolver so anchored worktrees (under a sub-repo's XDG base) are
+	// found. A miss leaves worktreePath empty, which routes state lookups
+	// to the legacy plan-local fallback.
 	var worktreePath string
 	if worktreeName != "" && gitRoot != "" {
-		if found, ok := workspace.FindWorktreePath(gitRoot, worktreeName); ok {
+		if found, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider); ok {
 			worktreePath = found
 		}
 	}
@@ -1124,20 +1126,34 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		}
 	}
 
-	// Check if branch exists and is merged.
+	// Check if branch exists and is merged. For ecosystem plans with a
+	// resolved worktree container, check branch existence in sub-repo
+	// directories inside the container — anchored/XDG ecosystem worktrees
+	// don't have the feature branch in gitRoot's own refs.
 	branchIsMerged := false
 	branchExists := false
-	if branchName != "" && gitRoot != "" {
-		branchCheckCmd := exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
+	branchCheckDir := gitRoot
+	if plan.Config != nil && len(plan.Config.Repos) > 0 && worktreePath != "" {
+		for _, repo := range plan.Config.Repos {
+			repoDir := filepath.Join(worktreePath, repo)
+			if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
+				continue
+			}
+			branchCheckDir = repoDir
+			break
+		}
+	}
+	if branchName != "" && branchCheckDir != "" {
+		branchCheckCmd := exec.Command("git", "-C", branchCheckDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
 		if branchCheckCmd.Run() == nil {
 			branchExists = true
 			baseBranches := []string{"main", "master"}
 			for _, baseBranch := range baseBranches {
-				_, baseCheckErr := exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Output()
+				_, baseCheckErr := exec.Command("git", "-C", branchCheckDir, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Output()
 				if baseCheckErr != nil {
 					continue
 				}
-				aheadOutput, aheadErr := exec.Command("git", "-C", gitRoot, "rev-list", "--count", baseBranch+".."+branchName).Output()
+				aheadOutput, aheadErr := exec.Command("git", "-C", branchCheckDir, "rev-list", "--count", baseBranch+".."+branchName).Output()
 				if aheadErr == nil {
 					aheadCount := strings.TrimSpace(string(aheadOutput))
 					if aheadCount == "0" || aheadCount == "" {

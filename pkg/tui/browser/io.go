@@ -255,7 +255,7 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 		if worktree != "" {
 			var gitRoot string
 			if cwdGitRoot != "" {
-				if _, ok := workspace.FindWorktreePath(cwdGitRoot, worktree); ok {
+				if _, ok := workspace.ResolveWorktreePathByName(cwdGitRoot, worktree, nil); ok {
 					gitRoot = cwdGitRoot
 				}
 			}
@@ -273,7 +273,18 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 			}
 
 			if gitRoot != "" {
-				if worktreePath, ok := workspace.FindWorktreePath(gitRoot, worktree); ok {
+				if provider == nil {
+					p, perr := planutil.DiscoverWorkspaceProvider()
+					if perr == nil {
+						provider = p
+					}
+				}
+
+				worktreePath, ok := planutil.ResolveWorktreePath(gitRoot, worktree, provider)
+				if !ok {
+					worktreePath, ok = workspace.FindWorktreePath(gitRoot, worktree)
+				}
+				if ok {
 					gitStatus, statusErr := git.GetStatus(worktreePath)
 					if statusErr == nil {
 						gitStatus.AheadCount = planutil.CommitCount(worktreePath, "main..HEAD")
@@ -282,15 +293,9 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 
 						if plan.Config != nil && len(plan.Config.Repos) > 0 {
 							if provider == nil {
-								p, perr := planutil.DiscoverWorkspaceProvider()
-								if perr == nil {
-									provider = p
-								}
-							}
-							if provider == nil {
 								item.MergeStatus = "err (discovery failed)"
 							} else {
-								item.EcosystemRepoStatuses, item.MergeStatus = planutil.EcosystemRepoDetails(plan, worktree, provider)
+								item.EcosystemRepoStatuses, item.MergeStatus = planutil.EcosystemRepoDetails(plan, worktree, worktreePath, provider)
 							}
 						} else {
 							item.MergeStatus = planutil.MergeStatus(gitRoot, worktree)
