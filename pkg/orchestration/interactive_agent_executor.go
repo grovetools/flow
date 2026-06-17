@@ -315,12 +315,13 @@ func (e *InteractiveAgentExecutor) determineWorkDir(ctx context.Context, job *Jo
 				PlanName:     plan.Name,
 			}
 
-			// XDG gate: a plan with sibling workspaces (persisted repos:
-			// key) gets its worktree under the XDG data dir.
 			if plan.Config != nil && len(plan.Config.Repos) > 0 {
 				opts.SiblingWorkspaces = plan.Config.Repos
-				opts.UseXDGWorktrees = true
 			}
+			// Layout is decided by ecosystem-ness, NOT the sibling list: an
+			// anchored full-ecosystem worktree persists an empty repos: yet
+			// lives in the XDG layout.
+			opts.UseXDGWorktrees = workspaceIsEcosystem(ownerRoot)
 
 			if _, err := workspace.Prepare(ctx, opts, CopyProjectFilesToWorktree); err != nil {
 				return "", fmt.Errorf("failed to prepare host worktree: %w", err)
