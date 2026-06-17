@@ -6,5 +6,11 @@
 
 cmd/plan.go
 cmd/plan_init.go
+cmd/plan_session.go
 pkg/plan_finish/factory.go
+pkg/orchestration/worktree_resolve.go
+pkg/orchestration/oneshot_executor.go
+pkg/orchestration/executor_generate_recipe.go
 tests/e2e/tend/scenarios/anchor_registry.go
+tests/e2e/tend/scenarios/anchor_registry_multi.go
+tests/e2e/tend/scenarios/anchor_registry_reap_stub.go

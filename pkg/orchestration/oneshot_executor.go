@@ -806,18 +806,24 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		}
 	}
 
-	// If we're already inside the requested worktree, use the current dir.
-	currentDir, _ := os.Getwd()
-	if target, ok := workspace.FindWorktreePath(realGitRoot, job.Worktree); ok {
-		if filepath.Clean(currentDir) == target || filepath.Clean(gitRoot) == target {
-			return currentDir, nil
-		}
-	}
-
-	// Use the shared method to get or prepare the worktree at the git root
-	worktreePath, _, err := e.worktreeManager.GetOrPrepareWorktree(ctx, realGitRoot, job.Worktree, "")
+	// Resolve the EXISTING worktree through the registry-first, anchor-aware
+	// resolver and CREATE only if it does not already exist. The legacy path
+	// (FindWorktreePath then GetOrPrepareWorktree) probes only realGitRoot's own
+	// .grove-worktrees base, so it misses an anchored container (created with
+	// `--anchor <sub-repo>`, which lives under the anchor repo's XDG base) and
+	// then `git worktree add`s the superproject — producing an empty-submodule
+	// legacy stub that duplicates the real XDG container.
+	worktreePath, err := resolveOrPrepareWorktree(ctx, realGitRoot, job.Worktree, plan)
 	if err != nil {
 		return "", err
+	}
+
+	// If we're already inside the resolved worktree (or at the git root that
+	// maps onto it), use the current dir so the job runs in place.
+	currentDir, _ := os.Getwd()
+	resolved := filepath.Clean(worktreePath)
+	if filepath.Clean(currentDir) == resolved || filepath.Clean(gitRoot) == resolved {
+		return currentDir, nil
 	}
 
 	// Automatically initialize state within the new worktree for a better UX.
