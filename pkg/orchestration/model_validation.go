@@ -99,14 +99,15 @@ func ValidateModelForJob(model string, jobType JobType) error {
 			"set flow.interactive_provider in grove.toml to route to a different provider", model)
 	}
 
-	if ok, instructions := IsProviderAuthenticated(provider); !ok {
-		verb := "run"
-		if isAgentJob {
-			verb = "launch"
+	// Agent jobs delegate to the claude CLI which handles its own OAuth —
+	// checking ANTHROPIC_API_KEY would be a false negative. Only check
+	// provider auth for jobs that call the API directly (oneshot, chat).
+	if !isAgentJob {
+		if ok, instructions := IsProviderAuthenticated(provider); !ok {
+			return fmt.Errorf("model %q requires the %s provider, which is not configured on this host.\n"+
+				"The job will fail to run until credentials are set up.\n\n%s",
+				model, provider, instructions)
 		}
-		return fmt.Errorf("model %q requires the %s provider, which is not configured on this host.\n"+
-			"The job will fail to %s until credentials are set up.\n\n%s",
-			model, provider, verb, instructions)
 	}
 
 	return nil
