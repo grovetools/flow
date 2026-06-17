@@ -269,7 +269,7 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		fmt.Println(theme.DefaultTheme.Success.Render("*") + " Created " + filename)
 		fmt.Println("\nNext steps:")
 		fmt.Println("- Review the job file")
-		fmt.Printf("- Run with: flow plan run %s/%s\n", cmd.Dir, filename)
+		fmt.Printf("- Run with: flow plan run --at %s %s\n", plan.Name, filename)
 	}
 
 	// Handle --run flag: create then run the job
