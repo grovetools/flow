@@ -190,7 +190,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.SiblingWorkspaces, anchorPath, cmd.Layout)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeToSet, cmd.SiblingWorkspaces, anchorPath, cmd.Layout, planName)
 		if err != nil {
 			return "", err
 		}
@@ -619,7 +619,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		if err != nil {
 			return err
 		}
-		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.SiblingWorkspaces, anchorPath, cmd.Layout)
+		worktreePath, sourceGitRoot, err := createWorktreeIfRequested(worktreeOverride, cmd.SiblingWorkspaces, anchorPath, cmd.Layout, planName)
 		if err != nil {
 			return err
 		}
@@ -834,7 +834,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	// Execute init actions after everything is set up (only if --init flag is set)
 	if cmd.RunInit && len(recipe.InitActions) > 0 {
 		fmt.Println("\n▶️  Executing initialization actions from recipe...")
-		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, cmd.SiblingWorkspaces, cmd.Layout, templateData); err != nil {
+		if err := executeInitActions(recipe.InitActions, worktreeOverride, finalWorktree, cmd.SiblingWorkspaces, cmd.Layout, planName, templateData); err != nil {
 			// Log a warning but do not fail the entire plan init
 			fmt.Printf("WARNING:  Warning: one or more init actions failed: %v\n", err)
 		} else {
@@ -1277,7 +1277,7 @@ func applyDefaultContextRulesToWorktree(worktreePath string, explicitRepos []str
 }
 
 // executeInitActions orchestrates the execution of actions defined in a recipe's workspace_init.yml
-func executeInitActions(actions []orchestration.InitAction, worktreeOverride, finalWorktree string, siblingWorkspaces []string, layout string, templateData interface{}) error {
+func executeInitActions(actions []orchestration.InitAction, worktreeOverride, finalWorktree string, siblingWorkspaces []string, layout, planName string, templateData interface{}) error {
 	var errors []string
 
 	// Determine the base worktree path
@@ -1298,6 +1298,7 @@ func executeInitActions(actions []orchestration.InitAction, worktreeOverride, fi
 			GitRoot:           gitRoot,
 			WorktreeName:      finalWorktree,
 			BranchName:        finalWorktree,
+			PlanName:          planName,
 			SiblingWorkspaces: siblingWorkspaces,
 			// Layout is decoupled from selection: the resolved layout value
 			// (default xdg for ecosystems) decides the on-disk location.
@@ -1463,7 +1464,7 @@ func currentEcosystemRoot(currentNode *workspace.WorkspaceNode) string {
 // layout is the resolved --layout value ("xdg"/"legacy"/"") threaded in from
 // the caller; createWorktreeIfRequested has no access to the cmd, so the final
 // layout is resolved here against the discovered git root.
-func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, workspacePath, layout string) (worktreePath, sourceGitRoot string, err error) {
+func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, workspacePath, layout, planName string) (worktreePath, sourceGitRoot string, err error) {
 	// Use workspace path if provided, otherwise fall back to current directory
 	searchPath := workspacePath
 	if searchPath == "" {
@@ -1484,6 +1485,7 @@ func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, 
 		GitRoot:           gitRoot,
 		WorktreeName:      worktreeName,
 		BranchName:        worktreeName,
+		PlanName:          planName,
 		SiblingWorkspaces: siblingWorkspaces,
 		// Layout is decoupled from selection: the resolved --layout/env/config
 		// value (default xdg for ecosystems) decides the on-disk location, not
