@@ -51,14 +51,21 @@ func runPlanWait(cmd *cobra.Command, args []string) error {
 		defer cancel()
 	}
 
-	// Get the active plan directory
-	planDir := planRunDir
-	if planDir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("could not determine current directory: %w", err)
+	// Get the active plan directory. Early override: when --at resolved a
+	// unified target, base relative job paths on its plan dir; otherwise the
+	// existing planRunDir/cwd default is preserved untouched.
+	var planDir string
+	if unified, ok := TargetFromContext(cmd.Context()); ok && unified.PlanDir != "" {
+		planDir = unified.PlanDir
+	} else {
+		planDir = planRunDir
+		if planDir == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("could not determine current directory: %w", err)
+			}
+			planDir = cwd
 		}
-		planDir = cwd
 	}
 
 	// Resolve job file paths

@@ -60,7 +60,7 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 	if contextDir == "" {
 		contextDir = "."
 	}
-	planPath, err := resolvePlanPathWithActiveJob(dir, contextDir)
+	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Context(), dir, contextDir)
 	if err != nil {
 		return err
 	}

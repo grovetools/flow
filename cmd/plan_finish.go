@@ -89,7 +89,7 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 	if contextDir == "" {
 		contextDir = "."
 	}
-	planPath, err := resolvePlanPathWithActiveJob(dir, contextDir)
+	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Context(), dir, contextDir)
 	if err != nil {
 		return err
 	}

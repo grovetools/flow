@@ -11,16 +11,16 @@ import (
 func addCmdExamples(cmdPrefix string) string {
 	return `
   # Add a job with inline prompt
-  ` + cmdPrefix + ` myplan -t agent --title "implement-feature" -d 01-plan.md -p "Implement the feature"
+  ` + cmdPrefix + ` myplan -t agent --title "implement-feature" --depends-on 01-plan.md -p "Implement the feature"
 
   # Add a job with prompt from file
-  ` + cmdPrefix + ` myplan -t agent --title "implement-feature" -d 01-plan.md -f prompt.md
+  ` + cmdPrefix + ` myplan -t agent --title "implement-feature" --depends-on 01-plan.md -f prompt.md
 
   # Add a job with prompt from stdin
-  echo "Implement feature X" | ` + cmdPrefix + ` myplan -t agent --title "implement-feature" -d 01-plan.md
+  echo "Implement feature X" | ` + cmdPrefix + ` myplan -t agent --title "implement-feature" --depends-on 01-plan.md
 
   # Use active job (after: flow set myplan)
-  ` + cmdPrefix + ` -t agent --title "implement-feature" -d 01-plan.md -p "Implement feature"
+  ` + cmdPrefix + ` -t agent --title "implement-feature" --depends-on 01-plan.md -p "Implement feature"
 
   # Specify a model for this job
   ` + cmdPrefix + ` myplan --title "analyze-codebase" --model gemini-3-pro-preview -p "Analyze the codebase"
@@ -32,13 +32,13 @@ func addCmdExamples(cmdPrefix string) string {
   ` + cmdPrefix + ` myplan --title "update-docs" --rules-file docs/.rules -p "Update documentation"
 
   # Use a job template
-  ` + cmdPrefix + ` myplan --template code-review --title "code-review" -d 01-implement.md
+  ` + cmdPrefix + ` myplan --template code-review --title "code-review" --depends-on 01-implement.md
 
   # Include specific files as context
   ` + cmdPrefix + ` myplan --title "refactor-api" --include src/api.go,src/types.go -p "Refactor the API"
 
   # Inline dependency output into the prompt
-  ` + cmdPrefix + ` myplan --title "fix-issues" -d 01-review.md --inline=dependencies -p "Fix the issues"
+  ` + cmdPrefix + ` myplan --title "fix-issues" --depends-on 01-review.md --inline=dependencies -p "Fix the issues"
 
   # Add jobs from a recipe
   ` + cmdPrefix + ` myplan --recipe standard-feature --recipe-vars "feature=auth"`
@@ -70,7 +70,7 @@ func NewAddCmd() *cobra.Command {
    • file             - Static file content, no execution
    • claw             - Delegate a task to the global claw daemon`)
 	addCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
-	addCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
+	addCmd.Flags().StringSliceVar(&planAddDependsOn, "depends-on", nil, "Dependencies (job filenames)")
 	addCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
 	addCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
 	addCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
@@ -170,7 +170,7 @@ func NewJobCmd() *cobra.Command {
    • file             - Static file content, no execution
    • claw             - Delegate a task to the global claw daemon`)
 	jobAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
-	jobAddCmd.Flags().StringSliceVarP(&planAddDependsOn, "depends-on", "d", nil, "Dependencies (job filenames)")
+	jobAddCmd.Flags().StringSliceVar(&planAddDependsOn, "depends-on", nil, "Dependencies (job filenames)")
 	jobAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
 	jobAddCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
 	jobAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")

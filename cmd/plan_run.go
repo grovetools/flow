@@ -40,7 +40,16 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	var planDir string
 	var targetJobs []string
 
-	if len(args) > 0 {
+	// Early override: if --at resolved a unified target, use its plan dir and
+	// treat positional args as job filenames within it. All existing
+	// resolution below (plan-name, filename, title, cwd) stays intact as the
+	// fallback when --at is absent.
+	if unified, ok := TargetFromContext(cmd.Context()); ok && unified.PlanDir != "" {
+		planDir = unified.PlanDir
+		for _, arg := range args {
+			targetJobs = append(targetJobs, filepath.Base(arg))
+		}
+	} else if len(args) > 0 {
 		target := args[0]
 
 		// Resolution order:
