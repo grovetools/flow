@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,27 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/sirupsen/logrus"
 )
+
+// resolvePlanPathCtx is the context-aware front door to resolvePlanPath. When a
+// unified `--at` target is present on ctx it short-circuits to the target's
+// plan dir; otherwise it falls back to the existing cwd/global resolution
+// 100% untouched. This LAYERS on top of the legacy resolver — nothing is
+// stripped.
+func resolvePlanPathCtx(ctx context.Context, planName, contextDir string) (string, error) {
+	if target, ok := TargetFromContext(ctx); ok && target.PlanDir != "" {
+		return target.PlanDir, nil
+	}
+	return resolvePlanPath(planName, contextDir)
+}
+
+// resolvePlanPathWithActiveJobCtx is the context-aware front door to
+// resolvePlanPathWithActiveJob. Same layering contract as resolvePlanPathCtx.
+func resolvePlanPathWithActiveJobCtx(ctx context.Context, planName, contextDir string) (string, error) {
+	if target, ok := TargetFromContext(ctx); ok && target.PlanDir != "" {
+		return target.PlanDir, nil
+	}
+	return resolvePlanPathWithActiveJob(planName, contextDir)
+}
 
 // resolvePlanPath determines the absolute path for a plan directory.
 // It uses the NotebookLocator to support both Local Mode (default) and Centralized Mode (opt-in).
