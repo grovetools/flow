@@ -43,8 +43,9 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 		contextDir = "."
 	}
 
-	// Resolve the plan path with active job support and context directory
-	planPath, err := resolvePlanPathWithActiveJob(planName, contextDir)
+	// Resolve the plan path with active job support and context directory.
+	// The Ctx variant honors --at when set, else falls back to the legacy path.
+	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Context(), planName, contextDir)
 	if err != nil {
 		// Smart Redirect: If no active plan is set, redirect to the plan list TUI.
 		isNoActiveJobError := strings.Contains(err.Error(), "no active job set")

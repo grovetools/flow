@@ -44,10 +44,19 @@ these saved rules to generate context.`,
 func runPlanContextSet(cmd *cobra.Command, args []string) error {
 	jobFilePath := args[0]
 
-	// Get absolute path for job file
-	absJobPath, err := filepath.Abs(jobFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve job file path: %w", err)
+	// Get absolute path for job file. Early override: when --at resolved a
+	// unified target and the job file is a bare relative name, resolve it
+	// against the target's plan dir instead of cwd. The cwd-relative
+	// filepath.Abs fallback is preserved untouched when --at is absent.
+	var absJobPath string
+	var err error
+	if unified, ok := TargetFromContext(cmd.Context()); ok && unified.PlanDir != "" && !filepath.IsAbs(jobFilePath) {
+		absJobPath = filepath.Join(unified.PlanDir, jobFilePath)
+	} else {
+		absJobPath, err = filepath.Abs(jobFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve job file path: %w", err)
+		}
 	}
 
 	// Verify job file exists
