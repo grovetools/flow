@@ -102,10 +102,20 @@ func NewRunCmd() *cobra.Command {
 		Long: `Run jobs in an orchestration plan.
 Without arguments, runs the next available jobs.
 With a single job file argument, runs that specific job.
-With multiple job file arguments, runs those jobs in parallel.`,
+With multiple job file arguments, runs those jobs in parallel.
+
+Use the persistent --at <target> flag to run against a plan/worktree from
+outside it (e.g. a headless orchestrator in the main checkout). --at accepts
+a plan name, an absolute container path, or <container-id>/<name>. Positional
+arguments are then treated as job filenames within the resolved plan dir.
+
+Examples:
+  flow plan run --at my-feature                 # run next jobs in plan "my-feature"
+  flow plan run --at my-feature 02-impl.md      # run a specific job by filename
+  flow plan run 02-impl.md                      # implicit: from inside the worktree`,
 		RunE: runPlanRun,
 	}
-	runCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
+	runCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "[DEPRECATED] Plan directory; use --at <target> instead")
 	runCmd.Flags().BoolVarP(&planRunAll, "all", "a", false, "Run all pending jobs")
 	runCmd.Flags().BoolVarP(&planRunNext, "next", "n", false, "Run next available jobs")
 	runCmd.Flags().IntVarP(&planRunParallel, "parallel", "p", 3, "Max parallel jobs")
@@ -127,18 +137,19 @@ If no directory is specified, uses the active job if set.
 If no active job is set, it will launch the plan browser.
 
 Plans can be referenced by slug from any directory. If the slug is globally
-unique, it will be resolved automatically. Use --dir to disambiguate or to
-specify the workspace context explicitly.
+unique, it will be resolved automatically. Prefer the persistent --at <target>
+flag (plan name, container path, or <container-id>/<name>) to operate on a
+plan/worktree from outside it. --dir is deprecated in favor of --at.
 
 Examples:
+  flow status --at my-feature               # registry-backed target (recommended)
   flow status my-feature                    # from any directory (global lookup)
-  flow status my-feature --dir ~/Code/myapp # explicit workspace
-  flow status my-feature --json             # JSON output`,
+  flow status --at my-feature --json        # JSON output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runPlanStatus,
 	}
 	statusCmd.Flags().BoolVarP(&statusTUI, "tui", "t", false, "Launch interactive TUI (default behavior, kept for backwards compatibility)")
-	statusCmd.Flags().StringVarP(&planStatusDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	statusCmd.Flags().StringVarP(&planStatusDir, "dir", "d", "", "[DEPRECATED] Workspace or plan directory context; use --at <target> instead")
 	return statusCmd
 }
 
@@ -231,6 +242,6 @@ Plans can be referenced by slug from any directory. Use --dir to specify the wor
 		RunE: runPlanAction,
 	}
 	actionCmd.Flags().BoolVar(&planActionList, "list", false, "List available actions for the plan")
-	actionCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+	actionCmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "[DEPRECATED] Workspace or plan directory context; use --at <target> instead")
 	return actionCmd
 }
