@@ -10,9 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/grovetools/agentlogs/pkg/display"
+	"github.com/grovetools/agentlogs/pkg/transcript"
 	"github.com/grovetools/core/fs"
 	"github.com/grovetools/core/pkg/paths"
 	coresessions "github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/flow/pkg/workflowmon"
 )
 
 // ArchiveContextRules copies the active rules file to the job's artifact directory
@@ -289,14 +292,14 @@ func ArchiveWorkflowRuns(job *Job, plan *Plan) error {
 		sessionDirs = []string{filepath.Join(filepath.Dir(metadata.TranscriptPath), metadata.ClaudeSessionID)}
 	}
 
-	includeTranscripts := plan.Config != nil && plan.Config.ArchiveAgentTranscripts
-	return archiveWorkflowRunsFromDirs(ctx, job, plan, sessionDirs, includeTranscripts)
+	// Always archive transcripts — the gate is removed per design.
+	return archiveWorkflowRunsFromDirs(ctx, job, plan, sessionDirs)
 }
 
 // archiveWorkflowRunsFromDirs archives every wf_* run found under any of the
 // resolved session dirs, searching all dirs' workflows/scripts/ for each
 // run's persisted script. Runs are deduped by run ID across dirs.
-func archiveWorkflowRunsFromDirs(ctx context.Context, job *Job, plan *Plan, sessionDirs []string, includeTranscripts bool) error {
+func archiveWorkflowRunsFromDirs(ctx context.Context, job *Job, plan *Plan, sessionDirs []string) error {
 	var scriptsDirs []string
 	for _, dir := range sessionDirs {
 		scriptsDirs = append(scriptsDirs, filepath.Join(dir, "workflows", "scripts"))
@@ -318,7 +321,7 @@ func archiveWorkflowRunsFromDirs(ctx context.Context, job *Job, plan *Plan, sess
 			seen[run.Name()] = true
 			srcRunDir := filepath.Join(runsDir, run.Name())
 			destRunDir := filepath.Join(plan.Directory, ".artifacts", job.ID, "workflows", run.Name())
-			if err := archiveWorkflowRun(ctx, srcRunDir, scriptsDirs, destRunDir, includeTranscripts); err != nil {
+			if err := archiveWorkflowRun(ctx, srcRunDir, scriptsDirs, destRunDir); err != nil {
 				// Never fail job completion over a single run's artifacts.
 				ulog.Warn("[ARCHIVE] Failed to archive workflow run").
 					Field("job_id", job.ID).
@@ -339,10 +342,12 @@ func archiveWorkflowRunsFromDirs(ctx context.Context, job *Job, plan *Plan, sess
 }
 
 // archiveWorkflowRun copies one wf_* run directory's durable artifacts into
-// destRunDir and writes a generated summary.md. The run's persisted script
-// is searched across all scriptsDirs (slug fragmentation can put it in a
-// different session dir than the run itself).
-func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []string, destRunDir string, includeTranscripts bool) error {
+// destRunDir and writes a generated summary.md. Per-agent transcripts are
+// written as both .jsonl (raw) and .md (rendered) files, named using the
+// naming precedence: (1) static script label, (2) prompt slug, (3) agent ID.
+// The run's persisted script is searched across all scriptsDirs (slug
+// fragmentation can put it in a different session dir than the run itself).
+func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []string, destRunDir string) error {
 	runID := filepath.Base(srcRunDir)
 
 	if err := os.MkdirAll(destRunDir, 0o755); err != nil {
@@ -358,11 +363,15 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 		}
 	}
 
+	// Load script meta (for name and AgentLabels for naming precedence)
+	var scriptMeta *workflowmon.ScriptMeta
 	scriptPath, title := findWorkflowScript(scriptsDirs, runID)
 	if scriptPath != "" {
 		if err := fs.CopyFile(scriptPath, filepath.Join(destRunDir, "script.js")); err != nil {
 			return fmt.Errorf("failed to copy workflow script: %w", err)
 		}
+		scriptSrc, _ := os.ReadFile(scriptPath)
+		scriptMeta = workflowmon.ParseScriptMeta(scriptSrc)
 	}
 	if title == "" {
 		title = runID
@@ -385,27 +394,51 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 		return fmt.Errorf("failed to write summary.md: %w", err)
 	}
 
-	if includeTranscripts {
-		entries, err := os.ReadDir(srcRunDir)
-		if err != nil {
-			return fmt.Errorf("failed to list workflow run directory: %w", err)
+	// Always archive per-agent transcripts as both .jsonl and .md
+	entries, err := os.ReadDir(srcRunDir)
+	if err != nil {
+		return fmt.Errorf("failed to list workflow run directory: %w", err)
+	}
+	agentsDir := filepath.Join(destRunDir, "agents")
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "agent-") || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
 		}
-		agentsDir := filepath.Join(destRunDir, "agents")
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasPrefix(entry.Name(), "agent-") {
-				continue
-			}
-			if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-				return fmt.Errorf("failed to create agents directory: %w", err)
-			}
-			src := filepath.Join(srcRunDir, entry.Name())
-			if err := fs.CopyFile(src, filepath.Join(agentsDir, entry.Name())); err != nil {
-				ulog.Warn("[ARCHIVE] Failed to copy agent transcript").
-					Field("run_id", runID).
-					Field("file", entry.Name()).
-					Err(err).
-					Log(ctx)
-			}
+		if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create agents directory: %w", err)
+		}
+		agentID := strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "agent-"), ".jsonl")
+		src := filepath.Join(srcRunDir, entry.Name())
+
+		// Determine the filename using naming precedence
+		agentFilename := archiveAgentFilename(agentID, src, scriptMeta)
+
+		// Copy raw .jsonl
+		if err := fs.CopyFile(src, filepath.Join(agentsDir, agentFilename+".jsonl")); err != nil {
+			ulog.Warn("[ARCHIVE] Failed to copy agent transcript").
+				Field("run_id", runID).
+				Field("file", entry.Name()).
+				Err(err).
+				Log(ctx)
+			continue
+		}
+
+		// Render and write .md
+		md, mdErr := renderAgentTranscriptMarkdown(src)
+		if mdErr != nil {
+			ulog.Warn("[ARCHIVE] Failed to render agent transcript to markdown").
+				Field("run_id", runID).
+				Field("agent_id", agentID).
+				Err(mdErr).
+				Log(ctx)
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(agentsDir, agentFilename+".md"), []byte(md), 0o600); err != nil {
+			ulog.Warn("[ARCHIVE] Failed to write agent markdown").
+				Field("run_id", runID).
+				Field("agent_id", agentID).
+				Err(err).
+				Log(ctx)
 		}
 	}
 
@@ -525,4 +558,159 @@ func renderJournalResult(raw json.RawMessage) string {
 		return "```json\n" + buf.String() + "\n```"
 	}
 	return "```\n" + string(raw) + "\n```"
+}
+
+// archiveAgentFilename returns a filesystem-safe filename for an agent's
+// archived transcript, using the naming precedence: (1) static script label,
+// (2) prompt slug from first user message, (3) raw agent ID.
+func archiveAgentFilename(agentID, transcriptPath string, meta *workflowmon.ScriptMeta) string {
+	// 1. Try script label match via prompt substring
+	prompt := readAgentPromptForArchive(transcriptPath)
+	if meta != nil && len(meta.AgentLabels) > 0 && prompt != "" {
+		for key, label := range meta.AgentLabels {
+			if strings.Contains(prompt, key) {
+				return sanitizeFilename(label)
+			}
+		}
+	}
+
+	// 2. Try prompt slug (first ~6 words)
+	if prompt != "" {
+		slug := archivePromptSlug(prompt)
+		if slug != "" {
+			return slug
+		}
+	}
+
+	// 3. Fall back to agent ID
+	return "agent-" + agentID
+}
+
+// readAgentPromptForArchive extracts the prompt from the first user message
+// in an agent transcript file, for naming purposes.
+func readAgentPromptForArchive(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	// Read first line only (user prompt)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 256*1024)
+	if !scanner.Scan() {
+		return ""
+	}
+
+	var entry struct {
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+		return ""
+	}
+
+	// Handle both string and array content formats
+	var text string
+	if err := json.Unmarshal(entry.Message.Content, &text); err == nil {
+		return text
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(entry.Message.Content, &blocks); err == nil {
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				return b.Text
+			}
+		}
+	}
+	return ""
+}
+
+// archivePromptSlug creates a filesystem-safe slug from a prompt's first ~6 words.
+func archivePromptSlug(prompt string) string {
+	// Take first line
+	line := strings.TrimSpace(prompt)
+	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
+		line = line[:idx]
+	}
+
+	// Take first 6 words
+	words := strings.Fields(line)
+	if len(words) > 6 {
+		words = words[:6]
+	}
+	if len(words) == 0 {
+		return ""
+	}
+
+	slug := strings.Join(words, "-")
+	return sanitizeFilename(slug)
+}
+
+// sanitizeFilename removes or replaces characters that are unsafe in filenames.
+func sanitizeFilename(name string) string {
+	// Lowercase, replace spaces with dashes, remove unsafe chars
+	name = strings.ToLower(name)
+	name = strings.ReplaceAll(name, " ", "-")
+
+	var sb strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+			sb.WriteRune(r)
+		case r == '/':
+			sb.WriteRune('-')
+		}
+	}
+	result := sb.String()
+
+	// Truncate to 60 chars max
+	if len(result) > 60 {
+		result = result[:60]
+	}
+	// Remove trailing dashes
+	result = strings.TrimRight(result, "-")
+	return result
+}
+
+// renderAgentTranscriptMarkdown reads a jsonl transcript file, normalizes
+// the entries, and renders them as Markdown using the shared formatter.
+func renderAgentTranscriptMarkdown(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	var entries []transcript.UnifiedEntry
+	normalizer := transcript.NewClaudeNormalizer()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024) // 16MB max line
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		entry, err := normalizer.NormalizeLine(line)
+		if err != nil || entry == nil {
+			continue
+		}
+		entries = append(entries, *entry)
+	}
+
+	// Flush buffered entries
+	for _, entry := range normalizer.Flush() {
+		entries = append(entries, *entry)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return display.FormatWorkflowMarkdown(entries), nil
 }

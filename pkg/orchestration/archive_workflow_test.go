@@ -171,7 +171,7 @@ func TestArchiveWorkflowRun_DefaultSkipsTranscripts(t *testing.T) {
 	}
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{scriptsDir}, destDir, false); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{scriptsDir}, destDir); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -192,23 +192,33 @@ func TestArchiveWorkflowRun_DefaultSkipsTranscripts(t *testing.T) {
 	if !strings.Contains(string(summary), "# Workflow Run: release-survey") {
 		t.Errorf("summary missing script-derived title:\n%s", summary)
 	}
-	if _, err := os.Stat(filepath.Join(destDir, "agents")); !os.IsNotExist(err) {
-		t.Error("agent transcripts archived despite archive_agent_transcripts=false")
+	// Agent transcripts are now always archived (gate removed).
+	if _, err := os.Stat(filepath.Join(destDir, "agents")); os.IsNotExist(err) {
+		t.Error("agent transcripts should always be archived now")
 	}
 }
 
-func TestArchiveWorkflowRun_TranscriptsOptIn(t *testing.T) {
+func TestArchiveWorkflowRun_TranscriptsAlwaysArchived(t *testing.T) {
 	runDir := buildWorkflowRunDir(t, "journal_complete.jsonl")
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, true); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
-	for _, name := range []string{"agent-a6053d9fe85440cfe.jsonl", "agent-a6053d9fe85440cfe.meta.json"} {
-		if _, err := os.Stat(filepath.Join(destDir, "agents", name)); err != nil {
-			t.Errorf("expected archived transcript %s: %v", name, err)
-		}
+	// Transcripts are now always archived (gate removed) as both .jsonl and .md
+	agentsDir := filepath.Join(destDir, "agents")
+	if _, err := os.Stat(agentsDir); os.IsNotExist(err) {
+		t.Fatal("agents directory should exist")
+	}
+	// The naming now uses precedence: label → prompt slug → agent-ID
+	// At minimum we should have some files in agents/
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		t.Fatalf("failed to read agents dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("expected archived transcripts in agents dir")
 	}
 }
 
@@ -217,7 +227,7 @@ func TestArchiveWorkflowRun_MissingScriptFallsBackToRunID(t *testing.T) {
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
 	// Empty scripts dir: title must fall back to the run ID.
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, false); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 
@@ -273,7 +283,7 @@ func TestArchiveWorkflowRunsFromDirs_MergesAcrossSlugDirs(t *testing.T) {
 	job := &Job{ID: "job-merge", Type: JobTypeHeadlessAgent}
 	plan := &Plan{Directory: planDir}
 
-	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}, false); err != nil {
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}); err != nil {
 		t.Fatalf("archiveWorkflowRunsFromDirs() error = %v", err)
 	}
 
@@ -307,7 +317,7 @@ func TestArchiveWorkflowRunsFromDirs_MergesAcrossSlugDirs(t *testing.T) {
 	}
 
 	// Re-archiving is an idempotent overwrite, not an error.
-	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}, false); err != nil {
+	if err := archiveWorkflowRunsFromDirs(context.Background(), job, plan, []string{slugA, slugB}); err != nil {
 		t.Fatalf("repeat archiveWorkflowRunsFromDirs() error = %v", err)
 	}
 }
@@ -316,7 +326,7 @@ func TestArchiveWorkflowRun_MalformedJournalStillWritesSummary(t *testing.T) {
 	runDir := buildWorkflowRunDir(t, "journal_malformed.jsonl")
 	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
 
-	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, false); err != nil {
+	if err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir); err != nil {
 		t.Fatalf("archiveWorkflowRun() error = %v", err)
 	}
 

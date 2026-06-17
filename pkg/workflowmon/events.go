@@ -42,6 +42,10 @@ type AgentStarted struct {
 	JobID   string
 	RunID   string
 	AgentID string
+	// Name is the descriptive agent name: for simple subagents, the
+	// meta.json "description" field; for workflow subagents, the static
+	// script "label:" if recoverable. Best-effort enrichment; may be empty.
+	Name string
 	// Prompt is the agent's task prompt; empty until known.
 	Prompt string
 	// Phase is the workflow phase the agent belongs to. The file-tailing

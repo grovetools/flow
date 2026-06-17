@@ -544,6 +544,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case workflowAgentTranscriptLoadedMsg:
+		delete(m.workflowAgentLoading, msg.AgentID)
+		if msg.Err == nil && msg.Markdown != "" {
+			m.workflowAgentMarkdown[msg.AgentID] = msg.Markdown
+		}
+		// Refresh the viewer if this agent is currently selected
+		if msg.AgentID == m.workflowSelectedAgentID && m.ActiveDetailPane == LogsPaneDetail {
+			return m, m.refreshWorkflowAgentViewer()
+		}
+		return m, nil
+
 	case RetryLoadAgentLogsMsg:
 		logger := logging.NewLogger("flow-tui")
 		logger.WithFields(map[string]interface{}{
@@ -2987,9 +2998,13 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 // routeWorkflowAgentDetail shows the selected workflow agent's buffered
 // transcript in the existing log viewport. It never opens a pane — callers
 // only reach it when LogsPaneDetail is already active.
+//
+// For completed agents without live-streamed lines, it kicks off a background
+// load of the historical transcript from disk (loadHistoricalWorkflowTranscriptCmd).
 func (m Model) routeWorkflowAgentDetail(row *DisplayRow) (Model, tea.Cmd) {
 	m.ActiveLogJob = row.Job
-	m.workflowSelectedAgentID = row.Agent.ID
+	agentID := row.Agent.ID
+	m.workflowSelectedAgentID = agentID
 	// Stop the job-log stream so late lines can't overwrite the agent
 	// transcript; it restarts when the cursor returns to a job row.
 	if m.StreamCancel != nil {
@@ -2999,6 +3014,32 @@ func (m Model) routeWorkflowAgentDetail(row *DisplayRow) (Model, tea.Cmd) {
 	}
 	m.CurrentAgentStatus = nil
 	m.updateLayoutDimensions()
+
+	// Check if agent is completed and we have no buffered lines or markdown
+	var agent *workflowAgentState
+	var sessionDir string
+	if st := m.WorkflowStates[row.Job.ID]; st != nil {
+		sessionDir = st.SessionDir
+		for _, runID := range st.RunOrder {
+			if a, ok := st.Runs[runID].Agents[agentID]; ok {
+				agent = a
+				break
+			}
+		}
+	}
+
+	// For completed agents without buffered content, load historical transcript
+	if agent != nil && agent.Completed {
+		hasLines := len(m.workflowAgentLines[agentID]) > 0
+		hasMarkdown := m.workflowAgentMarkdown[agentID] != ""
+		isLoading := m.workflowAgentLoading[agentID]
+
+		if !hasLines && !hasMarkdown && !isLoading && sessionDir != "" {
+			m.workflowAgentLoading[agentID] = true
+			return m, loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID)
+		}
+	}
+
 	return m, m.refreshWorkflowAgentViewer()
 }
 
@@ -3020,8 +3061,8 @@ func (m *Model) refreshWorkflowAgentViewer() tea.Cmd {
 }
 
 // workflowAgentViewerContent assembles the agent detail view: a status
-// header, the task prompt, the buffered transcript lines, and the result
-// once completed.
+// header, the task prompt, the buffered transcript lines (or loaded
+// historical markdown for completed agents), and the result once completed.
 func (m *Model) workflowAgentViewerContent(agentID string) string {
 	t := theme.DefaultTheme
 
@@ -3038,7 +3079,12 @@ func (m *Model) workflowAgentViewerContent(agentID string) string {
 	}
 
 	var b strings.Builder
-	header := theme.IconRobot + " agent " + agentID
+	// Use display name (from naming precedence) if available, else agent ID
+	displayName := agentID
+	if agent != nil && agent.Name != "" {
+		displayName = agent.Name
+	}
+	header := theme.IconRobot + " " + displayName
 	if agent != nil {
 		if agent.Phase != "" {
 			header += "  •  " + agent.Phase
@@ -3055,8 +3101,15 @@ func (m *Model) workflowAgentViewerContent(agentID string) string {
 	}
 	b.WriteString("\n")
 
+	// Content precedence: (1) live-streamed lines, (2) loaded historical
+	// markdown, (3) loading indicator, (4) empty placeholder
 	if lines := m.workflowAgentLines[agentID]; len(lines) > 0 {
 		b.WriteString(strings.Join(lines, "\n"))
+	} else if md := m.workflowAgentMarkdown[agentID]; md != "" {
+		// Render the historical markdown with styling
+		b.WriteString(renderStyledMarkdown(md))
+	} else if m.workflowAgentLoading[agentID] {
+		b.WriteString(t.Muted.Render("loading transcript…"))
 	} else {
 		b.WriteString(t.Muted.Render("no transcript buffered for this agent yet"))
 	}
