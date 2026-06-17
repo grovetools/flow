@@ -751,6 +751,12 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						return err
 					}
 					_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
+					// The container above is the registry-tracked (often anchored
+					// XDG) worktree. A stray legacy `<gitRoot>/.grove-worktrees/<name>`
+					// superproject stub — left by an older legacy-only worktree-prep
+					// path — has no registry entry and would survive the prune.
+					// Reap it defensively so orphans don't accumulate.
+					reapLegacyStubWorktree(context.Background(), gitRoot, worktreeName, opts.Force)
 					return nil
 				}
 				hasSubmodules := false
@@ -818,6 +824,13 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					}
 				}
 				_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
+				// Reap any stray legacy superproject stub left at the in-repo
+				// `<gitRoot>/.grove-worktrees/<name>` location by an older
+				// legacy-only worktree-prep path. In the single-repo case the
+				// prune above usually already removed it (wPath == that path), so
+				// this is a no-op then; it matters when a duplicate stub coexists
+				// with a differently-located real worktree.
+				reapLegacyStubWorktree(context.Background(), gitRoot, worktreeName, opts.Force)
 				return nil
 			},
 		},
@@ -1505,6 +1518,83 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 // gitignored/untracked content survives the remove.
 func isDirNotEmptyErr(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "Directory not empty")
+}
+
+// reapLegacyStubWorktree removes a stray legacy
+// `<gitRoot>/.grove-worktrees/<worktreeName>` superproject git worktree if one
+// exists and is registered with gitRoot.
+//
+// The registry-first prune that runs before this removes the real container
+// (including anchored worktrees under a sub-repo's XDG base, which carry a
+// registry entry). But a legacy stub created by an older legacy-only
+// worktree-prep path (a bare `git worktree add` of the superproject) has NO
+// registry entry, so it is invisible to the registry-driven prune and would be
+// left orphaned on disk. This reaps it defensively.
+//
+// The target is strictly confined to gitRoot's own `.grove-worktrees` boundary
+// (via pathIsUnderGroveWorktrees) and removed only after confirming gitRoot
+// actually registers it as a linked worktree, so nothing outside the
+// ecosystem's legacy worktree dir is ever touched. Best-effort: failures are
+// logged, never fatal.
+func reapLegacyStubWorktree(ctx context.Context, gitRoot, worktreeName string, force bool) {
+	if gitRoot == "" || worktreeName == "" {
+		return
+	}
+	// The legacy (non-XDG) location for this ecosystem's worktree.
+	legacyPath := workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
+	if !pathIsUnderGroveWorktrees(legacyPath, gitRoot) {
+		return
+	}
+	if _, err := os.Stat(legacyPath); err != nil {
+		return // no stray stub on disk
+	}
+	// Confirm gitRoot registers this path as a linked worktree before removing,
+	// so a directory that merely sits at the legacy location (but isn't a git
+	// worktree of gitRoot) is never force-removed here. Compare symlink-resolved
+	// paths: `git worktree list` emits realpaths (e.g. /private/var/... on
+	// macOS) which need not match the lexically-joined legacyPath.
+	listCmd := exec.CommandContext(ctx, "git", "-C", gitRoot, "worktree", "list", "--porcelain")
+	out, err := listCmd.Output()
+	if err != nil || !worktreeListContainsPath(string(out), legacyPath) {
+		return
+	}
+	fmt.Printf("    Reaping stray legacy worktree stub at %s\n", legacyPath)
+	args := []string{"-C", gitRoot, "worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, legacyPath)
+	if err := exec.CommandContext(ctx, "git", args...).Run(); err != nil {
+		fmt.Printf("      Warning: failed to remove legacy worktree stub: %v\n", err)
+	}
+}
+
+// worktreeListContainsPath reports whether the `git worktree list --porcelain`
+// output registers a worktree at target, comparing symlink-resolved absolute
+// paths so a realpath in the output (macOS /private/var/...) still matches a
+// lexically-joined target.
+func worktreeListContainsPath(porcelain, target string) bool {
+	canon := func(p string) string {
+		abs := p
+		if a, err := filepath.Abs(p); err == nil {
+			abs = a
+		}
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = r
+		}
+		return filepath.Clean(abs)
+	}
+	want := canon(target)
+	for _, line := range strings.Split(porcelain, "\n") {
+		if !strings.HasPrefix(line, "worktree ") {
+			continue
+		}
+		p := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+		if canon(p) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // pathIsUnderGroveWorktrees reports whether wPath is a safe target

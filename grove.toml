@@ -12,7 +12,7 @@ default_rules = "dev-no-tests"
 [[test_scopes]]
 name = "anchor-registry"
 rules = ".cx/anchor-registry.rules"
-scenarios = ["anchor-registry", "anchor-registry-multi"]
+scenarios = ["anchor-registry", "anchor-registry-multi", "anchor-registry-reap-stub"]
 
 [[test_scopes]]
 name = "at-target"

@@ -32,6 +32,7 @@ func main() {
 		scenarios.SiblingWorkspacesLifecycleScenario,
 		scenarios.AnchorRegistryScenario,
 		scenarios.AnchorRegistryMultiScenario,
+		scenarios.AnchorRegistryReapStubScenario,
 		scenarios.ATTargetScenario,
 		scenarios.CoordinatorWorkflowScenario,
 		scenarios.JobManagementScenario,

@@ -16,6 +16,8 @@ import (
 
 	groveexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/flow/pkg/orchestration"
+
+	"github.com/sirupsen/logrus"
 )
 
 // CreateOrSwitchToWorktreeSessionAndRunCommand creates or switches to a tmux session for the worktree and executes a command.
@@ -48,17 +50,28 @@ func CreateOrSwitchToWorktreeSessionAndRunCommand(ctx context.Context, plan *orc
 		gitRoot = gitRootInfo.ParentProjectPath
 	}
 
-	// Check if we're already in the target worktree (any known worktree base).
+	// Check if we're already in the target worktree. Resolve the worktree's
+	// real location registry-first (anchor-aware): a `--anchor <sub-repo>`
+	// worktree lives under the anchor repo's XDG base, not gitRoot's, so the
+	// legacy WorktreeBases(gitRoot) enumeration misses it — leaving
+	// alreadyInWorktree false and re-preparing a DIVERGENT worktree/session.
 	currentDir, _ := os.Getwd()
 	var worktreePath string
 	alreadyInWorktree := false
 	if currentDir != "" && workspace.IsWorktreePath(currentDir) {
-		for _, base := range workspace.WorktreeBases(gitRoot) {
-			candidate := filepath.Join(base, worktreeName)
-			if strings.HasPrefix(currentDir, candidate) {
-				worktreePath = candidate
+		// Build a provider so the resolver can scope the registry match to this
+		// ecosystem's sub-repos (any of which could be the anchor owner).
+		var provider *workspace.Provider
+		logger := logrus.New()
+		logger.SetLevel(logrus.WarnLevel)
+		if discoveryResult, derr := workspace.NewDiscoveryService(logger).DiscoverAll(); derr == nil {
+			provider = workspace.NewProvider(discoveryResult)
+		}
+		if resolved, ok := workspace.ResolveWorktreePathByName(gitRoot, worktreeName, ecosystemWorktreeOwners(gitRoot, provider)); ok {
+			resolvedClean := filepath.Clean(resolved)
+			if strings.HasPrefix(filepath.Clean(currentDir), resolvedClean) {
+				worktreePath = resolvedClean
 				alreadyInWorktree = true
-				break
 			}
 		}
 	}

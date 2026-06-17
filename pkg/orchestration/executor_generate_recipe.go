@@ -76,7 +76,11 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 			gitRoot = plan.Directory
 		}
 
-		worktreeDir, _, err := e.worktreeManager.GetOrPrepareWorktree(ctx, gitRoot, job.Worktree, "main")
+		// Resolve the EXISTING worktree registry-first (anchor-aware) and create
+		// only when it does not already exist. GetOrPrepareWorktree probes only
+		// gitRoot's own .grove-worktrees base, so it misses an anchored container
+		// and would `git worktree add` a duplicate legacy superproject stub.
+		worktreeDir, err := resolveOrPrepareWorktree(ctx, gitRoot, job.Worktree, plan)
 		if err != nil {
 			return fmt.Errorf("getting worktree: %w", err)
 		}
