@@ -36,21 +36,21 @@ const (
 // this onto their plan-creation code path (cmd.PlanInitCmd for the
 // CLI wrapper, or a subprocess invocation for the in-TUI host).
 type Request struct {
-	Dir            string
-	Force          bool
-	Model          string
-	Worktree       string
-	ExtractAllFrom string
-	OpenSession    bool
-	EnvProfile     string
-	Recipe         string
-	RecipeVars     []string
+	Dir               string
+	Force             bool
+	Model             string
+	Worktree          string
+	ExtractAllFrom    string
+	OpenSession       bool
+	EnvProfile        string
+	Recipe            string
+	RecipeVars        []string
 	RecipeCmd         string
 	SiblingWorkspaces []string
 	NoteRef           string
-	FromNote       string
-	NoteTargetFile string
-	RunInit        bool
+	FromNote          string
+	NoteTargetFile    string
+	RunInit           bool
 }
 
 // Config carries the dependencies the init wizard needs. Hosts build

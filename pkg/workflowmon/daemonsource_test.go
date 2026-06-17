@@ -187,9 +187,9 @@ func TestDecodeWorkflowUpdate(t *testing.T) {
 	t.Run("non-workflow and malformed updates are skipped", func(t *testing.T) {
 		for _, u := range []daemon.StateUpdate{
 			{UpdateType: "session"},
-			{UpdateType: "workflow_agent_started"},                          // nil payload
-			{UpdateType: "workflow_agent_started", Payload: "not-a-map"},    // wrong shape
-			{UpdateType: "workflow_run_stale", Payload: map[string]any{}},   // no run id
+			{UpdateType: "workflow_agent_started"},                             // nil payload
+			{UpdateType: "workflow_agent_started", Payload: "not-a-map"},       // wrong shape
+			{UpdateType: "workflow_run_stale", Payload: map[string]any{}},      // no run id
 			{UpdateType: "workflow_run_discovered", Payload: map[string]any{}}, // no run id
 		} {
 			if events := decodeWorkflowUpdate(u); events != nil {

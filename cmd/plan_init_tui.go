@@ -53,21 +53,21 @@ func planInitCmdToRequest(c *PlanInitCmd) *planinit.Request {
 		return nil
 	}
 	return &planinit.Request{
-		Dir:            c.Dir,
-		Force:          c.Force,
-		Model:          c.Model,
-		Worktree:       c.Worktree,
-		ExtractAllFrom: c.ExtractAllFrom,
-		OpenSession:    c.OpenSession,
-		EnvProfile:     c.EnvProfile,
-		Recipe:         c.Recipe,
-		RecipeVars:     c.RecipeVars,
-		RecipeCmd:      c.RecipeCmd,
+		Dir:               c.Dir,
+		Force:             c.Force,
+		Model:             c.Model,
+		Worktree:          c.Worktree,
+		ExtractAllFrom:    c.ExtractAllFrom,
+		OpenSession:       c.OpenSession,
+		EnvProfile:        c.EnvProfile,
+		Recipe:            c.Recipe,
+		RecipeVars:        c.RecipeVars,
+		RecipeCmd:         c.RecipeCmd,
 		SiblingWorkspaces: c.SiblingWorkspaces,
-		NoteRef:        c.NoteRef,
-		FromNote:       c.FromNote,
-		NoteTargetFile: c.NoteTargetFile,
-		RunInit:        c.RunInit,
+		NoteRef:           c.NoteRef,
+		FromNote:          c.FromNote,
+		NoteTargetFile:    c.NoteTargetFile,
+		RunInit:           c.RunInit,
 	}
 }
 
@@ -77,21 +77,21 @@ func planInitCmdToRequest(c *PlanInitCmd) *planinit.Request {
 // RecipeCmd, SiblingWorkspaces, Force, etc.).
 func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanInitCmd {
 	cmd := &PlanInitCmd{
-		Dir:            req.Dir,
-		Force:          req.Force,
-		Model:          req.Model,
-		Worktree:       req.Worktree,
-		ExtractAllFrom: req.ExtractAllFrom,
-		OpenSession:    req.OpenSession,
-		EnvProfile:     req.EnvProfile,
-		Recipe:         req.Recipe,
-		RecipeVars:     req.RecipeVars,
-		RecipeCmd:      req.RecipeCmd,
+		Dir:               req.Dir,
+		Force:             req.Force,
+		Model:             req.Model,
+		Worktree:          req.Worktree,
+		ExtractAllFrom:    req.ExtractAllFrom,
+		OpenSession:       req.OpenSession,
+		EnvProfile:        req.EnvProfile,
+		Recipe:            req.Recipe,
+		RecipeVars:        req.RecipeVars,
+		RecipeCmd:         req.RecipeCmd,
 		SiblingWorkspaces: req.SiblingWorkspaces,
-		NoteRef:        req.NoteRef,
-		FromNote:       req.FromNote,
-		NoteTargetFile: req.NoteTargetFile,
-		RunInit:        req.RunInit,
+		NoteRef:           req.NoteRef,
+		FromNote:          req.FromNote,
+		NoteTargetFile:    req.NoteTargetFile,
+		RunInit:           req.RunInit,
 	}
 	// Carry through CLI-only fields that the wizard doesn't
 	// surface in its form. The wizard never clears these, so they

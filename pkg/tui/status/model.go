@@ -70,12 +70,12 @@ const (
 
 // Model represents the state of the TUI
 type Model struct {
-	Plan                  *orchestration.Plan
-	Graph                 *orchestration.DependencyGraph
-	Orchestrator          *orchestration.Orchestrator // Direct orchestrator for job execution
-	Jobs                  []*orchestration.Job
-	JobParents            map[string]*orchestration.Job // Track parent in tree structure
-	JobIndents            map[string]int                // Track indentation level
+	Plan         *orchestration.Plan
+	Graph        *orchestration.DependencyGraph
+	Orchestrator *orchestration.Orchestrator // Direct orchestrator for job execution
+	Jobs         []*orchestration.Job
+	JobParents   map[string]*orchestration.Job // Track parent in tree structure
+	JobIndents   map[string]int                // Track indentation level
 	// DisplayRows is the view model the jobs table renders: one RowTypeJob
 	// row per job plus virtual workflow child rows. Cursor and ScrollOffset
 	// index DisplayRows, never m.Jobs. Rebuilt by rebuildDisplayRows after

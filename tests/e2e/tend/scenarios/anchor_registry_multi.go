@@ -20,11 +20,11 @@ import (
 //   - `flow plan init <name> --worktree --anchor <sub-repo>` places the worktree
 //     under the ANCHOR repo's XDG base, NOT the ecosystem's. Flow's worktree
 //     LOOKUP used the ecosystem-scoped workspace.FindWorktreePath, so:
-//       * at create, provisionEnvironment printed
-//         `Warning: worktree "<name>" not found under <eco>; skipping
-//         environment provisioning` (false miss — the worktree DID exist);
-//       * at finish --prune-worktree, the prune reported success but LEFT the
-//         worktree dir AND its registry JSON behind.
+//   - at create, provisionEnvironment printed
+//     `Warning: worktree "<name>" not found under <eco>; skipping
+//     environment provisioning` (false miss — the worktree DID exist);
+//   - at finish --prune-worktree, the prune reported success but LEFT the
+//     worktree dir AND its registry JSON behind.
 //
 // The fix routes all consumers through the registry-first
 // workspace.ResolveWorktreePathByName so anchored worktrees resolve.
