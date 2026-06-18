@@ -829,6 +829,10 @@ func appendClaudeJobArgs(agentArgs []string, job *Job, plan *Plan) ([]string, er
 			"plan/global defaults apply only to chat/oneshot jobs. To run a different provider, set "+
 			"flow.interactive_provider in grove.toml, or set a claude-family model on the job", model)
 	}
+	// When no model is pinned on the job, pass NO --model so the claude CLI
+	// honors the user's own configured default (e.g. opusplan). We do NOT force
+	// the agent default here; that alias is only used as the best-effort
+	// frontmatter LABEL in backfillClaudeAgentModel.
 	if model == "" && job.Effort == "" {
 		return agentArgs, nil
 	}
@@ -893,9 +897,11 @@ func canonicalClaudeModel(model string) string {
 // backfillClaudeAgentModel records the model a claude agent job will ACTUALLY
 // run with into the job's frontmatter, so the `model:` field stops lying.
 //
-//   - Empty job.Model: no --model was passed, so the claude CLI self-selects
-//     its configured default. We record the registry's canonical default alias
-//     (anthropicmodels.DefaultAlias) instead of leaving the field blank.
+//   - Empty job.Model: no --model is passed, so the claude CLI self-selects the
+//     user's configured default. We record the canonical agent default alias
+//     (anthropicmodels.DefaultAgentAlias) as a best-effort label instead of
+//     leaving the field blank. The runtime model still honors the user's CLI
+//     config; this is only the displayed label.
 //   - Non-empty job.Model: normalize it to its canonical alias.
 //
 // The write is skipped when the value is already canonical (no churn). This is
@@ -904,7 +910,7 @@ func canonicalClaudeModel(model string) string {
 func backfillClaudeAgentModel(job *Job) {
 	resolved := canonicalClaudeModel(job.Model)
 	if resolved == "" {
-		resolved = anthropicmodels.DefaultAlias
+		resolved = anthropicmodels.DefaultAgentAlias
 	}
 	if resolved == job.Model {
 		return // already canonical; nothing to write
