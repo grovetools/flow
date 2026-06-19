@@ -14,6 +14,7 @@ import (
 
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/tui/theme"
 	"github.com/sirupsen/logrus"
 
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -163,45 +164,52 @@ func ResolveWorktreePath(gitRoot, worktreeName string, provider *workspace.Provi
 	return workspace.ResolveWorktreePathByName(gitRoot, worktreeName, owners)
 }
 
+// ResolveRepoCheckout resolves the on-disk path to use for git/merge status
+// of a single repo in an ecosystem group. When the anchored container holds a
+// linked worktree for the repo (containerPath/repoName is a git repo) that
+// in-container checkout is preferred — it is the worktree's own working copy,
+// shares the source repo's ref namespace, and is what "is this group ready to
+// finish" should reflect. Otherwise it falls back to localWorkspacePath (the
+// repo's main checkout discovered by the provider). Returns "" when neither
+// resolves, which callers treat as "not found".
+func ResolveRepoCheckout(repoName, localWorkspacePath, containerPath string) string {
+	if containerPath != "" {
+		candidate := filepath.Join(containerPath, repoName)
+		if git.IsGitRepo(candidate) {
+			return candidate
+		}
+	}
+	return localWorkspacePath
+}
+
 // EcosystemRepoDetails fetches detailed git and merge status for each repo
-// in an ecosystem plan, along with a rollup summary string suitable for
-// display in a list. worktreePath is the resolved container directory of the
-// ecosystem worktree; when non-empty, repo status is read from the sub-repo
-// directories inside it (which works for anchored worktrees). Falls back to
-// the main checkout's repos via provider discovery when worktreePath is empty.
-func EcosystemRepoDetails(plan *orchestration.Plan, worktree, worktreePath string, provider *workspace.Provider) ([]EcosystemRepoStatus, string) {
+// in an ecosystem plan, along with an abbreviated rollup string and the
+// worst-case group verdict. worktreePath is the resolved container directory
+// of the ecosystem worktree; when set, per-repo status is read from the
+// linked-worktree sub-dirs inside it (which works for anchored worktrees),
+// falling back to the main checkout via provider discovery.
+//
+// The rollup is a compact "<count><icon>" string for the narrow plan-list
+// MERGE cell (worst-first segment order, merged repos implied); when every
+// repo is merged it is exactly "<IconMerge> Synced" with no counts. The
+// verdict is the single worst status across the group, using the precedence
+// Conflicts > Needs Rebase > Diverged > Behind > Ready > Synced, and drives
+// the cell color in view.go.
+func EcosystemRepoDetails(plan *orchestration.Plan, worktree, worktreePath string, provider *workspace.Provider) (details []EcosystemRepoStatus, rollup string, verdict string) {
 	if provider == nil {
-		return nil, "err (no provider)"
+		return nil, "err (no provider)", "err"
 	}
 	ecosystemRoot, _ := git.GetGitRoot(plan.Directory)
 	localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
 
-	var details []EcosystemRepoStatus
 	statusCounts := make(map[string]int)
 
 	for _, repoName := range plan.Config.Repos {
-		repoPath, exists := localWorkspaces[repoName]
-		if !exists && worktreePath == "" {
+		checkPath := ResolveRepoCheckout(repoName, localWorkspaces[repoName], worktreePath)
+		if checkPath == "" {
 			details = append(details, EcosystemRepoStatus{Name: repoName, MergeStatus: "not found"})
 			statusCounts["err"]++
 			continue
-		}
-
-		// For git status/merge checking, use the source repo (main checkout)
-		// because that's where branch refs live. The worktree sub-dirs share
-		// the same ref namespace as their source repos (linked worktrees), so
-		// MergeStatus works against either path. Prefer the source repo when
-		// available; fall back to the worktree container sub-dir.
-		checkPath := repoPath
-		if !exists && worktreePath != "" {
-			candidate := filepath.Join(worktreePath, repoName)
-			if git.IsGitRepo(candidate) {
-				checkPath = candidate
-			} else {
-				details = append(details, EcosystemRepoStatus{Name: repoName, MergeStatus: "not found"})
-				statusCounts["err"]++
-				continue
-			}
 		}
 
 		gitStatus, _ := git.GetStatus(checkPath)
@@ -214,23 +222,41 @@ func EcosystemRepoDetails(plan *orchestration.Plan, worktree, worktreePath strin
 		statusCounts[mergeStatus]++
 	}
 
-	var summaryStatus string
-	switch {
-	case statusCounts["Conflicts"] > 0:
-		summaryStatus = fmt.Sprintf("%d Conflicts", statusCounts["Conflicts"])
-	case statusCounts["Needs Rebase"] > 0:
-		summaryStatus = fmt.Sprintf("%d Rebase", statusCounts["Needs Rebase"])
-	case statusCounts["Ready"] > 0:
-		summaryStatus = fmt.Sprintf("%d Ready", statusCounts["Ready"])
-	case statusCounts["Merged"] == len(plan.Config.Repos):
-		summaryStatus = "Merged"
-	case statusCounts["err"] > 0:
-		summaryStatus = "err"
-	default:
-		summaryStatus = "Mixed"
+	// Abbreviated count+icon segments in worst-first precedence order. Merged/
+	// synced repos are implied (omitted) so the narrow cell only shows what
+	// still needs attention. The verdict is the first non-zero status here.
+	rollupSpecs := []struct {
+		status string
+		icon   string
+	}{
+		{"Conflicts", theme.IconError},
+		{"Needs Rebase", theme.IconWarning},
+		{"Diverged", theme.IconWarning},
+		{"Behind", theme.IconArrowDown},
+		{"Ready", theme.IconArrowUp},
+	}
+	var segments []string
+	for _, s := range rollupSpecs {
+		if n := statusCounts[s.status]; n > 0 {
+			segments = append(segments, fmt.Sprintf("%d%s", n, s.icon))
+			if verdict == "" {
+				verdict = s.status
+			}
+		}
+	}
+	if n := statusCounts["err"]; n > 0 {
+		segments = append(segments, fmt.Sprintf("%d%s", n, theme.IconError))
 	}
 
-	return details, summaryStatus
+	if len(segments) == 0 {
+		// Every repo is merged/synced (no actionable states) — clean verdict.
+		return details, theme.IconMerge + " Synced", "Synced"
+	}
+	if verdict == "" {
+		// Only errors/not-found present.
+		verdict = "err"
+	}
+	return details, strings.Join(segments, " "), verdict
 }
 
 // FindGitRootForWorktree attempts to locate the repository root that owns

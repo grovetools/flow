@@ -37,6 +37,7 @@ type PlanListItem struct {
 	GitStatus             *git.StatusInfo
 	ReviewStatus          string
 	MergeStatus           string
+	MergeVerdict          string
 	Notes                 string
 	EcosystemRepoStatuses []planutil.EcosystemRepoStatus
 }
