@@ -25,6 +25,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/tui/utils/scrollbar"
 	notifyconfig "github.com/grovetools/notify/pkg/config"
+	tuimuxmsg "github.com/grovetools/tuimux/messages"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -866,6 +867,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StreamCancel = nil
 				m.StreamingJobID = ""
 			}
+		}
+		return m, nil
+
+	case tuimuxmsg.DetailPaneClosedMsg:
+		// The host detached a RoleDetail pane out-of-band — i.e. without
+		// flow initiating the close. This happens when the user runs the
+		// treemux close-pane action (leader-x) on the agent/editor/context/
+		// memory/viewport split that occupies our single "detail" slot. Flow
+		// still believes "detail" is promoted, so the next `p`/`v`/`w`/`M`
+		// would mis-toggle (refocus a gone pane). Demote the promotion and
+		// reset the detail state here so the next open re-creates the split.
+		// (The agent is only DETACHED, never killed, by that path.)
+		if m.Manager.IsPromoted("detail") {
+			m.Manager, _ = m.Manager.Demote("detail")
+		}
+		m.ActiveDetailPane = NoPane
+		m.ShowLogs = false
+		m.Focus = FocusJobs
+		m.ActiveLogJob = nil
+		m.CurrentAgentStatus = nil
+		m.viewportActive = false
+		m.workflowSelectedAgentID = ""
+		if m.StreamCancel != nil {
+			m.StreamCancel()
+			m.StreamCancel = nil
+			m.StreamingJobID = ""
 		}
 		return m, nil
 
