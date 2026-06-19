@@ -402,8 +402,15 @@ func (m Model) fetchSelectedRepoGitLog() tea.Cmd {
 	}
 	ecosystemRoot, _ := git.GetGitRoot(selectedPlan.Plan.Directory)
 	localWorkspaces := provider.LocalWorkspacesInEcosystem(ecosystemRoot)
-	if repoPath, exists := localWorkspaces[repoStatus.Name]; exists {
-		return fetchRepoGitLogCmd(repoPath)
+
+	// Resolve the anchored container the same way the status load does, then
+	// pick the repo's in-container checkout. A bare provider map lookup misses
+	// repos that only live inside an anchored/XDG container (no main-checkout
+	// entry), which left the git-log pane empty for those groups.
+	worktreePath, _ := planutil.ResolveWorktreePath(ecosystemRoot, selectedPlan.Worktree, provider)
+	checkPath := planutil.ResolveRepoCheckout(repoStatus.Name, localWorkspaces[repoStatus.Name], worktreePath)
+	if checkPath == "" {
+		return nil
 	}
-	return nil
+	return fetchRepoGitLogCmd(checkPath)
 }

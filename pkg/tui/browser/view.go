@@ -297,16 +297,21 @@ func (m Model) renderPlanTable() string {
 			notesText = notesText[:27] + "..."
 		}
 
+		// The MERGE cell text is plan.MergeStatus — for ecosystem plans this is
+		// the abbreviated count+icon rollup (icons already baked in); for
+		// single-repo plans it is the bare status label. MergeVerdict (the
+		// worst-case status across the group, or the status itself for single
+		// repos) drives the color so the whole cell reads at a glance.
 		var mergeText string
-		switch plan.MergeStatus {
+		switch plan.MergeVerdict {
 		case "Ready":
-			mergeText = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Ready")
-		case "Needs Rebase":
-			mergeText = theme.DefaultTheme.Warning.Render(theme.IconWarning + " Needs Rebase")
+			mergeText = theme.DefaultTheme.Success.Render(plan.MergeStatus)
+		case "Needs Rebase", "Diverged":
+			mergeText = theme.DefaultTheme.Warning.Render(plan.MergeStatus)
 		case "Behind":
-			mergeText = theme.DefaultTheme.Info.Render(theme.IconInfo + " Behind")
+			mergeText = theme.DefaultTheme.Info.Render(plan.MergeStatus)
 		case "Conflicts":
-			mergeText = theme.DefaultTheme.Error.Render(theme.IconError + " Conflicts")
+			mergeText = theme.DefaultTheme.Error.Render(plan.MergeStatus)
 		case "Merged", "Synced":
 			mergeText = theme.DefaultTheme.Muted.Render(theme.IconMerge + " Synced")
 		default:

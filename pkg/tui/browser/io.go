@@ -285,21 +285,26 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 					worktreePath, ok = workspace.FindWorktreePath(gitRoot, worktree)
 				}
 				if ok {
-					gitStatus, statusErr := git.GetStatus(worktreePath)
-					if statusErr == nil {
-						gitStatus.AheadCount = planutil.CommitCount(worktreePath, "main..HEAD")
-						gitStatus.BehindCount = planutil.CommitCount(worktreePath, "HEAD..main")
-						item.GitStatus = gitStatus
-
-						if plan.Config != nil && len(plan.Config.Repos) > 0 {
-							if provider == nil {
-								item.MergeStatus = "err (discovery failed)"
-							} else {
-								item.EcosystemRepoStatuses, item.MergeStatus = planutil.EcosystemRepoDetails(plan, worktree, worktreePath, provider)
-							}
-						} else {
+					// Anchored/ecosystem plans have no superproject worktree we
+					// care about — the container's own .git (if any) drifts from
+					// main and is pure noise. Skip the top-level git.GetStatus for
+					// them so the GIT column renders "-"; the per-module rollup in
+					// the MERGE column carries the real status instead.
+					isEcosystem := plan.Config != nil && len(plan.Config.Repos) > 0
+					if !isEcosystem {
+						gitStatus, statusErr := git.GetStatus(worktreePath)
+						if statusErr == nil {
+							gitStatus.AheadCount = planutil.CommitCount(worktreePath, "main..HEAD")
+							gitStatus.BehindCount = planutil.CommitCount(worktreePath, "HEAD..main")
+							item.GitStatus = gitStatus
 							item.MergeStatus = planutil.MergeStatus(gitRoot, worktree)
+							item.MergeVerdict = item.MergeStatus
 						}
+					} else if provider == nil {
+						item.MergeStatus = "err (discovery failed)"
+						item.MergeVerdict = "err"
+					} else {
+						item.EcosystemRepoStatuses, item.MergeStatus, item.MergeVerdict = planutil.EcosystemRepoDetails(plan, worktree, worktreePath, provider)
 					}
 				}
 			}
