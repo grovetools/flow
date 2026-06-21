@@ -72,10 +72,23 @@ type AgentCompleted struct {
 }
 
 // RunStale is emitted when a run looks abandoned: no journal writes for the
-// staleness window while the owning session is gone. An agent that started
-// without a result is otherwise always considered in-flight — gaps in the
-// journal alone never mean "interrupted".
+// staleness window while the owning session is gone AND at least one started
+// agent never recorded a result (stragglers). An agent that started without a
+// result is otherwise always considered in-flight — gaps in the journal alone
+// never mean "interrupted".
 type RunStale struct {
+	// JobID is the owning flow job, when known (DaemonSource only).
+	JobID string
+	RunID string
+}
+
+// RunCompleted is emitted when a run reaches a clean terminal state: the
+// owning session has ended (the real terminal trigger — NOT live mid-run
+// count equality, which recurs at every phase boundary) AND every started
+// agent has a recorded result. Gated on the same two-factor signal as
+// RunStale (quiet journal + gone session); the two are mutually exclusive
+// per run, disambiguated by whether any agent is still a straggler.
+type RunCompleted struct {
 	// JobID is the owning flow job, when known (DaemonSource only).
 	JobID string
 	RunID string
@@ -85,6 +98,7 @@ func (RunDiscovered) workflowEvent()  {}
 func (AgentStarted) workflowEvent()   {}
 func (AgentCompleted) workflowEvent() {}
 func (RunStale) workflowEvent()       {}
+func (RunCompleted) workflowEvent()   {}
 
 // EventJobID returns the event's job attribution, or "" when the source
 // could not attribute it (FileSource events; daemon events for unstamped
@@ -98,6 +112,8 @@ func EventJobID(ev Event) string {
 	case AgentCompleted:
 		return ev.JobID
 	case RunStale:
+		return ev.JobID
+	case RunCompleted:
 		return ev.JobID
 	}
 	return ""

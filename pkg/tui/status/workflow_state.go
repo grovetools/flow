@@ -46,6 +46,7 @@ type workflowRunState struct {
 	Agents     map[string]*workflowAgentState
 	AgentOrder []string
 	Stale      bool
+	Completed  bool
 }
 
 // adhocRunID is the pseudo-run bucket for run-less subagents (ad-hoc
@@ -121,6 +122,8 @@ func applyWorkflowEvent(s *workflowPaneState, ev workflowmon.Event) {
 		agent.Result = ev.Result
 	case workflowmon.RunStale:
 		s.ensureRun(ev.RunID).Stale = true
+	case workflowmon.RunCompleted:
+		s.ensureRun(ev.RunID).Completed = true
 	}
 }
 
@@ -178,17 +181,23 @@ func (r *workflowRunState) displayName() string {
 	return r.ID
 }
 
-// statusLabel returns the run's honest status: "stale" when the source
-// signalled abandonment, "idle" when every started agent has a result, and
-// "running" otherwise. Started-without-result is in-flight, never
-// "interrupted".
+// statusLabel returns the run's honest status. The terminal words come from
+// the source's terminal events (gated on session-end), never from live
+// mid-run count equality:
+//   - "completed" when the source signalled a clean terminal run (session
+//     ended with every started agent finished); checked FIRST so it is never
+//     shadowed by a stale signal, and matching the job-level ✓/"Completed"
+//     vocabulary.
+//   - "stale" when the source signalled session-ended-with-stragglers.
+//   - "running" otherwise. Started-without-result is in-flight, never
+//     "interrupted", and live count equality at a phase boundary stays
+//     "running" until the session actually ends.
 func (r *workflowRunState) statusLabel() string {
+	if r.Completed {
+		return "completed"
+	}
 	if r.Stale {
 		return "stale"
-	}
-	started, completed := r.counts()
-	if started > 0 && started == completed {
-		return "idle"
 	}
 	return "running"
 }
