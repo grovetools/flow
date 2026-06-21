@@ -485,7 +485,7 @@ func (m *Model) virtualRowLabel(row *DisplayRow, styled bool) string {
 		if row.Agent.Completed {
 			icon = theme.IconSuccess
 		}
-		label := icon + " " + row.Agent.ID
+		label := icon + " " + agentDisplayName(row.Agent)
 		if s := promptSummary(row.Agent.Prompt, 24); s != "" {
 			label += " " + s
 		}

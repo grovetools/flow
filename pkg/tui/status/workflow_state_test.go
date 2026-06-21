@@ -110,10 +110,14 @@ func TestResolveWorkflowPaneNodes_PhaseGrouping(t *testing.T) {
 	for _, n := range nodes {
 		shape = append(shape, n.Type+":"+n.Name)
 	}
+	// Agent node Names follow agentDisplayName precedence: no static label
+	// here, so phase-attributed agents with a prompt render as
+	// "<Phase>: <slug>"; the unattributed, prompt-less agent-c falls back to
+	// its (already-short) id.
 	want := []string{
 		"run:release-survey",
-		"phase:Survey", "agent:agent-a",
-		"phase:Verify", "agent:agent-b",
+		"phase:Survey", "agent:Survey: survey the nb module",
+		"phase:Verify", "agent:Verify: verify the build",
 		"agent:agent-c",
 	}
 	if strings.Join(shape, ",") != strings.Join(want, ",") {
@@ -122,6 +126,42 @@ func TestResolveWorkflowPaneNodes_PhaseGrouping(t *testing.T) {
 	// Phase-grouped agents are indented one deeper than unattributed ones.
 	if nodes[2].Depth != 2 || nodes[5].Depth != 1 {
 		t.Errorf("depths: grouped=%d unattributed=%d", nodes[2].Depth, nodes[5].Depth)
+	}
+}
+
+func TestAgentDisplayName(t *testing.T) {
+	cases := []struct {
+		name  string
+		agent *workflowAgentState
+		want  string
+	}{
+		{
+			name:  "static label wins",
+			agent: &workflowAgentState{ID: "a66726f613ebf2989", Name: "inspect:core", Phase: "Survey", Prompt: "look at it"},
+			want:  "inspect:core",
+		},
+		{
+			name:  "phase plus prompt slug",
+			agent: &workflowAgentState{ID: "a66726f613ebf2989", Phase: "Survey", Prompt: "survey the nb module deeply"},
+			want:  "Survey: survey the nb module deeply",
+		},
+		{
+			name:  "long id falls back to 7-char prefix",
+			agent: &workflowAgentState{ID: "a66726f613ebf2989"},
+			want:  "a66726f",
+		},
+		{
+			name:  "short id returned whole",
+			agent: &workflowAgentState{ID: "agent-c"},
+			want:  "agent-c",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentDisplayName(tc.agent); got != tc.want {
+				t.Errorf("agentDisplayName = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

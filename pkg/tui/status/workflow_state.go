@@ -295,7 +295,10 @@ func agentDisplayName(agent *workflowAgentState) string {
 			return slug
 		}
 	}
-	// 3. Raw agent ID
+	// 3. Short agent ID (7-char prefix, mirroring workflowRunState.displayName)
+	if len(agent.ID) > 7 {
+		return agent.ID[:7]
+	}
 	return agent.ID
 }
 
