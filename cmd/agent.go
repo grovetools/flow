@@ -480,7 +480,19 @@ whether the agent is idle (waiting for input), working (processing), or disconne
 			status := AgentStatus{Target: displayTarget}
 
 			if capErr != nil {
+				// Capture failed. Consult the daemon registry (the same source of
+				// truth `flow agent list` uses) to distinguish a genuinely gone
+				// agent (→ disconnected) from a running agent whose capture hit a
+				// transport error (→ unknown), so status agrees with list.
 				status.Status = "disconnected"
+				if job != nil {
+					client := daemon.NewWithAutoStart()
+					sess, err := client.GetSession(context.Background(), job.ID)
+					client.Close()
+					if err == nil && sess != nil && sess.Status != "completed" && sess.Status != "failed" {
+						status.Status = "unknown"
+					}
+				}
 			} else if isAgentIdle(output) {
 				status.Status = "idle"
 			} else {
