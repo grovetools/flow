@@ -1166,10 +1166,15 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 		return "", fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Try daemon API first — works when agent runs in a native groveterm pane.
+	// Try daemon API first. This works when a native groveterm pane is connected
+	// OR when the agent runs as an out-of-process tuimux PTY — the daemon now has
+	// a native PtyID capture tier, so a connected terminal is no longer required.
 	ctx := context.Background()
 	daemonClient := daemon.NewWithAutoStart()
-	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
+	connected, _ := daemonClient.IsTerminalConnected(ctx)
+	session, _ := daemonClient.GetSession(ctx, job.ID)
+	hasPty := session != nil && session.PtyID != ""
+	if connected || hasPty {
 		result, err := daemonClient.CaptureAgentPane(ctx, job.ID)
 		daemonClient.Close()
 		if err == nil {
