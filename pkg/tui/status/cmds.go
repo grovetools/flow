@@ -2,6 +2,7 @@ package status
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -327,7 +328,14 @@ func collectWorkflowTranscripts(ctx context.Context, sessionDir, jobID string, m
 // disk, normalizes it, and renders it as Markdown. It handles BOTH on-disk
 // locations: simple subagents at <sessionDir>/subagents/agent-<id>.jsonl AND
 // workflow subagents at <sessionDir>/subagents/workflows/wf_*/agent-<id>.jsonl.
-func loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID string) tea.Cmd {
+//
+// When the live session dirs miss (e.g. after a cold load, when the upstream
+// runtime's per-agent jsonl has been cleaned up but the run was archived), it
+// falls back to the canonical glyph-format transcript the archiver wrote to
+// <planDir>/.artifacts/<jobID>/workflows/<runID>/agents/agent-<id>.md, returning
+// it as-is. planDir/jobID/runID may be empty, in which case the fallback is
+// skipped.
+func loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID, planDir, jobID, runID string) tea.Cmd {
 	return func() tea.Msg {
 		// Try both locations: simple subagent and workflow subagent
 		paths := []string{
@@ -351,6 +359,13 @@ func loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID string) tea.Cmd {
 			}
 		}
 		if transcriptPath == "" {
+			// Fall back to the archived, canonical glyph-format transcript.
+			if md, ok := loadArchivedAgentMarkdown(planDir, jobID, runID, agentID); ok {
+				return workflowAgentTranscriptLoadedMsg{
+					AgentID:  agentID,
+					Markdown: md,
+				}
+			}
 			return workflowAgentTranscriptLoadedMsg{
 				AgentID: agentID,
 				Err:     fmt.Errorf("no transcript found for agent %s", agentID),
@@ -366,13 +381,51 @@ func loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID string) tea.Cmd {
 			}
 		}
 
-		// Render to Markdown using the shared formatter
-		md := display.FormatWorkflowMarkdown(entries)
+		// Render to Markdown using the canonical glyph renderer (theme icons +
+		// summarized tool rows, ANSI-stripped) — the same format the archiver
+		// writes to disk, so live and cold-loaded transcripts read identically.
+		var buf bytes.Buffer
+		if err := display.RenderUnifiedTranscriptPlain(&buf, entries, "full", display.DefaultToolFormatters()); err != nil {
+			return workflowAgentTranscriptLoadedMsg{
+				AgentID: agentID,
+				Err:     err,
+			}
+		}
 		return workflowAgentTranscriptLoadedMsg{
 			AgentID:  agentID,
-			Markdown: md,
+			Markdown: buf.String(),
 		}
 	}
+}
+
+// loadArchivedAgentMarkdown reads the archiver's canonical glyph-format
+// transcript for an agent from
+// <planDir>/.artifacts/<jobID>/workflows/<runID>/agents/agent-<id>.md.
+// When runID is empty it scans every archived wf_* run dir for a match.
+// Returns ("", false) when no archived transcript exists.
+func loadArchivedAgentMarkdown(planDir, jobID, runID, agentID string) (string, bool) {
+	if planDir == "" || jobID == "" {
+		return "", false
+	}
+	var candidates []string
+	if runID != "" {
+		candidates = append(candidates, filepath.Join(planDir, ".artifacts", jobID, "workflows", runID, "agents", "agent-"+agentID+".md"))
+	} else {
+		workflowsDir := filepath.Join(planDir, ".artifacts", jobID, "workflows")
+		if dirEntries, err := os.ReadDir(workflowsDir); err == nil {
+			for _, e := range dirEntries {
+				if e.IsDir() && strings.HasPrefix(e.Name(), "wf_") {
+					candidates = append(candidates, filepath.Join(workflowsDir, e.Name(), "agents", "agent-"+agentID+".md"))
+				}
+			}
+		}
+	}
+	for _, p := range candidates {
+		if data, err := os.ReadFile(p); err == nil {
+			return string(data), true
+		}
+	}
+	return "", false
 }
 
 // normalizeTranscriptFile reads a jsonl transcript file and normalizes each
