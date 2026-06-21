@@ -193,15 +193,22 @@ func TestArchiveWorkflowRun_DefaultSkipsRawTranscripts(t *testing.T) {
 		t.Errorf("summary missing agent markdown transcript link:\n%s", summary)
 	}
 
-	// Rendered markdown transcript is always on...
+	// Rendered transcript is always on, in the canonical glyph style
+	// (theme icons + summarized rows), ANSI-clean on disk.
 	agentMD, err := os.ReadFile(filepath.Join(destDir, "agents", "agent-a6053d9fe85440cfe.md"))
 	if err != nil {
-		t.Fatalf("agent markdown transcript not rendered: %v", err)
+		t.Fatalf("agent transcript not rendered: %v", err)
 	}
-	for _, want := range []string{"**User:**", "Survey the nb module", "**Assistant:**", "Survey complete."} {
+	for _, want := range []string{"Survey the nb module", "Survey complete."} {
 		if !strings.Contains(string(agentMD), want) {
-			t.Errorf("agent markdown missing %q:\n%s", want, agentMD)
+			t.Errorf("agent transcript missing %q:\n%s", want, agentMD)
 		}
+	}
+	if strings.Contains(string(agentMD), "**User:**") || strings.Contains(string(agentMD), "**Tool:") {
+		t.Errorf("agent transcript should use the glyph style, not legacy markdown markers:\n%s", agentMD)
+	}
+	if strings.Contains(string(agentMD), "\x1b") {
+		t.Errorf("agent transcript should be ANSI-clean (no escape sequences):\n%s", agentMD)
 	}
 	if !ar.AgentDocs["a6053d9fe85440cfe"] {
 		t.Error("AgentDocs missing rendered agent")

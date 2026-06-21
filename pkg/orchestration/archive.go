@@ -497,9 +497,10 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 }
 
 // writeAgentMarkdown renders one agent's transcript entries to
-// agents/agent-<id>.md under the archived run dir, via the agentlogs
-// markdown renderer (stable role labels, injection-safe indented tool
-// blocks, no TTY/theme dependence).
+// agents/agent-<id>.md under the archived run dir, via the canonical
+// agentlogs glyph renderer (theme icons + summarized tool rows, ANSI
+// stripped for durable on-disk output). This gives archived subagent
+// transcripts the same `aglogs read` experience as main-agent transcripts.
 func writeAgentMarkdown(destRunDir, runID, agentID string, entries []transcript.UnifiedEntry) error {
 	agentsDir := filepath.Join(destRunDir, "agents")
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
@@ -507,9 +508,8 @@ func writeAgentMarkdown(destRunDir, runID, agentID string, entries []transcript.
 	}
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "# Agent `%s` — %s\n\n", agentID, runID)
-	opts := display.RenderOptions{Style: display.StyleMarkdown, DetailLevel: "full"}
-	if err := display.RenderUnifiedTranscript(&buf, entries, opts, nil); err != nil {
-		return fmt.Errorf("failed to render markdown transcript: %w", err)
+	if err := display.RenderUnifiedTranscriptPlain(&buf, entries, "full", display.DefaultToolFormatters()); err != nil {
+		return fmt.Errorf("failed to render transcript: %w", err)
 	}
 	return os.WriteFile(filepath.Join(agentsDir, "agent-"+agentID+".md"), buf.Bytes(), 0o600)
 }
