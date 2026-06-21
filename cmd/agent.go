@@ -645,8 +645,9 @@ Falls back to the job log in the plan's .artifacts directory.`,
 }
 
 func newAgentKillCmd() *cobra.Command {
+	var sessionID string
 	cmd := &cobra.Command{
-		Use:   "kill <slug> <job>",
+		Use:   "kill [<slug> <job>]",
 		Short: "Terminate a running interactive agent and close its pane",
 		Long: `Sends SIGTERM to the agent process, closes its out-of-process PTY,
 and marks the session as interrupted in the daemon registry.
@@ -654,23 +655,46 @@ and marks the session as interrupted in the daemon registry.
 The treemux pane closes automatically once the PTY receives EOF —
 no daemon restart required.
 
-Unlike 'flow plan complete', this command targets a single agent by
-plan slug and job name rather than operating on the whole plan.`,
+Targets a single agent by plan slug and job name, OR — with --id — by the
+daemon session id shown in 'flow agent list'. The --id form talks straight
+to the daemon registry and does NOT resolve the on-disk plan, so it can reap
+an ORPHANED agent whose plan has already been finished/archived (the case
+where '<slug> <job>' fails with "could not resolve plan").`,
 		Example: `  # Kill the coordinator agent for a plan
   flow agent kill agent-lifecycle-reaping coordinate-agent-lifecycle-reaping
 
-  # Kill an implementation agent
-  flow agent kill my-feature impl-my-feature`,
-		Args: cobra.ExactArgs(2),
+  # Kill an orphan by its session id (plan already gone)
+  flow agent kill --id coordinate-my-feature-701748e2`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, job, err := resolveAgentTarget(args[0], args[1])
-			if err != nil {
-				return err
+			// Validate the target shape BEFORE touching the daemon so bad
+			// invocations don't auto-start a daemon as a side effect.
+			if sessionID != "" && len(args) > 0 {
+				return fmt.Errorf("pass either --id or <slug> <job>, not both")
+			}
+			if sessionID == "" && len(args) != 2 {
+				return fmt.Errorf("requires <slug> <job> (or --id <session-id>)")
 			}
 
 			ctx := context.Background()
 			client := daemon.NewWithAutoStart()
 			defer client.Close()
+
+			// --id bypasses plan resolution entirely: kill straight by the
+			// daemon's session id. This is the orphan escape hatch — it works
+			// even after the plan has been finished/archived.
+			if sessionID != "" {
+				if err := client.KillSession(ctx, sessionID); err != nil {
+					return fmt.Errorf("kill agent %q: %w", sessionID, err)
+				}
+				fmt.Printf("Agent session %q killed.\n", sessionID)
+				return nil
+			}
+
+			_, job, err := resolveAgentTarget(args[0], args[1])
+			if err != nil {
+				return err
+			}
 
 			if err := client.KillSession(ctx, job.ID); err != nil {
 				return fmt.Errorf("kill agent: %w", err)
@@ -680,6 +704,7 @@ plan slug and job name rather than operating on the whole plan.`,
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&sessionID, "id", "", "Kill by daemon session id (bypasses plan resolution; reaps orphans)")
 	return cmd
 }
 
