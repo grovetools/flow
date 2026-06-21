@@ -55,12 +55,32 @@ func TestApplyWorkflowEvent_Accumulates(t *testing.T) {
 		t.Errorf("statusLabel = %q, want running", got)
 	}
 
+	// All agents finished but no terminal event yet: still "running" — count
+	// equality alone (a mid-run phase boundary) is NOT a completion signal.
 	applyWorkflowEvent(s, workflowmon.AgentCompleted{RunID: "wf_run-1", AgentID: "agent-b", Result: "done"})
-	if got := run.statusLabel(); got != "idle" {
-		t.Errorf("statusLabel after all results = %q, want idle", got)
+	if got := run.statusLabel(); got != "running" {
+		t.Errorf("statusLabel after all results (no terminal event) = %q, want running", got)
 	}
 
-	applyWorkflowEvent(s, workflowmon.RunStale{RunID: "wf_run-1"})
+	// Session-end + all agents completed → RunCompleted → "completed".
+	applyWorkflowEvent(s, workflowmon.RunCompleted{RunID: "wf_run-1"})
+	if got := run.statusLabel(); got != "completed" {
+		t.Errorf("statusLabel after RunCompleted = %q, want completed", got)
+	}
+}
+
+func TestStatusLabel_StaleForStragglers(t *testing.T) {
+	s := newWorkflowPaneState()
+	applyWorkflowEvent(s, workflowmon.RunDiscovered{RunID: "wf_s", Meta: &workflowmon.ScriptMeta{Name: "s"}})
+	applyWorkflowEvent(s, workflowmon.AgentStarted{RunID: "wf_s", AgentID: "a1"})
+	applyWorkflowEvent(s, workflowmon.AgentCompleted{RunID: "wf_s", AgentID: "a1", Result: "done"})
+	applyWorkflowEvent(s, workflowmon.AgentStarted{RunID: "wf_s", AgentID: "a2"}) // straggler, never completes
+	run := s.Runs["wf_s"]
+	if got := run.statusLabel(); got != "running" {
+		t.Errorf("statusLabel mid-run = %q, want running", got)
+	}
+	// Session ended with a straggler → RunStale → "stale".
+	applyWorkflowEvent(s, workflowmon.RunStale{RunID: "wf_s"})
 	if got := run.statusLabel(); got != "stale" {
 		t.Errorf("statusLabel after RunStale = %q, want stale", got)
 	}

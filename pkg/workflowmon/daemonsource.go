@@ -19,6 +19,7 @@ const (
 	updateWorkflowAgentStarted   = "workflow_agent_started"
 	updateWorkflowAgentCompleted = "workflow_agent_completed"
 	updateWorkflowRunStale       = "workflow_run_stale"
+	updateWorkflowRunCompleted   = "workflow_run_completed"
 )
 
 // DaemonWorkflowClient is the slice of daemon.Client a DaemonSource needs:
@@ -182,7 +183,8 @@ type daemonWorkflowPayload struct {
 func decodeWorkflowUpdate(u daemon.StateUpdate) []Event {
 	switch u.UpdateType {
 	case updateWorkflowRunDiscovered, updateWorkflowAgentStarted,
-		updateWorkflowAgentCompleted, updateWorkflowRunStale:
+		updateWorkflowAgentCompleted, updateWorkflowRunStale,
+		updateWorkflowRunCompleted:
 	default:
 		return nil
 	}
@@ -251,6 +253,11 @@ func decodeWorkflowUpdate(u daemon.StateUpdate) []Event {
 			return nil
 		}
 		return []Event{RunStale{JobID: ev.JobID, RunID: ev.RunID}}
+	case updateWorkflowRunCompleted:
+		if ev.RunID == "" {
+			return nil
+		}
+		return []Event{RunCompleted{JobID: ev.JobID, RunID: ev.RunID}}
 	}
 	return nil
 }
@@ -260,7 +267,7 @@ func decodeWorkflowUpdate(u daemon.StateUpdate) []Event {
 // name/phase meta), AgentStarted/AgentCompleted per agent (with the daemon's
 // hook-sourced timestamps; the durable Subagent record carries no phase, so
 // snapshot-replayed agents are phase-unattributed until a live delta
-// enriches them), then RunStale for stale runs. Iteration order is
+// enriches them), then RunCompleted/RunStale for terminal runs. Iteration order is
 // deterministic (run IDs and adhoc session keys sorted; agents by StartedAt
 // then ID).
 func snapshotEvents(snap *models.WorkflowSnapshot) []Event {
@@ -281,6 +288,9 @@ func snapshotEvents(snap *models.WorkflowSnapshot) []Event {
 		})
 		for _, agent := range sortedAgents(run.Agents) {
 			events = append(events, agentSnapshotEvents(run.JobID, runID, agent)...)
+		}
+		if run.Completed {
+			events = append(events, RunCompleted{JobID: run.JobID, RunID: runID})
 		}
 		if run.Stale {
 			events = append(events, RunStale{JobID: run.JobID, RunID: runID})

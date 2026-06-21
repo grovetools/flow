@@ -55,13 +55,14 @@ type FileSource struct {
 
 // fileRunState is the per-run tail state.
 type fileRunState struct {
-	journalOffset int64
-	partial       []byte          // trailing bytes of an incomplete journal line
-	started       map[string]bool // agents with an emitted AgentStarted
-	completed     map[string]bool // agents with an emitted AgentCompleted
-	promptPending map[string]bool // started agents whose transcript had no prompt yet
-	staleEmitted  bool
-	meta          *ScriptMeta // parsed script meta (for AgentLabels lookup)
+	journalOffset    int64
+	partial          []byte          // trailing bytes of an incomplete journal line
+	started          map[string]bool // agents with an emitted AgentStarted
+	completed        map[string]bool // agents with an emitted AgentCompleted
+	promptPending    map[string]bool // started agents whose transcript had no prompt yet
+	staleEmitted     bool
+	completedEmitted bool
+	meta             *ScriptMeta // parsed script meta (for AgentLabels lookup)
 }
 
 // journalEvent mirrors one journal.jsonl line: {type, key, agentId} for
@@ -169,7 +170,7 @@ func (s *FileSource) poll(ctx context.Context, runs map[string]*fileRunState) {
 		if !s.retryPrompts(ctx, runDir, runID, rs) {
 			return
 		}
-		s.checkStale(ctx, runDir, runID, rs)
+		s.checkTerminal(ctx, runDir, runID, rs)
 	}
 }
 
@@ -255,11 +256,17 @@ func (s *FileSource) retryPrompts(ctx context.Context, runDir, runID string, rs 
 	return true
 }
 
-// checkStale emits RunStale (once) when the journal has been quiet for the
-// staleness window AND the owning session is gone. In-flight agents are
-// never inferred as interrupted from journal gaps alone.
-func (s *FileSource) checkStale(ctx context.Context, runDir, runID string, rs *fileRunState) {
-	if rs.staleEmitted || s.opts.SessionAlive == nil {
+// checkTerminal resolves a run to its terminal state (once) once the journal
+// has been quiet for the staleness window AND the owning session is gone.
+// That two-factor gate is the REAL terminal trigger: a phase boundary
+// mid-run produces a quiet journal but a still-LIVE session, so count
+// equality is never trusted on its own (started==completed recurs at every
+// phase boundary). Once the session has actually ended, the run is
+// disambiguated by counts: every started agent has a result → RunCompleted;
+// any straggler → RunStale. In-flight agents are never inferred as
+// interrupted from journal gaps alone.
+func (s *FileSource) checkTerminal(ctx context.Context, runDir, runID string, rs *fileRunState) {
+	if rs.staleEmitted || rs.completedEmitted || s.opts.SessionAlive == nil {
 		return
 	}
 	info, err := os.Stat(filepath.Join(runDir, "journal.jsonl"))
@@ -269,7 +276,17 @@ func (s *FileSource) checkStale(ctx context.Context, runDir, runID string, rs *f
 	if time.Since(info.ModTime()) < s.opts.StaleAfter {
 		return
 	}
+	// Session still alive: a quiet journal at a phase boundary is NOT
+	// terminal. Never declare completion or staleness here.
 	if s.opts.SessionAlive() {
+		return
+	}
+	// Session has ended — this is the real terminal trigger. Disambiguate by
+	// counts: clean completion only when every started agent has a result.
+	if len(rs.started) > 0 && len(rs.started) == len(rs.completed) {
+		if s.emit(ctx, RunCompleted{RunID: runID}) {
+			rs.completedEmitted = true
+		}
 		return
 	}
 	if s.emit(ctx, RunStale{RunID: runID}) {
