@@ -274,12 +274,16 @@ func (m Model) renderTableView() string {
 		var row []string
 
 		// Virtual workflow rows render their tree label into the JOB
-		// column and leave every other cell empty.
+		// column and a muted kind label into TYPE (these nodes are not
+		// grove-managed jobs); every other cell stays empty.
 		if dr.Type != RowTypeJob {
 			for _, colName := range headers {
-				if strings.ToUpper(colName) == "JOB" {
+				switch strings.ToUpper(colName) {
+				case "JOB":
 					row = append(row, m.renderVirtualRowCell(m.ScrollOffset+i, dr))
-				} else {
+				case "TYPE":
+					row = append(row, m.virtualRowTypeCell(dr))
+				default:
 					row = append(row, "")
 				}
 			}

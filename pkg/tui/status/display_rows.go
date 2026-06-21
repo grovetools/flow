@@ -506,6 +506,37 @@ func (m *Model) virtualRowLabel(row *DisplayRow, styled bool) string {
 	return ""
 }
 
+// virtualRowTypeCell renders the TYPE-column cell for a virtual workflow
+// row. These nodes are Claude Code subagents / workflow runs, not
+// grove-managed jobs, so they get a muted icon + label clarifying what the
+// line is. Phases get a bare label; the "… +K more" overflow row gets
+// nothing.
+func (m *Model) virtualRowTypeCell(row *DisplayRow) string {
+	var icon, label string
+	switch row.Type {
+	case RowTypeRun:
+		// The ad-hoc bucket is the synthetic grouping for subagents spawned
+		// directly via the Agent/Task tool — NOT a Workflow() script run.
+		// Only real runs (a workflow run ID / script meta) are "workflow".
+		if row.Run != nil && row.Run.ID == adhocRunID {
+			icon, label = theme.IconRobot, "subagents"
+		} else {
+			icon, label = theme.IconGear, "workflow"
+		}
+	case RowTypeAgent:
+		icon, label = theme.IconRobot, "subagent"
+	case RowTypePhase:
+		label = "phase"
+	default:
+		return ""
+	}
+	text := label
+	if icon != "" {
+		text = icon + " " + label
+	}
+	return theme.DefaultTheme.Muted.Render(text)
+}
+
 // jobWorkflowBadge renders the "⚙ completed/started" badge appended to a
 // job row's JOB cell, or "" when the job has no workflow runs (live or
 // archived).
