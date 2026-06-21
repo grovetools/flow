@@ -349,43 +349,30 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 
 	mergeItem := &finish.Item{
 		ID:   ItemMergeSubmodules,
-		Name: "Merge/fast-forward submodules to main",
+		Name: "Merge/fast-forward ecosystem repos to main",
 		Check: func() (string, error) {
 			if worktreeName == "" || gitRoot == "" {
 				return "N/A", nil
 			}
-			workspaceFile := filepath.Join(gitRoot, ".grove", "workspace")
-			if _, err := os.Stat(workspaceFile); os.IsNotExist(err) {
-				return "N/A (not ecosystem)", nil
-			}
-			data, err := os.ReadFile(workspaceFile)
-			if err != nil {
-				return "N/A (read error)", nil
-			}
-			var workspaceConfig struct {
-				Branch    string   `yaml:"branch"`
-				Plan      string   `yaml:"plan"`
-				CreatedAt string   `yaml:"created_at"`
-				Ecosystem bool     `yaml:"ecosystem"`
-				Repos     []string `yaml:"repos,omitempty"`
-			}
-			if err := yaml.Unmarshal(data, &workspaceConfig); err != nil {
-				return "N/A (parse error)", nil
-			}
-			if !workspaceConfig.Ecosystem || len(workspaceConfig.Repos) == 0 {
+			// The plan's repo scope is the universal source of truth for
+			// which repos participate, loaded in memory via plan.Config —
+			// no need to read/parse the worktree's .grove/workspace from
+			// disk (which is absent for anchored/XDG worktrees whose
+			// container lives outside gitRoot).
+			if plan.Config == nil || len(plan.Config.Repos) == 0 {
 				return "N/A (not ecosystem)", nil
 			}
 			if provider == nil {
 				return color.YellowString("Available (discovery failed)"), nil
 			}
 			localWorkspaces := provider.LocalWorkspacesInEcosystem(gitRoot)
-			totalRepos := len(workspaceConfig.Repos)
+			totalRepos := len(plan.Config.Repos)
 			needsMerge := 0
 			alreadyMerged := 0
 			notFound := 0
 			needsRebase := 0
 			var repoDetails []finish.RepoStatus
-			for _, repoName := range workspaceConfig.Repos {
+			for _, repoName := range plan.Config.Repos {
 				repoPath, exists := localWorkspaces[repoName]
 				if !exists {
 					notFound++
@@ -463,31 +450,16 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			return fmt.Sprintf("%d repos: %s", totalRepos, strings.Join(statusParts, ", ")), nil
 		},
 		Action: func() error {
-			workspaceFile := filepath.Join(gitRoot, ".grove", "workspace")
-			data, err := os.ReadFile(workspaceFile)
-			if err != nil {
-				return fmt.Errorf("failed to read workspace file: %w", err)
-			}
-			var workspaceConfig struct {
-				Branch    string   `yaml:"branch"`
-				Plan      string   `yaml:"plan"`
-				CreatedAt string   `yaml:"created_at"`
-				Ecosystem bool     `yaml:"ecosystem"`
-				Repos     []string `yaml:"repos,omitempty"`
-			}
-			if err := yaml.Unmarshal(data, &workspaceConfig); err != nil {
-				return fmt.Errorf("failed to parse workspace file: %w", err)
-			}
-			if !workspaceConfig.Ecosystem || len(workspaceConfig.Repos) == 0 {
+			if plan.Config == nil || len(plan.Config.Repos) == 0 {
 				return nil
 			}
-			fmt.Printf("    Merging/fast-forwarding submodule branches to main...\n")
+			fmt.Printf("    Merging/fast-forwarding ecosystem branches to main...\n")
 			if provider == nil {
-				return fmt.Errorf("cannot merge submodules; workspace discovery failed")
+				return fmt.Errorf("cannot merge ecosystem repos; workspace discovery failed")
 			}
 			localWorkspaces := provider.LocalWorkspacesInEcosystem(gitRoot)
 			hasErrors := false
-			for _, repoName := range workspaceConfig.Repos {
+			for _, repoName := range plan.Config.Repos {
 				repoPath, exists := localWorkspaces[repoName]
 				if !exists {
 					fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping\n", repoName)
@@ -538,7 +510,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				fmt.Printf("        * Merged successfully\n")
 			}
 			if hasErrors {
-				return fmt.Errorf("some submodules failed to merge")
+				return fmt.Errorf("some ecosystem repos failed to merge")
 			}
 			return nil
 		},
@@ -860,6 +832,13 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				if branchName == "" || gitRoot == "" {
 					return "N/A", nil
 				}
+				// Modern ecosystem plans track their repos in plan.Config.Repos
+				// and route branch deletion through ItemDeleteLocalBranch
+				// (Phase 3). This legacy `.gitmodules`-based submodule path
+				// would double-delete (or fight) those branches, so skip it.
+				if plan.Config != nil && len(plan.Config.Repos) > 0 {
+					return "N/A (ecosystem plan)", nil
+				}
 				if _, err := os.Stat(filepath.Join(gitRoot, ".gitmodules")); os.IsNotExist(err) {
 					return "N/A (no submodules)", nil
 				}
@@ -953,10 +932,55 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		},
 		{
 			ID:   ItemDeleteLocalBranch,
-			Name: "Delete local git branch",
+			Name: "Delete local git branch(es)",
 			Check: func() (string, error) {
 				if branchName == "" || gitRoot == "" {
 					return "N/A", nil
+				}
+				// Ecosystem plans: the feature branch lives in each
+				// participating sub-repo's git, not in gitRoot (gitRoot is
+				// the ecosystem root, which never holds the branch for
+				// anchored/XDG worktrees). Probe the source repos.
+				if plan.Config != nil && len(plan.Config.Repos) > 0 {
+					sources := resolveEcosystemRepoSources(gitRoot, plan.Config.Repos, provider)
+					existsIn := 0
+					aheadStatus := ""
+					for _, repo := range plan.Config.Repos {
+						repoPath, ok := sources[repo]
+						if !ok {
+							continue
+						}
+						if err := exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", "refs/heads/"+branchName).Run(); err != nil { //nolint:gosec // branchName is internal
+							continue
+						}
+						existsIn++
+						if aheadStatus != "" {
+							continue
+						}
+						// Surface ahead-of-base count from the first repo that
+						// still carries the branch, matching the single-repo
+						// display so the wizard can color the row.
+						for _, baseBranch := range []string{"main", "master"} {
+							if exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Run() != nil {
+								continue
+							}
+							aheadOutput, aheadErr := exec.Command("git", "-C", repoPath, "rev-list", "--count", baseBranch+".."+branchName).Output() //nolint:gosec // branchName is internal
+							if aheadErr == nil {
+								aheadCount := strings.TrimSpace(string(aheadOutput))
+								if aheadCount != "0" && aheadCount != "" {
+									aheadStatus = color.RedString("%s has %s commits ahead of %s", repo, aheadCount, baseBranch)
+								}
+							}
+							break
+						}
+					}
+					if existsIn == 0 {
+						return "Not found", nil
+					}
+					if aheadStatus != "" {
+						return aheadStatus, nil
+					}
+					return color.YellowString("Available"), nil
 				}
 				output, err := exec.Command("git", "-C", gitRoot, "branch", "--list", branchName).Output()
 				if err != nil {
@@ -993,16 +1017,37 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return color.YellowString("Exists"), nil
 			},
 			Action: func() error {
+				// Ecosystem plans: delete the feature branch from every
+				// participating source repo. The prune-worktree step already
+				// removed the linked worktrees (Phase 2 decoupling), so the
+				// refs are no longer checked out and `-d` succeeds. Aggregate
+				// failures so one unmerged/locked repo doesn't abort the rest.
+				if plan.Config != nil && len(plan.Config.Repos) > 0 {
+					sources := resolveEcosystemRepoSources(gitRoot, plan.Config.Repos, provider)
+					var firstErr error
+					for _, repo := range plan.Config.Repos {
+						repoPath, ok := sources[repo]
+						if !ok {
+							continue
+						}
+						if err := exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", "refs/heads/"+branchName).Run(); err != nil { //nolint:gosec // branchName is internal
+							continue // branch already gone in this repo
+						}
+						if err := deleteLocalBranch(repoPath, branchName, opts.Force); err != nil {
+							fmt.Printf("    Warning: failed to delete branch '%s' from %s: %v\n", branchName, repo, err)
+							if firstErr == nil {
+								firstErr = err
+							}
+							continue
+						}
+						fmt.Printf("    Deleted branch '%s' from %s\n", branchName, repo)
+					}
+					return firstErr
+				}
 				err := executor.Execute("git", "-C", gitRoot, "branch", "-d", branchName)
 				if err != nil {
 					if strings.Contains(err.Error(), "not found") {
-						// Idempotent: the branch is already gone. For a
-						// container worktree the prune step's per-repo
-						// cleanup (cleanupEcosystemWorktree) deletes the
-						// owner repo's branch as part of deregistering its
-						// child worktree, so by the time this step runs the
-						// owner branch (gitRoot == owner repo) has already
-						// been removed. Nothing left to delete is success.
+						// Idempotent: the branch is already gone.
 						return nil
 					} else if strings.Contains(err.Error(), "checked out at") {
 						// Worktree was pruned earlier in the cleanup
@@ -1246,7 +1291,10 @@ func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
 // When force is false, `git worktree remove` is run without --force so that
 // uncommitted submodule work is preserved (the failure surfaces to the caller).
 func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string, provider *workspace.Provider, force bool) error {
-	worktreePath, ok := workspace.FindWorktreePath(gitRoot, worktreeName)
+	// Registry-first resolution so a worktree created with `--anchor <sub-repo>`
+	// (living under the anchor repo's XDG base, not gitRoot's) is found; only
+	// then does the .gitmodules under it resolve correctly.
+	worktreePath, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
 	if !ok {
 		worktreePath = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
 	}
@@ -1345,6 +1393,85 @@ func resolveContainerWorktreePath(gitRoot, worktreeName string, provider *worksp
 	return workspace.ResolveWorktreePathByName(gitRoot, worktreeName, owners)
 }
 
+// resolveEcosystemRepoSources maps each plan repo name to its on-disk SOURCE
+// checkout (not a worktree), mirroring the resolution order used by
+// cleanupEcosystemWorktree so branch operations target the same repos the prune
+// step deregistered worktrees from. For anchored/XDG worktrees the feature
+// branch lives in these source repos, never in gitRoot's own refs. Repos that
+// cannot be resolved are omitted from the result.
+func resolveEcosystemRepoSources(gitRoot string, repos []string, provider *workspace.Provider) map[string]string {
+	var localWorkspaces map[string]string
+	if provider != nil {
+		localWorkspaces = provider.LocalWorkspacesInEcosystem(gitRoot)
+	} else {
+		localWorkspaces = make(map[string]string)
+	}
+	out := make(map[string]string, len(repos))
+	for _, repo := range repos {
+		if p, ok := localWorkspaces[repo]; ok {
+			out[repo] = p
+			continue
+		}
+		// Sibling repo checked out directly under the ecosystem root (e.g. a
+		// non-grove `workspaces=["*"]` sibling the provider can't discover).
+		candidate := filepath.Join(gitRoot, repo)
+		if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
+			out[repo] = candidate
+			continue
+		}
+		// Single-repo container owned by the repo itself: gitRoot IS the source.
+		if filepath.Base(gitRoot) == repo {
+			if _, err := os.Stat(filepath.Join(gitRoot, ".git")); err == nil {
+				out[repo] = gitRoot
+				continue
+			}
+		}
+		// Repo linked in from a DIFFERENT ecosystem: resolve its source node
+		// (the non-worktree node carrying this name) via the provider.
+		if provider != nil {
+			for _, node := range provider.All() {
+				if node.Name != repo || node.IsWorktree() {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(node.Path, ".git")); err == nil {
+					out[repo] = node.Path
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
+// deleteLocalBranch deletes branchName from the repo at repoPath. It uses the
+// safe `-d` by default, escalating to `-D` only when the branch is merely
+// pinned by a stale (already-pruned) worktree pointer, or when force is set to
+// destroy unmerged commits. Returns an error when the branch is unmerged and
+// force is false so the caller can surface the data-loss risk; a missing branch
+// is treated as success (idempotent).
+func deleteLocalBranch(repoPath, branchName string, force bool) error {
+	out, err := exec.Command("git", "-C", repoPath, "branch", "-d", branchName).CombinedOutput() //nolint:gosec // branchName is internal
+	if err == nil {
+		return nil
+	}
+	outStr := string(out)
+	switch {
+	case strings.Contains(outStr, "not found"):
+		return nil
+	case strings.Contains(outStr, "checked out at") || strings.Contains(outStr, "used by worktree"):
+		// Worktree was pruned earlier in the cleanup sequence; the ref just
+		// carries a stale worktree pointer, so -D here loses no work.
+		return exec.Command("git", "-C", repoPath, "branch", "-D", branchName).Run() //nolint:gosec // branchName is internal
+	case strings.Contains(outStr, "not fully merged"):
+		if !force {
+			return fmt.Errorf("branch %q not fully merged (re-run with --force to destroy unmerged commits)", branchName)
+		}
+		return exec.Command("git", "-C", repoPath, "branch", "-D", branchName).Run() //nolint:gosec // branchName is internal
+	default:
+		return fmt.Errorf("%s", strings.TrimSpace(outStr))
+	}
+}
+
 func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider, force bool) error {
 	ecosystemDir, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
 	if !ok {
@@ -1364,13 +1491,9 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 			firstErr = err
 		}
 	}
-	branchDeleteFlag := "-d"
-	if force {
-		branchDeleteFlag = "-D"
-	}
 	for _, repo := range repos {
 		repoWorktreePath := filepath.Join(ecosystemDir, repo)
-		fmt.Printf("    • %s: removing worktree and branch\n", repo)
+		fmt.Printf("    • %s: removing worktree\n", repo)
 		repoPath, exists := localWorkspaces[repo]
 		// fellBackToGitRoot tracks the case where the provider missed the repo
 		// but we located its source checkout as a direct child of gitRoot. Such
@@ -1476,21 +1599,14 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 				continue
 			}
 		}
-		deleteBranchCmd := exec.CommandContext(ctx, "git", "branch", branchDeleteFlag, worktreeName)
-		deleteBranchCmd.Dir = repoPath
-		if output, err := deleteBranchCmd.CombinedOutput(); err != nil {
-			outputStr := string(output)
-			if strings.Contains(outputStr, "not found") {
-				// Idempotent: nothing to delete.
-			} else if !force && strings.Contains(outputStr, "not fully merged") {
-				fmt.Printf("      Error: branch '%s' in %s has unmerged commits: %s\n", worktreeName, repo, outputStr)
-				recordErr(fmt.Errorf("%s: branch %q not fully merged (re-run with --force to destroy unmerged commits)", repo, worktreeName))
-			} else {
-				fmt.Printf("      Warning: failed to delete branch '%s' from %s: %s\n", worktreeName, repo, outputStr)
-			}
-		} else {
-			fmt.Printf("      * Deleted branch '%s'\n", worktreeName)
-		}
+		// Branch deletion is intentionally NOT done here. Pruning the
+		// worktree only deregisters/removes the per-repo linked worktrees
+		// and the container dir; the feature branches in the source repos
+		// are deleted by the separate "Delete local git branch(es)" item
+		// (ItemDeleteLocalBranch), which owns the unmerged-commit safety
+		// gate and surfaces the deletion in the wizard checklist. Keeping
+		// them decoupled avoids the prune step silently destroying branches
+		// behind the user's back.
 
 		// In the fallback path the worktree dir may have been force-removed via
 		// os.RemoveAll (rather than `git worktree remove`), leaving a dangling
