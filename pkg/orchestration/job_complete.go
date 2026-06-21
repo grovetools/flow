@@ -248,6 +248,12 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 				fmt.Printf("Warning: failed to archive workflow runs: %v\n", err)
 			}
 		}
+		if err := ArchiveStandaloneSubagents(job, plan); err != nil {
+			// Log a warning but don't fail the entire completion process.
+			if !silent {
+				fmt.Printf("Warning: failed to archive standalone subagents: %v\n", err)
+			}
+		}
 	}
 
 	// Append transcript for agent jobs — runs even when already completed so
