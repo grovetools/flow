@@ -33,7 +33,7 @@ func TestGenerateWorkflowSummary_Complete(t *testing.T) {
 	}
 
 	summary := generateWorkflowSummary("release-survey", "wf_4650c05a-c39", run,
-		map[string]bool{"a6053d9fe85440cfe": true})
+		map[string]bool{"a6053d9fe85440cfe": true}, nil)
 
 	for _, want := range []string{
 		"# Workflow Run: release-survey",
@@ -74,7 +74,7 @@ func TestGenerateWorkflowSummary_Interrupted(t *testing.T) {
 		},
 	}
 
-	summary := generateWorkflowSummary("verify-round", "wf_2dc6d7f2-bab", run, nil)
+	summary := generateWorkflowSummary("verify-round", "wf_2dc6d7f2-bab", run, nil, nil)
 
 	for _, want := range []string{
 		"Agents started: 3",
@@ -91,7 +91,7 @@ func TestGenerateWorkflowSummary_Interrupted(t *testing.T) {
 
 func TestGenerateWorkflowSummary_NoAgents(t *testing.T) {
 	run := &agentworkflow.WorkflowRun{RunID: "wf_empty-run", Agents: map[string]*agentworkflow.AgentRun{}}
-	summary := generateWorkflowSummary("wf_empty-run", "wf_empty-run", run, nil)
+	summary := generateWorkflowSummary("wf_empty-run", "wf_empty-run", run, nil, nil)
 	for _, want := range []string{
 		"# Workflow Run: wf_empty-run",
 		"Agents started: 0",
@@ -293,6 +293,105 @@ func TestArchiveWorkflowRun_CopiesDaemonEventsAndDurations(t *testing.T) {
 	// Started but never completed: no duration entry.
 	if _, ok := ar.Durations["a9172cda79b99f9ad"]; ok {
 		t.Error("duration computed for agent without a completed event")
+	}
+}
+
+// TestArchiveWorkflowRun_RemovesSupersededSubTranscripts asserts the archiver
+// removes the upstream runtime's stray run-*-sub.* duplicate transcripts from
+// the source run dir, while leaving everything else untouched.
+func TestArchiveWorkflowRun_RemovesSupersededSubTranscripts(t *testing.T) {
+	runDir := buildWorkflowRunDir(t, "journal_complete.jsonl")
+	destDir := filepath.Join(t.TempDir(), "workflows", "wf_4650c05a-c39")
+
+	// Stray run-*-sub.* duplicates the upstream Claude runtime leaves behind.
+	stray := []string{"run-abc123-sub.jsonl", "run-abc123-sub.md"}
+	for _, name := range stray {
+		if err := os.WriteFile(filepath.Join(runDir, name), []byte("dup"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := archiveWorkflowRun(context.Background(), runDir, []string{t.TempDir()}, destDir, t.TempDir(), false); err != nil {
+		t.Fatalf("archiveWorkflowRun() error = %v", err)
+	}
+
+	for _, name := range stray {
+		if _, err := os.Stat(filepath.Join(runDir, name)); !os.IsNotExist(err) {
+			t.Errorf("superseded %s not removed from source run dir", name)
+		}
+	}
+	// The real journal and agent transcript must survive (not run-*-sub.*).
+	for _, name := range []string{"journal.jsonl", "agent-a6053d9fe85440cfe.jsonl"} {
+		if _, err := os.Stat(filepath.Join(runDir, name)); err != nil {
+			t.Errorf("archiver removed non-superseded file %s: %v", name, err)
+		}
+	}
+}
+
+// TestSortedAgentIDs_ChronologicalFromEvents asserts agents render in
+// start-time order (matching the live TUI), derived from a synthetic daemon
+// events.jsonl, with a lexical fallback for agents missing a start timestamp
+// and a stable order when no event log is present at all.
+func TestSortedAgentIDs_ChronologicalFromEvents(t *testing.T) {
+	// Lexical order of these IDs is z-inventory, z-no-event, z-synthesize.
+	// Chronological order (by started time) must put inventory first and
+	// synthesize last, with the timestamp-less agent sorting after the two
+	// that have a known start time.
+	run := &agentworkflow.WorkflowRun{
+		RunID: "wf_chrono",
+		Agents: map[string]*agentworkflow.AgentRun{
+			"z-synthesize": {Started: true},
+			"z-inventory":  {Started: true},
+			"z-no-event":   {Started: true},
+		},
+	}
+
+	eventsPath := filepath.Join(t.TempDir(), "events.jsonl")
+	events := `{"event":{"kind":"agent_started","agent_id":"z-synthesize","timestamp":"2026-06-10T10:05:00Z"}}
+{"event":{"kind":"agent_started","agent_id":"z-inventory","timestamp":"2026-06-10T10:00:00Z"}}
+{"event":{"kind":"agent_completed","agent_id":"z-inventory","timestamp":"2026-06-10T10:02:00Z"}}
+`
+	if err := os.WriteFile(eventsPath, []byte(events), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	durations, started := loadAgentDurations(eventsPath)
+	if started == nil {
+		t.Fatal("loadAgentDurations returned nil started map")
+	}
+	if _, ok := started["z-inventory"]; !ok {
+		t.Error("started map missing z-inventory")
+	}
+	if _, ok := started["z-synthesize"]; !ok {
+		t.Error("started map missing z-synthesize")
+	}
+	if _, ok := started["z-no-event"]; ok {
+		t.Error("started map should not contain an agent with no event")
+	}
+	if d := durations["z-inventory"]; d != 2*time.Minute {
+		t.Errorf("z-inventory duration = %v, want 2m", d)
+	}
+
+	got := sortedAgentIDs(run, started)
+	want := []string{"z-inventory", "z-synthesize", "z-no-event"}
+	if len(got) != len(want) {
+		t.Fatalf("sortedAgentIDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("sortedAgentIDs = %v, want %v", got, want)
+			break
+		}
+	}
+
+	// With no event log (nil started), ordering falls back to lexical.
+	lexical := sortedAgentIDs(run, nil)
+	wantLexical := []string{"z-inventory", "z-no-event", "z-synthesize"}
+	for i := range wantLexical {
+		if lexical[i] != wantLexical[i] {
+			t.Errorf("lexical fallback = %v, want %v", lexical, wantLexical)
+			break
+		}
 	}
 }
 

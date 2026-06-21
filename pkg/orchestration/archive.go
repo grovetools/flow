@@ -262,6 +262,10 @@ type archivedWorkflowRun struct {
 	// Durations holds per-agent wall-clock durations computed from the
 	// daemon's enriched events.jsonl (the raw journal has no timestamps).
 	Durations map[string]time.Duration
+	// Started holds per-agent wall-clock start times from the daemon's
+	// enriched events.jsonl, used to order agents chronologically (matching
+	// the live TUI). Nil when no enriched log was present.
+	Started map[string]time.Time
 	// AgentDocs marks agents whose rendered markdown transcript exists at
 	// agents/agent-<id>.md under the archived run dir.
 	AgentDocs map[string]bool
@@ -427,6 +431,7 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 	// timestamps the raw journal lacks, so the durable record gets ordering
 	// and per-agent durations.
 	var durations map[string]time.Duration
+	var startedTimes map[string]time.Time
 	daemonEvents := filepath.Join(daemonEventsDir, runID+".jsonl")
 	if _, err := os.Stat(daemonEvents); err == nil {
 		if err := fs.CopyFile(daemonEvents, filepath.Join(destRunDir, "events.jsonl")); err != nil {
@@ -435,14 +440,14 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 				Err(err).
 				Log(ctx)
 		} else {
-			durations = loadAgentDurations(filepath.Join(destRunDir, "events.jsonl"))
+			durations, startedTimes = loadAgentDurations(filepath.Join(destRunDir, "events.jsonl"))
 		}
 	}
 
 	// Render per-agent markdown transcripts (always on — these are small
 	// relative to the raw jsonl and environment-independent).
 	agentDocs := make(map[string]bool)
-	for _, agentID := range sortedAgentIDs(run) {
+	for _, agentID := range sortedAgentIDs(run, startedTimes) {
 		agent := run.Agents[agentID]
 		if len(agent.Entries) == 0 {
 			continue
@@ -458,7 +463,13 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 		agentDocs[agentID] = true
 	}
 
-	summary := generateWorkflowSummary(title, runID, run, agentDocs)
+	// Clean up superseded run-*-sub.* transcripts the upstream Claude runtime
+	// leaves in the session's run dir: these are duplicate transcripts in an
+	// old style, now replaced by the canonical agents/agent-<id>.md renders.
+	// Conservative glob — only run-*-sub.* matches.
+	removeSupersededSubTranscripts(ctx, srcRunDir, runID)
+
+	summary := generateWorkflowSummary(title, runID, run, agentDocs, startedTimes)
 	if err := os.WriteFile(filepath.Join(destRunDir, "summary.md"), []byte(summary), 0o600); err != nil {
 		return nil, fmt.Errorf("failed to write summary.md: %w", err)
 	}
@@ -492,6 +503,7 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 		Title:     title,
 		Run:       run,
 		Durations: durations,
+		Started:   startedTimes,
 		AgentDocs: agentDocs,
 	}, nil
 }
@@ -514,6 +526,28 @@ func writeAgentMarkdown(destRunDir, runID, agentID string, entries []transcript.
 	return os.WriteFile(filepath.Join(agentsDir, "agent-"+agentID+".md"), buf.Bytes(), 0o600)
 }
 
+// removeSupersededSubTranscripts deletes any run-*-sub.* files the upstream
+// Claude runtime left in a workflow run's source directory. These are
+// duplicate transcripts in an old style, superseded by the canonical
+// agents/agent-<id>.md renders. The glob is deliberately narrow (run-*-sub.*)
+// so nothing else in the run dir is touched, and removal failures are logged
+// but never fail archival.
+func removeSupersededSubTranscripts(ctx context.Context, srcRunDir, runID string) {
+	matches, err := filepath.Glob(filepath.Join(srcRunDir, "run-*-sub.*"))
+	if err != nil {
+		return
+	}
+	for _, path := range matches {
+		if err := os.Remove(path); err != nil {
+			ulog.Warn("[ARCHIVE] Failed to remove superseded sub transcript").
+				Field("run_id", runID).
+				Field("file", filepath.Base(path)).
+				Err(err).
+				Log(ctx)
+		}
+	}
+}
+
 // findWorkflowScript locates the persisted orchestration script for a run,
 // searching each scripts dir in order. Scripts are saved as
 // <name>-<runId>.js; the <name> prefix becomes the run's human-readable
@@ -531,17 +565,20 @@ func findWorkflowScript(scriptsDirs []string, runID string) (path, title string)
 	return "", ""
 }
 
-// loadAgentDurations computes per-agent wall-clock durations from the
-// daemon's enriched workflow event log (lines of {"event": WorkflowEvent}).
-// Only agents with both a started and a completed timestamp get an entry.
-func loadAgentDurations(eventsPath string) map[string]time.Duration {
+// loadAgentDurations computes per-agent wall-clock durations and earliest
+// start times from the daemon's enriched workflow event log (lines of
+// {"event": WorkflowEvent}). Durations cover only agents with both a started
+// and a completed timestamp; started covers every agent the log saw start
+// (used for chronological ordering). A nil durations/started map means the
+// log was missing or unparseable.
+func loadAgentDurations(eventsPath string) (durations map[string]time.Duration, started map[string]time.Time) {
 	f, err := os.Open(eventsPath)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer f.Close()
 
-	started := make(map[string]time.Time)
+	startedTimes := make(map[string]time.Time)
 	completed := make(map[string]time.Time)
 
 	scanner := bufio.NewScanner(f)
@@ -563,8 +600,8 @@ func loadAgentDurations(eventsPath string) map[string]time.Duration {
 		}
 		switch ev.Kind {
 		case models.WorkflowAgentStarted:
-			if t, ok := started[ev.AgentID]; !ok || ev.Timestamp.Before(t) {
-				started[ev.AgentID] = ev.Timestamp
+			if t, ok := startedTimes[ev.AgentID]; !ok || ev.Timestamp.Before(t) {
+				startedTimes[ev.AgentID] = ev.Timestamp
 			}
 		case models.WorkflowAgentCompleted:
 			if t, ok := completed[ev.AgentID]; !ok || ev.Timestamp.After(t) {
@@ -573,26 +610,47 @@ func loadAgentDurations(eventsPath string) map[string]time.Duration {
 		}
 	}
 
-	durations := make(map[string]time.Duration)
-	for agentID, start := range started {
+	durations = make(map[string]time.Duration)
+	for agentID, start := range startedTimes {
 		if end, ok := completed[agentID]; ok && !end.Before(start) {
 			durations[agentID] = end.Sub(start)
 		}
 	}
 	if len(durations) == 0 {
-		return nil
+		durations = nil
 	}
-	return durations
+	if len(startedTimes) == 0 {
+		startedTimes = nil
+	}
+	return durations, startedTimes
 }
 
-// sortedAgentIDs returns the run's agent IDs in lexical order so rendered
-// output is deterministic (WorkflowRun.Agents is a map).
-func sortedAgentIDs(run *agentworkflow.WorkflowRun) []string {
+// sortedAgentIDs returns the run's agent IDs in chronological order by start
+// time (earliest first), so rendered output matches the live TUI ordering
+// (inventory → … → synthesize). Agents with a missing or equal start
+// timestamp fall back to lexical ID order, which also makes output
+// deterministic when started is nil (no enriched event log).
+func sortedAgentIDs(run *agentworkflow.WorkflowRun, started map[string]time.Time) []string {
 	ids := make([]string, 0, len(run.Agents))
 	for id := range run.Agents {
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	sort.SliceStable(ids, func(i, j int) bool {
+		ti, oki := started[ids[i]]
+		tj, okj := started[ids[j]]
+		switch {
+		case oki && okj:
+			if !ti.Equal(tj) {
+				return ti.Before(tj)
+			}
+			return ids[i] < ids[j]
+		case oki != okj:
+			// Agents with a known start time sort before those without.
+			return oki
+		default:
+			return ids[i] < ids[j]
+		}
+	})
 	return ids
 }
 
@@ -687,7 +745,7 @@ func renderWorkflowRunsSection(jobID string, runs []*archivedWorkflowRun) string
 		}
 		fmt.Fprintf(&b, "- Artifacts: [%s/](%s/)\n", artifactDir, artifactDir)
 
-		agentIDs := sortedAgentIDs(ar.Run)
+		agentIDs := sortedAgentIDs(ar.Run, ar.Started)
 		if len(agentIDs) == 0 {
 			continue
 		}
@@ -733,16 +791,16 @@ func renderWorkflowRunsSection(jobID string, runs []*archivedWorkflowRun) string
 // title, started/completed agent counts, an interrupted-run note when agents
 // started but never returned, and each result payload in full, with links
 // to the rendered per-agent markdown transcripts.
-func generateWorkflowSummary(title, runID string, run *agentworkflow.WorkflowRun, agentDocs map[string]bool) string {
-	started, completed := countAgents(run)
+func generateWorkflowSummary(title, runID string, run *agentworkflow.WorkflowRun, agentDocs map[string]bool, started map[string]time.Time) string {
+	startedCount, completed := countAgents(run)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Workflow Run: %s\n\n", title)
 	fmt.Fprintf(&b, "- Run ID: `%s`\n", runID)
-	fmt.Fprintf(&b, "- Agents started: %d\n", started)
+	fmt.Fprintf(&b, "- Agents started: %d\n", startedCount)
 	fmt.Fprintf(&b, "- Agents completed: %d\n", completed)
 
-	agentIDs := sortedAgentIDs(run)
+	agentIDs := sortedAgentIDs(run, started)
 
 	var interrupted []string
 	for _, agentID := range agentIDs {

@@ -3045,25 +3045,30 @@ func (m Model) routeWorkflowAgentDetail(row *DisplayRow) (Model, tea.Cmd) {
 	// Check if agent is completed and we have no buffered lines or markdown
 	var agent *workflowAgentState
 	var sessionDir string
+	var agentRunID string
 	if st := m.WorkflowStates[row.Job.ID]; st != nil {
 		sessionDir = st.SessionDir
 		for _, runID := range st.RunOrder {
 			if a, ok := st.Runs[runID].Agents[agentID]; ok {
 				agent = a
+				agentRunID = runID
 				break
 			}
 		}
 	}
 
-	// For completed agents without buffered content, load historical transcript
+	// For completed agents without buffered content, load historical transcript.
+	// The live session dir may have been cleaned up (cold load), so we also
+	// pass the plan dir + job + run IDs for the archived-.md fallback. Allow the
+	// load even when sessionDir is empty as long as the archive path is known.
 	if agent != nil && agent.Completed {
 		hasLines := len(m.workflowAgentLines[agentID]) > 0
 		hasMarkdown := m.workflowAgentMarkdown[agentID] != ""
 		isLoading := m.workflowAgentLoading[agentID]
 
-		if !hasLines && !hasMarkdown && !isLoading && sessionDir != "" {
+		if !hasLines && !hasMarkdown && !isLoading && (sessionDir != "" || m.PlanDir != "") {
 			m.workflowAgentLoading[agentID] = true
-			return m, loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID)
+			return m, loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID, m.PlanDir, row.Job.ID, agentRunID)
 		}
 	}
 
