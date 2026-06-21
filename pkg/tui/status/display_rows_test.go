@@ -427,6 +427,42 @@ func TestVirtualRowCell_TruncatedAndConnected(t *testing.T) {
 	}
 }
 
+func TestVirtualRowTypeCell_LabelsKinds(t *testing.T) {
+	running := testJob("j")
+	running.Status = orchestration.JobStatusRunning
+	m := newDisplayTestModel(running)
+	st := newWorkflowPaneState()
+	m.WorkflowStates["j"] = st
+	// A real workflow run with a script-spawned agent.
+	applyWorkflowEvent(st, workflowmon.RunDiscovered{RunID: "wf"})
+	applyWorkflowEvent(st, workflowmon.AgentStarted{RunID: "wf", AgentID: "a1"})
+	// An ad-hoc Agent/Task-tool subagent (lands in the synthetic ad-hoc run).
+	applyWorkflowEvent(st, workflowmon.AgentStarted{RunID: adhocRunID, AgentID: "a2"})
+	m.rebuildDisplayRows()
+
+	for i := range m.DisplayRows {
+		row := &m.DisplayRows[i]
+		cell := stripANSI(m.virtualRowTypeCell(row))
+		switch row.Type {
+		case RowTypeRun:
+			// The ad-hoc bucket is a grouping of subagents, not a workflow.
+			want := "workflow"
+			if row.Run != nil && row.Run.ID == adhocRunID {
+				want = "subagents"
+			}
+			if !strings.Contains(cell, want) {
+				t.Errorf("run row %q: TYPE cell %q missing label %q", row.RunID, cell, want)
+			}
+		case RowTypeAgent:
+			if !strings.Contains(cell, "subagent") {
+				t.Errorf("agent row: TYPE cell %q missing label %q", cell, "subagent")
+			}
+		case RowTypeJob:
+			// Job rows render TYPE through the main column path, not this helper.
+		}
+	}
+}
+
 func TestWorkflowEventMsg_CoalescesRebuilds(t *testing.T) {
 	running := testJob("j")
 	running.Status = orchestration.JobStatusRunning
