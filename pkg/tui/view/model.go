@@ -9,6 +9,7 @@ package view
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -529,10 +530,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if plan != nil {
 				plan_finish.RunOnFinishHook(plan, plan.Name)
 			}
-			if err := state.Delete(groveplan.StateKey); err != nil {
+			sd := stateDirForView()
+			if err := state.Delete(sd, groveplan.StateKey); err != nil {
 				actionErrs = append(actionErrs, finishActionError{itemTitle: "unset active plan", err: err})
 			} else {
-				_ = state.Delete(groveplan.LegacyStateKey)
+				_ = state.Delete(sd, groveplan.LegacyStateKey)
 			}
 			m.finishTransient = formatFinishErrors(actionErrs)
 			if m.s.statusModel != nil {
@@ -1015,6 +1017,18 @@ func (m Model) TestState() map[string]interface{} {
 	}
 
 	return state
+}
+
+// stateDirForView returns the directory whose ecosystem owns the active-plan
+// state. core/state resolves it to its ecosystem/worktree root, so a process
+// outside any ecosystem refuses the write rather than touching a home-global
+// state file.
+func stateDirForView() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
 }
 
 // compile-time guard that Model satisfies tea.Model.

@@ -117,6 +117,18 @@ func getActivePlanWithMigration() (string, error) {
 	return name, nil
 }
 
+// stateDir returns the directory whose ecosystem owns the active-plan state for
+// the current command invocation: the process working directory. core/state
+// resolves this up to its ecosystem/worktree root, so reads/writes from $HOME
+// (no ecosystem) are graceful-empty / refused respectively.
+func stateDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
+}
+
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.
 // If no active job is set, it falls back to the rolling plan, creating it if necessary.
 func resolvePlanPathWithActiveJob(planName, contextDir string) (string, error) {

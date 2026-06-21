@@ -380,12 +380,24 @@ func formatConfigStatus(config *orchestration.PlanConfig) string {
 	}
 }
 
+// stateDir returns the directory whose ecosystem owns the active-plan state.
+// core/state resolves this to its ecosystem/worktree root, so a process run
+// outside any ecosystem refuses the write rather than touching a home-global
+// state file.
+func stateDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
+}
+
 // executePlanFinish launches `flow plan finish` as a subprocess, first
 // setting the active plan so the subprocess picks it up.
 func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
 		func() tea.Msg {
-			if err := state.Set(coreplan.StateKey, plan.Name); err != nil {
+			if err := state.Set(stateDir(), coreplan.StateKey, plan.Name); err != nil {
 				return err
 			}
 			return nil
@@ -399,7 +411,7 @@ func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 	return tea.Sequence(
 		func() tea.Msg {
-			if err := state.Set(coreplan.StateKey, plan.Name); err != nil {
+			if err := state.Set(stateDir(), coreplan.StateKey, plan.Name); err != nil {
 				return err
 			}
 			return nil
@@ -416,7 +428,7 @@ func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
 // its output via reviewCompleteMsg.
 func executePlanReview(plan *orchestration.Plan) tea.Cmd {
 	return func() tea.Msg {
-		if err := state.Set(coreplan.StateKey, plan.Name); err != nil {
+		if err := state.Set(stateDir(), coreplan.StateKey, plan.Name); err != nil {
 			return reviewCompleteMsg{err: err}
 		}
 		cmd := exec.Command("grove", "flow", "plan", "review")
