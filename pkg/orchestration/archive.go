@@ -508,6 +508,213 @@ func archiveWorkflowRun(ctx context.Context, srcRunDir string, scriptsDirs []str
 	}, nil
 }
 
+// subagentsSectionHeader is the job-.md section holding the durable record of
+// standalone (Agent-tool) subagents captured at completion. Rebuilt wholesale
+// on every completion and inserted before the agent chat transcript section.
+const subagentsSectionHeader = "# Subagents"
+
+// archivedStandaloneSubagent is the per-agent data collected while archiving a
+// standalone (non-workflow) Agent-tool subagent, used to render the job .md's
+// "# Subagents" section.
+type archivedStandaloneSubagent struct {
+	// ID is the agent ID (the agent-<id>.jsonl basename minus prefix/suffix).
+	ID string
+	// Name is the human display name from the sibling agent-<id>.meta.json
+	// "description" field, falling back to the agent ID.
+	Name string
+}
+
+// standaloneAgentMeta is the subset of a standalone subagent's
+// agent-<id>.meta.json we read: "description" is a human-readable name.
+type standaloneAgentMeta struct {
+	Description string `json:"description"`
+}
+
+// ArchiveStandaloneSubagents durably captures STANDALONE (Agent-tool) subagent
+// transcripts that workflow archival never touches. These live FLAT at
+// <claudeSessionDir>/subagents/agent-<id>.jsonl (with a sibling
+// agent-<id>.meta.json), as distinct from workflow agents nested under
+// subagents/workflows/wf_*/. For each one it renders a canonical markdown
+// transcript into .artifacts/<job>/subagents/agent-<id>.md (always), optionally
+// copies the raw jsonl (gated on plan.Config.ArchiveAgentTranscripts), and
+// rebuilds the job .md's "# Subagents" section. No session dir or no standalone
+// agents is a silent no-op (no error, no empty section). It is called right
+// after ArchiveWorkflowRuns in job completion and reuses the same session-dir
+// resolution.
+func ArchiveStandaloneSubagents(job *Job, plan *Plan) error {
+	ctx := context.Background()
+
+	if job.Type != JobTypeInteractiveAgent && job.Type != JobTypeHeadlessAgent && job.Type != JobTypeIsolatedAgent {
+		return nil
+	}
+
+	registry, err := coresessions.NewFileSystemRegistry()
+	if err != nil {
+		return fmt.Errorf("failed to create session registry: %w", err)
+	}
+
+	metadata, err := registry.Find(job.ID)
+	if err != nil || metadata.TranscriptPath == "" || metadata.ClaudeSessionID == "" {
+		ulog.Debug("[ARCHIVE] Session binding unverified; skipping standalone subagent archival").
+			Field("job_id", job.ID).
+			Err(err).
+			Log(ctx)
+		return nil
+	}
+
+	sessionDirs, dirsErr := coresessions.ResolveClaudeSessionDirs(metadata.ClaudeSessionID)
+	if dirsErr != nil || len(sessionDirs) == 0 {
+		sessionDirs = []string{filepath.Join(filepath.Dir(metadata.TranscriptPath), metadata.ClaudeSessionID)}
+	}
+
+	includeTranscripts := plan.Config != nil && plan.Config.ArchiveAgentTranscripts
+	return archiveStandaloneSubagentsFromDirs(ctx, job, plan, sessionDirs, includeTranscripts)
+}
+
+// archiveStandaloneSubagentsFromDirs globs the FLAT subagents/agent-*.jsonl
+// files in each session dir (explicitly skipping the subagents/workflows/
+// subtree, whose agents are handled by ArchiveWorkflowRuns), renders each to
+// .artifacts/<job>/subagents/agent-<id>.md, optionally copies the raw jsonl,
+// and rebuilds the job .md's "# Subagents" section. Agents are deduped by ID
+// across dirs. No standalone agents leaves the job file untouched.
+func archiveStandaloneSubagentsFromDirs(ctx context.Context, job *Job, plan *Plan, sessionDirs []string, includeTranscripts bool) error {
+	destSubagentsDir := filepath.Join(plan.Directory, ".artifacts", job.ID, "subagents")
+
+	var archived []*archivedStandaloneSubagent
+	seen := make(map[string]bool)
+	for _, dir := range sessionDirs {
+		// Glob the FLAT subagents/agent-*.jsonl files. filepath.Glob's
+		// agent-* pattern does not descend, so the subagents/workflows/
+		// subtree is naturally excluded; the IsDir guard below skips any
+		// non-file match defensively.
+		matches, globErr := filepath.Glob(filepath.Join(dir, "subagents", "agent-*.jsonl"))
+		if globErr != nil {
+			continue
+		}
+		for _, src := range matches {
+			info, statErr := os.Stat(src)
+			if statErr != nil || info.IsDir() {
+				continue
+			}
+			name := filepath.Base(src)
+			agentID := strings.TrimSuffix(strings.TrimPrefix(name, "agent-"), ".jsonl")
+			if agentID == "" || seen[agentID] {
+				continue
+			}
+
+			entries, err := agentworkflow.ReadAgentTranscript(src, agentID)
+			if err != nil || len(entries) == 0 {
+				// Unreadable or empty transcript: nothing to capture.
+				continue
+			}
+			seen[agentID] = true
+
+			displayName := standaloneAgentDisplayName(dir, agentID)
+			if err := writeStandaloneSubagentMarkdown(destSubagentsDir, agentID, displayName, entries); err != nil {
+				ulog.Warn("[ARCHIVE] Failed to render standalone subagent markdown").
+					Field("job_id", job.ID).
+					Field("agent_id", agentID).
+					Err(err).
+					Log(ctx)
+				continue
+			}
+
+			if includeTranscripts {
+				if err := os.MkdirAll(destSubagentsDir, 0o755); err != nil {
+					return fmt.Errorf("failed to create subagents directory: %w", err)
+				}
+				if err := fs.CopyFile(src, filepath.Join(destSubagentsDir, name)); err != nil {
+					ulog.Warn("[ARCHIVE] Failed to copy standalone subagent transcript").
+						Field("job_id", job.ID).
+						Field("agent_id", agentID).
+						Err(err).
+						Log(ctx)
+				}
+			}
+
+			archived = append(archived, &archivedStandaloneSubagent{ID: agentID, Name: displayName})
+			ulog.Debug("[ARCHIVE] Standalone subagent archived").
+				Field("job_id", job.ID).
+				Field("agent_id", agentID).
+				Log(ctx)
+		}
+	}
+
+	// Rebuild the job .md's "# Subagents" section from ALL captured agents.
+	// None → no section (and an existing section is left alone: a later
+	// partial re-archive must not erase a previously good record).
+	if len(archived) > 0 && job.FilePath != "" {
+		sort.Slice(archived, func(i, j int) bool { return archived[i].ID < archived[j].ID })
+		content := renderStandaloneSubagentsSection(job.ID, archived)
+		if _, err := NewStatePersister().UpdateJobSection(job, subagentsSectionHeader, content, transcriptSectionHeader, false); err != nil {
+			ulog.Warn("[ARCHIVE] Failed to update subagents section in job file").
+				Field("job_id", job.ID).
+				Field("filepath", job.FilePath).
+				Err(err).
+				Log(ctx)
+		}
+	}
+
+	return nil
+}
+
+// standaloneAgentDisplayName reads the sibling agent-<id>.meta.json's
+// "description" as a human display name, falling back to the agent ID when the
+// meta file is missing, unreadable, or has no description.
+func standaloneAgentDisplayName(sessionDir, agentID string) string {
+	metaPath := filepath.Join(sessionDir, "subagents", "agent-"+agentID+".meta.json")
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return agentID
+	}
+	var meta standaloneAgentMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return agentID
+	}
+	if name := strings.TrimSpace(meta.Description); name != "" {
+		return name
+	}
+	return agentID
+}
+
+// writeStandaloneSubagentMarkdown renders one standalone subagent's transcript
+// to subagents/agent-<id>.md under the job's artifact dir, via the same
+// canonical agentlogs glyph renderer used for workflow agents (ANSI stripped).
+func writeStandaloneSubagentMarkdown(destSubagentsDir, agentID, displayName string, entries []transcript.UnifiedEntry) error {
+	if err := os.MkdirAll(destSubagentsDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create subagents directory: %w", err)
+	}
+	var buf bytes.Buffer
+	if displayName != "" && displayName != agentID {
+		fmt.Fprintf(&buf, "# Subagent `%s` — %s\n\n", agentID, displayName)
+	} else {
+		fmt.Fprintf(&buf, "# Subagent `%s`\n\n", agentID)
+	}
+	if err := display.RenderUnifiedTranscriptPlain(&buf, entries, "full", display.DefaultToolFormatters()); err != nil {
+		return fmt.Errorf("failed to render transcript: %w", err)
+	}
+	return os.WriteFile(filepath.Join(destSubagentsDir, "agent-"+agentID+".md"), buf.Bytes(), 0o600)
+}
+
+// renderStandaloneSubagentsSection renders the body of the job .md's
+// "# Subagents" section (without the header itself): one bullet per captured
+// standalone agent with its display name and a link into the rendered markdown
+// transcript under .artifacts.
+func renderStandaloneSubagentsSection(jobID string, agents []*archivedStandaloneSubagent) string {
+	subagentsDir := filepath.ToSlash(filepath.Join(".artifacts", jobID, "subagents"))
+	var b strings.Builder
+	b.WriteString("\n")
+	for _, a := range agents {
+		link := fmt.Sprintf("%s/agent-%s.md", subagentsDir, a.ID)
+		if a.Name != "" && a.Name != a.ID {
+			fmt.Fprintf(&b, "- `%s` — %s: [agent-%s.md](%s)\n", a.ID, a.Name, a.ID, link)
+		} else {
+			fmt.Fprintf(&b, "- `%s`: [agent-%s.md](%s)\n", a.ID, a.ID, link)
+		}
+	}
+	return b.String()
+}
+
 // writeAgentMarkdown renders one agent's transcript entries to
 // agents/agent-<id>.md under the archived run dir, via the canonical
 // agentlogs glyph renderer (theme icons + summarized tool rows, ANSI
