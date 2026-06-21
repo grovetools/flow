@@ -365,7 +365,11 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if provider == nil {
 				return color.YellowString("Available (discovery failed)"), nil
 			}
-			localWorkspaces := provider.LocalWorkspacesInEcosystem(gitRoot)
+			// Resolve repos the same way ItemDeleteLocalBranch does so an
+			// --anchor <sub-repo> worktree (whose repos aren't in the bare
+			// provider map keyed off gitRoot) is found, not mis-flagged
+			// not_found. A weaker lookup here hid the merge item entirely.
+			sources := resolveEcosystemRepoSources(gitRoot, plan.Config.Repos, provider)
 			totalRepos := len(plan.Config.Repos)
 			needsMerge := 0
 			alreadyMerged := 0
@@ -373,7 +377,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			needsRebase := 0
 			var repoDetails []finish.RepoStatus
 			for _, repoName := range plan.Config.Repos {
-				repoPath, exists := localWorkspaces[repoName]
+				repoPath, exists := sources[repoName]
 				if !exists {
 					notFound++
 					repoDetails = append(repoDetails, finish.RepoStatus{Name: repoName, Status: "not_found"})
@@ -457,10 +461,10 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if provider == nil {
 				return fmt.Errorf("cannot merge ecosystem repos; workspace discovery failed")
 			}
-			localWorkspaces := provider.LocalWorkspacesInEcosystem(gitRoot)
+			sources := resolveEcosystemRepoSources(gitRoot, plan.Config.Repos, provider)
 			hasErrors := false
 			for _, repoName := range plan.Config.Repos {
-				repoPath, exists := localWorkspaces[repoName]
+				repoPath, exists := sources[repoName]
 				if !exists {
 					fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping\n", repoName)
 					continue
