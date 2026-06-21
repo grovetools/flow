@@ -158,9 +158,11 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	formattedOutput, formattedErr := formattedCmd.CombinedOutput()
 	formattedStr := string(formattedOutput)
 
-	// Get markdown transcript for the .md file: environment-independent
-	// (no TTY/theme/icon dependence), injection-safe indented tool blocks.
-	plainCmd := delegation.Command("aglogs", "read", aglogsSpec, "--style=markdown")
+	// Render the transcript for the .md file in the canonical glyph style
+	// (theme icons + summarized tool rows). Run as a subprocess with piped
+	// (non-TTY) stdout, so lipgloss auto-disables color and the output is
+	// ANSI-clean on disk — matching the archived subagent transcripts.
+	plainCmd := delegation.Command("aglogs", "read", aglogsSpec)
 	plainOutput, plainErr := plainCmd.CombinedOutput()
 	plainStr := string(plainOutput)
 
