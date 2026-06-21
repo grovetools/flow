@@ -258,7 +258,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	// If a new session is opened, the active plan will be set inside that session.
 	// Also skip setting the active plan in the parent if a worktree was created.
 	if !cmd.OpenSession && worktreeToSet == "" {
-		if err := state.Set(plan.StateKey, planName); err != nil {
+		if err := state.Set(stateDir(), plan.StateKey, planName); err != nil {
 			result.WriteString(fmt.Sprintf("Warning: failed to set active job: %v\n", err))
 		} else {
 			result.WriteString(fmt.Sprintf("* Set active plan to: %s\n", planName))
@@ -855,7 +855,7 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	// If a new session is opened, the active plan will be set inside that session.
 	// Also skip setting the active plan in the parent if a worktree was created.
 	if !cmd.OpenSession && finalWorktree == "" {
-		if err := state.Set(plan.StateKey, planName); err != nil {
+		if err := state.Set(stateDir(), plan.StateKey, planName); err != nil {
 			fmt.Printf("Warning: failed to set active job: %v\n", err)
 		} else {
 			fmt.Printf("* Set active plan to: %s\n", planName)
@@ -1579,7 +1579,7 @@ func provisionEnvironment(worktreeName, planPath string, wsProvider *workspace.P
 	// Determine active environment profile: --env flag > sticky state > default
 	activeProfile := envProfile
 	if activeProfile == "" {
-		activeProfile, _ = state.GetString("environment")
+		activeProfile, _ = state.GetString(loadPath, "environment")
 	}
 	// "default" is an alias for the unnamed base [environment] block.
 	// Normalize here so the pre-validation below doesn't reject it as a missing

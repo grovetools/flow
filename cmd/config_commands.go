@@ -24,7 +24,7 @@ Examples:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			planDir := args[0]
-			if err := state.Set(plan.StateKey, planDir); err != nil {
+			if err := state.Set(stateDir(), plan.StateKey, planDir); err != nil {
 				return fmt.Errorf("set active job: %w", err)
 			}
 			fmt.Printf("Set active job to: %s\n", planDir)
@@ -66,11 +66,11 @@ func NewUnsetCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Clear both old and new keys
-			if err := state.Delete(plan.StateKey); err != nil {
+			if err := state.Delete(stateDir(), plan.StateKey); err != nil {
 				return fmt.Errorf("clear active job: %w", err)
 			}
 			// Also try to delete old key (ignore errors)
-			_ = state.Delete(plan.LegacyStateKey)
+			_ = state.Delete(stateDir(), plan.LegacyStateKey)
 			fmt.Println("Cleared active job")
 			return nil
 		},

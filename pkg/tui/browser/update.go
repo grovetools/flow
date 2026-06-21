@@ -101,7 +101,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clear any prior error on a successful (re)load — recovery path.
 		m.err = nil
 		m.plans = msg.plans
-		activePlan, _ := state.GetString(coreplan.StateKey)
+		activePlan, _ := state.GetString(stateDir(), coreplan.StateKey)
 		m.activePlan = activePlan
 		if m.cursor >= len(m.plans) {
 			m.cursor = len(m.plans) - 1
@@ -246,7 +246,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.SetActive):
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
-			if err := state.Set(coreplan.StateKey, selectedPlan.Name); err == nil {
+			if err := state.Set(stateDir(), coreplan.StateKey, selectedPlan.Name); err == nil {
 				m.activePlan = selectedPlan.Name
 			}
 		}

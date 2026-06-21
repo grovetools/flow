@@ -177,10 +177,10 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 	// Check if the finished plan was the active plan and unset it.
 	activePlan, err := getActivePlanWithMigration()
 	if err == nil && activePlan == planName {
-		if err := state.Delete(groveplan.StateKey); err != nil {
+		if err := state.Delete(stateDir(), groveplan.StateKey); err != nil {
 			fmt.Printf("Warning: could not unset active plan: %v\n", err)
 		} else {
-			_ = state.Delete(groveplan.LegacyStateKey)
+			_ = state.Delete(stateDir(), groveplan.LegacyStateKey)
 			fmt.Println("\n* Unset active plan")
 		}
 	}
