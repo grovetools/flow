@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
+	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/logviewer"
 	"github.com/grovetools/core/tui/keymap"
@@ -813,16 +814,12 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// RollingPlanName is the name of the auto-created rolling plan.
-// This constant is duplicated here to avoid import cycles with cmd package.
-const RollingPlanName = "rolling"
-
 // PlanTitle returns the styled plan name for use as a pager title row.
 // Exported so the view meta-panel's page adapter can surface it via
 // PageWithTitle without duplicating the rolling-plan logic.
 func (m Model) PlanTitle() string {
 	label := theme.IconPlan + " Plan Status: "
-	if m.Plan.Name == RollingPlanName {
+	if m.Plan.Name == coreplan.RollingPlanName {
 		return label + theme.DefaultTheme.Muted.Render("(rolling)") + "  " + theme.DefaultTheme.Muted.Italic(true).Render("auto-created for quick tasks")
 	}
 	return label + m.Plan.Name

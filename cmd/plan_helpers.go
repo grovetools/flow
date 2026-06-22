@@ -132,8 +132,6 @@ func stateDir() string {
 // resolvePlanPathWithActiveJob resolves a plan path, using the active job if no path is provided.
 // If no active job is set, it falls back to the rolling plan, creating it if necessary.
 func resolvePlanPathWithActiveJob(planName, contextDir string) (string, error) {
-	usingRollingPlan := false
-
 	// If no plan name provided, try to use active job
 	if planName == "" {
 		activeJob, err := getActivePlanWithMigration()
@@ -144,22 +142,24 @@ func resolvePlanPathWithActiveJob(planName, contextDir string) (string, error) {
 			planName = activeJob
 		} else {
 			// Fallback to the rolling plan
-			planName = RollingPlanName
-			usingRollingPlan = true
+			planName = plan.RollingPlanName
 		}
 	}
 
-	// For the rolling plan, we need to ensure we have a valid workspace context.
-	// Don't create "rolling/" in random directories if workspace detection fails.
-	if usingRollingPlan {
-		resolvedPath, err := resolvePlanPathInWorkspace(planName, contextDir)
+	// Self-heal the rolling plan whenever it's the resolved plan — whether it
+	// arrived via the empty-name fallback above OR was already the active plan
+	// (state/branch/registry). EnsureRollingPlan requires a valid workspace, so
+	// we never create "rolling/" in a random directory. created==true means we
+	// just materialized it for the first time, so notify the user once.
+	if planName == plan.RollingPlanName {
+		dir, created, err := plan.EnsureRollingPlan(contextDir)
 		if err != nil {
 			return "", fmt.Errorf("cannot use rolling plan: %w", err)
 		}
-		if err := ensureRollingPlanExists(resolvedPath); err != nil {
-			return "", fmt.Errorf("ensuring rolling plan exists: %w", err)
+		if created {
+			fmt.Fprintf(os.Stderr, "No active plan set. Using rolling plan at: %s\n", dir)
 		}
-		return resolvedPath, nil
+		return dir, nil
 	}
 
 	return resolvePlanPath(planName, contextDir)
@@ -195,37 +195,6 @@ func resolvePlanPathInWorkspace(planName, contextDir string) (string, error) {
 	// Join with the specific plan name.
 	fullPath := filepath.Join(plansDir, planName)
 	return filepath.Abs(fullPath)
-}
-
-// RollingPlanName is the name of the auto-created rolling plan used when no plan is specified.
-const RollingPlanName = "rolling"
-
-// ensureRollingPlanExists checks if the rolling plan directory exists, creating it if necessary.
-func ensureRollingPlanExists(planPath string) error {
-	// Check if the directory already exists
-	if _, err := os.Stat(planPath); err == nil {
-		return nil // Already exists, nothing to do
-	} else if !os.IsNotExist(err) {
-		// Another error occurred (e.g., permissions)
-		return fmt.Errorf("checking rolling plan path: %w", err)
-	}
-
-	// Directory does not exist, so create it
-	if err := os.MkdirAll(planPath, 0o755); err != nil {
-		return fmt.Errorf("creating rolling plan directory: %w", err)
-	}
-
-	// Create a minimal .grove-plan.yml file
-	configPath := filepath.Join(planPath, ".grove-plan.yml")
-	configContent := []byte("# Rolling plan - auto-created for quick tasks without a formal plan.\n")
-	if err := os.WriteFile(configPath, configContent, 0o600); err != nil {
-		return fmt.Errorf("creating rolling plan .grove-plan.yml: %w", err)
-	}
-
-	// Notify the user on stderr that the rolling plan is being used for the first time
-	fmt.Fprintf(os.Stderr, "No active plan set. Using rolling plan at: %s\n", planPath)
-
-	return nil
 }
 
 // loadFlowConfigWithDynamicRecipes is a helper to load flow config and extract the get_recipe_cmd.
