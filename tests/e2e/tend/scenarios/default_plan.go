@@ -429,5 +429,57 @@ var RollingPlanWorkflowScenario = harness.NewScenario(
 				v.Contains("back-to-rolling job in status output", result.Stdout, "back-to-rolling")
 			})
 		}),
+
+		harness.NewStep("Active plan 'rolling' but directory deleted self-heals on read", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			rollingPlanPath := ctx.GetString("rolling_plan_path")
+
+			// Pin the active plan to the literal "rolling" name. This is the
+			// direct-load path: resolution short-circuits to the named plan
+			// instead of the empty-name fallback that historically created it.
+			cmd := ctx.Bin("set", RollingPlanName)
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("set rolling failed: %w", err)
+			}
+
+			// Delete the rolling plan directory out from under the active plan,
+			// simulating a fresh clone / pruned plans dir where nothing has run
+			// the write path yet.
+			if err := fs.RemoveIfExists(rollingPlanPath); err != nil {
+				return fmt.Errorf("removing rolling plan dir: %w", err)
+			}
+			if err := ctx.Check("rolling plan dir is gone before read", fs.AssertNotExists(rollingPlanPath)); err != nil {
+				return err
+			}
+
+			// 'flow plan status --json' with active plan == rolling must
+			// self-heal the missing directory instead of erroring with
+			// "plan directory not found".
+			cmd = ctx.Bin("plan", "status", "--json")
+			cmd.Dir(projectDir)
+			result = cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("plan status failed to self-heal missing rolling plan: %w", err)
+			}
+			if strings.Contains(result.Stderr, "plan directory not found") {
+				return fmt.Errorf("expected self-heal, but got 'plan directory not found': %s", result.Stderr)
+			}
+
+			// The directory and its marker must have been re-materialized.
+			if err := ctx.Check("rolling plan dir re-created", fs.AssertExists(rollingPlanPath)); err != nil {
+				return err
+			}
+			markerPath := filepath.Join(rollingPlanPath, ".grove-plan.yml")
+			if err := ctx.Check("rolling plan marker re-created", fs.AssertExists(markerPath)); err != nil {
+				return err
+			}
+
+			return nil
+		}),
 	},
 )

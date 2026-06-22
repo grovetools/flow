@@ -8,16 +8,16 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/daemon"
+	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/planutil"
 )
 
-// RollingPlanName is the name of the auto-created rolling plan. Duplicated
-// here rather than imported from flow/cmd so this package can be imported
-// without pulling in the cobra command surface.
-const RollingPlanName = "rolling"
+// RollingPlanName is the name of the auto-created rolling plan, sourced from
+// core/pkg/plan so the literal lives in exactly one place.
+const RollingPlanName = coreplan.RollingPlanName
 
 // refreshInterval controls how often the browser re-polls the plans
 // directory and git log while running.
