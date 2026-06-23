@@ -1,15 +1,9 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"text/template"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -76,74 +70,10 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Find the first job with a note_ref
-	var noteRef string
-	for _, job := range plan.Jobs {
-		if job.NoteRef != "" {
-			noteRef = job.NoteRef
-			break
-		}
-	}
-
-	// Execute on_review hook if it exists
-	if plan.Config != nil && plan.Config.Hooks != nil {
-		if hookCmdStr, ok := plan.Config.Hooks["on_review"]; ok && hookCmdStr != "" {
-			fmt.Println("▶️  Executing on_review hook...")
-
-			// Prepare template data
-			templateData := struct {
-				PlanName string
-				NoteRef  string
-			}{
-				PlanName: plan.Name,
-				NoteRef:  noteRef,
-			}
-
-			// Render the hook command
-			tmpl, err := template.New("hook").Parse(hookCmdStr)
-			if err != nil {
-				return fmt.Errorf("failed to parse on_review hook template: %w", err)
-			}
-			var renderedCmd bytes.Buffer
-			if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
-				return fmt.Errorf("failed to render on_review hook command: %w", err)
-			}
-
-			// Execute the command
-			hookCmd := exec.Command("sh", "-c", renderedCmd.String()) //nolint:gosec // on_review hook comes from trusted plan config
-			hookCmd.Stdout = os.Stdout
-			hookCmd.Stderr = os.Stderr
-			if err := hookCmd.Run(); err != nil {
-				return fmt.Errorf("on_review hook execution failed: %w", err)
-			}
-			fmt.Println("* on_review hook executed successfully.")
-		}
-	}
-
-	// Update plan status to 'review'
-	if plan.Config == nil {
-		plan.Config = &orchestration.PlanConfig{}
-	}
-	plan.Config.Status = "review"
-
-	configPath := filepath.Join(planPath, ".grove-plan.yml")
-
-	// Read existing config to preserve other fields
-	var existingConfig orchestration.PlanConfig
-	if data, err := os.ReadFile(configPath); err == nil {
-		_ = yaml.Unmarshal(data, &existingConfig)
-	}
-	existingConfig.Status = "review"
-	if plan.Config.Hooks != nil {
-		existingConfig.Hooks = plan.Config.Hooks
-	}
-
-	yamlData, err := yaml.Marshal(existingConfig)
-	if err != nil {
-		return fmt.Errorf("failed to marshal plan config: %w", err)
-	}
-	if err := os.WriteFile(configPath, yamlData, 0o600); err != nil {
-		return fmt.Errorf("failed to write updated plan config: %w", err)
+	// Mark for review: runs the on_review hook, flips status to "review", and
+	// persists .grove-plan.yml. Shared with non-CLI callers (e.g. git-viewer).
+	if err := orchestration.MarkPlanReview(planPath); err != nil {
+		return err
 	}
 
 	fmt.Printf("* Plan '%s' marked for review.\n", plan.Name)
