@@ -335,6 +335,21 @@ func SavePlan(dir string, plan *Plan) error {
 	plan.Directory = dir
 	plan.Name = filepath.Base(dir)
 
+	// Persist plan-level configuration (.grove-plan.yml) when present so
+	// callers that mutate plan.Config (e.g. MarkPlanReview flipping Status to
+	// "review") have their changes written back. plan.Config carries the full
+	// config loaded by LoadPlan, so marshaling it preserves all other fields.
+	if plan.Config != nil {
+		yamlData, err := yaml.Marshal(plan.Config)
+		if err != nil {
+			return fmt.Errorf("marshaling plan config: %w", err)
+		}
+		configPath := filepath.Join(dir, ".grove-plan.yml")
+		if err := os.WriteFile(configPath, yamlData, 0o600); err != nil {
+			return fmt.Errorf("writing plan config: %w", err)
+		}
+	}
+
 	// Save each job
 	for _, job := range plan.Jobs {
 		if job.Filename == "" {
