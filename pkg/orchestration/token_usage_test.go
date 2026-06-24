@@ -18,10 +18,11 @@ func TestFormatTokenCount(t *testing.T) {
 		{0, "0"},
 		{42, "42"},
 		{999, "999"},
-		{1000, "1,000"},
-		{12345, "12,345"},
-		{1234567, "1,234,567"},
-		{-1500, "-1,500"},
+		{1000, "1.0k"},
+		{12345, "12.3k"},
+		{179549, "179.5k"},
+		{1234567, "1.2M"},
+		{-1500, "-1.5k"},
 	}
 	for _, c := range cases {
 		if got := formatTokenCount(c.in); got != c.want {
@@ -58,18 +59,18 @@ func TestRenderTokenUsageSection(t *testing.T) {
 	out := renderTokenUsageSection(s)
 
 	for _, want := range []string{
-		"Total tokens: 6,550",
+		"Total tokens: 6.5k",
 		"Cost: $0.42",
 		"Models: claude-opus-4-5",
 		"Messages: 7",
 		"### Token breakdown",
-		"Input: 1,000",
+		"Input: 1.0k",
 		"Output: 200",
-		"Cache read: 5,000",
+		"Cache read: 5.0k",
 		"Cache write (5m): 300",
 		"Cache write (1h): 50",
 		"### Per-model",
-		"`claude-opus-4-5`: 1,200 tokens, $0.42",
+		"`claude-opus-4-5`: 1.2k tokens, $0.42",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered section missing %q\n---\n%s", want, out)

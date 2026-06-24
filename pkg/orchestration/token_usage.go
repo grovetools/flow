@@ -246,27 +246,24 @@ func formatCostUSD(cost float64, missingPricing bool) string {
 	return fmt.Sprintf("$%.2f", cost)
 }
 
-// formatTokenCount renders an integer token count with thousands separators
-// for readability in the markdown section.
+// formatTokenCount renders a token count using the same humanized form as
+// `cx` (cx/pkg/context/manager.go FormatTokenCount): <1k verbatim, then "%.1fk"
+// and "%.1fM". Keeping the two tools' representations identical avoids the
+// reader having to reconcile "179,549" here with "179.5k" there.
 func formatTokenCount(n int64) string {
 	neg := n < 0
 	if neg {
 		n = -n
 	}
-	s := fmt.Sprintf("%d", n)
-	if len(s) <= 3 {
-		if neg {
-			return "-" + s
-		}
-		return s
+	var out string
+	switch {
+	case n < 1000:
+		out = fmt.Sprintf("%d", n)
+	case n < 1000000:
+		out = fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		out = fmt.Sprintf("%.1fM", float64(n)/1000000)
 	}
-	var parts []string
-	for len(s) > 3 {
-		parts = append([]string{s[len(s)-3:]}, parts...)
-		s = s[:len(s)-3]
-	}
-	parts = append([]string{s}, parts...)
-	out := strings.Join(parts, ",")
 	if neg {
 		return "-" + out
 	}

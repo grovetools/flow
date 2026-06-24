@@ -46,7 +46,7 @@ func TestRenderTokenPaneContentFull(t *testing.T) {
 
 	for _, want := range []string{
 		"Totals",
-		"6,550", // total tokens
+		"6.5k", // total tokens
 		"$0.42",
 		"Messages: 7",
 		"claude-opus-4-5",
