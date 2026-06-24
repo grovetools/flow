@@ -38,6 +38,7 @@ func defaultColumnVisibility() map[string]bool {
 		"COMPLETED": false,
 		"SKILL":     false,
 		"DURATION":  false,
+		"TOKENS":    false,
 	}
 }
 

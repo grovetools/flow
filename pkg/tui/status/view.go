@@ -459,6 +459,8 @@ func (m Model) renderTableView() string {
 				} else {
 					cell = t.Muted.Render("-")
 				}
+			case "TOKENS":
+				cell = m.renderTokenColumnCell(job)
 			default:
 				cell = t.Muted.Render("?")
 			}

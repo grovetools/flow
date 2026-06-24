@@ -254,6 +254,15 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 				fmt.Printf("Warning: failed to archive standalone subagents: %v\n", err)
 			}
 		}
+		// Summarize per-job token usage + cost into
+		// .artifacts/<job>/token-usage.json and a "## Token Usage" section.
+		// ArchiveTokenUsage warns-and-continues internally, so it never
+		// returns an error that could fail completion.
+		if err := ArchiveTokenUsage(job, plan); err != nil {
+			if !silent {
+				fmt.Printf("Warning: failed to archive token usage: %v\n", err)
+			}
+		}
 	}
 
 	// Append transcript for agent jobs — runs even when already completed so

@@ -34,6 +34,7 @@ type KeyMap struct {
 	ViewFrontmatter  key.Binding
 	ViewBriefing     key.Binding
 	ViewEdit         key.Binding
+	ViewTokens       key.Binding
 	ViewSkillPane    key.Binding
 	CloseDetailPane  key.Binding
 	SwitchFocus      key.Binding
@@ -136,6 +137,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("v"),
 			key.WithHelp("v", "preview job file"),
 		),
+		ViewTokens: key.NewBinding(
+			key.WithKeys("O"),
+			key.WithHelp("O", "view token usage"),
+		),
 		ViewContext: key.NewBinding(
 			key.WithKeys("w"),
 			key.WithHelp("w", "view context"),
@@ -205,7 +210,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
 			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-			k.ViewBriefing, k.ViewEdit, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview,
+			k.ViewBriefing, k.ViewEdit, k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview,
 			k.CloseDetailPane, k.SwitchFocus, k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(
