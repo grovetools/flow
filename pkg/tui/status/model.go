@@ -67,6 +67,7 @@ const (
 	MemoryPaneDetail
 	NativeAgentPaneDetail
 	EditorPaneDetail // BSP split editor (hosted mode only)
+	TokenPaneDetail  // Per-job token usage + cost breakdown
 )
 
 // Model represents the state of the TUI
@@ -131,6 +132,7 @@ type Model struct {
 	columnVisibility      map[string]bool
 	frontmatterViewport   viewport.Model
 	briefingViewport      viewport.Model
+	tokenViewport         viewport.Model
 	editViewport          viewport.Model
 	skillPaneViewport     viewport.Model
 	skillArtifactViewport viewport.Model                              // Scrollable artifact detail viewport
@@ -199,8 +201,13 @@ type Model struct {
 	skillSearchInput         textinput.Model // Text input for skill pane search
 	frontmatterRawContent    string
 	briefingRawContent       string
+	tokenRawContent          string
 	editRawContent           string
 	skillPaneRawContent      string
+	// tokenColumnCache memoizes the rendered TOKENS column cell per job ID
+	// so the table render doesn't re-read the artifact (or re-summarize) on
+	// every frame. Invalidated by refreshes via clearTokenColumnCache.
+	tokenColumnCache map[string]string
 	Focus                    ViewFocus       // Track which pane is active
 	LogSplitVertical         bool            // Track log viewer layout
 	LogPaneFullscreen        bool            // Track if logs pane is fullscreen
@@ -416,6 +423,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Context"
 	case MemoryPaneDetail:
 		paneTitle = "Memory"
+	case TokenPaneDetail:
+		paneTitle = "Token Usage"
 	}
 
 	jobIcon := getJobIcon(currentJob)
@@ -462,6 +471,8 @@ func (m Model) renderDetailContent() string {
 		return addScrollbarToViewport(&m.frontmatterViewport)
 	case BriefingPane:
 		return addScrollbarToViewport(&m.briefingViewport)
+	case TokenPaneDetail:
+		return addScrollbarToViewport(&m.tokenViewport)
 	case EditPane:
 		return addScrollbarToViewport(&m.editViewport)
 	case SkillPane:
@@ -504,6 +515,8 @@ func (m *Model) resizeAllDetailViewports() {
 	m.frontmatterViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.briefingViewport.Width = m.LogViewerWidth
 	m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.tokenViewport.Width = m.LogViewerWidth
+	m.tokenViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.updateSkillViewportSizes()
@@ -517,6 +530,10 @@ func (m *Model) resizeAllDetailViewports() {
 		styledContent := renderStyledBriefing(m.briefingRawContent)
 		wrappedContent := wrapContentForViewport(styledContent, m.briefingViewport.Width-1)
 		m.briefingViewport.SetContent(wrappedContent)
+	}
+	if m.tokenRawContent != "" {
+		wrappedContent := wrapContentForViewport(m.tokenRawContent, m.tokenViewport.Width-1)
+		m.tokenViewport.SetContent(wrappedContent)
 	}
 	if m.editRawContent != "" {
 		styledContent := renderStyledMarkdown(m.editRawContent)
@@ -575,6 +592,7 @@ func New(cfg Config) Model {
 	// Initialize new viewports
 	frontmatterVp := viewport.New(80, 20)
 	briefingVp := viewport.New(80, 20)
+	tokenVp := viewport.New(80, 20)
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
 	skillArtifactVp := viewport.New(80, 10)
@@ -600,7 +618,7 @@ func New(cfg Config) Model {
 	}
 
 	// Column Visibility Setup
-	availableColumns := []string{"JOB", "TITLE", "SKILL", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "PREPEND", "UPDATED", "COMPLETED", "DURATION"}
+	availableColumns := []string{"JOB", "TITLE", "SKILL", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "PREPEND", "UPDATED", "COMPLETED", "DURATION", "TOKENS"}
 	state, err := loadState()
 	if err != nil {
 		// On error, use defaults
@@ -699,7 +717,9 @@ func New(cfg Config) Model {
 		msgChCloseOnce:           &sync.Once{},
 		frontmatterViewport:      frontmatterVp,
 		briefingViewport:         briefingVp,
+		tokenViewport:            tokenVp,
 		editViewport:             editVp,
+		tokenColumnCache:         make(map[string]string),
 		skillPaneViewport:        skillPaneVp,
 		skillArtifactViewport:    skillArtifactVp,
 		workflowAgentLines:       make(map[string][]string),

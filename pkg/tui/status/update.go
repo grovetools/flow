@@ -300,6 +300,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case TokenUsageLoadedMsg:
+		if m.ActiveDetailPane == TokenPaneDetail {
+			m.updateLayoutDimensions()
+			m.tokenViewport.Width = m.LogViewerWidth
+			m.tokenViewport.Height = m.LogViewerHeight - logHeaderHeight
+			content := renderTokenPaneContent(msg.Summary, msg.Found, msg.Err, m.tokenViewport.Width)
+			m.tokenRawContent = content
+			m.tokenViewport.SetContent(wrapContentForViewport(content, m.tokenViewport.Width-1))
+		}
+		return m, nil
+
 	case EditContentLoadedMsg:
 		if m.ActiveDetailPane == EditPane {
 			if msg.Err != nil {
@@ -941,6 +952,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RefreshMsg:
 		logger := logging.NewLogger("flow-tui")
+
+		// Token column cells memoize artifact reads; a completing job may
+		// have just written its token-usage.json, so invalidate on refresh.
+		m.clearTokenColumnCache()
 
 		// Reload the plan
 		plan, err := orchestration.LoadPlan(m.PlanDir)
@@ -2176,6 +2191,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.openDetailPane(EditPane)
 
+		case key.Matches(msg, m.KeyMap.ViewTokens):
+			if m.ActiveDetailPane == TokenPaneDetail {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			return m.openDetailPane(TokenPaneDetail)
+
 		case key.Matches(msg, m.KeyMap.ViewNativeAgent):
 			if !m.Hosted {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Native agent preview requires groveterm host")
@@ -2966,6 +2988,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.frontmatterViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading frontmatter for %s...", job.Title)))
 	case BriefingPane:
 		m.briefingViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading briefing for %s...", job.Title)))
+	case TokenPaneDetail:
+		m.tokenViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading token usage for %s...", job.Title)))
 	case EditPane:
 		m.editViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading file content for %s...", job.Title)))
 	case SkillPane:
@@ -2992,6 +3016,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		return m, loadFrontmatterCmd(job)
 	case BriefingPane:
 		return m, loadBriefingCmd(m.Plan, job)
+	case TokenPaneDetail:
+		return m, loadTokenUsageCmd(m.Plan, job)
 	case EditPane:
 		return m, loadJobFileContentCmd(job)
 	case EditorPaneDetail:
@@ -3276,6 +3302,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.frontmatterViewport.Height = logHeight
 	m.briefingViewport.Width = m.LogViewerWidth
 	m.briefingViewport.Height = logHeight
+	m.tokenViewport.Width = m.LogViewerWidth
+	m.tokenViewport.Height = logHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
@@ -3296,6 +3324,11 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	case BriefingPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading briefing for %s...", job.Title))
 		cmds = append(cmds, loadBriefingCmd(m.Plan, job))
+	case TokenPaneDetail:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading token usage for %s...", job.Title))
+		m.tokenRawContent = ""
+		m.tokenViewport.SetContent(wrapContentForViewport(theme.DefaultTheme.Muted.Render("Loading token usage…"), m.tokenViewport.Width-1))
+		cmds = append(cmds, loadTokenUsageCmd(m.Plan, job))
 	case EditPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
 		cmds = append(cmds, loadJobFileContentCmd(job))
@@ -3457,6 +3490,12 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 			} else {
 				m.briefingViewport.GotoBottom()
 			}
+		case TokenPaneDetail:
+			if idx == 0 {
+				m.tokenViewport.GotoTop()
+			} else {
+				m.tokenViewport.GotoBottom()
+			}
 		case EditPane:
 			if idx == 0 {
 				m.editViewport.GotoTop()
@@ -3486,6 +3525,8 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 		m.frontmatterViewport, cmd = m.frontmatterViewport.Update(msg)
 	case BriefingPane:
 		m.briefingViewport, cmd = m.briefingViewport.Update(msg)
+	case TokenPaneDetail:
+		m.tokenViewport, cmd = m.tokenViewport.Update(msg)
 	case EditPane:
 		m.editViewport, cmd = m.editViewport.Update(msg)
 	case SkillPane:
