@@ -84,8 +84,7 @@ func (m *Model) renderTokenColumnCell(job *orchestration.Job) string {
 	var cell string
 	if job.Status == orchestration.JobStatusCompleted {
 		if s, ok := orchestration.ReadTokenUsageArtifact(m.PlanDir, job.ID); ok && s.Usage.Total() > 0 {
-			cost := orchestration.FormatCostUSD(s.CostUSD, s.MissingPricing)
-			cell = t.Muted.Render(fmt.Sprintf("%s (%s)", orchestration.FormatTokenCount(s.Usage.Total()), cost))
+			cell = t.Muted.Render(formatTokenCell(s))
 		} else {
 			cell = t.Muted.Render("-")
 		}
@@ -96,6 +95,19 @@ func (m *Model) renderTokenColumnCell(job *orchestration.Job) string {
 
 	m.tokenColumnCache[job.ID] = cell
 	return cell
+}
+
+// formatTokenCell renders the compact TOKENS column value, cost-forward with
+// the peak context size: "$0.31 · 27.2k ctx". Cost is the one honest magnitude
+// (token classes price 0.1×–5×) and context size matches Claude Code's
+// /context, unlike the cache-read-inflated cumulative total. Legacy artifacts
+// lack ContextSize, so fall back to the cumulative total there.
+func formatTokenCell(s usage.Summary) string {
+	cost := orchestration.FormatCostUSD(s.CostUSD, s.MissingPricing)
+	if s.ContextSize > 0 {
+		return fmt.Sprintf("%s · %s ctx", cost, orchestration.FormatTokenCount(s.ContextSize))
+	}
+	return fmt.Sprintf("%s · %s", cost, orchestration.FormatTokenCount(s.Usage.Total()))
 }
 
 // clearTokenColumnCache invalidates the memoized TOKENS column cells so the
@@ -122,6 +134,11 @@ func renderTokenPaneContent(s usage.Summary, found bool, loadErr error, width in
 	b.WriteString(t.Bold.Render("Totals"))
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "  Tokens:   %s\n", orchestration.FormatTokenCount(s.Usage.Total()))
+	if s.ContextSize > 0 {
+		// Peak window size (≈ Claude Code /context); the cumulative Tokens above
+		// is cache-read-inflated and not comparable to it.
+		fmt.Fprintf(&b, "  Context:  %s\n", orchestration.FormatTokenCount(s.ContextSize))
+	}
 	fmt.Fprintf(&b, "  Cost:     %s\n", cost)
 	if s.MessageCount > 0 {
 		fmt.Fprintf(&b, "  Messages: %d\n", s.MessageCount)
