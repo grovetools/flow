@@ -8,6 +8,26 @@ import (
 	"github.com/grovetools/agentlogs/pkg/usage"
 )
 
+func TestFormatTokenCell(t *testing.T) {
+	// With ContextSize: cost-forward + peak context (matches /context).
+	withCtx := usage.Summary{
+		Usage:       usage.Usage{Input: 3707, Output: 411, CacheWrite5m: 27240, CacheRead: 20310},
+		CostUSD:     0.3114,
+		ContextSize: 27242,
+	}
+	if got := formatTokenCell(withCtx); got != "$0.31 · 27.2k ctx" {
+		t.Errorf("formatTokenCell(withCtx) = %q, want %q", got, "$0.31 · 27.2k ctx")
+	}
+	// Legacy artifact (no ContextSize): fall back to cumulative total.
+	legacy := usage.Summary{
+		Usage:   usage.Usage{Input: 4448, Output: 2833, CacheWrite5m: 11671, CacheRead: 210280},
+		CostUSD: 0.3149,
+	}
+	if got := formatTokenCell(legacy); got != "$0.31 · 229.2k" {
+		t.Errorf("formatTokenCell(legacy) = %q, want %q", got, "$0.31 · 229.2k")
+	}
+}
+
 func TestRenderTokenPaneContentError(t *testing.T) {
 	out := renderTokenPaneContent(usage.Summary{}, false, errors.New("boom"), 80)
 	if !strings.Contains(out, "boom") {
