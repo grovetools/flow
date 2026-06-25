@@ -334,9 +334,8 @@ func buildHeadlessCommand(ctx context.Context, providerName, prompt string, agen
 	switch providerName {
 	case "claude":
 		// Claude Code headless: prompt is piped via stdin. Flags are derived
-		// entirely from providers.claude.args (resolved upstream, including the
-		// --dangerously-skip-permissions backward-compat default); no flag is
-		// hardcoded here.
+		// entirely from providers.claude.args (resolved upstream); no flag —
+		// including --dangerously-skip-permissions — is hardcoded here.
 		var args []string
 		args = append(args, agentArgs...)
 		cmd := exec.Command("claude", args...)

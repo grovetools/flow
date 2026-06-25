@@ -52,31 +52,16 @@ type ProviderConfig struct {
 	InputMode string   `yaml:"input_mode,omitempty" jsonschema:"description=Input mode for interactive sessions: vim or standard"`
 }
 
-// resolveProviderArgs returns the configured launch args for a provider,
-// applying the claude backward-compat default.
-//
-// Backward-compat decision: headless and isolated claude agents historically
-// launched with a hardcoded `--dangerously-skip-permissions`. That hardcode has
-// been removed in favor of deriving flags from `[flow.providers.claude] args`
-// uniformly across all launch paths. To preserve the behavior existing
-// autonomous agents rely on, the bypass flag is the DEFAULT for the claude
-// provider whenever no args are configured (the `[flow.providers.claude]` table
-// is absent). To run a claude agent WITHOUT the bypass (e.g. the sandbox-profile
-// validator), configure `[flow.providers.claude]` with an explicit args list
-// that omits the flag. Non-claude providers never receive a default.
-//
-// Note: this default now also applies to the interactive path, which previously
-// passed no args when unconfigured. This is the deliberate cost of unifying all
-// claude launch paths through one config field; opt out via grove.toml.
+// resolveProviderArgs returns the configured launch args for a provider. No
+// provider gets an implicit default — claude is never auto-given
+// --dangerously-skip-permissions; the bypass is opt-in via
+// [flow.providers.claude] args only.
 func resolveProviderArgs(cfg FlowConfig, providerName string) []string {
 	var args []string
 	if cfg.Providers != nil {
 		if pc, ok := cfg.Providers[providerName]; ok {
 			args = pc.Args
 		}
-	}
-	if providerName == "claude" && args == nil {
-		args = []string{"--dangerously-skip-permissions"}
 	}
 	return args
 }
