@@ -211,6 +211,16 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update worktree marker repos: %w", err)
 	}
 
+	// 5. Re-seed the worktree's .claude/settings.local.json with the union of
+	//    every member repo's paired-notebook directory, so flow agents can READ
+	//    (no prompt) and WRITE (under /sandbox) the out-of-tree notebooks where
+	//    briefings/plans/concepts/.artifacts live. Pass the FULL union (not just
+	//    newRepos) so the merge is additive/idempotent and the newly-linked repos
+	//    contribute their notebooks. Best-effort: warn, never fail the command.
+	if err := workspace.SeedNotebookDirsForWorktree(worktreePath, union, provider); err != nil {
+		fmt.Printf("Warning: failed to seed notebook dirs into worktree settings: %v\n", err)
+	}
+
 	fmt.Printf("* Worktree '%s' now includes %d repos: %s\n", worktreeName, len(union), strings.Join(union, ", "))
 	return nil
 }
