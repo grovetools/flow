@@ -28,6 +28,7 @@ type GrovetermAgentProvider struct {
 	providerName string            // "claude", "codex", "opencode"
 	autoSplit    bool              // whether to auto-split the pane in groveterm's UI
 	agentTarget  string            // "native" or "tuimux" — selects Mux type
+	agentEnv     map[string]string // flow.agent_env injected into the agent process (before GROVE_* keys)
 	extraEnv     map[string]string // additional env vars (e.g., GROVE_FLOW_ISOLATED for isolated agents)
 }
 
@@ -91,12 +92,16 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	// from the executor's env (treemux exports it at startup; the daemon
 	// process exports its own scope on boot) — we don't force it from workDir.
 	// Agents launched from a context without GROVE_SCOPE go to the global daemon.
-	envVars := map[string]string{
-		"GROVE_FLOW_JOB_ID":    job.ID,
-		"GROVE_FLOW_JOB_PATH":  job.FilePath,
-		"GROVE_FLOW_PLAN_NAME": plan.Name,
-		"GROVE_FLOW_JOB_TITLE": job.Title,
+	// Seed flow.agent_env first so the GROVE_* keys below always win on
+	// collision (precedence: os env < agent_env < GROVE_*).
+	envVars := map[string]string{}
+	for k, v := range p.agentEnv {
+		envVars[k] = v
 	}
+	envVars["GROVE_FLOW_JOB_ID"] = job.ID
+	envVars["GROVE_FLOW_JOB_PATH"] = job.FilePath
+	envVars["GROVE_FLOW_PLAN_NAME"] = plan.Name
+	envVars["GROVE_FLOW_JOB_TITLE"] = job.Title
 	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
 		envVars["GROVE_SCOPE"] = scope
 	}

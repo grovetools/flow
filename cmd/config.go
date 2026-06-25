@@ -4,34 +4,20 @@ import (
 	"fmt"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 //go:generate sh -c "cd .. && go run ./tools/schema-generator/"
 
-// FlowConfig defines the structure for the 'flow' section in grove.yml.
-type FlowConfig struct {
-	// Job execution settings
-	OneshotModel        string `yaml:"oneshot_model" jsonschema:"description=Default model for oneshot jobs" jsonschema_extras:"x-layer=global,x-priority=60,x-important=true"`
-	MaxConsecutiveSteps int    `yaml:"max_consecutive_steps" jsonschema:"description=Maximum consecutive steps before requiring user input" jsonschema_extras:"x-layer=global,x-priority=85"`
-	RunInitByDefault    *bool  `yaml:"run_init_by_default" jsonschema:"description=Run init actions by default (nil = true)" jsonschema_extras:"x-layer=project,x-priority=81"`
-
-	// Agent settings (formerly in separate [agent] extension)
-	InteractiveProvider string                    `yaml:"interactive_provider,omitempty" jsonschema:"description=Provider for interactive sessions: claude/codex/opencode,enum=claude,enum=codex,enum=opencode" jsonschema_extras:"x-layer=global,x-priority=55,x-important=true"`
-	Providers           map[string]ProviderConfig `yaml:"providers" jsonschema:"description=Configuration for agent providers" jsonschema_extras:"x-layer=global,x-priority=65,x-important=true"`
-
-	// Recipe settings
-	Recipes map[string]RecipeConfig `yaml:"recipes" jsonschema:"description=Recipe-specific variable overrides" jsonschema_extras:"x-layer=project,x-priority=90"`
-}
-
-// RecipeConfig defines configuration for a specific recipe.
-type RecipeConfig struct {
-	Vars map[string]string `yaml:"vars" jsonschema:"description=Variable overrides for this recipe" jsonschema_extras:"x-layer=project,x-priority=90"`
-}
-
-// ProviderConfig holds settings for a specific agent provider.
-type ProviderConfig struct {
-	Args []string `yaml:"args" jsonschema:"description=Command-line arguments for this provider" jsonschema_extras:"x-layer=global,x-priority=65,x-important=true"`
-}
+// FlowConfig, ProviderConfig and RecipeConfig are now defined canonically in the
+// orchestration package (flow/pkg/orchestration/config.go) so the agent-launch
+// executors and the CLI share a single definition. They are aliased here to keep
+// existing cmd-package references compiling without an orchestration. prefix.
+type (
+	FlowConfig     = orchestration.FlowConfig
+	ProviderConfig = orchestration.ProviderConfig
+	RecipeConfig   = orchestration.RecipeConfig
+)
 
 // AppConfig wraps the core config with flow-specific extensions.
 type AppConfig struct {

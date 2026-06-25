@@ -35,19 +35,6 @@ type InteractiveAgentProvider interface {
 	Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error
 }
 
-// FlowProviderConfig holds per-provider configuration from grove.toml.
-type FlowProviderConfig struct {
-	Args      []string `yaml:"args"`
-	InputMode string   `yaml:"input_mode"` // "vim" or "standard"
-}
-
-// FlowConfig holds the flow extension configuration from grove.toml.
-type FlowConfig struct {
-	InteractiveProvider string                        `yaml:"interactive_provider,omitempty"`
-	AgentTarget         string                        `yaml:"agent_target,omitempty"` // "auto", "native", or "tmux"
-	Providers           map[string]FlowProviderConfig `yaml:"providers"`
-}
-
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
 type InteractiveAgentExecutor struct {
 	skipInteractive bool
@@ -248,28 +235,31 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	}
 
 	if useNative {
-		provider = NewGrovetermAgentProvider(providerName, false, target)
+		gp := NewGrovetermAgentProvider(providerName, false, target)
+		gp.agentEnv = flowCfg.AgentEnv
+		provider = gp
 	} else {
 		// Fallback to legacy tmux-based providers
 		switch providerName {
 		case "codex":
-			provider = NewCodexAgentProvider()
+			cp := NewCodexAgentProvider()
+			cp.agentEnv = flowCfg.AgentEnv
+			provider = cp
 		case "claude":
-			provider = NewClaudeAgentProvider()
+			cp := NewClaudeAgentProvider()
+			cp.agentEnv = flowCfg.AgentEnv
+			provider = cp
 		case "opencode":
-			provider = NewOpencodeAgentProvider()
+			op := NewOpencodeAgentProvider()
+			op.agentEnv = flowCfg.AgentEnv
+			provider = op
 		default:
 			return fmt.Errorf("unknown interactive_agent provider: '%s'", providerName)
 		}
 	}
 
-	// Get agent args for the selected provider
-	var agentArgs []string
-	if flowCfg.Providers != nil {
-		if providerCfg, ok := flowCfg.Providers[providerName]; ok {
-			agentArgs = providerCfg.Args
-		}
-	}
+	// Get agent args for the selected provider (with the claude bypass default).
+	agentArgs := resolveProviderArgs(flowCfg, providerName)
 
 	// Append per-job flags (--model, --effort) for claude only; other
 	// providers do not accept these flags.
@@ -420,8 +410,9 @@ func (e *InteractiveAgentExecutor) generatePlanFromDependencies(ctx context.Cont
 
 // ClaudeAgentProvider implements InteractiveAgentProvider for Claude Code.
 type ClaudeAgentProvider struct {
-	log  *logrus.Entry
-	ulog *grovelogging.UnifiedLogger
+	log      *logrus.Entry
+	ulog     *grovelogging.UnifiedLogger
+	agentEnv map[string]string // flow.agent_env injected into the agent process
 }
 
 func NewClaudeAgentProvider() *ClaudeAgentProvider {
@@ -589,7 +580,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 		}
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-		envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 			job.ID, job.FilePath, plan.Name, escapedTitle)
 		if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 			logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
@@ -748,7 +739,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+	envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	if node, nodeErr := workspace.GetProjectByPath(workDir); nodeErr == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))

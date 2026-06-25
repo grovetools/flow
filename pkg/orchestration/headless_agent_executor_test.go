@@ -91,7 +91,9 @@ func TestBuildHeadlessCommand(t *testing.T) {
 		if got := filepath.Base(cmd.Path); got != "claude" && cmd.Args[0] != "claude" {
 			t.Errorf("expected claude binary, got path=%s args[0]=%s", cmd.Path, cmd.Args[0])
 		}
-		wantArgs := []string{"claude", "--dangerously-skip-permissions", "--model", "opus"}
+		// The bypass flag is no longer hardcoded here — flags come solely from
+		// the agentArgs passed in (resolved upstream from providers.claude.args).
+		wantArgs := []string{"claude", "--model", "opus"}
 		if len(cmd.Args) != len(wantArgs) {
 			t.Fatalf("expected args %v, got %v", wantArgs, cmd.Args)
 		}

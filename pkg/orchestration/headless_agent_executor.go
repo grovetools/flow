@@ -261,13 +261,8 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		providerName = flowCfg.InteractiveProvider
 	}
 
-	// Get agent args for the selected provider
-	var agentArgs []string
-	if flowCfg.Providers != nil {
-		if providerCfg, ok := flowCfg.Providers[providerName]; ok {
-			agentArgs = providerCfg.Args
-		}
-	}
+	// Get agent args for the selected provider (with the claude bypass default).
+	agentArgs := resolveProviderArgs(flowCfg, providerName)
 
 	// Append per-job flags (--model, --effort) for claude only; other
 	// providers do not accept these flags.
@@ -285,7 +280,7 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 	// agent, now that the work dir and resolved provider are known.
 	e.registerSessionIntent(ctx, job, plan, worktreePath, providerName)
 
-	return e.runOnHost(ctx, worktreePath, prompt, job, plan, providerName, agentArgs)
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, providerName, agentArgs, flowCfg.AgentEnv)
 }
 
 // registerSessionIntent best-effort pre-registers the headless session with
@@ -338,8 +333,11 @@ func (e *HeadlessAgentExecutor) registerSessionIntent(ctx context.Context, job *
 func buildHeadlessCommand(ctx context.Context, providerName, prompt string, agentArgs []string) (*exec.Cmd, error) {
 	switch providerName {
 	case "claude":
-		// Claude Code headless: prompt is piped via stdin.
-		args := []string{"--dangerously-skip-permissions"}
+		// Claude Code headless: prompt is piped via stdin. Flags are derived
+		// entirely from providers.claude.args (resolved upstream, including the
+		// --dangerously-skip-permissions backward-compat default); no flag is
+		// hardcoded here.
+		var args []string
 		args = append(args, agentArgs...)
 		cmd := exec.Command("claude", args...)
 		cmd.Stdin = strings.NewReader(prompt)
@@ -362,8 +360,44 @@ func buildHeadlessCommand(ctx context.Context, providerName, prompt string, agen
 	}
 }
 
+// buildHeadlessEnv assembles the subprocess environment for a headless agent.
+//
+// Precedence (lowest to highest): the inherited process environment
+// (os.Environ()), then flow.agent_env, then the GROVE_* internals. agent_env is
+// appended after os.Environ() so it overrides inherited values, but before the
+// GROVE_* vars so it can never clobber grove's own bookkeeping. GROVE_SCOPE is
+// intentionally inherited via os.Environ() rather than re-exported here.
+func buildHeadlessEnv(job *Job, plan *Plan, providerName, worktreePath string, agentEnv map[string]string) []string {
+	env := os.Environ()
+	for k, v := range agentEnv {
+		env = append(env, k+"="+v)
+	}
+	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
+	env = append(env,
+		"GROVE_FLOW_JOB_ID="+job.ID,
+		"GROVE_FLOW_JOB_PATH="+job.FilePath,
+		"GROVE_FLOW_PLAN_NAME="+plan.Name,
+		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
+	)
+	if providerName != "claude" {
+		// Non-claude providers (e.g. opencode plugins) use this to identify
+		// themselves during session registration, matching the interactive path.
+		env = append(env, "GROVE_AGENT_PROVIDER="+providerName)
+	}
+	if node, err := workspace.GetProjectByPath(worktreePath); err == nil && node != nil {
+		env = append(env, "GROVE_LOG_DIR="+filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/")))
+	}
+	if pbName, pbRoot := resolvePlaybookRootForJob(job, plan); pbRoot != "" {
+		env = append(env,
+			"PLAYBOOK_ROOT="+pbRoot,
+			"PLAYBOOK_NAME="+pbName,
+		)
+	}
+	return env
+}
+
 // runOnHost executes the agent directly on the host machine.
-func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, prompt string, job *Job, plan *Plan, providerName string, agentArgs []string) error {
+func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, prompt string, job *Job, plan *Plan, providerName string, agentArgs []string, agentEnv map[string]string) error {
 	ulog.Debug("[HEADLESS] Running agent on host").
 		Field("job_id", job.ID).
 		Field("worktree", worktreePath).
@@ -392,31 +426,10 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 	}
 	cmd.Dir = worktreePath
 
-	// Set environment variables to enable grove-hooks integration for session registration.
-	// GROVE_SCOPE is inherited via os.Environ() — treemux exports it at startup
-	// and the daemon process exports its own scope on boot. If the executor has
-	// no GROVE_SCOPE set, the agent's daemon calls go to the unscoped global daemon.
-	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	cmd.Env = append(os.Environ(),
-		"GROVE_FLOW_JOB_ID="+job.ID,
-		"GROVE_FLOW_JOB_PATH="+job.FilePath,
-		"GROVE_FLOW_PLAN_NAME="+plan.Name,
-		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
-	)
-	if providerName != "claude" {
-		// Non-claude providers (e.g. opencode plugins) use this to identify
-		// themselves during session registration, matching the interactive path.
-		cmd.Env = append(cmd.Env, "GROVE_AGENT_PROVIDER="+providerName)
-	}
-	if node, err := workspace.GetProjectByPath(worktreePath); err == nil && node != nil {
-		cmd.Env = append(cmd.Env, "GROVE_LOG_DIR="+filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/")))
-	}
-	if pbName, pbRoot := resolvePlaybookRootForJob(job, plan); pbRoot != "" {
-		cmd.Env = append(cmd.Env,
-			"PLAYBOOK_ROOT="+pbRoot,
-			"PLAYBOOK_NAME="+pbName,
-		)
-	}
+	// Set environment variables to enable grove-hooks integration for session
+	// registration. See buildHeadlessEnv for the precedence rules
+	// (inherited env < flow.agent_env < GROVE_* internals).
+	cmd.Env = buildHeadlessEnv(job, plan, providerName, worktreePath, agentEnv)
 
 	ulog.Debug("[HEADLESS] Starting agent CLI with environment variables").
 		Field("job_id", job.ID).
@@ -424,7 +437,7 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		Field("GROVE_FLOW_JOB_ID", job.ID).
 		Field("GROVE_FLOW_JOB_PATH", job.FilePath).
 		Field("GROVE_FLOW_PLAN_NAME", plan.Name).
-		Field("GROVE_FLOW_JOB_TITLE", escapedTitle).
+		Field("GROVE_FLOW_JOB_TITLE", job.Title).
 		Log(ctx)
 
 	// PHASE 2: Redirect stdout/stderr to /dev/null to prevent cluttering the main process output.
