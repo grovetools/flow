@@ -6,13 +6,30 @@ import (
 	"testing"
 )
 
-// TestResolveProviderArgs covers the claude backward-compat bypass default and
-// the opt-out / non-claude behavior.
+// TestResolveProviderArgs asserts that NO provider receives an implicit default
+// — claude in particular is never auto-given --dangerously-skip-permissions; the
+// bypass is opt-in via grove.toml only.
 func TestResolveProviderArgs(t *testing.T) {
-	t.Run("claude defaults to bypass when unconfigured", func(t *testing.T) {
+	t.Run("claude gets no bypass default when unconfigured", func(t *testing.T) {
 		args := resolveProviderArgs(FlowConfig{}, "claude")
-		if len(args) != 1 || args[0] != "--dangerously-skip-permissions" {
-			t.Errorf("expected default bypass, got %v", args)
+		if len(args) != 0 {
+			t.Errorf("expected no args (no implicit bypass), got %v", args)
+		}
+		for _, a := range args {
+			if a == "--dangerously-skip-permissions" {
+				t.Errorf("bypass must never be injected by default, got %v", args)
+			}
+		}
+	})
+
+	t.Run("claude opts into bypass via explicit args", func(t *testing.T) {
+		// The bypass is available, but only when an operator configures it.
+		cfg := FlowConfig{Providers: map[string]ProviderConfig{
+			"claude": {Args: []string{"--dangerously-skip-permissions"}},
+		}}
+		args := resolveProviderArgs(cfg, "claude")
+		if strings.Join(args, " ") != "--dangerously-skip-permissions" {
+			t.Errorf("expected opt-in bypass, got %v", args)
 		}
 	})
 
@@ -26,19 +43,7 @@ func TestResolveProviderArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("claude opt-out via explicit empty args", func(t *testing.T) {
-		// A present-but-empty args list (non-nil) disables the bypass default,
-		// which is how the no-bypass sandbox profile is selected.
-		cfg := FlowConfig{Providers: map[string]ProviderConfig{
-			"claude": {Args: []string{}},
-		}}
-		args := resolveProviderArgs(cfg, "claude")
-		if len(args) != 0 {
-			t.Errorf("expected no args (bypass disabled), got %v", args)
-		}
-	})
-
-	t.Run("non-claude provider never gets a default", func(t *testing.T) {
+	t.Run("non-claude provider gets no default either", func(t *testing.T) {
 		args := resolveProviderArgs(FlowConfig{}, "opencode")
 		if args != nil {
 			t.Errorf("expected nil args for opencode, got %v", args)
