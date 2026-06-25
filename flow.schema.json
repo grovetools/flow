@@ -11,6 +11,10 @@
           "x-important": true,
           "x-layer": "global",
           "x-priority": "65"
+        },
+        "input_mode": {
+          "description": "Input mode for interactive sessions: vim or standard",
+          "type": "string"
         }
       },
       "required": [
@@ -36,10 +40,23 @@
       "type": "object"
     }
   },
-  "$id": "https://github.com/grovetools/flow/cmd/flow-config",
+  "$id": "https://github.com/grovetools/flow/pkg/orchestration/flow-config",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Schema for the 'flow' extension in grove.yml.",
   "properties": {
+    "agent_env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Environment variables injected into all agent subprocesses",
+      "type": "object",
+      "x-layer": "global",
+      "x-priority": "64"
+    },
+    "agent_target": {
+      "description": "Agent launch target: auto/native/tmux",
+      "type": "string"
+    },
     "interactive_provider": {
       "description": "Provider for interactive sessions: claude/codex/opencode",
       "enum": [
