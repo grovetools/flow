@@ -21,8 +21,9 @@ import (
 
 // OpencodeAgentProvider implements InteractiveAgentProvider for the opencode agent.
 type OpencodeAgentProvider struct {
-	log  *logrus.Entry
-	ulog *grovelogging.UnifiedLogger
+	log      *logrus.Entry
+	ulog     *grovelogging.UnifiedLogger
+	agentEnv map[string]string // flow.agent_env injected into the agent process
 }
 
 func NewOpencodeAgentProvider() *OpencodeAgentProvider {
@@ -152,7 +153,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := "GROVE_AGENT_PROVIDER='opencode' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='opencode' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))

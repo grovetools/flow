@@ -146,15 +146,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Unmarshal flow configuration (agent settings moved to flow extension)
-	type flowProviderConfig struct {
-		Args []string `yaml:"args"`
-	}
-	type flowConfig struct {
-		InteractiveProvider string                        `yaml:"interactive_provider,omitempty"`
-		AgentTarget         string                        `yaml:"agent_target,omitempty"` // "auto", "native", or "tmux"
-		Providers           map[string]flowProviderConfig `yaml:"providers"`
-	}
-	var flowCfg flowConfig
+	var flowCfg FlowConfig
 	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
 
 	// Determine which provider to use (default to claude)
@@ -163,13 +155,8 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		providerName = flowCfg.InteractiveProvider
 	}
 
-	// Get agent args for the selected provider
-	var agentArgs []string
-	if flowCfg.Providers != nil {
-		if providerCfg, ok := flowCfg.Providers[providerName]; ok {
-			agentArgs = providerCfg.Args
-		}
-	}
+	// Get agent args for the selected provider (with the claude bypass default).
+	agentArgs := resolveProviderArgs(flowCfg, providerName)
 
 	// Append per-job flags (--model, --effort) for claude only; other
 	// providers do not accept these flags.
@@ -221,22 +208,18 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	if useNative {
 		// Isolated agents launch silently into the groveterm icon rail (autoSplit=false)
 		provider := NewGrovetermAgentProvider(providerName, false, target)
+		provider.agentEnv = flowCfg.AgentEnv
 		provider.extraEnv = map[string]string{"GROVE_FLOW_ISOLATED": "true"}
-
-		// For isolated agents, inject --dangerously-skip-permissions for claude
-		if providerName == "claude" {
-			agentArgs = append([]string{"--dangerously-skip-permissions"}, agentArgs...)
-		}
 
 		return provider.Launch(ctx, job, plan, workDir, agentArgs, briefingFilePath)
 	}
 
 	// Fallback: launch the agent in an isolated tmux server
-	return e.launchIsolatedAgent(ctx, job, plan, workDir, providerName, agentArgs, briefingFilePath)
+	return e.launchIsolatedAgent(ctx, job, plan, workDir, providerName, agentArgs, flowCfg.AgentEnv, briefingFilePath)
 }
 
 // launchIsolatedAgent starts the agent in an isolated tmux server using a custom socket.
-func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Job, plan *Plan, workDir, providerName string, agentArgs []string, briefingFilePath string) error {
+func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Job, plan *Plan, workDir, providerName string, agentArgs []string, agentEnv map[string]string, briefingFilePath string) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -286,7 +269,7 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' ",
+	envPrefix := agentEnvInline(agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 

@@ -19,8 +19,9 @@ import (
 )
 
 type CodexAgentProvider struct {
-	log  *logrus.Entry
-	ulog *grovelogging.UnifiedLogger
+	log      *logrus.Entry
+	ulog     *grovelogging.UnifiedLogger
+	agentEnv map[string]string // flow.agent_env injected into the agent process
 }
 
 func NewCodexAgentProvider() *CodexAgentProvider {
@@ -113,7 +114,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+	envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	envPrefix += playbookEnvInline(job, plan)
 
