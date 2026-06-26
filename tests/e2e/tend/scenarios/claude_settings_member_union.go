@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/util/pathutil"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
 	"github.com/grovetools/tend/pkg/harness"
@@ -245,7 +246,15 @@ var ClaudeSettingsMemberUnionScenario = harness.NewScenario(
 				return fmt.Errorf("parsing worktree settings JSON: %w", err)
 			}
 
-			worktreeEditRule := editRuleForAbsDir(worktreePath)
+			// Canonicalize to match the seeder, which resolves symlinks so the Edit
+			// rule matches Claude's resolved cwd (on macOS the XDG worktree is a
+			// /var -> /private/var symlink). An un-canonicalized expectation would
+			// hide the very bug the seeder fix addresses.
+			canonWt, canonErr := pathutil.CanonicalPath(worktreePath)
+			if canonErr != nil {
+				canonWt = worktreePath
+			}
+			worktreeEditRule := editRuleForAbsDir(canonWt)
 
 			return ctx.Verify(func(v *verify.Collector) {
 				// Arrays UNION across root + every member.
