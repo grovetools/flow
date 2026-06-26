@@ -24,6 +24,11 @@ name = "claude-trust-preseed"
 rules = ".cx/claude-trust-preseed.rules"
 scenarios = ["coordinator-workflow"]
 
+[[test_scopes]]
+name = "claude-settings-sync"
+rules = ".cx/claude-settings-sync.rules"
+scenarios = ["claude-settings-sync"]
+
 [[hooks.on_stop]]
 name = "Auto-format"
 command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"

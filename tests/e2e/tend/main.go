@@ -173,6 +173,9 @@ func main() {
 		scenarios.DemoteToNoteScenario,
 		scenarios.DemoteWithWorkspaceFlagScenario,
 		scenarios.PromoteDemoteRoundTripScenario,
+
+		// Claude settings sync ([claude] grove.toml -> .claude/settings.local.json)
+		scenarios.ClaudeSettingsSyncScenario,
 	}
 
 	if err := app.Execute(context.TODO(), allScenarios); err != nil {
