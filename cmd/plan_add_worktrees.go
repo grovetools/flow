@@ -221,6 +221,14 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Warning: failed to seed notebook dirs into worktree settings: %v\n", err)
 	}
 
+	// 6. Re-seed the [claude] grove.toml profile (permissions.allow + sandbox
+	//    settings) into the same .claude/settings.local.json, unioning every
+	//    member repo's [claude] block across the FULL union of linked repos.
+	//    Best-effort: warn, never fail the command.
+	if err := workspace.SeedClaudeSettingsForWorktree(worktreePath, union, provider); err != nil {
+		fmt.Printf("Warning: failed to seed claude settings into worktree settings: %v\n", err)
+	}
+
 	fmt.Printf("* Worktree '%s' now includes %d repos: %s\n", worktreeName, len(union), strings.Join(union, ", "))
 	return nil
 }
