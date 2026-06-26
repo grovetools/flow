@@ -18,32 +18,37 @@ import (
 //	ecosystem        ~/code/claude-eco/grove.yml
 //	project          ~/code/claude-eco/svc-a/grove.yml      (highest)
 //
-// and merged by core/config deepMergeMaps (core/config/merge.go:76), where
-// arrays and scalars at a leaf are WHOLE-REPLACED by the higher layer and only
-// nested MAPS recurse (:89-97). The test asserts both halves of that rule:
+// and merged by core/config mergeExtensions (core/config/merge.go), where the
+// [claude] extension ACCUMULATES (unions) its list-typed leaves down the cascade
+// by default, while nested MAPS recurse and scalars keep highest-wins. A
+// block-level `inherit = false` opts out, resetting accumulation beneath it. The
+// test asserts every half of that rule:
 //
-//   - CONFLICT (same key at all three layers): permissions.allow carries a
+//   - ACCUMULATE (same key at all three layers): permissions.allow carries a
 //     distinct sentinel at each layer (GlobalOnly / EcoWins / ProjWins). Because
-//     allow is an ARRAY leaf, only the HIGHEST layer that sets it survives — so
-//     svc-a's resolved settings show ProjWins ONLY; EcoWins and GlobalOnly are
-//     both GONE. This is the override-not-union property that distinguishes
-//     Axis A from Axis B/C (where the same array key would union).
+//     [claude] list leaves UNION down the cascade by default, svc-a's resolved
+//     settings show ALL THREE sentinels — the accumulate-by-default property that
+//     replaces the old override-not-union behavior.
 //   - DISTINCT keys (a different key per layer, under the shared `sandbox` map):
 //     global -> sandbox.network.allowedDomains, ecosystem ->
 //     sandbox.filesystem.allowWrite, project -> sandbox.failIfUnavailable. All
-//     three survive together because deepMergeMaps recurses into the `sandbox`
-//     map and merges sibling sub-keys.
+//     three survive together because the union merger recurses into the `sandbox`
+//     map and merges sibling sub-keys (map recursion is unchanged).
+//   - OPT-OUT (`inherit = false`): svc-b's project grove.yml carries a [claude]
+//     block with `inherit = false` + its own allow (SvcBOnly). Because that layer
+//     resets accumulation, svc-b's resolved settings show SvcBOnly ONLY — the
+//     accumulated EcoWins/GlobalOnly from lower layers are GONE.
 //
-// The assertion target is the svc-a PRIMARY CHECKOUT (a single-repo workspace,
-// member set empty), so its seeded settings.local.json is the product of a SINGLE
-// config.LoadFrom cascade with NO member-repo union (Axis B) muddying the result.
-// Trigger: `grove-anthropic sync-settings --all`, which seeds every discovered
-// workspace via workspace.SeedClaudeSettingsForWorktree (core/pkg/workspace/
-// claude_notebook.go:139) — for svc-a that is rootCfg only.
+// The assertion targets are the svc-a and svc-b PRIMARY CHECKOUTs (single-repo
+// workspaces, member set empty), so each seeded settings.local.json is the
+// product of a SINGLE config.LoadFrom cascade with NO member-repo union (Axis B)
+// muddying the result. Trigger: `grove-anthropic sync-settings --all`, which
+// seeds every discovered workspace via workspace.SeedClaudeSettingsForWorktree
+// (core/pkg/workspace/claude_notebook.go) — for svc-a/svc-b that is rootCfg only.
 var ClaudeSettingsGroveCascadeScenario = harness.NewScenario(
 	"claude-settings-grove-cascade",
-	"Axis A: the [claude] grove-config cascade (global fragment -> ecosystem -> project) OVERRIDES conflicting array leaves (only the highest layer's permissions.allow survives) while merging distinct sibling keys under sandbox.",
-	[]string{"claude", "settings-sync", "cascade", "config", "override"},
+	"Axis A: the [claude] grove-config cascade (global fragment -> ecosystem -> project) ACCUMULATES conflicting array leaves by default (all layers' permissions.allow union) while merging distinct sibling keys under sandbox; a block-level inherit=false opts out and resets accumulation.",
+	[]string{"claude", "settings-sync", "cascade", "config", "accumulate", "inherit"},
 	[]harness.Step{
 		harness.SetupMocks(
 			harness.Mock{CommandName: "grove"},
@@ -58,6 +63,7 @@ var ClaudeSettingsGroveCascadeScenario = harness.NewScenario(
 			}
 			ctx.Set("git_root", gitRoot)
 			ctx.Set("svc_a_dir", repoDirs["svc-a"])
+			ctx.Set("svc_b_dir", repoDirs["svc-b"])
 
 			// Layer 1 (lowest): the GLOBAL fragment. Written as raw TOML directly
 			// into the sandbox XDG config dir so it is globbed as a *.toml
@@ -128,7 +134,33 @@ allowedDomains = ["global-distinct.example.com"]
 			if err := git.Add(repoDirs["svc-a"], "grove.yml"); err != nil {
 				return err
 			}
-			return git.Commit(repoDirs["svc-a"], "Add [claude] block to svc-a grove.yml")
+			if err := git.Commit(repoDirs["svc-a"], "Add [claude] block to svc-a grove.yml"); err != nil {
+				return err
+			}
+
+			// OPT-OUT layer: svc-b's PROJECT grove.yml carries a [claude] block
+			// with `inherit = false`, which resets accumulation beneath it. Its
+			// own allow (SvcBOnly) is the only one that should survive — the
+			// accumulated EcoWins/GlobalOnly from the lower layers are dropped.
+			svcBCfg := &config.Config{
+				Name:    "svc-b",
+				Version: "1.0",
+				Extensions: map[string]interface{}{
+					"claude": map[string]interface{}{
+						"inherit": false,
+						"permissions": map[string]interface{}{
+							"allow": []string{"SvcBOnly(b:*)"},
+						},
+					},
+				},
+			}
+			if err := fs.WriteGroveConfig(repoDirs["svc-b"], svcBCfg); err != nil {
+				return err
+			}
+			if err := git.Add(repoDirs["svc-b"], "grove.yml"); err != nil {
+				return err
+			}
+			return git.Commit(repoDirs["svc-b"], "Add [claude] inherit=false block to svc-b grove.yml")
 		}),
 
 		harness.NewStep("Run grove-anthropic sync-settings --all", func(ctx *harness.Context) error {
@@ -161,18 +193,38 @@ allowedDomains = ["global-distinct.example.com"]
 			}
 
 			return ctx.Verify(func(v *verify.Collector) {
-				// CONFLICT (Axis A override): only the HIGHEST layer's allow value
-				// survives. EcoWins and GlobalOnly were both replaced — proving
-				// arrays OVERRIDE (not union) across the grove-config cascade.
-				v.Contains("highest-layer (project) allow survives", content, "ProjWins(p:*)")
-				v.NotContains("ecosystem-layer allow overridden (not unioned)", content, "EcoWins(e:*)")
-				v.NotContains("global-layer allow overridden (not unioned)", content, "GlobalOnly(g:*)")
+				// ACCUMULATE (Axis A default): all three layers' allow values
+				// survive because [claude] list leaves UNION down the cascade.
+				v.Contains("project-layer allow accumulated", content, "ProjWins(p:*)")
+				v.Contains("ecosystem-layer allow accumulated (unioned)", content, "EcoWins(e:*)")
+				v.Contains("global-layer allow accumulated (unioned)", content, "GlobalOnly(g:*)")
 
 				// DISTINCT keys (map recursion): a different sandbox sub-key from
 				// each layer all coexist after the cascade merge.
 				v.Contains("global distinct key (network.allowedDomains) survives", content, "global-distinct.example.com")
 				v.Contains("ecosystem distinct key (filesystem.allowWrite) survives", content, "/eco-distinct-dir")
 				v.Contains("project distinct key (sandbox.failIfUnavailable) survives", content, "\"failIfUnavailable\": true")
+			})
+		}),
+
+		harness.NewStep("Assert the svc-b opt-out: inherit=false resets accumulation to svc-b's own rule", func(ctx *harness.Context) error {
+			svcBDir := ctx.GetString("svc_b_dir")
+			settingsPath := filepath.Join(svcBDir, ".claude", "settings.local.json")
+
+			if err := fs.AssertExists(settingsPath); err != nil {
+				return fmt.Errorf("svc-b settings.local.json should exist after sync: %w", err)
+			}
+			content, err := fs.ReadString(settingsPath)
+			if err != nil {
+				return fmt.Errorf("reading svc-b settings: %w", err)
+			}
+
+			return ctx.Verify(func(v *verify.Collector) {
+				// OPT-OUT (inherit=false): only svc-b's own rule survives; the
+				// accumulated lower-layer sentinels are reset away.
+				v.Contains("svc-b own allow survives", content, "SvcBOnly(b:*)")
+				v.NotContains("ecosystem-layer allow reset by inherit=false", content, "EcoWins(e:*)")
+				v.NotContains("global-layer allow reset by inherit=false", content, "GlobalOnly(g:*)")
 			})
 		}),
 	},
