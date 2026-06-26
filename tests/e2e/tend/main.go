@@ -176,6 +176,11 @@ func main() {
 
 		// Claude settings sync ([claude] grove.toml -> .claude/settings.local.json)
 		scenarios.ClaudeSettingsSyncScenario,
+
+		// Claude settings LAYERING — the three merge axes made observable:
+		scenarios.ClaudeSettingsGroveCascadeScenario, // Axis A: grove-config cascade (override)
+		scenarios.ClaudeSettingsMemberUnionScenario,  // Axis B: member-repo union (root-wins bool)
+		scenarios.ClaudeSettingsNoClobberScenario,    // Axis C: additive seed + dry-run + malformed safety
 	}
 
 	if err := app.Execute(context.TODO(), allScenarios); err != nil {

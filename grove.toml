@@ -29,6 +29,21 @@ name = "claude-settings-sync"
 rules = ".cx/claude-settings-sync.rules"
 scenarios = ["claude-settings-sync"]
 
+[[test_scopes]]
+name = "claude-settings-grove-cascade"
+rules = ".cx/claude-settings-grove-cascade.rules"
+scenarios = ["claude-settings-grove-cascade"]
+
+[[test_scopes]]
+name = "claude-settings-member-union"
+rules = ".cx/claude-settings-member-union.rules"
+scenarios = ["claude-settings-member-union"]
+
+[[test_scopes]]
+name = "claude-settings-no-clobber"
+rules = ".cx/claude-settings-no-clobber.rules"
+scenarios = ["claude-settings-no-clobber"]
+
 [[hooks.on_stop]]
 name = "Auto-format"
 command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"
