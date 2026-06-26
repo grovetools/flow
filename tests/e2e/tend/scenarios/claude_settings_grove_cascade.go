@@ -70,8 +70,13 @@ var ClaudeSettingsGroveCascadeScenario = harness.NewScenario(
 			// fragment by config.LoadFrom (core/config/config.go:317) — NOT via
 			// WriteGroveConfig (which would write grove.yml, the base layer).
 			// Carries the conflicting allow (GlobalOnly) + a DISTINCT key
-			// (sandbox.network.allowedDomains).
+			// (sandbox.network.allowedDomains) + allowGroveTools=true (mirrors the
+			// real ~/.config/grove/claude-settings.toml profile: a path-clean
+			// global fragment that expands the grove CLI allow-list).
 			globalFragment := `# Global [claude] fragment (lowest cascade layer)
+[claude]
+allowGroveTools = true
+
 [claude.permissions]
 allow = ["GlobalOnly(g:*)"]
 
@@ -198,6 +203,12 @@ allowedDomains = ["global-distinct.example.com"]
 				v.Contains("project-layer allow accumulated", content, "ProjWins(p:*)")
 				v.Contains("ecosystem-layer allow accumulated (unioned)", content, "EcoWins(e:*)")
 				v.Contains("global-layer allow accumulated (unioned)", content, "GlobalOnly(g:*)")
+
+				// allowGroveTools=true set in the GLOBAL fragment rides the cascade
+				// scalar down and expands the grove CLI allow-list into svc-a's
+				// settings — exactly the path-clean ~/.config/grove profile pattern.
+				v.Contains("global-fragment allowGroveTools expands Bash(grove:*)", content, "Bash(grove:*)")
+				v.Contains("global-fragment allowGroveTools expands Bash(nb:*)", content, "Bash(nb:*)")
 
 				// DISTINCT keys (map recursion): a different sandbox sub-key from
 				// each layer all coexist after the cascade merge.
