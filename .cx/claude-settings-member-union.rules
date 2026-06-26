@@ -1,0 +1,16 @@
+# Claude settings member-union rules
+# Scopes the source behind the ecosystem-worktree member-repo merge (Axis B):
+# the leaf [claude] config + Merge (root-wins-gap scalars including
+# allowGroveTools, array unions), the seeder (the auto-derived Edit(//<dir>/**)
+# rules and the allowGroveTools -> Bash(<tool>:*) expansion), and the per-
+# worktree union resolver that drives them. Changes to any of these should
+# trigger the claude-settings-member-union E2E scenario, which drives a real
+# grove-anthropic sync-settings --all across an ecosystem and asserts the
+# unioned arrays, root-wins bool, auto-Edit rules, and grove-tools expansion.
+# Paths are relative to the flow repo root.
+
+../core/pkg/claudenotebook/config.go
+../core/pkg/claudenotebook/seeder.go
+../core/pkg/workspace/claude_notebook.go
+../grove-anthropic/cmd/sync_settings.go
+tests/e2e/tend/scenarios/claude_settings_member_union.go

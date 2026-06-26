@@ -1,8 +1,10 @@
 package scenarios
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/tend/pkg/fs"
@@ -10,6 +12,12 @@ import (
 	"github.com/grovetools/tend/pkg/harness"
 	"github.com/grovetools/tend/pkg/verify"
 )
+
+// editRuleForAbsDir mirrors claudenotebook.editRuleForAbsDir (the helper is
+// unexported in the leaf package): the "//" prefix is the absolute anchor.
+func editRuleForAbsDir(absDir string) string {
+	return "Edit(//" + strings.TrimPrefix(filepath.ToSlash(absDir), "/") + "/**)"
+}
 
 // ClaudeSettingsMemberUnionScenario makes AXIS B (the member-repo merge)
 // observable, and pins the CODE semantics against the misleading doc-comment.
@@ -30,7 +38,7 @@ import (
 // Fixture:
 //
 //	root grove.yml   allow=[Root(r:*)]  sandbox.enabled=FALSE
-//	svc-a grove.yml  allow=[Aaa(a:*)]   sandbox.enabled=TRUE  domains=[a.example.com]
+//	svc-a grove.yml  allow=[Aaa(a:*)]   sandbox.enabled=TRUE  domains=[a.example.com]  allowGroveTools=TRUE
 //	svc-b grove.yml  allow=[Bbb(b:*)]                          domains=[b.example.com]
 //
 // Assertions on the ecosystem worktree's settings.local.json:
@@ -38,6 +46,12 @@ import (
 //     both present.
 //   - bool ROOT-WINS: "enabled": false present, "enabled": true ABSENT — even
 //     though member svc-a explicitly set enabled=true, the root's false wins.
+//   - Edit() AUTO-DERIVATION (Task 1): a narrow Edit(//<worktree>/**) rule plus
+//     an Edit(//<dir>/**) rule for each resolved notebook dir are emitted into
+//     permissions.allow (they ride the notebook-dir gate).
+//   - allowGroveTools EXPANSION (Task 2): svc-a's allowGroveTools=true (a
+//     root-wins-gap scalar) expands into Bash(<tool>:*) rules — Bash(grove:*),
+//     Bash(nb:*), ... — in the unioned settings.
 var ClaudeSettingsMemberUnionScenario = harness.NewScenario(
 	"claude-settings-member-union",
 	"Axis B: an ecosystem worktree unions every member repo's [claude] arrays (allow/allowedDomains) while resolving the conflicting sandbox.enabled bool to the ecosystem-ROOT value (root-wins, not the doc-comment's other-wins).",
@@ -110,6 +124,10 @@ var ClaudeSettingsMemberUnionScenario = harness.NewScenario(
 						"permissions": map[string]interface{}{
 							"allow": []string{"Aaa(a:*)"},
 						},
+						// allowGroveTools is a root-wins-gap scalar; the root
+						// leaves it nil, so this member's true flows up and the
+						// seeder expands it into Bash(<tool>:*) rules.
+						"allowGroveTools": true,
 						"sandbox": map[string]interface{}{
 							"enabled": enabledTrue,
 							"network": map[string]interface{}{
@@ -216,6 +234,19 @@ var ClaudeSettingsMemberUnionScenario = harness.NewScenario(
 				return fmt.Errorf("reading worktree settings: %w", err)
 			}
 
+			// Parse to derive the auto-Edit rule for a resolved notebook dir
+			// (whatever path the locator produced for the members).
+			var parsed struct {
+				Permissions struct {
+					AdditionalDirectories []string `json:"additionalDirectories"`
+				} `json:"permissions"`
+			}
+			if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+				return fmt.Errorf("parsing worktree settings JSON: %w", err)
+			}
+
+			worktreeEditRule := editRuleForAbsDir(worktreePath)
+
 			return ctx.Verify(func(v *verify.Collector) {
 				// Arrays UNION across root + every member.
 				v.Contains("root allow unioned", content, "Root(r:*)")
@@ -228,6 +259,19 @@ var ClaudeSettingsMemberUnionScenario = harness.NewScenario(
 				// member's explicit true is dropped.
 				v.Contains("sandbox.enabled resolves to root=false", content, "\"enabled\": false")
 				v.NotContains("member sandbox.enabled=true does NOT win", content, "\"enabled\": true")
+
+				// Task 1: the narrow worktree Edit rule is auto-derived.
+				v.Contains("worktree Edit rule auto-derived", content, worktreeEditRule)
+				// And every resolved notebook dir gets a matching Edit rule.
+				v.True("at least one notebook dir resolved", len(parsed.Permissions.AdditionalDirectories) > 0)
+				for _, d := range parsed.Permissions.AdditionalDirectories {
+					v.Contains("notebook-dir Edit rule auto-derived", content, editRuleForAbsDir(d))
+				}
+
+				// Task 2: svc-a's allowGroveTools=true expands into Bash(<tool>:*)
+				// rules in the unioned settings.
+				v.Contains("allowGroveTools expands Bash(grove:*)", content, "Bash(grove:*)")
+				v.Contains("allowGroveTools expands Bash(nb:*)", content, "Bash(nb:*)")
 			})
 		}),
 	},
