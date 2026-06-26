@@ -1,0 +1,20 @@
+# Claude settings sync rules
+# Scopes the source that propagates the [claude] grove.toml profile
+# (permissions.allow + sandbox{enabled, failIfUnavailable,
+# autoAllowBashIfSandboxed, filesystem.allowWrite, network.allowedDomains}) into
+# each workspace/worktree's .claude/settings.local.json: the leaf config struct
+# + seeder, the per-worktree member-repo union resolver, the worktree-creation
+# call sites, the local daemon watcher, and the manual grove-anthropic
+# sync-settings command. Changes to any of these should trigger the
+# claude-settings-sync E2E scenario, which drives a real `sync-settings --all`
+# across an ecosystem and asserts the merged/unioned/no-clobber result.
+# Paths are relative to the flow repo root.
+
+../core/pkg/claudenotebook/config.go
+../core/pkg/claudenotebook/seeder.go
+../core/pkg/workspace/claude_notebook.go
+../core/pkg/workspace/prepare.go
+cmd/plan_add_worktrees.go
+../daemon/internal/daemon/watcher/claude_settings.go
+../grove-anthropic/cmd/sync_settings.go
+tests/e2e/tend/scenarios/claude_settings_sync.go
