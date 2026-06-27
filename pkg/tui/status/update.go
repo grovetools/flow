@@ -300,7 +300,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case runningTokenUsageMsg:
+		// Live summaries for in-progress agent jobs: drive the running TOKENS
+		// cell (ctx) and the subagent rows, then invalidate the memoized job
+		// cells so they re-render with the fresh values.
+		for id, s := range msg.summaries {
+			m.runningTokenCell[id] = s
+			if mp := agentUsageMap(s); mp != nil {
+				m.tokenAgentLive[id] = mp
+			}
+			delete(m.tokenColumnCache, id)
+		}
+		return m, nil
+
 	case TokenUsageLoadedMsg:
+		// Feed the per-subagent tree cells from this live Summary, so a
+		// running job's subagent rows show cost/total once its pane has
+		// been opened (completed jobs read the artifact directly).
+		if msg.Found && msg.Err == nil {
+			if mp := agentUsageMap(msg.Summary); mp != nil {
+				m.tokenAgentLive[msg.JobID] = mp
+			}
+		}
 		if m.ActiveDetailPane == TokenPaneDetail {
 			m.updateLayoutDimensions()
 			m.tokenViewport.Width = m.LogViewerWidth
@@ -937,10 +958,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshPlan(m.PlanDir)
 
 	case RefreshTickMsg:
-		return m, tea.Batch(
+		cmds := []tea.Cmd{
 			refreshPlan(m.PlanDir),
 			refreshTick(),
-		)
+		}
+		// Background-summarize in-progress agent jobs so the TOKENS column
+		// shows a live ctx (and running subagent costs), throttled so large
+		// transcripts aren't re-read every tick.
+		if cmd := m.maybeRefreshRunningTokenCells(time.Time(msg)); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 
 	case DemoteJobMsg:
 		if msg.Err != nil {
