@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/grovetools/agentlogs/pkg/usage"
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 func TestFormatTokenCell(t *testing.T) {
@@ -81,6 +82,69 @@ func TestRenderTokenPaneContentFull(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("token pane missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+func TestFormatAgentTokenCell(t *testing.T) {
+	au := usage.AgentUsage{
+		Usage:   usage.Usage{Input: 4448, Output: 2833, CacheWrite5m: 11671, CacheRead: 210280},
+		CostUSD: 0.42,
+	}
+	if got := formatAgentTokenCell(au); got != "$0.42 · 229.2k" {
+		t.Errorf("formatAgentTokenCell = %q, want %q", got, "$0.42 · 229.2k")
+	}
+}
+
+func TestAgentUsageMap(t *testing.T) {
+	s := usage.Summary{
+		Agents: []usage.AgentUsage{
+			{AgentID: "parent", Usage: usage.Usage{Input: 999}, CostUSD: 9.99}, // skipped
+			{AgentID: "a42aff2", Usage: usage.Usage{Input: 400}, CostUSD: 0.10},
+			{AgentID: "", Usage: usage.Usage{Input: 1}, CostUSD: 0.01}, // skipped
+		},
+	}
+	mp := agentUsageMap(s)
+	if len(mp) != 1 {
+		t.Fatalf("agentUsageMap len = %d, want 1 (parent + empty skipped)", len(mp))
+	}
+	if _, ok := mp["parent"]; ok {
+		t.Errorf("parent entry should be skipped")
+	}
+	au, ok := mp["a42aff2"]
+	if !ok || au.CostUSD != 0.10 {
+		t.Errorf("a42aff2 entry missing or wrong: %+v ok=%v", au, ok)
+	}
+
+	// No real subagents → nil (so the cell stays blank).
+	if mp := agentUsageMap(usage.Summary{Agents: []usage.AgentUsage{{AgentID: "parent"}}}); mp != nil {
+		t.Errorf("agentUsageMap with only parent = %v, want nil", mp)
+	}
+	if mp := agentUsageMap(usage.Summary{}); mp != nil {
+		t.Errorf("agentUsageMap with no agents = %v, want nil", mp)
+	}
+}
+
+func TestIsLiveAgentJob(t *testing.T) {
+	mk := func(typ orchestration.JobType, st orchestration.JobStatus) *orchestration.Job {
+		return &orchestration.Job{Type: typ, Status: st}
+	}
+	cases := []struct {
+		name string
+		job  *orchestration.Job
+		want bool
+	}{
+		{"running interactive", mk(orchestration.JobTypeInteractiveAgent, orchestration.JobStatusRunning), true},
+		{"idle interactive", mk(orchestration.JobTypeInteractiveAgent, orchestration.JobStatusIdle), true},
+		{"running headless", mk(orchestration.JobTypeHeadlessAgent, orchestration.JobStatusRunning), true},
+		{"pending_user interactive", mk(orchestration.JobTypeInteractiveAgent, orchestration.JobStatusPendingUser), true},
+		{"completed interactive", mk(orchestration.JobTypeInteractiveAgent, orchestration.JobStatusCompleted), false},
+		{"running chat (not an agent)", mk(orchestration.JobTypeChat, orchestration.JobStatusRunning), false},
+		{"pending interactive (no session yet)", mk(orchestration.JobTypeInteractiveAgent, orchestration.JobStatusPending), false},
+	}
+	for _, tc := range cases {
+		if got := isLiveAgentJob(tc.job); got != tc.want {
+			t.Errorf("%s: isLiveAgentJob = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

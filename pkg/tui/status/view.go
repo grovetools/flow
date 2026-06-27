@@ -283,6 +283,14 @@ func (m Model) renderTableView() string {
 					row = append(row, m.renderVirtualRowCell(m.ScrollOffset+i, dr))
 				case "TYPE":
 					row = append(row, m.virtualRowTypeCell(dr))
+				case "TOKENS":
+					// Subagent rows surface their own cost/total; other
+					// virtual rows (runs, phases, "… +K more") stay blank.
+					if dr.Type == RowTypeAgent {
+						row = append(row, m.renderAgentTokenCell(dr))
+					} else {
+						row = append(row, "")
+					}
 				default:
 					row = append(row, "")
 				}

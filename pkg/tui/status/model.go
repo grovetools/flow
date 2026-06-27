@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/grovetools/agentlogs/pkg/usage"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	coreplan "github.com/grovetools/core/pkg/plan"
@@ -208,13 +209,31 @@ type Model struct {
 	// so the table render doesn't re-read the artifact (or re-summarize) on
 	// every frame. Invalidated by refreshes via clearTokenColumnCache.
 	tokenColumnCache map[string]string
-	Focus                    ViewFocus       // Track which pane is active
-	LogSplitVertical         bool            // Track log viewer layout
-	LogPaneFullscreen        bool            // Track if logs pane is fullscreen
-	IsRunningJob             bool            // Track if a job is currently running
-	isAutorunning            bool            // True when automatically running all stages
-	originalSelection        map[string]bool // Track the original user selection for autorun
-	RunLogFile               string          // Path to temporary log file for job output
+	// tokenAgentArtifact caches the per-subagent usage map (agentID →
+	// AgentUsage) read from a completed job's immutable token-usage.json
+	// artifact. Keyed by job ID; lazily filled and kept across refreshes
+	// (the artifact never changes once written).
+	tokenAgentArtifact map[string]map[string]usage.AgentUsage
+	// tokenAgentLive holds the per-subagent usage map for a running job,
+	// sourced from the detail pane's live Summary (and the running-ctx
+	// background refresher). Keyed by job ID; overwritten as fresher
+	// summaries arrive and ignored once the job completes (artifact wins).
+	tokenAgentLive map[string]map[string]usage.AgentUsage
+	// runningTokenCell holds the live token Summary for an in-progress agent
+	// job, produced off the event loop by the running-ctx refresher. Drives
+	// the TOKENS column's "$cost · NNk ctx" for running jobs (completed jobs
+	// read the artifact). Survives refreshes; replaced as the job completes.
+	runningTokenCell map[string]usage.Summary
+	// lastRunningTokenRefresh throttles the running-ctx refresher so large
+	// coordinator transcripts aren't re-summarized on every 2s tick.
+	lastRunningTokenRefresh time.Time
+	Focus                   ViewFocus       // Track which pane is active
+	LogSplitVertical        bool            // Track log viewer layout
+	LogPaneFullscreen       bool            // Track if logs pane is fullscreen
+	IsRunningJob            bool            // Track if a job is currently running
+	isAutorunning           bool            // True when automatically running all stages
+	originalSelection       map[string]bool // Track the original user selection for autorun
+	RunLogFile              string          // Path to temporary log file for job output
 	// MsgCh is the channel used by background streaming goroutines to deliver
 	// messages into the Update loop. The Model's listenStream tea.Cmd drains it.
 	// Close() closes this channel (once) so the listener goroutine unblocks
@@ -720,6 +739,9 @@ func New(cfg Config) Model {
 		tokenViewport:            tokenVp,
 		editViewport:             editVp,
 		tokenColumnCache:         make(map[string]string),
+		tokenAgentArtifact:       make(map[string]map[string]usage.AgentUsage),
+		tokenAgentLive:           make(map[string]map[string]usage.AgentUsage),
+		runningTokenCell:         make(map[string]usage.Summary),
 		skillPaneViewport:        skillPaneVp,
 		skillArtifactViewport:    skillArtifactVp,
 		workflowAgentLines:       make(map[string][]string),

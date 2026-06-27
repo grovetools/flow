@@ -3,6 +3,7 @@ package status
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/agentlogs/pkg/usage"
@@ -67,6 +68,88 @@ func loadTokenUsageCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd
 	}
 }
 
+// runningTokenRefreshInterval throttles the running-ctx refresher: the refresh
+// tick fires every 2s, but re-summarizing large transcripts that often is
+// wasteful, so the refresher runs at most this often.
+const runningTokenRefreshInterval = 4 * time.Second
+
+// maybeRefreshRunningTokenCells returns the running-ctx refresh command when
+// enough time has elapsed since the last run, else nil. Called from the
+// refresh tick.
+func (m *Model) maybeRefreshRunningTokenCells(now time.Time) tea.Cmd {
+	if now.Sub(m.lastRunningTokenRefresh) < runningTokenRefreshInterval {
+		return nil
+	}
+	m.lastRunningTokenRefresh = now
+	return refreshRunningTokenCellsCmd(m.Jobs)
+}
+
+// runningTokenUsageMsg carries live token summaries for in-progress agent
+// jobs, produced off the event loop by refreshRunningTokenCellsCmd. Keyed by
+// job ID; jobs with no resolvable session or no usage are omitted.
+type runningTokenUsageMsg struct {
+	summaries map[string]usage.Summary
+}
+
+// isLiveAgentJob reports whether a job is an in-progress agent job worth
+// summarizing live for the TOKENS column (a Claude session that may still be
+// growing). Completed jobs use the persisted artifact instead.
+func isLiveAgentJob(job *orchestration.Job) bool {
+	switch job.Type {
+	case orchestration.JobTypeInteractiveAgent,
+		orchestration.JobTypeHeadlessAgent,
+		orchestration.JobTypeIsolatedAgent:
+	default:
+		return false
+	}
+	switch job.Status {
+	case orchestration.JobStatusRunning,
+		orchestration.JobStatusIdle,
+		orchestration.JobStatusPendingUser,
+		orchestration.JobStatusPendingLLM:
+		return true
+	}
+	return false
+}
+
+// refreshRunningTokenCellsCmd summarizes the live Claude session of each
+// in-progress agent job off the event loop, so the TOKENS column can show a
+// live "$cost · NNk ctx" for running jobs (peak context window) and their
+// subagent rows their cost/total. It reuses the exact summarizer the detail
+// pane and the persisted artifact use, so live and recorded numbers match.
+// The job list is filtered on the event loop; only IDs cross into the
+// goroutine (never *Job).
+func refreshRunningTokenCellsCmd(jobs []*orchestration.Job) tea.Cmd {
+	var targets []string
+	for _, j := range jobs {
+		if isLiveAgentJob(j) {
+			targets = append(targets, j.ID)
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		registry, err := sessions.NewFileSystemRegistry()
+		if err != nil {
+			return runningTokenUsageMsg{}
+		}
+		out := make(map[string]usage.Summary, len(targets))
+		for _, id := range targets {
+			metadata, err := registry.Find(id)
+			if err != nil || metadata.ClaudeSessionID == "" {
+				continue
+			}
+			s, err := orchestration.SummarizeJobTokenUsage(metadata.ClaudeSessionID, metadata.TranscriptPath)
+			if err != nil || s.Usage.Total() == 0 {
+				continue
+			}
+			out[id] = s
+		}
+		return runningTokenUsageMsg{summaries: out}
+	}
+}
+
 // renderTokenColumnCell renders the compact TOKENS table cell for a job:
 // "<total> ($<cost>)" for jobs with recorded usage, "-" otherwise. Only
 // completed jobs are read synchronously here (from the cheap cached artifact);
@@ -88,8 +171,13 @@ func (m *Model) renderTokenColumnCell(job *orchestration.Job) string {
 		} else {
 			cell = t.Muted.Render("-")
 		}
+	} else if s, ok := m.runningTokenCell[job.ID]; ok && s.Usage.Total() > 0 {
+		// Running agent jobs: the live "$cost · NNk ctx" from the background
+		// running-ctx refresher (peak context window, ≈ Claude Code /context).
+		cell = t.Muted.Render(formatTokenCell(s))
 	} else {
-		// Running/other jobs: a placeholder; the detail pane summarizes live.
+		// No live summary yet (session not registered, or refresher hasn't
+		// run): a placeholder; the detail pane summarizes live on demand.
 		cell = t.Muted.Render("·")
 	}
 
@@ -111,9 +199,78 @@ func formatTokenCell(s usage.Summary) string {
 }
 
 // clearTokenColumnCache invalidates the memoized TOKENS column cells so the
-// next render re-reads artifacts. Called on refresh.
+// next render re-reads artifacts. Called on refresh. The per-agent maps are
+// deliberately NOT cleared here: tokenAgentArtifact is immutable once read,
+// and tokenAgentLive is overwritten as fresher summaries arrive (and ignored
+// once a job completes), so clearing them would only blank running subagent
+// cells between the 2s refresh and the next live summary.
 func (m *Model) clearTokenColumnCache() {
 	m.tokenColumnCache = make(map[string]string)
+}
+
+// renderAgentTokenCell renders the TOKENS cell for a RowTypeAgent (subagent)
+// row: "$cost · <tokens>" when usage is known, "" otherwise (matching the
+// blank cells of other virtual rows). Completed jobs read the immutable
+// artifact; running jobs use whatever live Summary the detail pane or the
+// running-ctx refresher last produced.
+func (m *Model) renderAgentTokenCell(dr *DisplayRow) string {
+	if dr == nil || dr.Agent == nil || dr.Job == nil {
+		return ""
+	}
+	mp := m.agentUsageMapForJob(dr.Job)
+	au, ok := mp[dr.Agent.ID]
+	if !ok {
+		return ""
+	}
+	return theme.DefaultTheme.Muted.Render(formatAgentTokenCell(au))
+}
+
+// agentUsageMapForJob returns the per-subagent usage map for a job (agentID →
+// AgentUsage). Completed jobs are served from the immutable artifact (read
+// once, then cached); running jobs from the live cache. Returns nil when no
+// per-agent data is available yet.
+func (m *Model) agentUsageMapForJob(job *orchestration.Job) map[string]usage.AgentUsage {
+	if job.Status == orchestration.JobStatusCompleted {
+		if mp, ok := m.tokenAgentArtifact[job.ID]; ok {
+			return mp
+		}
+		var mp map[string]usage.AgentUsage
+		if s, ok := orchestration.ReadTokenUsageArtifact(m.PlanDir, job.ID); ok {
+			mp = agentUsageMap(s)
+		}
+		m.tokenAgentArtifact[job.ID] = mp // cache even nil to avoid re-reading
+		return mp
+	}
+	return m.tokenAgentLive[job.ID]
+}
+
+// agentUsageMap indexes a Summary's per-agent breakdown by agent ID, skipping
+// the synthetic "parent" entry (the owning job, not a subagent). Returns nil
+// when there are no real subagents.
+func agentUsageMap(s usage.Summary) map[string]usage.AgentUsage {
+	if len(s.Agents) == 0 {
+		return nil
+	}
+	mp := make(map[string]usage.AgentUsage, len(s.Agents))
+	for _, a := range s.Agents {
+		if a.AgentID == "" || a.AgentID == "parent" {
+			continue
+		}
+		mp[a.AgentID] = a
+	}
+	if len(mp) == 0 {
+		return nil
+	}
+	return mp
+}
+
+// formatAgentTokenCell renders a subagent's TOKENS cell, cost-forward with the
+// cumulative token total: "$0.42 · 1.2M". Unlike the job cell there is no
+// per-agent context size (AgentUsage carries no ContextSize), so the total
+// stands in for the magnitude.
+func formatAgentTokenCell(au usage.AgentUsage) string {
+	cost := orchestration.FormatCostUSD(au.CostUSD, au.MissingPricing)
+	return fmt.Sprintf("%s · %s", cost, orchestration.FormatTokenCount(au.Usage.Total()))
 }
 
 // renderTokenPaneContent renders the full token usage detail pane body from a
