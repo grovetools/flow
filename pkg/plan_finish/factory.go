@@ -32,6 +32,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
+	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
@@ -119,6 +120,7 @@ const (
 	ItemRebuildBinaries         = "rebuild_binaries"
 	ItemArchivePlan             = "archive_plan"
 	ItemPruneOrphans            = "prune_orphans"
+	ItemClearNavBindings        = "clear_nav_bindings"
 )
 
 // ItemsByID returns the first item matching the given ID, or nil if
@@ -1122,6 +1124,60 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return nil
 			},
 		},
+		{
+			ID:   ItemClearNavBindings,
+			Name: "Clear sessionizer keymap entries",
+			Check: func() (string, error) {
+				if worktreePath == "" {
+					return "N/A", nil
+				}
+				ctx := context.Background()
+				client := daemon.New()
+				defer client.Close()
+				bindings, err := client.GetNavBindings(ctx)
+				if err != nil {
+					return "Daemon unavailable", nil
+				}
+				if n := countNavBindingsUnderPath(bindings, worktreePath); n > 0 {
+					return color.YellowString("%d stale key(s)", n), nil
+				}
+				return "None", nil
+			},
+			Action: func() error {
+				if worktreePath == "" {
+					return nil
+				}
+				ctx := context.Background()
+				client := daemon.New()
+				defer client.Close()
+				bindings, err := client.GetNavBindings(ctx)
+				if err != nil {
+					// Daemon not running; nothing to clear.
+					return nil
+				}
+				removed := pruneNavBindingsUnderPath(bindings, worktreePath)
+				if removed == 0 {
+					return nil
+				}
+				// Persist the default (top-level) group and every named
+				// group we touched. UpdateNavGroup with "default" replaces
+				// the top-level Sessions map; a named group replaces that
+				// group's Sessions map.
+				if err := client.UpdateNavGroup(ctx, "default", models.NavGroupState{
+					Sessions:   bindings.Sessions,
+					LockedKeys: bindings.LockedKeys,
+				}); err != nil {
+					return fmt.Errorf("failed to update default nav bindings: %w", err)
+				}
+				for name, group := range bindings.Groups {
+					if err := client.UpdateNavGroup(ctx, name, group); err != nil {
+						return fmt.Errorf("failed to update nav group %q: %w", name, err)
+					}
+				}
+				fmt.Printf("    Cleared %d stale sessionizer keymap entr(ies)\n", removed)
+				return nil
+			},
+		},
 		markFinishedItem,
 		{
 			ID:   ItemArchivePlan,
@@ -1170,7 +1226,8 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			status == color.YellowString("Has links") ||
 			status == color.YellowString("Checked out in worktree") ||
 			status == color.RedString("Has changes (needs --force)") ||
-			strings.Contains(status, "commits ahead of") {
+			strings.Contains(status, "commits ahead of") ||
+			strings.Contains(status, "stale key") {
 			item.IsAvailable = true
 		}
 	}
@@ -1395,6 +1452,70 @@ func resolveContainerWorktreePath(gitRoot, worktreeName string, provider *worksp
 		}
 	}
 	return workspace.ResolveWorktreePathByName(gitRoot, worktreeName, owners)
+}
+
+// navBindingPathStale reports whether a nav session path points at (or
+// inside) the worktree being finished, so its keymap entry should be
+// removed. The worktree container is removed by the prune step, so any
+// binding at that path or a sub-repo path beneath it is now dead.
+func navBindingPathStale(sessionPath, worktreePath string) bool {
+	if sessionPath == "" || worktreePath == "" {
+		return false
+	}
+	sp := filepath.Clean(sessionPath)
+	wp := filepath.Clean(worktreePath)
+	if sp == wp {
+		return true
+	}
+	return strings.HasPrefix(sp, wp+string(filepath.Separator))
+}
+
+// countNavBindingsUnderPath counts nav session keys (across the default
+// group and every named group) whose path is at or under worktreePath.
+func countNavBindingsUnderPath(bindings *models.NavSessionsFile, worktreePath string) int {
+	if bindings == nil {
+		return 0
+	}
+	count := 0
+	for _, cfg := range bindings.Sessions {
+		if navBindingPathStale(cfg.Path, worktreePath) {
+			count++
+		}
+	}
+	for _, group := range bindings.Groups {
+		for _, cfg := range group.Sessions {
+			if navBindingPathStale(cfg.Path, worktreePath) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// pruneNavBindingsUnderPath removes, in place, every nav session key
+// whose path is at or under worktreePath — from the default (top-level)
+// group and every named group. Returns the number of entries removed so
+// the caller can skip the daemon write when nothing changed.
+func pruneNavBindingsUnderPath(bindings *models.NavSessionsFile, worktreePath string) int {
+	if bindings == nil {
+		return 0
+	}
+	removed := 0
+	for key, cfg := range bindings.Sessions {
+		if navBindingPathStale(cfg.Path, worktreePath) {
+			delete(bindings.Sessions, key)
+			removed++
+		}
+	}
+	for _, group := range bindings.Groups {
+		for key, cfg := range group.Sessions {
+			if navBindingPathStale(cfg.Path, worktreePath) {
+				delete(group.Sessions, key)
+				removed++
+			}
+		}
+	}
+	return removed
 }
 
 // resolveEcosystemRepoSources maps each plan repo name to its on-disk SOURCE

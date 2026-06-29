@@ -128,7 +128,16 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 	}
 	anyExplicitFlags := opts.DeleteBranch || opts.DeleteRemote || opts.PruneWorktree || opts.CloseSession || opts.CleanDevLinks || opts.RebuildBinaries || opts.Archive || opts.Force
 	if opts.Yes {
+		// --yes confirms cleanup actions, but the main-repo binary
+		// rebuild is a slow (~30s), non-teardown concern that must stay
+		// opt-in. Enable it under --yes ONLY when the user explicitly
+		// passed --rebuild-binaries; otherwise plain `flow plan finish
+		// --yes` is fast teardown.
 		for _, item := range items {
+			if item.ID == plan_finish.ItemRebuildBinaries && !opts.RebuildBinaries {
+				item.IsEnabled = false
+				continue
+			}
 			item.IsEnabled = item.IsAvailable
 		}
 	} else if anyExplicitFlags {
@@ -139,6 +148,10 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 		enable(plan_finish.ItemMarkFinished, true)
 		enable(plan_finish.ItemCloseSession, opts.CloseSession)
 		enable(plan_finish.ItemPruneWorktree, opts.PruneWorktree)
+		// Pruning the worktree leaves its sessionizer keymap entries
+		// dangling (paths that no longer exist), so clear them whenever
+		// the worktree is pruned.
+		enable(plan_finish.ItemClearNavBindings, opts.PruneWorktree)
 		enable(plan_finish.ItemCleanDevLinks, opts.CleanDevLinks)
 		enable(plan_finish.ItemDeleteSubmoduleBranches, opts.DeleteBranch)
 		enable(plan_finish.ItemDeleteLocalBranch, opts.DeleteBranch)
