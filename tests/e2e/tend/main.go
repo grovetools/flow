@@ -181,6 +181,11 @@ func main() {
 		scenarios.ClaudeSettingsGroveCascadeScenario, // Axis A: grove-config cascade (override)
 		scenarios.ClaudeSettingsMemberUnionScenario,  // Axis B: member-repo union (root-wins bool)
 		scenarios.ClaudeSettingsNoClobberScenario,    // Axis C: additive seed + dry-run + malformed safety
+
+		// Claude config self-protection: the protectConfig toggle that denies
+		// writes to grove config files (sandbox denyWrite + permissions.deny),
+		// strips on false, honors GROVE_UNLOCK_CONFIG, and seeds on ShouldSeed.
+		scenarios.ClaudeSettingsSelfProtectionScenario,
 	}
 
 	if err := app.Execute(context.TODO(), allScenarios); err != nil {
