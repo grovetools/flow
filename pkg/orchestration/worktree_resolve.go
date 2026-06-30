@@ -97,6 +97,9 @@ func resolveOrPrepareWorktree(ctx context.Context, gitRoot, worktreeName string,
 		BranchName:        worktreeName,
 		SiblingWorkspaces: repos,
 		UseXDGWorktrees:   resolveWorktreeLayout(gitRoot, len(repos) > 0) == "xdg",
+		// Delegate the privileged ~/.claude.json trust write to the gitRoot-scope
+		// daemon when Prepare runs sandbox-side (see NewTrustSeedFallback).
+		TrustSeedFallback: NewTrustSeedFallback(gitRoot),
 	}
 	if plan != nil {
 		opts.PlanName = filepath.Base(plan.Directory)

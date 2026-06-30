@@ -1303,6 +1303,9 @@ func executeInitActions(actions []orchestration.InitAction, worktreeOverride, fi
 			// Layout is decoupled from selection: the resolved layout value
 			// (default xdg for ecosystems) decides the on-disk location.
 			UseXDGWorktrees: resolveWorktreeLayout(layout, gitRoot, len(siblingWorkspaces) > 0) == "xdg",
+			// Delegate the privileged ~/.claude.json trust write to the
+			// gitRoot-scope daemon when Prepare runs sandbox-side.
+			TrustSeedFallback: orchestration.NewTrustSeedFallback(gitRoot),
 		}
 		worktreePath, err = workspace.Prepare(context.Background(), opts)
 		if err != nil {
@@ -1491,6 +1494,9 @@ func createWorktreeIfRequested(worktreeName string, siblingWorkspaces []string, 
 		// value (default xdg for ecosystems) decides the on-disk location, not
 		// the presence of sibling workspaces.
 		UseXDGWorktrees: resolveWorktreeLayout(layout, gitRoot, len(siblingWorkspaces) > 0) == "xdg",
+		// Delegate the privileged ~/.claude.json trust write to the gitRoot-scope
+		// daemon when Prepare runs sandbox-side (see NewTrustSeedFallback).
+		TrustSeedFallback: orchestration.NewTrustSeedFallback(gitRoot),
 	}
 
 	worktreePath, err = workspace.Prepare(context.Background(), opts, orchestration.CopyProjectFilesToWorktree)

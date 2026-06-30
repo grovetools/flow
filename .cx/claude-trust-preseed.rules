@@ -1,12 +1,25 @@
 # Claude folder-trust pre-seed rules
 # Scopes the core source that pre-seeds ~/.claude.json folder-trust at worktree
-# creation (the new claudetrust leaf package + its single call site in Prepare)
-# plus the E2E scenario that asserts the seeded trust keys. Changes to these
-# should trigger the coordinator-workflow scenario, which drives a real
-# `plan init --worktree --anchor` and verifies the per-path trust keys land in
-# the sandbox ~/.claude.json. Paths are relative to the flow repo root.
+# creation (the claudetrust leaf package + its call site in Prepare) plus the
+# daemon-delegated fallback path (used when Prepare runs inside the OS sandbox
+# and the ~/.claude.json write is denied: the daemon performs the privileged
+# write, deriving trusted paths from the worktree registry) and the E2E
+# scenarios that assert the seeded trust keys. Changes to these should trigger
+# the trust scenarios, which drive a real `plan init --worktree` and verify the
+# per-path trust keys land in the sandbox ~/.claude.json. Paths are relative to
+# the flow repo root.
 
 ../core/pkg/claudetrust/seeder.go
 ../core/pkg/workspace/prepare.go
+../core/pkg/workspace/types.go
 ../core/util/pathutil/normalize.go
+# Daemon-delegated trust seeding (privileged fallback for sandboxed callers).
+../core/pkg/daemon/client.go
+../core/pkg/daemon/remote.go
+../core/pkg/daemon/local.go
+../daemon/internal/daemon/server/trust_handler.go
+# flow wiring: the injected fallback closure + the add-worktrees direct path.
+pkg/orchestration/trust_seeder.go
+cmd/plan_add_worktrees.go
 tests/e2e/tend/scenarios/coordinator_workflow.go
+tests/e2e/tend/scenarios/claude_trust_seed.go

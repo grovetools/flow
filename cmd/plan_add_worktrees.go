@@ -10,8 +10,11 @@ import (
 	"strings"
 
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/claudetrust"
+	"github.com/grovetools/core/pkg/daemon"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/pathutil"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -211,6 +214,17 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to update worktree marker repos: %w", err)
 	}
 
+	// 4b. Pre-seed Claude folder-trust for the FULL union of member repos. This
+	//     command bypasses workspace.Prepare (it grows an existing worktree), so
+	//     newly-linked <worktree>/<repo> subdirs would otherwise lack a trust
+	//     entry and stall an agent at the interactive prompt. Mirror prepare.go:
+	//     trust the container + each <container>/<repo>, canonicalized with
+	//     pathutil.CanonicalPath. Best-effort: never fail the command. When the
+	//     in-process write is denied (running sandbox-side, ~/.claude.json is out
+	//     of bounds), delegate to the ecosystem-scope daemon, which re-derives the
+	//     paths from the registry (the marker/registry update above already ran).
+	seedTrustForAddedWorktree(cmd.Context(), worktreePath, union, ecosystemRoot)
+
 	// 5. Re-seed the worktree's .claude/settings.local.json with the union of
 	//    every member repo's paired-notebook directory, so flow agents can READ
 	//    (no prompt) and WRITE (under /sandbox) the out-of-tree notebooks where
@@ -231,6 +245,48 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("* Worktree '%s' now includes %d repos: %s\n", worktreeName, len(union), strings.Join(union, ", "))
 	return nil
+}
+
+// seedTrustForAddedWorktree pre-seeds Claude folder-trust for an existing
+// worktree that just grew its repo set. It builds the same path set prepare.go
+// trusts (container + <container>/<repo> per repo, canonicalized) and writes it
+// in-process. When that write is denied by the OS sandbox (~/.claude.json is
+// outside the writable boundary), it delegates to the ecosystem-scope daemon,
+// which re-derives the trusted paths from the worktree registry rather than
+// honoring the caller's. Best-effort throughout: a failure only costs the user
+// an interactive trust prompt, so we warn and move on.
+func seedTrustForAddedWorktree(ctx context.Context, worktreePath string, union []string, ecosystemRoot string) {
+	absWorktreePath := worktreePath
+	if abs, err := filepath.Abs(worktreePath); err == nil {
+		absWorktreePath = abs
+	}
+
+	rawPaths := make([]string, 0, 1+len(union))
+	rawPaths = append(rawPaths, absWorktreePath)
+	for _, repo := range union {
+		rawPaths = append(rawPaths, filepath.Join(absWorktreePath, repo))
+	}
+	canonicalPaths := make([]string, 0, len(rawPaths))
+	for _, p := range rawPaths {
+		canonical, cerr := pathutil.CanonicalPath(p)
+		if cerr != nil {
+			fmt.Printf("Warning: failed to canonicalize path for Claude trust pre-seed (%s): %v\n", p, cerr)
+			continue
+		}
+		canonicalPaths = append(canonicalPaths, canonical)
+	}
+
+	seedErr := claudetrust.SeedTrust(canonicalPaths...)
+	if seedErr == nil {
+		return
+	}
+	if claudetrust.IsPermissionDenied(seedErr) {
+		if rpcErr := daemon.New(ecosystemRoot).SeedTrust(ctx, absWorktreePath); rpcErr != nil {
+			fmt.Printf("Warning: failed to pre-seed Claude trust via daemon: %v\n", rpcErr)
+		}
+		return
+	}
+	fmt.Printf("Warning: failed to pre-seed Claude trust: %v\n", seedErr)
 }
 
 // resolveWorktreeBranch returns the branch of the existing ecosystem worktree.

@@ -174,6 +174,9 @@ func main() {
 		scenarios.DemoteWithWorkspaceFlagScenario,
 		scenarios.PromoteDemoteRoundTripScenario,
 
+		// Claude folder-trust pre-seeding (~/.claude.json hasTrustDialogAccepted)
+		scenarios.ClaudeTrustSeedScenario,
+
 		// Claude settings sync ([claude] grove.toml -> .claude/settings.local.json)
 		scenarios.ClaudeSettingsSyncScenario,
 

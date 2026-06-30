@@ -22,7 +22,7 @@ scenarios = ["at-target", "coordinator-workflow"]
 [[test_scopes]]
 name = "claude-trust-preseed"
 rules = ".cx/claude-trust-preseed.rules"
-scenarios = ["coordinator-workflow"]
+scenarios = ["coordinator-workflow", "claude-trust-seed"]
 
 [[test_scopes]]
 name = "claude-settings-sync"
