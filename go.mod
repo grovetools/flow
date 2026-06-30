@@ -15,6 +15,7 @@ require (
 	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/grove-gemini v0.6.1
 	github.com/grovetools/memory v0.6.3
+	github.com/grovetools/notify v0.6.0
 	github.com/grovetools/skills v0.6.0
 	github.com/grovetools/tend v0.6.0
 	github.com/invopop/jsonschema v0.13.0
