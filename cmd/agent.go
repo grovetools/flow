@@ -563,7 +563,7 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 
 // AgentStatus represents the detected state of an agent.
 type AgentStatus struct {
-	Status string `json:"status"` // "idle", "working", or "disconnected"
+	Status string `json:"status"` // "idle", "working", "pending_user", "disconnected", or "unknown"
 	Target string `json:"target"`
 }
 
@@ -612,28 +612,44 @@ whether the agent is idle (waiting for input), working (processing), or disconne
 				}
 			}
 
-			output, capErr := captureAgentOutput(plan, job, targetPane, 30)
-
 			status := AgentStatus{Target: displayTarget}
 
-			if capErr != nil {
-				// Capture failed. Consult the daemon registry (the same source of
-				// truth `flow agent list` uses) to distinguish a genuinely gone
-				// agent (→ disconnected) from a running agent whose capture hit a
-				// transport error (→ unknown), so status agrees with list.
-				status.Status = "disconnected"
-				if job != nil {
-					client := daemon.NewWithAutoStart()
-					sess, err := client.GetSession(context.Background(), job.ID)
-					client.Close()
-					if err == nil && sess != nil && sess.Status != "completed" && sess.Status != "failed" {
+			// Consult the authoritative daemon session status before scraping
+			// the tmux pane. The daemon registry (the same source of truth
+			// `flow agent list` uses) knows when an agent is blocked waiting on
+			// the user (pending_user) — a state the pane scrape would mislabel
+			// as "working". Fetch the session once and reuse it for both the
+			// pending_user short-circuit and the capture-error fallback below.
+			var sess *models.Session
+			if job != nil {
+				client := daemon.NewWithAutoStart()
+				s, err := client.GetSession(context.Background(), job.ID)
+				client.Close()
+				if err == nil {
+					sess = s
+				}
+			}
+
+			if sess != nil && sess.Status == "pending_user" {
+				// Agent is blocked waiting on the user; the pane scrape can't
+				// see this, so trust the daemon and skip it.
+				status.Status = "pending_user"
+			} else {
+				output, capErr := captureAgentOutput(plan, job, targetPane, 30)
+				if capErr != nil {
+					// Capture failed. Consult the daemon registry to distinguish
+					// a genuinely gone agent (→ disconnected) from a running
+					// agent whose capture hit a transport error (→ unknown), so
+					// status agrees with list.
+					status.Status = "disconnected"
+					if sess != nil && sess.Status != "completed" && sess.Status != "failed" {
 						status.Status = "unknown"
 					}
+				} else if isAgentIdle(output) {
+					status.Status = "idle"
+				} else {
+					status.Status = "working"
 				}
-			} else if isAgentIdle(output) {
-				status.Status = "idle"
-			} else {
-				status.Status = "working"
 			}
 
 			if jsonOut {
@@ -692,7 +708,9 @@ Shows the plan name, job title, provider, and status for each agent.`,
 
 			var active []AgentListEntry
 			for _, s := range sessions {
-				if s.Status == "running" && s.PlanName != "" {
+				// Include pending_user so agents blocked waiting on the user
+				// stay visible instead of silently dropping off the list.
+				if (s.Status == "running" || s.Status == "pending_user") && s.PlanName != "" {
 					active = append(active, AgentListEntry{
 						PlanName:  s.PlanName,
 						JobTitle:  s.JobTitle,
