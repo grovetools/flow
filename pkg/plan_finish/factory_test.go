@@ -2,6 +2,7 @@ package plan_finish
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,82 @@ import (
 	gexec "github.com/grovetools/flow/pkg/exec"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
+
+// initGitRepo creates a real git repo at dir via `git init` and returns
+// the resolved git root (which may differ from dir on platforms where
+// TempDir is symlinked, e.g. macOS /var -> /private/var).
+func initGitRepo(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "init", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	root, err := git.GetGitRoot(dir)
+	if err != nil {
+		t.Fatalf("GetGitRoot after init: %v", err)
+	}
+	return root
+}
+
+// TestNewBuildContext_GitRootFromPlanDir verifies that NewBuildContext
+// resolves GitRoot from the plan directory (via
+// orchestration.GetProjectGitRoot), not from the process cwd. This is
+// the path that was broken for notebook-backed / anchored-container
+// ecosystem plans, where cwd is unrelated to the selected plan.
+func TestNewBuildContext_GitRootFromPlanDir(t *testing.T) {
+	repo := t.TempDir()
+	wantRoot := initGitRepo(t, repo)
+
+	planPath := filepath.Join(repo, "plans", "my-plan")
+	if err := os.MkdirAll(planPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := &orchestration.Plan{
+		Directory: planPath,
+		Config:    &orchestration.PlanConfig{Worktree: "feature", Status: "review"},
+	}
+	bctx := NewBuildContext(plan, planPath)
+	if bctx.GitRoot == "" {
+		t.Fatal("GitRoot should be resolved from plan dir, got empty")
+	}
+	if bctx.GitRoot != wantRoot {
+		t.Fatalf("GitRoot = %q, want %q", bctx.GitRoot, wantRoot)
+	}
+}
+
+// TestNewBuildContext_GitRootIndependentOfCwd proves the resolution no
+// longer depends on the process cwd: with cwd in a NON-git temp dir, a
+// plan whose directory IS under a git repo still resolves its GitRoot
+// from the plan dir.
+func TestNewBuildContext_GitRootIndependentOfCwd(t *testing.T) {
+	repo := t.TempDir()
+	wantRoot := initGitRepo(t, repo)
+	planPath := filepath.Join(repo, "plans", "my-plan")
+	if err := os.MkdirAll(planPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// cwd: a non-git directory unrelated to the plan.
+	nonGit := t.TempDir()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+	if err := os.Chdir(nonGit); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := &orchestration.Plan{
+		Directory: planPath,
+		Config:    &orchestration.PlanConfig{Worktree: "feature", Status: "review"},
+	}
+	bctx := NewBuildContext(plan, planPath)
+	if bctx.GitRoot != wantRoot {
+		t.Fatalf("GitRoot = %q, want %q (cwd must not determine result)", bctx.GitRoot, wantRoot)
+	}
+}
 
 // recordingExecutor wraps MockCommandExecutor with scripted responses
 // indexed by call order so tests can simulate git failures.

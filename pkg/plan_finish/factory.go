@@ -192,10 +192,8 @@ func NewBuildContext(plan *orchestration.Plan, planPath string) BuildContext {
 		Executor: &gexec.RealCommandExecutor{},
 		WM:       git.NewWorktreeManager(),
 	}
-	if cwd, err := os.Getwd(); err == nil {
-		if root, gerr := git.GetGitRoot(cwd); gerr == nil {
-			bctx.GitRoot = root
-		}
+	if root, err := orchestration.GetProjectGitRoot(planPath); err == nil {
+		bctx.GitRoot = root
 	}
 	logger := logrus.New()
 	logger.SetLevel(logrus.WarnLevel)
