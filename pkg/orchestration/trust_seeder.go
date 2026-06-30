@@ -9,20 +9,33 @@ import (
 // NewTrustSeedFallback returns the closure that workspace.Prepare invokes when
 // its in-process Claude folder-trust write is denied by the OS sandbox
 // (~/.claude.json is outside the sandbox's writable boundary). The closure
-// delegates the privileged write to the daemon dialed at scopeRoot.
+// delegates the privileged write to an unsandboxed daemon.
 //
-// scopeRoot MUST be the parent ecosystem / gitRoot — the scope whose daemon is
-// actively running the provisioning job and is therefore unsandboxed and live.
-// It must NOT be the brand-new worktree's own path: that scope has no daemon yet
-// and would fall through to LocalClient, whose SeedTrust hard-fails. Dialing the
-// gitRoot scope hits the daemon that launched the flow agent.
+// It dials in two steps:
 //
-// If no daemon is running at scopeRoot, daemon.New degrades to LocalClient and
-// the closure returns LocalClient's "daemon unavailable" error, which Prepare
-// surfaces as a best-effort warning — worktree creation still finishes; the user
-// just gets the interactive trust prompt.
+//  1. The scoped daemon at scopeRoot (the parent ecosystem / gitRoot — the scope
+//     whose daemon is actively running the provisioning job, when there is one).
+//     scopeRoot must NOT be the brand-new worktree's own path: that scope has no
+//     daemon yet.
+//  2. If no scoped daemon is reachable (daemon.New degrades to LocalClient, whose
+//     SeedTrust hard-fails), fall back to the always-on global/unscoped daemon.
+//
+// The global fallback is safe and deliberate here even though daemon.New itself
+// refuses a global fallback for general RPCs: /api/trust/seed derives the trusted
+// paths SOLELY from the worktree registry (keyed by worktreeRef), so ANY
+// unsandboxed daemon services the request identically — there is no
+// "which daemon am I talking to?" ambiguity to preserve. This covers the common
+// case where only the global daemon (the shared proxy host) is running, which
+// otherwise left the worktree untrusted and stalled the agent at the trust prompt.
+//
+// Both steps are best-effort: if neither daemon is reachable the final error is
+// surfaced as a warning, worktree creation still finishes, and the user just gets
+// the interactive trust prompt.
 func NewTrustSeedFallback(scopeRoot string) func(context.Context, string) error {
 	return func(ctx context.Context, worktreeRef string) error {
-		return daemon.New(scopeRoot).SeedTrust(ctx, worktreeRef)
+		if err := daemon.New(scopeRoot).SeedTrust(ctx, worktreeRef); err == nil {
+			return nil
+		}
+		return daemon.NewGlobalClient().SeedTrust(ctx, worktreeRef)
 	}
 }
