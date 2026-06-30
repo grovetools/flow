@@ -37,6 +37,15 @@ import (
 // "Bash(git:*)"/enabled=true AND svc-a's distinct "Bash(make:*)"/"api.example.com".
 // A user-added key pre-seeded into wt1's settings.local.json must survive the
 // sync (the no-clobber, additive-only contract).
+//
+// REGRESSION GUARD for the ecosystem-ROOT seeding fix (grove-anthropic 46bdf5b,
+// daemon b45fb58): the primary checkout (~/code/claude-eco) is a
+// workspace.KindEcosystemRoot node that DiscoverAll surfaces under
+// result.Ecosystems (never result.Projects), so the pre-fix projects-only loop
+// skipped it and its .claude/settings.local.json went unwritten. The final step
+// asserts the ROOT's settings (a) exist, (b) carry the ecosystem's own block,
+// and (c) carry svc-a's member union — proving sync-settings now both
+// enumerates ecosystems AND resolves each root's member repos.
 var ClaudeSettingsSyncScenario = harness.NewScenario(
 	"claude-settings-sync",
 	"sync-settings --all propagates the [claude] grove.toml profile (member-repo union, ecosystem worktree, no-clobber) into every workspace/worktree's settings.local.json.",
@@ -229,7 +238,7 @@ var ClaudeSettingsSyncScenario = harness.NewScenario(
 			})
 		}),
 
-		harness.NewStep("Assert the per-repo workspaces were also seeded", func(ctx *harness.Context) error {
+		harness.NewStep("Assert the ecosystem ROOT and the per-repo workspaces were also seeded", func(ctx *harness.Context) error {
 			gitRoot := ctx.GetString("git_root")
 			svcADir := ctx.GetString("svc_a_dir")
 
@@ -237,12 +246,28 @@ var ClaudeSettingsSyncScenario = harness.NewScenario(
 			svcASettings := filepath.Join(svcADir, ".claude", "settings.local.json")
 
 			return ctx.Verify(func(v *verify.Collector) {
-				// The ecosystem-root primary checkout (a workspace, not a
-				// worktree) is seeded only by sync-settings — its presence proves
-				// the command reached the workspace targets.
-				v.Equal("eco-root workspace settings created", nil, fs.AssertExists(ecoSettings))
+				// REGRESSION GUARD (grove-anthropic 46bdf5b / daemon b45fb58): the
+				// ecosystem-root primary checkout (`~/code/claude-eco`) is a
+				// workspace.KindEcosystemRoot node — DiscoverAll surfaces it under
+				// result.Ecosystems, NOT result.Projects. The pre-fix sync-settings
+				// only walked result.Projects (plus the worktree registry), so the
+				// primary checkout was NEVER added as a seed target and this file
+				// did not exist. An agent launched at the ecosystem root reads its
+				// own .claude/settings.local.json, so it MUST be seeded. Its mere
+				// existence here proves sync-settings now enumerates ecosystems.
+				v.Equal("eco-root (KindEcosystemRoot) settings created", nil, fs.AssertExists(ecoSettings))
 				v.Equal("eco-root carries ecosystem allow", nil, fs.AssertContains(ecoSettings, "Bash(git:*)"))
 				v.Equal("eco-root carries sandbox.enabled", nil, fs.AssertContains(ecoSettings, "\"enabled\": true"))
+
+				// The fix resolves each ecosystem root's member repos from the
+				// sub-projects grouped beneath it (ParentEcosystemPath), so the root
+				// target receives the SAME member union an XDG ecosystem worktree
+				// gets. Assert svc-a's DISTINCT [claude] contributions reached the
+				// ROOT's settings — not just the ecosystem's own block. This is what
+				// pins the member-resolution half of the eco-root fix; without it
+				// the root could be seeded with an empty member set and still pass.
+				v.Equal("eco-root unions member allow", nil, fs.AssertContains(ecoSettings, "Bash(make:*)"))
+				v.Equal("eco-root unions member allowedDomains", nil, fs.AssertContains(ecoSettings, "api.example.com"))
 
 				// The svc-a primary checkout resolves its own [claude] block plus
 				// the cascaded ecosystem block.
