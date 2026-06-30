@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/worktreeregistry"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -29,13 +31,24 @@ func NewAgentCmd() *cobra.Command {
 Provides read, send, status, list, and transcript subcommands for
 coordinator-to-agent communication.
 
-Commands that target a specific agent accept either:
-  - Positional args: <slug> <job>  (resolved via flow plan/job)
-  - Direct tmux target: -t "session:window"  (standard tmux syntax)`,
+Commands that target a specific agent accept any of:
+  - Unified target: --at <feature> <job>  (plan name, container path, or
+    <container-id>/<name> — the same --at every flow subcommand uses; the
+    canonical, disambiguated form)
+  - Positional args: <slug> <job>  (resolved via flow plan/job; an ambiguous
+    slug errors with the --at candidate forms rather than picking one)
+  - Direct tmux target: -t "session:window"  (standard tmux syntax)
+
+The job is reconciled to its live daemon session id, so a job whose session is
+hash-suffixed (e.g. "coord-9a146245") still resolves from plan+job.`,
 		Example: `  # Quick workflow: check status, read output, send instruction
   flow agent status my-feature impl-feature
   flow agent read my-feature impl-feature -n 50
   flow agent send my-feature impl-feature 'Fix the failing test in pkg/api'
+
+  # Unified --at targeting (disambiguates a plan name shared by many worktrees)
+  flow agent read --at my-feature impl-feature -n 50
+  flow agent status --at host-id/my-feature coord
 
   # Direct tmux targeting (bypass plan/job resolution)
   flow agent read -t "grovetools_my-feature:job-impl-feature"
@@ -59,11 +72,24 @@ Commands that target a specific agent accept either:
 	return cmd
 }
 
-// resolveAgentTarget loads the plan and job from a slug and job identifier.
-// The job can be specified by filename or title.
-func resolveAgentTarget(slug, jobID string) (*orchestration.Plan, *orchestration.Job, error) {
-	planDir, err := resolvePlanPath(slug, ".")
+// resolveAgentTarget loads the plan and job from a slug and job identifier and
+// reconciles the job to its live daemon session id. The job can be specified by
+// filename or title.
+//
+// Plan resolution is ctx-aware: when a unified `--at <feature>` target is
+// present on ctx it pins the plan dir directly (the same mechanism every other
+// `flow plan` subcommand uses), so `flow agent read --at <feature> <job>` is the
+// canonical, disambiguated address. A bare positional slug still routes through
+// the legacy cwd/workspace resolver, but an ambiguous one errors with the
+// concrete `--at <container-id>/<name>` candidate forms instead of silently
+// picking a plan.
+func resolveAgentTarget(ctx context.Context, slug, jobID string) (*orchestration.Plan, *orchestration.Job, error) {
+	planDir, err := resolvePlanPathCtx(ctx, slug, ".")
 	if err != nil {
+		if cands := planTargetCandidates(slug); len(cands) > 1 {
+			return nil, nil, fmt.Errorf("plan %q is ambiguous; disambiguate with one of:\n  --at %s",
+				slug, strings.Join(cands, "\n  --at "))
+		}
 		return nil, nil, fmt.Errorf("could not resolve plan '%s': %w", slug, err)
 	}
 
@@ -93,7 +119,103 @@ func resolveAgentTarget(slug, jobID string) (*orchestration.Plan, *orchestration
 		return nil, nil, fmt.Errorf("job '%s' not found in plan '%s'", jobID, slug)
 	}
 
+	// Reconcile the on-disk job.ID to the live daemon session id. The daemon
+	// registers an interactive agent under a hash-suffixed id (e.g.
+	// "coord-9a146245") that differs from job.ID; every capture/send/status/kill
+	// path keys on job.ID, so without this they miss the session and fall through
+	// to the (often wrong) tmux path. Mutating the freshly-loaded in-memory job is
+	// safe — it lives only for this CLI invocation.
+	job.ID = reconcileSessionID(plan, job)
+
 	return plan, job, nil
+}
+
+// reconcileSessionID maps a resolved job to the live daemon session id by
+// consulting the daemon registry the same way `flow agent list` does, scoped to
+// this plan. Returns the registry id of the best-matching session (preferring a
+// live one over a terminal one), or job.ID unchanged when the daemon is
+// unreachable or nothing matches — preserving the bare-id / tmux escape paths.
+func reconcileSessionID(plan *orchestration.Plan, job *orchestration.Job) string {
+	client := daemon.NewWithAutoStart()
+	defer client.Close()
+
+	sessions, err := client.GetSessions(context.Background())
+	if err != nil {
+		return job.ID
+	}
+
+	var fallback string
+	for _, s := range sessions {
+		// Scope to this plan when both sides are known, so a job title that
+		// collides across plans cannot grab the wrong session.
+		if plan != nil && plan.Name != "" && s.PlanName != "" && s.PlanName != plan.Name {
+			continue
+		}
+		if !matchesJob(s, job) {
+			continue
+		}
+		if s.Status != "completed" && s.Status != "failed" && s.Status != "stopped" {
+			return s.ID
+		}
+		if fallback == "" {
+			fallback = s.ID
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return job.ID
+}
+
+// planTargetCandidates returns the canonical `--at <container-id>/<name>` forms
+// for every registered worktree whose plan name equals slug. Used to turn an
+// ambiguous bare slug into an actionable disambiguation error.
+func planTargetCandidates(slug string) []string {
+	if slug == "" {
+		return nil
+	}
+	entries, err := worktreeregistry.ListAll()
+	if err != nil {
+		return nil
+	}
+	var forms []string
+	for _, e := range entries {
+		if e == nil || e.Plan != slug || e.AbsPath == "" {
+			continue
+		}
+		containerID := filepath.Base(filepath.Dir(e.AbsPath))
+		name := filepath.Base(e.AbsPath)
+		forms = append(forms, fmt.Sprintf("%s/%s", containerID, name))
+	}
+	return forms
+}
+
+// resolveAgentTargetArgs is the positional-args front door to
+// resolveAgentTarget: it splits args into (slug, job) honoring a unified `--at`
+// target on ctx, then resolves and reconciles. Used by the simple agent
+// subcommands that take exactly a target (no trailing message).
+func resolveAgentTargetArgs(ctx context.Context, args []string) (*orchestration.Plan, *orchestration.Job, error) {
+	slug, jobID, err := agentSlugJob(ctx, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resolveAgentTarget(ctx, slug, jobID)
+}
+
+// agentSlugJob splits positional args into (slug, job) honoring a unified
+// `--at` target on ctx. With `--at` the plan is already pinned, so callers pass
+// only <job>; without it the canonical <slug> <job> pair is required.
+func agentSlugJob(ctx context.Context, args []string) (slug, job string, err error) {
+	if _, ok := TargetFromContext(ctx); ok {
+		if len(args) < 1 {
+			return "", "", fmt.Errorf("provide <job> (plan targeted via --at)")
+		}
+		return "", args[0], nil
+	}
+	if len(args) < 2 {
+		return "", "", fmt.Errorf("provide <slug> <job>, --at <plan> <job>, or -t <session:window>")
+	}
+	return args[0], args[1], nil
 }
 
 // agentCmdLogger returns a structured logger for CLI agent commands.
@@ -244,11 +366,12 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 			var job *orchestration.Job
 			targetPane := target
 			if target == "" {
-				if len(args) < 2 {
-					return fmt.Errorf("provide either -t <session:window> or <slug> <job>")
+				slug, jobID, perr := agentSlugJob(cmd.Context(), args)
+				if perr != nil {
+					return perr
 				}
 				var err error
-				plan, job, err = resolveAgentTarget(args[0], args[1])
+				plan, job, err = resolveAgentTarget(cmd.Context(), slug, jobID)
 				if err != nil {
 					return err
 				}
@@ -362,11 +485,24 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 					return fmt.Errorf("must provide either a message argument or --file")
 				}
 			} else {
-				if len(args) < 2 {
-					return fmt.Errorf("provide either -t <session:window> or <slug> <job> [message]")
+				// Honor --at: with a unified target the plan is pinned, so the
+				// positionals are <job> [message...]; otherwise <slug> <job>
+				// [message...].
+				var slug, jobID string
+				var msgArgs []string
+				if _, ok := TargetFromContext(cmd.Context()); ok {
+					if len(args) < 1 {
+						return fmt.Errorf("provide <job> [message] (plan targeted via --at)")
+					}
+					jobID, msgArgs = args[0], args[1:]
+				} else {
+					if len(args) < 2 {
+						return fmt.Errorf("provide <slug> <job> [message], --at <plan> <job> [message], or -t <session:window>")
+					}
+					slug, jobID, msgArgs = args[0], args[1], args[2:]
 				}
 				var err error
-				plan, job, err = resolveAgentTarget(args[0], args[1])
+				plan, job, err = resolveAgentTarget(cmd.Context(), slug, jobID)
 				if err != nil {
 					return err
 				}
@@ -376,8 +512,8 @@ Target the agent by plan slug + job, or directly by tmux target.`,
 						return fmt.Errorf("could not read file '%s': %w", fileFlag, readErr)
 					}
 					input = string(b)
-				} else if len(args) >= 3 {
-					input = strings.Join(args[2:], " ")
+				} else if len(msgArgs) > 0 {
+					input = strings.Join(msgArgs, " ")
 				} else {
 					return fmt.Errorf("must provide either a message argument or --file")
 				}
@@ -459,11 +595,12 @@ whether the agent is idle (waiting for input), working (processing), or disconne
 			targetPane := target
 			displayTarget := target
 			if target == "" {
-				if len(args) < 2 {
-					return fmt.Errorf("provide either -t <session:window> or <slug> <job>")
+				slug, jobID, perr := agentSlugJob(cmd.Context(), args)
+				if perr != nil {
+					return perr
 				}
 				var err error
-				plan, job, err = resolveAgentTarget(args[0], args[1])
+				plan, job, err = resolveAgentTarget(cmd.Context(), slug, jobID)
 				if err != nil {
 					return err
 				}
@@ -605,9 +742,13 @@ Falls back to the job log in the plan's .artifacts directory.`,
 
   # Search transcript for specific output
   flow agent transcript my-feature impl-feature | grep -A5 "error"`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			plan, job, err := resolveAgentTarget(args[0], args[1])
+			slug, jobID, perr := agentSlugJob(cmd.Context(), args)
+			if perr != nil {
+				return perr
+			}
+			plan, job, err := resolveAgentTarget(cmd.Context(), slug, jobID)
 			if err != nil {
 				return err
 			}
@@ -672,8 +813,13 @@ where '<slug> <job>' fails with "could not resolve plan").`,
 			if sessionID != "" && len(args) > 0 {
 				return fmt.Errorf("pass either --id or <slug> <job>, not both")
 			}
-			if sessionID == "" && len(args) != 2 {
-				return fmt.Errorf("requires <slug> <job> (or --id <session-id>)")
+			var slug, jobID string
+			if sessionID == "" {
+				var perr error
+				slug, jobID, perr = agentSlugJob(cmd.Context(), args)
+				if perr != nil {
+					return perr
+				}
 			}
 
 			ctx := context.Background()
@@ -691,7 +837,7 @@ where '<slug> <job>' fails with "could not resolve plan").`,
 				return nil
 			}
 
-			_, job, err := resolveAgentTarget(args[0], args[1])
+			_, job, err := resolveAgentTarget(cmd.Context(), slug, jobID)
 			if err != nil {
 				return err
 			}

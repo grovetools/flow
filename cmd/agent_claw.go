@@ -31,11 +31,15 @@ func newAgentClawCmd() *cobra.Command {
 This turns a standard interactive agent into a "claw" agent that can:
 - Receive and send messages via Signal or Home Assistant Voice
 - Get periodic idle pings when inactive`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			plan, job, err := resolveAgentTarget(args[0], args[1])
+			slug, jobID, perr := agentSlugJob(cmd.Context(), args)
+			if perr != nil {
+				return perr
+			}
+			plan, job, err := resolveAgentTarget(cmd.Context(), slug, jobID)
 			if err != nil {
 				return err
 			}
@@ -105,11 +109,11 @@ func newAgentUnclawCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unclaw <slug> <job>",
 		Short: "Disable channels and autonomous mode on an interactive agent",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			_, job, err := resolveAgentTarget(args[0], args[1])
+			_, job, err := resolveAgentTargetArgs(cmd.Context(), args)
 			if err != nil {
 				return err
 			}
@@ -174,11 +178,11 @@ func newAgentDetachCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "detach <slug> <job>",
 		Short: "Pop an agent into its own tmux session",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			_, job, err := resolveAgentTarget(args[0], args[1])
+			_, job, err := resolveAgentTargetArgs(cmd.Context(), args)
 			if err != nil {
 				return err
 			}
@@ -227,11 +231,11 @@ func newAgentAttachCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach <slug> <job>",
 		Short: "Move a detached agent back into the project session",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			_, job, err := resolveAgentTarget(args[0], args[1])
+			_, job, err := resolveAgentTargetArgs(cmd.Context(), args)
 			if err != nil {
 				return err
 			}
