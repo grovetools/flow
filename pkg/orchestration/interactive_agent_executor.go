@@ -94,7 +94,12 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			_ = updateJobFile(job)
+			if uerr := updateJobFile(job); uerr != nil {
+				e.ulog.Warn("Failed to persist job status").
+					Field("job_id", job.ID).
+					Err(uerr).
+					Log(ctx)
+			}
 			return fmt.Errorf("failed to generate plan from dependencies: %w", err)
 		}
 
@@ -108,7 +113,12 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			_ = updateJobFile(job)
+			if uerr := updateJobFile(job); uerr != nil {
+				e.ulog.Warn("Failed to persist job status").
+					Field("job_id", job.ID).
+					Err(uerr).
+					Log(ctx)
+			}
 			return fmt.Errorf("failed to write generated plan briefing file: %w", err)
 		}
 
@@ -130,7 +140,12 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			_ = updateJobFile(job)
+			if uerr := updateJobFile(job); uerr != nil {
+				e.ulog.Warn("Failed to persist job status").
+					Field("job_id", job.ID).
+					Err(uerr).
+					Log(ctx)
+			}
 			return fmt.Errorf("failed to gather context files: %w", err)
 		}
 
@@ -143,7 +158,12 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		if err != nil {
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
-			_ = updateJobFile(job)
+			if uerr := updateJobFile(job); uerr != nil {
+				e.ulog.Warn("Failed to persist job status").
+					Field("job_id", job.ID).
+					Err(uerr).
+					Log(ctx)
+			}
 			e.ulog.Error("Failed to build prompt for job").
 				Field("job_id", job.ID).
 				Field("job_file", job.FilePath).
@@ -199,9 +219,18 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		coreCfg = &config.Config{}
 	}
 
-	// Unmarshal flow configuration (agent settings moved to flow extension)
+	// Unmarshal flow configuration (agent settings moved to flow extension).
+	// A malformed config shouldn't hard-fail an agent launch; log and fall back
+	// to defaults.
 	var flowCfg FlowConfig
-	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
+	if parsed, cfgErr := FlowConfigFrom(coreCfg); cfgErr != nil {
+		e.ulog.Warn("Failed to parse flow configuration; using defaults").
+			Field("job_id", job.ID).
+			Err(cfgErr).
+			Log(ctx)
+	} else {
+		flowCfg = *parsed
+	}
 
 	// Determine which provider to use
 	providerName := "claude" // Default for backward compatibility
@@ -703,7 +732,12 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			p.ulog.Info("Window already exists, attempting to kill it first").
 				Field("window", windowName).
 				Log(ctx)
-			_ = engine.KillWindow(ctx, windowTarget)
+			if err := engine.KillWindow(ctx, windowTarget); err != nil {
+				p.ulog.Warn("Failed to kill existing window").
+					Field("window", windowTarget).
+					Err(err).
+					Log(ctx)
+			}
 			time.Sleep(100 * time.Millisecond)
 
 			if err := engine.NewWindow(ctx, sessionName, windowName, workDir, true); err != nil {
@@ -984,7 +1018,9 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		}
 	} else {
 		logger.WithField("pid", claudePID).Debug("Discovered Claude Code PID via pidfile")
-		_ = agentstream.CleanupPIDFile(job.ID)
+		if err := agentstream.CleanupPIDFile(job.ID); err != nil {
+			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
+		}
 	}
 
 	// Discover transcript path using agentstream
@@ -1306,7 +1342,11 @@ func resolveInputMode(workDir string) string {
 		coreCfg = &config.Config{}
 	}
 	var flowCfg FlowConfig
-	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
+	if parsed, err := FlowConfigFrom(coreCfg); err != nil {
+		log.WithError(err).Warn("Failed to parse flow configuration; using default input mode")
+	} else {
+		flowCfg = *parsed
+	}
 
 	inputMode := "vim" // default
 	providerName := "claude"

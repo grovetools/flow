@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grovetools/core/config"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
@@ -283,12 +282,11 @@ func sendToAgent(plan *orchestration.Plan, job *orchestration.Job, targetPane, i
 	}
 
 	// Direct path (for `-t <target>`).
-	coreCfg, cfgErr := config.LoadDefault()
-	if cfgErr != nil {
-		coreCfg = &config.Config{}
+	flowCfgPtr, err := orchestration.LoadFlowConfigDefault()
+	if err != nil {
+		return err
 	}
-	var flowCfg orchestration.FlowConfig
-	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
+	flowCfg := *flowCfgPtr
 
 	inputMode := "vim"
 	providerName := "claude"

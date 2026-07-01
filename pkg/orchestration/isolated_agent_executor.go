@@ -145,9 +145,18 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		coreCfg = &config.Config{}
 	}
 
-	// Unmarshal flow configuration (agent settings moved to flow extension)
+	// Unmarshal flow configuration (agent settings moved to flow extension).
+	// A malformed config shouldn't hard-fail an agent launch; log and fall back
+	// to defaults.
 	var flowCfg FlowConfig
-	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
+	if parsed, cfgErr := FlowConfigFrom(coreCfg); cfgErr != nil {
+		e.ulog.Warn("Failed to parse flow configuration; using defaults").
+			Field("job_id", job.ID).
+			Err(cfgErr).
+			Log(ctx)
+	} else {
+		flowCfg = *parsed
+	}
 
 	// Determine which provider to use (default to claude)
 	providerName := "claude"

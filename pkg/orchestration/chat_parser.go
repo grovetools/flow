@@ -90,6 +90,9 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 		// Remove the directive comment itself from the content
 		content := groveDirectiveRegex.ReplaceAllString(fullContent, "")
 		content = strings.TrimSpace(content)
+		// Strip a leading blockquote marker ("> ") from each line so quoted
+		// user asks (the convention for directive turns) come out clean.
+		content = stripBlockquoteMarkers(content)
 
 		if content != "" || speaker == "user" {
 			turns = append(turns, &ChatTurn{
@@ -102,4 +105,22 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 	}
 
 	return turns, nil
+}
+
+// stripBlockquoteMarkers removes a single leading blockquote marker from each
+// line ("> " or a bare ">"). Lines without a marker are left unchanged.
+func stripBlockquoteMarkers(content string) string {
+	if content == "" {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "> "):
+			lines[i] = line[2:]
+		case line == ">":
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
 }

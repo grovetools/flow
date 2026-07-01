@@ -5,36 +5,6 @@ import (
 	"testing"
 )
 
-func TestLookupModelProvider(t *testing.T) {
-	tests := []struct {
-		model    string
-		wantProv string
-		wantOK   bool
-	}{
-		{"claude-opus-4-8", "Anthropic", true},
-		{"claude-opus-4-8-20260612", "Anthropic", true},
-		{"claude-sonnet-4-6", "Anthropic", true},
-		{"claude-sonnet-4-6-20260115", "Anthropic", true},
-		{"claude-haiku-4-5", "Anthropic", true},
-		{"gemini-2.5-pro", "Google", true},
-		{"gemini-3.1-pro-preview", "Google", true},
-		{"gpt-4o", "", false},
-		{"nonexistent-model", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.model, func(t *testing.T) {
-			prov, ok := LookupModelProvider(tt.model)
-			if ok != tt.wantOK {
-				t.Errorf("LookupModelProvider(%q) found=%v, want %v", tt.model, ok, tt.wantOK)
-			}
-			if prov != tt.wantProv {
-				t.Errorf("LookupModelProvider(%q) provider=%q, want %q", tt.model, prov, tt.wantProv)
-			}
-		})
-	}
-}
-
 func TestValidateModelForJob_UnknownModel(t *testing.T) {
 	err := ValidateModelForJob("totally-fake-model", JobTypeHeadlessAgent)
 	if err == nil {

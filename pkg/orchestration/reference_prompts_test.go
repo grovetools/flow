@@ -39,20 +39,27 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
+		prompt, promptSourceFiles, _, err := executor.buildPrompt(job, plan, "", nil)
 		if err != nil {
 			t.Fatalf("buildPrompt() error = %v", err)
 		}
 
-		// Verify prompt contains all sources
-		if !strings.Contains(prompt, "package main") {
-			t.Errorf("Prompt missing file content")
+		// Reference-based: file contents are NOT embedded. The prompt is XML
+		// with the user body in <user_request>; include files are returned as
+		// resolved paths in promptSourceFiles.
+		if !strings.Contains(prompt, "<user_request") {
+			t.Errorf("Prompt missing <user_request> structure")
 		}
 		if !strings.Contains(prompt, "Do something with these files") {
 			t.Errorf("Prompt missing job body")
 		}
-		if !strings.Contains(prompt, "Content from file1.go") {
-			t.Errorf("Prompt missing file1.go header")
+		if strings.Contains(prompt, "package main") {
+			t.Errorf("Prompt should not embed file contents")
+		}
+		for _, want := range []string{"file1.go", "file2.go"} {
+			if !containsPath(promptSourceFiles, want) {
+				t.Errorf("promptSourceFiles missing %s: %v", want, promptSourceFiles)
+			}
 		}
 	})
 
@@ -146,15 +153,16 @@ func TestReferenceBased_OneShotExecutor_BuildPrompt(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
+		_, promptSourceFiles, _, err := executor.buildPrompt(job, plan, "", nil)
 		if err != nil {
 			t.Fatalf("buildPrompt() error = %v", err)
 		}
 
-		// Verify all files are included
+		// Reference-based: files are returned as resolved source paths, not
+		// embedded into the prompt string.
 		for i, file := range includeFiles {
-			if !strings.Contains(prompt, file) {
-				t.Errorf("Prompt missing file %d: %s", i, file)
+			if !containsPath(promptSourceFiles, file) {
+				t.Errorf("promptSourceFiles missing file %d: %s (got %v)", i, file, promptSourceFiles)
 			}
 		}
 	})
@@ -262,6 +270,16 @@ func TestCLIIntegration(t *testing.T) {
 	}
 }
 
+// containsPath reports whether any path in paths contains the substring want.
+func containsPath(paths []string, want string) bool {
+	for _, p := range paths {
+		if strings.Contains(p, want) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestEdgeCases tests various edge cases
 func TestEdgeCases(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -313,12 +331,14 @@ func TestEdgeCases(t *testing.T) {
 		}
 
 		executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-		prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
+		_, promptSourceFiles, _, err := executor.buildPrompt(job, plan, "", nil)
 
+		// Reference-based: the resolved symlink path is returned as a source
+		// file; content is NOT embedded into the prompt.
 		if err != nil {
 			t.Errorf("Failed to process symlink: %v", err)
-		} else if !strings.Contains(prompt, "package real") {
-			t.Errorf("Symlink content not included in prompt")
+		} else if !containsPath(promptSourceFiles, "link.go") {
+			t.Errorf("Symlink not included in prompt source files: %v", promptSourceFiles)
 		}
 	})
 

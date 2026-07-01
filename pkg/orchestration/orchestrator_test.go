@@ -162,13 +162,18 @@ func TestOrchestrator_GetStatus(t *testing.T) {
 }
 
 func TestOrchestrator_RunJob(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Real job files on disk so LocalRuntime's status persistence works, and
+	// resolved Dependencies so dependency gating is exercised.
+	job1 := &Job{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job1.md", FilePath: createTempJobFile(t, tmpDir, "job1.md", JobTypeOneshot, JobStatusPending)}
+	job2 := &Job{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job2.md", FilePath: createTempJobFile(t, tmpDir, "job2.md", JobTypeOneshot, JobStatusPending), DependsOn: []string{"job1"}, Dependencies: []*Job{job1}}
+
 	plan := &Plan{
 		Name:      "test-plan",
-		Directory: "/tmp/test",
-		Jobs: []*Job{
-			{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending, FilePath: "job1.md"},
-			{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending, FilePath: "job2.md", DependsOn: []string{"job1"}},
-		},
+		Directory: tmpDir,
+		Jobs:      []*Job{job1, job2},
+		JobsByID:  map[string]*Job{"job1": job1, "job2": job2},
 	}
 
 	orch, err := NewOrchestrator(plan, nil)
@@ -207,13 +212,17 @@ func TestOrchestrator_RunJob(t *testing.T) {
 }
 
 func TestOrchestrator_RunNext(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	job1 := &Job{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job1.md", FilePath: createTempJobFile(t, tmpDir, "job1.md", JobTypeOneshot, JobStatusPending)}
+	job2 := &Job{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job2.md", FilePath: createTempJobFile(t, tmpDir, "job2.md", JobTypeOneshot, JobStatusPending)}
+	job3 := &Job{ID: "job3", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job3.md", FilePath: createTempJobFile(t, tmpDir, "job3.md", JobTypeOneshot, JobStatusPending), DependsOn: []string{"job1", "job2"}, Dependencies: []*Job{job1, job2}}
+
 	plan := &Plan{
-		Name: "test-plan",
-		Jobs: []*Job{
-			{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending},
-			{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending},
-			{ID: "job3", Type: JobTypeOneshot, Status: JobStatusPending, DependsOn: []string{"job1", "job2"}},
-		},
+		Name:      "test-plan",
+		Directory: tmpDir,
+		Jobs:      []*Job{job1, job2, job3},
+		JobsByID:  map[string]*Job{"job1": job1, "job2": job2, "job3": job3},
 	}
 
 	config := &OrchestratorConfig{
@@ -225,11 +234,14 @@ func TestOrchestrator_RunNext(t *testing.T) {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
 
-	// Replace executor
+	// Replace executor (job1 and job2 run concurrently, so guard the counter).
+	var mu sync.Mutex
 	executionCount := 0
 	mockExec := &mockExecutor{
 		executeFunc: func(ctx context.Context, job *Job, plan *Plan) error {
+			mu.Lock()
 			executionCount++
+			mu.Unlock()
 			job.Status = JobStatusCompleted
 			return nil
 		},
@@ -256,13 +268,17 @@ func TestOrchestrator_RunNext(t *testing.T) {
 }
 
 func TestOrchestrator_RunAll(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	job1 := &Job{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job1.md", FilePath: createTempJobFile(t, tmpDir, "job1.md", JobTypeOneshot, JobStatusPending)}
+	job2 := &Job{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job2.md", FilePath: createTempJobFile(t, tmpDir, "job2.md", JobTypeOneshot, JobStatusPending), DependsOn: []string{"job1"}, Dependencies: []*Job{job1}}
+	job3 := &Job{ID: "job3", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job3.md", FilePath: createTempJobFile(t, tmpDir, "job3.md", JobTypeOneshot, JobStatusPending), DependsOn: []string{"job2"}, Dependencies: []*Job{job2}}
+
 	plan := &Plan{
-		Name: "test-plan",
-		Jobs: []*Job{
-			{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending},
-			{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending, DependsOn: []string{"job1"}},
-			{ID: "job3", Type: JobTypeOneshot, Status: JobStatusPending, DependsOn: []string{"job2"}},
-		},
+		Name:      "test-plan",
+		Directory: tmpDir,
+		Jobs:      []*Job{job1, job2, job3},
+		JobsByID:  map[string]*Job{"job1": job1, "job2": job2, "job3": job3},
 	}
 
 	config := &OrchestratorConfig{
@@ -276,10 +292,13 @@ func TestOrchestrator_RunAll(t *testing.T) {
 	}
 
 	// Replace executor
+	var mu sync.Mutex
 	executionOrder := []string{}
 	mockExec := &mockExecutor{
 		executeFunc: func(ctx context.Context, job *Job, plan *Plan) error {
+			mu.Lock()
 			executionOrder = append(executionOrder, job.ID)
+			mu.Unlock()
 			job.Status = JobStatusCompleted
 			return nil
 		},
@@ -316,11 +335,15 @@ func TestOrchestrator_RunAll(t *testing.T) {
 }
 
 func TestOrchestrator_UpdateJobStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	job1 := &Job{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job1.md", FilePath: createTempJobFile(t, tmpDir, "job1.md", JobTypeOneshot, JobStatusPending)}
+
 	plan := &Plan{
-		Name: "test-plan",
-		Jobs: []*Job{
-			{ID: "job1", Status: JobStatusPending},
-		},
+		Name:      "test-plan",
+		Directory: tmpDir,
+		Jobs:      []*Job{job1},
+		JobsByID:  map[string]*Job{"job1": job1},
 	}
 
 	orch, err := NewOrchestrator(plan, nil)
@@ -362,12 +385,16 @@ func TestOrchestrator_UpdateJobStatus(t *testing.T) {
 }
 
 func TestOrchestrator_HandleFailures(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	job1 := &Job{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job1.md", FilePath: createTempJobFile(t, tmpDir, "job1.md", JobTypeOneshot, JobStatusPending)}
+	job2 := &Job{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending, Filename: "job2.md", FilePath: createTempJobFile(t, tmpDir, "job2.md", JobTypeOneshot, JobStatusPending), DependsOn: []string{"job1"}, Dependencies: []*Job{job1}}
+
 	plan := &Plan{
-		Name: "test-plan",
-		Jobs: []*Job{
-			{ID: "job1", Type: JobTypeOneshot, Status: JobStatusPending},
-			{ID: "job2", Type: JobTypeOneshot, Status: JobStatusPending, DependsOn: []string{"job1"}},
-		},
+		Name:      "test-plan",
+		Directory: tmpDir,
+		Jobs:      []*Job{job1, job2},
+		JobsByID:  map[string]*Job{"job1": job1, "job2": job2},
 	}
 
 	orch, err := NewOrchestrator(plan, nil)

@@ -355,6 +355,8 @@ Test prompt`
 	// Load job
 	job, err := LoadJob(jobPath)
 	require.NoError(t, err)
+	// LoadJob does not populate FilePath; state persistence writes back to it.
+	job.FilePath = jobPath
 
 	// Update status
 	sp := NewStatePersister()
@@ -404,70 +406,83 @@ Test job %d`, i, i, i)
 	plan, err := LoadPlan(tmpDir)
 	require.NoError(t, err)
 
-	// Track execution order
-	executionOrder := []string{}
-	executionTimes := make(map[string]time.Time)
-	_ = executionOrder // Will be used when we can hook into the executor
-	_ = executionTimes // Will be used when we can hook into the executor
+	const maxParallel = 3
 
-	// The orchestrator will use its internal executors
-
-	// Create orchestrator
+	// Create orchestrator. It builds a LocalRuntime whose executors we replace
+	// with a recording mock below, so no LLM/daemon/network is contacted. The
+	// LocalRuntime still persists status to the on-disk job files, so this
+	// exercises the real concurrency/state path hermetically.
 	config := &OrchestratorConfig{
-		MaxParallelJobs: 3,
-		CheckInterval:   5 * time.Second,
+		MaxParallelJobs: maxParallel,
+		CheckInterval:   5 * time.Millisecond,
 	}
 	orch, err := NewOrchestrator(plan, config)
 	require.NoError(t, err)
-	// Note: In real orchestrator, executors are registered internally
-	// For this test, we'll need to modify the approach
 
-	// Execute all jobs
+	rec := &recordingExecutor{}
+	orch.config.Runtime.(*LocalRuntime).SetExecutor(JobTypeOneshot, rec)
+
+	// RunNext dispatches a batch of runnable jobs capped at MaxParallelJobs,
+	// running them concurrently (bounded by the runtime's semaphore) and
+	// persisting each job's status to disk. Loop until no runnable jobs remain.
 	ctx := context.Background()
-	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		if err := orch.RunNext(ctx); err != nil {
+			break // "no runnable jobs found" — all done
+		}
+	}
 
+	// Verify all jobs executed and completed.
+	assert.Equal(t, 10, rec.count())
 	for _, job := range plan.Jobs {
-		wg.Add(1)
-		go func(j *Job) {
-			defer wg.Done()
-			_ = orch.RunJob(ctx, j.FilePath)
-		}(job)
-
-		// Small delay to respect parallelism limit
-		time.Sleep(10 * time.Millisecond)
+		assert.Equal(t, JobStatusCompleted, job.Status, "job %s should be completed", job.ID)
 	}
 
-	wg.Wait()
+	// Verify the parallelism limit was respected.
+	assert.LessOrEqual(t, rec.maxObserved(), maxParallel, "Max parallelism exceeded")
+}
 
-	// Verify all executed
-	assert.Len(t, executionOrder, 10)
+// recordingExecutor is a thread-safe Executor that records how many jobs it ran
+// and the peak number running concurrently. It sleeps briefly so overlapping
+// executions are observable.
+type recordingExecutor struct {
+	mu      sync.Mutex
+	total   int
+	current int
+	peak    int
+}
 
-	// Verify parallelism was respected
-	// Check that at most 3 jobs were running at the same time
-	maxConcurrent := 0
-	for i := 0; i < len(executionOrder); i++ {
-		startTime := executionTimes[executionOrder[i]]
-		concurrent := 1
+func (r *recordingExecutor) Name() string { return "recording" }
 
-		for j := 0; j < len(executionOrder); j++ {
-			if i == j {
-				continue
-			}
-			otherStart := executionTimes[executionOrder[j]]
-			otherEnd := otherStart.Add(100 * time.Millisecond)
-
-			// Check if jobs overlapped
-			if startTime.After(otherStart) && startTime.Before(otherEnd) {
-				concurrent++
-			}
-		}
-
-		if concurrent > maxConcurrent {
-			maxConcurrent = concurrent
-		}
+func (r *recordingExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	r.mu.Lock()
+	r.total++
+	r.current++
+	if r.current > r.peak {
+		r.peak = r.current
 	}
+	r.mu.Unlock()
 
-	assert.LessOrEqual(t, maxConcurrent, 3, "Max parallelism exceeded")
+	time.Sleep(15 * time.Millisecond)
+
+	r.mu.Lock()
+	r.current--
+	r.mu.Unlock()
+
+	job.Status = JobStatusCompleted
+	return nil
+}
+
+func (r *recordingExecutor) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.total
+}
+
+func (r *recordingExecutor) maxObserved() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.peak
 }
 
 // Helper types and functions

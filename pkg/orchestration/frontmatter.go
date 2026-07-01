@@ -38,7 +38,18 @@ func ParseFrontmatter(content []byte) (map[string]interface{}, []byte, error) {
 			// Try with Windows line endings
 			tmpIdx = strings.Index(contentStr[startIdx:], "\r\n---\r\n")
 			if tmpIdx == -1 {
-				return nil, nil, fmt.Errorf("invalid frontmatter: no closing delimiter found")
+				// Also accept a closing delimiter at EOF with no trailing
+				// newline (a file ending exactly with "---"). This only adds
+				// the EOF case; the normal "\n---\n" path above is unchanged.
+				rest := contentStr[startIdx:]
+				switch {
+				case strings.HasSuffix(rest, "\n---"):
+					tmpIdx = len(rest) - len("\n---")
+				case strings.HasSuffix(rest, "\r\n---"):
+					tmpIdx = len(rest) - len("\r\n---")
+				default:
+					return nil, nil, fmt.Errorf("invalid frontmatter: no closing delimiter found")
+				}
 			}
 		}
 		endIdx = startIdx + tmpIdx

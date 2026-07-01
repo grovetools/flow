@@ -4,65 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	anthropicconfig "github.com/grovetools/grove-anthropic/pkg/config"
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
-	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
+
+	modelpkg "github.com/grovetools/flow/pkg/model"
 )
-
-const (
-	ProviderAnthropic = "Anthropic"
-	ProviderGoogle    = "Google"
-)
-
-// LookupModelProvider returns the provider name for a known model ID or alias.
-// Returns ("", false) if the model is not found in any registry.
-func LookupModelProvider(model string) (provider string, found bool) {
-	for _, m := range anthropicmodels.Models() {
-		if m.ID == model || (m.Alias != "" && m.Alias == model) {
-			return ProviderAnthropic, true
-		}
-	}
-	resolved := anthropicmodels.ResolveAlias(model)
-	if resolved != model {
-		return ProviderAnthropic, true
-	}
-
-	for _, m := range geminimodels.Models() {
-		if m.ID == model || (m.Alias != "" && m.Alias == model) {
-			return ProviderGoogle, true
-		}
-	}
-	return "", false
-}
-
-// IsProviderAuthenticated checks whether a provider has credentials configured
-// on this host. Returns (true, "") if authenticated, or (false, instructions)
-// with an actionable message on how to configure credentials.
-func IsProviderAuthenticated(provider string) (ok bool, instructions string) {
-	switch provider {
-	case ProviderAnthropic:
-		if _, found := anthropicconfig.GetAPIKeySource(); found {
-			return true, ""
-		}
-		return false, "Anthropic provider is not authenticated.\n" +
-			"Configure credentials using one of:\n" +
-			"  1. Set ANTHROPIC_API_KEY environment variable\n" +
-			"  2. Add 'anthropic.api_key_command' to grove.yml\n" +
-			"  3. Add 'anthropic.api_key' to grove.yml"
-	case ProviderGoogle:
-		if _, err := geminiconfig.ResolveAPIKey(); err == nil {
-			return true, ""
-		}
-		return false, "Google (Gemini) provider is not authenticated.\n" +
-			"Configure credentials using one of:\n" +
-			"  1. Set GEMINI_API_KEY environment variable\n" +
-			"  2. Add 'gemini.api_key_command' to grove.yml\n" +
-			"  3. Add 'gemini.api_key' to grove.yml"
-	default:
-		return false, fmt.Sprintf("unknown provider %q", provider)
-	}
-}
 
 // ValidateModelForJob checks that a model is valid for the given job type.
 // For agent job types (interactive_agent, headless_agent), it enforces that the
@@ -76,7 +22,7 @@ func ValidateModelForJob(model string, jobType JobType) error {
 		return nil
 	}
 
-	provider, known := LookupModelProvider(model)
+	provider, known := modelpkg.LookupModelProvider(model)
 	if !known {
 		if isClaudeFamilyModel(model) {
 			return nil
@@ -86,7 +32,7 @@ func ValidateModelForJob(model string, jobType JobType) error {
 	}
 
 	isAgentJob := jobType == JobTypeInteractiveAgent || jobType == JobTypeHeadlessAgent
-	if isAgentJob && provider == ProviderGoogle {
+	if isAgentJob && provider == modelpkg.ProviderGoogle {
 		return fmt.Errorf("model %q is a %s model, but agent jobs run on the Claude CLI.\n"+
 			"Use a Claude-family model (e.g. claude-opus-4-8, claude-sonnet-4-6) or\n"+
 			"set flow.interactive_provider in grove.toml to route to a different provider",
@@ -103,7 +49,7 @@ func ValidateModelForJob(model string, jobType JobType) error {
 	// checking ANTHROPIC_API_KEY would be a false negative. Only check
 	// provider auth for jobs that call the API directly (oneshot, chat).
 	if !isAgentJob {
-		if ok, instructions := IsProviderAuthenticated(provider); !ok {
+		if ok, instructions := modelpkg.IsProviderAuthenticated(provider); !ok {
 			return fmt.Errorf("model %q requires the %s provider, which is not configured on this host.\n"+
 				"The job will fail to run until credentials are set up.\n\n%s",
 				model, provider, instructions)
@@ -120,7 +66,7 @@ func ValidateModelKnown(model string) error {
 	if model == "" {
 		return nil
 	}
-	if _, known := LookupModelProvider(model); known {
+	if _, known := modelpkg.LookupModelProvider(model); known {
 		return nil
 	}
 	if isClaudeFamilyModel(model) {

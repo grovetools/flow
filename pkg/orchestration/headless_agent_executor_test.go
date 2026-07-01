@@ -23,10 +23,16 @@ func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 		Directory: tmpDir,
 	}
 
+	// Use an invalid model so the executor fails deterministically at model
+	// validation — the first thing Execute does, before any worktree prep, agent
+	// launch, or daemon contact. This keeps the test fully hermetic (no git repo,
+	// no groved, no network) while still exercising the "job marked failed on
+	// error" path.
 	job := &Job{
 		ID:       "test-job",
 		Type:     JobTypeHeadlessAgent,
 		Status:   JobStatusPending,
+		Model:    "not-a-real-model",
 		Worktree: "test-worktree",
 		FilePath: filepath.Join(tmpDir, "test-job.md"),
 	}
@@ -41,9 +47,9 @@ func TestHeadlessAgentExecutor_Execute(t *testing.T) {
 	ctx := context.Background()
 	err = executor.Execute(ctx, job, plan)
 
-	// For now, expect error due to missing git repo
+	// Expect an error due to the invalid model.
 	if err == nil {
-		t.Errorf("Expected error due to missing git repo, got nil")
+		t.Errorf("Expected error due to invalid model, got nil")
 	}
 
 	// Verify status was updated

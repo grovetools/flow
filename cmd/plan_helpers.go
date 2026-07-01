@@ -9,6 +9,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 )
 
@@ -220,12 +221,12 @@ func loadFlowConfigWithDynamicRecipes() (*FlowConfig, string, error) {
 	}
 
 	// Now unmarshal into the typed FlowConfig struct
-	var flowCfg FlowConfig
-	if err := coreCfg.UnmarshalExtension("flow", &flowCfg); err != nil {
-		return nil, "", fmt.Errorf("failed to parse 'flow' configuration into struct: %w", err)
+	flowCfg, err := orchestration.FlowConfigFrom(coreCfg)
+	if err != nil {
+		return nil, "", err
 	}
 
-	return &flowCfg, getRecipeCmd, nil
+	return flowCfg, getRecipeCmd, nil
 }
 
 // findPlanGlobally searches all known workspaces on the system for a plan matching the given slug.

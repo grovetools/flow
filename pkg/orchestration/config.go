@@ -3,6 +3,8 @@ package orchestration
 import (
 	"fmt"
 	"strings"
+
+	"github.com/grovetools/core/config"
 )
 
 // Config holds orchestration-specific settings, decoupled from grove-core.
@@ -39,6 +41,42 @@ type FlowConfig struct {
 
 	// Recipe settings
 	Recipes map[string]RecipeConfig `yaml:"recipes" jsonschema:"description=Recipe-specific variable overrides" jsonschema_extras:"x-layer=project,x-priority=90"`
+}
+
+// FlowConfigFrom decodes the 'flow' extension from an already-loaded core
+// config into a FlowConfig. It is the single unmarshal+error-wrap helper shared
+// by every flow-config load path. UnmarshalExtension returns nil (leaving the
+// target zero-valued) when the 'flow' section is absent, so a non-nil error here
+// only ever means a genuinely malformed config — worth surfacing.
+func FlowConfigFrom(cfg *config.Config) (*FlowConfig, error) {
+	var flowCfg FlowConfig
+	if err := cfg.UnmarshalExtension("flow", &flowCfg); err != nil {
+		return nil, fmt.Errorf("failed to parse 'flow' configuration from grove.yml: %w", err)
+	}
+	return &flowCfg, nil
+}
+
+// LoadFlowConfig loads the core grove config from the current directory
+// (hierarchical: global -> project -> override) and decodes its 'flow'
+// extension. A failure to load the core config is tolerated (an empty config is
+// used); only a malformed 'flow' section produces an error.
+func LoadFlowConfig() (*FlowConfig, error) {
+	coreCfg, err := config.LoadFrom(".")
+	if err != nil {
+		coreCfg = &config.Config{}
+	}
+	return FlowConfigFrom(coreCfg)
+}
+
+// LoadFlowConfigDefault is like LoadFlowConfig but loads the core config via
+// config.LoadDefault() (global-anchored discovery) rather than from the current
+// directory.
+func LoadFlowConfigDefault() (*FlowConfig, error) {
+	coreCfg, err := config.LoadDefault()
+	if err != nil {
+		coreCfg = &config.Config{}
+	}
+	return FlowConfigFrom(coreCfg)
 }
 
 // RecipeConfig defines configuration for a specific recipe.

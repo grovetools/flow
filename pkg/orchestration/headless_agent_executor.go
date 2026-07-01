@@ -78,7 +78,14 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return fmt.Errorf("failed to create lock file: %w", err)
 	}
 	// Ensure lock file is removed when execution finishes.
-	defer func() { _ = RemoveLockFile(job.FilePath) }()
+	defer func() {
+		if err := RemoveLockFile(job.FilePath); err != nil {
+			ulog.Warn("Failed to remove lock file").
+				Field("job", job.ID).
+				Field("error", err).
+				Log(ctx)
+		}
+	}()
 
 	// Update job status to running
 	job.StartTime = time.Now()
@@ -111,13 +118,23 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 			return
 		}
 		job.EndTime = time.Now()
-		_ = job.UpdateStatus(persister, JobStatusFailed)
+		if err := job.UpdateStatus(persister, JobStatusFailed); err != nil {
+			ulog.Warn("Failed to update job status to failed").
+				Field("job", job.ID).
+				Field("error", err).
+				Log(ctx)
+		}
 
 		// Clean up the daemon session record for the failed-to-launch agent.
 		if client := daemon.New(); client != nil {
 			endCtx, endCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer endCancel()
-			_ = client.EndSession(endCtx, job.ID, string(JobStatusFailed))
+			if err := client.EndSession(endCtx, job.ID, string(JobStatusFailed)); err != nil {
+				ulog.Warn("Failed to end daemon session for failed agent").
+					Field("job", job.ID).
+					Field("error", err).
+					Log(ctx)
+			}
 		}
 	}()
 
@@ -251,9 +268,18 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 	}
 
 	// Unmarshal flow configuration to resolve the provider and its args,
-	// mirroring the resolution done by the interactive agent executor.
+	// mirroring the resolution done by the interactive agent executor. A
+	// malformed config shouldn't hard-fail an agent launch; log and fall back
+	// to defaults.
 	var flowCfg FlowConfig
-	_ = coreCfg.UnmarshalExtension("flow", &flowCfg)
+	if parsed, cfgErr := FlowConfigFrom(coreCfg); cfgErr != nil {
+		ulog.Warn("Failed to parse flow configuration; using defaults").
+			Field("job", job.ID).
+			Field("error", cfgErr).
+			Log(ctx)
+	} else {
+		flowCfg = *parsed
+	}
 
 	// Determine which provider to use (default to claude for backward compatibility)
 	providerName := "claude"
@@ -408,7 +434,15 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
-	defer func() { _ = os.Chdir(originalDir) }()
+	defer func() {
+		if err := os.Chdir(originalDir); err != nil {
+			ulog.Warn("Failed to restore original working directory").
+				Field("job", job.ID).
+				Field("original_dir", originalDir).
+				Field("error", err).
+				Log(ctx)
+		}
+	}()
 
 	if err := os.Chdir(worktreePath); err != nil {
 		return fmt.Errorf("failed to change to worktree directory: %w", err)

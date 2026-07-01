@@ -83,13 +83,15 @@ func TestDependencyGraph_ValidateDependencies(t *testing.T) {
 			wantError: false,
 		},
 		{
+			// A reference to a non-existent dependency is now tolerated:
+			// ResolveDependencies records it as a nil dependency instead of
+			// failing (see loader.go). Setup must NOT error.
 			name: "missing dependency",
 			jobs: []*Job{
 				{ID: "job1", DependsOn: []string{"job2"}},
 			},
-			wantError:  true,
+			wantError:  false,
 			setupError: true,
-			errorMsg:   "non-existent job",
 		},
 		{
 			name: "self dependency",
@@ -123,10 +125,14 @@ func TestDependencyGraph_ValidateDependencies(t *testing.T) {
 					plan.JobsByID[job.ID] = job
 				}
 				err := plan.ResolveDependencies()
-				if err == nil {
-					t.Errorf("Expected error during setup but got none")
-				} else if !strings.Contains(err.Error(), tt.errorMsg) {
-					t.Errorf("Expected error containing '%s', got '%s'", tt.errorMsg, err.Error())
+				if tt.wantError {
+					if err == nil {
+						t.Errorf("Expected error during setup but got none")
+					} else if !strings.Contains(err.Error(), tt.errorMsg) {
+						t.Errorf("Expected error containing '%s', got '%s'", tt.errorMsg, err.Error())
+					}
+				} else if err != nil {
+					t.Errorf("Expected no setup error, got '%s'", err.Error())
 				}
 				return
 			}

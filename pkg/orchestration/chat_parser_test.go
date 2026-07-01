@@ -15,6 +15,10 @@ func TestParseChatFile(t *testing.T) {
 		wantErr   bool
 	}{
 		{
+			// Directive model: turns are split ONLY on <!-- grove: ... -->
+			// directives. Leading content before the first directive is one
+			// user turn; a directive with a template is a user turn, one
+			// without is an llm turn.
 			name: "simple conversation",
 			content: `---
 id: test-plan
@@ -23,14 +27,10 @@ title: Test Plan
 
 Initial user prompt
 
----
-
-## LLM Response
-
+<!-- grove: {"model": "claude-3-opus"} -->
 This is the LLM's response
 
----
-
+<!-- grove: {"template": "refine-plan-generic"} -->
 > User feedback here`,
 			wantTurns: 3,
 			wantErr:   false,
@@ -52,18 +52,22 @@ Initial prompt
 			wantErr:   false,
 		},
 		{
+			// Empty input yields a single empty user turn (a freshly created
+			// chat file), not an error.
 			name:      "empty file",
 			content:   "",
-			wantTurns: 0,
-			wantErr:   true,
+			wantTurns: 1,
+			wantErr:   false,
 		},
 		{
+			// Frontmatter with a closing "---" at EOF (no trailing newline) is
+			// now valid; the empty body yields one empty user turn.
 			name: "only frontmatter",
 			content: `---
 id: test-plan
 title: Test Plan
 ---`,
-			wantTurns: 0,
+			wantTurns: 1,
 			wantErr:   false,
 		},
 	}
@@ -134,6 +138,9 @@ Initial prompt
 }
 
 func TestParseChatFileMultipleTurns(t *testing.T) {
+	// Directive model: each turn after the initial user prompt is introduced by
+	// a <!-- grove: ... --> directive. A directive with a template is a user
+	// turn; one without is an llm turn.
 	content := `---
 id: test-plan
 title: Test Plan
@@ -141,31 +148,22 @@ title: Test Plan
 
 Initial prompt about a web API
 
----
-
-## LLM Response (2024-01-15 10:30:00)
-
+<!-- grove: {"model": "claude-3-opus"} -->
 Here's my plan for the web API:
 1. Create endpoints
 2. Add authentication
 3. Implement database
 
----
-
 <!-- grove: {"template": "refine-plan-generic"} -->
 > Can you add more detail about the authentication?
 
----
-
-## LLM Response (2024-01-15 10:35:00)
-
+<!-- grove: {"model": "claude-3-opus"} -->
 Sure! For authentication:
 - Use JWT tokens
 - Implement OAuth2
 - Add rate limiting
 
----
-
+<!-- grove: {"template": "refine-plan-generic"} -->
 > Looks good, please proceed`
 
 	turns, err := orchestration.ParseChatFile([]byte(content))

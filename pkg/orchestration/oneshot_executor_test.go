@@ -108,20 +108,23 @@ func TestOneShotExecutor_BuildPrompt(t *testing.T) {
 	}
 
 	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
-	prompt, _, _, err := executor.buildPrompt(job, plan, "", nil)
+	prompt, promptSourceFiles, _, err := executor.buildPrompt(job, plan, "", nil)
 	if err != nil {
 		t.Fatalf("buildPrompt() error = %v", err)
 	}
 
-	// Verify prompt contains all sources
-	if !strings.Contains(prompt, "Spec 1 content") {
-		t.Errorf("Prompt missing spec1 content")
-	}
-	if !strings.Contains(prompt, "Spec 2 content") {
-		t.Errorf("Prompt missing spec2 content")
-	}
+	// Reference-based: spec file contents are NOT embedded; they are returned
+	// as resolved source paths. The prompt body appears in <user_request>.
 	if !strings.Contains(prompt, "Do something with these specs") {
 		t.Errorf("Prompt missing job body")
+	}
+	if strings.Contains(prompt, "Spec 1 content") || strings.Contains(prompt, "Spec 2 content") {
+		t.Errorf("Prompt should not embed spec file contents")
+	}
+	for _, want := range []string{"spec1.md", "spec2.md"} {
+		if !containsPath(promptSourceFiles, want) {
+			t.Errorf("promptSourceFiles missing %s: %v", want, promptSourceFiles)
+		}
 	}
 }
 
@@ -161,21 +164,23 @@ func TestOneShotExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
 		return
 	}
 
-	// Verify prompt structure for reference-based prompts
-	if !strings.Contains(prompt, "System Instructions (from template: agent-run)") {
-		t.Errorf("Prompt missing template header")
+	// Reference-based structure: XML system_instructions carry the template
+	// name as an attribute, the user body lives in <user_request>, and file
+	// contents are NOT embedded (no START/END separators, no old header).
+	if !strings.Contains(prompt, `<system_instructions template="agent-run">`) {
+		t.Errorf("Prompt missing system_instructions with template attribute")
 	}
-	if !strings.Contains(prompt, "--- START OF file1.go ---") {
-		t.Errorf("Prompt missing file1.go separator")
+	if !strings.Contains(prompt, "<user_request") {
+		t.Errorf("Prompt missing <user_request> structure")
 	}
-	if !strings.Contains(prompt, "--- END OF file1.go ---") {
-		t.Errorf("Prompt missing file1.go end separator")
+	if strings.Contains(prompt, "System Instructions (from template: agent-run)") {
+		t.Errorf("Prompt should not contain old template header")
 	}
-	if !strings.Contains(prompt, "--- START OF file2.go ---") {
-		t.Errorf("Prompt missing file2.go separator")
+	if strings.Contains(prompt, "--- START OF") || strings.Contains(prompt, "--- END OF") {
+		t.Errorf("Prompt should not contain file separators")
 	}
-	if !strings.Contains(prompt, "package main") {
-		t.Errorf("Prompt missing file content")
+	if strings.Contains(prompt, "package main") {
+		t.Errorf("Prompt should not embed file contents")
 	}
 	if !strings.Contains(prompt, "Refactor these files") {
 		t.Errorf("Prompt missing additional instructions")
@@ -542,7 +547,7 @@ Body`
 				plan := &Plan{Directory: tmpDir}
 				return job, plan
 			},
-			wantErr:    "reading include file",
+			wantErr:    "could not find prompt source",
 			wantStatus: JobStatusFailed,
 		},
 		{

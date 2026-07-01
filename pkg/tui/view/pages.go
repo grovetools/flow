@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/grovetools/core/tui"
 	"github.com/grovetools/core/tui/components/pager"
 	"github.com/grovetools/core/tui/embed"
 	core_theme "github.com/grovetools/core/tui/theme"
@@ -42,11 +43,11 @@ func (p *statusPage) Title() string {
 	return p.s.statusModel.PlanTitle()
 }
 func (p *statusPage) Init() tea.Cmd { return nil }
-func (p *statusPage) View() string {
+func (p *statusPage) View() (out string) {
 	if p.s.statusModel == nil {
 		return ""
 	}
-	defer func() { _ = recover() }()
+	defer tui.RecoverView(&out)
 	return p.s.statusModel.View()
 }
 
@@ -130,11 +131,11 @@ func (p *addJobPage) Title() string {
 	return core_theme.IconFilePlus + " Add Job"
 }
 func (p *addJobPage) Init() tea.Cmd { return nil }
-func (p *addJobPage) View() string {
+func (p *addJobPage) View() (out string) {
 	if p.s.wizardModel == nil {
 		return ""
 	}
-	defer func() { _ = recover() }()
+	defer tui.RecoverView(&out)
 	return p.s.wizardModel.View()
 }
 
@@ -291,11 +292,11 @@ type addPlanPage struct {
 func (p *addPlanPage) Name() string  { return "Add Plan" }
 func (p *addPlanPage) Title() string { return "󰠡 Create New Plan" }
 func (p *addPlanPage) Init() tea.Cmd { return nil }
-func (p *addPlanPage) View() string {
+func (p *addPlanPage) View() (out string) {
 	if p.s.initWizardModel == nil {
 		return ""
 	}
-	defer func() { _ = recover() }()
+	defer tui.RecoverView(&out)
 	return p.s.initWizardModel.View()
 }
 
@@ -380,11 +381,11 @@ type finishPlanPage struct {
 func (p *finishPlanPage) Name() string  { return "Finish Plan" }
 func (p *finishPlanPage) Title() string { return "󰄬 Finish Plan" }
 func (p *finishPlanPage) Init() tea.Cmd { return nil }
-func (p *finishPlanPage) View() string {
+func (p *finishPlanPage) View() (out string) {
 	if p.s.finishWizardModel == nil {
 		return ""
 	}
-	defer func() { _ = recover() }()
+	defer tui.RecoverView(&out)
 	return p.s.finishWizardModel.View()
 }
 

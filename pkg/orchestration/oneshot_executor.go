@@ -27,6 +27,8 @@ import (
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
+
+	modelpkg "github.com/grovetools/flow/pkg/model"
 	"github.com/mattn/go-isatty"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -105,6 +107,15 @@ func NewOneShotExecutor(llmClient LLMClient, config *ExecutorConfig) *OneShotExe
 // Name returns the executor name.
 func (e *OneShotExecutor) Name() string {
 	return "oneshot"
+}
+
+// usesMockLLM reports whether this executor was constructed with a mock LLM
+// client. Tests inject a *MockLLMClient to run offline; production always
+// injects a *CommandLLMClient (or a provider runner is used), so this returns
+// false for real runs and leaves model routing unchanged.
+func (e *OneShotExecutor) usesMockLLM() bool {
+	_, ok := e.llmClient.(*MockLLMClient)
+	return ok
 }
 
 // Execute runs a oneshot job.
@@ -291,6 +302,18 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Log(ctx)
 	}
 
+	// Enforce the prompt length limit when one is configured. A zero limit
+	// means "no limit" (the production default for the plain constructor). The
+	// orchestrator sets a very high ceiling, so this is effectively dormant for
+	// real runs and only guards against pathologically large prompts; tests set
+	// a small limit to exercise this path.
+	if e.config != nil && e.config.MaxPromptLength > 0 && len(prompt) > e.config.MaxPromptLength {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		_ = updateJobFile(job)
+		return fmt.Errorf("prompt exceeds maximum length: %d characters (limit %d)", len(prompt), e.config.MaxPromptLength)
+	}
+
 	// NOTE: GROVE_CURRENT_JOB_PATH is intentionally NOT set here. os.Setenv is
 	// process-global, and runJobsConcurrently dispatches jobs as goroutines in
 	// one process, so concurrent jobs would clobber each other's value — a data
@@ -344,9 +367,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		// Use mock response for testing
 		response = "This is a mock LLM response for testing purposes."
 		err = nil
-	} else if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
-		// Check if mocking is enabled - if so, always use llmClient regardless of model
-		// Use traditional llm command which is mocked
+	} else if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" || e.usesMockLLM() {
+		// Route through the injected llmClient whenever mocking is active — either
+		// via the env-file mock or because a test injected a *MockLLMClient. This
+		// is the hermetic test seam: production always injects a CommandLLMClient,
+		// so usesMockLLM() is false and the provider-specific branches below
+		// (gemini/claude) run unchanged.
 		err = e.executeWithRetry(ctx, job, func() error {
 			llmOpts := LLMOptions{
 				Model:        effectiveModel,
@@ -401,7 +427,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					HotContextFile:  hotCtxFile,  // Job-scoped, avoids cross-job race
 					ColdContextFile: coldCtxFile, // Job-scoped, avoids cross-job race
 					APIKey:          apiKey,
-					MaxTokens:       anthropicMaxTokens(effectiveModel),
+					MaxTokens:       modelpkg.MaxTokens(effectiveModel),
 					Caller:          "grove-flow-oneshot",
 					JobID:           job.ID,
 					PlanName:        plan.Name,
@@ -781,7 +807,92 @@ func (m *MockLLMClient) Complete(ctx context.Context, job *Job, plan *Plan, prom
 		return "", fmt.Errorf("read mock response: %w", err)
 	}
 
+	// Emulate the planning-agent behavior of splitting a response containing
+	// multiple frontmatter blocks into separate job files. Only active when the
+	// test/mock explicitly requests it, so it stays dormant for ordinary mock
+	// responses and for production (which never sets these env vars).
+	if os.Getenv("GROVE_MOCK_LLM_OUTPUT_MODE") == "split_by_frontmatter" {
+		if err := writeSplitFrontmatterJobs(string(content)); err != nil {
+			return "", fmt.Errorf("split mock response by frontmatter: %w", err)
+		}
+	}
+
 	return string(content), nil
+}
+
+// writeSplitFrontmatterJobs scans a mock LLM response for embedded frontmatter
+// blocks (`---\n<yaml>\n---\n<body>`) and writes each as a sequentially numbered
+// job file next to GROVE_CURRENT_JOB_PATH. Generated files are named
+// NN-generated-job.md, continuing from the current job's leading number. This
+// mirrors the real planning flow where an LLM emits multiple job definitions
+// that get materialized as files.
+func writeSplitFrontmatterJobs(content string) error {
+	currentJobPath := os.Getenv("GROVE_CURRENT_JOB_PATH")
+	if currentJobPath == "" {
+		return nil
+	}
+	dir := filepath.Dir(currentJobPath)
+
+	// Determine the starting index from the current job's filename prefix.
+	startNum := leadingNumber(filepath.Base(currentJobPath)) + 1
+	if startNum < 1 {
+		startNum = 1
+	}
+
+	// Collect the line indices of `---` delimiters.
+	lines := strings.Split(content, "\n")
+	var delims []int
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "---" {
+			delims = append(delims, i)
+		}
+	}
+
+	// Each frontmatter block consumes a pair of delimiters. The body runs from
+	// the closing delimiter to the next block's opening delimiter (or EOF).
+	blockCount := len(delims) / 2
+	for k := 0; k < blockCount; k++ {
+		openIdx := delims[2*k]
+		closeIdx := delims[2*k+1]
+		fm := lines[openIdx+1 : closeIdx]
+
+		bodyEnd := len(lines)
+		if 2*k+2 < len(delims) {
+			bodyEnd = delims[2*k+2]
+		}
+		body := lines[closeIdx+1 : bodyEnd]
+
+		var b strings.Builder
+		b.WriteString("---\n")
+		b.WriteString(strings.Join(fm, "\n"))
+		b.WriteString("\n---\n")
+		b.WriteString(strings.TrimSpace(strings.Join(body, "\n")))
+		b.WriteString("\n")
+
+		filename := fmt.Sprintf("%02d-generated-job.md", startNum+k)
+		if err := os.WriteFile(filepath.Join(dir, filename), []byte(b.String()), 0o600); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// leadingNumber parses the leading integer of a filename like "01-initial.md".
+// Returns 0 when there is no leading number.
+func leadingNumber(name string) int {
+	end := 0
+	for end < len(name) && name[end] >= '0' && name[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0
+	}
+	n := 0
+	for i := 0; i < end; i++ {
+		n = n*10 + int(name[i]-'0')
+	}
+	return n
 }
 
 // prepareWorktree ensures the worktree exists and is ready.
@@ -1818,7 +1929,7 @@ interpret and continue through YOUR current system instructions.
 					HotContextFile:  chatHotCtx,  // Job-scoped, avoids cross-job race
 					ColdContextFile: chatColdCtx, // Job-scoped, avoids cross-job race
 					APIKey:          apiKey,
-					MaxTokens:       anthropicMaxTokens(effectiveModel),
+					MaxTokens:       modelpkg.MaxTokens(effectiveModel),
 					Caller:          "grove-flow-chat",
 					JobID:           job.ID,
 					PlanName:        plan.Name,
