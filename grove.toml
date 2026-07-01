@@ -10,6 +10,11 @@ path = "./bin/flow"
 default_rules = "dev-no-tests"
 
 [[test_scopes]]
+name = "strip-comments"
+rules = ".cx/strip-comments.rules"
+scenarios = ["oneshot-strip-comments"]
+
+[[test_scopes]]
 name = "anchor-registry"
 rules = ".cx/anchor-registry.rules"
 scenarios = ["anchor-registry", "anchor-registry-multi", "anchor-registry-reap-stub"]

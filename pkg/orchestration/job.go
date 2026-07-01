@@ -145,6 +145,11 @@ type Job struct {
 	SourceBlock string   `yaml:"source_block,omitempty" json:"source_block,omitempty" jsonschema:"description=Reference to a named block in another job to use as input"`
 	SourceFile  string   `yaml:"source_file,omitempty" json:"source_file,omitempty" jsonschema:"description=Path to source file for context"`
 	Memory      *bool    `yaml:"memory,omitempty" json:"memory,omitempty" jsonschema:"description=Whether to inject related memories into the prompt (default: true)"`
+	// StripComments removes code comments from the generated repository
+	// context before it is sent to the LLM, giving a comment-free view of the
+	// code. Enabled by default; set to false to keep comments. Uses a *bool so
+	// "unset" defaults to true (see IsStripCommentsEnabled).
+	StripComments *bool `yaml:"strip_comments,omitempty" json:"strip_comments,omitempty" jsonschema:"description=Strip code comments from generated context before sending to the LLM (default: true)"`
 
 	// Worktree configuration
 	Repository string `yaml:"repository,omitempty" json:"repository,omitempty" jsonschema:"description=Git repository URL for worktree creation"`
@@ -219,6 +224,13 @@ type JobOptions struct {
 // into its prompt. Memory injection is enabled by default unless explicitly opted-out.
 func (j *Job) IsMemoryEnabled() bool {
 	return j.Memory == nil || *j.Memory
+}
+
+// IsStripCommentsEnabled reports whether code comments should be stripped from
+// this job's generated repository context. Enabled by default unless the job
+// explicitly sets strip_comments: false.
+func (j *Job) IsStripCommentsEnabled() bool {
+	return j.StripComments == nil || *j.StripComments
 }
 
 // ShouldInline checks if a specific category should be inlined in the prompt.

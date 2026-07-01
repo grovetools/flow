@@ -19,6 +19,7 @@ func main() {
 		scenarios.CoreOrchestrationScenario,
 		scenarios.DependencyWorkflowScenario,
 		scenarios.OneshotWithContextScenario,
+		scenarios.OneshotStripCommentsScenario,
 		scenarios.AgentWorktreeLifecycleScenario,
 		scenarios.ChatAndExtractWorkflowScenario,
 		scenarios.JobFailureAndRecoveryScenario,

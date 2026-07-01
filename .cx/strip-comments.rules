@@ -1,0 +1,16 @@
+# strip_comments feature rules
+# Scopes the source behind the per-job `strip_comments` frontmatter setting:
+# the Job field + default-true accessor, the oneshot executor call site that
+# forwards it to the cx Manager, and (cross-repo) the cx comment-stripper the
+# generated context flows through. Changes to any of these should trigger the
+# oneshot-strip-comments E2E scenario, which runs real oneshot jobs with the
+# setting defaulted (strip) and set false (keep) and asserts the generated
+# context accordingly.
+# Paths are relative to the flow repo root.
+
+pkg/orchestration/job.go
+pkg/orchestration/oneshot_executor.go
+../cx/pkg/context/strip.go
+../cx/pkg/context/generate.go
+../cx/pkg/context/manager.go
+tests/e2e/tend/scenarios/oneshot_strip_comments.go

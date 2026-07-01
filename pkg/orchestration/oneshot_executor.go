@@ -937,6 +937,12 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		}
 		coldList := filepath.Join(artifactsDir, "cached-context-files")
 		ctxMgr = grovecontext.NewManagerWithPathsOverride(contextDir, jobCtx.Hot, jobCtx.Cold, jobCtx.FilesList, coldList)
+		// Comment stripping mutates plain Manager state, so only enable it on
+		// this fresh, job-owned instance (never the shared cached Manager in
+		// the else branch). Real jobs always have an ID and take this path.
+		if job != nil {
+			ctxMgr.SetStripComments(job.IsStripCommentsEnabled())
+		}
 	} else {
 		ctxMgr = grovecontext.NewManager(contextDir)
 	}
