@@ -256,6 +256,15 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 // honoring the caller's. Best-effort throughout: a failure only costs the user
 // an interactive trust prompt, so we warn and move on.
 func seedTrustForAddedWorktree(ctx context.Context, worktreePath string, union []string, ecosystemRoot string) {
+	// Gate: grove only touches ~/.claude.json when this worktree's resolved
+	// [claude] profile sets manageTrust=true (default off, opt-in). Per-worktree
+	// by design (mirrors prepare.go); the resolver already cascades the global
+	// ~/.config/grove config. Mirror the repos slice passed to
+	// SeedClaudeSettingsForWorktree at the call site (the full union).
+	if !workspace.WorktreeManagesTrust(worktreePath, union) {
+		return
+	}
+
 	absWorktreePath := worktreePath
 	if abs, err := filepath.Abs(worktreePath); err == nil {
 		absWorktreePath = abs
