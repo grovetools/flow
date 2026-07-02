@@ -135,7 +135,7 @@ var agentProviderRegistry = map[string]*AgentProviderSpec{
 		EffortFlag:          "",
 		ValidateJobModel:    nil, // codex owns its model names (gpt-*, o*, ...)
 		DefaultInputMode:    "standard",
-		SessionRegistration: SessionRegistrationFSOnly,
+		SessionRegistration: SessionRegistrationDaemon,
 		ProviderEnv:         "codex",
 		newTmuxProvider: func(agentEnv map[string]string) InteractiveAgentProvider {
 			p := NewCodexAgentProvider()

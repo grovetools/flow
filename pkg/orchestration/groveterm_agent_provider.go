@@ -227,10 +227,16 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		}
 	}
 
-	// Extract native session ID from transcript path
+	// Extract native session ID from transcript path. Codex rollout filenames
+	// embed the conversation UUID (rollout-<ts>-<uuid>.jsonl) — store just the
+	// UUID so hooks can correlate notify thread-ids back to the session.
 	var nativeID string
 	if transcriptPath != "" {
-		nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+		if p.spec.Name == "codex" {
+			nativeID = codexNativeSessionID(transcriptPath)
+		} else {
+			nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+		}
 	}
 
 	// Confirm the session with the daemon
