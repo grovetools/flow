@@ -59,7 +59,7 @@ func TestBuildCommandParity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// --- Groveterm (native) path ---
-			gp := &GrovetermAgentProvider{providerName: "claude"}
+			gp := &GrovetermAgentProvider{spec: claudeSpecForTest(t)}
 			nativeCmd := gp.buildCommand(tt.agentArgs, tt.briefingFilePath)
 
 			// --- Tmux (ClaudeAgentProvider) path ---
@@ -106,7 +106,7 @@ func TestBuildCommandShellSafety(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gp := &GrovetermAgentProvider{providerName: "claude"}
+			gp := &GrovetermAgentProvider{spec: claudeSpecForTest(t)}
 			cmd := gp.buildCommand([]string{"--model", "opus"}, tt.briefingFilePath)
 
 			// The command must not contain unescaped single quotes outside of

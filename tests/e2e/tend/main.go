@@ -117,6 +117,7 @@ func main() {
 		scenarios.CodexProviderArgsScenario,
 		scenarios.OpencodeProviderLifecycleScenario,
 		scenarios.OpencodeProviderArgsScenario,
+		scenarios.PerJobProviderOverrideScenario,
 
 		// Session registration tests (verify synchronous registration for all providers)
 		scenarios.OpencodeSessionRegistrationScenario,

@@ -42,11 +42,11 @@ func TestClaudeAgentProvider_buildAgentCommand(t *testing.T) {
 		t.Errorf("Test 2: command did not correctly escape path. Got: %s", cmd2)
 	}
 
-	// Test case 3: per-job model+effort flow through appendClaudeJobArgs into the command
+	// Test case 3: per-job model+effort flow through appendProviderJobArgs into the command
 	job3 := &Job{ID: "test-job-3", Type: JobTypeInteractiveAgent, Model: "opus", Effort: "high"}
-	args3, err3 := appendClaudeJobArgs(nil, job3, plan)
+	args3, err3 := appendProviderJobArgs(claudeSpecForTest(t), nil, job3)
 	if err3 != nil {
-		t.Fatalf("Test 3: appendClaudeJobArgs failed: %v", err3)
+		t.Fatalf("Test 3: appendProviderJobArgs failed: %v", err3)
 	}
 	cmd3, err3 := provider.buildAgentCommand(job3, plan, briefingPath, args3)
 	if err3 != nil {
@@ -57,11 +57,22 @@ func TestClaudeAgentProvider_buildAgentCommand(t *testing.T) {
 	}
 }
 
+// claudeSpecForTest returns the claude registry spec (the per-job arg and
+// model-validation behavior under test).
+func claudeSpecForTest(t *testing.T) *AgentProviderSpec {
+	t.Helper()
+	spec, ok := LookupAgentProvider("claude")
+	if !ok {
+		t.Fatal("claude provider missing from registry")
+	}
+	return spec
+}
+
 func TestAppendClaudeJobArgs(t *testing.T) {
 	baseArgs := []string{"--dangerously-skip-permissions"}
 
 	t.Run("no model or effort leaves args untouched", func(t *testing.T) {
-		args, err := appendClaudeJobArgs(baseArgs, &Job{ID: "j"}, &Plan{})
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), baseArgs, &Job{ID: "j"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -71,7 +82,7 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	})
 
 	t.Run("job model appended", func(t *testing.T) {
-		args, err := appendClaudeJobArgs(baseArgs, &Job{ID: "j", Model: "opus"}, &Plan{})
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), baseArgs, &Job{ID: "j", Model: "opus"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -84,9 +95,9 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	t.Run("plan config model is not consulted for agent jobs", func(t *testing.T) {
 		// The agent model comes from job frontmatter only. Plan-level defaults
 		// belong to chat/oneshot jobs and `flow plan add` no longer stamps them
-		// onto agent jobs, so appendClaudeJobArgs must not resurrect them.
-		plan := &Plan{Config: &PlanConfig{Model: "claude-sonnet-4-6"}}
-		args, err := appendClaudeJobArgs(nil, &Job{ID: "j"}, plan)
+		// onto agent jobs; appendProviderJobArgs takes no plan at all, so a
+		// plan default can never be resurrected here.
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -97,9 +108,8 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 
 	t.Run("non-claude plan config model is ignored, not errored", func(t *testing.T) {
 		// A gemini plan default must neither reach the claude CLI nor error —
-		// it simply isn't an agent-job model.
-		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
-		args, err := appendClaudeJobArgs(baseArgs, &Job{ID: "j"}, plan)
+		// it simply isn't an agent-job model (and never reaches this function).
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), baseArgs, &Job{ID: "j"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -111,7 +121,7 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	t.Run("non-claude job model is a hard error", func(t *testing.T) {
 		// A non-claude model EXPLICITLY set on a claude agent job must fail
 		// loudly instead of silently running a default claude agent.
-		_, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "gemini-3.1-pro-preview"}, &Plan{})
+		_, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Model: "gemini-3.1-pro-preview"})
 		if err == nil {
 			t.Fatal("expected hard error for non-claude job model, got nil")
 		}
@@ -121,8 +131,7 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	})
 
 	t.Run("non-claude plan model ignored but effort kept", func(t *testing.T) {
-		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
-		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Effort: "high"}, plan)
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Effort: "high"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -133,8 +142,7 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	})
 
 	t.Run("job model used regardless of plan config", func(t *testing.T) {
-		plan := &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}}
-		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "opus"}, plan)
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Model: "opus"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -145,7 +153,7 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	})
 
 	t.Run("effort appended after model", func(t *testing.T) {
-		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "opus", Effort: "low"}, &Plan{})
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Model: "opus", Effort: "low"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -156,7 +164,7 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	})
 
 	t.Run("effort alone appended without model flag", func(t *testing.T) {
-		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Effort: "high"}, &Plan{})
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Effort: "high"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -167,19 +175,19 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	})
 
 	t.Run("shell-unsafe values rejected", func(t *testing.T) {
-		if _, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "opus; rm -rf /"}, &Plan{}); err == nil {
+		if _, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Model: "opus; rm -rf /"}); err == nil {
 			t.Error("expected error for shell-unsafe model")
 		}
-		if _, err := appendClaudeJobArgs(nil, &Job{ID: "j", Effort: "high$(whoami)"}, &Plan{}); err == nil {
+		if _, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Effort: "high$(whoami)"}); err == nil {
 			t.Error("expected error for shell-unsafe effort")
 		}
-		if _, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "opus[1m]"}, &Plan{}); err == nil {
+		if _, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Model: "opus[1m]"}); err == nil {
 			t.Error("expected error for glob characters in model")
 		}
 	})
 
 	t.Run("explicit claude-family job model is honored, not errored", func(t *testing.T) {
-		args, err := appendClaudeJobArgs(nil, &Job{ID: "j", Model: "claude-opus-4-6"}, &Plan{})
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), nil, &Job{ID: "j", Model: "claude-opus-4-6"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -215,7 +223,7 @@ func TestAppendClaudeJobArgs(t *testing.T) {
 	t.Run("does not mutate the shared provider args slice", func(t *testing.T) {
 		shared := make([]string, 1, 4)
 		shared[0] = "--dangerously-skip-permissions"
-		args, err := appendClaudeJobArgs(shared, &Job{ID: "j", Model: "opus"}, &Plan{})
+		args, err := appendProviderJobArgs(claudeSpecForTest(t), shared, &Job{ID: "j", Model: "opus"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

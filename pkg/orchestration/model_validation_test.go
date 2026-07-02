@@ -6,7 +6,7 @@ import (
 )
 
 func TestValidateModelForJob_UnknownModel(t *testing.T) {
-	err := ValidateModelForJob("totally-fake-model", JobTypeHeadlessAgent)
+	err := ValidateModelForJob("totally-fake-model", JobTypeHeadlessAgent, "")
 	if err == nil {
 		t.Fatal("expected error for unknown model, got nil")
 	}
@@ -21,7 +21,7 @@ func TestValidateModelForJob_UnknownModel(t *testing.T) {
 func TestValidateModelForJob_GeminiOnAgentJob(t *testing.T) {
 	for _, jt := range []JobType{JobTypeInteractiveAgent, JobTypeHeadlessAgent} {
 		t.Run(string(jt), func(t *testing.T) {
-			err := ValidateModelForJob("gemini-2.5-pro", jt)
+			err := ValidateModelForJob("gemini-2.5-pro", jt, "")
 			if err == nil {
 				t.Fatal("expected error for gemini model on agent job, got nil")
 			}
@@ -39,7 +39,7 @@ func TestValidateModelForJob_ClaudeOnAgentJob(t *testing.T) {
 	// Claude models should be accepted for agent jobs (provider auth check may
 	// fail in CI where no API key is configured, so we just check it doesn't
 	// fail with "unknown" or "wrong provider").
-	err := ValidateModelForJob("claude-opus-4-8", JobTypeHeadlessAgent)
+	err := ValidateModelForJob("claude-opus-4-8", JobTypeHeadlessAgent, "")
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "unknown model") || strings.Contains(errStr, "Google model") {
@@ -49,7 +49,7 @@ func TestValidateModelForJob_ClaudeOnAgentJob(t *testing.T) {
 }
 
 func TestValidateModelForJob_EmptyModel(t *testing.T) {
-	err := ValidateModelForJob("", JobTypeHeadlessAgent)
+	err := ValidateModelForJob("", JobTypeHeadlessAgent, "")
 	if err != nil {
 		t.Errorf("empty model should be valid, got: %s", err.Error())
 	}
@@ -58,7 +58,7 @@ func TestValidateModelForJob_EmptyModel(t *testing.T) {
 func TestValidateModelForJob_GeminiOnChatJob(t *testing.T) {
 	// Gemini models on chat/oneshot jobs should NOT trigger the provider
 	// mismatch error — only agent jobs enforce claude-only.
-	err := ValidateModelForJob("gemini-2.5-pro", JobTypeChat)
+	err := ValidateModelForJob("gemini-2.5-pro", JobTypeChat, "")
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "Claude CLI") {

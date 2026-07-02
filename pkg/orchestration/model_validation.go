@@ -11,14 +11,35 @@ import (
 )
 
 // ValidateModelForJob checks that a model is valid for the given job type.
-// For agent job types (interactive_agent, headless_agent), it enforces that the
-// model is known and compatible with the agent provider. Returns nil if valid,
-// or an actionable error distinguishing:
-//   - unknown model (not in any registry)
-//   - known model but wrong provider for agent jobs
-//   - known model but provider not authenticated
-func ValidateModelForJob(model string, jobType JobType) error {
+// For agent job types (interactive_agent, headless_agent) the check is
+// per-provider: providerName is the job's EFFECTIVE agent provider (job
+// `provider:` frontmatter > flow.interactive_provider; "" defaults to claude)
+// and the provider's registry spec decides which models are acceptable —
+// claude enforces Claude-family models, codex/opencode accept any model string
+// (their CLIs own validation). Returns nil if valid, or an actionable error
+// distinguishing:
+//   - unknown agent provider
+//   - unknown model / wrong model family for the provider (agent jobs)
+//   - known model but API provider not authenticated (non-agent jobs)
+func ValidateModelForJob(model string, jobType JobType, providerName string) error {
 	if model == "" {
+		return nil
+	}
+
+	isAgentJob := jobType == JobTypeInteractiveAgent || jobType == JobTypeHeadlessAgent
+	if isAgentJob {
+		if providerName == "" {
+			providerName = defaultAgentProviderName
+		}
+		spec, ok := LookupAgentProvider(providerName)
+		if !ok {
+			return unknownAgentProviderError(providerName)
+		}
+		// Agent jobs delegate to the provider's CLI which handles its own
+		// auth — no API-key check here.
+		if spec.ValidateJobModel != nil {
+			return spec.ValidateJobModel(model)
+		}
 		return nil
 	}
 
@@ -31,29 +52,12 @@ func ValidateModelForJob(model string, jobType JobType) error {
 			"Run 'flow models' to see available models", model)
 	}
 
-	isAgentJob := jobType == JobTypeInteractiveAgent || jobType == JobTypeHeadlessAgent
-	if isAgentJob && provider == modelpkg.ProviderGoogle {
-		return fmt.Errorf("model %q is a %s model, but agent jobs run on the Claude CLI.\n"+
-			"Use a Claude-family model (e.g. claude-opus-4-8, claude-sonnet-4-6) or\n"+
-			"set flow.interactive_provider in grove.toml to route to a different provider",
-			model, provider)
-	}
-
-	if isAgentJob && !isClaudeFamilyModel(model) {
-		return fmt.Errorf("model %q is not recognized as a Claude-family model.\n"+
-			"Agent jobs require a Claude model. Use a Claude-family model or\n"+
-			"set flow.interactive_provider in grove.toml to route to a different provider", model)
-	}
-
-	// Agent jobs delegate to the claude CLI which handles its own OAuth —
-	// checking ANTHROPIC_API_KEY would be a false negative. Only check
-	// provider auth for jobs that call the API directly (oneshot, chat).
-	if !isAgentJob {
-		if ok, instructions := modelpkg.IsProviderAuthenticated(provider); !ok {
-			return fmt.Errorf("model %q requires the %s provider, which is not configured on this host.\n"+
-				"The job will fail to run until credentials are set up.\n\n%s",
-				model, provider, instructions)
-		}
+	// Non-agent jobs (oneshot, chat) call the API directly; verify the API
+	// provider is configured on this host.
+	if ok, instructions := modelpkg.IsProviderAuthenticated(provider); !ok {
+		return fmt.Errorf("model %q requires the %s provider, which is not configured on this host.\n"+
+			"The job will fail to run until credentials are set up.\n\n%s",
+			model, provider, instructions)
 	}
 
 	return nil

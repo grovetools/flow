@@ -34,6 +34,7 @@ type PlanAddStepCmd struct {
 	Model               string   `flag:"" help:"LLM model to use for this job"`
 	Responder           string   `flag:"" help:"Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session per turn; never dispatched to an LLM API)"`
 	Effort              string   `flag:"" help:"Effort level for claude agent jobs (passed to the claude CLI as --effort)"`
+	Provider            string   `flag:"" help:"Agent CLI provider for agent jobs (claude/codex/opencode; defaults to flow.interactive_provider)"`
 	Inline              []string `flag:"" sep:"," help:"File types to inline in prompt: dependencies, include, context, all, files, none (comma-separated)"`
 	PrependDependencies bool     `flag:"" help:"[DEPRECATED] Use --inline=dependencies instead. Inline dependency content into prompt body."`
 	Recipe              string   `flag:"" help:"Name of a recipe to add to the plan"`
@@ -287,9 +288,17 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		fmt.Fprintln(os.Stderr, "Note: defaulting inline: dependencies for oracle chat with dependencies (pass --inline to override)")
 	}
 
-	// Validate the model for this job type: reject unknown models and
-	// provider mismatches (e.g. gemini model on a claude agent job) early.
-	if err := orchestration.ValidateModelForJob(job.Model, job.Type); err != nil {
+	// Validate the provider (job frontmatter / --provider) early: an unknown
+	// provider must fail at submit time, not at launch.
+	if err := orchestration.ValidateAgentProviderName(job.Provider); err != nil {
+		return fmt.Errorf("invalid --provider: %w", err)
+	}
+
+	// Validate the model for this job type against the job's EFFECTIVE
+	// provider (job provider > flow.interactive_provider > claude): reject
+	// unknown models and provider mismatches (e.g. gemini model on a claude
+	// agent job) early.
+	if err := orchestration.ValidateModelForJob(job.Model, job.Type, orchestration.ResolveJobProviderNameFromConfig(job)); err != nil {
 		return fmt.Errorf("invalid --model: %w", err)
 	}
 
@@ -466,6 +475,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			DependsOn:           cmd.DependsOn,
 			Include:             relativeIncludeFiles,
 			Model:               cmd.Model,
+			Effort:              cmd.Effort,
+			Provider:            cmd.Provider,
 			Inline:              inlineConfig,
 			PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 			SourceFile:          cmd.SourceFile,
@@ -587,6 +598,8 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		DependsOn:           cmd.DependsOn,
 		PromptBody:          strings.TrimSpace(prompt),
 		Model:               cmd.Model,
+		Effort:              cmd.Effort,
+		Provider:            cmd.Provider,
 		Inline:              inlineConfig,
 		PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 		SourceFile:          cmd.SourceFile,
@@ -682,6 +695,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if effort, ok := template.Frontmatter["effort"].(string); ok {
 		job.Effort = effort
 	}
+	if provider, ok := template.Frontmatter["provider"].(string); ok {
+		job.Provider = provider
+	}
 	if genPlan, ok := template.Frontmatter["generate_plan_from"].(bool); ok {
 		job.GeneratePlanFrom = genPlan
 	}
@@ -748,6 +764,9 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 			return nil, err
 		}
 		job.Responder = cmd.Responder
+	}
+	if cmd.Provider != "" {
+		job.Provider = cmd.Provider
 	}
 	// New inline flag overrides template and plan defaults
 	if len(cmd.Inline) > 0 {

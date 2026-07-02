@@ -11,8 +11,10 @@ import (
 
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -114,8 +116,12 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='codex' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
+	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
+		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
+		envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
+	}
 	envPrefix += playbookEnvInline(job, plan)
 
 	if err := engine.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
@@ -248,17 +254,12 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 
 // buildAgentCommand constructs the codex command for the interactive session.
 func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePath string, agentArgs []string) (string, error) {
-	// Pass a simple instruction to read the briefing file.
-	// This is cleaner than reading the entire file content into the command.
-	// Shell escape the entire briefing file path.
-	escapedPath := "'" + strings.ReplaceAll(briefingFilePath, "'", "'\\''") + "'"
-
-	// Build command with agent args
-	cmdParts := []string{"codex"}
-	cmdParts = append(cmdParts, agentArgs...)
-
-	// Pass instruction to read the briefing file
-	return fmt.Sprintf("%s \"Read the briefing file at %s and execute the task.\"", strings.Join(cmdParts, " "), escapedPath), nil
+	// Pass a simple instruction to read the briefing file — cleaner than
+	// reading the entire file content into the command. The instruction and
+	// command shape come from the provider registry so this path stays
+	// byte-identical with the groveterm/isolated launch paths.
+	spec, _ := LookupAgentProvider("codex")
+	return spec.BuildShellCommand(agentArgs, buildBriefingInstruction(briefingFilePath)), nil
 }
 
 // findMostRecentFile finds the most recently modified file in a directory tree.

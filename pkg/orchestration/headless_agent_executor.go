@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/grovetools/agentlogs/pkg/agentstream"
@@ -51,9 +50,23 @@ func (e *HeadlessAgentExecutor) Name() string {
 
 // Execute runs an agent job in a worktree.
 func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
-	// Validate model before any setup work so the user gets an actionable
-	// error instead of a generic "Agent execution failed" after 2+ seconds.
-	if err := ValidateModelForJob(job.Model, job.Type); err != nil {
+	// Resolve the effective provider (job frontmatter > flow.interactive_provider
+	// > claude) and validate the model against it before any setup work, so the
+	// user gets an actionable error instead of a generic "Agent execution
+	// failed" after 2+ seconds.
+	spec, err := ResolveJobProviderSpecFromConfig(job)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		ulog.Error("[HEADLESS] Agent provider validation failed").
+			Field("job_id", job.ID).
+			Field("provider", job.Provider).
+			Err(err).
+			Pretty(" " + err.Error()).
+			Log(ctx)
+		return fmt.Errorf("agent provider: %w", err)
+	}
+	if err := ValidateModelForJob(job.Model, job.Type, spec.Name); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		ulog.Error("[HEADLESS] Model validation failed").
@@ -281,32 +294,34 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 		flowCfg = *parsed
 	}
 
-	// Determine which provider to use (default to claude for backward compatibility)
-	providerName := "claude"
-	if flowCfg.InteractiveProvider != "" {
-		providerName = flowCfg.InteractiveProvider
+	// Resolve the effective provider (job frontmatter > flow.interactive_provider
+	// > claude); unknown names are a hard error (also validated up front in
+	// Execute, before any worktree/prompt setup).
+	spec, err := resolveJobProviderSpec(job, flowCfg)
+	if err != nil {
+		return fmt.Errorf("agent provider: %w", err)
 	}
 
 	// Get agent args for the selected provider (with the claude bypass default).
-	agentArgs := resolveProviderArgs(flowCfg, providerName)
+	agentArgs := resolveProviderArgs(flowCfg, spec.Name)
 
-	// Append per-job flags (--model, --effort) for claude only; other
-	// providers do not accept these flags.
-	if providerName == "claude" {
-		agentArgs, err = appendClaudeJobArgs(agentArgs, job, plan)
-		if err != nil {
-			return err
-		}
-		// Record the model the agent will actually run with (or claude's
-		// default when none was passed) into the job frontmatter.
-		backfillClaudeAgentModel(job)
+	// Append per-job flags (model, effort) per the provider's spec; providers
+	// without the corresponding flag reject a non-empty value.
+	agentArgs, err = appendProviderJobArgs(spec, agentArgs, job)
+	if err != nil {
+		return err
+	}
+	// Record the model the agent will actually run with (for claude: its
+	// default when none was passed) into the job frontmatter.
+	if spec.BackfillJobModel != nil {
+		spec.BackfillJobModel(job)
 	}
 
 	// Pre-register the session intent with the daemon BEFORE launching the
 	// agent, now that the work dir and resolved provider are known.
-	e.registerSessionIntent(ctx, job, plan, worktreePath, providerName)
+	e.registerSessionIntent(ctx, job, plan, worktreePath, spec.Name)
 
-	return e.runOnHost(ctx, worktreePath, prompt, job, plan, providerName, agentArgs, flowCfg.AgentEnv)
+	return e.runOnHost(ctx, worktreePath, prompt, job, plan, spec.Name, agentArgs, flowCfg.AgentEnv)
 }
 
 // registerSessionIntent best-effort pre-registers the headless session with
@@ -352,37 +367,22 @@ func (e *HeadlessAgentExecutor) registerSessionIntent(ctx context.Context, job *
 	}
 }
 
-// buildHeadlessCommand constructs the exec.Cmd for a provider's headless mode.
-// Returns an error for providers that have no headless execution mode.
-// PHASE 2 CHANGE: Uses exec.Command (not CommandContext) for process detachment.
-// Agents are detached from the daemon and will be adopted on daemon restart.
+// buildHeadlessCommand constructs the exec.Cmd for a provider's headless mode
+// via the provider registry. Returns an error for unknown providers and for
+// providers that have no headless execution mode.
+// PHASE 2 CHANGE: The spec builders use exec.Command (not CommandContext) for
+// process detachment. Agents are detached from the daemon and will be adopted
+// on daemon restart.
 func buildHeadlessCommand(ctx context.Context, providerName, prompt string, agentArgs []string) (*exec.Cmd, error) {
-	switch providerName {
-	case "claude":
-		// Claude Code headless: prompt is piped via stdin. Flags are derived
-		// entirely from providers.claude.args (resolved upstream); no flag —
-		// including --dangerously-skip-permissions — is hardcoded here.
-		var args []string
-		args = append(args, agentArgs...)
-		cmd := exec.Command("claude", args...)
-		cmd.Stdin = strings.NewReader(prompt)
-		// Detach the process: place it in its own process group so signals
-		// sent to the daemon don't propagate to the agent.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		return cmd, nil
-	case "opencode":
-		// Opencode headless: 'opencode run' executes the prompt and exits
-		// (same invocation OpencodeAgentProvider.buildAgentCommand uses for
-		// non-interactive jobs).
-		args := []string{"run"}
-		args = append(args, agentArgs...)
-		args = append(args, prompt)
-		cmd := exec.Command("opencode", args...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		return cmd, nil
-	default:
-		return nil, fmt.Errorf("provider %q does not support headless execution (no headless mode implemented); supported headless providers: claude, opencode — set flow.interactive_provider in grove.toml to a supported provider or run this job as interactive_agent", providerName)
+	spec, ok := LookupAgentProvider(providerName)
+	if !ok {
+		return nil, unknownAgentProviderError(providerName)
 	}
+	if !spec.SupportsHeadless || spec.NewHeadlessCommand == nil {
+		return nil, fmt.Errorf("provider %q does not support headless execution (no headless mode implemented); supported headless providers: %s — set provider: on the job or flow.interactive_provider in grove.toml to a supported provider or run this job as interactive_agent",
+			providerName, strings.Join(headlessAgentProviderNames(), ", "))
+	}
+	return spec.NewHeadlessCommand(prompt, agentArgs), nil
 }
 
 // buildHeadlessEnv assembles the subprocess environment for a headless agent.
@@ -404,10 +404,10 @@ func buildHeadlessEnv(job *Job, plan *Plan, providerName, worktreePath string, a
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
 	)
-	if providerName != "claude" {
+	if spec, ok := LookupAgentProvider(providerName); ok && spec.ProviderEnv != "" {
 		// Non-claude providers (e.g. opencode plugins) use this to identify
 		// themselves during session registration, matching the interactive path.
-		env = append(env, "GROVE_AGENT_PROVIDER="+providerName)
+		env = append(env, "GROVE_AGENT_PROVIDER="+spec.ProviderEnv)
 	}
 	if node, err := workspace.GetProjectByPath(worktreePath); err == nil && node != nil {
 		env = append(env, "GROVE_LOG_DIR="+filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/")))
@@ -590,13 +590,15 @@ func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDi
 	}
 
 	// Transcript/native-session discovery is provider-specific; today only the
-	// claude provider writes a discoverable ~/.claude transcript. For other
-	// providers we still confirm with the PID so the session is de-duped.
+	// claude provider declares a discoverable transcript in its registry spec.
+	// For other providers we still confirm with the PID so the session is
+	// de-duped.
 	var transcriptPath string
-	if providerName == "claude" {
+	spec, specKnown := LookupAgentProvider(providerName)
+	if specKnown && spec.HeadlessTranscriptDiscovery {
 		var err error
 		transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
-			Provider:  "claude",
+			Provider:  providerName,
 			WorkDir:   workDir,
 			AfterTime: startTime,
 		})
@@ -606,7 +608,7 @@ func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDi
 			for i := 0; i < 10; i++ {
 				time.Sleep(1 * time.Second)
 				transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
-					Provider:  "claude",
+					Provider:  providerName,
 					WorkDir:   workDir,
 					AfterTime: startTime,
 				})

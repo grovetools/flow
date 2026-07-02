@@ -1,0 +1,19 @@
+# Agent provider registry rules
+# Scopes the AgentProviderSpec registry and every launch path that dispatches
+# through it (interactive / isolated / headless executors, groveterm and the
+# tmux providers), plus per-job provider: frontmatter plumbing and validation.
+# Changes here should trigger the provider E2E scenarios.
+
+pkg/orchestration/agent_provider_registry.go
+pkg/orchestration/claude_agent_provider.go
+pkg/orchestration/codex_agent_provider.go
+pkg/orchestration/opencode_agent_provider.go
+pkg/orchestration/groveterm_agent_provider.go
+pkg/orchestration/interactive_agent_executor.go
+pkg/orchestration/isolated_agent_executor.go
+pkg/orchestration/headless_agent_executor.go
+pkg/orchestration/model_validation.go
+pkg/orchestration/config.go
+pkg/orchestration/job.go
+cmd/plan_add_step.go
+tests/e2e/tend/scenarios/agent_provider_generic.go

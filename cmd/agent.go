@@ -293,6 +293,9 @@ func sendToAgent(plan *orchestration.Plan, job *orchestration.Job, targetPane, i
 	if flowCfg.InteractiveProvider != "" {
 		providerName = flowCfg.InteractiveProvider
 	}
+	if spec, ok := orchestration.LookupAgentProvider(providerName); ok {
+		inputMode = spec.DefaultInputMode
+	}
 	if providerCfg, ok := flowCfg.Providers[providerName]; ok && providerCfg.InputMode != "" {
 		inputMode = providerCfg.InputMode
 	}

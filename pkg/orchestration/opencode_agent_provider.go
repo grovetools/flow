@@ -11,7 +11,6 @@ import (
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/paths"
-	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
@@ -215,19 +214,4 @@ func (p *OpencodeAgentProvider) buildAgentCommand(job *Job, briefingFilePath str
 	cmdParts := []string{"opencode", "run"}
 	cmdParts = append(cmdParts, agentArgs...)
 	return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), prompt), nil
-}
-
-// FindOpencodePIDForPane finds the PID of the 'opencode' process running within a specific tmux pane
-func FindOpencodePIDForPane(targetPane string) (int, error) {
-	engine, err := mux.DetectMuxEngine(context.Background())
-	if err != nil {
-		return 0, fmt.Errorf("mux engine not available: %w", err)
-	}
-
-	shellPID, err := engine.GetPanePID(context.Background(), targetPane)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get pane PID: %w", err)
-	}
-
-	return process.FindDescendantPID(shellPID, "opencode")
 }

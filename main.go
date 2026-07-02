@@ -75,8 +75,6 @@ func main() {
 	rootCmd.AddCommand(cmd.NewVersionCmd())
 	rootCmd.AddCommand(cmd.NewModelsCmd())
 	rootCmd.AddCommand(cmd.NewStarshipCmd())
-	rootCmd.AddCommand(cmd.GetRegisterCodexSessionCmd())
-	rootCmd.AddCommand(cmd.GetRegisterOpencodeSessionCmd())
 	rootCmd.AddCommand(cmd.NewTmuxCmd())
 	rootCmd.AddCommand(cli.NewDocsCommand(docs.DocsJSON))
 

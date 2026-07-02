@@ -49,6 +49,11 @@ name = "claude-settings-no-clobber"
 rules = ".cx/claude-settings-no-clobber.rules"
 scenarios = ["claude-settings-no-clobber"]
 
+[[test_scopes]]
+name = "agent-provider"
+rules = ".cx/agent-provider.rules"
+scenarios = ["claude-provider-lifecycle", "claude-provider-args", "codex-provider-lifecycle", "codex-provider-args", "opencode-provider-lifecycle", "opencode-provider-args", "per-job-provider-override"]
+
 [[hooks.on_stop]]
 name = "Auto-format"
 command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"

@@ -158,26 +158,29 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		flowCfg = *parsed
 	}
 
-	// Determine which provider to use (default to claude)
-	providerName := "claude"
-	if flowCfg.InteractiveProvider != "" {
-		providerName = flowCfg.InteractiveProvider
+	// Resolve the effective provider (job frontmatter > flow.interactive_provider
+	// > claude); unknown names are a hard error.
+	spec, err := resolveJobProviderSpec(job, flowCfg)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		_ = updateJobFile(job)
+		return fmt.Errorf("agent provider: %w", err)
 	}
 
 	// Get agent args for the selected provider (with the claude bypass default).
-	agentArgs := resolveProviderArgs(flowCfg, providerName)
+	agentArgs := resolveProviderArgs(flowCfg, spec.Name)
 
-	// Append per-job flags (--model, --effort) for claude only; other
-	// providers do not accept these flags.
-	if providerName == "claude" {
-		var err error
-		agentArgs, err = appendClaudeJobArgs(agentArgs, job, plan)
-		if err != nil {
-			return err
-		}
-		// Record the model the agent will actually run with (or claude's
-		// default when none was passed) into the job frontmatter.
-		backfillClaudeAgentModel(job)
+	// Append per-job flags (model, effort) per the provider's spec; providers
+	// without the corresponding flag reject a non-empty value.
+	agentArgs, err = appendProviderJobArgs(spec, agentArgs, job)
+	if err != nil {
+		return err
+	}
+	// Record the model the agent will actually run with (for claude: its
+	// default when none was passed) into the job frontmatter.
+	if spec.BackfillJobModel != nil {
+		spec.BackfillJobModel(job)
 	}
 
 	// Handle source_block reference if present
@@ -216,7 +219,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 
 	if useNative {
 		// Isolated agents launch silently into the groveterm icon rail (autoSplit=false)
-		provider := NewGrovetermAgentProvider(providerName, false, target)
+		provider := NewGrovetermAgentProvider(spec, false, target)
 		provider.agentEnv = flowCfg.AgentEnv
 		provider.extraEnv = map[string]string{"GROVE_FLOW_ISOLATED": "true"}
 
@@ -224,11 +227,11 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	}
 
 	// Fallback: launch the agent in an isolated tmux server
-	return e.launchIsolatedAgent(ctx, job, plan, workDir, providerName, agentArgs, flowCfg.AgentEnv, briefingFilePath)
+	return e.launchIsolatedAgent(ctx, job, plan, workDir, spec, agentArgs, flowCfg.AgentEnv, briefingFilePath)
 }
 
 // launchIsolatedAgent starts the agent in an isolated tmux server using a custom socket.
-func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Job, plan *Plan, workDir, providerName string, agentArgs []string, agentEnv map[string]string, briefingFilePath string) error {
+func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Job, plan *Plan, workDir string, spec *AgentProviderSpec, agentArgs []string, agentEnv map[string]string, briefingFilePath string) error {
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -244,7 +247,7 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	e.ulog.Info("Creating isolated tmux server for agent").
 		Field("socket", socketName).
 		Field("job_id", job.ID).
-		Field("provider", providerName).
+		Field("provider", spec.Name).
 		Pretty(theme.IconInteractiveAgent + " Creating isolated tmux server: " + socketName).
 		Log(ctx)
 
@@ -261,13 +264,9 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 		return fmt.Errorf("failed to create isolated session: %w", err)
 	}
 
-	// Build the agent command based on provider
-	agentCommand, err := e.buildAgentCommand(providerName, briefingFilePath, agentArgs)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to build agent command: %w", err)
-	}
+	// Build the agent command from the provider's spec (same instruction and
+	// command shape as the interactive/groveterm launch paths).
+	agentCommand := spec.BuildShellCommand(agentArgs, buildBriefingInstruction(briefingFilePath))
 
 	// Inline env vars on the agent command itself — scoped to the agent
 	// process, not exported into the pane's shell, so nothing leaks after
@@ -296,13 +295,13 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	e.ulog.Success("Isolated agent launched").
 		Field("socket", socketName).
 		Field("job_id", job.ID).
-		Field("provider", providerName).
+		Field("provider", spec.Name).
 		Pretty(theme.IconSuccess + " Isolated agent launched in socket: " + socketName).
 		Log(ctx)
 
 	// Register the session asynchronously
 	go func() {
-		if err := e.discoverAndRegisterSession(job, plan, workDir, socketName, targetPane, providerName); err != nil {
+		if err := e.discoverAndRegisterSession(job, plan, workDir, socketName, targetPane, spec.Name); err != nil {
 			e.log.WithError(err).Error("Failed to register isolated session")
 		}
 	}()
@@ -314,31 +313,6 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	}
 
 	return nil
-}
-
-// buildAgentCommand constructs the agent command based on the provider.
-func (e *IsolatedAgentExecutor) buildAgentCommand(providerName, briefingFilePath string, agentArgs []string) (string, error) {
-	escapedPath := "'" + strings.ReplaceAll(briefingFilePath, "'", "'\\''") + "'"
-	prompt := fmt.Sprintf("Read the briefing file at %s and execute the task.", escapedPath)
-
-	var cmdParts []string
-	switch providerName {
-	case "claude":
-		cmdParts = []string{"claude"}
-	case "codex":
-		cmdParts = []string{"codex"}
-	case "opencode":
-		// For isolated agents, use interactive mode with --prompt
-		cmdParts = []string{"opencode"}
-		cmdParts = append(cmdParts, agentArgs...)
-		cmdParts = append(cmdParts, "--prompt", fmt.Sprintf("\"%s\"", prompt))
-		return strings.Join(cmdParts, " "), nil
-	default:
-		return "", fmt.Errorf("unknown provider for isolated agent: '%s'", providerName)
-	}
-
-	cmdParts = append(cmdParts, agentArgs...)
-	return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), prompt), nil
 }
 
 // discoverAndRegisterSession discovers the agent PID and registers the session.

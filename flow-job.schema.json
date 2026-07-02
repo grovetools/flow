@@ -106,6 +106,15 @@
       "type": "string",
       "description": "Effort level for claude agent jobs; passed to the claude CLI as --effort (claude owns the accepted levels)"
     },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "opencode"
+      ],
+      "description": "Agent CLI provider for agent jobs; falls back to flow.interactive_provider (default claude)"
+    },
     "template": {
       "type": "string",
       "description": "Template name for generating the job prompt"
