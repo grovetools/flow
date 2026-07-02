@@ -28,6 +28,7 @@ type KeyMap struct {
 	FastForwardUpdate key.Binding
 	ToggleGitLog      key.Binding
 	ToggleHold        key.Binding
+	ToggleArchived    key.Binding
 	SetHoldStatus     key.Binding
 }
 
@@ -58,6 +59,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			k.FastForwardMain,
 			k.ToggleGitLog,
 			k.ToggleHold,
+			k.ToggleArchived,
 			k.Help,
 			k.Quit,
 		},
@@ -81,7 +83,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		},
 		{
 			Name:     "View",
-			Bindings: []key.Binding{k.ToggleGitLog, k.ToggleHold},
+			Bindings: []key.Binding{k.ToggleGitLog, k.ToggleHold, k.ToggleArchived},
 		},
 		{
 			Name:     "System",
@@ -146,6 +148,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		ToggleHold: key.NewBinding(
 			key.WithKeys("H"),
 			key.WithHelp("H", "toggle on-hold"),
+		),
+		ToggleArchived: key.NewBinding(
+			key.WithKeys("A"),
+			key.WithHelp("A", "toggle archived"),
 		),
 		SetHoldStatus: key.NewBinding(
 			key.WithKeys("h"),

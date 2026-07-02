@@ -40,6 +40,10 @@ type PlanListItem struct {
 	MergeVerdict          string
 	Notes                 string
 	EcosystemRepoStatuses []planutil.EcosystemRepoStatus
+	// Archived marks a plan loaded from the <plansDir>/.archive scan.
+	// Archived rows are read-only in the browser: mutating row-actions
+	// are refused and the row renders dimmed.
+	Archived bool
 }
 
 // Config carries the dependencies a browser Model needs. Hosts (the CLI
@@ -102,6 +106,7 @@ type Model struct {
 	gitLogContent  string
 	gitLogError    error
 	showOnHold     bool
+	showArchived   bool
 
 	embedMode bool // suppress inline footer; host uses Footer()
 
@@ -176,7 +181,7 @@ func New(cfg Config) Model {
 // load, a top-level git log fetch, and the periodic refresh tick.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
+		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 		fetchGitLogCmd(m.cwdGitRoot),
 		refreshTick(),
 	)

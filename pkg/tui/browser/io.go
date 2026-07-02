@@ -3,7 +3,9 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -107,9 +109,9 @@ func fetchRepoGitLogCmd(repoPath string) tea.Cmd {
 	}
 }
 
-func loadPlansListCmd(plansDirectory, cwdGitRoot string, showOnHold bool) tea.Cmd {
+func loadPlansListCmd(plansDirectory, cwdGitRoot string, showOnHold, showArchived bool) tea.Cmd {
 	return func() tea.Msg {
-		plans, err := loadPlansList(plansDirectory, cwdGitRoot, showOnHold)
+		plans, err := loadPlansList(plansDirectory, cwdGitRoot, showOnHold, showArchived)
 		return planListLoadCompleteMsg{plans: plans, error: err}
 	}
 }
@@ -207,10 +209,37 @@ func loadPlansFromDisk(plansDirectory string) ([]*orchestration.Plan, error) {
 	return plans, nil
 }
 
-func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanListItem, error) {
+// planListEntry pairs a loaded plan with its archived provenance so the
+// item-building loop below can treat live and archived plans uniformly.
+type planListEntry struct {
+	plan     *orchestration.Plan
+	archived bool
+}
+
+func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold, showArchived bool) ([]PlanListItem, error) {
 	plans, err := fetchPlans(plansDirectory)
 	if err != nil {
 		return nil, err
+	}
+
+	entries := make([]planListEntry, 0, len(plans))
+	for _, plan := range plans {
+		entries = append(entries, planListEntry{plan: plan})
+	}
+
+	if showArchived {
+		// Archived plans live one level under <plansDir>/.archive (moved
+		// there by `flow plan finish --archive`). The scan is disk-only —
+		// the daemon snapshot never covers the archive dir — and must not
+		// descend further (job-level archives live at <planDir>/.archive).
+		archiveDir := filepath.Join(plansDirectory, ".archive")
+		archivedPlans, archiveErr := loadPlansFromDisk(archiveDir)
+		if archiveErr != nil && !errors.Is(archiveErr, fs.ErrNotExist) {
+			return nil, archiveErr
+		}
+		for _, plan := range archivedPlans {
+			entries = append(entries, planListEntry{plan: plan, archived: true})
+		}
 	}
 
 	var items []PlanListItem
@@ -218,12 +247,17 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 	// full ecosystem and used to dominate CPU on plans with .Repos set.
 	var provider *workspace.Provider
 
-	for _, plan := range plans {
-		if plan.Config != nil && plan.Config.Status == "finished" {
-			continue
-		}
-		if !showOnHold && plan.Config != nil && plan.Config.Status == "hold" {
-			continue
+	for _, entry := range entries {
+		plan := entry.plan
+		// Archived plans carry status "finished" by construction; they
+		// bypass the live-list filters and are shown flagged instead.
+		if !entry.archived {
+			if plan.Config != nil && plan.Config.Status == "finished" {
+				continue
+			}
+			if !showOnHold && plan.Config != nil && plan.Config.Status == "hold" {
+				continue
+			}
 		}
 
 		planInfo, statErr := os.Stat(plan.Directory)
@@ -250,6 +284,10 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold bool) ([]PlanLi
 			Notes:        notes,
 			MergeStatus:  "-",
 			ReviewStatus: formatConfigStatus(plan.Config),
+			Archived:     entry.archived,
+		}
+		if entry.archived {
+			item.ReviewStatus = "Archived"
 		}
 
 		if worktree != "" {

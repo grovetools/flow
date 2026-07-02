@@ -256,11 +256,17 @@ func (m Model) renderPlanTable() string {
 		updatedText := theme.DefaultTheme.Muted.Render("◦ " + formatRelativeTime(plan.LastUpdated))
 
 		titleText := plan.Name
-		if plan.Name == RollingPlanName {
-			titleText = theme.DefaultTheme.Muted.Render("(rolling)")
-		}
-		if plan.Name == m.activePlan {
-			titleText = theme.DefaultTheme.Bold.Render(fmt.Sprintf("%s %s", theme.IconSelect, titleText))
+		if plan.Archived {
+			// Archived rows render dimmed and never get the active-plan
+			// or rolling-plan decorations.
+			titleText = theme.DefaultTheme.Muted.Render(titleText)
+		} else {
+			if plan.Name == RollingPlanName {
+				titleText = theme.DefaultTheme.Muted.Render("(rolling)")
+			}
+			if plan.Name == m.activePlan {
+				titleText = theme.DefaultTheme.Bold.Render(fmt.Sprintf("%s %s", theme.IconSelect, titleText))
+			}
 		}
 
 		worktreeText := plan.Worktree
@@ -326,6 +332,8 @@ func (m Model) renderPlanTable() string {
 			reviewedText = theme.DefaultTheme.Warning.Render("Hold")
 		case "Finished":
 			reviewedText = theme.DefaultTheme.Success.Render("Finished")
+		case "Archived":
+			reviewedText = theme.DefaultTheme.Muted.Render("Archived")
 		default:
 			reviewedText = theme.DefaultTheme.Muted.Render("-")
 		}

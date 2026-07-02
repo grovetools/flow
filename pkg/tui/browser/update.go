@@ -27,7 +27,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focused = true
 		m.loading = true
 		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 			fetchGitLogCmd(m.cwdGitRoot),
 		)
 
@@ -58,7 +58,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		m.initialLoaded = false
 		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 			fetchGitLogCmd(m.cwdGitRoot),
 		)
 
@@ -86,7 +86,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.output != "" {
 			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s Plan marked for review", theme.IconSuccess))
 		}
-		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold)
+		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 
 	case planListLoadCompleteMsg:
 		m.loading = false
@@ -120,7 +120,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loading = true
 		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold),
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 			fetchGitLogCmd(m.cwdGitRoot),
 			refreshTick(),
 		)
@@ -244,6 +244,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.SetActive):
+		if m.selectedArchived() {
+			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
 			if err := state.Set(stateDir(), coreplan.StateKey, selectedPlan.Name); err == nil {
@@ -253,6 +257,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.ReviewPlan):
+		if m.selectedArchived() {
+			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			plan := m.plans[m.cursor]
 			return m, executePlanReview(plan.Plan)
@@ -260,6 +268,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.EditNotes):
+		if m.selectedArchived() {
+			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) && !m.editingNotes {
 			m.editingNotes = true
 			m.editPlanIndex = m.cursor
@@ -277,6 +289,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.FinishPlan):
+		if m.selectedArchived() {
+			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			plan := m.plans[m.cursor]
 			return m, executePlanFinish(plan.Plan)
@@ -284,6 +300,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.FastForwardUpdate):
+		if m.selectedArchived() {
+			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
 			if selectedPlan.MergeStatus == "Needs Rebase" || selectedPlan.MergeStatus == "Behind" ||
@@ -296,6 +316,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.FastForwardMain):
+		if m.selectedArchived() {
+			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
 			if selectedPlan.MergeStatus != "Ready" && !strings.Contains(selectedPlan.MergeStatus, "Ready") {
@@ -337,9 +361,19 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showOnHold = !m.showOnHold
 		m.cursor = 0
 		m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
-		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold)
+		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
+
+	case key.Matches(msg, m.keys.ToggleArchived):
+		m.showArchived = !m.showArchived
+		m.cursor = 0
+		m.statusMessage = fmt.Sprintf("Archived plans: %v", m.showArchived)
+		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 
 	case key.Matches(msg, m.keys.SetHoldStatus):
+		if m.selectedArchived() {
+			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
 			plan := selectedPlan.Plan
@@ -349,38 +383,36 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				currentStatus = plan.Config.Status
 			}
 
-			var newStatus string
-			var action string
-			if currentStatus == "hold" {
-				newStatus = ""
+			hold := currentStatus != "hold"
+			action := "set to"
+			if !hold {
 				action = "removed from"
+			}
+
+			if err := orchestration.SetHold(plan.Directory, hold); err != nil {
+				m.statusMessage = fmt.Sprintf("Failed to update plan: %v", err)
 			} else {
-				newStatus = "hold"
-				action = "set to"
+				m.statusMessage = fmt.Sprintf("Plan '%s' %s hold", selectedPlan.Name, action)
 			}
 
-			if plan.Config == nil {
-				plan.Config = &orchestration.PlanConfig{}
-			}
-			plan.Config.Status = newStatus
-
-			configPath := filepath.Join(plan.Directory, ".grove-plan.yml")
-			if data, err := yaml.Marshal(plan.Config); err == nil {
-				if werr := os.WriteFile(configPath, data, 0o600); werr != nil {
-					m.statusMessage = fmt.Sprintf("Failed to update plan: %v", werr)
-				} else {
-					m.statusMessage = fmt.Sprintf("Plan '%s' %s hold", selectedPlan.Name, action)
-				}
-			} else {
-				m.statusMessage = fmt.Sprintf("Failed to marshal plan config: %v", err)
-			}
-
-			return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold)
+			return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 		}
 		return m, nil
 	}
 
 	return m, nil
+}
+
+// archivedReadOnlyMessage is shown when a mutating row-action is refused
+// because the selected plan lives in the archive.
+const archivedReadOnlyMessage = "plan is archived (read-only)"
+
+// selectedArchived reports whether the row under the cursor is an
+// archived plan. Mutating row-actions (finish, set-active, review,
+// notes, hold, merge/update) are refused for archived rows; viewing
+// (Enter) and the git-log toggle remain available.
+func (m Model) selectedArchived() bool {
+	return m.cursor >= 0 && m.cursor < len(m.plans) && m.plans[m.cursor].Archived
 }
 
 // fetchSelectedRepoGitLog resolves the repo path for the repo currently
