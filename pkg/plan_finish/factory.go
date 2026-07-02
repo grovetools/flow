@@ -30,6 +30,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/grovetools/core/fs"
 	"github.com/grovetools/core/git"
+	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/env"
 	"github.com/grovetools/core/pkg/models"
@@ -566,7 +567,18 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if err != nil {
 				return err
 			}
-			return os.WriteFile(configPath, newData, 0o600)
+			if err := os.WriteFile(configPath, newData, 0o600); err != nil {
+				return err
+			}
+			entry := grovelogging.NewUnifiedLogger("grove-flow").Info("Plan finished").
+				Field("event", "plan.finished").
+				Field("plan", filepath.Base(planPath)).
+				Field("plan_dir", planPath)
+			if worktreeName != "" {
+				entry = entry.Field("worktree", worktreeName)
+			}
+			entry.StructuredOnly().Emit()
+			return nil
 		},
 	}
 

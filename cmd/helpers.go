@@ -51,6 +51,7 @@ func configureDefaultContextRules(repoPath string) error {
 		Field("repo_path", repoPath).
 		Field("rules_path", rulesDestPath).
 		Pretty(theme.IconSuccess + " Applied default context rules to: " + repoPath).
+		PrettyOnly().
 		Log(ctx)
 	return nil
 }
@@ -122,6 +123,7 @@ func configureGoWorkspace(worktreePath string, repos []string, sourceGitRoot str
 		Field("go_modules_count", len(goRepos)).
 		Field("go_modules", goRepos).
 		Pretty(fmt.Sprintf(theme.IconSuccess+" Configured go.work in worktree container with %d Go modules.", len(goRepos))).
+		PrettyOnly().
 		Log(ctx)
 	return nil
 }

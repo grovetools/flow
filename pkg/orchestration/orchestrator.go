@@ -452,11 +452,33 @@ func (o *Orchestrator) UpdateJobStatus(job *Job, status JobStatus) error {
 		return fmt.Errorf("persist status change: %w", err)
 	}
 
-	// Log state transition
-	o.logger.Info("Job status updated",
-		"job", job.ID,
-		"from", oldStatus,
-		"to", status)
+	// Log state transition. This is the single funnel for job lifecycle
+	// events (event=job.launched / job.finished) covering both the local
+	// and daemon execution paths.
+	switch status {
+	case JobStatusRunning:
+		o.logger.Info("Job launched",
+			"event", "job.launched",
+			"job", job.ID,
+			"job_file", job.Filename,
+			"from", oldStatus)
+	case JobStatusCompleted, JobStatusFailed:
+		keyvals := []interface{}{
+			"event", "job.finished",
+			"job", job.ID,
+			"job_file", job.Filename,
+			"status", string(status),
+		}
+		if job.Metadata.LastError != "" {
+			keyvals = append(keyvals, "error", job.Metadata.LastError)
+		}
+		o.logger.Info("Job finished", keyvals...)
+	default:
+		o.logger.Debug("Job status updated",
+			"job", job.ID,
+			"from", oldStatus,
+			"to", status)
+	}
 
 	return nil
 }

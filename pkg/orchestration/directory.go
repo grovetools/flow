@@ -14,9 +14,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
+	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
+
+// directoryUlog emits lifecycle events (event=job.created) for plan-directory
+// mutations. StructuredOnly: audit record, not user-facing CLI output.
+var directoryUlog = grovelogging.NewUnifiedLogger("grove-flow")
 
 // sanitizeForFilename sanitizes a string for use in a filename (kebab-case).
 func sanitizeForFilename(s string) string {
@@ -174,6 +179,15 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 	job.FilePath = jobFilePath
 	plan.Jobs = append(plan.Jobs, job)
 	plan.JobsByID[job.ID] = job
+
+	directoryUlog.Info("Job created").
+		Field("event", "job.created").
+		Field("plan_dir", plan.Directory).
+		Field("job_file", filename).
+		Field("job_type", string(job.Type)).
+		Field("title", job.Title).
+		StructuredOnly().
+		Emit()
 
 	return filename, nil
 }

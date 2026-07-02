@@ -49,7 +49,7 @@ func (r *DaemonRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) er
 		agentTarget = plan.Orchestration.AgentTarget
 	}
 
-	submitLog.Info("submitting job to daemon").
+	submitLog.Debug("submitting job to daemon").
 		Field("job", job.Filename).
 		Field("type", string(job.Type)).
 		Field("agent_target", agentTarget).
@@ -72,7 +72,7 @@ func (r *DaemonRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) er
 	}
 
 	jobID := info.ID
-	r.logger.Info("Job submitted to daemon", "job_id", jobID, "status", info.Status)
+	r.logger.Debug("Job submitted to daemon", "job_id", jobID, "status", info.Status)
 
 	// Stream logs and wait for completion
 	ch, err := r.client.StreamJobLogs(ctx, jobID)

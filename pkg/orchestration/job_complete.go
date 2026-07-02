@@ -29,7 +29,7 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		"job_title":  job.Title,
 		"job_status": job.Status,
 		"silent":     silent,
-	}).Info("CompleteJob called - tracing caller")
+	}).Debug("CompleteJob called - tracing caller")
 
 	// Check current status
 	alreadyCompleted := job.Status == JobStatusCompleted

@@ -677,7 +677,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			"job_type":          job.Type,
 			"binding_verified":  verified,
 			"claude_session_id": claudeSessionID,
-		}).Info("loadAndStreamAgentLogsCmd executing")
+		}).Debug("loadAndStreamAgentLogsCmd executing")
 
 		// Fast path: read from job.log which contains ANSI-formatted output (for both completed and running jobs)
 		jobLogPath, err := orchestration.GetJobLogPath(plan, job)
@@ -685,7 +685,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			"job_id":       job.ID,
 			"job_log_path": jobLogPath,
 			"get_path_err": err,
-		}).Info("GetJobLogPath result")
+		}).Debug("GetJobLogPath result")
 
 		if err == nil {
 			statInfo, statErr := os.Stat(jobLogPath)
@@ -700,7 +700,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 					}
 					return 0
 				}(),
-			}).Info("Fast path: checking job.log file")
+			}).Debug("Fast path: checking job.log file")
 
 			if statErr == nil {
 				// Read the job.log file directly - it contains ANSI-formatted aglogs output
@@ -709,14 +709,14 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 					"job_id":      job.ID,
 					"read_err":    readErr,
 					"content_len": len(content),
-				}).Info("Fast path: read job.log result")
+				}).Debug("Fast path: read job.log result")
 
 				if readErr == nil && len(content) > 0 {
 					logger.WithFields(map[string]interface{}{
 						"log_path":    jobLogPath,
 						"is_running":  job.Status == orchestration.JobStatusRunning,
 						"content_len": len(content),
-					}).Info("Fast path: successfully read job logs from job.log")
+					}).Debug("Fast path: successfully read job logs from job.log")
 
 					contentStr := string(content)
 					shouldStream := job.Status == orchestration.JobStatusRunning || job.Status == orchestration.JobStatusIdle
@@ -770,27 +770,27 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 						"job_id":      job.ID,
 						"read_err":    readErr,
 						"content_len": len(content),
-					}).Info("Fast path: job.log read failed or empty")
+					}).Debug("Fast path: job.log read failed or empty")
 				}
 			} else {
 				logger.WithFields(map[string]interface{}{
 					"job_id":   job.ID,
 					"log_path": jobLogPath,
 					"stat_err": statErr,
-				}).Info("Fast path: job.log stat failed")
+				}).Debug("Fast path: job.log stat failed")
 			}
 		} else {
 			logger.WithFields(map[string]interface{}{
 				"job_id": job.ID,
 				"error":  err,
-			}).Info("Fast path: GetJobLogPath failed")
+			}).Debug("Fast path: GetJobLogPath failed")
 		}
 
 		// Fallback: job.log doesn't exist yet (running job just started)
 		logger.WithFields(map[string]interface{}{
 			"job_id":     job.ID,
 			"job_status": job.Status,
-		}).Info("Fast path failed, checking fallback for running job")
+		}).Debug("Fast path failed, checking fallback for running job")
 
 		// For agent jobs, if status is pending but we're in the TUI (indicated by being called
 		// from runJobsWithOrchestrator), the job is about to start. Treat it like a running job.
@@ -807,7 +807,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 			"is_idle":      isIdle,
 			"is_agent_job": isAgentJob,
 			"will_stream":  isRunning || isIdle || (isPending && isAgentJob),
-		}).Info("Checking if job should use streaming fallback")
+		}).Debug("Checking if job should use streaming fallback")
 
 		if isRunning || isIdle || (isPending && isAgentJob) {
 			if !verified {
@@ -815,7 +815,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				// plan/job-name spec; retry until the registry entry shows up.
 				logger.WithFields(map[string]interface{}{
 					"job_id": job.ID,
-				}).Info("Session binding unverified; not streaming")
+				}).Debug("Session binding unverified; not streaming")
 				return LogContentLoadedMsg{
 					Content:     unverifiedBindingNotice + "\n(Waiting for the hooks session registry entry; this may take a few seconds)\n",
 					ShouldRetry: true,
@@ -836,7 +836,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				"log_spec":   logSpec,
 				"output_len": len(readOutput),
 				"error":      readErr,
-			}).Info("aglogs read completed for running job")
+			}).Debug("aglogs read completed for running job")
 
 			if readErr != nil {
 				// Session is still initializing, retry
@@ -869,7 +869,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				"job_id":            job.ID,
 				"claude_session_id": claudeSessionID,
 				"job_status":        job.Status,
-			}).Info("Trying aglogs read fallback for completed job")
+			}).Debug("Trying aglogs read fallback for completed job")
 
 			readCmd := delegation.Command("aglogs", "read", claudeSessionID)
 			readCmd.Env = append(os.Environ(), "CLICOLOR_FORCE=1")
@@ -879,7 +879,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				"job_id":     job.ID,
 				"output_len": len(readOutput),
 				"error":      readErr,
-			}).Info("aglogs read fallback result")
+			}).Debug("aglogs read fallback result")
 
 			if readErr == nil && len(readOutput) > 0 {
 				return LogContentLoadedMsg{
@@ -976,7 +976,7 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 
 			logger.WithFields(map[string]interface{}{
 				"line_count": lineCount,
-			}).Info("Agent log stream ended")
+			}).Debug("Agent log stream ended")
 		}()
 
 		return nil

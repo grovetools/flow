@@ -121,10 +121,12 @@ func (r *LocalRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) err
 		logFields["prepend_dependencies"] = job.PrependDependencies
 	}
 
+	// Debug: the user-facing lifecycle event is the single event=job.launched
+	// line emitted by UpdateJobStatus on the pending->running transition.
 	if job.Type == JobTypeInteractiveAgent {
-		r.logger.Info("Starting interactive job", logFieldsToKeyVals(logFields)...)
+		r.logger.Debug("Starting interactive job", logFieldsToKeyVals(logFields)...)
 	} else {
-		r.logger.Info("Executing job", logFieldsToKeyVals(logFields)...)
+		r.logger.Debug("Executing job", logFieldsToKeyVals(logFields)...)
 	}
 
 	// 2. Update status to running
