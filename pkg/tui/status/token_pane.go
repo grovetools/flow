@@ -56,7 +56,7 @@ func loadTokenUsageCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd
 			return TokenUsageLoadedMsg{JobID: jobID, Found: false}
 		}
 
-		s, err := orchestration.SummarizeJobTokenUsage(metadata.ClaudeSessionID, metadata.TranscriptPath)
+		s, err := summarizeJobTokenUsageForSession(jobID, metadata)
 		if err != nil {
 			return TokenUsageLoadedMsg{JobID: jobID, Err: err}
 		}
@@ -170,7 +170,7 @@ func refreshRunningTokenCellsCmd(jobs []*orchestration.Job) tea.Cmd {
 			if err != nil || metadata.ClaudeSessionID == "" {
 				continue
 			}
-			s, err := orchestration.SummarizeJobTokenUsage(metadata.ClaudeSessionID, metadata.TranscriptPath)
+			s, err := summarizeJobTokenUsageForSession(id, metadata)
 			if err != nil || s.Usage.Total() == 0 {
 				continue
 			}
@@ -178,6 +178,18 @@ func refreshRunningTokenCellsCmd(jobs []*orchestration.Job) tea.Cmd {
 		}
 		return runningTokenUsageMsg{summaries: out}
 	}
+}
+
+// summarizeJobTokenUsageForSession routes the live token summary by the
+// session's provider: Claude keeps the historical subagent-inclusive rollup
+// (SummarizeJobTokenUsage, unchanged call chain); codex/pi/opencode use the
+// provider-routed single-transcript summarizer (ClaudeSessionID holds their
+// NATIVE session id, which Claude slug discovery can never match).
+func summarizeJobTokenUsageForSession(jobID string, metadata *sessions.SessionMetadata) (usage.Summary, error) {
+	if metadata.Provider == "" || strings.HasPrefix(metadata.Provider, "claude") {
+		return orchestration.SummarizeJobTokenUsage(metadata.ClaudeSessionID, metadata.TranscriptPath)
+	}
+	return orchestration.SummarizeJobTokenUsageByProvider(jobID, metadata.Provider, metadata.TranscriptPath)
 }
 
 // renderTokenColumnCell renders the compact TOKENS table cell for a job:

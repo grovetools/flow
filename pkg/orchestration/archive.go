@@ -309,6 +309,18 @@ func ArchiveWorkflowRuns(job *Job, plan *Plan) error {
 		return nil
 	}
 
+	if !isClaudeSessionProvider(metadata.Provider) {
+		// Workflow/subagent trees are written by Claude Code's workflow
+		// runtime only; for other providers ClaudeSessionID is their native
+		// id and there is nothing to archive. Silent, intentional degrade
+		// (the transcript itself is archived by ArchiveSession regardless).
+		ulog.Debug("[ARCHIVE] Non-claude provider; no workflow runs to archive").
+			Field("job_id", job.ID).
+			Field("provider", metadata.Provider).
+			Log(ctx)
+		return nil
+	}
+
 	sessionDirs, dirsErr := coresessions.ResolveClaudeSessionDirs(metadata.ClaudeSessionID)
 	if dirsErr != nil || len(sessionDirs) == 0 {
 		// Fall back to the single path constructed next to the transcript
@@ -558,6 +570,16 @@ func ArchiveStandaloneSubagents(job *Job, plan *Plan) error {
 		ulog.Debug("[ARCHIVE] Session binding unverified; skipping standalone subagent archival").
 			Field("job_id", job.ID).
 			Err(err).
+			Log(ctx)
+		return nil
+	}
+
+	if !isClaudeSessionProvider(metadata.Provider) {
+		// Standalone (Agent-tool) subagent trees only exist for Claude
+		// sessions; other providers degrade silently.
+		ulog.Debug("[ARCHIVE] Non-claude provider; no standalone subagents to archive").
+			Field("job_id", job.ID).
+			Field("provider", metadata.Provider).
 			Log(ctx)
 		return nil
 	}

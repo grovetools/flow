@@ -150,7 +150,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ctx, cancel := context.WithCancel(context.Background())
 					m.StreamCancel = cancel
 					m.StreamingJobID = m.ActiveLogJob.ID
-					cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, m.MsgCh))
+					cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, msg.Provider, m.MsgCh))
 					isAgentWithStatus := m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 						m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent
 					if isAgentWithStatus {
@@ -195,7 +195,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StreamCancel = cancel
 				m.StreamingJobID = m.ActiveLogJob.ID
 
-				cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, m.MsgCh))
+				cmds = append(cmds, streamAgentLogsCmd(ctx, m.Plan, m.ActiveLogJob, msg.LogFilePath, msg.Provider, m.MsgCh))
 
 				// Start status polling for agent jobs that support it
 				isAgentWithStatus := m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||

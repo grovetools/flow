@@ -478,12 +478,25 @@ func (e *IsolatedAgentExecutor) gatherContextFiles(job *Job, plan *Plan, workDir
 // SendInputToIsolatedAgent sends input text to an isolated agent.
 // Tries the daemon's native agent pane input API first (groveterm), falls back to tmux.
 func SendInputToIsolatedAgent(jobID, input string) error {
-	// Try daemon API first.
 	ctx := context.Background()
+
+	// The session registry records the provider (and workdir) the isolated
+	// job actually launched with; resolve the input mode from it. An
+	// unresolvable session keeps the historical vim default (Claude).
+	inputMode := "vim"
+	if registry, err := sessions.NewFileSystemRegistry(); err == nil {
+		if metadata, err := registry.Find(jobID); err == nil && metadata != nil {
+			inputMode = resolveInputMode(metadata.WorkingDirectory, metadata.Provider)
+		}
+	}
+
+	// Try daemon API first.
 	daemonClient := daemon.NewWithAutoStart()
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
-		// Isolated agents always use vim mode for Claude.
-		payload := "\x1bi" + input + "\r"
+		payload := input + "\r"
+		if inputMode == "vim" {
+			payload = "\x1bi" + input + "\r"
+		}
 		err := daemonClient.SendAgentInput(ctx, jobID, payload)
 		daemonClient.Close()
 		if err == nil {
@@ -502,8 +515,14 @@ func SendInputToIsolatedAgent(jobID, input string) error {
 		return fmt.Errorf("failed to create isolated mux engine: %w", err)
 	}
 
-	if err := engine.SendKeys(context.Background(), targetPane, "Escape", "i", input); err != nil {
-		return err
+	if inputMode == "vim" {
+		if err := engine.SendKeys(context.Background(), targetPane, "Escape", "i", input); err != nil {
+			return err
+		}
+	} else {
+		if err := engine.SendKeys(context.Background(), targetPane, input); err != nil {
+			return err
+		}
 	}
 
 	return engine.SendKeys(context.Background(), targetPane, "C-Enter")

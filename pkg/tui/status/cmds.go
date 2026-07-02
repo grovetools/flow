@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/agentlogs/pkg/agentstream"
 	"github.com/grovetools/agentlogs/pkg/display"
+	aglogsession "github.com/grovetools/agentlogs/pkg/sessioninfo"
 	"github.com/grovetools/agentlogs/pkg/transcript"
 	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
@@ -248,7 +249,20 @@ func startWorkflowMonitorCmd(job *orchestration.Job, msgCh chan tea.Msg) tea.Cmd
 		}
 		metadata, err := registry.Find(jobID)
 		if err != nil {
+			// No hooks-registry record. Before declaring "no Claude session",
+			// ask agentlogs' tiered resolver (daemon job registry, opencode
+			// pointer, multi-provider scan) whether this is a non-Claude
+			// session — those legitimately have no workflow tree and should
+			// degrade to the transcript view, not error.
+			if info, rerr := aglogsession.Resolve(jobID); rerr == nil && info.Provider != "" && info.Provider != "claude" {
+				return workflowSessionResolvedMsg{JobID: jobID, Err: workflowUnsupportedProviderErr(info.Provider)}
+			}
 			return workflowSessionResolvedMsg{JobID: jobID, Err: fmt.Errorf("no Claude session registered for this job")}
+		}
+		if metadata.Provider != "" && !strings.HasPrefix(metadata.Provider, "claude") {
+			// Workflow/subagent trees are produced by Claude Code's workflow
+			// runtime only; other providers degrade to the transcript view.
+			return workflowSessionResolvedMsg{JobID: jobID, Err: workflowUnsupportedProviderErr(metadata.Provider)}
 		}
 		if metadata.TranscriptPath == "" || metadata.ClaudeSessionID == "" {
 			return workflowSessionResolvedMsg{JobID: jobID, Err: fmt.Errorf("session metadata has no transcript path yet")}
@@ -301,6 +315,13 @@ func startWorkflowMonitorCmd(job *orchestration.Job, msgCh chan tea.Msg) tea.Cmd
 
 		return workflowSessionResolvedMsg{JobID: jobID, SessionDir: strings.Join(sessionDirs, ", "), Cancel: cancel}
 	}
+}
+
+// workflowUnsupportedProviderErr is the friendly degrade "error" shown in the
+// workflow pane for non-Claude sessions: they have no workflow/subagent tree
+// to monitor, and the transcript pane remains the observability surface.
+func workflowUnsupportedProviderErr(provider string) error {
+	return fmt.Errorf("workflow monitoring is Claude-only; %s sessions show the transcript view only", provider)
 }
 
 // collectWorkflowTranscripts fans the session's multiplexed workflow
@@ -372,8 +393,10 @@ func loadHistoricalWorkflowTranscriptCmd(sessionDir, agentID, planDir, jobID, ru
 			}
 		}
 
-		// Read and normalize the transcript
-		entries, err := normalizeTranscriptFile(transcriptPath)
+		// Read and normalize the transcript. Workflow subagent transcripts
+		// only exist for Claude sessions (the wf_* tree is written by Claude
+		// Code's workflow runtime), so the provider is claude by construction.
+		entries, err := normalizeTranscriptFile(transcriptPath, "claude")
 		if err != nil {
 			return workflowAgentTranscriptLoadedMsg{
 				AgentID: agentID,
@@ -429,8 +452,11 @@ func loadArchivedAgentMarkdown(planDir, jobID, runID, agentID string) (string, b
 }
 
 // normalizeTranscriptFile reads a jsonl transcript file and normalizes each
-// line using the Claude normalizer.
-func normalizeTranscriptFile(path string) ([]transcript.UnifiedEntry, error) {
+// line with the given provider's normalizer, selected through agentlogs'
+// provider→normalizer routing table (agentstream.NormalizerForProvider —
+// empty/claude yields the exact ClaudeNormalizer this used to construct
+// directly).
+func normalizeTranscriptFile(path, provider string) ([]transcript.UnifiedEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -438,7 +464,7 @@ func normalizeTranscriptFile(path string) ([]transcript.UnifiedEntry, error) {
 	defer f.Close()
 
 	var entries []transcript.UnifiedEntry
-	normalizer := transcript.NewClaudeNormalizer()
+	normalizer := agentstream.NormalizerForProvider(provider)
 
 	// Use a scanner with a larger buffer for long lines
 	scanner := newLargeLineScanner(f)
@@ -456,8 +482,10 @@ func normalizeTranscriptFile(path string) ([]transcript.UnifiedEntry, error) {
 	}
 
 	// Flush any buffered entries (e.g., tool calls awaiting results)
-	for _, entry := range normalizer.Flush() {
-		entries = append(entries, *entry)
+	if flusher, ok := normalizer.(agentstream.Flusher); ok {
+		for _, entry := range flusher.Flush() {
+			entries = append(entries, *entry)
+		}
 	}
 
 	return entries, scanner.Err()
@@ -536,6 +564,7 @@ type LogContentLoadedMsg struct {
 	ShouldRetry    bool   // If true, we should retry loading after a delay
 	StartStreaming bool   // If true, we should start streaming (agent session is ready)
 	LogFilePath    string // The path to the log file to stream
+	Provider       string // Session provider from the registry ("" = claude)
 	JobID          string // The ID of the job this message belongs to
 }
 
@@ -660,11 +689,12 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 		// specs to ANY session that ever matched the plan/job name, which
 		// can silently stream another agent's transcript into this job's
 		// log (the completion path dropped the same fallback in f21cc59).
-		var claudeSessionID, transcriptPath string
+		var claudeSessionID, transcriptPath, sessionProvider string
 		if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
 			if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata != nil {
 				claudeSessionID = metadata.ClaudeSessionID
 				transcriptPath = metadata.TranscriptPath
+				sessionProvider = metadata.Provider
 			}
 		}
 		// The binding is verified only when the registry recorded the
@@ -754,6 +784,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 							ShouldRetry:    false,
 							StartStreaming: true,
 							LogFilePath:    logSpec,
+							Provider:       sessionProvider,
 							JobID:          job.ID,
 						}
 					}
@@ -857,6 +888,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 				ShouldRetry:    false,
 				StartStreaming: true,
 				LogFilePath:    logSpec,
+				Provider:       sessionProvider,
 				JobID:          job.ID,
 			}
 		}
@@ -915,8 +947,10 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 	}
 }
 
-// streamAgentLogsCmd creates a background process to stream agent logs from a specific file.
-func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orchestration.Job, logFilePath string, msgCh chan<- tea.Msg) tea.Cmd {
+// streamAgentLogsCmd creates a background process to stream agent logs from a
+// specific file. provider selects the transcript normalizer through agentlogs'
+// router ("" = claude, the historical default).
+func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orchestration.Job, logFilePath, provider string, msgCh chan<- tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		// Get the log file path for this job (for writing streamed content)
 		jobLogPath, err := orchestration.GetJobLogPath(plan, job)
@@ -933,6 +967,7 @@ func streamAgentLogsCmd(ctx context.Context, plan *orchestration.Plan, job *orch
 		// Stream transcript entries in-process via agentstream
 		entries, err := agentstream.Stream(ctx, agentstream.StreamOptions{
 			TranscriptPath: logFilePath,
+			Provider:       provider,
 		})
 		if err != nil {
 			logFile.Close()
@@ -1765,10 +1800,28 @@ func pollAgentStatusAfterDelay() tea.Cmd {
 	})
 }
 
-// fetchAgentStatusCmd fetches the current agent status by capturing tmux pane output
+// fetchAgentStatusCmd fetches the current agent status. Claude sessions are
+// pane-scraped (the historical ParseAgentPane path, unchanged); other
+// providers' TUIs are never scraped — their status is derived from transcript
+// activity via agentstream.DeriveTranscriptStatus (recency + in-flight tool
+// calls), so only the provider-neutral State/Activity fields are populated.
 func fetchAgentStatusCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		logger := logging.NewLogger("flow-tui")
+
+		// The session registry records the provider that actually launched.
+		var provider, transcriptPath string
+		if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
+			if metadata, findErr := registry.Find(job.ID); findErr == nil && metadata != nil {
+				provider = metadata.Provider
+				transcriptPath = metadata.TranscriptPath
+			}
+		}
+
+		if provider != "" && provider != "claude" {
+			return fetchTranscriptAgentStatus(job, provider, transcriptPath)
+		}
+
 		var output string
 		var err error
 
@@ -1805,6 +1858,29 @@ func fetchAgentStatusCmd(plan *orchestration.Plan, job *orchestration.Job) tea.C
 		}).Debug("Agent status captured")
 		return AgentStatusMsg{Status: status, JobID: job.ID, Err: nil}
 	}
+}
+
+// fetchTranscriptAgentStatus derives a non-Claude agent's status from its
+// transcript. When the registry didn't record a transcript path (e.g.
+// opencode's plugin-deferred registration), agentlogs' tiered resolver fills
+// it in by job ID.
+func fetchTranscriptAgentStatus(job *orchestration.Job, provider, transcriptPath string) tea.Msg {
+	if transcriptPath == "" {
+		if info, err := aglogsession.Resolve(job.ID); err == nil && info.LogFilePath != "" {
+			transcriptPath = info.LogFilePath
+			if info.Provider != "" {
+				provider = info.Provider
+			}
+		}
+	}
+	if transcriptPath == "" {
+		return AgentStatusMsg{JobID: job.ID, Err: fmt.Errorf("no transcript recorded yet for %s session", provider)}
+	}
+	status, err := agentstream.DeriveTranscriptStatus(transcriptPath, provider, time.Now())
+	if err != nil {
+		return AgentStatusMsg{JobID: job.ID, Err: err}
+	}
+	return AgentStatusMsg{Status: status, JobID: job.ID, Err: nil}
 }
 
 // InterruptAgentMsg is sent when an agent interrupt attempt finishes

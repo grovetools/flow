@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	aglogsession "github.com/grovetools/agentlogs/pkg/sessioninfo"
 	"github.com/grovetools/agentlogs/pkg/usage"
 	coresessions "github.com/grovetools/core/pkg/sessions"
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
@@ -59,7 +60,16 @@ func ArchiveTokenUsage(job *Job, plan *Plan) error {
 		return nil
 	}
 
-	summary, err := SummarizeJobTokenUsage(metadata.ClaudeSessionID, metadata.TranscriptPath)
+	// Claude sessions keep the historical subagent-inclusive rollup; other
+	// providers summarize their single transcript through agentlogs'
+	// provider-routed summarizer (ClaudeSessionID holds the NATIVE session id
+	// for them, which the Claude slug-dir discovery can never match).
+	var summary usage.Summary
+	if isClaudeSessionProvider(metadata.Provider) {
+		summary, err = SummarizeJobTokenUsage(metadata.ClaudeSessionID, metadata.TranscriptPath)
+	} else {
+		summary, err = SummarizeJobTokenUsageByProvider(job.ID, metadata.Provider, metadata.TranscriptPath)
+	}
 	if err != nil {
 		ulog.Warn("[TOKENS] Failed to summarize token usage; skipping").
 			Field("job_id", job.ID).
@@ -299,6 +309,38 @@ func FormatCostUSD(cost float64, missingPricing bool) string {
 func SummarizeJobTokenUsage(claudeSessionID, transcriptPath string) (usage.Summary, error) {
 	slugDirs := resolveTokenUsageSlugDirs(claudeSessionID, transcriptPath)
 	return usage.SummarizeSession(slugDirs, claudeSessionID, usage.CostModeCalculate)
+}
+
+// isClaudeSessionProvider reports whether a session-registry provider value
+// denotes Claude (empty is Claude: older records omit the provider, and only
+// Claude runs predate the field).
+func isClaudeSessionProvider(provider string) bool {
+	return provider == "" || strings.HasPrefix(provider, "claude")
+}
+
+// SummarizeJobTokenUsageByProvider is the non-Claude analogue of
+// SummarizeJobTokenUsage: it resolves the job's transcript locator (the
+// registry's TranscriptPath when recorded, else agentlogs' tiered resolver by
+// job ID — opencode's plugin-deferred registration often lacks the path) and
+// summarizes usage + cost through agentlogs' provider-routed
+// single-transcript summarizer. pi/opencode costs come from their native
+// per-message figures; codex is priced from the snapshot table. There is no
+// subagent rollup — subagent/workflow trees only exist for Claude.
+func SummarizeJobTokenUsageByProvider(jobID, provider, transcriptPath string) (usage.Summary, error) {
+	if transcriptPath == "" {
+		info, err := aglogsession.Resolve(jobID)
+		if err != nil {
+			return usage.Summary{}, fmt.Errorf("no transcript recorded and session resolution failed: %w", err)
+		}
+		if info.LogFilePath == "" {
+			return usage.Summary{}, fmt.Errorf("no transcript resolved for %s session of job %s", provider, jobID)
+		}
+		transcriptPath = info.LogFilePath
+		if info.Provider != "" {
+			provider = info.Provider
+		}
+	}
+	return usage.SummarizeSessionTranscript(transcriptPath, provider, usage.CostModeCalculate)
 }
 
 // resolveTokenUsageSlugDirs returns the project-slug directories to scan for a
