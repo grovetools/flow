@@ -121,3 +121,78 @@ Do the thing.`
 		t.Error("on_review hook fired on an already-review plan; expected no-op")
 	}
 }
+
+func TestSetHold_RoundTrip(t *testing.T) {
+	dir := writeReviewPlan(t, "model: gemini-3.1-pro-preview\n")
+
+	// Set hold: persisted status flips to "hold", other fields preserved.
+	if err := SetHold(dir, true); err != nil {
+		t.Fatalf("SetHold(true) error = %v", err)
+	}
+	reloaded, err := LoadPlan(dir)
+	if err != nil {
+		t.Fatalf("LoadPlan() after hold error = %v", err)
+	}
+	if reloaded.Config == nil || reloaded.Config.Status != "hold" {
+		t.Fatalf("persisted status after hold = %+v, want %q", reloaded.Config, "hold")
+	}
+	if reloaded.Config.Model != "gemini-3.1-pro-preview" {
+		t.Errorf("model not preserved = %q, want %q", reloaded.Config.Model, "gemini-3.1-pro-preview")
+	}
+
+	// Clear hold: status resets to "".
+	if err := SetHold(dir, false); err != nil {
+		t.Fatalf("SetHold(false) error = %v", err)
+	}
+	reloaded, err = LoadPlan(dir)
+	if err != nil {
+		t.Fatalf("LoadPlan() after unhold error = %v", err)
+	}
+	if reloaded.Config == nil || reloaded.Config.Status != "" {
+		t.Errorf("persisted status after unhold = %+v, want empty", reloaded.Config)
+	}
+	if reloaded.Config != nil && reloaded.Config.Model != "gemini-3.1-pro-preview" {
+		t.Errorf("model not preserved through unhold = %q", reloaded.Config.Model)
+	}
+}
+
+func TestSetHold_ClearDoesNotClobberOtherStatus(t *testing.T) {
+	dir := writeReviewPlan(t, "status: review\n")
+
+	// Clearing hold on a plan that is not held must leave the status alone.
+	if err := SetHold(dir, false); err != nil {
+		t.Fatalf("SetHold(false) error = %v", err)
+	}
+	reloaded, err := LoadPlan(dir)
+	if err != nil {
+		t.Fatalf("LoadPlan() error = %v", err)
+	}
+	if reloaded.Config == nil || reloaded.Config.Status != "review" {
+		t.Errorf("status after no-op unhold = %+v, want %q", reloaded.Config, "review")
+	}
+}
+
+func TestSetHold_NoConfigCreatesOne(t *testing.T) {
+	dir := t.TempDir()
+	job := `---
+id: job-1
+title: First Job
+status: pending
+type: oneshot
+---
+Do the thing.`
+	if err := os.WriteFile(filepath.Join(dir, "01-job.md"), []byte(job), 0o600); err != nil {
+		t.Fatalf("writing job file: %v", err)
+	}
+
+	if err := SetHold(dir, true); err != nil {
+		t.Fatalf("SetHold(true) error = %v", err)
+	}
+	reloaded, err := LoadPlan(dir)
+	if err != nil {
+		t.Fatalf("LoadPlan() error = %v", err)
+	}
+	if reloaded.Config == nil || reloaded.Config.Status != "hold" {
+		t.Errorf("status = %+v, want %q", reloaded.Config, "hold")
+	}
+}

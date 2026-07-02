@@ -179,7 +179,7 @@ func planTargetCandidates(slug string) []string {
 	}
 	var forms []string
 	for _, e := range entries {
-		if e == nil || e.Plan != slug || e.AbsPath == "" {
+		if e == nil || e.Plan != slug || e.AbsPath == "" || e.IsArchived() {
 			continue
 		}
 		containerID := filepath.Base(filepath.Dir(e.AbsPath))

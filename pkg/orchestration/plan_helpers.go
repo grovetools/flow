@@ -84,6 +84,42 @@ func MarkPlanReview(planDir string) error {
 	return nil
 }
 
+// SetHold sets or clears the plan-level hold flag (Config.Status == "hold"
+// in .grove-plan.yml) for the plan at planPath, persisting via SavePlan. It
+// is the shared write path for hold toggling (CLI `flow plan hold`/`unhold`
+// semantics and the plans-browser `h` action).
+//
+// Semantics: hold prevents NEW runs only. The CLI run guard
+// (flow/cmd/plan_run.go) and the daemon jobrunner refuse to start jobs of a
+// held plan, but jobs and agents that are already running continue
+// unaffected.
+//
+// Clearing the hold resets Status to "" only when it is currently "hold";
+// any other status (e.g. "review", "finished") is left untouched.
+func SetHold(planPath string, hold bool) error {
+	plan, err := LoadPlan(planPath)
+	if err != nil {
+		return fmt.Errorf("failed to load plan: %w", err)
+	}
+
+	if hold {
+		if plan.Config == nil {
+			plan.Config = &PlanConfig{}
+		}
+		plan.Config.Status = "hold"
+	} else {
+		if plan.Config == nil || plan.Config.Status != "hold" {
+			return nil // not on hold — nothing to clear
+		}
+		plan.Config.Status = ""
+	}
+
+	if err := SavePlan(planPath, plan); err != nil {
+		return fmt.Errorf("failed to save plan: %w", err)
+	}
+	return nil
+}
+
 // FindRootJobs returns jobs with no dependencies.
 func FindRootJobs(plan *Plan) []*Job {
 	var roots []*Job
