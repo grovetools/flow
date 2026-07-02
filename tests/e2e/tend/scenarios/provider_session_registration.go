@@ -190,4 +190,9 @@ func createProviderSessionRegistrationScenario(p ProviderConfig) *harness.Scenar
 var (
 	// Opencode session registration test
 	OpencodeSessionRegistrationScenario = createProviderSessionRegistrationScenario(AllProviders()[2])
+
+	// Pi session registration test: the pi provider must pre-register a
+	// session intent (metadata.json + pid.lock in the filesystem registry)
+	// synchronously before the agent launches, like claude/codex.
+	PiSessionRegistrationScenario = createProviderSessionRegistrationScenario(ProviderByName("pi"))
 )

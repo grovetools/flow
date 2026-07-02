@@ -52,7 +52,12 @@ scenarios = ["claude-settings-no-clobber"]
 [[test_scopes]]
 name = "agent-provider"
 rules = ".cx/agent-provider.rules"
-scenarios = ["claude-provider-lifecycle", "claude-provider-args", "codex-provider-lifecycle", "codex-provider-args", "opencode-provider-lifecycle", "opencode-provider-args", "per-job-provider-override"]
+scenarios = ["claude-provider-lifecycle", "claude-provider-args", "codex-provider-lifecycle", "codex-provider-args", "opencode-provider-lifecycle", "opencode-provider-args", "pi-provider-lifecycle", "pi-provider-args", "per-job-provider-override", "mixed-provider-plan"]
+
+[[test_scopes]]
+name = "agent-provider-lifecycle"
+rules = ".cx/agent-provider.rules"
+scenarios = ["codex-outcome-lifecycle", "pi-outcome-lifecycle", "opencode-outcome-lifecycle", "codex-nested-session-discovery", "pi-headless-launch", "codex-headless-unsupported", "pi-session-registration", "pi-interactive-non-tty"]
 
 [[hooks.on_stop]]
 name = "Auto-format"

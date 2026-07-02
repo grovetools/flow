@@ -14,13 +14,16 @@ import (
 
 // ProviderConfig defines the configuration for testing a specific provider.
 type ProviderConfig struct {
-	Name          string   // Provider name: "claude", "codex", "opencode"
-	MockName      string   // Mock binary name (e.g., "claude", "codex", "opencode")
+	Name          string   // Provider name: "claude", "codex", "opencode", "pi"
+	MockName      string   // Mock binary name (e.g., "claude", "codex", "opencode", "pi")
 	TestArgs      []string // Test args to verify are passed
 	ProjectSuffix string   // Unique suffix for project names
 }
 
-// AllProviders returns configurations for all three providers.
+// AllProviders returns configurations for all supported agent providers
+// (every name registered in flow's agent provider registry). Order is stable:
+// claude, codex, opencode, pi — existing index-based lookups depend on it;
+// new code should prefer ProviderByName.
 func AllProviders() []ProviderConfig {
 	return []ProviderConfig{
 		{
@@ -41,7 +44,25 @@ func AllProviders() []ProviderConfig {
 			TestArgs:      []string{"--opencode-test-arg", "--verbose"},
 			ProjectSuffix: "opencode",
 		},
+		{
+			Name:          "pi",
+			MockName:      "pi",
+			TestArgs:      []string{"--pi-test-arg", "--verbose"},
+			ProjectSuffix: "pi",
+		},
 	}
+}
+
+// ProviderByName returns the ProviderConfig for a provider name, panicking on
+// unknown names (scenario construction happens at init time, so a typo fails
+// the whole suite loudly instead of silently testing the wrong provider).
+func ProviderByName(name string) ProviderConfig {
+	for _, p := range AllProviders() {
+		if p.Name == name {
+			return p
+		}
+	}
+	panic(fmt.Sprintf("unknown e2e provider config %q", name))
 }
 
 // createProviderLifecycleScenario generates a lifecycle test for a specific provider.
@@ -448,6 +469,10 @@ var (
 	// Opencode provider tests
 	OpencodeProviderLifecycleScenario = createProviderLifecycleScenario(AllProviders()[2])
 	OpencodeProviderArgsScenario      = createProviderArgsScenario(AllProviders()[2])
+
+	// Pi provider tests
+	PiProviderLifecycleScenario = createProviderLifecycleScenario(ProviderByName("pi"))
+	PiProviderArgsScenario      = createProviderArgsScenario(ProviderByName("pi"))
 
 	// Per-job provider: frontmatter override + submit-time validation
 	PerJobProviderOverrideScenario = createPerJobProviderScenario()

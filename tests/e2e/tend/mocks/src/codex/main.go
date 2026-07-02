@@ -12,8 +12,13 @@ import (
 // Mock codex command to prevent actual agent launches during tests.
 // This mock:
 //  1. Logs its invocation for test verification
-//  2. Creates a fake rollout session log in the sandboxed ~/.codex/sessions/
-//     (mirroring real codex behavior, used by session registration)
+//  2. Creates a fake rollout session log in the sandboxed
+//     ~/.codex/sessions/YYYY/MM/DD/ — the DATE-NESTED layout the real codex
+//     CLI writes (codex-rs/rollout/src/recorder.rs) and the only layout
+//     flow's discovery matches (agentlogs transcript.CodexSessionsGlob:
+//     ~/.codex/sessions/*/*/*/*.jsonl). A flat file under ~/.codex/sessions/
+//     would be invisible to discovery — that was the P2 glob bug this mock
+//     now guards against (see the codex-nested-session-discovery scenario).
 //  3. Exits successfully
 func main() {
 	// Log the call for debugging purposes
@@ -29,19 +34,22 @@ func main() {
 	}
 
 	// Create a fake session log like the real codex CLI would. The flow
-	// codex provider discovers sessions via ~/.codex/sessions, expecting
-	// filenames whose last five dash-separated segments form a UUID.
+	// codex provider discovers sessions via the shared
+	// ~/.codex/sessions/YYYY/MM/DD/*.jsonl glob, expecting filenames whose
+	// last five dash-separated segments form a UUID.
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {
 		homeDir, _ = os.UserHomeDir()
 	}
 	if homeDir != "" {
-		sessionsDir := filepath.Join(homeDir, ".codex", "sessions")
+		now := time.Now()
+		sessionsDir := filepath.Join(homeDir, ".codex", "sessions", now.Format("2006"), now.Format("01"), now.Format("02"))
 		if err := os.MkdirAll(sessionsDir, 0o755); err == nil {
-			now := time.Now()
-			// Pseudo-UUID with the standard 8-4-4-4-12 shape.
+			// Pseudo-UUID with the standard 8-4-4-4-12 shape (the last
+			// segment is masked to 48 bits so it stays exactly 12 hex chars —
+			// flow parses the native id as the trailing UUID of the filename).
 			uuid := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-				now.UnixNano()&0xffffffff, 0x4d0c, 0x4b1d, 0x8e2f, now.UnixNano())
+				now.UnixNano()&0xffffffff, 0x4d0c, 0x4b1d, 0x8e2f, now.UnixNano()&0xffffffffffff)
 			sessionFile := filepath.Join(sessionsDir,
 				fmt.Sprintf("rollout-%s-%s.jsonl", now.Format("2006-01-02T15-04-05"), uuid))
 			mockContent := fmt.Sprintf(`{"type":"session_meta","timestamp":"%s","id":"%s"}

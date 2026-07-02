@@ -110,17 +110,36 @@ func main() {
 		scenarios.FileJobTypeScenario,
 		scenarios.FileJobTypeTUIScenario,
 
-		// Provider tests (parameterized for claude, codex, opencode)
+		// Provider tests (parameterized for claude, codex, opencode, pi)
 		scenarios.ClaudeProviderLifecycleScenario,
 		scenarios.ClaudeProviderArgsScenario,
 		scenarios.CodexProviderLifecycleScenario,
 		scenarios.CodexProviderArgsScenario,
 		scenarios.OpencodeProviderLifecycleScenario,
 		scenarios.OpencodeProviderArgsScenario,
+		scenarios.PiProviderLifecycleScenario,
+		scenarios.PiProviderArgsScenario,
 		scenarios.PerJobProviderOverrideScenario,
+		scenarios.MixedProviderPlanScenario,
+
+		// Provider lifecycle beyond launch: registered -> `flow agent list` ->
+		// idle outcome (simulated at the hooks/registry boundary) ->
+		// completion teardown + archival.
+		scenarios.CodexOutcomeLifecycleScenario,
+		scenarios.PiOutcomeLifecycleScenario,
+		scenarios.OpencodeOutcomeLifecycleScenario,
+
+		// Codex nested-session-layout discovery regression guard (P2).
+		scenarios.CodexNestedDiscoveryScenario,
+
+		// Headless execution mode coverage (pi supports it; codex must
+		// fail fast with an actionable error).
+		scenarios.PiHeadlessLaunchScenario,
+		scenarios.CodexHeadlessUnsupportedScenario,
 
 		// Session registration tests (verify synchronous registration for all providers)
 		scenarios.OpencodeSessionRegistrationScenario,
+		scenarios.PiSessionRegistrationScenario,
 
 		// Environment provisioning lifecycle
 		scenarios.EnvLifecycleScenario,
@@ -139,6 +158,7 @@ func main() {
 		scenarios.ClaudeInteractiveNonTTYScenario,
 		scenarios.CodexInteractiveNonTTYScenario,
 		scenarios.OpencodeInteractiveNonTTYScenario,
+		scenarios.PiInteractiveNonTTYScenario,
 		scenarios.MultiJobNonTTYRegressionScenario,
 
 		// Plan status from any directory (--dir flag and global resolution)

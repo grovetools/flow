@@ -373,6 +373,7 @@ var (
 	ClaudeInteractiveNonTTYScenario   = createInteractiveAgentNonTTYScenario(AllProviders()[0])
 	CodexInteractiveNonTTYScenario    = createInteractiveAgentNonTTYScenario(AllProviders()[1])
 	OpencodeInteractiveNonTTYScenario = createInteractiveAgentNonTTYScenario(AllProviders()[2])
+	PiInteractiveNonTTYScenario       = createInteractiveAgentNonTTYScenario(ProviderByName("pi"))
 
 	// Multi-job regression test
 	MultiJobNonTTYRegressionScenario = createMultiJobNonTTYScenario()
