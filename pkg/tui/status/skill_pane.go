@@ -314,10 +314,10 @@ func renderPaneNodeLine(b *strings.Builder, node *SkillPaneNode, stateMap map[st
 		state = orchestration.SkillFidelityState{Status: "pending"}
 	}
 
-	icon, color := skillStatusStyle(state.Status)
-	styledIcon := lipgloss.NewStyle().Foreground(color).Render(icon)
+	icon, statusStyle := skillStatusStyle(state.Status)
+	styledIcon := statusStyle.Render(icon)
 	statusLabel := fmt.Sprintf("[%s]", capitalizeFirst(state.Status))
-	styledStatus := lipgloss.NewStyle().Foreground(color).Render(statusLabel)
+	styledStatus := statusStyle.Render(statusLabel)
 
 	line := fmt.Sprintf("%s%s%s %-18s %s", cursorStr, indent, styledIcon, node.Name, styledStatus)
 
@@ -381,10 +381,10 @@ func renderSkillArtifactDetail(b *strings.Builder, node *SkillPaneNode, stateMap
 	labelStyle := t.Muted.Italic(true)
 
 	// Skill name header
-	_, color := skillStatusStyle(state.Status)
-	b.WriteString(lipgloss.NewStyle().Foreground(color).Bold(true).Render(node.Name))
+	_, statusStyle := skillStatusStyle(state.Status)
+	b.WriteString(statusStyle.Bold(true).Render(node.Name))
 	b.WriteString("  ")
-	b.WriteString(lipgloss.NewStyle().Foreground(color).Render(fmt.Sprintf("[%s]", capitalizeFirst(state.Status))))
+	b.WriteString(statusStyle.Render(fmt.Sprintf("[%s]", capitalizeFirst(state.Status))))
 	b.WriteString("\n\n")
 
 	artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
@@ -566,20 +566,14 @@ func extraArtifacts(produced, expected []string) []string {
 	return extras
 }
 
-// skillStatusStyle returns the icon and color for a skill status.
-func skillStatusStyle(status string) (string, lipgloss.Color) {
-	switch status {
-	case "completed":
-		return theme.IconStatusCompleted, lipgloss.Color("#00cc00")
-	case "running":
-		return theme.IconStatusRunning, lipgloss.Color("#cccc00")
-	case "failed":
-		return theme.IconStatusFailed, lipgloss.Color("#cc0000")
-	case "skipped":
-		return "-", lipgloss.Color("#888888")
-	default: // pending
-		return theme.IconPending, lipgloss.Color("#888888")
+// skillStatusStyle returns the icon and style for a skill status.
+func skillStatusStyle(status string) (string, lipgloss.Style) {
+	if status == "skipped" {
+		return "-", theme.DefaultTheme.Muted
 	}
+	// "completed", "running", "failed", and "pending" all map through the
+	// canonical status→style table in core/tui/theme.
+	return theme.StatusIconAndStyle(status, theme.DefaultTheme)
 }
 
 // capitalizeFirst capitalizes the first letter of a string.

@@ -67,11 +67,11 @@ func (m Model) renderMainScreen() string {
 
 	unfocusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240"))
+		BorderForeground(theme.DefaultColors.MutedText)
 
 	unfocusedBorderStyleWide := borderStyleWide.
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240"))
+		BorderForeground(theme.DefaultColors.MutedText)
 
 	focusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.ThickBorder()).
@@ -167,11 +167,11 @@ func (m Model) renderAdvancedScreen() string {
 
 	unfocusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240"))
+		BorderForeground(theme.DefaultColors.MutedText)
 
 	unfocusedBorderStyleWide := borderStyleWide.
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240"))
+		BorderForeground(theme.DefaultColors.MutedText)
 
 	focusedBorderStyle := borderStyle.
 		BorderStyle(lipgloss.ThickBorder()).
