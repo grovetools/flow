@@ -66,6 +66,7 @@ func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
 	cmd.Flags().BoolVar(&opts.DeleteBranch, "delete-branch", false, "Delete the local git branch")
 	cmd.Flags().BoolVar(&opts.DeleteRemote, "delete-remote", false, "Delete the remote git branch")
 	cmd.Flags().BoolVar(&opts.PruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
+	cmd.Flags().BoolVar(&opts.ArchiveWorktree, "archive-worktree", false, "Move the worktree to the grove worktree archive (detached backup with git bundles) instead of deleting it; mutually exclusive with --prune-worktree")
 	cmd.Flags().BoolVar(&opts.CloseSession, "close-session", false, "Close the associated tmux session")
 	cmd.Flags().BoolVar(&opts.CleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
 	cmd.Flags().BoolVar(&opts.RebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
@@ -80,6 +81,9 @@ func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
 }
 
 func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options) error {
+	if opts.ArchiveWorktree && opts.PruneWorktree {
+		return fmt.Errorf("--archive-worktree and --prune-worktree are mutually exclusive")
+	}
 	var dir string
 	if len(args) > 0 {
 		dir = args[0]
@@ -126,7 +130,7 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 			it.IsEnabled = on && it.IsAvailable
 		}
 	}
-	anyExplicitFlags := opts.DeleteBranch || opts.DeleteRemote || opts.PruneWorktree || opts.CloseSession || opts.CleanDevLinks || opts.RebuildBinaries || opts.Archive || opts.Force
+	anyExplicitFlags := opts.DeleteBranch || opts.DeleteRemote || opts.PruneWorktree || opts.ArchiveWorktree || opts.CloseSession || opts.CleanDevLinks || opts.RebuildBinaries || opts.Archive || opts.Force
 	if opts.Yes {
 		// --yes confirms cleanup actions, but the main-repo binary
 		// rebuild is a slow (~30s), non-teardown concern that must stay
@@ -135,6 +139,18 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 		// --yes` is fast teardown.
 		for _, item := range items {
 			if item.ID == plan_finish.ItemRebuildBinaries && !opts.RebuildBinaries {
+				item.IsEnabled = false
+				continue
+			}
+			// Archiving the worktree is strictly opt-in (like the
+			// rebuild), and it replaces pruning: when requested, the
+			// prune item must stay off or both would race over the
+			// same container.
+			if item.ID == plan_finish.ItemArchiveWorktree && !opts.ArchiveWorktree {
+				item.IsEnabled = false
+				continue
+			}
+			if item.ID == plan_finish.ItemPruneWorktree && opts.ArchiveWorktree {
 				item.IsEnabled = false
 				continue
 			}
@@ -148,6 +164,7 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 		enable(plan_finish.ItemMarkFinished, true)
 		enable(plan_finish.ItemCloseSession, opts.CloseSession)
 		enable(plan_finish.ItemPruneWorktree, opts.PruneWorktree)
+		enable(plan_finish.ItemArchiveWorktree, opts.ArchiveWorktree)
 		// Pruning the worktree leaves its sessionizer keymap entries
 		// dangling (paths that no longer exist), so clear them whenever
 		// the worktree is pruned.

@@ -78,6 +78,13 @@ type Options struct {
 	DeleteRemote bool
 	// PruneWorktree enables the "prune git worktree" item.
 	PruneWorktree bool
+	// ArchiveWorktree enables the "archive git worktree" item, which
+	// moves the worktree container under paths.WorktreeArchiveDir()
+	// (detached from its owner repos, with per-repo git bundles for
+	// unpushed history) instead of deleting it. Mutually exclusive
+	// with PruneWorktree — the archive item's Check and Action refuse
+	// to run when both are set.
+	ArchiveWorktree bool
 	// CloseSession enables the "close tmux session" item.
 	CloseSession bool
 	// Archive enables the "archive plan directory" item.
@@ -112,6 +119,7 @@ const (
 	ItemMarkFinished            = "mark_finished"
 	ItemKillBoundAgents         = "kill_bound_agents"
 	ItemCloseSession            = "close_session"
+	ItemArchiveWorktree         = "archive_worktree"
 	ItemPruneWorktree           = "prune_worktree"
 	ItemCleanDevLinks           = "clean_dev_links"
 	ItemDeleteSubmoduleBranches = "delete_submodule_branches"
@@ -672,6 +680,79 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					return err
 				}
 				return engine.KillSession(context.Background(), sessionName)
+			},
+		},
+		{
+			// Archive runs BEFORE prune_worktree (and before the
+			// branch-deletion items) so the per-repo git bundles it
+			// creates still see every ref. It is mutually exclusive
+			// with prune_worktree: both retire the same container.
+			ID:   ItemArchiveWorktree,
+			Name: "Archive git worktree",
+			Check: func() (string, error) {
+				if opts.ArchiveWorktree && opts.PruneWorktree {
+					return color.RedString("Conflicts with prune_worktree"),
+						fmt.Errorf("archive_worktree is mutually exclusive with prune_worktree")
+				}
+				if worktreeName == "" || gitRoot == "" {
+					return "N/A", nil
+				}
+				containerDir, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
+				if !ok {
+					containerDir = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
+				}
+				if _, err := os.Stat(containerDir); err != nil {
+					return "Not found", nil
+				}
+				return color.YellowString("Exists"), nil
+			},
+			Action: func() error {
+				// The wizard applies no CLI-level flag exclusion, so
+				// the factory is the last line of defense: refuse to
+				// archive when the prune item is also requested.
+				if opts.ArchiveWorktree && opts.PruneWorktree {
+					return fmt.Errorf("archive_worktree is mutually exclusive with prune_worktree — enable only one")
+				}
+				if worktreeName == "" || gitRoot == "" {
+					return fmt.Errorf("cannot archive worktree: worktree name or git root unknown")
+				}
+				containerPath, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
+				if !ok {
+					containerPath = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
+				}
+				if _, err := os.Stat(containerPath); err != nil {
+					return fmt.Errorf("worktree not found at %s: %w", containerPath, err)
+				}
+				archiveBase := paths.WorktreeArchiveDir()
+				if archiveBase == "" {
+					return fmt.Errorf("cannot resolve worktree archive directory (no grove data dir)")
+				}
+				destPath := filepath.Join(archiveBase, workspace.DirIdentifier(gitRoot), worktreeName)
+				if _, err := os.Stat(destPath); err == nil {
+					return fmt.Errorf("archive destination already exists: %s", destPath)
+				}
+				if !pathIsUnderWorktreeArchive(destPath) {
+					return fmt.Errorf("refusing to archive outside the worktree-archive boundary: %s", destPath)
+				}
+				var repos []string
+				if plan.Config != nil {
+					repos = plan.Config.Repos
+				}
+				if err := archiveWorktreeContainer(context.Background(), containerPath, destPath, gitRoot, repos); err != nil {
+					return err
+				}
+				// Re-key the registry entry onto the archive location
+				// (sets ArchivedAt/OriginalPath, deletes the old ID) so
+				// Reconcile neither prunes nor re-adopts it.
+				if err := worktreeregistry.Archive(containerPath, destPath); err != nil {
+					return fmt.Errorf("worktree moved to %s but registry update failed: %w", destPath, err)
+				}
+				// Same defensive reap as prune_worktree: a stray legacy
+				// `<gitRoot>/.grove-worktrees/<name>` stub has no registry
+				// entry and would otherwise survive.
+				reapLegacyStubWorktree(context.Background(), gitRoot, worktreeName, opts.Force)
+				fmt.Printf("    Archived worktree to: %s\n", destPath)
+				return nil
 			},
 		},
 		{
@@ -1893,4 +1974,222 @@ func pathIsUnderGroveWorktrees(wPath, gitRoot string) bool {
 		}
 	}
 	return false
+}
+
+// canonicalizePathForBoundary returns an absolute, symlink-resolved form of p
+// suitable for boundary comparisons. Unlike a bare EvalSymlinks, p need not
+// exist yet: the longest EXISTING ancestor is resolved and the non-existent
+// suffix re-joined, so a not-yet-created /var/... destination still compares
+// equal to its /private/var/... archive root on macOS.
+func canonicalizePathForBoundary(p string) string {
+	abs := p
+	if a, err := filepath.Abs(p); err == nil {
+		abs = a
+	}
+	abs = filepath.Clean(abs)
+	prefix := abs
+	suffix := ""
+	for {
+		if resolved, err := filepath.EvalSymlinks(prefix); err == nil {
+			return filepath.Clean(filepath.Join(resolved, suffix))
+		}
+		parent := filepath.Dir(prefix)
+		if parent == prefix {
+			return abs
+		}
+		suffix = filepath.Join(filepath.Base(prefix), suffix)
+		prefix = parent
+	}
+}
+
+// pathIsUnderWorktreeArchive reports whether destPath lies STRICTLY beneath
+// paths.WorktreeArchiveDir(). It is the archive-side counterpart of
+// pathIsUnderGroveWorktrees, which guards removal of LIVE worktrees and
+// rejects the archive base by design — so the archive move needs its own
+// destination guard. The archive root itself is never a valid destination.
+// Comparisons are symlink-resolved (see worktreeListContainsPath) so macOS
+// /var vs /private/var spellings still match.
+func pathIsUnderWorktreeArchive(destPath string) bool {
+	base := paths.WorktreeArchiveDir()
+	if base == "" || destPath == "" {
+		return false
+	}
+	root := canonicalizePathForBoundary(base)
+	dest := canonicalizePathForBoundary(destPath)
+	return dest != root && strings.HasPrefix(dest, root+string(filepath.Separator))
+}
+
+// ownerFromWorktreeGitPointer parses the `.git` FILE of the linked worktree
+// checkout at worktreeDir ("gitdir: <owner>/.git/worktrees/<name>", or
+// "<bare>/worktrees/<name>" for bare owners) and returns the owning repo
+// root. It mirrors core/pkg/workspace's ownerFromGitdir (layout.go), which is
+// unexported; parsing the pointer directly is exact and — unlike the
+// provider-based resolution in cleanupEcosystemWorktree — needs no workspace
+// discovery, which suits the archive path (read the pointer, then delete it).
+// Returns ok=false when .git is missing, a directory, or not a pointer file.
+func ownerFromWorktreeGitPointer(worktreeDir string) (string, bool) {
+	content, err := os.ReadFile(filepath.Join(worktreeDir, ".git"))
+	if err != nil {
+		return "", false
+	}
+	line := strings.TrimSpace(string(content))
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = strings.TrimSpace(line[:i])
+	}
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	gitdir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if gitdir == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(worktreeDir, gitdir)
+	}
+	gitdir = filepath.Clean(gitdir)
+	sep := string(filepath.Separator)
+	// Normal owners: <owner>/.git/worktrees/<name>
+	if i := strings.LastIndex(gitdir, sep+".git"+sep+"worktrees"+sep); i >= 0 {
+		return gitdir[:i], true
+	}
+	// Bare owners: <bare>/worktrees/<name>
+	if i := strings.LastIndex(gitdir, sep+"worktrees"+sep); i >= 0 {
+		return gitdir[:i], true
+	}
+	return "", false
+}
+
+// archiveWorktreeContainer detaches every git checkout inside containerPath
+// from its owner repo and moves the whole container to destPath (under the
+// worktree archive). The caller has already validated destPath (exists-check
+// + pathIsUnderWorktreeArchive) and updates the worktree registry afterwards.
+//
+// Sequence, per checkout (repo subdirs for ecosystem containers — from the
+// plan's repos list, like cleanupEcosystemWorktree — plus the container
+// itself; single-repo worktrees ARE the checkout):
+//
+//  1. `git bundle create <container>/<name>.bundle --all` captures every ref
+//     (including unpushed commits) as standalone history BEFORE the
+//     branch-deletion finish items delete the refs. Bundles refs, not the
+//     index, so a dirty tree is fine — and dirty/untracked files are
+//     preserved by the move itself.
+//  2. The `.git` gitdir POINTER FILE (never a directory) and the
+//     `.grove/workspace` owner marker are deleted so the archived copy can
+//     no longer resolve (or write through to) an owner repo.
+//  3. Each owner repo gets a `git worktree prune` (raw exec, matching
+//     cleanupEcosystemWorktree) to scrub the now-dangling registration.
+//  4. The container is moved with os.Rename, falling back to fs.CopyDir +
+//     os.RemoveAll of the source — the RemoveAll is gated by
+//     pathIsUnderGroveWorktrees, the same guard the prune item uses.
+//
+// Failures on individual repos (not a git checkout, bundle failure) are
+// logged warnings, not fatal: archiving a partially-degraded container is
+// still strictly better than losing it.
+func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitRoot string, repos []string) error {
+	type detachTarget struct {
+		dir        string
+		bundleName string
+	}
+	var targets []detachTarget
+	if len(repos) > 0 {
+		for _, repo := range repos {
+			targets = append(targets, detachTarget{
+				dir:        filepath.Join(containerPath, repo),
+				bundleName: repo + ".bundle",
+			})
+		}
+		// The container itself may be a linked worktree of the ecosystem
+		// root (rather than a plain synthetic dir); detach it too. The
+		// fixed bundle name cannot collide with a repo subdir's bundle.
+		targets = append(targets, detachTarget{dir: containerPath, bundleName: "ecosystem.bundle"})
+	} else {
+		targets = append(targets, detachTarget{
+			dir:        containerPath,
+			bundleName: filepath.Base(gitRoot) + ".bundle",
+		})
+	}
+
+	var owners []string
+	seenOwner := map[string]bool{}
+	addOwner := func(p string) {
+		if p == "" {
+			return
+		}
+		p = filepath.Clean(p)
+		if !seenOwner[p] {
+			seenOwner[p] = true
+			owners = append(owners, p)
+		}
+	}
+
+	for _, tgt := range targets {
+		if _, err := os.Stat(tgt.dir); err != nil {
+			if tgt.dir != containerPath {
+				fmt.Printf("    Warning: repo dir %s missing, skipping\n", tgt.dir)
+			}
+			continue
+		}
+		gitPtr := filepath.Join(tgt.dir, ".git")
+		fi, err := os.Lstat(gitPtr)
+		switch {
+		case err != nil:
+			// No .git at all. Expected for a synthetic ecosystem
+			// container; suspicious for a repo subdir.
+			if tgt.dir != containerPath {
+				fmt.Printf("    Warning: %s is not a git checkout, skipping bundle\n", tgt.dir)
+			}
+		case fi.Mode().IsRegular():
+			if owner, ok := ownerFromWorktreeGitPointer(tgt.dir); ok {
+				addOwner(owner)
+			}
+			bundlePath := filepath.Join(containerPath, tgt.bundleName)
+			bundleCmd := exec.CommandContext(ctx, "git", "-C", tgt.dir, "bundle", "create", bundlePath, "--all")
+			if output, bundleErr := bundleCmd.CombinedOutput(); bundleErr != nil {
+				fmt.Printf("    Warning: git bundle failed for %s: %s\n", tgt.dir, strings.TrimSpace(string(output)))
+			}
+			// Delete the gitdir pointer FILE — never a directory — so
+			// the archived copy cannot resolve an owner.
+			if rmErr := os.Remove(gitPtr); rmErr != nil {
+				return fmt.Errorf("failed to remove .git pointer %s: %w", gitPtr, rmErr)
+			}
+		default:
+			// A full .git DIRECTORY means a standalone clone, not a
+			// linked worktree: it owns its own object store, needs no
+			// bundle for safety and no detaching. Leave it intact.
+			fmt.Printf("    Note: %s has a full .git directory (standalone clone); left intact\n", tgt.dir)
+		}
+		marker := filepath.Join(tgt.dir, ".grove", "workspace")
+		if mfi, mErr := os.Lstat(marker); mErr == nil && mfi.Mode().IsRegular() {
+			if rmErr := os.Remove(marker); rmErr != nil {
+				fmt.Printf("    Warning: failed to remove workspace marker %s: %v\n", marker, rmErr)
+			}
+		}
+	}
+
+	// Scrub the now-dangling worktree registrations in each owner repo
+	// (raw exec, matching the pattern in cleanupEcosystemWorktree).
+	for _, owner := range owners {
+		pruneCmd := exec.CommandContext(ctx, "git", "-C", owner, "worktree", "prune")
+		if output, pruneErr := pruneCmd.CombinedOutput(); pruneErr != nil {
+			fmt.Printf("    Warning: failed to prune stale worktree registration in %s: %s\n", owner, string(output))
+		}
+	}
+
+	// Move the container into the archive.
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return fmt.Errorf("failed to create archive directory: %w", err)
+	}
+	if err := os.Rename(containerPath, destPath); err != nil {
+		if err := fs.CopyDir(containerPath, destPath); err != nil {
+			return fmt.Errorf("failed to copy worktree to archive: %w", err)
+		}
+		if !pathIsUnderGroveWorktrees(containerPath, gitRoot) {
+			return fmt.Errorf("worktree copied to %s but refusing to remove source outside worktree boundary: %s", destPath, containerPath)
+		}
+		if err := os.RemoveAll(filepath.Clean(containerPath)); err != nil {
+			return fmt.Errorf("failed to remove original worktree directory: %w", err)
+		}
+	}
+	return nil
 }
