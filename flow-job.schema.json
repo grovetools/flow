@@ -111,7 +111,8 @@
       "enum": [
         "claude",
         "codex",
-        "opencode"
+        "opencode",
+        "pi"
       ],
       "description": "Agent CLI provider for agent jobs; falls back to flow.interactive_provider (default claude)"
     },

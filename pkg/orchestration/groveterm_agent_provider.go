@@ -228,13 +228,17 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	}
 
 	// Extract native session ID from transcript path. Codex rollout filenames
-	// embed the conversation UUID (rollout-<ts>-<uuid>.jsonl) — store just the
-	// UUID so hooks can correlate notify thread-ids back to the session.
+	// embed the conversation UUID (rollout-<ts>-<uuid>.jsonl) and pi session
+	// filenames embed the session uuidv7 (<ts>_<uuid>.jsonl) — store just the
+	// UUID so hooks can correlate provider events back to the session.
 	var nativeID string
 	if transcriptPath != "" {
-		if p.spec.Name == "codex" {
+		switch p.spec.Name {
+		case "codex":
 			nativeID = codexNativeSessionID(transcriptPath)
-		} else {
+		case "pi":
+			nativeID = piNativeSessionID(transcriptPath)
+		default:
 			nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
 		}
 	}

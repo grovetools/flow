@@ -16,13 +16,13 @@ func specForTest(t *testing.T, name string) *AgentProviderSpec {
 
 func TestAgentProviderRegistry_Names(t *testing.T) {
 	names := AgentProviderNames()
-	want := []string{"claude", "codex", "opencode"}
+	want := []string{"claude", "codex", "opencode", "pi"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("expected sorted provider names %v, got %v", want, names)
 	}
 
 	headless := headlessAgentProviderNames()
-	wantHeadless := []string{"claude", "opencode"}
+	wantHeadless := []string{"claude", "opencode", "pi"}
 	if strings.Join(headless, ",") != strings.Join(wantHeadless, ",") {
 		t.Errorf("expected headless providers %v, got %v", wantHeadless, headless)
 	}
@@ -32,16 +32,16 @@ func TestValidateAgentProviderName(t *testing.T) {
 	if err := ValidateAgentProviderName(""); err != nil {
 		t.Errorf("empty provider name should be valid (fallback), got: %v", err)
 	}
-	for _, name := range []string{"claude", "codex", "opencode"} {
+	for _, name := range []string{"claude", "codex", "opencode", "pi"} {
 		if err := ValidateAgentProviderName(name); err != nil {
 			t.Errorf("provider %q should be valid, got: %v", name, err)
 		}
 	}
-	err := ValidateAgentProviderName("pi")
+	err := ValidateAgentProviderName("gemini")
 	if err == nil {
 		t.Fatal("expected error for unregistered provider")
 	}
-	if !strings.Contains(err.Error(), "pi") || !strings.Contains(err.Error(), "claude, codex, opencode") {
+	if !strings.Contains(err.Error(), "gemini") || !strings.Contains(err.Error(), "claude, codex, opencode, pi") {
 		t.Errorf("error should name the provider and list available ones, got: %v", err)
 	}
 }
@@ -125,6 +125,45 @@ func TestBuildShellCommand_Shapes(t *testing.T) {
 			t.Errorf("unexpected opencode command: %s", got)
 		}
 	})
+
+	t.Run("pi positional", func(t *testing.T) {
+		got := specForTest(t, "pi").BuildShellCommand([]string{"--model", "sonnet"}, "instr")
+		if got != `pi --model sonnet "instr"` {
+			t.Errorf("unexpected pi command: %s", got)
+		}
+	})
+}
+
+func TestPiHeadlessCommand_StdinPromptAndPrintFlag(t *testing.T) {
+	spec := specForTest(t, "pi")
+	if !spec.SupportsHeadless || spec.NewHeadlessCommand == nil {
+		t.Fatal("pi should support headless execution")
+	}
+	cmd := spec.NewHeadlessCommand("do the thing", []string{"--model", "gpt-5.2"})
+	// -p must come AFTER provider args so it never consumes a flag value as a
+	// positional message (pi's -p optionally eats the next non-dash token).
+	wantArgs := []string{"pi", "--model", "gpt-5.2", "-p"}
+	if strings.Join(cmd.Args, " ") != strings.Join(wantArgs, " ") {
+		t.Errorf("args = %v, want %v", cmd.Args, wantArgs)
+	}
+	if cmd.Stdin == nil {
+		t.Error("prompt should be piped via stdin (pi print mode reads piped stdin as the initial prompt)")
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
+		t.Error("headless pi should run in its own process group (Setpgid)")
+	}
+}
+
+func TestPiNativeSessionID(t *testing.T) {
+	cases := map[string]string{
+		"/home/u/.pi/agent/sessions/--tmp-w--/2026-07-01T22-20-05-123Z_0198c2f4-9a51-7abc-8def-0123456789ab.jsonl": "0198c2f4-9a51-7abc-8def-0123456789ab",
+		"/x/no-underscore.jsonl": "no-underscore",
+	}
+	for path, want := range cases {
+		if got := piNativeSessionID(path); got != want {
+			t.Errorf("piNativeSessionID(%q) = %q, want %q", path, got, want)
+		}
+	}
 }
 
 func TestAppendProviderJobArgs_NonClaudeProviders(t *testing.T) {
@@ -150,8 +189,19 @@ func TestAppendProviderJobArgs_NonClaudeProviders(t *testing.T) {
 		}
 	})
 
+	t.Run("pi accepts any model via --model", func(t *testing.T) {
+		args, err := appendProviderJobArgs(specForTest(t, "pi"), nil, &Job{ID: "j", Model: "anthropic/claude-sonnet-4-5:high"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := "--model anthropic/claude-sonnet-4-5:high"
+		if strings.Join(args, " ") != want {
+			t.Errorf("expected %q, got %v", want, args)
+		}
+	})
+
 	t.Run("effort rejected for providers without an effort flag", func(t *testing.T) {
-		for _, name := range []string{"codex", "opencode"} {
+		for _, name := range []string{"codex", "opencode", "pi"} {
 			_, err := appendProviderJobArgs(specForTest(t, name), nil, &Job{ID: "j", Effort: "high"})
 			if err == nil {
 				t.Errorf("%s: expected error for unsupported effort", name)
@@ -204,8 +254,14 @@ func TestValidateModelForJob_PerProvider(t *testing.T) {
 		}
 	})
 
+	t.Run("non-claude model allowed on pi agent job", func(t *testing.T) {
+		if err := ValidateModelForJob("google/gemini-3-pro:high", JobTypeInteractiveAgent, "pi"); err != nil {
+			t.Errorf("pi agent job should accept any model pattern, got: %v", err)
+		}
+	})
+
 	t.Run("unknown provider is an error", func(t *testing.T) {
-		err := ValidateModelForJob("gpt-5.2", JobTypeInteractiveAgent, "pi")
+		err := ValidateModelForJob("gpt-5.2", JobTypeInteractiveAgent, "aider")
 		if err == nil {
 			t.Fatal("expected error for unknown provider")
 		}
@@ -244,6 +300,17 @@ func TestBuildCommandParityAcrossPaths(t *testing.T) {
 		want := specForTest(t, "codex").BuildShellCommand(args, buildBriefingInstruction(briefing))
 		if cmd != want {
 			t.Errorf("codex parity broken:\n tmux: %s\n spec: %s", cmd, want)
+		}
+	})
+
+	t.Run("pi tmux vs spec", func(t *testing.T) {
+		cmd, err := NewPiAgentProvider().buildAgentCommand(job, plan, briefing, args)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := specForTest(t, "pi").BuildShellCommand(args, buildBriefingInstruction(briefing))
+		if cmd != want {
+			t.Errorf("pi parity broken:\n tmux: %s\n spec: %s", cmd, want)
 		}
 	})
 

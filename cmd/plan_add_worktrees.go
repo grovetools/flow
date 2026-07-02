@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/claudetrust"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/pitrust"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/pathutil"
@@ -256,6 +257,23 @@ func runPlanAddWorktrees(cmd *cobra.Command, args []string) error {
 // honoring the caller's. Best-effort throughout: a failure only costs the user
 // an interactive trust prompt, so we warn and move on.
 func seedTrustForAddedWorktree(ctx context.Context, worktreePath string, union []string, ecosystemRoot string) {
+	absWorktreePath := worktreePath
+	if abs, err := filepath.Abs(worktreePath); err == nil {
+		absWorktreePath = abs
+	}
+
+	// Pre-seed pi project trust for the container path (mirrors prepare.go).
+	// pi's trust lookup inherits from the nearest decided ancestor, so the
+	// container alone covers the newly-linked <worktree>/<repo> subdirs. Not
+	// coupled to the [claude] manageTrust gate below: pitrust gates itself on
+	// ~/.pi/agent existing and GROVE_PRESEED_PI_TRUST. Best-effort; no daemon
+	// fallback exists for pi trust.
+	if piPath, piErr := pathutil.CanonicalPath(absWorktreePath); piErr == nil {
+		if seedErr := pitrust.SeedTrust(piPath); seedErr != nil {
+			fmt.Printf("Warning: failed to pre-seed pi trust: %v\n", seedErr)
+		}
+	}
+
 	// Gate: grove only touches ~/.claude.json when this worktree's resolved
 	// [claude] profile sets manageTrust=true (default off, opt-in). Per-worktree
 	// by design (mirrors prepare.go); the resolver already cascades the global
@@ -263,11 +281,6 @@ func seedTrustForAddedWorktree(ctx context.Context, worktreePath string, union [
 	// SeedClaudeSettingsForWorktree at the call site (the full union).
 	if !workspace.WorktreeManagesTrust(worktreePath, union) {
 		return
-	}
-
-	absWorktreePath := worktreePath
-	if abs, err := filepath.Abs(worktreePath); err == nil {
-		absWorktreePath = abs
 	}
 
 	rawPaths := make([]string, 0, 1+len(union))

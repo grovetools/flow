@@ -130,7 +130,7 @@ type Job struct {
 	Responder     string    `yaml:"responder,omitempty" json:"responder,omitempty" jsonschema:"enum=oracle,enum=agent,description=Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API)"`
 	Model         string    `yaml:"model,omitempty" json:"model,omitempty" jsonschema:"description=LLM model to use for this job"`
 	Effort        string    `yaml:"effort,omitempty" json:"effort,omitempty" jsonschema:"description=Effort level for claude agent jobs; passed to the claude CLI as --effort (claude owns the accepted levels)"`
-	Provider      string    `yaml:"provider,omitempty" json:"provider,omitempty" jsonschema:"description=Agent CLI provider for agent jobs; falls back to flow.interactive_provider (default claude),enum=claude,enum=codex,enum=opencode"`
+	Provider      string    `yaml:"provider,omitempty" json:"provider,omitempty" jsonschema:"description=Agent CLI provider for agent jobs; falls back to flow.interactive_provider (default claude),enum=claude,enum=codex,enum=opencode,enum=pi"`
 	Template      string    `yaml:"template,omitempty" json:"template,omitempty" jsonschema:"description=Template name for generating the job prompt"`
 	Skill         string    `yaml:"skill,omitempty" json:"skill,omitempty" jsonschema:"description=Skill name to inject into the agent context (resolved via skills package)"`
 	SkillSequence []string  `yaml:"skill_sequence,omitempty" json:"skill_sequence,omitempty" jsonschema:"description=List of skills to execute in sequence"`

@@ -143,6 +143,51 @@ var agentProviderRegistry = map[string]*AgentProviderSpec{
 			return p
 		},
 	},
+	"pi": {
+		Name:             "pi",
+		Binary:           "pi",
+		SupportsHeadless: true,
+		NewHeadlessCommand: func(prompt string, agentArgs []string) *exec.Cmd {
+			// pi headless: --print/-p enters print mode, and the prompt is
+			// piped via stdin like the claude headless path (pi reads all of
+			// piped stdin as the initial prompt: readPipedStdin in
+			// packages/coding-agent/src/main.ts, combined into the initial
+			// message by src/cli/initial-message.ts). -p is appended AFTER the
+			// provider args so it can never swallow a following flag value as
+			// a positional message (args.ts only consumes the next token when
+			// it doesn't start with "-").
+			args := append([]string{}, agentArgs...)
+			args = append(args, "-p")
+			cmd := exec.Command("pi", args...)
+			cmd.Stdin = strings.NewReader(prompt)
+			// Detach the process: place it in its own process group so signals
+			// sent to the daemon don't propagate to the agent.
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			return cmd
+		},
+		// pi auto-submits a positional argument as the first prompt in the
+		// interactive TUI (packages/coding-agent/src/modes/interactive/
+		// interactive-mode.ts), so the claude/codex positional shape works.
+		BuildShellCommand: positionalShellCommand("pi"),
+		// pi accepts --model <pattern> (optionally provider/id, and a
+		// ":<thinking>" suffix); the CLI owns validation
+		// (packages/coding-agent/src/cli/args.ts).
+		ModelFlag: "--model",
+		// pi has no effort flag. Its closest analogue is --thinking / the
+		// ":<thinking>" model suffix, which is not effort semantics — reject
+		// job effort rather than mistranslating it.
+		EffortFlag:                  "",
+		ValidateJobModel:            nil, // pi owns its model patterns (provider/id, fuzzy match)
+		DefaultInputMode:            "standard",
+		SessionRegistration:         SessionRegistrationDaemon,
+		ProviderEnv:                 "pi",
+		HeadlessTranscriptDiscovery: true,
+		newTmuxProvider: func(agentEnv map[string]string) InteractiveAgentProvider {
+			p := NewPiAgentProvider()
+			p.agentEnv = agentEnv
+			return p
+		},
+	},
 	"opencode": {
 		Name:             "opencode",
 		Binary:           "opencode",
