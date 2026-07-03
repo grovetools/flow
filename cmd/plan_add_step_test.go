@@ -133,6 +133,120 @@ func TestRunPlanAddStep(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "responder agent with non-chat type errors",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan"}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "oneshot",
+				Title:      "Agent Responded Oneshot",
+				Responder:  "agent",
+				PromptFile: createTempFile(t, "Some prompt"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid responder value errors",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan"}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "chat",
+				Title:      "Bad Responder",
+				Responder:  "human",
+				PromptFile: createTempFile(t, "Some prompt"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "responder agent with chat type creates agent-responded chat with chat-agent template",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan"}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "chat",
+				Title:      "Design Chat",
+				Responder:  "agent",
+				PromptFile: createTempFile(t, "Design the feature"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				plan, err := orchestration.LoadPlan(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var job *orchestration.Job
+				for _, j := range plan.Jobs {
+					if j.Title == "Design Chat" {
+						job = j
+						break
+					}
+				}
+				if job == nil {
+					t.Fatal("Created job not found")
+				}
+				if job.Responder != "agent" {
+					t.Errorf("Expected responder 'agent', got %q", job.Responder)
+				}
+				if !job.IsAgentResponded() {
+					t.Error("Expected job to be agent-responded")
+				}
+				if job.Template != "chat-agent" {
+					t.Errorf("Expected default template 'chat-agent' for --responder agent, got %q", job.Template)
+				}
+			},
+		},
+		{
+			name: "responder oracle with chat type succeeds and behaves like absent responder",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan"}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "chat",
+				Title:      "Oracle Chat",
+				Responder:  "oracle",
+				PromptFile: createTempFile(t, "Discuss the feature"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				plan, err := orchestration.LoadPlan(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var job *orchestration.Job
+				for _, j := range plan.Jobs {
+					if j.Title == "Oracle Chat" {
+						job = j
+						break
+					}
+				}
+				if job == nil {
+					t.Fatal("Created job not found")
+				}
+				// Either no responder frontmatter or an explicit
+				// "responder: oracle" is acceptable; the dispatch guard
+				// must treat both identically to an absent field.
+				if job.Responder != "" && job.Responder != "oracle" {
+					t.Errorf("Expected responder empty or 'oracle', got %q", job.Responder)
+				}
+				if job.IsAgentResponded() {
+					t.Error("responder: oracle must not be treated as agent-responded (same dispatch path as absent field)")
+				}
+			},
+		},
+		{
 			name: "auto-create plan directory",
 			setupPlan: func(t *testing.T, dir string) {
 				// Don't create the plan directory - it should be auto-created

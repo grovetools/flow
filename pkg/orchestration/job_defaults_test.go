@@ -41,6 +41,18 @@ func TestApplyPlanDefaults(t *testing.T) {
 			want: Job{Type: JobTypeChat, Model: "gemini-3.5-flash"},
 		},
 		{
+			name: "agent-responded chat does NOT inherit plan model",
+			plan: &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}},
+			job:  Job{Type: JobTypeChat, Responder: "agent"},
+			want: Job{Type: JobTypeChat, Responder: "agent"}, // Model stays empty: never dispatched to an LLM
+		},
+		{
+			name: "oracle-responder chat still inherits plan model",
+			plan: &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}},
+			job:  Job{Type: JobTypeChat, Responder: "oracle"},
+			want: Job{Type: JobTypeChat, Responder: "oracle", Model: "gemini-3.5-flash"},
+		},
+		{
 			name: "headless agent does NOT inherit plan model",
 			plan: &Plan{Config: &PlanConfig{Model: "gemini-3.5-flash"}},
 			job:  Job{Type: JobTypeHeadlessAgent},

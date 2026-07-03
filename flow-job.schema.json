@@ -90,6 +90,14 @@
       "type": "string",
       "description": "Job type determining execution behavior (oneshot/chat/interactive_agent/headless_agent/shell/file)"
     },
+    "responder": {
+      "type": "string",
+      "enum": [
+        "oracle",
+        "agent"
+      ],
+      "description": "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API). Only meaningful for type: chat"
+    },
     "model": {
       "type": "string",
       "description": "LLM model to use for this job"
@@ -145,7 +153,7 @@
     },
     "strip_comments": {
       "type": "boolean",
-      "description": "Strip code comments from generated context before sending to the LLM (default: true)"
+      "description": "Strip code comments from generated context before sending to the LLM (default: true). Oracle-only concern: a no-op on responder: agent chats (agents read raw files)"
     },
     "repository": {
       "type": "string",
@@ -161,7 +169,7 @@
     },
     "inline": {
       "$ref": "#/$defs/InlineConfig",
-      "description": "Controls which content types are inlined vs uploaded"
+      "description": "Controls which content types are inlined vs uploaded. Oracle-only concern: responder: agent chats read dependencies from disk and ignore inlining"
     },
     "prepend_dependencies": {
       "type": "boolean",
@@ -262,6 +270,23 @@
     }
   },
   "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "responder"
+        ]
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "const": "chat",
+            "description": "responder is only meaningful for chat jobs"
+          }
+        }
+      }
+    }
+  ],
   "title": "Grove Flow Job",
   "description": "Schema for Grove Flow job frontmatter in markdown files."
 }

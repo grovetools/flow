@@ -32,6 +32,7 @@ type PlanAddStepCmd struct {
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`
+	Responder           string   `flag:"" help:"Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session per turn; never dispatched to an LLM API)"`
 	Effort              string   `flag:"" help:"Effort level for claude agent jobs (passed to the claude CLI as --effort)"`
 	Inline              []string `flag:"" sep:"," help:"File types to inline in prompt: dependencies, include, context, all, files, none (comma-separated)"`
 	PrependDependencies bool     `flag:"" help:"[DEPRECATED] Use --inline=dependencies instead. Inline dependency content into prompt body."`
@@ -97,6 +98,26 @@ func parseInlineFlag(values []string) orchestration.InlineConfig {
 		}
 	}
 	return orchestration.InlineConfig{Categories: categories}
+}
+
+// validateResponderFlag checks the --responder flag value against the job
+// type. Accepted values are empty (default), "oracle", and "agent". "oracle"
+// is explicitly valid and treated identically to an absent field (a stateless
+// LLM API call over inlined context); "agent" marks an agent-responded chat
+// whose response turns are authored by a fresh agent session per turn and is
+// never dispatched to an LLM API, so it only makes sense on chat jobs.
+func validateResponderFlag(responder, jobType string) error {
+	switch responder {
+	case "", "oracle":
+		return nil
+	case "agent":
+		if jobType != "chat" {
+			return fmt.Errorf("--responder agent requires --type chat (agent-responded chats are turn-based dialogues answered by a fresh agent session per turn); got --type %s", jobType)
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid --responder value %q: must be oracle or agent", responder)
+	}
 }
 
 // inheritSkillSequence sets job.SkillSequence from the skill's frontmatter
@@ -205,6 +226,13 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	// Use explicit worktree from command line flag only
 	worktreeToUse := cmd.Worktree
 
+	// An agent-responded chat defaults to the chat-agent template, which
+	// carries the respondent contract as its base prompt. An explicit
+	// --template always wins.
+	if cmd.Responder == "agent" && cmd.Template == "" {
+		cmd.Template = "chat-agent"
+	}
+
 	var job *orchestration.Job
 
 	if cmd.Template != "" {
@@ -230,6 +258,18 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 
 	if job == nil {
 		return fmt.Errorf("failed to create job: no job details collected")
+	}
+
+	// Add-time lint warnings for agent-responded chats (warn, never error):
+	// agent responders read files from disk, so oracle-only context knobs are
+	// wasted or meaningless on them.
+	if job.IsAgentResponded() {
+		if len(cmd.Inline) > 0 {
+			fmt.Fprintln(os.Stderr, "Warning: --inline with --responder agent: agent responders read dependencies from disk; inlining content into the prompt only wastes tokens")
+		}
+		if job.StripComments != nil {
+			fmt.Fprintln(os.Stderr, "Warning: strip_comments is a no-op with responder: agent — agents read raw files; comment stripping only applies to oracle context inlining")
+		}
 	}
 
 	// Validate the model for this job type: reject unknown models and
@@ -338,6 +378,10 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		return nil, fmt.Errorf("invalid job type: must be oneshot, chat, shell, interactive_agent, headless_agent, or file")
 	}
 
+	if err := validateResponderFlag(cmd.Responder, cmd.Type); err != nil {
+		return nil, err
+	}
+
 	// Validate dependencies
 	for _, dep := range cmd.DependsOn {
 		found := false
@@ -402,6 +446,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			ID:                  jobID,
 			Title:               cmd.Title,
 			Type:                orchestration.JobType(cmd.Type),
+			Responder:           cmd.Responder,
 			Status:              status,
 			DependsOn:           cmd.DependsOn,
 			Include:             relativeIncludeFiles,
@@ -522,6 +567,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		ID:                  jobID,
 		Title:               cmd.Title,
 		Type:                orchestration.JobType(cmd.Type),
+		Responder:           cmd.Responder,
 		Status:              status,
 		DependsOn:           cmd.DependsOn,
 		PromptBody:          strings.TrimSpace(prompt),
@@ -679,6 +725,14 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	}
 	if cmd.Effort != "" {
 		job.Effort = cmd.Effort
+	}
+	if cmd.Responder != "" {
+		// Validate against the resolved type (template frontmatter may have
+		// set it, with the CLI flag taking precedence above).
+		if err := validateResponderFlag(cmd.Responder, string(job.Type)); err != nil {
+			return nil, err
+		}
+		job.Responder = cmd.Responder
 	}
 	// New inline flag overrides template and plan defaults
 	if len(cmd.Inline) > 0 {

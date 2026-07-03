@@ -127,6 +127,7 @@ type Job struct {
 	Title         string    `yaml:"title" json:"title" jsonschema:"description=Human-readable title for the job"`
 	Status        JobStatus `yaml:"status" json:"status" jsonschema:"description=Current execution status (pending/running/completed/failed)"`
 	Type          JobType   `yaml:"type" json:"type" jsonschema:"description=Job type determining execution behavior (oneshot/chat/interactive_agent/headless_agent/shell/file)"`
+	Responder     string    `yaml:"responder,omitempty" json:"responder,omitempty" jsonschema:"enum=oracle,enum=agent,description=Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API)"`
 	Model         string    `yaml:"model,omitempty" json:"model,omitempty" jsonschema:"description=LLM model to use for this job"`
 	Effort        string    `yaml:"effort,omitempty" json:"effort,omitempty" jsonschema:"description=Effort level for claude agent jobs; passed to the claude CLI as --effort (claude owns the accepted levels)"`
 	Template      string    `yaml:"template,omitempty" json:"template,omitempty" jsonschema:"description=Template name for generating the job prompt"`
@@ -149,7 +150,7 @@ type Job struct {
 	// context before it is sent to the LLM, giving a comment-free view of the
 	// code. Enabled by default; set to false to keep comments. Uses a *bool so
 	// "unset" defaults to true (see IsStripCommentsEnabled).
-	StripComments *bool `yaml:"strip_comments,omitempty" json:"strip_comments,omitempty" jsonschema:"description=Strip code comments from generated context before sending to the LLM (default: true)"`
+	StripComments *bool `yaml:"strip_comments,omitempty" json:"strip_comments,omitempty" jsonschema:"description=Strip code comments from generated context before sending to the LLM (default: true). Oracle-only concern: a no-op on responder: agent chats (agents read raw files)"`
 
 	// Worktree configuration
 	Repository string `yaml:"repository,omitempty" json:"repository,omitempty" jsonschema:"description=Git repository URL for worktree creation"`
@@ -157,7 +158,7 @@ type Job struct {
 	Worktree   string `yaml:"worktree,omitempty" json:"worktree,omitempty" jsonschema:"description=Worktree name for isolated execution"`
 
 	// Inlining configuration
-	Inline              InlineConfig `yaml:"inline,omitempty" json:"inline,omitempty" jsonschema:"description=Controls which content types are inlined vs uploaded"`
+	Inline              InlineConfig `yaml:"inline,omitempty" json:"inline,omitempty" jsonschema:"description=Controls which content types are inlined vs uploaded. Oracle-only concern: responder: agent chats read dependencies from disk and ignore inlining"`
 	PrependDependencies bool         `yaml:"prepend_dependencies,omitempty" json:"prepend_dependencies,omitempty" jsonschema:"description=DEPRECATED: Use inline: [dependencies] instead"`
 
 	// Lifecycle hooks
@@ -224,6 +225,17 @@ type JobOptions struct {
 // into its prompt. Memory injection is enabled by default unless explicitly opted-out.
 func (j *Job) IsMemoryEnabled() bool {
 	return j.Memory == nil || *j.Memory
+}
+
+// IsAgentResponded reports whether this chat job's response turns are authored
+// directly into the artifact by a fresh agent session per turn rather than
+// produced by dispatching to an LLM API. Agent-responded chats (responder:
+// agent) must NEVER be sent to an LLM provider and never inherit the plan's
+// default chat model. An absent responder field and responder: oracle are
+// equivalent: today's oracle behavior (stateless API model over inlined,
+// comment-stripped context).
+func (j *Job) IsAgentResponded() bool {
+	return j.Type == JobTypeChat && j.Responder == "agent"
 }
 
 // IsStripCommentsEnabled reports whether code comments should be stripped from

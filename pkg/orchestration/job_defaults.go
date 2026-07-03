@@ -19,7 +19,9 @@ func ApplyPlanDefaults(plan *Plan, job *Job) {
 
 	// Model: only oneshot/chat jobs inherit the plan default (typically a
 	// gemini-* chat model). Agent jobs select their own model at launch.
-	if job.Model == "" && job.Type.InheritsPlanModel() && cfg.Model != "" {
+	// Agent-responded chats (responder: agent) never call an LLM API, so
+	// stamping the plan default would advertise a model that never runs.
+	if job.Model == "" && job.Type.InheritsPlanModel() && !job.IsAgentResponded() && cfg.Model != "" {
 		job.Model = cfg.Model
 	}
 	if job.Worktree == "" && cfg.Worktree != "" {

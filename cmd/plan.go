@@ -155,6 +155,7 @@ var (
 	planAddRecipeVars          []string
 	planAddSourceFile          string
 	planAddModel               string
+	planAddResponder           string
 	planAddRulesFile           string
 	planAddGitChanges          bool
 	planAddSkill               string
@@ -237,6 +238,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringArrayVar(&planAddRecipeVars, "recipe-vars", nil, "Variables for the recipe templates (e.g., key=value)")
 	planAddCmd.Flags().StringVar(&planAddSourceFile, "source-file", "", "Origin file path for tracking job provenance (e.g., Claude plan file)")
 	planAddCmd.Flags().StringVarP(&planAddModel, "model", "m", "", "LLM model to use for this job (e.g., gemini-3-pro-preview, claude-sonnet-4-20250514)")
+	planAddCmd.Flags().StringVar(&planAddResponder, "responder", "", "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API). Requires --type chat when set to agent")
 	planAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
 	planAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
 	planAddCmd.Flags().StringVar(&planAddSkill, "skill", "", "Skill name to inject into the agent context")
@@ -374,6 +376,7 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		RecipeVars:          planAddRecipeVars,
 		SourceFile:          planAddSourceFile,
 		Model:               planAddModel,
+		Responder:           planAddResponder,
 		RulesFile:           planAddRulesFile,
 		GitChanges:          planAddGitChanges,
 		Skill:               planAddSkill,

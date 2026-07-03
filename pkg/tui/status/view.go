@@ -212,7 +212,12 @@ func (m Model) estimateTableWidth() int {
 			}
 		}
 		if m.columnVisibility["TYPE"] {
-			w := 2 + lipgloss.Width(string(job.Type))
+			typeLabel := string(job.Type)
+			if job.IsAgentResponded() {
+				// Rendered as "agent chat" in the TYPE cell below.
+				typeLabel = "agent chat"
+			}
+			w := 2 + lipgloss.Width(typeLabel)
 			if w > columnWidths["TYPE"] {
 				columnWidths["TYPE"] = w
 			}
@@ -380,6 +385,12 @@ func (m Model) renderTableView() string {
 					jobTypeSymbol = theme.IconClaw
 					typeLabel = "claw"
 					isClaw = true
+				} else if job.IsAgentResponded() {
+					// Agent-responded chat (responder: agent): response turns
+					// authored by a fresh agent session per turn, never
+					// dispatched to an LLM API.
+					jobTypeSymbol = theme.IconRobot
+					typeLabel = "agent chat"
 				} else {
 					switch job.Type {
 					case "interactive_agent":
@@ -491,6 +502,10 @@ func (m Model) renderTableView() string {
 
 // getJobIcon returns the icon for a job type
 func getJobIcon(job *orchestration.Job) string {
+	// Agent-responded chat (responder: agent) gets its own icon.
+	if job.IsAgentResponded() {
+		return theme.IconRobot
+	}
 	switch job.Type {
 	case "interactive_agent":
 		return theme.IconInteractiveAgent

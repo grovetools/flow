@@ -1435,6 +1435,22 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		return fmt.Errorf("parsing chat file: %w", err)
 	}
 
+	// Agent-responded chats (responder: agent) have their response turns
+	// written directly into the artifact by a fresh agent session per turn;
+	// they must NEVER be dispatched to an LLM provider, regardless of the
+	// last turn's speaker. Running one is an explicit no-op.
+	if job.IsAgentResponded() {
+		ulog.Info("agent-responded chat (responder: agent) — skipping LLM dispatch").
+			Field("job", job.Title).
+			Log(ctx)
+		// Ensure status is correctly set to pending_user and return.
+		if job.Status != JobStatusPendingUser {
+			job.Status = JobStatusPendingUser
+			_ = updateJobFile(job)
+		}
+		return nil
+	}
+
 	if len(turns) == 0 {
 		return fmt.Errorf("chat file has no turns")
 	}
