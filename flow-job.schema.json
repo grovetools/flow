@@ -96,7 +96,7 @@
         "oracle",
         "agent"
       ],
-      "description": "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API). Only meaningful for type: chat"
+      "description": "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API)"
     },
     "model": {
       "type": "string",
@@ -270,23 +270,6 @@
     }
   },
   "type": "object",
-  "allOf": [
-    {
-      "if": {
-        "required": [
-          "responder"
-        ]
-      },
-      "then": {
-        "properties": {
-          "type": {
-            "const": "chat",
-            "description": "responder is only meaningful for chat jobs"
-          }
-        }
-      }
-    }
-  ],
   "title": "Grove Flow Job",
   "description": "Schema for Grove Flow job frontmatter in markdown files."
 }
