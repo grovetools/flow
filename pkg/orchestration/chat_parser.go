@@ -107,6 +107,66 @@ func ParseChatFile(content []byte) ([]*ChatTurn, error) {
 	return turns, nil
 }
 
+// TrailingChatTurn describes the final turn of a chat file for the purpose of
+// deciding whether an explicit `flow plan run` actually has a user turn to
+// dispatch. A chat file that ends on a bare '<!-- grove: {"template": "chat"}
+// -->' marker with no content after it has no user turn — dispatching it is a
+// silent no-op, which is almost always a mistake the user should hear about.
+type TrailingChatTurn struct {
+	// HasUserTurn is true when there is non-empty user content after the last
+	// chat marker — i.e. an actual turn to send to the LLM.
+	HasUserTurn bool
+	// OrphanBeforeMarker is true when the last marker has no content after it
+	// yet a preceding user turn does — the classic "typed the question, then
+	// pasted a fresh marker below it" mistake, where the question sits before
+	// the marker and is silently ignored.
+	OrphanBeforeMarker bool
+}
+
+// InspectTrailingChatTurn reports whether a chat file has a dispatchable user
+// turn after its last marker. It is used at the explicit run/dispatch layer to
+// turn a silent "no user turn" no-op into a hard error. Normal batch runs
+// (RunAll/RunNext) deliberately do NOT call this — a chat legitimately waiting
+// for user input has the exact same on-disk shape as this error, and only the
+// user's explicit `flow plan run <job>` distinguishes intent.
+func InspectTrailingChatTurn(content []byte) TrailingChatTurn {
+	turns, err := ParseChatFile(content)
+	if err != nil || len(turns) == 0 {
+		// Parsing problems are surfaced elsewhere; don't block here.
+		return TrailingChatTurn{HasUserTurn: true}
+	}
+
+	last := turns[len(turns)-1]
+	if last.Speaker == "user" && strings.TrimSpace(last.Content) != "" {
+		// A real user turn with content — dispatchable.
+		return TrailingChatTurn{HasUserTurn: true}
+	}
+
+	// No dispatchable user turn after the last marker. Detect the "content
+	// before the marker" variant: two consecutive user turns (the earlier one
+	// never answered by the LLM) means the user's ask is stranded above the
+	// trailing marker. A normal chat waiting after an LLM response has an llm
+	// turn immediately before the empty marker, so it is NOT flagged as orphan.
+	orphan := false
+	if len(turns) >= 2 {
+		prev := turns[len(turns)-2]
+		if prev.Speaker == "user" && strings.TrimSpace(prev.Content) != "" {
+			orphan = true
+		}
+	}
+	return TrailingChatTurn{HasUserTurn: false, OrphanBeforeMarker: orphan}
+}
+
+// NoUserTurnError builds the hard error reported when an explicitly-run chat
+// job has no user turn after its last chat marker. The message names the
+// problem and how to fix it.
+func NoUserTurnError(jobPath string) error {
+	return fmt.Errorf(
+		"no user turn after last chat marker in %s: add your message on a new line below the last '<!-- grove: {\"template\": \"chat\"} -->' marker (content placed before the marker is ignored)",
+		jobPath,
+	)
+}
+
 // stripBlockquoteMarkers removes a single leading blockquote marker from each
 // line ("> " or a bare ">"). Lines without a marker are left unchanged.
 func stripBlockquoteMarkers(content string) string {

@@ -181,6 +181,25 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		for _, jobFile := range targetJobs {
 			job, found := plan.GetJobByFilename(jobFile)
 			if found {
+				// Explicitly running an oracle chat (responder oracle/absent)
+				// that ends on a bare marker with no user content is a silent
+				// no-op today — the turn never reaches the LLM. Treat it as a
+				// hard error naming the problem. Batch runs (RunAll/RunNext)
+				// intentionally skip this check: a chat legitimately awaiting
+				// input has the same shape and must not fail the whole plan.
+				if job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() {
+					if content, rerr := os.ReadFile(job.FilePath); rerr == nil {
+						trailing := orchestration.InspectTrailingChatTurn(content)
+						if !trailing.HasUserTurn {
+							if trailing.OrphanBeforeMarker {
+								fmt.Fprintf(os.Stderr, "%s Warning: content sits before the last chat marker in %s and will be ignored — move it onto a new line below the marker\n",
+									color.YellowString(theme.IconWarning), job.FilePath)
+							}
+							return orchestration.NoUserTurnError(job.FilePath)
+						}
+					}
+				}
+
 				if job.Status == orchestration.JobStatusFailed || job.Status == orchestration.JobStatusAbandoned {
 					fmt.Printf("%s Auto-resetting job '%s' from %s to %s\n",
 						color.CyanString("↺"),

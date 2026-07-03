@@ -247,6 +247,134 @@ func TestRunPlanAddStep(t *testing.T) {
 			},
 		},
 		{
+			// Oracle chats (responder oracle/absent) with a dependency default
+			// inline: dependencies ON so the tool-less LLM actually sees them.
+			name: "oracle chat with deps defaults inline dependencies",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{
+					Name: "test-plan",
+					Jobs: []*orchestration.Job{
+						{
+							ID:       "spec",
+							Title:    "spec",
+							Filename: "01-spec.md",
+							Type:     "oneshot",
+							Status:   "completed",
+						},
+					},
+				}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "chat",
+				Title:      "Oracle Chat With Deps",
+				DependsOn:  []string{"01-spec.md"},
+				PromptFile: createTempFile(t, "Discuss the spec"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Oracle Chat With Deps")
+				if !hasInlineCategory(job, orchestration.InlineDependencies) {
+					t.Errorf("expected inline: dependencies to be defaulted, got %+v", job.Inline.Categories)
+				}
+			},
+		},
+		{
+			// responder: agent chats read files from disk — they must NOT get
+			// the inline default (the lint warns the other direction).
+			name: "agent chat with deps does not default inline",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{
+					Name: "test-plan",
+					Jobs: []*orchestration.Job{
+						{
+							ID:       "spec",
+							Title:    "spec",
+							Filename: "01-spec.md",
+							Type:     "oneshot",
+							Status:   "completed",
+						},
+					},
+				}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "chat",
+				Title:      "Agent Chat With Deps",
+				Responder:  "agent",
+				DependsOn:  []string{"01-spec.md"},
+				PromptFile: createTempFile(t, "Design the feature"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Agent Chat With Deps")
+				if hasInlineCategory(job, orchestration.InlineDependencies) {
+					t.Errorf("responder: agent chat must not default inline dependencies, got %+v", job.Inline.Categories)
+				}
+			},
+		},
+		{
+			// An explicit --inline value always wins over the oracle default.
+			name: "explicit inline none on oracle chat wins",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{
+					Name: "test-plan",
+					Jobs: []*orchestration.Job{
+						{
+							ID:       "spec",
+							Title:    "spec",
+							Filename: "01-spec.md",
+							Type:     "oneshot",
+							Status:   "completed",
+						},
+					},
+				}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "chat",
+				Title:      "Explicit None Chat",
+				DependsOn:  []string{"01-spec.md"},
+				Inline:     []string{"none"},
+				PromptFile: createTempFile(t, "Discuss the spec"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Explicit None Chat")
+				if hasInlineCategory(job, orchestration.InlineDependencies) {
+					t.Errorf("explicit --inline none must win over the default, got %+v", job.Inline.Categories)
+				}
+			},
+		},
+		{
+			// A dependency-free oracle chat has nothing to inline.
+			name: "oracle chat without deps does not default inline",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan"}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:       "chat",
+				Title:      "Depless Chat",
+				PromptFile: createTempFile(t, "Just chat"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Depless Chat")
+				if hasInlineCategory(job, orchestration.InlineDependencies) {
+					t.Errorf("dependency-free chat must not default inline, got %+v", job.Inline.Categories)
+				}
+			},
+		},
+		{
 			name: "auto-create plan directory",
 			setupPlan: func(t *testing.T, dir string) {
 				// Don't create the plan directory - it should be auto-created
@@ -514,6 +642,33 @@ func TestCollectJobDetails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// findJobByTitle loads the plan in dir and returns the job with the given
+// title, failing the test if it is not found.
+func findJobByTitle(t *testing.T, dir, title string) *orchestration.Job {
+	t.Helper()
+	plan, err := orchestration.LoadPlan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range plan.Jobs {
+		if j.Title == title {
+			return j
+		}
+	}
+	t.Fatalf("job %q not found", title)
+	return nil
+}
+
+// hasInlineCategory reports whether the job's inline config includes cat.
+func hasInlineCategory(job *orchestration.Job, cat orchestration.InlineCategory) bool {
+	for _, c := range job.Inline.Categories {
+		if c == cat {
+			return true
+		}
+	}
+	return false
 }
 
 func createTempFile(t *testing.T, content string) string {

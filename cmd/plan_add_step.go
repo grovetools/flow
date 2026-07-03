@@ -272,6 +272,21 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		}
 	}
 
+	// Oracle chats (responder oracle/absent) with dependencies need those
+	// dependencies inlined into the prompt: the stateless, tool-less LLM can't
+	// read a "<dep>.md" file off disk, so an un-inlined dep silently never
+	// reaches the model. Default inline: dependencies ON for them unless the
+	// user gave an explicit --inline value (which always wins) or a template
+	// already set inline. responder: agent chats are the opposite case — they
+	// read files from disk and keep the lint warning above.
+	if job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() &&
+		len(job.DependsOn) > 0 && len(cmd.Inline) == 0 && len(job.Inline.Categories) == 0 {
+		job.Inline = orchestration.InlineConfig{
+			Categories: []orchestration.InlineCategory{orchestration.InlineDependencies},
+		}
+		fmt.Fprintln(os.Stderr, "Note: defaulting inline: dependencies for oracle chat with dependencies (pass --inline to override)")
+	}
+
 	// Validate the model for this job type: reject unknown models and
 	// provider mismatches (e.g. gemini model on a claude agent job) early.
 	if err := orchestration.ValidateModelForJob(job.Model, job.Type); err != nil {

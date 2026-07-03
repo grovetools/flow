@@ -137,6 +137,118 @@ Initial prompt
 	}
 }
 
+func TestInspectTrailingChatTurn(t *testing.T) {
+	const fm = `---
+id: test-plan
+title: Test Plan
+---
+
+`
+	tests := []struct {
+		name       string
+		body       string
+		wantUser   bool
+		wantOrphan bool
+	}{
+		{
+			// A chat ending on a bare marker with nothing after it has no user
+			// turn to dispatch.
+			name: "bare trailing marker",
+			body: `Initial prompt
+
+<!-- grove: {"model": "claude-3-opus"} -->
+An LLM response
+
+<!-- grove: {"template": "chat"} -->`,
+			wantUser:   false,
+			wantOrphan: false,
+		},
+		{
+			// Content after the last marker is a real user turn — dispatch it.
+			name: "content after marker dispatches",
+			body: `Initial prompt
+
+<!-- grove: {"model": "claude-3-opus"} -->
+An LLM response
+
+<!-- grove: {"template": "chat"} -->
+Please add more detail`,
+			wantUser:   true,
+			wantOrphan: false,
+		},
+		{
+			// User typed the question, then pasted a fresh marker below it: the
+			// question is stranded before the empty trailing marker.
+			name: "content before trailing marker is orphaned",
+			body: `My real question for the model
+
+<!-- grove: {"template": "chat"} -->`,
+			wantUser:   false,
+			wantOrphan: true,
+		},
+		{
+			// A brand-new empty chat (no content anywhere) has no user turn but
+			// nothing is orphaned.
+			name:       "empty chat",
+			body:       ``,
+			wantUser:   false,
+			wantOrphan: false,
+		},
+		{
+			// The normal "waiting after an LLM response" shape must NOT be
+			// flagged as orphaned — the turn before the empty marker is the LLM.
+			name: "waiting after llm response is not orphan",
+			body: `Initial prompt
+
+<!-- grove: {"model": "claude-3-opus"} -->
+Here is my answer
+
+<!-- grove: {"template": "chat"} -->`,
+			wantUser:   false,
+			wantOrphan: false,
+		},
+		{
+			// A plain first-turn prompt with no markers at all is a user turn.
+			name:       "leading prompt only",
+			body:       `Just a prompt, no markers`,
+			wantUser:   true,
+			wantOrphan: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := orchestration.InspectTrailingChatTurn([]byte(fm + tt.body))
+			if got.HasUserTurn != tt.wantUser {
+				t.Errorf("HasUserTurn = %v, want %v", got.HasUserTurn, tt.wantUser)
+			}
+			if got.OrphanBeforeMarker != tt.wantOrphan {
+				t.Errorf("OrphanBeforeMarker = %v, want %v", got.OrphanBeforeMarker, tt.wantOrphan)
+			}
+		})
+	}
+}
+
+func TestNoUserTurnError(t *testing.T) {
+	err := orchestration.NoUserTurnError("/plans/demo/03-chat.md")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	msg := err.Error()
+	// Names the problem...
+	if !strings.Contains(msg, "no user turn after last chat marker") {
+		t.Errorf("error should name the problem, got %q", msg)
+	}
+	// ...includes the job path...
+	if !strings.Contains(msg, "/plans/demo/03-chat.md") {
+		t.Errorf("error should include the job path, got %q", msg)
+	}
+	// ...and says how to fix it.
+	if !strings.Contains(msg, "add your message") || !strings.Contains(msg, "below the last") {
+		t.Errorf("error should explain how to fix it, got %q", msg)
+	}
+}
+
 func TestParseChatFileMultipleTurns(t *testing.T) {
 	// Directive model: each turn after the initial user prompt is introduced by
 	// a <!-- grove: ... --> directive. A directive with a template is a user
