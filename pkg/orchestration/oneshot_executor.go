@@ -182,12 +182,21 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Always regenerate context to ensure oneshot has latest view
 	usedRulesPath, jobCtx, err := e.regenerateContextInWorktree(ctx, workDir, "oneshot", job, plan)
 	if err != nil {
-		// Log warning but don't fail the job
-		ulog.Warn("Failed to regenerate context").
+		// Hard-fail: a regen error means we could not build this job's stripped,
+		// job-scoped context. Proceeding would either upload no repo context or
+		// (via the runner's WorkDir fallback) the shared, unstripped context —
+		// both wrong. Fail loudly with the underlying error instead.
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		_ = updateJobFile(job)
+		ulog.Error("Failed to regenerate context").
 			Err(err).
 			Field("request_id", requestID).
 			Field("job_id", job.ID).
+			Pretty(theme.IconError + " Failed to regenerate context: " + err.Error()).
 			Log(ctx)
+		execErr = fmt.Errorf("regenerating context: %w", err)
+		return execErr
 	} else if usedRulesPath != "" {
 		if archiveErr := ArchiveContextRules(job, plan, usedRulesPath); archiveErr != nil {
 			ulog.Warn("Failed to archive context rules").Err(archiveErr).Log(ctx)
@@ -734,18 +743,26 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string,
 	}
 }
 
-// collectContextFiles returns the context file paths to attach for a job. It
-// prefers the job-scoped generated context (hot/cold under .artifacts/<job-id>/)
-// when available — this is what isolates concurrent jobs in one plan from each
-// other — and otherwise falls back to the shared plan-level lookup. CLAUDE.md
-// from the context dir is always included when present.
+// collectContextFiles returns the context file paths to attach for a job. When
+// a job-scoped context was requested (jobCtx != nil — every real job takes this
+// path via regenerateContextInWorktree), that context is AUTHORITATIVE: attach
+// only the job-scoped hot/cold files (+ CLAUDE.md) and never substitute the
+// shared plan-level context/generated/context. The shared file is written by a
+// manager that did not honor this job's strip_comments, so falling back to it
+// would upload unstripped context (the strip_comments-ignored bug). Only jobless
+// callers (jobCtx == nil) use the shared plan-level lookup. CLAUDE.md from the
+// context dir is always included when present.
 func (e *OneShotExecutor) collectContextFiles(job *Job, plan *Plan, worktreePath string, jobCtx *jobContextPaths) []string {
 	var contextFiles []string
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
 
-	if jobFiles := jobCtx.uploadFiles(); len(jobFiles) > 0 {
-		contextFiles = append(contextFiles, jobFiles...)
+	if jobCtx != nil {
+		// Job-scoped context is authoritative. uploadFiles() returns only the
+		// files that actually exist; if generation failed it returns nothing,
+		// and we still refuse the shared fallback (the caller hard-fails on the
+		// regen error before reaching here).
+		contextFiles = append(contextFiles, jobCtx.uploadFiles()...)
 		if contextDir != "" {
 			claudePath := filepath.Join(contextDir, "CLAUDE.md")
 			if _, err := os.Stat(claudePath); err == nil {
@@ -1091,6 +1108,15 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 			Cold:      filepath.Join(artifactsDir, "cached-context"),
 			FilesList: filepath.Join(artifactsDir, "context-files"),
 		}
+		// Wipe any artifacts from a prior run before regenerating. A prior run
+		// may have written this job's context with a different strip_comments
+		// setting (or a stale file set); clearing first guarantees a regen
+		// failure below can never leave last run's context on disk for
+		// existingPaths()/uploadFiles() to pick up and upload unstripped.
+		_ = os.RemoveAll(artifactsDir)
+		if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+			return "", jobCtx, fmt.Errorf("preparing job context dir %s: %w", artifactsDir, err)
+		}
 		coldList := filepath.Join(artifactsDir, "cached-context-files")
 		ctxMgr = grovecontext.NewManagerWithPathsOverride(contextDir, jobCtx.Hot, jobCtx.Cold, jobCtx.FilesList, coldList)
 		// Comment stripping mutates plain Manager state, so only enable it on
@@ -1167,7 +1193,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		}
 
 		if !foundPath {
-			return "", nil, fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
+			return "", jobCtx, fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
 		}
 
 		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
@@ -1175,7 +1201,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 		// Generate context using the custom rules file (job-scoped output)
 		if err := ctxMgr.GenerateContextFromRulesFile(rulesFilePath, true); err != nil {
-			return rulesFilePath, nil, fmt.Errorf("failed to generate job-specific context: %w", err)
+			return rulesFilePath, jobCtx, fmt.Errorf("failed to generate job-specific context: %w", err)
 		}
 
 		// Mirror the context summary to the per-job writer so callers
@@ -1241,14 +1267,14 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 					fmt.Fprintf(writer, "Warning: Could not create .grove/rules file.\n")
 					fmt.Fprintf(writer, "Skipping interactive prompt and proceeding without context for %s job\n", jobType)
 					log.WithField("job_type", jobType).Info(fmt.Sprintf("Skipping interactive prompt and proceeding without context for %s job", jobType))
-					return "", nil, e.displayContextInfo(ctx, contextDir)
+					return "", jobCtx, e.displayContextInfo(ctx, contextDir)
 				}
 
 				// Check if we have a TTY before prompting
 				if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
 					fmt.Fprintf(writer, "Warning: Could not create .grove/rules file.\n")
 					log.WithField("job_type", jobType).Info("No TTY available, proceeding without context")
-					return "", nil, e.displayContextInfo(ctx, contextDir)
+					return "", jobCtx, e.displayContextInfo(ctx, contextDir)
 				}
 
 				// Prompt user when rules file is missing
@@ -1309,10 +1335,10 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 					case "p", "proceed":
 						fmt.Fprintf(writer, "Warning: Proceeding without context from rules.\n")
 						fmt.Fprintf(writer, "Tip: To add context for future runs, open a new terminal, navigate to the context directory, and run 'cx edit'.\n")
-						return "", nil, e.displayContextInfo(ctx, contextDir)
+						return "", jobCtx, e.displayContextInfo(ctx, contextDir)
 
 					case "c", "cancel":
-						return "", nil, fmt.Errorf("job canceled by user: .grove/rules file not found")
+						return "", jobCtx, fmt.Errorf("job canceled by user: .grove/rules file not found")
 
 					default:
 						fmt.Fprintf(writer, "Error: Invalid choice '%s'. Please choose E, P, or C.\n", choice)
@@ -1324,7 +1350,7 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 				}
 			}
 		} else {
-			return "", nil, fmt.Errorf("checking .grove/rules: %w", err)
+			return "", jobCtx, fmt.Errorf("checking .grove/rules: %w", err)
 		}
 	}
 
@@ -1338,12 +1364,12 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 
 	// Update context from rules
 	if err := ctxMgr.UpdateFromRules(); err != nil {
-		return rulesPath, nil, fmt.Errorf("update context from rules: %w", err)
+		return rulesPath, jobCtx, fmt.Errorf("update context from rules: %w", err)
 	}
 
 	// Generate context file
 	if err := ctxMgr.GenerateContext(true); err != nil {
-		return rulesPath, nil, fmt.Errorf("generate context: %w", err)
+		return rulesPath, jobCtx, fmt.Errorf("generate context: %w", err)
 	}
 
 	// Get and display context statistics
@@ -1488,6 +1514,15 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		ulog.Info("agent-responded chat (responder: agent) — skipping LLM dispatch").
 			Field("job", job.Title).
 			Log(ctx)
+		// strip_comments only affects the inlined context uploaded to an LLM API.
+		// responder: agent chats never dispatch to an API — the agent reads raw
+		// worktree files — so an explicitly-set strip_comments has no effect. Warn
+		// so the user isn't misled into thinking their code was stripped.
+		if job.StripComments != nil {
+			ulog.Warn("strip_comments has no effect for responder: agent chats (the agent reads raw worktree files)").
+				Field("job", job.Title).
+				Log(ctx)
+		}
 		// Ensure status is correctly set to pending_user and return.
 		if job.Status != JobStatusPendingUser {
 			job.Status = JobStatusPendingUser
@@ -1615,8 +1650,14 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Regenerate context in the worktree to ensure chat has latest view
 		chatUsedRulesPath, chatJobCtx, err = e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan)
 		if err != nil {
-			// Log warning but don't fail the job
-			ulog.Warn("Failed to regenerate context in worktree").Err(err).Log(ctx)
+			// Hard-fail: without stripped, job-scoped context we must not proceed
+			// and silently upload the shared, unstripped context (the runner's
+			// WorkDir fallback) — that is exactly the strip_comments-ignored bug.
+			job.Status = JobStatusFailed
+			_ = updateJobFile(job)
+			ulog.Error("Failed to regenerate context in worktree").Err(err).Log(ctx)
+			execErr = fmt.Errorf("regenerating chat context: %w", err)
+			return execErr
 		}
 	} else {
 		// No worktree specified, default to the project git repository root (notebook-aware).
@@ -1633,8 +1674,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Also regenerate context for non-worktree case if .grove/rules exists
 		chatUsedRulesPath, chatJobCtx, err = e.regenerateContextInWorktree(ctx, worktreePath, "chat", job, plan)
 		if err != nil {
-			// Log warning but don't fail the job
-			ulog.Warn("Failed to regenerate context").Err(err).Log(ctx)
+			// Hard-fail (see the worktree branch above): never fall through to an
+			// unstripped shared-context upload.
+			job.Status = JobStatusFailed
+			_ = updateJobFile(job)
+			ulog.Error("Failed to regenerate context").Err(err).Log(ctx)
+			execErr = fmt.Errorf("regenerating chat context: %w", err)
+			return execErr
 		}
 	}
 

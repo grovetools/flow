@@ -20,6 +20,7 @@ func main() {
 		scenarios.DependencyWorkflowScenario,
 		scenarios.OneshotWithContextScenario,
 		scenarios.OneshotStripCommentsScenario,
+		scenarios.ChatStripCommentsScenario,
 		scenarios.AgentWorktreeLifecycleScenario,
 		scenarios.ChatAndExtractWorkflowScenario,
 		scenarios.JobFailureAndRecoveryScenario,
