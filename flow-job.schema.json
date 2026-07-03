@@ -155,6 +155,10 @@
       "type": "boolean",
       "description": "Strip code comments from generated context before sending to the LLM (default: true). Oracle-only concern: a no-op on responder: agent chats (agents read raw files)"
     },
+    "no_cache": {
+      "type": "boolean",
+      "description": "Disable provider prompt caching for this job's LLM calls (default: caching enabled). Only worthwhile for large-context jobs that run exactly once"
+    },
     "repository": {
       "type": "string",
       "description": "Git repository URL for worktree creation"

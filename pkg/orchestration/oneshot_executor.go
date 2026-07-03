@@ -402,6 +402,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 				ColdContextFile:  coldCtxFile,              // Job-scoped, avoids cross-job race
 				SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
 				APIKey:           apiKey,                   // Pass the resolved API key
+				NoCache:          job.NoCache,              // Frontmatter no_cache: true opts out of prompt caching
 				// Pass context for better logging
 				Caller:   "grove-flow-oneshot",
 				JobID:    job.ID,
@@ -428,6 +429,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					ColdContextFile: coldCtxFile, // Job-scoped, avoids cross-job race
 					APIKey:          apiKey,
 					MaxTokens:       modelpkg.MaxTokens(effectiveModel),
+					NoCache:         job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
 					Caller:          "grove-flow-oneshot",
 					JobID:           job.ID,
 					PlanName:        plan.Name,
@@ -1909,6 +1911,7 @@ interpret and continue through YOUR current system instructions.
 				HotContextFile:   chatHotCtx,               // Job-scoped, avoids cross-job race
 				ColdContextFile:  chatColdCtx,              // Job-scoped, avoids cross-job race
 				SkipConfirmation: e.config.SkipInteractive, // Respect -y flag
+				NoCache:          job.NoCache,              // Frontmatter no_cache: true opts out of prompt caching
 				// Pass context for better logging
 				Caller:   "grove-flow-chat",
 				JobID:    job.ID,
@@ -1946,6 +1949,7 @@ interpret and continue through YOUR current system instructions.
 					ColdContextFile: chatColdCtx, // Job-scoped, avoids cross-job race
 					APIKey:          apiKey,
 					MaxTokens:       modelpkg.MaxTokens(effectiveModel),
+					NoCache:         job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
 					Caller:          "grove-flow-chat",
 					JobID:           job.ID,
 					PlanName:        plan.Name,

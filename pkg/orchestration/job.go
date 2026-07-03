@@ -151,6 +151,13 @@ type Job struct {
 	// code. Enabled by default; set to false to keep comments. Uses a *bool so
 	// "unset" defaults to true (see IsStripCommentsEnabled).
 	StripComments *bool `yaml:"strip_comments,omitempty" json:"strip_comments,omitempty" jsonschema:"description=Strip code comments from generated context before sending to the LLM (default: true). Oracle-only concern: a no-op on responder: agent chats (agents read raw files)"`
+	// NoCache disables provider prompt caching for this job's LLM calls.
+	// Caching is on by default: the first request pays a ~1.25x write premium
+	// on the context documents and any repeat within the cache TTL (retries,
+	// later chat turns, sibling jobs with identical context) reads them at
+	// ~0.1x. Set no_cache: true only for large-context jobs known to run
+	// exactly once, where the write premium buys nothing. Oracle-only concern.
+	NoCache bool `yaml:"no_cache,omitempty" json:"no_cache,omitempty" jsonschema:"description=Disable provider prompt caching for this job's LLM calls (default: caching enabled). Only worthwhile for large-context jobs that run exactly once"`
 
 	// Worktree configuration
 	Repository string `yaml:"repository,omitempty" json:"repository,omitempty" jsonschema:"description=Git repository URL for worktree creation"`
