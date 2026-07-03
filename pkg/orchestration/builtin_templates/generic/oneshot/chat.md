@@ -13,6 +13,7 @@ You are helping to develop software.
 - Use direct, technical language - no timelines or corporate speak
 - Do NOT include large code blocks - just describe what to create (small snippets are enouraged though)
 - Be specific about file paths (e.g., "backend/src/routes/todos.ts")
+- IMPORTANT: code comments may have been stripped from the context you see, so line numbers do NOT reliably match the actual source files. Anchor every claim to a file path plus a function/type/symbol name (or a short quoted snippet), never to an exact line number alone
 - IMPORTANT: inform the LLM agent of all files it should read for sufficient context, using full paths if they fall outside the repo/project
 - The user may provide feedback and ask for refinements in subsequent turns of this conversation; IMPORTANT: do not restate the full plan; address the user's specific suggestions/questions in your next turn in the conversation. In your response, ask the user if they'd like to see the full plan with the feedback incorporated.
 
