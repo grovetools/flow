@@ -139,6 +139,13 @@
       "type": "array",
       "description": "Files or globs to include as context in the job prompt"
     },
+    "pinned_context": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Files placed in a stable cached region of Anthropic chat requests with a dedicated cache_control breakpoint; append new entries to the end. Anthropic oracle-chat only"
+    },
     "source_block": {
       "type": "string",
       "description": "Reference to a named block in another job to use as input"

@@ -290,6 +290,25 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		}
 	}
 
+	// Resolve pinned_context files for the oneshot claude path. The stable-region
+	// caching win is chat-specific (oneshot jobs run once), but wiring it keeps
+	// the field meaningful for oneshot claude jobs and avoids silently dropping
+	// declared files. Order persistence/overlap warnings are chat-only (Phase 3).
+	// Best-effort: a bad entry warns rather than failing the job.
+	var pinnedFilePaths []string
+	for _, source := range job.PinnedContext {
+		sourcePath, resolveErr := ResolvePromptSource(source, plan)
+		if resolveErr != nil {
+			ulog.Warn("Could not resolve pinned_context file; skipping").
+				Field("job_id", job.ID).
+				Field("source", source).
+				Err(resolveErr).
+				Log(ctx)
+			continue
+		}
+		pinnedFilePaths = append(pinnedFilePaths, sourcePath)
+	}
+
 	if briefingFilePath != "" {
 		ulog.Success("Briefing file created").
 			Field("job_id", job.ID).
@@ -428,6 +447,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					Model:           effectiveModel,
 					Prompt:          prompt,
 					ContextFiles:    append(promptSourceFiles, contextFiles...),
+					PinnedFiles:     pinnedFilePaths, // stable cached region w/ own breakpoint
 					WorkDir:         workDir,
 					HotContextFile:  hotCtxFile,  // Job-scoped, avoids cross-job race
 					ColdContextFile: coldCtxFile, // Job-scoped, avoids cross-job race
@@ -1703,6 +1723,27 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	}
 
+	// Resolve pinned_context files. These go into the Anthropic stable cached
+	// region (their own cache_control breakpoint) rather than the volatile
+	// include half, so context added mid-chat stays cached across later turns.
+	// Order is persisted (Phase 3) so prior members keep their positions across
+	// turns — a precondition for the pinned prefix to keep hitting the cache.
+	var pinnedFilePaths []string
+	if len(job.PinnedContext) > 0 {
+		log.WithField("count", len(job.PinnedContext)).Debug("Collecting pinned_context files for upload")
+		for _, source := range job.PinnedContext {
+			sourcePath, err := ResolvePromptSource(source, plan)
+			if err != nil {
+				return fmt.Errorf("could not find pinned_context file %s: %w", source, err)
+			}
+			pinnedFilePaths = append(pinnedFilePaths, sourcePath)
+			log.WithField("file", source).Debug("Uploading pinned_context file as stable attachment")
+		}
+		// Reconcile against the persisted per-turn order so prior members keep
+		// their positions and only new entries are appended (Phase 3). Best-effort.
+		pinnedFilePaths = reconcilePinnedOrder(ctx, plan, job, pinnedFilePaths)
+	}
+
 	// Load the template using TemplateManager
 	templateManager := NewTemplateManager()
 	template, err := templateManager.FindTemplate(directive.Template)
@@ -1720,6 +1761,13 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
+
+	// Warn if a pinned file is also swept into the cx-generated context — that
+	// double-places it (wasted tokens) and makes the stable prefix edit-sensitive
+	// again, defeating the point of pinning. Best-effort; needs contextDir.
+	if len(pinnedFilePaths) > 0 {
+		warnPinnedContextOverlap(ctx, contextDir, chatJobCtx, pinnedFilePaths)
+	}
 
 	contextPaths := e.collectContextFiles(job, plan, worktreePath, chatJobCtx)
 
@@ -1771,8 +1819,8 @@ interpret and continue through YOUR current system instructions.
 </conversation_note>
 `)
 
-	// Add context section if we have dependencies, include files, or context files
-	if len(prependedDependencies) > 0 || len(dependencyFilePaths) > 0 || len(includeFilePaths) > 0 || len(validContextPaths) > 0 {
+	// Add context section if we have dependencies, include files, pinned files, or context files
+	if len(prependedDependencies) > 0 || len(dependencyFilePaths) > 0 || len(includeFilePaths) > 0 || len(pinnedFilePaths) > 0 || len(validContextPaths) > 0 {
 		promptBuilder.WriteString("\n<context>\n")
 
 		// Add prepended dependencies (inlined content from upstream jobs)
@@ -1790,6 +1838,11 @@ interpret and continue through YOUR current system instructions.
 		// Add include files (explicitly included files for this task)
 		for _, includePath := range includeFilePaths {
 			promptBuilder.WriteString(fmt.Sprintf("    <uploaded_context_file file=\"%s\" type=\"include\" importance=\"high\" description=\"File explicitly included for this task.\"/>\n", filepath.Base(includePath)))
+		}
+
+		// Add pinned files (stable cached context added mid-chat)
+		for _, pinnedPath := range pinnedFilePaths {
+			promptBuilder.WriteString(fmt.Sprintf("    <uploaded_context_file file=\"%s\" type=\"pinned\" importance=\"high\" description=\"Pinned reference file kept in the stable cached context region.\"/>\n", filepath.Base(pinnedPath)))
 		}
 
 		// Add context files (concatenated project/source code)
@@ -1926,6 +1979,20 @@ interpret and continue through YOUR current system instructions.
 			// Don't fail immediately, let the runner handle it for a more consistent error
 			apiKey = ""
 		}
+		// pinned_context is an Anthropic-only caching feature; gemini has a
+		// separate caching model. Rather than silently drop the files, fold them
+		// into the volatile PromptFiles upload so their content still reaches the
+		// model (no stable-region caching win). Warn once so the misconfiguration
+		// is visible.
+		geminiPromptFiles := allIncludeFiles
+		if len(pinnedFilePaths) > 0 {
+			ulog.Warn("pinned_context is Anthropic-only; folding pinned files into the gemini upload (no stable-region caching)").
+				Field("job_id", job.ID).
+				Field("model", effectiveModel).
+				Field("count", len(pinnedFilePaths)).
+				Log(ctx)
+			geminiPromptFiles = append(append([]string{}, allIncludeFiles...), pinnedFilePaths...)
+		}
 		// Use grove-gemini package for Gemini models with retry
 		err = e.executeWithRetry(ctx, job, func() error {
 			// The grove context (hot/cold) is passed explicitly via
@@ -1935,8 +2002,8 @@ interpret and continue through YOUR current system instructions.
 			opts := gemini.RequestOptions{
 				Model:            llmOpts.Model,
 				Prompt:           fullPrompt,
-				APIKey:           apiKey,          // Pass the resolved API key
-				PromptFiles:      allIncludeFiles, // Dependency + include attachments
+				APIKey:           apiKey,            // Pass the resolved API key
+				PromptFiles:      geminiPromptFiles, // Dependency + include (+ folded pinned) attachments
 				WorkDir:          contextDir,
 				HotContextFile:   chatHotCtx,               // Job-scoped, avoids cross-job race
 				ColdContextFile:  chatColdCtx,              // Job-scoped, avoids cross-job race
@@ -1974,6 +2041,7 @@ interpret and continue through YOUR current system instructions.
 					Model:           effectiveModel,
 					Prompt:          fullPrompt,
 					ContextFiles:    allIncludeFiles, // hot/cold passed explicitly below
+					PinnedFiles:     pinnedFilePaths, // stable cached region w/ own breakpoint
 					WorkDir:         contextDir,
 					HotContextFile:  chatHotCtx,  // Job-scoped, avoids cross-job race
 					ColdContextFile: chatColdCtx, // Job-scoped, avoids cross-job race

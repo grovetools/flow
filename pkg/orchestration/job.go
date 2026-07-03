@@ -141,11 +141,22 @@ type Job struct {
 	Playbook string `yaml:"playbook,omitempty" json:"playbook,omitempty" jsonschema:"description=Per-job playbook override (normally inherited from .grove-plan.yml)"`
 
 	// Dependencies and context
-	DependsOn   []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`
-	Include     []string `yaml:"include,omitempty" json:"include,omitempty" jsonschema:"description=Files or globs to include as context in the job prompt"`
-	SourceBlock string   `yaml:"source_block,omitempty" json:"source_block,omitempty" jsonschema:"description=Reference to a named block in another job to use as input"`
-	SourceFile  string   `yaml:"source_file,omitempty" json:"source_file,omitempty" jsonschema:"description=Path to source file for context"`
-	Memory      *bool    `yaml:"memory,omitempty" json:"memory,omitempty" jsonschema:"description=Whether to inject related memories into the prompt (default: true)"`
+	DependsOn []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`
+	Include   []string `yaml:"include,omitempty" json:"include,omitempty" jsonschema:"description=Files or globs to include as context in the job prompt"`
+	// PinnedContext lists files placed in a stable, cacheable region of an
+	// Anthropic chat request — after the cold/CLAUDE.md stable half and before
+	// the per-turn volatile context — each with its own cache_control breakpoint.
+	// Unlike Include (volatile half, re-cached every turn), pinned files added
+	// mid-chat preserve the already-cached prefix on the turn they appear and
+	// cache durably thereafter. Append new entries to the END of the list; order
+	// is persisted so prior members keep their positions (see the pinned-context
+	// order artifact). Anthropic (claude) oracle chats only: on gemini models the
+	// files are folded into the volatile upload with a warning; agents read raw
+	// files so it is a no-op there. Files are uploaded raw (no comment stripping).
+	PinnedContext []string `yaml:"pinned_context,omitempty" json:"pinned_context,omitempty" jsonschema:"description=Files placed in a stable cached region of Anthropic chat requests with a dedicated cache_control breakpoint; append new entries to the end. Anthropic oracle-chat only"`
+	SourceBlock   string   `yaml:"source_block,omitempty" json:"source_block,omitempty" jsonschema:"description=Reference to a named block in another job to use as input"`
+	SourceFile    string   `yaml:"source_file,omitempty" json:"source_file,omitempty" jsonschema:"description=Path to source file for context"`
+	Memory        *bool    `yaml:"memory,omitempty" json:"memory,omitempty" jsonschema:"description=Whether to inject related memories into the prompt (default: true)"`
 	// StripComments removes code comments from the generated repository
 	// context before it is sent to the LLM, giving a comment-free view of the
 	// code. Enabled by default; set to false to keep comments. Uses a *bool so
