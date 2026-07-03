@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/grovetools/agentlogs/pkg/usage"
 	coresessions "github.com/grovetools/core/pkg/sessions"
+	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 )
 
 // tokenUsageSectionHeader is the job-.md section holding the per-job token
@@ -139,6 +142,142 @@ func ReadTokenUsageArtifact(planDir, jobID string) (usage.Summary, bool) {
 	return s, true
 }
 
+// AccumulateAPITokenUsage folds one API call's usage (from an in-process
+// anthropic.RunWithUsage) into the job's cumulative token-usage.json artifact,
+// reusing the same usage.Summary shape the status TUI already reads for agent
+// jobs. This is the write path for oneshot/chat jobs, whose token/cost data
+// comes straight from the API response rather than a Claude transcript. It is
+// called once per successful turn/execution; the cell shows the job's lifetime
+// cumulative total (matching the agent path's session sum).
+//
+// Concurrency: the read-modify-write is safe because CreateLockFile serializes
+// executions of a single job (both Execute and executeChatJob take the lock
+// before dispatching to a provider), so two goroutines never accumulate into
+// one job's artifact at once. The temp-file+rename write additionally
+// guarantees the polling TUI never observes a partially written file.
+//
+// Only the two oneshot_executor.go call sites use this. Agent jobs must NOT
+// call it — they derive totals from the Claude transcript via ArchiveTokenUsage,
+// and accumulating here would double-count.
+func AccumulateAPITokenUsage(plan *Plan, job *Job, u *anthropic.UsageResult) error {
+	if u == nil {
+		return nil
+	}
+
+	// Existing artifact (zero-value Summary if this is the first turn).
+	summary, _ := ReadTokenUsageArtifact(plan.Directory, job.ID)
+	if summary.SessionID == "" {
+		// First write. SessionID is required (no omitempty); chat jobs have no
+		// natural Claude session id, so key it by job.ID so the artifact is
+		// self-describing.
+		summary.SessionID = job.ID
+		summary.ProjectPath = plan.Directory
+		summary.FirstActivity = time.Now()
+	}
+	summary.LastActivity = time.Now()
+	summary.MessageCount++
+
+	turn := usage.Usage{
+		Input:        u.InputTokens,
+		Output:       u.OutputTokens,
+		CacheRead:    u.CacheReadTokens,
+		CacheWrite5m: u.CacheCreationTokens, // flow only sets 5m ephemeral cache
+	}
+	summary.Usage.Add(turn)
+	summary.CostUSD += u.EstimatedCostUSD
+	if !u.KnownPricing {
+		summary.MissingPricing = true // sticky once any turn was unpriced
+	}
+
+	// Models list: dedup, kept sorted to match agentlogs' summarize().
+	if u.Model != "" {
+		found := false
+		for _, m := range summary.Models {
+			if m == u.Model {
+				found = true
+				break
+			}
+		}
+		if !found {
+			summary.Models = append(summary.Models, u.Model)
+			sort.Strings(summary.Models)
+		}
+	}
+
+	// Per-model breakdown: find-or-append the entry for this model.
+	mi := -1
+	for i := range summary.ModelBreakdown {
+		if summary.ModelBreakdown[i].Model == u.Model {
+			mi = i
+			break
+		}
+	}
+	if mi == -1 {
+		summary.ModelBreakdown = append(summary.ModelBreakdown, usage.AgentUsage{Model: u.Model})
+		mi = len(summary.ModelBreakdown) - 1
+	}
+	summary.ModelBreakdown[mi].Usage.Add(turn)
+	summary.ModelBreakdown[mi].CostUSD += u.EstimatedCostUSD
+	if !u.KnownPricing {
+		summary.ModelBreakdown[mi].MissingPricing = true
+	}
+
+	// ContextSize is the PEAK single-turn prompt size (input + cache_read +
+	// cache_creation), matching agentlogs' summarize() — a cumulative would be
+	// meaninglessly inflated by cache reads. formatTokenCell prefers this.
+	if promptSize := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens; promptSize > summary.ContextSize {
+		summary.ContextSize = promptSize
+	}
+
+	return writeTokenUsageArtifact(plan.Directory, job.ID, summary)
+}
+
+// writeTokenUsageArtifact atomically writes a job's token-usage.json (temp file
+// + rename) so the TUI, which polls this file on its own tick, never reads a
+// partial write.
+func writeTokenUsageArtifact(planDir, jobID string, summary usage.Summary) error {
+	dir := filepath.Join(planDir, ".artifacts", jobID)
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // artifact dir
+		return err
+	}
+	data, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(dir, tokenUsageArtifactName)
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+// WriteTokenUsageSection renders a job's accumulated token-usage.json into its
+// .md "## Token Usage" section, for parity with the agent on-disk record (agent
+// jobs get this section at completion via ArchiveTokenUsage). Best-effort: a
+// missing/empty artifact or a write failure is a no-op/warn, never a job
+// failure. Called at terminal transitions of oneshot/chat jobs, not per-turn —
+// the artifact is the live source, the markdown the archival record. When the
+// anchor section is absent (chat/oneshot files have no transcript section),
+// updateJobSection appends "## Token Usage" at the end of the body.
+func WriteTokenUsageSection(plan *Plan, job *Job) {
+	if job.FilePath == "" {
+		return
+	}
+	summary, ok := ReadTokenUsageArtifact(plan.Directory, job.ID)
+	if !ok || summary.Usage.Total() == 0 {
+		return
+	}
+	content := renderTokenUsageSection(summary)
+	if _, err := NewStatePersister().UpdateJobSection(job, tokenUsageSectionHeader, content, transcriptSectionHeader, false); err != nil {
+		ulog.Warn("[TOKENS] Failed to update token usage section in job file").
+			Field("job_id", job.ID).
+			Field("filepath", job.FilePath).
+			Err(err).
+			Log(context.Background())
+	}
+}
+
 // FormatTokenCount renders an integer token count with thousands separators
 // for compact display (exported for the status TUI's TOKENS column/pane).
 func FormatTokenCount(n int64) string {
@@ -242,6 +381,12 @@ func renderTokenUsageSection(s usage.Summary) string {
 func formatCostUSD(cost float64, missingPricing bool) string {
 	if missingPricing {
 		return "⚠ unpriced"
+	}
+	// A real but sub-half-cent cost (common for a cheap cached oneshot) would
+	// round to a misleading "$0.00"; surface it as "<$0.01" instead so the cell
+	// distinguishes "nearly free" from "genuinely zero".
+	if cost > 0 && cost < 0.01 {
+		return "<$0.01"
 	}
 	return fmt.Sprintf("$%.2f", cost)
 }

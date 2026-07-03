@@ -363,6 +363,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	// Call LLM based on model type, with automatic retry for transient failures
 	var response string
+	// apiUsage carries the in-process token/cost usage from the anthropic runner
+	// (claude branch only) so we can accumulate it into the job's token-usage
+	// artifact after a successful call. Gemini/mock/other providers leave it nil.
+	var apiUsage *anthropic.UsageResult
 	if effectiveModel == "mock" {
 		// Use mock response for testing
 		response = "This is a mock LLM response for testing purposes."
@@ -438,7 +442,11 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
 				}
 				var innerErr error
-				response, innerErr = e.anthropicRunner.Run(ctx, opts)
+				var usage *anthropic.UsageResult
+				response, usage, innerErr = e.anthropicRunner.RunWithUsage(ctx, opts)
+				if innerErr == nil {
+					apiUsage = usage // only the final successful attempt's usage
+				}
 				return innerErr
 			})
 		}
@@ -473,6 +481,17 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return execErr
 	}
 
+	// Record the API token/cost usage for this oneshot into the job's
+	// token-usage artifact (best-effort — never fail the job over accounting).
+	if apiUsage != nil {
+		if accErr := AccumulateAPITokenUsage(plan, job, apiUsage); accErr != nil {
+			ulog.Warn("Failed to accumulate API token usage").
+				Err(accErr).
+				Field("job_id", job.ID).
+				Log(ctx)
+		}
+	}
+
 	// Append output to job file
 	if err := e.appendToJobFile(response, job); err != nil {
 		job.Status = JobStatusFailed
@@ -491,6 +510,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 			Err(err).
 			Log(ctx)
 	}
+
+	// Archive the accumulated token usage into the job .md, for parity with the
+	// agent on-disk record (best-effort).
+	WriteTokenUsageSection(plan, job)
 
 	return nil
 }
@@ -1550,6 +1573,9 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		job.Status = JobStatusCompleted
 		job.EndTime = time.Now()
 		_ = updateJobFile(job)
+		// Archive the accumulated token usage into the job .md at completion,
+		// for parity with the agent on-disk record (best-effort).
+		WriteTokenUsageSection(plan, job)
 		return nil
 	}
 
@@ -1886,6 +1912,10 @@ interpret and continue through YOUR current system instructions.
 	var response string
 	var apiKey string
 	var geminiErr error
+	// apiUsage carries the in-process token/cost usage from the anthropic runner
+	// (claude branch only), accumulated into the job's token-usage artifact after
+	// a successful turn. Gemini/mock/other providers leave it nil.
+	var apiUsage *anthropic.UsageResult
 	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
 		// Check if mocking is enabled - if so, always use llmClient regardless of model
 		response, _ = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
@@ -1958,7 +1988,11 @@ interpret and continue through YOUR current system instructions.
 					fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
 				}
 				var innerErr error
-				response, innerErr = e.anthropicRunner.Run(ctx, opts)
+				var usage *anthropic.UsageResult
+				response, usage, innerErr = e.anthropicRunner.RunWithUsage(ctx, opts)
+				if innerErr == nil {
+					apiUsage = usage // only the final successful attempt's usage
+				}
 				return innerErr
 			})
 		}
@@ -1986,6 +2020,20 @@ interpret and continue through YOUR current system instructions.
 		}
 	}
 	log.WithField("response_length_bytes", len(response)).Debug("LLM call succeeded")
+
+	// Accumulate this turn's API token/cost usage into the job's token-usage
+	// artifact the moment the response lands — before the cell append and the
+	// pending_user flip — so the TUI cell reflects it immediately. Best-effort:
+	// never fail the turn over accounting. (Anthropic claude branch only;
+	// apiUsage is nil for gemini/mock.)
+	if apiUsage != nil {
+		if accErr := AccumulateAPITokenUsage(plan, job, apiUsage); accErr != nil {
+			ulog.Warn("Failed to accumulate API token usage").
+				Err(accErr).
+				Field("job_id", job.ID).
+				Log(ctx)
+		}
+	}
 
 	// Use the same turnID that was generated earlier for the briefing file
 	// This creates a 1:1 correspondence between briefing files and chat turns
@@ -2029,6 +2077,14 @@ interpret and continue through YOUR current system instructions.
 	job.Status = finalStatus
 	job.EndTime = time.Now()
 	_ = updateJobFile(job)
+
+	// On a terminal transition (auto_complete → completed), archive the
+	// accumulated token usage into the job .md for parity with agent jobs.
+	// pending_user chats keep only the live artifact until the user completes
+	// them (handled by the directive.Action == "complete" path above).
+	if finalStatus == JobStatusCompleted {
+		WriteTokenUsageSection(plan, job)
+	}
 
 	return nil
 }

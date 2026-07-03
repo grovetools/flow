@@ -32,13 +32,12 @@ func loadTokenUsageCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd
 	jobID := job.ID
 	planDir := plan.Directory
 	jobType := job.Type
-	completed := job.Status == orchestration.JobStatusCompleted
 	return func() tea.Msg {
-		// Completed jobs: prefer the persisted artifact.
-		if completed {
-			if s, ok := orchestration.ReadTokenUsageArtifact(planDir, jobID); ok {
-				return TokenUsageLoadedMsg{JobID: jobID, Summary: s, Found: true}
-			}
+		// Prefer the persisted artifact regardless of status: completed agent
+		// jobs and chat/oneshot jobs (which accumulate one after every turn, even
+		// while pending_user) are both served from it.
+		if s, ok := orchestration.ReadTokenUsageArtifact(planDir, jobID); ok {
+			return TokenUsageLoadedMsg{JobID: jobID, Summary: s, Found: true}
 		}
 
 		// Only agent jobs have a Claude session worth summarizing live.
@@ -81,7 +80,38 @@ func (m *Model) maybeRefreshRunningTokenCells(now time.Time) tea.Cmd {
 		return nil
 	}
 	m.lastRunningTokenRefresh = now
+
+	// Evict memoized TOKENS cells for live chat/oneshot jobs so the next render
+	// re-reads their token-usage artifact (rewritten after each turn, Phase 2).
+	// Scoped to live non-agent jobs only: completed jobs' cells stay cached, so a
+	// plan with many finished jobs re-reads nothing per tick. Agent live cells
+	// refresh via runningTokenCell (below), not the artifact, so they're left
+	// alone.
+	for _, j := range m.Jobs {
+		if isLiveAPIDirectJob(j) {
+			delete(m.tokenColumnCache, j.ID)
+		}
+	}
+
 	return refreshRunningTokenCellsCmd(m.Jobs)
+}
+
+// isLiveAPIDirectJob reports whether a job is an in-progress chat/oneshot job
+// whose token-usage artifact is written incrementally (Phase 2), so its
+// memoized TOKENS cell must be evicted each tick to pick up the newest turn.
+func isLiveAPIDirectJob(job *orchestration.Job) bool {
+	switch job.Type {
+	case orchestration.JobTypeChat, orchestration.JobTypeOneshot:
+	default:
+		return false
+	}
+	switch job.Status {
+	case orchestration.JobStatusRunning,
+		orchestration.JobStatusPendingUser,
+		orchestration.JobStatusPendingLLM:
+		return true
+	}
+	return false
 }
 
 // runningTokenUsageMsg carries live token summaries for in-progress agent
@@ -171,6 +201,12 @@ func (m *Model) renderTokenColumnCell(job *orchestration.Job) string {
 		} else {
 			cell = t.Muted.Render("-")
 		}
+	} else if s, ok := orchestration.ReadTokenUsageArtifact(m.PlanDir, job.ID); ok && s.Usage.Total() > 0 {
+		// Non-completed job with an incrementally-written artifact: chat/oneshot
+		// jobs get one after every turn (Phase 2), so this lights up the cell for
+		// a pending_user chat. Harmless for agent jobs — they have no artifact
+		// until completion, so this falls through to the live path below.
+		cell = t.Muted.Render(formatTokenCell(s))
 	} else if s, ok := m.runningTokenCell[job.ID]; ok && s.Usage.Total() > 0 {
 		// Running agent jobs: the live "$cost · NNk ctx" from the background
 		// running-ctx refresher (peak context window, ≈ Claude Code /context).
