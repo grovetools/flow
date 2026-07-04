@@ -216,6 +216,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		// The concept file (if any) is picked up by context gathering logic below.
 	}
 
+	// Capture the pre-scope worktree ROOT before the sub-project rescope below,
+	// for worktree-root-relative pinned_context resolution further down.
+	worktreeRoot := workDir
+
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	// This ensures buildPrompt uses the correct context files
 	workDir = ScopeToSubProject(workDir, job)
@@ -306,7 +310,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Best-effort: a bad entry warns rather than failing the job.
 	var pinnedFilePaths []string
 	for _, source := range job.PinnedContext {
-		sourcePath, resolveErr := ResolvePromptSource(source, plan)
+		// Worktree-root-first resolution (the documented pinned_context contract),
+		// same as the chat path. Oneshot keeps warn+skip semantics rather than
+		// hard-failing (a oneshot runs once; a bad pin degrades rather than hangs).
+		sourcePath, resolveErr := resolvePinnedSource(source, worktreeRoot, plan)
 		if resolveErr != nil {
 			ulog.Warn("Could not resolve pinned_context file; skipping").
 				Field("job_id", job.ID).
@@ -1482,7 +1489,7 @@ func (e *OneShotExecutor) displayContextInfo(ctx context.Context, worktreePath s
 }
 
 // executeChatJob handles the conversational logic for chat-type jobs
-func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan, output io.Writer) error {
+func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan, output io.Writer) (retErr error) {
 	// Generate a unique request ID for tracing this turn
 	requestID := "req-" + uuid.New().String()[:8]
 	ctx = context.WithValue(ctx, contextKey("request_id"), requestID)
@@ -1566,6 +1573,29 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	if err := updateJobFile(job); err != nil {
 		return fmt.Errorf("updating job status: %w", err)
 	}
+
+	// Terminal-failure guard: any error return AFTER the job was marked running
+	// must leave the job file in a terminal `failed` state with the error logged
+	// to the per-job job.log (and the daemon system log) via ulog.Error. Without
+	// this, an error path that only `return`s an error (e.g. pinned_context
+	// resolution, template lookup, turn-ID generation, or an API call) leaves the
+	// .md stuck at `status: running` forever and nothing lands in the job.log —
+	// the exact silent hang seen with an unresolvable pinned_context. It fires
+	// only when the status is still `running`, so paths that already set their own
+	// terminal status (the regen hard-fails, the API paths that this now also
+	// covers) or return nil (waiting-for-user, agent-responded, action=complete,
+	// successful turn → pending_user/completed) are left untouched.
+	defer func() {
+		if retErr != nil && job.Status == JobStatusRunning {
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			_ = updateJobFile(job)
+			ulog.Error("Chat turn failed").
+				Err(retErr).
+				Field("job_id", job.ID).
+				Log(ctx)
+		}
+	}()
 
 	var execErr error
 
@@ -1700,6 +1730,12 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// The concept file (if any) is picked up by context gathering logic below.
 	}
 
+	// Capture the pre-scope worktree ROOT before the sub-project rescope below.
+	// pinned_context paths are worktree-root-relative (see resolvePinnedSource):
+	// ecosystem pins like "core/logging/logger_test.go" must resolve against the
+	// superrepo root, not the sub-project-scoped path.
+	worktreeRoot := worktreePath
+
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	// This ensures chat uses the correct context files
 	worktreePath = ScopeToSubProject(worktreePath, job)
@@ -1778,7 +1814,12 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	if len(job.PinnedContext) > 0 {
 		log.WithField("count", len(job.PinnedContext)).Debug("Collecting pinned_context files for upload")
 		for _, source := range job.PinnedContext {
-			sourcePath, err := ResolvePromptSource(source, plan)
+			// Resolve worktree-root-first (the documented pinned_context contract).
+			// A missing pin HARD-FAILS the turn on purpose: silently dropping a pin
+			// means the oracle lacks files the coordinator believes are pinned. The
+			// deferred handler below flips the job to failed and logs to the job.log
+			// so this failure is visible instead of a silent hang.
+			sourcePath, err := resolvePinnedSource(source, worktreeRoot, plan)
 			if err != nil {
 				return fmt.Errorf("could not find pinned_context file %s: %w", source, err)
 			}

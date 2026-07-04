@@ -18,6 +18,45 @@ import (
 // per-job context under <plan>/.artifacts/<job-id>/.
 const pinnedOrderFileName = "pinned-context-order"
 
+// resolvePinnedSource resolves a pinned_context source path with worktree-first
+// semantics. pinned_context paths are a WORKTREE-ROOT-relative contract (see the
+// oracle-chats concept), but the daemon executes chat turns with a cwd that is
+// NOT the worktree, so ResolvePromptSource's plan-dir/cwd strategies miss the
+// file entirely (the "could not find pinned_context file core/logging/..." live
+// failure). Try, in order: an absolute path as-is; the worktree-root join (the
+// documented contract); then fall back to ResolvePromptSource's plan-dir/cwd
+// strategies so plan-relative pins and existing callers keep working.
+//
+// worktreeRoot MUST be the pre-scope worktree ROOT, not a sub-project-scoped
+// path, so ecosystem-relative pins like "core/logging/logger_test.go" resolve
+// against the superrepo root rather than a scoped sub-project directory.
+func resolvePinnedSource(source, worktreeRoot string, plan *Plan) (string, error) {
+	// Absolute path: honor as given (matches ResolvePromptSource's contract for
+	// its other callers — prompts, includes, templates).
+	if filepath.IsAbs(source) {
+		return source, nil
+	}
+
+	// Worktree-root-relative: the documented pinned_context contract, tried
+	// before the shared fallbacks because the daemon's cwd is not the worktree.
+	if worktreeRoot != "" {
+		if candidate := filepath.Join(worktreeRoot, source); fileExistsAt(candidate) {
+			return candidate, nil
+		}
+	}
+
+	// Fall back to the shared resolution strategies (plan dir, plan parent, cwd)
+	// so plan-relative pins still resolve. ResolvePromptSource is left untouched
+	// for its other callers.
+	return ResolvePromptSource(source, plan)
+}
+
+// fileExistsAt reports whether a regular path exists (best-effort stat).
+func fileExistsAt(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // reconcileOrder computes the emission order for pinned files given the order
 // persisted from prior turns and the set resolved this turn. Rules:
 //   - persisted entries that still appear in current keep their persisted order;
