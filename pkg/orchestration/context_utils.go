@@ -1,10 +1,12 @@
 package orchestration
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
@@ -234,6 +236,68 @@ func GetProjectGitRoot(planDir string) (string, error) {
 
 	// Normal case - get git root from plan directory
 	return GetGitRootSafe(planDir)
+}
+
+// resolveGitRootForWorktree resolves the project git root that worktree
+// CREATION will run against, with retry + notebook-aware hard-fail semantics.
+//
+// Notebook plan dirs resolve via workspace discovery (GetProjectFromNotebookPath
+// → findProjectByWorkspaceName), which can transiently find no project while
+// racing the daemon's workspace collectors. The old callers silently fell back
+// to `gitRoot = plan.Directory` on ANY error — for a notebook plan that
+// fabricates a fresh worktree CONTAINER at the notebook plan dir, and
+// SetupSubmodules then tries `git worktree add -B <branch>` for every repo,
+// each failing with "branch already used by worktree" ("incomplete worktree:
+// failed to create linked worktree(s) for N repo(s)"). A re-runnable failed
+// job beats creating a bogus container, so notebook plans hard-fail instead.
+func resolveGitRootForWorktree(ctx context.Context, planDir string) (string, error) {
+	return resolveGitRootForWorktreeWith(ctx, planDir, GetProjectGitRoot, isUnderNotebook)
+}
+
+// resolveGitRootForWorktreeWith is the injectable core of
+// resolveGitRootForWorktree (resolver/notebook-detector split out for tests).
+func resolveGitRootForWorktreeWith(ctx context.Context, planDir string, resolveRoot func(string) (string, error), underNotebook func(string) bool) (string, error) {
+	gitRoot, err := resolveRoot(planDir)
+	if err == nil {
+		return gitRoot, nil
+	}
+
+	// Non-notebook plan in a non-git dir (e.g. bare tmp plan dirs in tests):
+	// resolution failure is deterministic, not a discovery race — keep the
+	// historical fallback of treating the plan directory itself as the root.
+	if !underNotebook(planDir) {
+		return planDir, nil
+	}
+
+	// Notebook plan: the failure is the transient discovery race. It clears
+	// within seconds (observed: runs minutes apart on the same worktree
+	// succeed), so retry briefly before giving up.
+	for _, backoff := range []time.Duration{100 * time.Millisecond, 250 * time.Millisecond} {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(backoff):
+		}
+		ulog.Warn("Git-root resolution failed for notebook plan; retrying").
+			Err(err).
+			Field("plan_dir", planDir).
+			Field("backoff", backoff.String()).
+			Log(ctx)
+		if gitRoot, err = resolveRoot(planDir); err == nil {
+			return gitRoot, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not resolve project git root for notebook plan %s (transient workspace-discovery failure — retry the job): %w", planDir, err)
+}
+
+// isUnderNotebook reports whether planDir lives inside a configured notebook.
+// Detection is deterministic (config prefix match / notebook.yml marker), so a
+// true here plus a GetProjectGitRoot failure means the PROJECT lookup raced —
+// the case that must never fall back to fabricating a container at planDir.
+func isUnderNotebook(planDir string) bool {
+	_, notebookRoot, _ := workspace.GetProjectFromNotebookPath(planDir)
+	return notebookRoot != ""
 }
 
 // ResolveProjectForSessionNaming resolves the appropriate project for tmux session naming.

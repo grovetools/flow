@@ -69,11 +69,14 @@ func (e *GenerateRecipeExecutor) Execute(ctx context.Context, job *Job, plan *Pl
 	// Determine the working directory for the job
 	var workDir string
 	if job.Worktree != "" {
-		// Prepare git worktree (notebook-aware)
-		gitRoot, err := GetProjectGitRoot(plan.Directory)
+		// Prepare git worktree (notebook-aware). Notebook plans hard-fail
+		// instead of falling back to the plan directory — the old silent
+		// fallback fabricated a worktree container at the notebook plan dir
+		// when discovery transiently raced the daemon's collectors (see
+		// resolveGitRootForWorktree).
+		gitRoot, err := resolveGitRootForWorktree(ctx, plan.Directory)
 		if err != nil {
-			// Fallback to plan directory if not in a git repo
-			gitRoot = plan.Directory
+			return fmt.Errorf("resolving git root for worktree: %w", err)
 		}
 
 		// Resolve the EXISTING worktree registry-first (anchor-aware) and create

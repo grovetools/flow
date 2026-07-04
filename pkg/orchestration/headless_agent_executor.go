@@ -241,9 +241,13 @@ func (e *HeadlessAgentExecutor) prepareWorktree(ctx context.Context, job *Job, p
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	// Notebook plans hard-fail instead of falling back to the plan directory —
+	// the old silent fallback fabricated a worktree container at the notebook
+	// plan dir when discovery transiently raced the daemon's collectors (see
+	// resolveGitRootForWorktree).
+	gitRoot, err := resolveGitRootForWorktree(ctx, plan.Directory)
 	if err != nil {
-		gitRoot = plan.Directory
+		return "", err
 	}
 
 	// Check if the worktree already exists. If so, skip preparation.

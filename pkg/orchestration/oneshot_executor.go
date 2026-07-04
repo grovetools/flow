@@ -970,11 +970,14 @@ func (e *OneShotExecutor) prepareWorktree(ctx context.Context, job *Job, plan *P
 		return "", fmt.Errorf("job %s has no worktree specified", job.ID)
 	}
 
-	// Get project git root for worktree creation (notebook-aware)
-	gitRoot, err := GetProjectGitRoot(plan.Directory)
+	// Get project git root for worktree creation (notebook-aware). Notebook
+	// plans hard-fail here instead of falling back to the plan directory —
+	// the old silent fallback fabricated a worktree container at the notebook
+	// plan dir when discovery transiently raced the daemon's collectors (see
+	// resolveGitRootForWorktree).
+	gitRoot, err := resolveGitRootForWorktree(ctx, plan.Directory)
 	if err != nil {
-		// Fallback to plan directory if not in a git repo
-		gitRoot = plan.Directory
+		return "", err
 	}
 
 	// If gitRoot is itself inside a worktree, resolve back to the owning repo
