@@ -89,6 +89,138 @@ type Model struct {
 	width, height int
 }
 
+// slotID identifies a wizard form slot independently of its position
+// in the focus order, so the focus/nav/update logic can key on a
+// stable identity rather than a raw index.
+type slotID int
+
+const (
+	slotTitle slotID = iota
+	slotJobType
+	slotTemplateOrSkill
+	slotDeps
+	slotPrompt
+)
+
+// slotKind classifies a slot's input widget for focus/keystroke
+// routing. slotText slots capture all keys (title input, prompt
+// textarea); slotList slots are navigable pickers.
+type slotKind int
+
+const (
+	slotText slotKind = iota
+	slotList
+)
+
+// formSlot is one entry in the wizard's ordered slot table. kind and
+// visible are functions of the live Model because a slot's widget
+// type and applicability can depend on prior selections (Phase 4b);
+// in Phase 4a they are all static. The function fields take *Model
+// rather than closing over a pointer at construction because
+// bubbletea copies the Model by value on every Update — a captured
+// pointer would read stale state.
+type formSlot struct {
+	id      slotID
+	kind    func(m *Model) slotKind
+	visible func(m *Model) bool
+}
+
+// staticText/staticList are the constant slot-kind functions used by
+// the current (Phase 4a) slots. alwaysVisible marks a slot as always
+// part of the focus order.
+func staticText(*Model) slotKind { return slotText }
+func staticList(*Model) slotKind { return slotList }
+func alwaysVisible(*Model) bool  { return true }
+
+// addFormSlots is the wizard's ordered slot table. The order defines
+// the tab/nav cycle. Kinds are static and every slot is visible, so
+// Phase 4a behaves identically to the previous hardcoded index logic.
+var addFormSlots = []formSlot{
+	{id: slotTitle, kind: staticText, visible: alwaysVisible},
+	{id: slotJobType, kind: staticList, visible: alwaysVisible},
+	{id: slotTemplateOrSkill, kind: staticList, visible: alwaysVisible},
+	{id: slotDeps, kind: staticList, visible: alwaysVisible},
+	{id: slotPrompt, kind: staticText, visible: alwaysVisible},
+}
+
+// currentSlot returns the slot the focus index currently points at.
+func (m *Model) currentSlot() formSlot {
+	return addFormSlots[m.focusIndex]
+}
+
+// currentSlotKind returns the widget kind of the currently focused
+// slot.
+func (m *Model) currentSlotKind() slotKind {
+	return addFormSlots[m.focusIndex].kind(m)
+}
+
+// nextVisibleSlot returns the index of the next visible slot after
+// from, wrapping around. With every slot visible this is just
+// (from+1) mod len.
+func (m *Model) nextVisibleSlot(from int) int {
+	n := len(addFormSlots)
+	for i := 1; i <= n; i++ {
+		idx := (from + i) % n
+		if addFormSlots[idx].visible(m) {
+			return idx
+		}
+	}
+	return from
+}
+
+// prevVisibleSlot returns the index of the previous visible slot
+// before from, wrapping around.
+func (m *Model) prevVisibleSlot(from int) int {
+	n := len(addFormSlots)
+	for i := 1; i <= n; i++ {
+		idx := ((from-i)%n + n) % n
+		if addFormSlots[idx].visible(m) {
+			return idx
+		}
+	}
+	return from
+}
+
+// firstVisibleSlot returns the index of the first visible slot.
+func (m *Model) firstVisibleSlot() int {
+	for i := range addFormSlots {
+		if addFormSlots[i].visible(m) {
+			return i
+		}
+	}
+	return 0
+}
+
+// lastVisibleSlot returns the index of the last visible slot.
+func (m *Model) lastVisibleSlot() int {
+	for i := len(addFormSlots) - 1; i >= 0; i-- {
+		if addFormSlots[i].visible(m) {
+			return i
+		}
+	}
+	return len(addFormSlots) - 1
+}
+
+// activeList returns a pointer to the list widget backing the
+// currently focused slot, honoring the slot-2 skills/templates mode,
+// or nil when the focused slot is not a list. It is the single source
+// of truth for "which list is the user interacting with," used by
+// filter detection.
+func (m *Model) activeList() *list.Model {
+	switch m.currentSlot().id {
+	case slotJobType:
+		return &m.jobTypeList
+	case slotTemplateOrSkill:
+		if m.slot2IsSkills {
+			return &m.skillList
+		}
+		return &m.templateList
+	case slotDeps:
+		return &m.depList
+	}
+	return nil
+}
+
 // IsTextEntryActive reports whether the wizard currently has a
 // text input, textarea, or list filter input focused. Hosts that
 // want to intercept single-character keys (e.g. the flow
@@ -100,7 +232,7 @@ func (m Model) IsTextEntryActive() bool {
 	if m.unfocused {
 		return false
 	}
-	if m.titleInput.Focused() || m.promptInput.Focused() {
+	if m.currentSlotKind() == slotText {
 		return true
 	}
 	return m.isListFiltering()
@@ -110,16 +242,8 @@ func (m Model) IsTextEntryActive() bool {
 // component is in active filter mode (the user is typing into the
 // list's built-in search input).
 func (m Model) isListFiltering() bool {
-	switch m.focusIndex {
-	case 1:
-		return m.jobTypeList.FilterState() == list.Filtering
-	case 2:
-		if m.slot2IsSkills {
-			return m.skillList.FilterState() == list.Filtering
-		}
-		return m.templateList.FilterState() == list.Filtering
-	case 3:
-		return m.depList.FilterState() == list.Filtering
+	if l := m.activeList(); l != nil {
+		return l.FilterState() == list.Filtering
 	}
 	return false
 }

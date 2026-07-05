@@ -58,9 +58,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if we're in a text input field that should capture all keys
-		inTextInput := !m.unfocused && (m.focusIndex == 0 || m.focusIndex == 4)
+		inTextInput := !m.unfocused && m.currentSlotKind() == slotText
 		// Check if we're in a list that needs arrow keys
-		inList := !m.unfocused && (m.focusIndex == 1 || m.focusIndex == 2 || m.focusIndex == 3)
+		inList := !m.unfocused && m.currentSlotKind() == slotList
 
 		// Also treat an active list filter input as text input so
 		// single-char keys (like q) are typed into the filter
@@ -95,23 +95,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Next):
 			// Tab moves to next field
-			m.focusIndex++
-			if m.focusIndex > 4 {
-				m.focusIndex = 0
-			}
+			m.focusIndex = m.nextVisibleSlot(m.focusIndex)
 			return m.updateFocus(), nil
 
 		case key.Matches(msg, m.keys.Prev):
 			// Shift+tab moves to previous field
-			m.focusIndex--
-			if m.focusIndex < 0 {
-				m.focusIndex = 4
-			}
+			m.focusIndex = m.prevVisibleSlot(m.focusIndex)
 			return m.updateFocus(), nil
 
 		case key.Matches(msg, m.keys.Toggle):
 			// Space toggles selection in dependency list
-			if m.focusIndex == 3 {
+			if m.currentSlot().id == slotDeps {
 				if selectedItem := m.depList.SelectedItem(); selectedItem != nil {
 					if depItem, ok := selectedItem.(dependencyItem); ok {
 						m.selectedDeps[depItem.job.ID] = !m.selectedDeps[depItem.job.ID]
@@ -125,16 +119,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			if inList {
-				switch m.focusIndex {
-				case 1:
+				// NOTE: the slot-2 case operates on templateList even
+				// when the skills list is shown, preserving the exact
+				// pre-refactor behavior (keystroke-identical). Do not
+				// substitute activeList() here — that would change what
+				// gg/G move on the skills slot.
+				switch m.currentSlot().id {
+				case slotJobType:
 					m.jobTypeList.Select(0)
-				case 2:
+				case slotTemplateOrSkill:
 					m.templateList.Select(0)
-				case 3:
+				case slotDeps:
 					m.depList.Select(0)
 				}
 			} else {
-				m.focusIndex = 0
+				m.focusIndex = m.firstVisibleSlot()
 				return m.updateFocus(), nil
 			}
 			return m, nil
@@ -144,38 +143,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			if inList {
-				switch m.focusIndex {
-				case 1:
+				// See the GoTop note: slot-2 stays on templateList to
+				// preserve pre-refactor keystroke behavior.
+				switch m.currentSlot().id {
+				case slotJobType:
 					m.jobTypeList.Select(len(m.jobTypeList.Items()) - 1)
-				case 2:
+				case slotTemplateOrSkill:
 					m.templateList.Select(len(m.templateList.Items()) - 1)
-				case 3:
+				case slotDeps:
 					m.depList.Select(len(m.depList.Items()) - 1)
 				}
 			} else {
-				m.focusIndex = 4
+				m.focusIndex = m.lastVisibleSlot()
 				return m.updateFocus(), nil
 			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.PageUp):
 			if inList {
-				switch m.focusIndex {
-				case 1:
+				// See the GoTop note: slot-2 stays on templateList to
+				// preserve pre-refactor keystroke behavior.
+				switch m.currentSlot().id {
+				case slotJobType:
 					current := m.jobTypeList.Index()
 					newIndex := current - 5
 					if newIndex < 0 {
 						newIndex = 0
 					}
 					m.jobTypeList.Select(newIndex)
-				case 2:
+				case slotTemplateOrSkill:
 					current := m.templateList.Index()
 					newIndex := current - 5
 					if newIndex < 0 {
 						newIndex = 0
 					}
 					m.templateList.Select(newIndex)
-				case 3:
+				case slotDeps:
 					current := m.depList.Index()
 					newIndex := current - 5
 					if newIndex < 0 {
@@ -188,22 +191,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.PageDown):
 			if inList {
-				switch m.focusIndex {
-				case 1:
+				// See the GoTop note: slot-2 stays on templateList to
+				// preserve pre-refactor keystroke behavior.
+				switch m.currentSlot().id {
+				case slotJobType:
 					current := m.jobTypeList.Index()
 					newIndex := current + 5
 					if newIndex >= len(m.jobTypeList.Items()) {
 						newIndex = len(m.jobTypeList.Items()) - 1
 					}
 					m.jobTypeList.Select(newIndex)
-				case 2:
+				case slotTemplateOrSkill:
 					current := m.templateList.Index()
 					newIndex := current + 5
 					if newIndex >= len(m.templateList.Items()) {
 						newIndex = len(m.templateList.Items()) - 1
 					}
 					m.templateList.Select(newIndex)
-				case 3:
+				case slotDeps:
 					current := m.depList.Index()
 					newIndex := current + 5
 					if newIndex >= len(m.depList.Items()) {
@@ -229,43 +234,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down", "j":
 			if (!inList || m.unfocused) && !inTextInput {
-				m.focusIndex++
-				if m.focusIndex > 4 {
-					m.focusIndex = 0
-				}
+				m.focusIndex = m.nextVisibleSlot(m.focusIndex)
 				return m.updateFocus(), nil
 			}
 
 		case "up", "k":
 			if (!inList || m.unfocused) && !inTextInput {
-				m.focusIndex--
-				if m.focusIndex < 0 {
-					m.focusIndex = 4
-				}
+				m.focusIndex = m.prevVisibleSlot(m.focusIndex)
 				return m.updateFocus(), nil
 			}
 
 		case "left", "h":
 			if m.unfocused && !inTextInput {
-				m.focusIndex--
-				if m.focusIndex < 0 {
-					m.focusIndex = 4
-				}
+				m.focusIndex = m.prevVisibleSlot(m.focusIndex)
 				return m.updateFocus(), nil
 			}
 
 		case "right", "l":
 			if m.unfocused && !inTextInput {
-				m.focusIndex++
-				if m.focusIndex > 4 {
-					m.focusIndex = 0
-				}
+				m.focusIndex = m.nextVisibleSlot(m.focusIndex)
 				return m.updateFocus(), nil
 			}
 
 		case "c":
 			// Quick chat setup - only when in NORMAL mode and NOT on a text field
-			if m.unfocused && m.focusIndex != 0 && m.focusIndex != 4 {
+			if m.unfocused && m.currentSlotKind() == slotList {
 				for i, listItem := range m.jobTypeList.Items() {
 					if string(listItem.(item)) == "chat" {
 						m.jobTypeList.Select(i)
@@ -285,7 +278,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "a":
 			// Quick agent setup - only when in NORMAL mode and NOT on a text field
-			if m.unfocused && m.focusIndex != 0 && m.focusIndex != 4 {
+			if m.unfocused && m.currentSlotKind() == slotList {
 				for i, listItem := range m.jobTypeList.Items() {
 					if string(listItem.(item)) == "interactive_agent" {
 						m.jobTypeList.Select(i)
@@ -313,10 +306,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if inList {
 				// For lists, enter confirms selection and moves to next field
 				m.unfocused = false
-				m.focusIndex++
-				if m.focusIndex > 4 {
-					m.focusIndex = 0
-				}
+				m.focusIndex = m.nextVisibleSlot(m.focusIndex)
 				return m.updateFocus(), nil
 			} else if m.unfocused {
 				// If unfocused, enter refocuses current field
@@ -331,10 +321,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// receive key events — prevents lists from capturing keys
 	// meant for wizard-level navigation.
 	if !m.unfocused {
-		switch m.focusIndex {
-		case 0: // Title input
+		switch m.currentSlot().id {
+		case slotTitle: // Title input
 			m.titleInput, cmd = m.titleInput.Update(msg)
-		case 1: // Job type list
+		case slotJobType: // Job type list
 			prevSelection := m.jobTypeList.SelectedItem()
 			m.jobTypeList, cmd = m.jobTypeList.Update(msg)
 			// Check if job type selection changed
@@ -350,15 +340,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.templateList = m.buildTemplateList(selectedJobType)
 				}
 			}
-		case 2: // Slot 2: Skills or Template list
+		case slotTemplateOrSkill: // Slot 2: Skills or Template list
 			if m.slot2IsSkills {
 				m.skillList, cmd = m.skillList.Update(msg)
 			} else {
 				m.templateList, cmd = m.templateList.Update(msg)
 			}
-		case 3: // Dependency list
+		case slotDeps: // Dependency list
 			m.depList, cmd = m.depList.Update(msg)
-		case 4: // Prompt textarea
+		case slotPrompt: // Prompt textarea
 			m.promptInput, cmd = m.promptInput.Update(msg)
 		}
 	}
@@ -375,10 +365,10 @@ func (m Model) updateFocus() Model {
 
 	// Only focus if not in unfocused state
 	if !m.unfocused {
-		switch m.focusIndex {
-		case 0:
+		switch m.currentSlot().id {
+		case slotTitle:
 			m.titleInput.Focus()
-		case 4:
+		case slotPrompt:
 			m.promptInput.Focus()
 		}
 	}
