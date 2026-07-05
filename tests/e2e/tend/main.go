@@ -212,6 +212,34 @@ func main() {
 		// writes to grove config files (sandbox denyWrite + permissions.deny),
 		// strips on false, honors GROVE_UNLOCK_CONFIG, and seeds on ShouldSeed.
 		scenarios.ClaudeSettingsSelfProtectionScenario,
+
+		// oracle-cache-lineage (spec 19 §5, scenarios 1-23): the chat cache
+		// rework's e2e surface — layer store mechanics, refresh verbs,
+		// cross-job lineage, and the guards/edges — all against the mock LLM,
+		// asserting on disk artifacts + request manifests + job.log.
+		scenarios.OracleCacheLayer0CreationScenario,        // 1
+		scenarios.OracleCacheByteImmutabilityScenario,      // 2
+		scenarios.OracleCacheRulesWideningScenario,         // 3
+		scenarios.OracleCacheWideningDedupScenario,         // 4
+		scenarios.OracleCacheWorktreeEditFrozenScenario,    // 5
+		scenarios.OracleCacheAppendDeltaScenario,           // 6
+		scenarios.OracleCacheRebaseScenario,                // 7
+		scenarios.OracleCacheRulesRemovalScenario,          // 8
+		scenarios.OracleCacheRebaseAdvisoryScenario,        // 9
+		scenarios.OracleCacheLineageInheritScenario,        // 10
+		scenarios.OracleCacheDepTranscriptScenario,         // 11
+		scenarios.OracleCacheGitDeltaOnLineageScenario,     // 12
+		scenarios.OracleCacheLineageModelMismatchScenario,  // 13
+		scenarios.OracleCachePinnedContextRejectedScenario, // 14
+		scenarios.OracleCacheTTLFrontmatterScenario,        // 15
+		scenarios.OracleCacheNoCacheScenario,               // 16
+		scenarios.OracleCacheTranscriptStabilityScenario,   // 17
+		scenarios.OracleCacheChatReopenScenario,            // 18
+		scenarios.OracleCacheSnapshotOptOutScenario,        // 19
+		scenarios.OracleCacheGeminiPassthroughScenario,     // 20
+		scenarios.OracleCacheConcurrentChatsScenario,       // 21
+		scenarios.OracleCacheUnreadableGlobScenario,        // 22
+		scenarios.OracleCacheLegacyUntouchedScenario,       // 23
 	}
 
 	if err := app.Execute(context.TODO(), allScenarios); err != nil {

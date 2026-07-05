@@ -1,0 +1,31 @@
+# oracle-cache-lineage feature rules (spec 19: layered cache lineage)
+# Scopes the chat cache rework: the layer store/engine/lineage that turns the
+# job's rules file into an append-only sequence of immutable layer artifacts,
+# the per-turn request manifest (D9, the e2e assertion surface), the transcript
+# split (byte-stable history vs volatile turn), the frontmatter knobs
+# (cache_ttl / context_snapshot / no_cache / pinned_context rejection), the
+# refresh verbs (--append-delta / --rebase-context + reopen stamping), and
+# (cross-repo) the grove-anthropic ladder layout + DescribeRequest breakpoint
+# plan the manifest is derived from. Changes to any of these should trigger
+# the oracle-cache-lineage E2E suite.
+# Paths are relative to the flow repo root.
+
+pkg/orchestration/layer_store.go
+pkg/orchestration/layer_engine.go
+pkg/orchestration/layer_lineage.go
+pkg/orchestration/chat_stamp.go
+pkg/orchestration/chat_reopen.go
+pkg/orchestration/request_manifest.go
+pkg/orchestration/chat_formatter.go
+pkg/orchestration/chat_prompt.go
+pkg/orchestration/oneshot_executor.go
+pkg/orchestration/job.go
+cmd/plan_run.go
+cmd/plan.go
+../grove-anthropic/pkg/anthropic/request.go
+../grove-anthropic/pkg/anthropic/client.go
+tests/e2e/tend/scenarios/oracle_cache_helpers.go
+tests/e2e/tend/scenarios/oracle_cache_layers.go
+tests/e2e/tend/scenarios/oracle_cache_refresh.go
+tests/e2e/tend/scenarios/oracle_cache_lineage.go
+tests/e2e/tend/scenarios/oracle_cache_misc.go

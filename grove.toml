@@ -59,6 +59,35 @@ name = "agent-provider-lifecycle"
 rules = ".cx/agent-provider.rules"
 scenarios = ["codex-outcome-lifecycle", "pi-outcome-lifecycle", "opencode-outcome-lifecycle", "codex-nested-session-discovery", "pi-headless-launch", "codex-headless-unsupported", "pi-session-registration", "pi-interactive-non-tty"]
 
+[[test_scopes]]
+name = "oracle-cache-lineage"
+rules = ".cx/oracle-cache-lineage.rules"
+scenarios = [
+  "layer0-creation",
+  "byte-immutability",
+  "rules-widening",
+  "widening-dedup",
+  "worktree-edit-frozen",
+  "append-delta",
+  "rebase",
+  "rules-removal",
+  "rebase-advisory",
+  "lineage-inherit",
+  "dep-transcript-layer",
+  "git-delta-on-lineage",
+  "lineage-model-mismatch",
+  "pinned-context-rejected",
+  "cache-ttl-frontmatter",
+  "no-cache",
+  "transcript-stability",
+  "chat-reopen",
+  "snapshot-optout",
+  "gemini-passthrough",
+  "concurrent-chats",
+  "unreadable-glob-file",
+  "legacy-untouched",
+]
+
 [[hooks.on_stop]]
 name = "Auto-format"
 command = "make fmt; CODE=$?; grove internal task-report . fmt $CODE; exit $CODE"
