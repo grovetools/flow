@@ -86,7 +86,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.extractValues()
 			return m, doneWithJob(m.toJob(m.plan))
 
-		case key.Matches(msg, clawToggleKey):
+		case key.Matches(msg, m.keys.ToggleClaw):
 			// Toggle claw — only for interactive_agent
 			if selected := m.jobTypeList.SelectedItem(); selected != nil && string(selected.(item)) == "interactive_agent" {
 				m.clawEnabled = !m.clawEnabled
@@ -218,6 +218,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+
+		case key.Matches(msg, m.keys.QuickChat):
+			// Quick chat setup - only in NORMAL mode and NOT on a text field.
+			// Guard adopts the base's slot-kind check (the former raw "c"
+			// handler was refactored to currentSlotKind()==slotList) so typing
+			// "c" into the title/prompt fields still inserts the char.
+			if m.unfocused && m.currentSlotKind() == slotList {
+				for i, listItem := range m.jobTypeList.Items() {
+					if string(listItem.(item)) == "chat" {
+						m.jobTypeList.Select(i)
+						break
+					}
+				}
+				m.templateList = m.buildTemplateList("chat")
+				m.slot2IsSkills = false
+				for i, listItem := range m.templateList.Items() {
+					if string(listItem.(item)) == "chat" {
+						m.templateList.Select(i)
+						break
+					}
+				}
+				return m, nil
+			}
+
+		case key.Matches(msg, m.keys.QuickAgent):
+			// Quick agent setup - only in NORMAL mode and NOT on a text field.
+			if m.unfocused && m.currentSlotKind() == slotList {
+				for i, listItem := range m.jobTypeList.Items() {
+					if string(listItem.(item)) == "interactive_agent" {
+						m.jobTypeList.Select(i)
+						break
+					}
+				}
+				m.templateList = m.buildTemplateList("interactive_agent")
+				m.slot2IsSkills = true
+				return m, nil
+			}
+
+		case key.Matches(msg, m.keys.Confirm):
+			// Confirm & advance. Guard (inList || unfocused) carried verbatim
+			// from the former raw "enter" handler so enter typed in a text
+			// field falls through to the input component.
+			if inList {
+				m.unfocused = false
+				m.focusIndex = m.nextVisibleSlot(m.focusIndex)
+				return m.updateFocus(), nil
+			} else if m.unfocused {
+				m.unfocused = false
+				return m.updateFocus(), nil
+			}
 		}
 
 		// Handle non-configurable keys via switch on string
@@ -257,40 +307,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateFocus(), nil
 			}
 
-		case "c":
-			// Quick chat setup - only when in NORMAL mode and NOT on a text field
-			if m.unfocused && m.currentSlotKind() == slotList {
-				for i, listItem := range m.jobTypeList.Items() {
-					if string(listItem.(item)) == "chat" {
-						m.jobTypeList.Select(i)
-						break
-					}
-				}
-				m.templateList = m.buildTemplateList("chat")
-				m.slot2IsSkills = false
-				for i, listItem := range m.templateList.Items() {
-					if string(listItem.(item)) == "chat" {
-						m.templateList.Select(i)
-						break
-					}
-				}
-				return m, nil
-			}
-
-		case "a":
-			// Quick agent setup - only when in NORMAL mode and NOT on a text field
-			if m.unfocused && m.currentSlotKind() == slotList {
-				for i, listItem := range m.jobTypeList.Items() {
-					if string(listItem.(item)) == "interactive_agent" {
-						m.jobTypeList.Select(i)
-						break
-					}
-				}
-				m.templateList = m.buildTemplateList("interactive_agent")
-				m.slot2IsSkills = true
-				return m, nil
-			}
-
 		case ":wq":
 			// Vim-style save and quit
 			m.extractValues()
@@ -299,18 +315,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "i":
 			// Insert mode - refocus current field (like vim)
 			if m.unfocused {
-				m.unfocused = false
-				return m.updateFocus(), nil
-			}
-
-		case "enter":
-			if inList {
-				// For lists, enter confirms selection and moves to next field
-				m.unfocused = false
-				m.focusIndex = m.nextVisibleSlot(m.focusIndex)
-				return m.updateFocus(), nil
-			} else if m.unfocused {
-				// If unfocused, enter refocuses current field
 				m.unfocused = false
 				return m.updateFocus(), nil
 			}

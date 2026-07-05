@@ -104,13 +104,19 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("R"),
 			key.WithHelp("R", "rename job"),
 		),
+		// Rebound from "ctrl+R": bubbletea lowercases ctrl chords, so
+		// "ctrl+R" never matched. "ctrl+e" is a FreeKeys entry (canonical.go)
+		// and unused elsewhere in this TUI. Not "ctrl+r" (reserved: refresh).
 		Resume: key.NewBinding(
-			key.WithKeys("ctrl+R"),
-			key.WithHelp("ctrl+R", "resume job"),
+			key.WithKeys("ctrl+e"),
+			key.WithHelp("ctrl+e", "resume job"),
 		),
+		// Rebound from "ctrl+d": that key is shadowed by Base.PageDown
+		// (ctrl+d/pgdown), whose case runs earlier in the Update switch, so
+		// the dependency editor could never open. "ctrl+o" is a free key.
 		EditDeps: key.NewBinding(
-			key.WithKeys("ctrl+d"),
-			key.WithHelp("ctrl+d", "edit dependencies"),
+			key.WithKeys("ctrl+o"),
+			key.WithHelp("ctrl+o", "edit dependencies"),
 		),
 		DemoteToNote: key.NewBinding(
 			key.WithKeys("D"),
@@ -194,8 +200,32 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 	// Apply TUI-specific overrides from config
 	keymap.ApplyTUIOverrides(cfg, "flow", "status", &km)
 
+	// Disable every promoted Base binding this TUI does not handle (verified
+	// against every key.Matches(msg, m.KeyMap.*) case in update.go). Handled
+	// Base bindings that stay enabled: Up, Down, Top (via the Sequence engine),
+	// Bottom, PageUp, PageDown, Select, SelectAll, SelectNone, Edit, Confirm,
+	// CopyPath, Help, Quit. Notable disables: SwitchView (tab is consumed by
+	// SwitchFocus), TogglePreview (v is consumed by ViewEdit), Base.Rename
+	// (shadowed by the outer "rename job" field with a distinct signature),
+	// Base.Back/Cancel (esc is handled by CloseDetailPane; ctrl+g unused here).
+	for _, b := range []*key.Binding{
+		&km.Base.Left, &km.Base.Right, &km.Base.Home, &km.Base.End,
+		&km.Base.Back, &km.Base.Cancel, &km.Base.Delete, &km.Base.Yank, &km.Base.Rename, &km.Base.Refresh,
+		&km.Base.Search, &km.Base.SearchNext, &km.Base.SearchPrev, &km.Base.ClearSearch, &km.Base.Grep,
+		&km.Base.SwitchView, &km.Base.NextTab, &km.Base.PrevTab, &km.Base.FocusNext, &km.Base.FocusPrev, &km.Base.TogglePreview,
+		&km.Base.Tab1, &km.Base.Tab2, &km.Base.Tab3, &km.Base.Tab4, &km.Base.Tab5, &km.Base.Tab6, &km.Base.Tab7, &km.Base.Tab8, &km.Base.Tab9,
+		&km.Base.FoldOpen, &km.Base.FoldClose, &km.Base.FoldToggle, &km.Base.FoldOpenAll, &km.Base.FoldCloseAll,
+	} {
+		b.SetEnabled(false)
+	}
+
 	return km
 }
+
+// Compile-time guard: KeyMap must satisfy SectionedKeyMap by value (KeymapInfo
+// passes it by value to MakeTUIInfo). A near-miss Sections() signature would
+// silently fall back to the promoted Base.Sections().
+var _ keymap.SectionedKeyMap = KeyMap{}
 
 func (k KeyMap) ShortHelp() []key.Binding {
 	// Return just quit - help is shown automatically by the help component
@@ -209,15 +239,16 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.NavigationSection(k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown),
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
-			k.SwitchView, k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-			k.ViewBriefing, k.ViewEdit, k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane, k.TogglePreview,
+			k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
+			k.ViewBriefing, k.ViewEdit, k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane,
 			k.CloseDetailPane, k.SwitchFocus, k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(
-			k.Run, k.Edit, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
-			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.Rename,
-			k.Resume, k.EditDeps, k.DemoteToNote, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath, k.Help, k.Quit,
+			k.Run, k.Edit, k.Confirm, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
+			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.AgentFromChat, k.Rename,
+			k.Resume, k.EditDeps, k.DemoteToNote, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath,
 		),
+		k.Base.SystemSection(),
 	}
 }
 
