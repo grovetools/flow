@@ -1745,6 +1745,77 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// This ensures chat uses the correct context files
 	worktreePath = ScopeToSubProject(worktreePath, job)
 
+	// Determine effective model with clear precedence. Resolved BEFORE
+	// dependency handling because the cross-job lineage guard (spec 19 P5)
+	// compares it against each parent chat's effective model.
+	var effectiveModel string
+	var modelSource string
+
+	// 1. CLI flag (highest priority)
+	if e.config.ModelOverride != "" {
+		effectiveModel = e.config.ModelOverride
+		modelSource = "CLI override"
+	} else if directive.Model != "" {
+		// 2. Chat directive model (for specific turns)
+		effectiveModel = directive.Model
+		modelSource = "chat directive"
+	} else if job.Model != "" {
+		// 3. Job frontmatter model
+		effectiveModel = job.Model
+		modelSource = "job frontmatter"
+	} else if plan.Config != nil && plan.Config.Model != "" {
+		// 4. Plan config model
+		effectiveModel = plan.Config.Model
+		modelSource = "plan config"
+	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
+		// 5. Global config model
+		effectiveModel = plan.Orchestration.OneshotModel
+		modelSource = "global config"
+	} else {
+		// 6. Hardcoded fallback - use Anthropic default
+		effectiveModel = anthropicmodels.DefaultModel
+		modelSource = "default fallback"
+	}
+
+	// Resolve model aliases (e.g., "claude-sonnet-4-5" -> "claude-sonnet-4-5-20250929")
+	effectiveModel = resolveModelAlias(effectiveModel)
+
+	logrus.WithFields(logrus.Fields{
+		"job_id":       job.ID,
+		"model":        effectiveModel,
+		"model_source": modelSource,
+	}).Debug("Resolved model for chat job execution")
+
+	// --- Cross-job cache lineage (spec 19 P5 / D8) ---
+	// Completed chat-type dependencies extend this chat's layer sequence: the
+	// layer engine rides their artifacts as inherited read-only refs, their
+	// conversations as dep-transcript layers, and a git-delta layer trues the
+	// inherited context up to the current worktree. Those deps therefore stop
+	// traveling in the prompt: inline: dependencies is superseded for them
+	// (the transcript layer is the cached, cheaper vehicle) and they are not
+	// uploaded as attachments either. Lineage needs a layer store, so a chat
+	// without a rules file keeps legacy dep handling for ALL deps; non-chat
+	// deps (agent jobs, oneshots) and non-completed chat deps always keep it.
+	var lineageParents []LineageParent
+	lineageDepIDs := make(map[string]bool)
+	if chatUsedRulesPath != "" {
+		for _, dep := range job.Dependencies {
+			if dep == nil || dep.Type != JobTypeChat || dep.Status != JobStatusCompleted || dep.FilePath == "" {
+				continue
+			}
+			parentModel := lineageEffectiveModel(dep, plan)
+			lineageParents = append(lineageParents, LineageParent{
+				JobID:      dep.ID,
+				Title:      dep.Title,
+				FilePath:   dep.FilePath,
+				PlanDir:    plan.Directory,
+				Model:      parentModel,
+				ModelMatch: parentModel == effectiveModel,
+			})
+			lineageDepIDs[dep.ID] = true
+		}
+	}
+
 	// Build the prompt
 	// Split the conversation into the two transcript cache regions (spec 19
 	// D7 / P4): byte-stable per-turn history blocks and the volatile current
@@ -1774,6 +1845,16 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		log.WithField("count", len(sortedDeps)).Debug("Inlining dependencies into prompt")
 		for _, dep := range sortedDeps {
 			if dep != nil && dep.FilePath != "" {
+				if lineageDepIDs[dep.ID] {
+					// P5: this dep travels as cached lineage layers (inherited
+					// refs + dep-transcript), never as prompt text — no
+					// <prepended_dependency> for it (spec 19 e2e 11).
+					ulog.Info("Chat dependency rides as a dep-transcript context layer; inline: dependencies is superseded for it").
+						Field("job_id", job.ID).
+						Field("dep", dep.Filename).
+						Log(ctx)
+					continue
+				}
 				depContent, err := os.ReadFile(dep.FilePath)
 				if err != nil {
 					execErr = fmt.Errorf("reading dependency file %s: %w", dep.FilePath, err)
@@ -1792,6 +1873,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		log.WithField("count", len(job.Dependencies)).Debug("Collecting dependencies for upload")
 		for _, dep := range job.Dependencies {
 			if dep != nil && dep.FilePath != "" {
+				if lineageDepIDs[dep.ID] {
+					log.WithField("file", dep.Filename).Debug("Chat dependency rides as lineage layers; not uploading as an attachment")
+					continue
+				}
 				dependencyFilePaths = append(dependencyFilePaths, dep.FilePath)
 				log.WithField("file", dep.Filename).Debug("Uploading dependency as file attachment")
 			}
@@ -1894,6 +1979,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			StripComments:   job.IsStripCommentsEnabled(),
 			SnapshotEnabled: job.IsContextSnapshotEnabled(),
 			Refresh:         refresh,
+			Lineage:         lineageParents,
 		})
 		if err != nil {
 			execErr = fmt.Errorf("preparing context layers: %w", err)
@@ -1983,46 +2069,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		log.Warn("No context files included in chat prompt")
 	}
 
-	// Determine effective model with clear precedence
-	var effectiveModel string
-	var modelSource string
-
-	// 1. CLI flag (highest priority)
-	if e.config.ModelOverride != "" {
-		effectiveModel = e.config.ModelOverride
-		modelSource = "CLI override"
-	} else if directive.Model != "" {
-		// 2. Chat directive model (for specific turns)
-		effectiveModel = directive.Model
-		modelSource = "chat directive"
-	} else if job.Model != "" {
-		// 3. Job frontmatter model
-		effectiveModel = job.Model
-		modelSource = "job frontmatter"
-	} else if plan.Config != nil && plan.Config.Model != "" {
-		// 4. Plan config model
-		effectiveModel = plan.Config.Model
-		modelSource = "plan config"
-	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
-		// 5. Global config model
-		effectiveModel = plan.Orchestration.OneshotModel
-		modelSource = "global config"
-	} else {
-		// 6. Hardcoded fallback - use Anthropic default
-		effectiveModel = anthropicmodels.DefaultModel
-		modelSource = "default fallback"
-	}
-
-	// Resolve model aliases (e.g., "claude-sonnet-4-5" -> "claude-sonnet-4-5-20250929")
-	effectiveModel = resolveModelAlias(effectiveModel)
-
-	logrus.WithFields(logrus.Fields{
-		"job_id":       job.ID,
-		"model":        effectiveModel,
-		"model_source": modelSource,
-	}).Debug("Resolved model for chat job execution")
-
-	// Create LLM options with determined model
+	// Create LLM options with the effective model (resolved above, before
+	// dependency handling — the lineage guard needed it).
 	// Combine dependency and include files for upload
 	allIncludeFiles := append(dependencyFilePaths, includeFilePaths...)
 	llmOpts := LLMOptions{

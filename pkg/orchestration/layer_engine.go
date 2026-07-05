@@ -70,6 +70,12 @@ type LayerEngineParams struct {
 	// guard is deliberately bypassed (the store is wiped first).
 	SnapshotEnabled bool
 	Refresh         LayerRefreshMode
+	// Lineage lists the job's completed chat dependencies whose layer
+	// sequences this job extends (spec 19 P5 / D8), in depends_on order.
+	// Integrated append-only and idempotently: parents already represented in
+	// the manifest are skipped, so a reopen picks up only newly-completed
+	// deps.
+	Lineage []LineageParent
 }
 
 // LayerEngineResult reports what the engine decided for this turn.
@@ -138,21 +144,38 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 
 	heads, dirty := collectGitState(p.ContextDir)
 
-	// Fresh store: freeze the base layer.
+	// Fresh store: assemble the cross-job lineage first (inherited refs +
+	// dep-transcript layers + auto git-delta, spec 19 P5), then freeze this
+	// job's own base from whatever the rules resolve BEYOND the inherited
+	// union — files the lineage already carries are never duplicated.
 	if manifest == nil {
-		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, 0, LayerSourceRulesBase, fileset, nil)
-		if err != nil {
+		manifest = &LayerManifest{Version: 1}
+		if _, err := integrateLineage(ctx, writer, p, layersDir, manifest); err != nil {
 			return nil, err
 		}
-		baseName := "00-base.xml"
-		basePath := filepath.Join(layersDir, baseName)
-		if err := WriteLayerArtifact(basePath, data); err != nil {
-			return nil, err
+		union := UnionFileRecords(manifest)
+		baseFiles := make([]string, 0, len(fileset))
+		for _, f := range fileset {
+			if _, ok := union[f]; !ok {
+				baseFiles = append(baseFiles, f)
+			}
 		}
-		manifest = &LayerManifest{
-			Version: 1,
-			Layers: []LayerEntry{{
-				N:         0,
+		// The own base is appended when the rules resolve files the lineage
+		// does not already carry; a lineage-less store always freezes a base
+		// (even an empty one) so the store visibly exists.
+		if len(baseFiles) > 0 || len(manifest.Layers) == 0 {
+			n := len(manifest.Layers)
+			data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceRulesBase, baseFiles, nil)
+			if err != nil {
+				return nil, err
+			}
+			baseName := fmt.Sprintf("%02d-base.xml", n)
+			basePath := filepath.Join(layersDir, baseName)
+			if err := WriteLayerArtifact(basePath, data); err != nil {
+				return nil, err
+			}
+			manifest.Layers = append(manifest.Layers, LayerEntry{
+				N:         n,
 				File:      baseName,
 				Source:    LayerSourceRulesBase,
 				Hash:      sha256Hex(data),
@@ -163,7 +186,8 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 				Files:     records,
 				TurnID:    p.TurnID,
 				CreatedAt: time.Now().UTC(),
-			}},
+			})
+			fmt.Fprintf(writer, "Context layers: froze %s (%d files, %s)\n", baseName, len(records), formatByteCount(int64(len(data))))
 		}
 		if err := SaveLayerManifest(layersDir, manifest); err != nil {
 			return nil, err
@@ -178,16 +202,30 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 		}); err != nil {
 			return nil, err
 		}
-		fmt.Fprintf(writer, "Context layers: froze %s (%d files, %s)\n", baseName, len(records), formatByteCount(int64(len(data))))
 		res := layerResultFromManifest(layersDir, manifest)
 		res.Rebased = rebased
 		return res, nil
 	}
 
-	// Existing store: enforce immutability before trusting anything in it.
+	// Existing store: enforce immutability before trusting anything in it —
+	// including inherited refs into parent jobs' artifacts (a rebased or
+	// pruned parent is a broken lineage and fails loudly, see
+	// AuditLayerArtifacts).
 	if err := AuditLayerArtifacts(layersDir, manifest); err != nil {
 		return nil, err
 	}
+
+	changed := false // manifest mutated this turn
+
+	// Chat deps that completed after the store was frozen (a reopen following
+	// new upstream work) extend the lineage append-only: inherited refs +
+	// dep-transcript + git-delta ride BEFORE this turn's rules diffing so the
+	// union below already accounts for the newly inherited files.
+	lineageChanged, err := integrateLineage(ctx, writer, p, layersDir, manifest)
+	if err != nil {
+		return nil, err
+	}
+	changed = changed || lineageChanged
 
 	union := UnionFileRecords(manifest)
 
@@ -203,8 +241,6 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 		}
 		current[f] = rf
 	}
-
-	changed := false // manifest mutated this turn
 
 	// Genuinely-new files (not in any layer) → rules-diff layer.
 	var newFiles []string
@@ -248,7 +284,10 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	}
 
 	// Files removed from the rules: bytes stay in their layers (shrinking the
-	// upload would bust the prefix); record the removal annotation once.
+	// upload would bust the prefix); record the removal annotation once. Only
+	// files this job's OWN rules layers captured count — inherited files were
+	// never in this job's rules, so their absence from the fileset is their
+	// normal state, not a removal.
 	alreadyRemoved := make(map[string]bool, len(manifest.Removals))
 	for _, r := range manifest.Removals {
 		alreadyRemoved[r.Path] = true
@@ -257,8 +296,16 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	for _, f := range fileset {
 		inFileset[f] = true
 	}
+	rulesCaptured := make(map[string]bool)
+	for _, layer := range manifest.Layers {
+		if layer.Source == LayerSourceRulesBase || layer.Source == LayerSourceRulesDiff {
+			for _, f := range layer.Files {
+				rulesCaptured[f.Path] = true
+			}
+		}
+	}
 	var removedPaths []string
-	for path := range union {
+	for path := range rulesCaptured {
 		if !inFileset[path] && !alreadyRemoved[path] {
 			removedPaths = append(removedPaths, path)
 		}

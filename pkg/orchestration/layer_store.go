@@ -26,10 +26,11 @@ import (
 // change are appending a new layer or archiving the whole lineage via
 // --rebase-context. WriteLayerArtifact and AuditLayerArtifacts enforce this.
 
-// Layer provenance sources recorded in layers.json (spec 19 §3). P3 emits
-// rules-base / rules-diff / git-delta; dep-transcript and inherited are
-// reserved for the cross-job lineage phase (P5) — the loader and
-// LayerArtifactPath already tolerate them so P5 only adds writers.
+// Layer provenance sources recorded in layers.json (spec 19 §3). The rules
+// engine (P3) emits rules-base / rules-diff / git-delta; cross-job lineage
+// (P5, layer_lineage.go) emits inherited (read-only refs to a parent chat's
+// artifacts), dep-transcript (a completed parent chat's conversation as a
+// layer document), and lineage git-delta layers.
 const (
 	LayerSourceRulesBase     = "rules-base"
 	LayerSourceRulesDiff     = "rules-diff"
@@ -83,8 +84,12 @@ type LayerEntry struct {
 	// (delta layers). The chat template instructs the oracle that later
 	// layers win.
 	Supersedes []string `json:"supersedes,omitempty"`
-	// InheritedFrom identifies the parent job artifact this entry references
-	// ("<job-id>/<layer-file>", P5). Empty for own layers.
+	// InheritedFrom records the parent-job provenance of lineage entries (P5):
+	// "<job-id>/<layer-file>" on inherited refs (the job that OWNS the
+	// artifact — a ref inherited through a chain keeps its original owner),
+	// bare "<job-id>" on dep-transcript layers (the direct parent whose
+	// transcript this is; also the marker integrateLineage uses to know a
+	// parent is already integrated). Empty for this job's own rules layers.
 	InheritedFrom string `json:"inherited_from,omitempty"`
 	// TurnID / CreatedAt record when the layer was appended.
 	TurnID    string    `json:"turn_id,omitempty"`
@@ -231,20 +236,27 @@ func WriteLayerArtifact(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// AuditLayerArtifacts verifies every own (non-inherited) layer artifact still
-// exists with exactly the bytes recorded at append time. Any drift is a hard
-// error: a mutated layer means the uploaded prefix silently changed.
+// AuditLayerArtifacts verifies every layer artifact — own AND inherited —
+// still exists with exactly the bytes recorded at append time. Any drift is a
+// hard error: a mutated layer means the uploaded prefix silently changed.
+// Inherited refs point into a PARENT job's context-layers dir, so their
+// failure mode is different (the parent was rebased or its artifacts pruned —
+// a broken lineage) and gets its own actionable message: --rebase-context on
+// THIS job rebuilds the context from the parent's current state.
 func AuditLayerArtifacts(layersDir string, m *LayerManifest) error {
 	for _, e := range m.Layers {
-		if e.InheritedFrom != "" {
-			continue // parent-owned artifact; P5 validates lineage separately
-		}
 		path := LayerArtifactPath(layersDir, e)
 		data, err := os.ReadFile(path)
 		if err != nil {
+			if e.Source == LayerSourceInherited {
+				return fmt.Errorf("inherited layer artifact %s (layer %d, inherited from %s) is missing or unreadable — the parent job's context layers were removed or rebased, breaking this chat's cache lineage; run this chat with --rebase-context to rebuild its context without the broken refs: %w", path, e.N, e.InheritedFrom, err)
+			}
 			return fmt.Errorf("layer artifact %s (layer %d, %s) is missing or unreadable: %w", path, e.N, e.Source, err)
 		}
 		if got := sha256Hex(data); got != e.Hash {
+			if e.Source == LayerSourceInherited {
+				return fmt.Errorf("inherited layer artifact %s (layer %d, inherited from %s) changed after this job inherited it (hash %s, recorded %s) — the parent job's context was rebased, breaking this chat's cache lineage; run this chat with --rebase-context to rebuild its context from the parent's current state", path, e.N, e.InheritedFrom, got, e.Hash)
+			}
 			return fmt.Errorf("layer artifact %s (layer %d, %s) was modified after freeze (hash %s, recorded %s) — layer artifacts are immutable; restore it or rebase with --rebase-context", path, e.N, e.Source, got, e.Hash)
 		}
 	}
