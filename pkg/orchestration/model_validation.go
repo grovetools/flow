@@ -6,6 +6,7 @@ import (
 
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
+	openroutermodels "github.com/grovetools/grove-openrouter/pkg/models"
 
 	modelpkg "github.com/grovetools/flow/pkg/model"
 )
@@ -100,6 +101,12 @@ func allModelNames() []string {
 		if m.Alias != "" {
 			names = append(names, m.Alias)
 		}
+	}
+	// OpenRouter: IDs only, no bare aliases — flow never accepts the bare
+	// "<vendor>/<model>" spelling (see LookupModelProvider), so the did-you-mean
+	// suggestion should only ever propose prefixed "openrouter/..." IDs.
+	for _, m := range openroutermodels.Models() {
+		names = append(names, m.ID)
 	}
 	return names
 }

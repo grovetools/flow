@@ -16,9 +16,10 @@ import (
 // same Anthropic ladder assembly as a real claude dispatch would use — it is
 // the tend e2e suite's assertion surface (spec 19 D9).
 const (
-	requestManifestProviderAnthropic = "anthropic"
-	requestManifestProviderGemini    = "gemini"
-	requestManifestProviderMock      = "mock"
+	requestManifestProviderAnthropic  = "anthropic"
+	requestManifestProviderGemini     = "gemini"
+	requestManifestProviderOpenRouter = "openrouter"
+	requestManifestProviderMock       = "mock"
 )
 
 // RequestManifestEntry is one block of an assembled LLM request, in emission

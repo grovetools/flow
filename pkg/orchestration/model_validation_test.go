@@ -99,3 +99,33 @@ func TestValidateModelKnown_DidYouMean(t *testing.T) {
 		t.Errorf("expected 'Did you mean' suggestion, got: %s", err.Error())
 	}
 }
+
+func TestValidateModelKnown_OpenRouterBareAliasSuggestsPrefixed(t *testing.T) {
+	// The bare OpenRouter alias is not accepted flow-side (conflation guard).
+	// It errors, and the did-you-mean should steer the user to the prefixed ID.
+	err := ValidateModelKnown("openai/gpt-5.2")
+	if err == nil {
+		t.Fatal("expected error for bare openrouter alias, got nil")
+	}
+	if !strings.Contains(err.Error(), "openrouter/openai/gpt-5.2") {
+		t.Errorf("expected did-you-mean to suggest %q, got: %s", "openrouter/openai/gpt-5.2", err.Error())
+	}
+}
+
+func TestValidateModelKnown_OpenRouterPrefixedAnthropicVendor(t *testing.T) {
+	// An OpenRouter ID whose vendor segment is "anthropic" must resolve via the
+	// provider lookup (prefix precedence, Correction 6) — not be rejected — even
+	// though it contains "claude". ValidateModelKnown returns nil.
+	if err := ValidateModelKnown("openrouter/anthropic/claude-sonnet-4.5"); err != nil {
+		t.Errorf("expected nil for prefixed openrouter/anthropic model, got: %s", err.Error())
+	}
+}
+
+func TestValidateModelForJob_OpencodeAgentSlashModel(t *testing.T) {
+	// opencode agent jobs carry bare slash model strings; adding OpenRouter to
+	// the provider lookup must not break agent-job validation (the agent branch
+	// early-returns before the provider lookup).
+	if err := ValidateModelForJob("anthropic/claude-sonnet-4-5", JobTypeInteractiveAgent, "opencode"); err != nil {
+		t.Errorf("expected opencode agent job with slash model to pass, got: %s", err.Error())
+	}
+}

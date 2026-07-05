@@ -10,6 +10,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
+	openroutermodels "github.com/grovetools/grove-openrouter/pkg/models"
 )
 
 // flowConfigSubset captures the fields of the flow grove.yml
@@ -116,6 +117,16 @@ func getAvailableModels() []modelInfo {
 		}
 		models = append(models, modelInfo{
 			ID:       id,
+			Provider: m.Provider,
+			Note:     m.Note,
+		})
+	}
+	// OpenRouter: use the prefixed ID, not the bare alias — flow only accepts
+	// the "openrouter/<vendor>/<model>" form (intentional divergence from the
+	// anthropic loop above, which prefers the alias).
+	for _, m := range openroutermodels.CurrentModels() {
+		models = append(models, modelInfo{
+			ID:       m.ID,
 			Provider: m.Provider,
 			Note:     m.Note,
 		})

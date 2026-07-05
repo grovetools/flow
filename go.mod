@@ -14,6 +14,7 @@ require (
 	github.com/grovetools/cx v0.6.0
 	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/grove-gemini v0.6.1
+	github.com/grovetools/grove-openrouter v0.0.0-00010101000000-000000000000
 	github.com/grovetools/memory v0.6.3
 	github.com/grovetools/notify v0.6.0
 	github.com/grovetools/skills v0.6.0
@@ -97,3 +98,9 @@ require (
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
+
+// grove-openrouter has no published release yet; the require above carries the
+// null pseudo-version and this replace resolves it from the local worktree so
+// builds work with GOWORK off too. Land-time: publish grove-openrouter, bump the
+// require to the tagged version, and drop this replace (go.work already `use`s it).
+replace github.com/grovetools/grove-openrouter => ../grove-openrouter

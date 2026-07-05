@@ -27,6 +27,9 @@ import (
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
+	openrouterconfig "github.com/grovetools/grove-openrouter/pkg/config"
+	openroutermodels "github.com/grovetools/grove-openrouter/pkg/models"
+	openrouter "github.com/grovetools/grove-openrouter/pkg/openrouter"
 
 	modelpkg "github.com/grovetools/flow/pkg/model"
 	"github.com/mattn/go-isatty"
@@ -77,11 +80,12 @@ type ExecutorConfig struct {
 
 // OneShotExecutor executes oneshot jobs.
 type OneShotExecutor struct {
-	llmClient       LLMClient
-	config          *ExecutorConfig
-	worktreeManager *git.WorktreeManager
-	geminiRunner    *gemini.RequestRunner
-	anthropicRunner *anthropic.RequestRunner
+	llmClient        LLMClient
+	config           *ExecutorConfig
+	worktreeManager  *git.WorktreeManager
+	geminiRunner     *gemini.RequestRunner
+	anthropicRunner  *anthropic.RequestRunner
+	openrouterRunner *openrouter.RequestRunner
 }
 
 // NewOneShotExecutor creates a new oneshot executor.
@@ -96,11 +100,12 @@ func NewOneShotExecutor(llmClient LLMClient, config *ExecutorConfig) *OneShotExe
 	}
 
 	return &OneShotExecutor{
-		llmClient:       llmClient,
-		config:          config,
-		worktreeManager: git.NewWorktreeManager(),
-		geminiRunner:    gemini.NewRequestRunner(),
-		anthropicRunner: anthropic.NewRequestRunner(),
+		llmClient:        llmClient,
+		config:           config,
+		worktreeManager:  git.NewWorktreeManager(),
+		geminiRunner:     gemini.NewRequestRunner(),
+		anthropicRunner:  anthropic.NewRequestRunner(),
+		openrouterRunner: openrouter.NewRequestRunner(),
 	}
 }
 
@@ -472,6 +477,43 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 				if innerErr == nil {
 					apiUsage = usage // only the final successful attempt's usage
 				}
+				return innerErr
+			})
+		}
+	} else if openroutermodels.HasPrefix(effectiveModel) {
+		// Resolve API key here where we have the correct execution context.
+		// Hard-fail like the anthropic branch (not gemini's silent blank):
+		// validation should have caught a missing key already, but the branch
+		// must be safe standalone.
+		apiKey, orErr := openrouterconfig.ResolveAPIKey()
+		if orErr != nil {
+			err = fmt.Errorf("resolving OpenRouter API key: %w", orErr)
+		} else {
+			// Use grove-openrouter package for OpenRouter models with retry.
+			err = e.executeWithRetry(ctx, job, func() error {
+				opts := openrouter.RequestOptions{
+					Model:           effectiveModel, // prefix kept; client strips it
+					Prompt:          prompt,
+					ContextFiles:    append(promptSourceFiles, contextFiles...),
+					WorkDir:         workDir,
+					HotContextFile:  hotCtxFile,  // Job-scoped, avoids cross-job race
+					ColdContextFile: coldCtxFile, // Job-scoped, avoids cross-job race
+					APIKey:          apiKey,
+					// MaxTokens omitted (0 = model default). OpenRouter's catalog
+					// has heterogeneous output caps; an over-cap max_tokens is an
+					// API error on some vendors, so we don't apply the 32000
+					// non-anthropic default here.
+					Caller:   "grove-flow-oneshot",
+					JobID:    job.ID,
+					PlanName: plan.Name,
+				}
+				if isTUIMode() {
+					fmt.Fprintf(output, "\n%s Calling OpenRouter API with model: %s\n\n", theme.IconRobot, effectiveModel)
+				}
+				var innerErr error
+				// Run returns (string, error) — no usage accumulation (token/cost
+				// tracking lives in the provider's own query ledger).
+				response, innerErr = e.openrouterRunner.Run(ctx, opts)
 				return innerErr
 			})
 		}
@@ -2165,7 +2207,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			CreatedAt: time.Now().UTC(),
 			Entries:   entries,
 		}
-		if provider != requestManifestProviderGemini {
+		if provider != requestManifestProviderGemini && provider != requestManifestProviderOpenRouter {
 			manifest.CacheLayout = anthropic.CacheLayoutLadder
 			manifest.CacheTTL = cacheTTL
 			manifest.NoCache = job.NoCache
@@ -2298,6 +2340,70 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 				Pretty(theme.DefaultTheme.Error.Render(fmt.Sprintf("%s Anthropic API call failed: %v", theme.IconError, err))).
 				Log(ctx)
 			execErr = fmt.Errorf("Anthropic API completion: %w", err)
+			return execErr
+		}
+	} else if openroutermodels.HasPrefix(effectiveModel) {
+		// The Anthropic ladder cache layout is Anthropic-only; OpenRouter keeps
+		// a flat upload (hot/cold passed explicitly via the dedicated fields +
+		// dependency/include attachments). Record the flattened shape in the
+		// manifest — no cache breakpoints (D9). The layer store still exists on
+		// disk (artifacts ≠ caching) but its artifacts are not what rides up —
+		// warn so the user knows the cache lineage semantics don't apply.
+		if layerResult != nil {
+			fmt.Fprintf(grovelogging.GetWriter(ctx),
+				"Context layers warning: model %s is not Anthropic — the layer store is flattened into the OpenRouter upload (job-scoped cx context) and no cache breakpoints apply (the ladder cache layout is Anthropic-only)\n",
+				effectiveModel)
+			ulog.Warn("OpenRouter chat: context layers flattened into legacy upload (no Anthropic cache lineage)").
+				Field("job_id", job.ID).
+				Field("model", effectiveModel).
+				Log(ctx)
+		}
+		var openrouterUploads []string
+		if chatColdCtx != "" {
+			openrouterUploads = append(openrouterUploads, chatColdCtx)
+		}
+		if chatHotCtx != "" {
+			openrouterUploads = append(openrouterUploads, chatHotCtx)
+		}
+		openrouterUploads = append(openrouterUploads, allIncludeFiles...)
+		entries, entriesErr := BuildFlattenedRequestManifestEntries(openrouterUploads, fullPrompt)
+		writeTurnManifest(requestManifestProviderOpenRouter, entries, entriesErr)
+		// Resolve API key here where we have the correct execution context.
+		apiKey, orErr := openrouterconfig.ResolveAPIKey()
+		if orErr != nil {
+			err = fmt.Errorf("resolving OpenRouter API key: %w", orErr)
+		} else {
+			// Use grove-openrouter package for OpenRouter models with retry.
+			err = e.executeWithRetry(ctx, job, func() error {
+				// hot/cold pass via dedicated fields (Correction 3); only the
+				// include set rides in ContextFiles — do NOT flatten hot/cold
+				// into ContextFiles or the job-scoped-context guarantees are lost.
+				opts := openrouter.RequestOptions{
+					Model:           effectiveModel,
+					Prompt:          fullPrompt, // SystemPrompt already embedded via flattenChatPrompt
+					WorkDir:         contextDir,
+					HotContextFile:  chatHotCtx,  // Job-scoped, avoids cross-job race
+					ColdContextFile: chatColdCtx, // Job-scoped, avoids cross-job race
+					ContextFiles:    allIncludeFiles,
+					APIKey:          apiKey,
+					Caller:          "grove-flow-chat",
+					JobID:           job.ID,
+					PlanName:        plan.Name,
+				}
+				if isTUIMode() {
+					fmt.Fprintf(output, "\n%s Calling OpenRouter API with model: %s\n\n", theme.IconRobot, effectiveModel)
+				}
+				var innerErr error
+				response, innerErr = e.openrouterRunner.Run(ctx, opts)
+				return innerErr
+			})
+		}
+		if err != nil {
+			ulog.Error("OpenRouter API call failed").
+				Err(err).
+				Pretty(theme.DefaultTheme.Error.Render(fmt.Sprintf("%s OpenRouter API call failed: %v", theme.IconError, err))).
+				Log(ctx)
+			execErr = fmt.Errorf("OpenRouter API completion: %w", err)
 			return execErr
 		}
 	} else {

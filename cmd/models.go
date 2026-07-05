@@ -8,6 +8,7 @@ import (
 
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
+	openroutermodels "github.com/grovetools/grove-openrouter/pkg/models"
 	"github.com/spf13/cobra"
 )
 
@@ -55,6 +56,17 @@ func runModelsList(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Add OpenRouter models — alias deliberately omitted: flow only accepts the
+	// prefixed "openrouter/<vendor>/<model>" spelling, never the bare alias, so
+	// surfaces must not advertise a spelling flow will reject.
+	for _, m := range openroutermodels.Models() {
+		models = append(models, displayModel{
+			ID:       m.ID,
+			Provider: m.Provider,
+			Note:     m.Note,
+		})
+	}
+
 	// Check if JSON output is requested via global flag
 	jsonOutput, _ := cmd.Root().PersistentFlags().GetBool("json")
 
@@ -86,6 +98,7 @@ func runModelsList(cmd *cobra.Command, args []string) error {
 	fmt.Println("\nUsage: Specify the model in your job or chat frontmatter:")
 	fmt.Println("  model: claude-sonnet-4-5    # uses alias")
 	fmt.Println("  model: gemini-2.5-pro       # full ID")
+	fmt.Println("  model: openrouter/openai/gpt-5.2  # any openrouter/<vendor>/<model> works")
 
 	return nil
 }

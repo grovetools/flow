@@ -16,11 +16,14 @@ import (
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	geminiconfig "github.com/grovetools/grove-gemini/pkg/config"
 	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
+	openrouterconfig "github.com/grovetools/grove-openrouter/pkg/config"
+	openroutermodels "github.com/grovetools/grove-openrouter/pkg/models"
 )
 
 const (
-	ProviderAnthropic = "Anthropic"
-	ProviderGoogle    = "Google"
+	ProviderAnthropic  = "Anthropic"
+	ProviderGoogle     = "Google"
+	ProviderOpenRouter = "OpenRouter"
 )
 
 // LookupModelProvider returns the provider name for a known model ID or alias.
@@ -40,6 +43,17 @@ func LookupModelProvider(model string) (provider string, found bool) {
 		if m.ID == model || (m.Alias != "" && m.Alias == model) {
 			return ProviderGoogle, true
 		}
+	}
+
+	// OpenRouter is matched by prefix only, not by registry membership: any
+	// "openrouter/<vendor>/<model>" string routes to the provider (the curated
+	// registry is just recommendations; OpenRouter passes uncatalogued models
+	// through). Bare "<vendor>/<model>" aliases are deliberately NOT matched —
+	// resolving them would let an opencode/pi agent model string (e.g.
+	// "anthropic/claude-sonnet-4-5") silently bill through OpenRouter. Requiring
+	// the prefix makes that string an unknown-model error instead.
+	if openroutermodels.HasPrefix(model) {
+		return ProviderOpenRouter, true
 	}
 	return "", false
 }
@@ -67,6 +81,15 @@ func IsProviderAuthenticated(provider string) (ok bool, instructions string) {
 			"  1. Set GEMINI_API_KEY environment variable\n" +
 			"  2. Add 'gemini.api_key_command' to grove.yml\n" +
 			"  3. Add 'gemini.api_key' to grove.yml"
+	case ProviderOpenRouter:
+		if _, found := openrouterconfig.GetAPIKeySource(); found {
+			return true, ""
+		}
+		return false, "OpenRouter provider is not authenticated.\n" +
+			"Configure credentials using one of:\n" +
+			"  1. Set OPENROUTER_API_KEY environment variable\n" +
+			"  2. Add 'openrouter.api_key_command' to grove.yml\n" +
+			"  3. Add 'openrouter.api_key' to grove.yml"
 	default:
 		return false, fmt.Sprintf("unknown provider %q", provider)
 	}
