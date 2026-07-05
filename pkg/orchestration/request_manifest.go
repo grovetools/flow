@@ -75,13 +75,19 @@ type RequestManifest struct {
 // DescribeChatRequestManifest converts the Anthropic block plan for opts (via
 // anthropic.DescribeRequest, so breakpoint placement is never re-derived in
 // flow) into manifest entries, hashing the exact bytes each block uploads:
-// file bytes for document blocks, opts.SystemPrompt / opts.HistoryPrefix /
-// opts.Prompt for the text blocks.
+// file bytes for document blocks, opts.SystemPrompt / the per-turn history
+// blocks / opts.Prompt for the text blocks. History entries appear one per
+// prior-turn block, in order — at turn K+1 the first K−1 history hashes are
+// byte-identical to turn K's (append-only growth, spec 19 scenario 17).
 func DescribeChatRequestManifest(opts anthropic.RequestOptions) ([]RequestManifestEntry, error) {
 	planEntries, err := anthropic.DescribeRequest(opts)
 	if err != nil {
 		return nil, err
 	}
+	// The plan describes the post-normalization history blocks; index them the
+	// same way the upload path does.
+	history := anthropic.FilterHistoryBlocks(opts.HistoryBlocks)
+	historyIdx := 0
 
 	entries := make([]RequestManifestEntry, 0, len(planEntries))
 	for _, pe := range planEntries {
@@ -96,7 +102,11 @@ func DescribeChatRequestManifest(opts anthropic.RequestOptions) ([]RequestManife
 		case anthropic.RequestBlockSystem:
 			content = []byte(opts.SystemPrompt)
 		case anthropic.RequestBlockHistory:
-			content = []byte(opts.HistoryPrefix)
+			if historyIdx >= len(history) {
+				return nil, fmt.Errorf("request plan has more history entries than history blocks (%d)", len(history))
+			}
+			content = []byte(history[historyIdx])
+			historyIdx++
 		case anthropic.RequestBlockTurn:
 			content = []byte(opts.Prompt)
 		default: // document blocks: layer / context

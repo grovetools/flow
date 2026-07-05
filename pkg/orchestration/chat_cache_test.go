@@ -302,13 +302,16 @@ func TestExecuteChatJob_WritesRequestManifest(t *testing.T) {
 		t.Errorf("manifest identity = (%q, %q), want job %q with a turn id", manifest.JobID, manifest.TurnID, job.ID)
 	}
 
-	// Exact P3 shape: [layer 00-base *1h][context inc1][context inc2][turn].
+	// Exact turn-1 shape after P4: [system *1h][layer 00-base *1h][context
+	// inc1][context inc2][turn] — the template rides as the system param with
+	// BP1, and there is no history region yet on the first turn.
 	wantBase := filepath.Join(plan.Directory, ".artifacts", job.ID, "context-layers", "00-base.xml")
 	want := []struct {
 		kind, path, source string
 		breakpoint         bool
 		ttl                string
 	}{
+		{"system", "", "", true, "1h"},
 		{"layer", wantBase, "rules-base", true, "1h"},
 		{"context", inc1, "", false, ""},
 		{"context", inc2, "", false, ""},
@@ -333,8 +336,8 @@ func TestExecuteChatJob_WritesRequestManifest(t *testing.T) {
 	if err != nil || layerManifest == nil || len(layerManifest.Layers) != 1 {
 		t.Fatalf("layers.json = (%+v, %v), want a single frozen base", layerManifest, err)
 	}
-	if manifest.Entries[0].ContentHash != layerManifest.Layers[0].Hash {
-		t.Errorf("manifest layer hash %s != layers.json hash %s", manifest.Entries[0].ContentHash, layerManifest.Layers[0].Hash)
+	if manifest.Entries[1].ContentHash != layerManifest.Layers[0].Hash {
+		t.Errorf("manifest layer hash %s != layers.json hash %s", manifest.Entries[1].ContentHash, layerManifest.Layers[0].Hash)
 	}
 	if _, err := os.Stat(LayerSnapshotPath(plan.Directory, job.ID)); err != nil {
 		t.Errorf("snapshot.json missing: %v", err)
@@ -437,9 +440,12 @@ func TestExecuteChatJob_LayerEngineTwoTurns(t *testing.T) {
 		t.Errorf("rules-diff layer must contain only the new file:\n%s", addedData)
 	}
 
-	// Turn-2 manifest: [layer base][layer add *1h][turn] — the breakpoint
-	// sits on the LAST layer, and layer-0's uploaded bytes are the same
-	// frozen artifact turn 1 wrote (cache-read, not rewrite).
+	// Turn-2 manifest after P4: [system *1h][layer base][layer add *1h]
+	// [history user-1][history assistant-1 *1h][turn] — the layer breakpoint
+	// sits on the LAST layer, layer-0's uploaded bytes are the same frozen
+	// artifact turn 1 wrote (cache-read, not rewrite), and the completed
+	// turn-1 exchange now rides as two byte-stable history blocks with the
+	// history breakpoint on the last.
 	manifests, _ := filepath.Glob(filepath.Join(plan.Directory, ".artifacts", job.ID, "request-manifest-*.json"))
 	if len(manifests) != 2 {
 		t.Fatalf("manifests after turn 2 = %v", manifests)
@@ -462,21 +468,189 @@ func TestExecuteChatJob_LayerEngineTwoTurns(t *testing.T) {
 	if turn2 == nil {
 		t.Fatal("turn 2 manifest not found")
 	}
-	if len(turn2.Entries) != 3 {
-		t.Fatalf("turn 2 entries = %+v, want [layer, layer, turn]", turn2.Entries)
+	if len(turn2.Entries) != 6 {
+		t.Fatalf("turn 2 entries = %+v, want [system, layer, layer, history, history, turn]", turn2.Entries)
 	}
 	e0, e1, e2 := turn2.Entries[0], turn2.Entries[1], turn2.Entries[2]
-	if e0.Kind != "layer" || e0.Source != "rules-base" || e0.Breakpoint || e0.ContentHash != baseHash {
-		t.Errorf("entry 0 = %+v, want the frozen base (no breakpoint, hash %s)", e0, baseHash)
+	e3, e4, e5 := turn2.Entries[3], turn2.Entries[4], turn2.Entries[5]
+	if e0.Kind != "system" || !e0.Breakpoint || e0.TTL != "1h" {
+		t.Errorf("entry 0 = %+v, want the system param carrying the 1h breakpoint", e0)
 	}
-	if e1.Kind != "layer" || e1.Source != "rules-diff" || !e1.Breakpoint || e1.TTL != "1h" {
-		t.Errorf("entry 1 = %+v, want the rules-diff layer carrying the 1h breakpoint", e1)
+	if e1.Kind != "layer" || e1.Source != "rules-base" || e1.Breakpoint || e1.ContentHash != baseHash {
+		t.Errorf("entry 1 = %+v, want the frozen base (no breakpoint, hash %s)", e1, baseHash)
 	}
-	if e1.ContentHash != m2.Layers[1].Hash {
-		t.Errorf("manifest diff-layer hash %s != layers.json %s", e1.ContentHash, m2.Layers[1].Hash)
+	if e2.Kind != "layer" || e2.Source != "rules-diff" || !e2.Breakpoint || e2.TTL != "1h" {
+		t.Errorf("entry 2 = %+v, want the rules-diff layer carrying the 1h breakpoint", e2)
 	}
-	if e2.Kind != "turn" || e2.Breakpoint {
-		t.Errorf("entry 2 = %+v, want the volatile turn block", e2)
+	if e2.ContentHash != m2.Layers[1].Hash {
+		t.Errorf("manifest diff-layer hash %s != layers.json %s", e2.ContentHash, m2.Layers[1].Hash)
+	}
+	if e3.Kind != "history" || e3.Breakpoint {
+		t.Errorf("entry 3 = %+v, want the first history block without a breakpoint", e3)
+	}
+	if e4.Kind != "history" || !e4.Breakpoint || e4.TTL != "1h" {
+		t.Errorf("entry 4 = %+v, want the LAST history block carrying the 1h breakpoint", e4)
+	}
+	if e5.Kind != "turn" || e5.Breakpoint {
+		t.Errorf("entry 5 = %+v, want the volatile turn block", e5)
+	}
+}
+
+// TestExecuteChatJob_TranscriptCaching is the executor-level P4 walkthrough
+// (spec 19 D7, scenario 17 at unit level) over a 3-turn mock chat:
+//
+//   - the system entry (template + conversation note) hashes byte-identically
+//     on every turn and always carries the 1h breakpoint;
+//   - the history region grows append-only — turn 3's history entries start
+//     with turn 2's exact hashes and only append new blocks;
+//   - exactly one history breakpoint, always on the LAST history block;
+//   - the volatile turn entry never carries a breakpoint and changes hash
+//     every turn.
+func TestExecuteChatJob_TranscriptCaching(t *testing.T) {
+	mockResponse := filepath.Join(t.TempDir(), "mock-response.md")
+	if err := os.WriteFile(mockResponse, []byte("mock oracle response"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", mockResponse)
+
+	plan, job := newChatJobFixture(t, "rules_file: ctx.rules\n", "First question.")
+	gitInitDir(t, plan.Directory)
+	if err := os.MkdirAll(filepath.Join(plan.Directory, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plan.Directory, "src", "a.go"), []byte("package src\n\nvar A = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plan.Directory, "ctx.rules"), []byte("src/a.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
+	seenManifests := map[string]bool{}
+
+	// runTurn executes the next chat turn and returns its request manifest.
+	runTurn := func(turn int) *RequestManifest {
+		t.Helper()
+		j, err := LoadJob(job.FilePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		j.Filename = job.Filename
+		j.FilePath = job.FilePath
+		if err := executor.Execute(context.Background(), j, plan); err != nil {
+			t.Fatalf("turn %d: %v", turn, err)
+		}
+		matches, _ := filepath.Glob(filepath.Join(plan.Directory, ".artifacts", job.ID, "request-manifest-*.json"))
+		var manifest *RequestManifest
+		for _, path := range matches {
+			if seenManifests[path] {
+				continue
+			}
+			seenManifests[path] = true
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var m RequestManifest
+			if err := json.Unmarshal(data, &m); err != nil {
+				t.Fatal(err)
+			}
+			if manifest != nil {
+				t.Fatalf("turn %d wrote more than one new manifest", turn)
+			}
+			manifest = &m
+		}
+		if manifest == nil {
+			t.Fatalf("turn %d wrote no manifest", turn)
+		}
+		return manifest
+	}
+
+	appendUserTurn := func(text string) {
+		t.Helper()
+		content, err := os.ReadFile(job.FilePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content = append(content, []byte("\n"+text+"\n")...)
+		if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// byKind extracts the manifest entries of one kind, in order.
+	byKind := func(m *RequestManifest, kind string) []RequestManifestEntry {
+		var out []RequestManifestEntry
+		for _, e := range m.Entries {
+			if e.Kind == kind {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+
+	m1 := runTurn(1)
+	appendUserTurn("Second question.")
+	m2 := runTurn(2)
+	appendUserTurn("Third question.")
+	m3 := runTurn(3)
+
+	// System region: breakpoint + 1h on every turn, byte-stable for the whole
+	// chat (same hash all three turns).
+	var systemHash string
+	for turn, m := range []*RequestManifest{m1, m2, m3} {
+		sys := byKind(m, "system")
+		if len(sys) != 1 || !sys[0].Breakpoint || sys[0].TTL != "1h" {
+			t.Fatalf("turn %d system entries = %+v, want one breakpointed 1h entry", turn+1, sys)
+		}
+		if systemHash == "" {
+			systemHash = sys[0].ContentHash
+		} else if sys[0].ContentHash != systemHash {
+			t.Errorf("turn %d system hash %s != turn 1 hash %s — system region not byte-stable", turn+1, sys[0].ContentHash, systemHash)
+		}
+	}
+
+	// History region: none on turn 1, then append-only growth (turn 3 starts
+	// with turn 2's exact hashes), breakpoint only ever on the LAST block.
+	assertHistory := func(turn int, m *RequestManifest, wantBlocks int) []RequestManifestEntry {
+		t.Helper()
+		hist := byKind(m, "history")
+		if len(hist) != wantBlocks {
+			t.Fatalf("turn %d history entries = %+v, want %d", turn, hist, wantBlocks)
+		}
+		for i, e := range hist {
+			isLast := i == len(hist)-1
+			if e.Breakpoint != isLast {
+				t.Errorf("turn %d history block %d breakpoint = %v, want %v (only the last block carries it)", turn, i, e.Breakpoint, isLast)
+			}
+			if isLast && e.TTL != "1h" {
+				t.Errorf("turn %d last history block TTL = %q, want 1h", turn, e.TTL)
+			}
+		}
+		return hist
+	}
+	if got := byKind(m1, "history"); len(got) != 0 {
+		t.Errorf("turn 1 has history entries %+v, want none", got)
+	}
+	h2 := assertHistory(2, m2, 2) // turn-1 user + assistant
+	h3 := assertHistory(3, m3, 4) // + turn-2 user + assistant
+	for i := range h2 {
+		if h3[i].ContentHash != h2[i].ContentHash {
+			t.Errorf("history block %d hash changed between turn 2 (%s) and turn 3 (%s) — history must grow append-only", i, h2[i].ContentHash, h3[i].ContentHash)
+		}
+	}
+
+	// Volatile turn block: never breakpointed, different bytes every turn.
+	turnHashes := map[string]bool{}
+	for turn, m := range []*RequestManifest{m1, m2, m3} {
+		tb := byKind(m, "turn")
+		if len(tb) != 1 || tb[0].Breakpoint {
+			t.Fatalf("turn %d turn entries = %+v, want one uncached entry", turn+1, tb)
+		}
+		if turnHashes[tb[0].ContentHash] {
+			t.Errorf("turn %d volatile block hash repeats an earlier turn's", turn+1)
+		}
+		turnHashes[tb[0].ContentHash] = true
 	}
 }
 

@@ -6,39 +6,67 @@ import (
 	"strings"
 )
 
-// FormatConversationXML converts parsed ChatTurns to structured XML format.
-// This is used to send a clean, structured conversation to the LLM instead of
-// raw markdown with HTML comment markers.
+// ConversationRegions is a parsed chat split into the two transcript cache
+// regions of the Anthropic stability ladder (spec 19 D7 / P4):
 //
-// Input:  []*ChatTurn - parsed conversation turns
-// Output: XML string with <conversation><turn>...</turn></conversation> structure
+//   - HistoryBlocks: one serialized <turn> element per COMPLETED prior turn
+//     (everything before the user turn awaiting a response), in order. Each
+//     block is byte-stable forever — once a turn has been serialized into
+//     history, re-serializing the grown conversation on any later turn
+//     reproduces exactly the same bytes for it, so the blocks form an
+//     append-only sequence and the Anthropic history breakpoint keeps
+//     hitting (TestFormatConversationRegions_HistoryAppendOnly is the
+//     property test). The mutating attributes status="awaiting_response"
+//     and respond_as NEVER appear here.
 //
-// The template attribute appears on assistant turns (indicating what persona/template
-// was used to generate that response). The last user turn gets special attributes:
-// - status="awaiting_response" to indicate this is the turn needing a response
-// - respond_as="<template>" to indicate what persona/template should be used
+//   - CurrentTurn: the volatile tail — the last user turn (carrying
+//     status="awaiting_response" and respond_as) plus any turns after it.
+//     This is the only part of the transcript whose bytes change once
+//     written, and it always travels in the uncached per-turn prompt block.
 //
-// Example output:
+// Byte-stability invariants of a history block (audited for P4 — anything
+// that could change a prior turn's serialization retroactively is frozen):
 //
-//	<conversation>
-//	  <turn role="user">
-//	    how about add fake syrup
-//	  </turn>
-//	  <turn role="assistant" template="chef" id="595424" timestamp="2026-01-08 05:34:09">
-//	    *Sigh.* "Fake syrup"...
-//	  </turn>
-//	  <turn role="user" status="awaiting_response" respond_as="chef">
-//	    respond to this
-//	  </turn>
-//	</conversation>
-func FormatConversationXML(turns []*ChatTurn) string {
-	if len(turns) == 0 {
-		return "<conversation/>"
-	}
+//   - a turn's serialization depends only on itself and EARLIER turns
+//     (template threading is backward-looking; the old lastUserIndex-driven
+//     awaiting_response attribute was the single forward-looking input and
+//     is confined to CurrentTurn);
+//   - grove directive comments are stripped by cleanTurnContent, so marker
+//     edits (e.g. chat_reopen clearing completion markers, run flags stamped
+//     into a directive) never change history bytes;
+//   - the assistant "## LLM Response (…)" header is converted to a timestamp
+//     attribute via a fixed-format regex — never re-formatted;
+//   - turns with state=running/pending are filtered out; they only ever
+//     occur at the tail of a chat file, so their later completion appends
+//     blocks rather than inserting them.
+type ConversationRegions struct {
+	HistoryBlocks []string
+	CurrentTurn   string
+}
 
-	// First pass: filter out incomplete turns and find the last user turn
+// timestampRegex extracts the timestamp from an LLM Response header.
+var timestampRegex = regexp.MustCompile(`## LLM Response \((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\)`)
+
+// FormatConversationRegions converts parsed ChatTurns to structured XML,
+// split into the byte-stable history region and the volatile current turn
+// (see ConversationRegions). It replaces the pre-P4 FormatConversationXML,
+// which serialized the whole dialogue into a single mutating string that
+// could never cache.
+//
+// Serialization per turn:
+//
+//	<turn role="assistant" template="chef" id="595424" timestamp="2026-01-08 05:34:09">
+//	  *Sigh.* "Fake syrup"...
+//	</turn>
+//
+// The template attribute appears on assistant turns (the persona that
+// generated the response, threaded from the preceding user turn's
+// directive). The awaiting user turn additionally gets
+// status="awaiting_response" and respond_as="<template>" — volatile-only.
+func FormatConversationRegions(turns []*ChatTurn) ConversationRegions {
+	// First pass: filter out incomplete turns and find the last user turn.
 	var filteredTurns []*ChatTurn
-	var lastUserIndex int = -1
+	lastUserIndex := -1
 	for _, turn := range turns {
 		// Skip turns with state=running or state=pending (these are incomplete)
 		if turn.Directive != nil {
@@ -53,18 +81,26 @@ func FormatConversationXML(turns []*ChatTurn) string {
 		}
 		filteredTurns = append(filteredTurns, turn)
 	}
+	if len(filteredTurns) == 0 {
+		return ConversationRegions{}
+	}
 
-	var sb strings.Builder
-	sb.WriteString("<conversation>\n")
+	// Everything from the awaiting user turn onward is volatile. A chat with
+	// no user turn is rejected upstream (executeChatJob's pre-flight); treat
+	// it defensively as all-history with an empty volatile tail.
+	splitAt := lastUserIndex
+	if splitAt < 0 {
+		splitAt = len(filteredTurns)
+	}
 
-	// Regex to extract timestamp from LLM Response header
-	timestampRegex := regexp.MustCompile(`## LLM Response \((\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\)`)
+	var regions ConversationRegions
+	var current strings.Builder
 
-	// Track the template from user turns to apply to the following assistant turn
+	// Track the template from user turns to apply to the following assistant
+	// turn. Strictly backward-looking — load-bearing for byte stability.
 	var pendingTemplate string
 
 	for i, turn := range filteredTurns {
-		// Determine role based on speaker
 		var role string
 		if turn.Speaker == "user" {
 			role = "user"
@@ -72,57 +108,71 @@ func FormatConversationXML(turns []*ChatTurn) string {
 			role = "assistant"
 		}
 
-		// Build attributes
 		var attrs []string
 		attrs = append(attrs, fmt.Sprintf(`role="%s"`, role))
 
+		content := turn.Content
 		if role == "user" {
-			// Capture template from user turn directive
 			if turn.Directive != nil && turn.Directive.Template != "" {
 				pendingTemplate = turn.Directive.Template
 			}
-
-			// If this is the last user turn, add special attributes
+			// ONLY the awaiting turn — always in the volatile region — carries
+			// the response-routing attributes.
 			if i == lastUserIndex {
 				attrs = append(attrs, `status="awaiting_response"`)
 				if pendingTemplate != "" {
 					attrs = append(attrs, fmt.Sprintf(`respond_as="%s"`, pendingTemplate))
 				}
 			}
-		} else if role == "assistant" {
-			// Assistant turns get the template that was used to generate them
+		} else {
 			if pendingTemplate != "" {
 				attrs = append(attrs, fmt.Sprintf(`template="%s"`, pendingTemplate))
 				pendingTemplate = "" // Reset after use
 			}
-
-			// Include id from directive
 			if turn.Directive != nil && turn.Directive.ID != "" {
 				attrs = append(attrs, fmt.Sprintf(`id="%s"`, turn.Directive.ID))
 			}
-		}
-
-		// Extract timestamp from content if this is an assistant turn
-		content := turn.Content
-		if role == "assistant" {
+			// Convert the LLM Response header to a timestamp attribute.
 			if matches := timestampRegex.FindStringSubmatch(content); len(matches) > 1 {
 				attrs = append(attrs, fmt.Sprintf(`timestamp="%s"`, matches[1]))
-				// Remove the header from content
 				content = timestampRegex.ReplaceAllString(content, "")
 			}
 		}
 
-		// Clean up the content
-		content = cleanTurnContent(content)
-
-		// Write the turn element
-		sb.WriteString(fmt.Sprintf("  <turn %s>\n", strings.Join(attrs, " ")))
-		sb.WriteString("    ")
-		sb.WriteString(strings.ReplaceAll(content, "\n", "\n    "))
-		sb.WriteString("\n  </turn>\n")
+		serialized := formatTurnXML(attrs, cleanTurnContent(content))
+		if i < splitAt {
+			regions.HistoryBlocks = append(regions.HistoryBlocks, serialized)
+		} else {
+			current.WriteString(serialized)
+		}
 	}
 
-	sb.WriteString("</conversation>")
+	regions.CurrentTurn = current.String()
+	return regions
+}
+
+// formatTurnXML renders one turn element. This is THE transcript
+// serialization: any change to it re-serializes every prior turn differently
+// and cold-busts the history cache of every open chat — treat the format as
+// frozen.
+func formatTurnXML(attrs []string, content string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("<turn %s>\n", strings.Join(attrs, " ")))
+	sb.WriteString("  ")
+	sb.WriteString(strings.ReplaceAll(content, "\n", "\n  "))
+	sb.WriteString("\n</turn>\n")
+	return sb.String()
+}
+
+// FlattenConversationRegions joins the two regions back into one string for
+// callers without a block-structured upload (gemini, the mock LLM client,
+// and the briefing file).
+func FlattenConversationRegions(regions ConversationRegions) string {
+	var sb strings.Builder
+	for _, h := range regions.HistoryBlocks {
+		sb.WriteString(h)
+	}
+	sb.WriteString(regions.CurrentTurn)
 	return sb.String()
 }
 
