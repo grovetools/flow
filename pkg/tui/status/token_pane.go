@@ -89,7 +89,7 @@ func (m *Model) maybeRefreshRunningTokenCells(now time.Time) tea.Cmd {
 	// alone.
 	for _, j := range m.Jobs {
 		if isLiveAPIDirectJob(j) {
-			delete(m.tokenColumnCache, j.ID)
+			m.evictJobRenderCaches(j.ID)
 		}
 	}
 
@@ -254,6 +254,18 @@ func formatTokenCell(s usage.Summary) string {
 // cells between the 2s refresh and the next live summary.
 func (m *Model) clearTokenColumnCache() {
 	m.tokenColumnCache = make(map[string]string)
+	m.modelColumnCache = make(map[string]string)
+}
+
+// evictJobRenderCaches drops both memoized table cells (TOKENS + MODEL) for a
+// single job so the next render recomputes them from fresh state. Called from
+// the two per-job eviction sites — the live chat/oneshot refresh loop and the
+// running-agent runningTokenUsageMsg handler — that previously dropped only the
+// TOKENS cell, so a mid-transcript model would otherwise stay cached as
+// provider-only forever.
+func (m *Model) evictJobRenderCaches(jobID string) {
+	delete(m.tokenColumnCache, jobID)
+	delete(m.modelColumnCache, jobID)
 }
 
 // renderAgentTokenCell renders the TOKENS cell for a RowTypeAgent (subagent)

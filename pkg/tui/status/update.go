@@ -309,7 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if mp := agentUsageMap(s); mp != nil {
 				m.tokenAgentLive[id] = mp
 			}
-			delete(m.tokenColumnCache, id)
+			m.evictJobRenderCaches(id)
 		}
 		return m, nil
 

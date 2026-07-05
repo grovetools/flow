@@ -121,7 +121,7 @@ func (m Model) renderTableViewWithWidth(maxWidth int) string {
 // space is constrained. Last element is dropped first.
 func columnDropPriority() []string {
 	return []string{
-		"DURATION", "COMPLETED", "UPDATED", "PREPEND",
+		"DURATION", "COMPLETED", "UPDATED", "INLINE",
 		"WORKTREE", "MODEL", "SKILL", "TEMPLATE", "TITLE", "STATUS", "TYPE",
 	}
 }
@@ -220,6 +220,16 @@ func (m Model) estimateTableWidth() int {
 			w := 2 + lipgloss.Width(typeLabel)
 			if w > columnWidths["TYPE"] {
 				columnWidths["TYPE"] = w
+			}
+		}
+		if m.columnVisibility["MODEL"] {
+			// The folded "provider · model" cell exceeds the bare header.
+			w := lipgloss.Width(m.renderModelColumnCell(job))
+			if w > 24 {
+				w = 24
+			}
+			if w > columnWidths["MODEL"] {
+				columnWidths["MODEL"] = w
 			}
 		}
 	}
@@ -445,12 +455,7 @@ func (m Model) renderTableView() string {
 				}
 				cell = templateText
 			case "MODEL":
-				modelText := job.Model
-				if modelText == "" {
-					cell = t.Muted.Render("-")
-				} else {
-					cell = t.Muted.Render(modelText)
-				}
+				cell = m.renderModelColumnCell(job)
 			case "WORKTREE":
 				worktreeText := job.Worktree
 				if worktreeText == "" {
@@ -458,12 +463,8 @@ func (m Model) renderTableView() string {
 				} else {
 					cell = t.Muted.Render(worktreeText)
 				}
-			case "PREPEND":
-				if job.PrependDependencies {
-					cell = t.Success.Render("*")
-				} else {
-					cell = t.Muted.Render("-")
-				}
+			case "INLINE":
+				cell = t.Muted.Render(inlineCellText(job))
 			case "UPDATED":
 				cell = t.Muted.Render(formatRelativeTime(job.UpdatedAt))
 			case "COMPLETED":

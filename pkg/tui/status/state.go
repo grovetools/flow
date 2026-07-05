@@ -33,7 +33,7 @@ func defaultColumnVisibility() map[string]bool {
 		"TEMPLATE":  true, // Template name visible by default
 		"MODEL":     false,
 		"WORKTREE":  false,
-		"PREPEND":   false,
+		"INLINE":    false,
 		"UPDATED":   false,
 		"COMPLETED": false,
 		"SKILL":     false,

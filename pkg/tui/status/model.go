@@ -209,6 +209,17 @@ type Model struct {
 	// so the table render doesn't re-read the artifact (or re-summarize) on
 	// every frame. Invalidated by refreshes via clearTokenColumnCache.
 	tokenColumnCache map[string]string
+	// modelColumnCache memoizes the rendered MODEL column cell per job ID.
+	// The cell's fallback chain (resolveJobDisplayModel) may read the token
+	// usage artifact, so it's memoized alongside tokenColumnCache and
+	// invalidated at the same three sites (evictJobRenderCaches /
+	// clearTokenColumnCache).
+	modelColumnCache map[string]string
+	// defaultProviderName is the config-default agent provider, resolved
+	// once in New() (LoadFlowConfig + ResolveJobProviderName). Used by the
+	// MODEL cell so a job with empty `provider:` folds under the effective
+	// default rather than re-loading the flow config per row.
+	defaultProviderName string
 	// tokenAgentArtifact caches the per-subagent usage map (agentID →
 	// AgentUsage) read from a completed job's immutable token-usage.json
 	// artifact. Keyed by job ID; lazily filled and kept across refreshes
@@ -637,7 +648,7 @@ func New(cfg Config) Model {
 	}
 
 	// Column Visibility Setup
-	availableColumns := []string{"JOB", "TITLE", "SKILL", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "PREPEND", "UPDATED", "COMPLETED", "DURATION", "TOKENS"}
+	availableColumns := []string{"JOB", "TITLE", "SKILL", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "INLINE", "UPDATED", "COMPLETED", "DURATION", "TOKENS"}
 	state, err := loadState()
 	if err != nil {
 		// On error, use defaults
@@ -675,6 +686,15 @@ func New(cfg Config) Model {
 	isolatedInput.Placeholder = "Type input for isolated agent..."
 	isolatedInput.CharLimit = 4096
 	isolatedInput.Width = 60
+
+	// Resolve the config-default agent provider once so the MODEL column can
+	// fold provider into non-claude cells without re-loading the flow config
+	// per row (ResolveJobProviderNameFromConfig calls LoadFlowConfig each time).
+	flowCfg, _ := orchestration.LoadFlowConfig()
+	if flowCfg == nil {
+		flowCfg = &orchestration.FlowConfig{}
+	}
+	defaultProviderName := orchestration.ResolveJobProviderName(nil, *flowCfg)
 
 	// Daemon client is passed in via Config so the host (CLI wrapper or
 	// terminal panel) can share a single multiplexed client. May be nil.
@@ -739,6 +759,8 @@ func New(cfg Config) Model {
 		tokenViewport:            tokenVp,
 		editViewport:             editVp,
 		tokenColumnCache:         make(map[string]string),
+		modelColumnCache:         make(map[string]string),
+		defaultProviderName:      defaultProviderName,
 		tokenAgentArtifact:       make(map[string]map[string]usage.AgentUsage),
 		tokenAgentLive:           make(map[string]map[string]usage.AgentUsage),
 		runningTokenCell:         make(map[string]usage.Summary),
@@ -1117,6 +1139,17 @@ func (m *Model) calculateFocusJobsWidth() int {
 			typeWidth := 2 + lipgloss.Width(string(job.Type))
 			if typeWidth > columnWidths["TYPE"] {
 				columnWidths["TYPE"] = typeWidth
+			}
+		}
+		if m.columnVisibility["MODEL"] {
+			// The folded "provider · model" cell exceeds the bare header, so
+			// measure the rendered cell (capped) rather than the header alone.
+			w := lipgloss.Width(m.renderModelColumnCell(job))
+			if w > 24 {
+				w = 24
+			}
+			if w > columnWidths["MODEL"] {
+				columnWidths["MODEL"] = w
 			}
 		}
 		// ... other columns can be added here if needed ...
