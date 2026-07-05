@@ -1582,6 +1582,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			_ = updateJobFile(job)
+			// The full error text must reach the per-job job.log (the ulog
+			// writer renders only the message line, not .Err) — spec 19 e2e 14
+			// asserts the actionable error is IN job.log, not just last_error.
+			fmt.Fprintf(grovelogging.GetWriter(ctx), "Chat turn failed: %v\n", retErr)
 			ulog.Error("Chat turn failed").
 				Err(retErr).
 				Field("job_id", job.ID).
@@ -2203,6 +2207,18 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// The ladder cache layout is Anthropic-only; gemini keeps its flat
 		// upload (hot/cold passed explicitly + dependency/include attachments).
 		// Record the flattened shape in the manifest — no breakpoints (D9).
+		// The layer store still exists on disk (artifacts ≠ caching) but its
+		// artifacts are not what rides up — warn so the user knows the cache
+		// lineage semantics don't apply to this chat (spec 19 e2e 20).
+		if layerResult != nil {
+			fmt.Fprintf(grovelogging.GetWriter(ctx),
+				"Context layers warning: model %s is not Anthropic — the layer store is flattened into the gemini upload (job-scoped cx context) and no cache breakpoints apply (the ladder cache layout is Anthropic-only)\n",
+				effectiveModel)
+			ulog.Warn("Gemini chat: context layers flattened into legacy upload (no Anthropic cache lineage)").
+				Field("job_id", job.ID).
+				Field("model", effectiveModel).
+				Log(ctx)
+		}
 		var geminiUploads []string
 		if chatColdCtx != "" {
 			geminiUploads = append(geminiUploads, chatColdCtx)

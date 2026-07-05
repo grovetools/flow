@@ -216,6 +216,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 					validTargetJobs = append(validTargetJobs, jobFile)
 				} else if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusPendingUser {
 					// Check if chat job has new user content that warrants reopening
+					wasCompleted := job.Status == orchestration.JobStatusCompleted
 					jobContent, err := os.ReadFile(job.FilePath)
 					if err == nil && orchestration.HasNewUserContent(jobContent) {
 						fmt.Printf("%s Auto-reopening job '%s' (new user content detected)\n",
@@ -230,12 +231,17 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 							continue
 						}
 
-						// A reopened chat's next turn picks up worktree
-						// changes via append-delta semantics (spec 19 D4):
-						// the frozen layers stay intact and changed files
+						// A REOPENED chat (completed → new user turn) picks up
+						// worktree changes via append-delta semantics (spec 19
+						// D4): the frozen layers stay intact and changed files
 						// ride up as one supersede-annotated delta layer —
-						// never a rebase.
-						if job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() {
+						// never a rebase. Only genuine reopens get the stamp: a
+						// pending_user chat with a new turn is the NORMAL chat
+						// cadence, and stamping it would append a delta layer
+						// uninvited on every worktree edit — exactly the silent
+						// refresh the frozen layer-0 semantics forbid (spec 19
+						// e2e scenario 5 vs 18).
+						if wasCompleted && job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() {
 							if _, serr := orchestration.StampTrailingChatDirective(job.FilePath, map[string]interface{}{"append_delta": true}); serr != nil {
 								fmt.Printf("%s Warning: could not stamp append_delta on reopened chat '%s': %v\n",
 									color.YellowString(theme.IconWarning),
