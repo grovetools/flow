@@ -451,10 +451,10 @@ func TestSupersededBytesRatio(t *testing.T) {
 		{Files: []LayerFileRecord{{Path: "a", Bytes: 20}}, Supersedes: []string{"a"}},
 	}}
 	// superseded: the layer-0 copy of "a" (60) out of 100 total.
-	if got := SupersededBytesRatio(m); got != 0.6 {
+	if got := SupersededBytesRatio(m, t.TempDir()); got != 0.6 {
 		t.Errorf("ratio = %v, want 0.6", got)
 	}
-	if got := SupersededBytesRatio(&LayerManifest{}); got != 0 {
+	if got := SupersededBytesRatio(&LayerManifest{}, t.TempDir()); got != 0 {
 		t.Errorf("empty ratio = %v, want 0", got)
 	}
 }
@@ -465,9 +465,255 @@ func TestUnionFileRecords(t *testing.T) {
 		{Files: []LayerFileRecord{{Path: "a", Hash: "old"}, {Path: "b", Hash: "b1"}}},
 		{Files: []LayerFileRecord{{Path: "a", Hash: "new"}}},
 	}}
-	union := UnionFileRecords(m)
+	union := UnionFileRecords(m, t.TempDir())
 	if union["a"].Hash != "new" || union["b"].Hash != "b1" || len(union) != 2 {
 		t.Errorf("union = %+v", union)
+	}
+}
+
+// TestUnionFileRecords_MixedSpellings: a store whose layers recorded the SAME
+// files under different spellings — worktree-relative in one layer, another
+// checkout's absolute paths in the next (the oracle-plays job-25 poisoning) —
+// still folds to one canonical record per file, with the later layer winning.
+func TestUnionFileRecords_MixedSpellings(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "wt-a")    // this turn's resolution root
+	foreign := filepath.Join(base, "wt-b") // the checkout the poisoned layer resolved
+	for _, dir := range []string{root, foreign} {
+		if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "src", "a.go"), []byte("package src\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := &LayerManifest{Layers: []LayerEntry{
+		{Files: []LayerFileRecord{{Path: "src/a.go", Hash: "old"}}},
+		{Files: []LayerFileRecord{{Path: filepath.Join(foreign, "src", "a.go"), Hash: "new"}}},
+	}}
+	union := UnionFileRecords(m, root)
+	if len(union) != 1 {
+		t.Fatalf("union = %+v, want ONE canonical record for the mixed spellings", union)
+	}
+	if union["src/a.go"].Hash != "new" {
+		t.Errorf("union = %+v, want the later (absolute-spelled) record to win under the canonical key", union)
+	}
+}
+
+// TestCanonicalLayerKey: the canonical file identity is spelling-independent —
+// relative, absolute, symlinked, and foreign-checkout spellings of the same
+// file collapse to one worktree-relative key; genuinely external files keep a
+// stable absolute identity.
+func TestCanonicalLayerKey(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "wt")
+	if err := os.MkdirAll(filepath.Join(root, "flow", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "flow", "pkg", "a.go")
+	if err := os.WriteFile(file, []byte("package pkg\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rootAlias := filepath.Join(base, "wt-alias")
+	if err := os.Symlink(root, rootAlias); err != nil {
+		t.Fatal(err)
+	}
+	// A second checkout of the "same repo" holding the same relative layout.
+	foreign := filepath.Join(base, "main-checkout")
+	if err := os.MkdirAll(filepath.Join(foreign, "flow", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, "flow", "pkg", "a.go"), []byte("package pkg\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const want = "flow/pkg/a.go"
+	cases := []struct {
+		name, root, path string
+	}{
+		{"relative spelling", root, "flow/pkg/a.go"},
+		{"uncleaned relative spelling", root, "./flow/pkg/a.go"},
+		{"absolute under root", root, file},
+		{"absolute under symlinked root spelling", rootAlias, filepath.Join(rootAlias, "flow", "pkg", "a.go")},
+		{"symlink-alias absolute against real root", root, filepath.Join(rootAlias, "flow", "pkg", "a.go")},
+		{"foreign-checkout absolute (job-25 poisoning)", root, filepath.Join(foreign, "flow", "pkg", "a.go")},
+	}
+	for _, tc := range cases {
+		if got := canonicalLayerKey(tc.root, tc.path); got != filepath.FromSlash(want) {
+			t.Errorf("%s: canonicalLayerKey(%q, %q) = %q, want %q", tc.name, tc.root, tc.path, got, want)
+		}
+	}
+
+	// A genuinely external absolute file (no suffix under root) keeps its
+	// canonical absolute spelling as a stable identity.
+	external := filepath.Join(base, "elsewhere", "doc.md")
+	if err := os.MkdirAll(filepath.Dir(external), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(external, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := canonicalLayerKey(root, external)
+	if !filepath.IsAbs(got) || filepath.Base(got) != "doc.md" {
+		t.Errorf("external file key = %q, want a canonical absolute path", got)
+	}
+	if got != canonicalLayerKey(root, external) {
+		t.Errorf("external key not stable")
+	}
+}
+
+// TestPrepareContextLayers_PoisonedStoreMixedSpellings reproduces the
+// oracle-plays job-25 store shape: an existing layer whose files[] records
+// carry ANOTHER checkout's absolute paths for the same files the rules
+// resolve relatively. The next turn must diff by canonical identity — zero
+// false "new" files, no duplicate layer, no removal annotations for the
+// absolute spellings — while the already-written layers stay immutable.
+func TestPrepareContextLayers_PoisonedStoreMixedSpellings(t *testing.T) {
+	f := newLayerFixture(t)
+	f.writeRules("src/a.go\nsrc/b.go\n")
+	f.run("t1", LayerRefreshNone)
+
+	// A "main checkout" holding the same files at the same relative layout.
+	foreign := filepath.Join(filepath.Dir(f.contextDir), "main-checkout")
+	if err := os.MkdirAll(filepath.Join(foreign, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.go", "b.go"} {
+		src, err := os.ReadFile(filepath.Join(f.contextDir, "src", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(foreign, "src", name), src, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Poison the manifest the way the job-25 turn did: respell layer-0's
+	// records as absolute paths under the foreign checkout. Layer ARTIFACTS
+	// stay untouched (immutability), only the bookkeeping is poisoned; the
+	// root pin is cleared to mimic a store written before the pin existed.
+	m := f.manifest()
+	for i, rec := range m.Layers[0].Files {
+		m.Layers[0].Files[i].Path = filepath.Join(foreign, rec.Path)
+	}
+	m.Root = ""
+	if err := SaveLayerManifest(f.layersDir(), m); err != nil {
+		t.Fatal(err)
+	}
+
+	res := f.run("t2", LayerRefreshNone)
+	if res.AppendedLayer != "" || res.DeltaLayer != "" {
+		t.Fatalf("poisoned store duplicated the fileset: %+v", res)
+	}
+	m2 := f.manifest()
+	if len(m2.Layers) != 1 {
+		t.Fatalf("layers after t2 = %+v, want just the base (no duplicate layer)", m2.Layers)
+	}
+	if len(m2.Removals) != 0 {
+		t.Errorf("removals = %+v, want none (the absolute spellings are the SAME files)", m2.Removals)
+	}
+	if m2.Root == "" {
+		t.Errorf("root pin not back-filled on the legacy store")
+	}
+}
+
+// TestPrepareContextLayers_RootPin is the defect-2 guard: a store frozen at
+// one resolution root hard-fails a turn resolved from a DIFFERENT checkout
+// (never silently extends the lineage), while spelling variants of the same
+// root (symlinks) canonicalize equal and proceed without duplicating.
+func TestPrepareContextLayers_RootPin(t *testing.T) {
+	f := newLayerFixture(t)
+	f.run("t1", LayerRefreshNone)
+	if m := f.manifest(); m.Root == "" {
+		t.Fatal("turn 1 did not record the root pin")
+	}
+	snap, err := LoadLayerSnapshot(f.planDir, "job-1")
+	if err != nil || snap == nil || snap.Root == "" {
+		t.Fatalf("snapshot root = (%+v, %v), want the pin mirrored", snap, err)
+	}
+
+	// A different checkout with identical content: hard failure.
+	other := filepath.Join(filepath.Dir(f.contextDir), "other-checkout")
+	if err := os.MkdirAll(filepath.Join(other, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.ReadFile(filepath.Join(f.contextDir, "src", "a.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "src", "a.go"), src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := f.params("t2", LayerRefreshNone)
+	p.ContextDir = other
+	_, err = PrepareContextLayers(f.ctx, p)
+	if err == nil || !strings.Contains(err.Error(), "pinned to resolution root") {
+		t.Fatalf("wrong-root turn = %v, want the root-pin hard failure", err)
+	}
+	if !strings.Contains(err.Error(), "--rebase-context") {
+		t.Errorf("root-pin error %v does not name the escape hatch", err)
+	}
+	if got := len(f.manifest().Layers); got != 1 {
+		t.Errorf("wrong-root turn mutated the store: %d layers", got)
+	}
+
+	// A symlinked spelling of the SAME root: proceeds, appends nothing.
+	alias := filepath.Join(filepath.Dir(f.contextDir), "wt-alias")
+	if err := os.Symlink(f.contextDir, alias); err != nil {
+		t.Fatal(err)
+	}
+	p = f.params("t3", LayerRefreshNone)
+	p.ContextDir = alias
+	res, err := PrepareContextLayers(f.ctx, p)
+	if err != nil {
+		t.Fatalf("same-root alias turn failed: %v", err)
+	}
+	if res.AppendedLayer != "" || len(f.manifest().Layers) != 1 {
+		t.Errorf("same-root alias turn duplicated the fileset: %+v", res)
+	}
+
+	// --rebase-context is the sanctioned re-root: succeeds from the other
+	// checkout and re-pins.
+	p = f.params("t4", LayerRefreshRebase)
+	p.ContextDir = other
+	if _, err := PrepareContextLayers(f.ctx, p); err != nil {
+		t.Fatalf("rebase from a new root must re-pin, got %v", err)
+	}
+	if got := f.manifest().Root; got != canonicalLayerRoot(other) {
+		t.Errorf("post-rebase root = %q, want %q", got, canonicalLayerRoot(other))
+	}
+}
+
+// TestPrepareContextLayers_RemovalKeyedCanonically: narrowing the rules on a
+// store that captured the dropped file under an absolute spelling records the
+// removal under the canonical (worktree-relative) key, once.
+func TestPrepareContextLayers_RemovalKeyedCanonically(t *testing.T) {
+	f := newLayerFixture(t)
+	f.writeRules("src/a.go\nsrc/b.go\n")
+	f.run("t1", LayerRefreshNone)
+
+	// Respell src/b.go's record absolutely (under the real context dir, so
+	// no foreign checkout is needed for canonicalization).
+	m := f.manifest()
+	for i, rec := range m.Layers[0].Files {
+		if rec.Path == "src/b.go" {
+			m.Layers[0].Files[i].Path = filepath.Join(f.contextDir, "src", "b.go")
+		}
+	}
+	if err := SaveLayerManifest(f.layersDir(), m); err != nil {
+		t.Fatal(err)
+	}
+
+	f.writeRules("src/a.go\n") // drop src/b.go
+	f.run("t2", LayerRefreshNone)
+	m2 := f.manifest()
+	if len(m2.Removals) != 1 || m2.Removals[0].Path != "src/b.go" {
+		t.Fatalf("removals = %+v, want exactly src/b.go under its canonical key", m2.Removals)
+	}
+	// And it is not re-recorded on the next turn.
+	f.run("t3", LayerRefreshNone)
+	if got := len(f.manifest().Removals); got != 1 {
+		t.Errorf("removal re-recorded: %d entries", got)
 	}
 }
 

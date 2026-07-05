@@ -108,7 +108,15 @@ type LayerRemoval struct {
 // LayerManifest is the layers.json document: the ordered layer sequence plus
 // removal annotations.
 type LayerManifest struct {
-	Version  int            `json:"version"`
+	Version int `json:"version"`
+	// Root pins the canonical resolution root (the job's worktree /
+	// sub-project dir, see canonicalLayerRoot) the store was frozen against.
+	// Every later turn must resolve the SAME root: a mismatch is a hard
+	// failure — a turn resolved from another checkout must never silently
+	// extend this lineage (oracle-plays job 25: an invoker-cwd-derived root
+	// duplicated the whole fileset from the main checkout). Stores written
+	// before this field exists ("") are back-filled on their next turn.
+	Root     string         `json:"root,omitempty"`
 	Layers   []LayerEntry   `json:"layers"`
 	Removals []LayerRemoval `json:"removals,omitempty"`
 }
@@ -120,8 +128,11 @@ type LayerManifest struct {
 // content hashes against layers.json records, so it is correct for both
 // committed and uncommitted changes without consulting git.
 type LayerSnapshot struct {
-	CreatedAt time.Time         `json:"created_at"`
-	TurnID    string            `json:"turn_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	TurnID    string    `json:"turn_id,omitempty"`
+	// Root is the canonical resolution root the base was frozen against
+	// (provenance mirror of LayerManifest.Root).
+	Root      string            `json:"root,omitempty"`
 	RulesFile string            `json:"rules_file"`
 	RulesHash string            `json:"rules_hash"`
 	GitHeads  map[string]string `json:"git_heads,omitempty"`
@@ -266,11 +277,17 @@ func AuditLayerArtifacts(layersDir string, m *LayerManifest) error {
 // UnionFileRecords folds the manifest's layers, in order, into the latest
 // record per path: later layers (rules-diff appends, delta supersessions)
 // win. This union is the diff baseline for every turn-N decision.
-func UnionFileRecords(m *LayerManifest) map[string]LayerFileRecord {
+//
+// Keys are canonical layer keys relative to root (canonicalLayerKey), so a
+// store that already contains mixed path spellings — worktree-relative in
+// one layer, another checkout's absolute paths in the next (oracle-plays
+// job 25) — still yields ONE record per file and stops producing duplicate
+// layers, while the already-written layer artifacts stay immutable.
+func UnionFileRecords(m *LayerManifest, root string) map[string]LayerFileRecord {
 	union := make(map[string]LayerFileRecord)
 	for _, layer := range m.Layers {
 		for _, f := range layer.Files {
-			union[f.Path] = f
+			union[canonicalLayerKey(root, f.Path)] = f
 		}
 	}
 	return union
@@ -279,19 +296,20 @@ func UnionFileRecords(m *LayerManifest) map[string]LayerFileRecord {
 // SupersededBytesRatio reports the fraction of lineage bytes that later
 // layers have superseded: for each file record, every earlier capture of the
 // same path counts as superseded. Above rebaseAdvisoryRatio the engine logs
-// the rebase advisory (never auto-busts).
-func SupersededBytesRatio(m *LayerManifest) float64 {
+// the rebase advisory (never auto-busts). Paths compare by canonical layer
+// key relative to root, matching the union diff's identity.
+func SupersededBytesRatio(m *LayerManifest, root string) float64 {
 	var total, superseded int64
-	seenLater := make(map[string]bool) // paths captured by any later layer
+	seenLater := make(map[string]bool) // canonical paths captured by any later layer
 	for i := len(m.Layers) - 1; i >= 0; i-- {
 		for _, f := range m.Layers[i].Files {
 			total += f.Bytes
-			if seenLater[f.Path] {
+			if seenLater[canonicalLayerKey(root, f.Path)] {
 				superseded += f.Bytes
 			}
 		}
 		for _, f := range m.Layers[i].Files {
-			seenLater[f.Path] = true
+			seenLater[canonicalLayerKey(root, f.Path)] = true
 		}
 	}
 	if total == 0 {

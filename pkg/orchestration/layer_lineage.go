@@ -249,10 +249,13 @@ func integrateLineage(ctx context.Context, writer io.Writer, p LayerEngineParams
 	// correct for committed and uncommitted changes alike. Files that vanished
 	// from the worktree can't be re-uploaded; they get a removal annotation.
 	if len(newInherited) > 0 {
+		// Keyed canonically against THIS job's resolution root: parent stores
+		// record worktree-relative keys, but a parent poisoned with foreign
+		// absolute spellings must still map onto this worktree's files.
 		union := make(map[string]LayerFileRecord)
 		for _, e := range newInherited {
 			for _, f := range e.Files {
-				union[f.Path] = f
+				union[canonicalLayerKey(p.ContextDir, f.Path)] = f
 			}
 		}
 		paths := make([]string, 0, len(union))

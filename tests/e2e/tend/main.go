@@ -240,6 +240,7 @@ func main() {
 		scenarios.OracleCacheConcurrentChatsScenario,       // 21
 		scenarios.OracleCacheUnreadableGlobScenario,        // 22
 		scenarios.OracleCacheLegacyUntouchedScenario,       // 23
+		scenarios.OracleCacheInvokerCwdRootingScenario,     // 24 (job-25 rooting regression)
 	}
 
 	if err := app.Execute(context.TODO(), allScenarios); err != nil {

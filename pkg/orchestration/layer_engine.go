@@ -144,16 +144,20 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 
 	heads, dirty := collectGitState(p.ContextDir)
 
+	// The canonical resolution root this turn resolved against — recorded on
+	// fresh stores and enforced against existing ones (the D-2 root pin).
+	rootCanon := canonicalLayerRoot(p.ContextDir)
+
 	// Fresh store: assemble the cross-job lineage first (inherited refs +
 	// dep-transcript layers + auto git-delta, spec 19 P5), then freeze this
 	// job's own base from whatever the rules resolve BEYOND the inherited
 	// union — files the lineage already carries are never duplicated.
 	if manifest == nil {
-		manifest = &LayerManifest{Version: 1}
+		manifest = &LayerManifest{Version: 1, Root: rootCanon}
 		if _, err := integrateLineage(ctx, writer, p, layersDir, manifest); err != nil {
 			return nil, err
 		}
-		union := UnionFileRecords(manifest)
+		union := UnionFileRecords(manifest, p.ContextDir)
 		baseFiles := make([]string, 0, len(fileset))
 		for _, f := range fileset {
 			if _, ok := union[f]; !ok {
@@ -195,6 +199,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 		if err := WriteLayerSnapshot(p.PlanDir, p.JobID, LayerSnapshot{
 			CreatedAt: time.Now().UTC(),
 			TurnID:    p.TurnID,
+			Root:      rootCanon,
 			RulesFile: p.RulesPath,
 			RulesHash: rulesHash,
 			GitHeads:  heads,
@@ -207,15 +212,31 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 		return res, nil
 	}
 
-	// Existing store: enforce immutability before trusting anything in it —
-	// including inherited refs into parent jobs' artifacts (a rebased or
-	// pruned parent is a broken lineage and fails loudly, see
-	// AuditLayerArtifacts).
-	if err := AuditLayerArtifacts(layersDir, manifest); err != nil {
-		return nil, err
+	// Existing store: the root pin first. A store frozen against one
+	// resolution root must never be extended by a turn that resolved a
+	// DIFFERENT one — that is a turn reading another checkout (job 25: an
+	// invoker-cwd-derived root read the main checkout), and a silently
+	// wrong-checkout layer is worse than a failed turn. Spelling variants of
+	// the same directory (symlinks, macOS case) canonicalize equal and pass.
+	if manifest.Root != "" && manifest.Root != rootCanon {
+		return nil, fmt.Errorf("layer store for job %s is pinned to resolution root %s, but this turn resolved context at %s — refusing to extend the lineage from a different checkout; run the turn against the job's worktree, or archive and re-freeze with --rebase-context", p.JobID, manifest.Root, rootCanon)
 	}
 
 	changed := false // manifest mutated this turn
+
+	// Back-fill the pin on stores written before Root existed, so the next
+	// turn after an upgrade locks the lineage to its (correct) root.
+	if manifest.Root == "" {
+		manifest.Root = rootCanon
+		changed = true
+	}
+
+	// Enforce immutability before trusting anything in the store — including
+	// inherited refs into parent jobs' artifacts (a rebased or pruned parent
+	// is a broken lineage and fails loudly, see AuditLayerArtifacts).
+	if err := AuditLayerArtifacts(layersDir, manifest); err != nil {
+		return nil, err
+	}
 
 	// Chat deps that completed after the store was frozen (a reopen following
 	// new upstream work) extend the lineage append-only: inherited refs +
@@ -227,7 +248,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	}
 	changed = changed || lineageChanged
 
-	union := UnionFileRecords(manifest)
+	union := UnionFileRecords(manifest, p.ContextDir)
 
 	// Render current bytes for every file the rules resolve to right now.
 	// One pass gives new-file detection, staleness compare, and delta
@@ -288,9 +309,11 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	// files this job's OWN rules layers captured count — inherited files were
 	// never in this job's rules, so their absence from the fileset is their
 	// normal state, not a removal.
+	// All three sets key on canonical layer keys so removal detection stays
+	// correct across stores holding mixed historical spellings.
 	alreadyRemoved := make(map[string]bool, len(manifest.Removals))
 	for _, r := range manifest.Removals {
-		alreadyRemoved[r.Path] = true
+		alreadyRemoved[canonicalLayerKey(p.ContextDir, r.Path)] = true
 	}
 	inFileset := make(map[string]bool, len(fileset))
 	for _, f := range fileset {
@@ -300,7 +323,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	for _, layer := range manifest.Layers {
 		if layer.Source == LayerSourceRulesBase || layer.Source == LayerSourceRulesDiff {
 			for _, f := range layer.Files {
-				rulesCaptured[f.Path] = true
+				rulesCaptured[canonicalLayerKey(p.ContextDir, f.Path)] = true
 			}
 		}
 	}
@@ -386,7 +409,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	}
 
 	// Rebase advisory (spec 19 e2e 9): suggest, never auto-bust.
-	if ratio := SupersededBytesRatio(manifest); ratio > rebaseAdvisoryRatio {
+	if ratio := SupersededBytesRatio(manifest, p.ContextDir); ratio > rebaseAdvisoryRatio {
 		fmt.Fprintf(writer, "Context rebase advisory: %.0f%% of lineage bytes are superseded by later layers — consider --rebase-context to compact into a fresh base (one deliberate cold cache write)\n", ratio*100)
 		ulog.Warn("Context layer lineage heavily superseded — rebase advised").
 			Field("job_id", p.JobID).
@@ -444,9 +467,12 @@ func archiveLayerStore(planDir, jobID, layersDir string) error {
 
 // resolveRulesFileset resolves the rules file to its ordered fileset: cold
 // files first, then hot (mirroring the legacy cold→hot upload order),
-// deduplicated. Paths come back as the rules engine resolves them (relative
-// to contextDir when inside it) — readRenderedFile resolves them the same
-// way cx's writeFileToXML does.
+// deduplicated. Every path is normalized to its canonical layer key
+// (canonicalLayerKey — worktree-relative for files under contextDir), so
+// layer records, the union diff, removal annotations, and supersede lists
+// all share one worktree-spelling-independent identity per file.
+// readRenderedFile resolves the keys back against contextDir the same way
+// cx's writeFileToXML does.
 func resolveRulesFileset(contextDir, rulesPath string) ([]string, error) {
 	mgr := grovecontext.NewManager(contextDir)
 	hot, cold, err := mgr.ResolveFilesFromCustomRulesFile(rulesPath)
@@ -456,9 +482,10 @@ func resolveRulesFileset(contextDir, rulesPath string) ([]string, error) {
 	seen := make(map[string]bool, len(hot)+len(cold))
 	fileset := make([]string, 0, len(hot)+len(cold))
 	for _, f := range append(append([]string{}, cold...), hot...) {
-		if !seen[f] {
-			seen[f] = true
-			fileset = append(fileset, f)
+		key := canonicalLayerKey(contextDir, f)
+		if !seen[key] {
+			seen[key] = true
+			fileset = append(fileset, key)
 		}
 	}
 	return fileset, nil

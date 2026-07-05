@@ -654,6 +654,107 @@ func TestExecuteChatJob_TranscriptCaching(t *testing.T) {
 	}
 }
 
+// TestExecuteChatJob_MixedSpellingStoreNoDuplicate is the executor-level
+// regression for the oracle-plays job-25 duplication: a two-turn mock chat
+// whose layer store gets poisoned between turns with ANOTHER checkout's
+// absolute spellings of the same files (exactly what the wrong-rooted turn 3
+// wrote). Turn 2 re-resolves the same rules relatively; with canonical file
+// identity the union diff must find zero "new" files — NO layer appended, no
+// removal annotations, and the store gains the root pin.
+func TestExecuteChatJob_MixedSpellingStoreNoDuplicate(t *testing.T) {
+	mockResponse := filepath.Join(t.TempDir(), "mock-response.md")
+	if err := os.WriteFile(mockResponse, []byte("mock oracle response"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", mockResponse)
+
+	plan, job := newChatJobFixture(t, "rules_file: ctx.rules\n", "First question.")
+	gitInitDir(t, plan.Directory)
+	writeSrc := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(plan.Directory, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSrc("src/a.go", "package src\n\nvar A = 1\n")
+	writeSrc("src/b.go", "package src\n\nvar B = 2\n")
+	writeSrc("ctx.rules", "src/a.go\nsrc/b.go\n")
+
+	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
+	if err := executor.Execute(context.Background(), job, plan); err != nil {
+		t.Fatalf("turn 1: %v", err)
+	}
+
+	layersDir := ContextLayersDir(plan.Directory, job.ID)
+	m1, err := LoadLayerManifest(layersDir)
+	if err != nil || m1 == nil || len(m1.Layers) != 1 {
+		t.Fatalf("turn 1 layers.json = (%+v, %v), want the frozen base", m1, err)
+	}
+
+	// The "main checkout": same files, same relative layout, different root.
+	foreign := filepath.Join(t.TempDir(), "main-checkout")
+	if err := os.MkdirAll(filepath.Join(foreign, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.go", "b.go"} {
+		data, err := os.ReadFile(filepath.Join(plan.Directory, "src", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(foreign, "src", name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Poison the manifest the way the wrong-rooted turn did (records only —
+	// layer artifacts stay immutable) and drop the root pin to mimic a store
+	// written before the pin existed.
+	for i, rec := range m1.Layers[0].Files {
+		m1.Layers[0].Files[i].Path = filepath.Join(foreign, rec.Path)
+	}
+	m1.Root = ""
+	if err := SaveLayerManifest(layersDir, m1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Turn 2 over the poisoned store.
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = append(content, []byte("\nThanks, one more question.\n")...)
+	if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job2, err := LoadJob(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job2.Filename = job.Filename
+	job2.FilePath = job.FilePath
+	if err := executor.Execute(context.Background(), job2, plan); err != nil {
+		t.Fatalf("turn 2 over the mixed-spelling store: %v", err)
+	}
+
+	m2, err := LoadLayerManifest(layersDir)
+	if err != nil || m2 == nil {
+		t.Fatal(err)
+	}
+	if len(m2.Layers) != 1 {
+		t.Fatalf("turn 2 duplicated the fileset into a new layer: %+v", m2.Layers)
+	}
+	if len(m2.Removals) != 0 {
+		t.Errorf("turn 2 annotated the same files as removed: %+v", m2.Removals)
+	}
+	if m2.Root == "" {
+		t.Errorf("turn 2 did not back-fill the root pin")
+	}
+}
+
 // TestExecuteChatJob_RefreshVerbsMutuallyExclusive: a turn directive carrying
 // both refresh verbs fails the turn actionably (and terminally via the
 // failure guard) instead of guessing which refresh the user meant.

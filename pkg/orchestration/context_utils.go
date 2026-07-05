@@ -228,6 +228,17 @@ func resolveWorktreeContainerRoot(dir string) (string, bool) {
 // If the plan is inside a notebook, it returns the associated project's path.
 // Otherwise, it falls back to GetGitRootSafe.
 func GetProjectGitRoot(planDir string) (string, error) {
+	// Canonicalize first (absolute + symlinks + macOS case): notebook
+	// detection is a string-prefix match against the configured notebook
+	// root, so a case-variant or symlinked spelling of a notebook plan dir
+	// (e.g. /Users/x/Notebooks/... for /Users/x/notebooks/...) would
+	// otherwise silently fail detection and fall through to git/worktree
+	// fallbacks rooted at the wrong checkout — the oracle-plays job-25
+	// wrong-root turn.
+	if canonical, err := pathutil.CanonicalPath(planDir); err == nil {
+		planDir = canonical
+	}
+
 	// First check if the plan directory is inside a notebook
 	if project, notebookRoot, _ := workspace.GetProjectFromNotebookPath(planDir); notebookRoot != "" && project != nil {
 		// Plan is in a notebook - use the associated project's path
@@ -295,7 +306,14 @@ func resolveGitRootForWorktreeWith(ctx context.Context, planDir string, resolveR
 // Detection is deterministic (config prefix match / notebook.yml marker), so a
 // true here plus a GetProjectGitRoot failure means the PROJECT lookup raced —
 // the case that must never fall back to fabricating a container at planDir.
+// Canonicalized for the same reason as GetProjectGitRoot: a case-variant or
+// symlinked spelling of a notebook plan dir must still be detected as
+// notebook-resident, or resolveGitRootForWorktree's non-notebook fallback
+// fabricates a worktree container at the plan dir.
 func isUnderNotebook(planDir string) bool {
+	if canonical, err := pathutil.CanonicalPath(planDir); err == nil {
+		planDir = canonical
+	}
 	_, notebookRoot, _ := workspace.GetProjectFromNotebookPath(planDir)
 	return notebookRoot != ""
 }
