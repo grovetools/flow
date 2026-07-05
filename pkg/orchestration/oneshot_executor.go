@@ -1862,6 +1862,47 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	}
 
+	// --- Layer engine (spec 19 P3) ---
+	// The job's rules file is turned into an append-only sequence of frozen
+	// layer artifacts (turn 1 freezes 00-base.xml; later turns diff the
+	// re-resolved fileset against the union of existing layers and append
+	// rules-diff/delta layers). Those artifacts are the Anthropic upload —
+	// byte-stable across turns, which is what keeps the cache prefix warm.
+	// Refresh verbs arrive via the turn directive (stamped there by the
+	// `flow plan run --append-delta/--rebase-context` flags or a reopen).
+	if directive.AppendDelta && directive.RebaseContext {
+		execErr = fmt.Errorf("append_delta and rebase_context are mutually exclusive for a single turn")
+		return execErr
+	}
+	var layerResult *LayerEngineResult
+	if chatUsedRulesPath != "" {
+		refresh := LayerRefreshNone
+		switch {
+		case directive.RebaseContext:
+			refresh = LayerRefreshRebase
+		case directive.AppendDelta:
+			refresh = LayerRefreshAppendDelta
+		}
+		layerResult, err = PrepareContextLayers(ctx, LayerEngineParams{
+			PlanDir:         plan.Directory,
+			JobID:           job.ID,
+			ContextDir:      contextDir,
+			RulesPath:       chatUsedRulesPath,
+			TurnID:          turnID,
+			StripComments:   job.IsStripCommentsEnabled(),
+			SnapshotEnabled: job.IsContextSnapshotEnabled(),
+			Refresh:         refresh,
+		})
+		if err != nil {
+			execErr = fmt.Errorf("preparing context layers: %w", err)
+			return execErr
+		}
+	} else if directive.AppendDelta || directive.RebaseContext {
+		ulog.Warn("append_delta/rebase_context have no effect: this chat has no rules file, so no layer store exists").
+			Field("job_id", job.ID).
+			Log(ctx)
+	}
+
 	// Build the briefing XML with context section if there are dependencies or context files
 	var promptBuilder strings.Builder
 	promptBuilder.WriteString("<prompt>\n<system_instructions>\n")
@@ -2014,26 +2055,22 @@ interpret and continue through YOUR current system instructions.
 	// paths are handed to the runners explicitly via chatHotCtx/chatColdCtx.
 	chatHotCtx, chatColdCtx := chatJobCtx.existingPaths()
 
-	// --- Ladder bridge (spec 19 P2) ---
-	// The chat path opts into the Anthropic stability-ladder cache layout
-	// (D1) with the job's cache TTL (D2, default 1h). The layer engine (P3)
-	// doesn't exist yet, so this turn's per-job cx context rides up as a
-	// single synthetic layer sequence: [cold (if non-empty), hot] followed by
-	// the dependency uploads and includes, in that stable order. Under ladder
-	// grove-anthropic skips its own hot/cold/CLAUDE.md resolution (D6), so
-	// these paths are passed explicitly here; deps/includes travel inside
-	// LayerFiles (not ContextFiles) so they sit under the last-layer
-	// breakpoint and keep the cache coverage the legacy layout's
-	// last-document breakpoint gave them. P3 replaces this bridge with the
-	// frozen on-disk layer store.
+	// --- Ladder upload (spec 19 P3) ---
+	// The chat path uses the Anthropic stability-ladder cache layout (D1)
+	// with the job's cache TTL (D2, default 1h). The document region is the
+	// layer engine's frozen artifact sequence, in layers.json order — the
+	// cache breakpoint rides on the LAST layer document. Dependency uploads
+	// and includes follow as plain ContextFiles (no breakpoint of their own):
+	// they become real transcript layers in P5, and once P4 lands they sit
+	// under the history-block breakpoint. Under ladder grove-anthropic skips
+	// its own hot/cold/CLAUDE.md resolution (D6), so chats with no rules file
+	// (no layer store) upload only deps/includes + the volatile prompt.
 	var chatLayerFiles []string
-	if chatColdCtx != "" && !anthropic.IsEmptyColdContext(chatColdCtx) {
-		chatLayerFiles = append(chatLayerFiles, chatColdCtx)
+	var chatLayerSources map[string]string
+	if layerResult != nil {
+		chatLayerFiles = layerResult.LayerPaths
+		chatLayerSources = layerResult.SourcesByPath
 	}
-	if chatHotCtx != "" {
-		chatLayerFiles = append(chatLayerFiles, chatHotCtx)
-	}
-	chatLayerFiles = append(chatLayerFiles, allIncludeFiles...)
 
 	// The full Anthropic request options for this turn, shared by the live
 	// claude dispatch below and the request manifest (the mock path describes
@@ -2042,17 +2079,18 @@ interpret and continue through YOUR current system instructions.
 	// the single volatile text block, so under ladder there is no system or
 	// history breakpoint yet — just the last-layer one.
 	anthropicOpts := anthropic.RequestOptions{
-		Model:       effectiveModel,
-		Prompt:      fullPrompt,
-		WorkDir:     contextDir,
-		CacheLayout: anthropic.CacheLayoutLadder,
-		CacheTTL:    cacheTTL,
-		LayerFiles:  chatLayerFiles,
-		MaxTokens:   modelpkg.MaxTokens(effectiveModel),
-		NoCache:     job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
-		Caller:      "grove-flow-chat",
-		JobID:       job.ID,
-		PlanName:    plan.Name,
+		Model:        effectiveModel,
+		Prompt:       fullPrompt,
+		WorkDir:      contextDir,
+		CacheLayout:  anthropic.CacheLayoutLadder,
+		CacheTTL:     cacheTTL,
+		LayerFiles:   chatLayerFiles,
+		ContextFiles: allIncludeFiles,
+		MaxTokens:    modelpkg.MaxTokens(effectiveModel),
+		NoCache:      job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
+		Caller:       "grove-flow-chat",
+		JobID:        job.ID,
+		PlanName:     plan.Name,
 	}
 
 	// Per-turn request manifest (spec 19 D9): record, next to the briefing
@@ -2069,6 +2107,8 @@ interpret and continue through YOUR current system instructions.
 				Log(ctx)
 			return
 		}
+		// Layer entries carry their layers.json provenance (spec 19 P3).
+		AnnotateLayerSources(entries, chatLayerSources)
 		manifest := RequestManifest{
 			TurnID:    turnID,
 			JobID:     job.ID,

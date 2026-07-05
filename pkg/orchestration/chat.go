@@ -21,4 +21,14 @@ type ChatDirective struct {
 	Action    string                 `json:"action,omitempty"`
 	RulesFile string                 `json:"rules_file,omitempty"` // Archived rules file used for this turn's context
 	Vars      map[string]interface{} `json:"vars,omitempty"`
+	// AppendDelta / RebaseContext are the per-turn context refresh verbs
+	// (spec 19 D4). AppendDelta appends a supersede-annotated delta layer
+	// with files changed since their layer was frozen (cache-preserving;
+	// also auto-stamped when a completed chat is reopened). RebaseContext
+	// archives all layers and re-freezes a fresh base — the one deliberate
+	// cache-busting verb. `flow plan run --append-delta/--rebase-context`
+	// stamps these into the trailing chat marker so the semantics are
+	// identical across local and daemon execution. Mutually exclusive.
+	AppendDelta   bool `json:"append_delta,omitempty"`
+	RebaseContext bool `json:"rebase_context,omitempty"`
 }

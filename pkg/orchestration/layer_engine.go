@@ -1,0 +1,533 @@
+package orchestration
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	grovelogging "github.com/grovetools/core/logging"
+	grovecontext "github.com/grovetools/cx/pkg/context"
+)
+
+// The layer engine (spec 19 P3, D3/D4): turns the job's rules file — the only
+// context surface the user ever edits — into an append-only sequence of
+// immutable layer artifacts whose byte/position stability is what keeps the
+// Anthropic cache prefix warm across turns.
+//
+//   - Turn 1 freezes the full rules sweep as 00-base.xml (+ layers.json +
+//     snapshot.json).
+//   - Later turns re-resolve the rules and diff the fileset against the UNION
+//     of all existing layers: genuinely-new files append a rules-diff layer;
+//     no new files, no new layer. Files whose worktree content changed are
+//     NOT refreshed (layer-0 is a snapshot) — a staleness advisory goes to
+//     job.log instead. Files removed from the rules keep their bytes and get
+//     a removal annotation.
+//   - --append-delta appends a supersede-annotated delta layer with the
+//     changed files (content-hash compare against the union — correct for
+//     committed and uncommitted changes alike, no git archaeology).
+//   - --rebase-context archives the whole lineage (never deletes) and
+//     re-freezes a fresh 00-base.xml: the one deliberate cache-busting verb.
+//   - context_snapshot: false opts out of freezing entirely: every turn wipes
+//     and regenerates the store (every turn is a rebase), for debug-style
+//     chats tracking a moving worktree.
+
+// LayerRefreshMode selects the refresh verb for one chat turn (spec 19 D4).
+type LayerRefreshMode int
+
+const (
+	// LayerRefreshNone is the default: diff rules, append new files only.
+	LayerRefreshNone LayerRefreshMode = iota
+	// LayerRefreshAppendDelta appends a supersede-annotated delta layer with
+	// the files whose content changed since capture (cache-preserving).
+	LayerRefreshAppendDelta
+	// LayerRefreshRebase archives all existing layers and re-freezes a fresh
+	// base from the current worktree (one deliberate cold write).
+	LayerRefreshRebase
+)
+
+// rebaseAdvisoryRatio is the superseded-bytes fraction past which the engine
+// suggests --rebase-context in job.log (spec 19 D4 — advise, never auto-bust).
+const rebaseAdvisoryRatio = 0.30
+
+// LayerEngineParams carries one turn's inputs to PrepareContextLayers.
+type LayerEngineParams struct {
+	PlanDir    string // plan directory (owns .artifacts/)
+	JobID      string
+	ContextDir string // worktree/sub-project dir the rules resolve against
+	RulesPath  string // resolved rules file for this turn
+	TurnID     string
+	// StripComments mirrors the job's strip_comments setting so layer bytes
+	// match what the legacy cx generation would have uploaded.
+	StripComments bool
+	// SnapshotEnabled is false under `context_snapshot: false` (opt-out):
+	// every turn regenerates the store from scratch and the immutability
+	// guard is deliberately bypassed (the store is wiped first).
+	SnapshotEnabled bool
+	Refresh         LayerRefreshMode
+}
+
+// LayerEngineResult reports what the engine decided for this turn.
+type LayerEngineResult struct {
+	// LayerPaths are the ordered layer artifact paths to upload as the
+	// request's LayerFiles (breakpoint on the last, per the ladder layout).
+	LayerPaths []string
+	// SourcesByPath maps each layer path to its provenance source, for
+	// request-manifest annotation.
+	SourcesByPath map[string]string
+	// AppendedLayer / DeltaLayer name the artifacts appended this turn
+	// (empty when none). Rebased reports a --rebase-context re-freeze.
+	AppendedLayer string
+	DeltaLayer    string
+	Rebased       bool
+}
+
+// PrepareContextLayers runs the layer engine for one chat turn and returns
+// the ordered layer upload. Errors are hard failures for the turn — a layer
+// store in an unknown state must never be papered over with a silent
+// re-upload (that is exactly the silent cache bust this engine removes).
+func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngineResult, error) {
+	writer := grovelogging.GetWriter(ctx)
+	layersDir := ContextLayersDir(p.PlanDir, p.JobID)
+
+	rulesBytes, err := os.ReadFile(p.RulesPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading rules file %s: %w", p.RulesPath, err)
+	}
+	rulesHash := sha256Hex(rulesBytes)
+
+	fileset, err := resolveRulesFileset(p.ContextDir, p.RulesPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving rules fileset: %w", err)
+	}
+
+	// context_snapshot: false — every turn is a rebase. Wipe the store first
+	// so the write-once guard (an immutability promise the job explicitly
+	// opted out of) never fires, then fall through to the fresh-freeze path.
+	if !p.SnapshotEnabled {
+		if err := os.RemoveAll(layersDir); err != nil {
+			return nil, fmt.Errorf("clearing layer store (context_snapshot: false): %w", err)
+		}
+		ulog.Info("context_snapshot: false — regenerating context layers from scratch this turn").
+			Field("job_id", p.JobID).
+			Log(ctx)
+	}
+
+	manifest, err := LoadLayerManifest(layersDir)
+	if err != nil {
+		return nil, err
+	}
+
+	rebased := false
+	if manifest != nil && p.Refresh == LayerRefreshRebase {
+		if err := archiveLayerStore(p.PlanDir, p.JobID, layersDir); err != nil {
+			return nil, fmt.Errorf("archiving layer store for rebase: %w", err)
+		}
+		rebased = true
+		manifest = nil
+		fmt.Fprintf(writer, "Context rebase: archived existing layers; re-freezing a fresh base from the current worktree\n")
+		ulog.Info("Rebasing context layers (existing layers archived, fresh base)").
+			Field("job_id", p.JobID).
+			Log(ctx)
+	}
+
+	heads, dirty := collectGitState(p.ContextDir)
+
+	// Fresh store: freeze the base layer.
+	if manifest == nil {
+		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, 0, LayerSourceRulesBase, fileset, nil)
+		if err != nil {
+			return nil, err
+		}
+		baseName := "00-base.xml"
+		basePath := filepath.Join(layersDir, baseName)
+		if err := WriteLayerArtifact(basePath, data); err != nil {
+			return nil, err
+		}
+		manifest = &LayerManifest{
+			Version: 1,
+			Layers: []LayerEntry{{
+				N:         0,
+				File:      baseName,
+				Source:    LayerSourceRulesBase,
+				Hash:      sha256Hex(data),
+				Bytes:     int64(len(data)),
+				RulesHash: rulesHash,
+				GitHeads:  heads,
+				Dirty:     dirty,
+				Files:     records,
+				TurnID:    p.TurnID,
+				CreatedAt: time.Now().UTC(),
+			}},
+		}
+		if err := SaveLayerManifest(layersDir, manifest); err != nil {
+			return nil, err
+		}
+		if err := WriteLayerSnapshot(p.PlanDir, p.JobID, LayerSnapshot{
+			CreatedAt: time.Now().UTC(),
+			TurnID:    p.TurnID,
+			RulesFile: p.RulesPath,
+			RulesHash: rulesHash,
+			GitHeads:  heads,
+			Dirty:     dirty,
+		}); err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(writer, "Context layers: froze %s (%d files, %s)\n", baseName, len(records), formatByteCount(int64(len(data))))
+		res := layerResultFromManifest(layersDir, manifest)
+		res.Rebased = rebased
+		return res, nil
+	}
+
+	// Existing store: enforce immutability before trusting anything in it.
+	if err := AuditLayerArtifacts(layersDir, manifest); err != nil {
+		return nil, err
+	}
+
+	union := UnionFileRecords(manifest)
+
+	// Render current bytes for every file the rules resolve to right now.
+	// One pass gives new-file detection, staleness compare, and delta
+	// material; a read failure is a hard failure (an unreadable file the
+	// rules demand must fail the turn, not silently thin the context).
+	current := make(map[string]renderedFile, len(fileset))
+	for _, f := range fileset {
+		rf, err := readRenderedFile(p.ContextDir, f, p.StripComments)
+		if err != nil {
+			return nil, fmt.Errorf("reading context file %s: %w", f, err)
+		}
+		current[f] = rf
+	}
+
+	changed := false // manifest mutated this turn
+
+	// Genuinely-new files (not in any layer) → rules-diff layer.
+	var newFiles []string
+	for _, f := range fileset {
+		if _, ok := union[f]; !ok {
+			newFiles = append(newFiles, f)
+		}
+	}
+	result := &LayerEngineResult{Rebased: rebased}
+	if len(newFiles) > 0 {
+		n := len(manifest.Layers)
+		name := fmt.Sprintf("%02d-add-%s.xml", n, layerSlug(p.TurnID))
+		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceRulesDiff, newFiles, nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := WriteLayerArtifact(filepath.Join(layersDir, name), data); err != nil {
+			return nil, err
+		}
+		manifest.Layers = append(manifest.Layers, LayerEntry{
+			N:         n,
+			File:      name,
+			Source:    LayerSourceRulesDiff,
+			Hash:      sha256Hex(data),
+			Bytes:     int64(len(data)),
+			RulesHash: rulesHash,
+			GitHeads:  heads,
+			Dirty:     dirty,
+			Files:     records,
+			TurnID:    p.TurnID,
+			CreatedAt: time.Now().UTC(),
+		})
+		changed = true
+		result.AppendedLayer = name
+		fmt.Fprintf(writer, "Context layers: appended %s (%d new files from rules)\n", name, len(newFiles))
+		ulog.Info("Appended rules-diff context layer").
+			Field("job_id", p.JobID).
+			Field("layer", name).
+			Field("new_files", len(newFiles)).
+			Log(ctx)
+	}
+
+	// Files removed from the rules: bytes stay in their layers (shrinking the
+	// upload would bust the prefix); record the removal annotation once.
+	alreadyRemoved := make(map[string]bool, len(manifest.Removals))
+	for _, r := range manifest.Removals {
+		alreadyRemoved[r.Path] = true
+	}
+	inFileset := make(map[string]bool, len(fileset))
+	for _, f := range fileset {
+		inFileset[f] = true
+	}
+	var removedPaths []string
+	for path := range union {
+		if !inFileset[path] && !alreadyRemoved[path] {
+			removedPaths = append(removedPaths, path)
+		}
+	}
+	sort.Strings(removedPaths)
+	for _, path := range removedPaths {
+		manifest.Removals = append(manifest.Removals, LayerRemoval{Path: path, TurnID: p.TurnID, At: time.Now().UTC()})
+		changed = true
+	}
+	if len(removedPaths) > 0 {
+		fmt.Fprintf(writer, "Context layers: %d file(s) removed from rules — bytes stay uploaded, removal recorded in layers.json: %s\n",
+			len(removedPaths), strings.Join(removedPaths, ", "))
+	}
+
+	// Content drift on captured files: never auto-refreshed. Either the user
+	// asked for a delta layer, or they get a staleness advisory.
+	var staleFiles []string
+	for _, f := range fileset {
+		rec, ok := union[f]
+		if !ok {
+			continue // new this turn — captured fresh above
+		}
+		if current[f].Hash != rec.Hash {
+			staleFiles = append(staleFiles, f)
+		}
+	}
+	sort.Strings(staleFiles)
+
+	switch {
+	case p.Refresh == LayerRefreshAppendDelta && len(staleFiles) > 0:
+		n := len(manifest.Layers)
+		name := fmt.Sprintf("%02d-delta-%s.xml", n, deltaSlug(heads))
+		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceGitDelta, staleFiles, staleFiles)
+		if err != nil {
+			return nil, err
+		}
+		if err := WriteLayerArtifact(filepath.Join(layersDir, name), data); err != nil {
+			return nil, err
+		}
+		manifest.Layers = append(manifest.Layers, LayerEntry{
+			N:          n,
+			File:       name,
+			Source:     LayerSourceGitDelta,
+			Hash:       sha256Hex(data),
+			Bytes:      int64(len(data)),
+			GitHeads:   heads,
+			Dirty:      dirty,
+			Files:      records,
+			Supersedes: append([]string{}, staleFiles...),
+			TurnID:     p.TurnID,
+			CreatedAt:  time.Now().UTC(),
+		})
+		changed = true
+		result.DeltaLayer = name
+		fmt.Fprintf(writer, "Context layers: appended delta %s (%d changed files supersede earlier copies)\n", name, len(staleFiles))
+		ulog.Info("Appended delta context layer").
+			Field("job_id", p.JobID).
+			Field("layer", name).
+			Field("changed_files", len(staleFiles)).
+			Log(ctx)
+	case p.Refresh == LayerRefreshAppendDelta:
+		fmt.Fprintf(writer, "Context layers: --append-delta found no changed files; nothing to append\n")
+	case len(staleFiles) > 0:
+		// Advisory only (spec 19 e2e 5): the frozen layers intentionally lag
+		// the worktree until the user asks for a delta or a rebase.
+		fmt.Fprintf(writer, "Context staleness advisory: %d file(s) changed on disk since their layer was frozen (%s) — the oracle still sees the frozen bytes; run with --append-delta to upload the changes or --rebase-context to re-freeze\n",
+			len(staleFiles), strings.Join(staleFiles, ", "))
+		ulog.Warn("Context layers are stale against the worktree (frozen bytes still uploaded)").
+			Field("job_id", p.JobID).
+			Field("stale_files", len(staleFiles)).
+			Log(ctx)
+	}
+
+	if changed {
+		if err := SaveLayerManifest(layersDir, manifest); err != nil {
+			return nil, err
+		}
+	}
+
+	// Rebase advisory (spec 19 e2e 9): suggest, never auto-bust.
+	if ratio := SupersededBytesRatio(manifest); ratio > rebaseAdvisoryRatio {
+		fmt.Fprintf(writer, "Context rebase advisory: %.0f%% of lineage bytes are superseded by later layers — consider --rebase-context to compact into a fresh base (one deliberate cold cache write)\n", ratio*100)
+		ulog.Warn("Context layer lineage heavily superseded — rebase advised").
+			Field("job_id", p.JobID).
+			Field("superseded_ratio", fmt.Sprintf("%.2f", ratio)).
+			Log(ctx)
+	}
+
+	res := layerResultFromManifest(layersDir, manifest)
+	res.Rebased = result.Rebased
+	res.AppendedLayer = result.AppendedLayer
+	res.DeltaLayer = result.DeltaLayer
+	return res, nil
+}
+
+// layerResultFromManifest builds the ordered upload list + provenance map.
+func layerResultFromManifest(layersDir string, m *LayerManifest) *LayerEngineResult {
+	res := &LayerEngineResult{SourcesByPath: make(map[string]string, len(m.Layers))}
+	for _, e := range m.Layers {
+		path := LayerArtifactPath(layersDir, e)
+		res.LayerPaths = append(res.LayerPaths, path)
+		res.SourcesByPath[path] = e.Source
+	}
+	return res
+}
+
+// archiveLayerStore moves every entry of the context-layers dir (artifacts +
+// layers.json) plus the job's snapshot.json into
+// context-layers/archive-<ts>/ — rebases retire layers, they never delete
+// them (spec 19 e2e 7).
+func archiveLayerStore(planDir, jobID, layersDir string) error {
+	entries, err := os.ReadDir(layersDir)
+	if err != nil {
+		return err
+	}
+	archiveDir := filepath.Join(layersDir, fmt.Sprintf("archive-%s", time.Now().UTC().Format("20060102-150405")))
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil { //nolint:gosec // artifact dir
+		return err
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "archive-") {
+			continue // prior archives stay where they are
+		}
+		if err := os.Rename(filepath.Join(layersDir, entry.Name()), filepath.Join(archiveDir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	snapPath := LayerSnapshotPath(planDir, jobID)
+	if _, err := os.Stat(snapPath); err == nil {
+		if err := os.Rename(snapPath, filepath.Join(archiveDir, "snapshot.json")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveRulesFileset resolves the rules file to its ordered fileset: cold
+// files first, then hot (mirroring the legacy cold→hot upload order),
+// deduplicated. Paths come back as the rules engine resolves them (relative
+// to contextDir when inside it) — readRenderedFile resolves them the same
+// way cx's writeFileToXML does.
+func resolveRulesFileset(contextDir, rulesPath string) ([]string, error) {
+	mgr := grovecontext.NewManager(contextDir)
+	hot, cold, err := mgr.ResolveFilesFromCustomRulesFile(rulesPath)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(hot)+len(cold))
+	fileset := make([]string, 0, len(hot)+len(cold))
+	for _, f := range append(append([]string{}, cold...), hot...) {
+		if !seen[f] {
+			seen[f] = true
+			fileset = append(fileset, f)
+		}
+	}
+	return fileset, nil
+}
+
+// renderedFile is one file's rendered (post strip_comments) content.
+type renderedFile struct {
+	Content []byte
+	Hash    string
+}
+
+// readRenderedFile reads a resolved rules path (relative paths join
+// contextDir, mirroring cx) and applies comment stripping when enabled, so
+// hashes and layer bytes match what legacy cx generation would upload.
+func readRenderedFile(contextDir, file string, strip bool) (renderedFile, error) {
+	path := file
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(contextDir, path)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return renderedFile{}, err
+	}
+	if strip {
+		content = grovecontext.StripComments(file, content)
+	}
+	return renderedFile{Content: content, Hash: sha256Hex(content)}, nil
+}
+
+// renderLayerXML renders one layer artifact: cx's `<file path=…>` blocks
+// wrapped in a `<layer>` envelope carrying provenance attributes (spec 19
+// §3). Unreadable files are hard errors (spec 19 e2e 22) — cx's inline
+// `<error>` placeholder would silently thin the oracle's context.
+func renderLayerXML(contextDir string, strip bool, n int, source string, files, supersedes []string) ([]byte, []LayerFileRecord, error) {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "<layer n=\"%d\" source=%q files=\"%d\"", n, source, len(files))
+	if len(supersedes) > 0 {
+		fmt.Fprintf(&buf, " supersedes=%q", strings.Join(supersedes, ","))
+	}
+	buf.WriteString(">\n")
+
+	records := make([]LayerFileRecord, 0, len(files))
+	for _, file := range files {
+		rf, err := readRenderedFile(contextDir, file, strip)
+		if err != nil {
+			return nil, nil, fmt.Errorf("reading context file %s: %w", file, err)
+		}
+		fmt.Fprintf(&buf, "  <file path=%q>\n", file)
+		buf.Write(rf.Content)
+		if len(rf.Content) > 0 && rf.Content[len(rf.Content)-1] != '\n' {
+			buf.WriteByte('\n')
+		}
+		buf.WriteString("  </file>\n")
+		records = append(records, LayerFileRecord{Path: file, Hash: rf.Hash, Bytes: int64(len(rf.Content))})
+	}
+	buf.WriteString("</layer>\n")
+	return buf.Bytes(), records, nil
+}
+
+// collectGitState records the context dir's repo HEAD + dirty flag for layer
+// provenance. Deliberately simple (spec 19 P3): one entry for the repo
+// containing contextDir — diffing never depends on git (content hashes do
+// that work), so heads are labels for humans and the delta layer's slug.
+// Non-repo dirs return (nil, false).
+func collectGitState(dir string) (map[string]string, bool) {
+	root, err := gitOutput(dir, "rev-parse", "--show-toplevel")
+	if err != nil || root == "" {
+		return nil, false
+	}
+	head, err := gitOutput(dir, "rev-parse", "HEAD")
+	if err != nil || head == "" {
+		// A repo with no commits yet: record the root with an empty head.
+		head = ""
+	}
+	status, err := gitOutput(dir, "status", "--porcelain")
+	dirty := err == nil && status != ""
+	return map[string]string{root: head}, dirty
+}
+
+// gitOutput runs git -C dir args… and returns trimmed stdout.
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// layerSlug shortens a turn id for use in a layer filename.
+func layerSlug(turnID string) string {
+	if turnID == "" {
+		return "turn"
+	}
+	return turnID
+}
+
+// deltaSlug names a delta layer after the current HEAD's short sha, falling
+// back to "worktree" for dirty-only or non-repo states.
+func deltaSlug(heads map[string]string) string {
+	for _, head := range heads {
+		if len(head) >= 7 {
+			return head[:7]
+		}
+	}
+	return "worktree"
+}
+
+// formatByteCount renders a human-readable byte size for job.log lines.
+func formatByteCount(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}

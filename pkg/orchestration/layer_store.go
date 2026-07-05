@@ -1,0 +1,295 @@
+package orchestration
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// The on-disk layer store (spec 19 §3). Each chat job owns an append-only
+// sequence of immutable context-layer artifacts under
+//
+//	plans/<plan>/.artifacts/<job-id>/context-layers/
+//	  00-base.xml            frozen rules sweep (turn 1)
+//	  01-add-<slug>.xml      rules-diff layer (new files only)
+//	  02-delta-<slug>.xml    delta layer (changed files, supersede-annotated)
+//	  layers.json            ordered sequence with provenance (LayerManifest)
+//	  archive-<ts>/          layers retired by --rebase-context (never deleted)
+//	plans/<plan>/.artifacts/<job-id>/snapshot.json   turn-1 freeze record
+//
+// Existing layer artifacts are NEVER rewritten (immutability is what keeps
+// the Anthropic cache prefix byte-stable); the only sanctioned ways bytes
+// change are appending a new layer or archiving the whole lineage via
+// --rebase-context. WriteLayerArtifact and AuditLayerArtifacts enforce this.
+
+// Layer provenance sources recorded in layers.json (spec 19 §3). P3 emits
+// rules-base / rules-diff / git-delta; dep-transcript and inherited are
+// reserved for the cross-job lineage phase (P5) — the loader and
+// LayerArtifactPath already tolerate them so P5 only adds writers.
+const (
+	LayerSourceRulesBase     = "rules-base"
+	LayerSourceRulesDiff     = "rules-diff"
+	LayerSourceGitDelta      = "git-delta"
+	LayerSourceDepTranscript = "dep-transcript"
+	LayerSourceInherited     = "inherited"
+)
+
+// layerManifestName is the manifest filename within the context-layers dir.
+const layerManifestName = "layers.json"
+
+// LayerFileRecord is one file captured inside a layer artifact: its path as
+// resolved by the rules engine (relative to the context dir when inside it),
+// the sha256 of the rendered content that went into the layer (post
+// strip_comments), and its rendered size. The per-file hashes are what later
+// turns diff against: new-file detection, staleness advisories, and
+// --append-delta all compare current rendered bytes to these records.
+type LayerFileRecord struct {
+	Path  string `json:"path"`
+	Hash  string `json:"hash"`
+	Bytes int64  `json:"bytes"`
+}
+
+// LayerEntry is one layer of the sequence, with full provenance (spec 19 §3).
+type LayerEntry struct {
+	// N is the layer's position in the upload sequence (0 = base).
+	N int `json:"n"`
+	// File is the artifact filename within the job's context-layers dir for
+	// own layers, or an absolute path for inherited references to a parent
+	// job's immutable artifacts (P5). See LayerArtifactPath.
+	File string `json:"file"`
+	// Source is the layer's provenance kind (LayerSource* constants).
+	Source string `json:"source"`
+	// Hash is the sha256 of the layer artifact's bytes — the immutability
+	// fingerprint checked by AuditLayerArtifacts every turn.
+	Hash string `json:"hash"`
+	// Bytes is the artifact size.
+	Bytes int64 `json:"bytes"`
+	// RulesHash is the sha256 of the rules file that produced this layer
+	// (rules-base / rules-diff layers).
+	RulesHash string `json:"rules_hash,omitempty"`
+	// GitHeads records the HEAD of the context dir's repo when the layer was
+	// written (provenance only — layer diffing is content-hash based, never
+	// git based). Keyed by repo root path.
+	GitHeads map[string]string `json:"git_heads,omitempty"`
+	// Dirty reports whether that repo had uncommitted changes at write time.
+	Dirty bool `json:"dirty,omitempty"`
+	// Files are the per-file records captured in this layer.
+	Files []LayerFileRecord `json:"files"`
+	// Supersedes lists paths whose earlier-layer copies this layer replaces
+	// (delta layers). The chat template instructs the oracle that later
+	// layers win.
+	Supersedes []string `json:"supersedes,omitempty"`
+	// InheritedFrom identifies the parent job artifact this entry references
+	// ("<job-id>/<layer-file>", P5). Empty for own layers.
+	InheritedFrom string `json:"inherited_from,omitempty"`
+	// TurnID / CreatedAt record when the layer was appended.
+	TurnID    string    `json:"turn_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// LayerRemoval is the annotation recorded when a file disappears from the
+// rules between turns. The bytes stay in their layer (removing uploaded bytes
+// would bust the cache prefix); the annotation is the honest record.
+type LayerRemoval struct {
+	Path   string    `json:"path"`
+	TurnID string    `json:"turn_id,omitempty"`
+	At     time.Time `json:"at"`
+}
+
+// LayerManifest is the layers.json document: the ordered layer sequence plus
+// removal annotations.
+type LayerManifest struct {
+	Version  int            `json:"version"`
+	Layers   []LayerEntry   `json:"layers"`
+	Removals []LayerRemoval `json:"removals,omitempty"`
+}
+
+// LayerSnapshot is the snapshot.json document written when a lineage's base
+// layer is frozen (turn 1, or a --rebase-context re-freeze): the rules file
+// and its hash, and the git state of the context dir's repo at freeze time.
+// Git heads here are provenance/labels — delta computation compares rendered
+// content hashes against layers.json records, so it is correct for both
+// committed and uncommitted changes without consulting git.
+type LayerSnapshot struct {
+	CreatedAt time.Time         `json:"created_at"`
+	TurnID    string            `json:"turn_id,omitempty"`
+	RulesFile string            `json:"rules_file"`
+	RulesHash string            `json:"rules_hash"`
+	GitHeads  map[string]string `json:"git_heads,omitempty"`
+	Dirty     bool              `json:"dirty,omitempty"`
+}
+
+// ContextLayersDir returns the job's layer-store directory.
+func ContextLayersDir(planDir, jobID string) string {
+	return filepath.Join(planDir, ".artifacts", jobID, "context-layers")
+}
+
+// LayerSnapshotPath returns the job's snapshot.json path (sibling of the
+// context-layers dir, per spec 19 §3).
+func LayerSnapshotPath(planDir, jobID string) string {
+	return filepath.Join(planDir, ".artifacts", jobID, "snapshot.json")
+}
+
+// LayerArtifactPath resolves a manifest entry to the artifact file it names:
+// own layers live inside layersDir; inherited entries (P5) carry an absolute
+// path to the parent job's immutable artifact and are used as-is.
+func LayerArtifactPath(layersDir string, e LayerEntry) string {
+	if filepath.IsAbs(e.File) {
+		return e.File
+	}
+	return filepath.Join(layersDir, e.File)
+}
+
+// LoadLayerManifest reads layers.json from layersDir. A missing manifest
+// returns (nil, nil) — the "no store yet" signal for turn 1.
+func LoadLayerManifest(layersDir string) (*LayerManifest, error) {
+	data, err := os.ReadFile(filepath.Join(layersDir, layerManifestName))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading %s: %w", layerManifestName, err)
+	}
+	var m LayerManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", layerManifestName, err)
+	}
+	return &m, nil
+}
+
+// SaveLayerManifest writes layers.json atomically (temp + rename).
+func SaveLayerManifest(layersDir string, m *LayerManifest) error {
+	if err := os.MkdirAll(layersDir, 0o755); err != nil { //nolint:gosec // artifact dir
+		return err
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(layersDir, layerManifestName)
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+// WriteLayerSnapshot writes snapshot.json atomically.
+func WriteLayerSnapshot(planDir, jobID string, s LayerSnapshot) error {
+	dest := LayerSnapshotPath(planDir, jobID)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil { //nolint:gosec // artifact dir
+		return err
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+// LoadLayerSnapshot reads snapshot.json; missing returns (nil, nil).
+func LoadLayerSnapshot(planDir, jobID string) (*LayerSnapshot, error) {
+	data, err := os.ReadFile(LayerSnapshotPath(planDir, jobID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var s LayerSnapshot
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, fmt.Errorf("parsing snapshot.json: %w", err)
+	}
+	return &s, nil
+}
+
+// WriteLayerArtifact writes a layer artifact under the write-once contract:
+// a missing file is created; an existing file with byte-identical content is
+// a no-op; an existing file with DIFFERENT content is a loud error — layer
+// artifacts are immutable and rewriting one silently would bust the cache
+// lineage the whole store exists to protect.
+func WriteLayerArtifact(path string, data []byte) error {
+	if existing, err := os.ReadFile(path); err == nil {
+		if sha256Hex(existing) == sha256Hex(data) {
+			return nil
+		}
+		return fmt.Errorf("layer artifact %s already exists with different content — layer artifacts are immutable (append a new layer, or archive the lineage with --rebase-context)", path)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // artifact dir
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// AuditLayerArtifacts verifies every own (non-inherited) layer artifact still
+// exists with exactly the bytes recorded at append time. Any drift is a hard
+// error: a mutated layer means the uploaded prefix silently changed.
+func AuditLayerArtifacts(layersDir string, m *LayerManifest) error {
+	for _, e := range m.Layers {
+		if e.InheritedFrom != "" {
+			continue // parent-owned artifact; P5 validates lineage separately
+		}
+		path := LayerArtifactPath(layersDir, e)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("layer artifact %s (layer %d, %s) is missing or unreadable: %w", path, e.N, e.Source, err)
+		}
+		if got := sha256Hex(data); got != e.Hash {
+			return fmt.Errorf("layer artifact %s (layer %d, %s) was modified after freeze (hash %s, recorded %s) — layer artifacts are immutable; restore it or rebase with --rebase-context", path, e.N, e.Source, got, e.Hash)
+		}
+	}
+	return nil
+}
+
+// UnionFileRecords folds the manifest's layers, in order, into the latest
+// record per path: later layers (rules-diff appends, delta supersessions)
+// win. This union is the diff baseline for every turn-N decision.
+func UnionFileRecords(m *LayerManifest) map[string]LayerFileRecord {
+	union := make(map[string]LayerFileRecord)
+	for _, layer := range m.Layers {
+		for _, f := range layer.Files {
+			union[f.Path] = f
+		}
+	}
+	return union
+}
+
+// SupersededBytesRatio reports the fraction of lineage bytes that later
+// layers have superseded: for each file record, every earlier capture of the
+// same path counts as superseded. Above rebaseAdvisoryRatio the engine logs
+// the rebase advisory (never auto-busts).
+func SupersededBytesRatio(m *LayerManifest) float64 {
+	var total, superseded int64
+	seenLater := make(map[string]bool) // paths captured by any later layer
+	for i := len(m.Layers) - 1; i >= 0; i-- {
+		for _, f := range m.Layers[i].Files {
+			total += f.Bytes
+			if seenLater[f.Path] {
+				superseded += f.Bytes
+			}
+		}
+		for _, f := range m.Layers[i].Files {
+			seenLater[f.Path] = true
+		}
+	}
+	if total == 0 {
+		return 0
+	}
+	return float64(superseded) / float64(total)
+}
+
+// sha256Hex returns the hex sha256 digest of data.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}

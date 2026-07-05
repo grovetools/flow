@@ -167,6 +167,14 @@ type Job struct {
 	// default to "1h" when unset; oneshot/agent jobs ignore it (they stay on
 	// the legacy request layout). Anthropic (claude) oracle chats only.
 	CacheTTL string `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty" jsonschema:"enum=5m,enum=1h,description=Anthropic prompt-cache TTL for chat turns: 5m or 1h (default 1h for chat jobs). Anthropic oracle-chat only"`
+	// ContextSnapshot controls the chat layer engine's freeze semantics
+	// (spec 19 P3). Default (unset/true): the turn-1 rules sweep is frozen
+	// as an immutable layer-0 and later turns only append layers — worktree
+	// edits reach the oracle solely via --append-delta / --rebase-context.
+	// context_snapshot: false opts out: every turn regenerates the layer
+	// store from scratch (every turn is a rebase, cache-busting by design)
+	// — for debug-style chats that must track a moving worktree.
+	ContextSnapshot *bool `yaml:"context_snapshot,omitempty" json:"context_snapshot,omitempty" jsonschema:"description=Freeze the chat's turn-1 context as immutable cache layers (default: true). Set false to fully regenerate context every turn (tracks a moving worktree, at full cache cost per turn)"`
 
 	// Worktree configuration
 	Repository string `yaml:"repository,omitempty" json:"repository,omitempty" jsonschema:"description=Git repository URL for worktree creation"`
@@ -282,6 +290,13 @@ func (j *Job) ChatCacheTTL() (string, error) {
 	default:
 		return "", fmt.Errorf("invalid cache_ttl %q in job frontmatter: valid values are \"5m\" or \"1h\" (chat jobs default to \"1h\" when unset)", j.CacheTTL)
 	}
+}
+
+// IsContextSnapshotEnabled reports whether the chat layer engine freezes the
+// turn-1 context as immutable layers (the default). context_snapshot: false
+// opts a chat out of freezing: every turn regenerates the store (spec 19 P3).
+func (j *Job) IsContextSnapshotEnabled() bool {
+	return j.ContextSnapshot == nil || *j.ContextSnapshot
 }
 
 // PinnedContextRemovedError is the actionable rejection for the removed

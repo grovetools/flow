@@ -27,12 +27,31 @@ const (
 // it carries a cache breakpoint (and at which TTL), and a rough token estimate
 // (bytes/4 heuristic — hence the field name token_estimate, not tokens).
 type RequestManifestEntry struct {
-	Kind          string `json:"kind"`
-	Path          string `json:"path,omitempty"`
+	Kind string `json:"kind"`
+	Path string `json:"path,omitempty"`
+	// Source is the layer's provenance from layers.json (rules-base,
+	// rules-diff, git-delta, …) — layer entries only (spec 19 P3).
+	Source        string `json:"source,omitempty"`
 	ContentHash   string `json:"content_hash"`
 	Breakpoint    bool   `json:"breakpoint"`
 	TTL           string `json:"ttl,omitempty"`
 	TokenEstimate int64  `json:"token_estimate"`
+}
+
+// AnnotateLayerSources stamps each layer entry's provenance source (from the
+// layer engine's layers.json view) onto the manifest entries, matching by
+// upload path.
+func AnnotateLayerSources(entries []RequestManifestEntry, sourcesByPath map[string]string) {
+	if len(sourcesByPath) == 0 {
+		return
+	}
+	for i := range entries {
+		if entries[i].Kind == anthropic.RequestBlockLayer {
+			if src, ok := sourcesByPath[entries[i].Path]; ok {
+				entries[i].Source = src
+			}
+		}
+	}
 }
 
 // RequestManifest is the per-turn record of what a chat turn actually

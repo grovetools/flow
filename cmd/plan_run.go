@@ -230,6 +230,19 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 							continue
 						}
 
+						// A reopened chat's next turn picks up worktree
+						// changes via append-delta semantics (spec 19 D4):
+						// the frozen layers stay intact and changed files
+						// ride up as one supersede-annotated delta layer —
+						// never a rebase.
+						if job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() {
+							if _, serr := orchestration.StampTrailingChatDirective(job.FilePath, map[string]interface{}{"append_delta": true}); serr != nil {
+								fmt.Printf("%s Warning: could not stamp append_delta on reopened chat '%s': %v\n",
+									color.YellowString(theme.IconWarning),
+									job.Title, serr)
+							}
+						}
+
 						jobsToRun = append(jobsToRun, job)
 						validTargetJobs = append(validTargetJobs, jobFile)
 					} else {
@@ -278,6 +291,39 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		jobsToRun = graph.GetRunnableJobs()
 	}
 	// Note: if planRunAll is true, we don't check because we want to avoid the prompt for batch runs
+
+	// Context refresh verbs (spec 19 D4): stamp the requested verb into the
+	// targeted chat turn's trailing grove marker. The layer engine reads it
+	// from the turn directive, so the semantics are identical whether the
+	// turn then executes locally or via the daemon, and the verb is consumed
+	// by exactly this turn (the response appends a clean trailing marker).
+	if planRunAppendDelta && planRunRebaseContext {
+		return fmt.Errorf("--append-delta and --rebase-context are mutually exclusive")
+	}
+	if planRunAppendDelta || planRunRebaseContext {
+		if len(targetJobs) == 0 {
+			return fmt.Errorf("--append-delta/--rebase-context require an explicit chat job target (e.g. `flow plan run 03-design.md --append-delta`)")
+		}
+		verb := "append_delta"
+		if planRunRebaseContext {
+			verb = "rebase_context"
+		}
+		for _, job := range jobsToRun {
+			if job.Type != orchestration.JobTypeChat || job.IsAgentResponded() {
+				fmt.Printf("%s Skipping --%s for '%s' (only oracle chat jobs have a context layer store)\n",
+					color.YellowString(theme.IconWarning), strings.ReplaceAll(verb, "_", "-"), job.Title)
+				continue
+			}
+			stamped, serr := orchestration.StampTrailingChatDirective(job.FilePath, map[string]interface{}{verb: true})
+			if serr != nil {
+				return fmt.Errorf("stamping %s on %s: %w", verb, job.Filename, serr)
+			}
+			if !stamped {
+				fmt.Printf("%s No chat marker to stamp in '%s' — %s is a no-op on a first turn (the layer store doesn't exist yet)\n",
+					color.YellowString(theme.IconWarning), job.Title, verb)
+			}
+		}
+	}
 
 	// Resolve agent_target from the caller's environment. The executor
 	// requires a concrete value ("native" or "tmux") — "auto" must be

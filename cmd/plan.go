@@ -138,6 +138,8 @@ var (
 	planRunModel              string
 	planRunLocal              bool // Force local execution (skip daemon)
 	planRunBackground         bool // Submit to daemon and exit without waiting
+	planRunAppendDelta        bool // Stamp append_delta into the targeted chat turn (spec 19 D4)
+	planRunRebaseContext      bool // Stamp rebase_context into the targeted chat turn (spec 19 D4)
 
 	// Add flags
 	planAddTemplate            string
@@ -210,6 +212,8 @@ func NewPlanCmd() *cobra.Command {
 	planRunCmd.Flags().BoolVar(&planRunSkipInteractive, "skip-interactive", false, "Skip interactive agent jobs (useful for CI/automation)")
 	planRunCmd.Flags().BoolVar(&planRunLocal, "local", false, "Force local execution (bypass daemon)")
 	planRunCmd.Flags().BoolVar(&planRunBackground, "background", false, "Submit to daemon and exit without waiting")
+	planRunCmd.Flags().BoolVar(&planRunAppendDelta, "append-delta", false, "Chat jobs: append a supersede-annotated context layer with files changed since the layers were frozen (cache-preserving refresh)")
+	planRunCmd.Flags().BoolVar(&planRunRebaseContext, "rebase-context", false, "Chat jobs: archive all context layers and re-freeze a fresh base from the current worktree (one deliberate cold cache write)")
 
 	// Add-step command flags
 	planAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")
