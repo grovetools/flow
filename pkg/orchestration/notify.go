@@ -38,6 +38,15 @@ func FireNotificationOnComplete(job *Job, status JobStatus) {
 		return
 	}
 
+	// Never fire real notifications from `go test` binaries. Unit tests run
+	// real job lifecycles through UpdateJobStatus, and — unlike the tend e2e
+	// harness, which sandboxes XDG/config/user paths — plain `go test`
+	// inherits the developer's real merged notify config, so every test run
+	// would push "job completed/failed" ntfy notifications to the live topic.
+	if grovelogging.IsTestBinary() {
+		return
+	}
+
 	// 1. Default ntfy push (config-driven).
 	fireCompletionNtfy(job, status)
 

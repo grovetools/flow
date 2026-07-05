@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -142,22 +143,11 @@ type Job struct {
 	Playbook string `yaml:"playbook,omitempty" json:"playbook,omitempty" jsonschema:"description=Per-job playbook override (normally inherited from .grove-plan.yml)"`
 
 	// Dependencies and context
-	DependsOn []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`
-	Include   []string `yaml:"include,omitempty" json:"include,omitempty" jsonschema:"description=Files or globs to include as context in the job prompt"`
-	// PinnedContext lists files placed in a stable, cacheable region of an
-	// Anthropic chat request — after the cold/CLAUDE.md stable half and before
-	// the per-turn volatile context — each with its own cache_control breakpoint.
-	// Unlike Include (volatile half, re-cached every turn), pinned files added
-	// mid-chat preserve the already-cached prefix on the turn they appear and
-	// cache durably thereafter. Append new entries to the END of the list; order
-	// is persisted so prior members keep their positions (see the pinned-context
-	// order artifact). Anthropic (claude) oracle chats only: on gemini models the
-	// files are folded into the volatile upload with a warning; agents read raw
-	// files so it is a no-op there. Files are uploaded raw (no comment stripping).
-	PinnedContext []string `yaml:"pinned_context,omitempty" json:"pinned_context,omitempty" jsonschema:"description=Files placed in a stable cached region of Anthropic chat requests with a dedicated cache_control breakpoint; append new entries to the end. Anthropic oracle-chat only"`
-	SourceBlock   string   `yaml:"source_block,omitempty" json:"source_block,omitempty" jsonschema:"description=Reference to a named block in another job to use as input"`
-	SourceFile    string   `yaml:"source_file,omitempty" json:"source_file,omitempty" jsonschema:"description=Path to source file for context"`
-	Memory        *bool    `yaml:"memory,omitempty" json:"memory,omitempty" jsonschema:"description=Whether to inject related memories into the prompt (default: true)"`
+	DependsOn   []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`
+	Include     []string `yaml:"include,omitempty" json:"include,omitempty" jsonschema:"description=Files or globs to include as context in the job prompt"`
+	SourceBlock string   `yaml:"source_block,omitempty" json:"source_block,omitempty" jsonschema:"description=Reference to a named block in another job to use as input"`
+	SourceFile  string   `yaml:"source_file,omitempty" json:"source_file,omitempty" jsonschema:"description=Path to source file for context"`
+	Memory      *bool    `yaml:"memory,omitempty" json:"memory,omitempty" jsonschema:"description=Whether to inject related memories into the prompt (default: true)"`
 	// StripComments removes code comments from the generated repository
 	// context before it is sent to the LLM, giving a comment-free view of the
 	// code. Enabled by default; set to false to keep comments. Uses a *bool so
@@ -170,6 +160,13 @@ type Job struct {
 	// ~0.1x. Set no_cache: true only for large-context jobs known to run
 	// exactly once, where the write premium buys nothing. Oracle-only concern.
 	NoCache bool `yaml:"no_cache,omitempty" json:"no_cache,omitempty" jsonschema:"description=Disable provider prompt caching for this job's LLM calls (default: caching enabled). Only worthwhile for large-context jobs that run exactly once"`
+	// CacheTTL selects the Anthropic prompt-cache TTL applied to every cache
+	// breakpoint of this job's chat turns (spec 19 D2). Valid values: "5m"
+	// (1.25x write premium) or "1h" (2.0x write premium, survives the
+	// minutes-to-an-hour gaps typical between oracle-chat turns). Chat jobs
+	// default to "1h" when unset; oneshot/agent jobs ignore it (they stay on
+	// the legacy request layout). Anthropic (claude) oracle chats only.
+	CacheTTL string `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty" jsonschema:"enum=5m,enum=1h,description=Anthropic prompt-cache TTL for chat turns: 5m or 1h (default 1h for chat jobs). Anthropic oracle-chat only"`
 
 	// Worktree configuration
 	Repository string `yaml:"repository,omitempty" json:"repository,omitempty" jsonschema:"description=Git repository URL for worktree creation"`
@@ -214,13 +211,20 @@ type Job struct {
 	SkillFidelity []SkillFidelityState `yaml:"skill_fidelity,omitempty" json:"skill_fidelity,omitempty" jsonschema:"description=Skill sequence execution fidelity records"`
 
 	// Derived fields (excluded from schema and YAML serialization - these are runtime/internal fields)
-	Filename     string      `yaml:"-" json:"filename,omitempty" jsonschema:"-"`
-	FilePath     string      `yaml:"-" json:"file_path,omitempty" jsonschema:"-"`
-	PromptBody   string      `yaml:"-" json:"-" jsonschema:"-"`
-	Dependencies []*Job      `yaml:"-" json:"-" jsonschema:"-"`
-	StartTime    time.Time   `yaml:"-" json:"start_time,omitempty" jsonschema:"-"`
-	EndTime      time.Time   `yaml:"-" json:"end_time,omitempty" jsonschema:"-"`
-	Metadata     JobMetadata `yaml:"-" json:"metadata,omitempty" jsonschema:"-"`
+	// HasLegacyPinnedContext records that the job file's frontmatter still
+	// carries the removed `pinned_context:` key (spec 19 D5). The key no
+	// longer maps to any field, so the loader detects it separately and the
+	// executors reject the job at run time with an actionable error — after
+	// the status flip to running, so the failure surfaces as status: failed +
+	// last_error + job.log instead of a load-time plan error.
+	HasLegacyPinnedContext bool        `yaml:"-" json:"-" jsonschema:"-"`
+	Filename               string      `yaml:"-" json:"filename,omitempty" jsonschema:"-"`
+	FilePath               string      `yaml:"-" json:"file_path,omitempty" jsonschema:"-"`
+	PromptBody             string      `yaml:"-" json:"-" jsonschema:"-"`
+	Dependencies           []*Job      `yaml:"-" json:"-" jsonschema:"-"`
+	StartTime              time.Time   `yaml:"-" json:"start_time,omitempty" jsonschema:"-"`
+	EndTime                time.Time   `yaml:"-" json:"end_time,omitempty" jsonschema:"-"`
+	Metadata               JobMetadata `yaml:"-" json:"metadata,omitempty" jsonschema:"-"`
 }
 
 // JobMetadata holds additional job metadata.
@@ -262,6 +266,39 @@ func (j *Job) IsAgentResponded() bool {
 // explicitly sets strip_comments: false.
 func (j *Job) IsStripCommentsEnabled() bool {
 	return j.StripComments == nil || *j.StripComments
+}
+
+// ChatCacheTTL resolves the job's cache_ttl frontmatter for its Anthropic chat
+// turns: "5m" and "1h" pass through, unset defaults to "1h" (spec 19 D2 — the
+// 1h premium is ~+60% of one cold write, vs one full cold rewrite per >5m gap
+// between turns), and anything else is an actionable error. Chat-path only;
+// oneshot/agent jobs never consult it.
+func (j *Job) ChatCacheTTL() (string, error) {
+	switch j.CacheTTL {
+	case "":
+		return "1h", nil
+	case "5m", "1h":
+		return j.CacheTTL, nil
+	default:
+		return "", fmt.Errorf("invalid cache_ttl %q in job frontmatter: valid values are \"5m\" or \"1h\" (chat jobs default to \"1h\" when unset)", j.CacheTTL)
+	}
+}
+
+// PinnedContextRemovedError is the actionable rejection for the removed
+// pinned_context frontmatter key (spec 19 D5). A pin was just a one-file
+// context layer with a second UX; the rules file is the only context surface
+// now. Executors return this AFTER flipping the job to running so it rides
+// the terminal-failure guard (status: failed + last_error + job.log) instead
+// of dying silently.
+func (j *Job) PinnedContextRemovedError() error {
+	if !j.HasLegacyPinnedContext {
+		return nil
+	}
+	rulesHint := j.RulesFile
+	if rulesHint == "" {
+		rulesHint = "the job's rules file"
+	}
+	return fmt.Errorf("pinned_context is no longer supported: remove the pinned_context key and add the files to %s instead — flow will layer them into the cached context", rulesHint)
 }
 
 // ShouldInline checks if a specific category should be inlined in the prompt.

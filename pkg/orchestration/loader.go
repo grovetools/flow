@@ -150,15 +150,21 @@ func LoadJob(filepath string) (*Job, error) {
 	// Flat metadata fields (last_error, retry_count) are stored at the top
 	// level of the frontmatter but belong inside job.Metadata in memory.
 	// Unmarshal once more into a narrow shim to pick them up without
-	// reintroducing the map allocation.
+	// reintroducing the map allocation. The shim also detects the REMOVED
+	// pinned_context key (spec 19 D5): it maps to no Job field anymore, so
+	// its presence is recorded on the job and rejected at execution time with
+	// an actionable error (loading must keep working so the plan stays
+	// browsable and the failure can surface as job status/last_error).
 	type flatMeta struct {
-		LastError  string `yaml:"last_error"`
-		RetryCount int    `yaml:"retry_count"`
+		LastError     string      `yaml:"last_error"`
+		RetryCount    int         `yaml:"retry_count"`
+		PinnedContext interface{} `yaml:"pinned_context"`
 	}
 	var fm flatMeta
 	if err := yaml.Unmarshal([]byte(yamlStr), &fm); err == nil {
 		job.Metadata.LastError = fm.LastError
 		job.Metadata.RetryCount = fm.RetryCount
+		job.HasLegacyPinnedContext = fm.PinnedContext != nil
 	}
 
 	// Rewrite any reference to a deleted builtin template to its current

@@ -191,7 +191,14 @@ func AccumulateAPITokenUsage(plan *Plan, job *Job, u *anthropic.UsageResult) err
 		Input:        u.InputTokens,
 		Output:       u.OutputTokens,
 		CacheRead:    u.CacheReadTokens,
-		CacheWrite5m: u.CacheCreationTokens, // flow only sets 5m ephemeral cache
+		CacheWrite5m: u.CacheWrite5m, // TTL split from the API's usage.cache_creation detail
+		CacheWrite1h: u.CacheWrite1h, // (spec 19 D9 — 1h writes bill at 2.0x, not 1.25x)
+	}
+	// Defensive fallback for a UsageResult produced without the split (both
+	// zero while the flat total is not): attribute the flat total to the 5m
+	// bucket, the historical behavior, rather than dropping the tokens.
+	if turn.CacheWrite5m == 0 && turn.CacheWrite1h == 0 && u.CacheCreationTokens > 0 {
+		turn.CacheWrite5m = u.CacheCreationTokens
 	}
 	summary.Usage.Add(turn)
 	summary.CostUSD += u.EstimatedCostUSD

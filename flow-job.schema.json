@@ -149,13 +149,6 @@
       "type": "array",
       "description": "Files or globs to include as context in the job prompt"
     },
-    "pinned_context": {
-      "items": {
-        "type": "string"
-      },
-      "type": "array",
-      "description": "Files placed in a stable cached region of Anthropic chat requests with a dedicated cache_control breakpoint; append new entries to the end. Anthropic oracle-chat only"
-    },
     "source_block": {
       "type": "string",
       "description": "Reference to a named block in another job to use as input"
@@ -175,6 +168,14 @@
     "no_cache": {
       "type": "boolean",
       "description": "Disable provider prompt caching for this job's LLM calls (default: caching enabled). Only worthwhile for large-context jobs that run exactly once"
+    },
+    "cache_ttl": {
+      "type": "string",
+      "enum": [
+        "5m",
+        "1h"
+      ],
+      "description": "Anthropic prompt-cache TTL for chat turns: 5m or 1h (default 1h for chat jobs). Anthropic oracle-chat only"
     },
     "repository": {
       "type": "string",

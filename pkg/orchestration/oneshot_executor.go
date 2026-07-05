@@ -151,6 +151,22 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 
 	var execErr error
 
+	// Reject the removed pinned_context key (spec 19 D5) after the running
+	// flip so the failure lands as status: failed + last_error, not a silent
+	// skip of files the author believed were pinned.
+	if pinErr := job.PinnedContextRemovedError(); pinErr != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		_ = updateJobFile(job)
+		ulog.Error("pinned_context is no longer supported").
+			Err(pinErr).
+			Field("job_id", job.ID).
+			Pretty(theme.IconError + " " + pinErr.Error()).
+			Log(ctx)
+		execErr = pinErr
+		return execErr
+	}
+
 	// Determine the working directory for the job
 	var workDir string
 	if job.Worktree != "" {
@@ -215,10 +231,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		}
 		// The concept file (if any) is picked up by context gathering logic below.
 	}
-
-	// Capture the pre-scope worktree ROOT before the sub-project rescope below,
-	// for worktree-root-relative pinned_context resolution further down.
-	worktreeRoot := workDir
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	// This ensures buildPrompt uses the correct context files
@@ -301,28 +313,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 				Pretty(theme.IconSuccess + " Added aggregated concepts: " + theme.DefaultTheme.Italic.Render(conceptContextFile)).
 				Log(ctx)
 		}
-	}
-
-	// Resolve pinned_context files for the oneshot claude path. The stable-region
-	// caching win is chat-specific (oneshot jobs run once), but wiring it keeps
-	// the field meaningful for oneshot claude jobs and avoids silently dropping
-	// declared files. Order persistence/overlap warnings are chat-only (Phase 3).
-	// Best-effort: a bad entry warns rather than failing the job.
-	var pinnedFilePaths []string
-	for _, source := range job.PinnedContext {
-		// Worktree-root-first resolution (the documented pinned_context contract),
-		// same as the chat path. Oneshot keeps warn+skip semantics rather than
-		// hard-failing (a oneshot runs once; a bad pin degrades rather than hangs).
-		sourcePath, resolveErr := resolvePinnedSource(source, worktreeRoot, plan)
-		if resolveErr != nil {
-			ulog.Warn("Could not resolve pinned_context file; skipping").
-				Field("job_id", job.ID).
-				Field("source", source).
-				Err(resolveErr).
-				Log(ctx)
-			continue
-		}
-		pinnedFilePaths = append(pinnedFilePaths, sourcePath)
 	}
 
 	if briefingFilePath != "" {
@@ -463,7 +453,6 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 					Model:           effectiveModel,
 					Prompt:          prompt,
 					ContextFiles:    append(promptSourceFiles, contextFiles...),
-					PinnedFiles:     pinnedFilePaths, // stable cached region w/ own breakpoint
 					WorkDir:         workDir,
 					HotContextFile:  hotCtxFile,  // Job-scoped, avoids cross-job race
 					ColdContextFile: coldCtxFile, // Job-scoped, avoids cross-job race
@@ -1602,6 +1591,25 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	var execErr error
 
+	// D5 (spec 19): the pinned_context key was removed. Reject it AFTER the
+	// running flip so the deferred terminal-failure guard above turns this
+	// into status: failed + last_error + job.log — a visible, actionable
+	// failure rather than a silent drop of files the author believed were
+	// pinned (e2e scenario 14 asserts exactly this path).
+	if pinErr := job.PinnedContextRemovedError(); pinErr != nil {
+		execErr = pinErr
+		return execErr
+	}
+
+	// Resolve the Anthropic cache TTL for this chat up front so a junk
+	// cache_ttl fails the turn actionably before any provider work (defaults
+	// to 1h for chat jobs — spec 19 D2).
+	cacheTTL, ttlErr := job.ChatCacheTTL()
+	if ttlErr != nil {
+		execErr = ttlErr
+		return execErr
+	}
+
 	// Check if job has a template, if not, add template: chat to frontmatter
 	if job.Template == "" {
 		// Add template: chat to the frontmatter
@@ -1733,12 +1741,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// The concept file (if any) is picked up by context gathering logic below.
 	}
 
-	// Capture the pre-scope worktree ROOT before the sub-project rescope below.
-	// pinned_context paths are worktree-root-relative (see resolvePinnedSource):
-	// ecosystem pins like "core/logging/logger_test.go" must resolve against the
-	// superrepo root, not the sub-project-scoped path.
-	worktreeRoot := worktreePath
-
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	// This ensures chat uses the correct context files
 	worktreePath = ScopeToSubProject(worktreePath, job)
@@ -1808,32 +1810,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	}
 
-	// Resolve pinned_context files. These go into the Anthropic stable cached
-	// region (their own cache_control breakpoint) rather than the volatile
-	// include half, so context added mid-chat stays cached across later turns.
-	// Order is persisted (Phase 3) so prior members keep their positions across
-	// turns — a precondition for the pinned prefix to keep hitting the cache.
-	var pinnedFilePaths []string
-	if len(job.PinnedContext) > 0 {
-		log.WithField("count", len(job.PinnedContext)).Debug("Collecting pinned_context files for upload")
-		for _, source := range job.PinnedContext {
-			// Resolve worktree-root-first (the documented pinned_context contract).
-			// A missing pin HARD-FAILS the turn on purpose: silently dropping a pin
-			// means the oracle lacks files the coordinator believes are pinned. The
-			// deferred handler below flips the job to failed and logs to the job.log
-			// so this failure is visible instead of a silent hang.
-			sourcePath, err := resolvePinnedSource(source, worktreeRoot, plan)
-			if err != nil {
-				return fmt.Errorf("could not find pinned_context file %s: %w", source, err)
-			}
-			pinnedFilePaths = append(pinnedFilePaths, sourcePath)
-			log.WithField("file", source).Debug("Uploading pinned_context file as stable attachment")
-		}
-		// Reconcile against the persisted per-turn order so prior members keep
-		// their positions and only new entries are appended (Phase 3). Best-effort.
-		pinnedFilePaths = reconcilePinnedOrder(ctx, plan, job, pinnedFilePaths)
-	}
-
 	// Load the template using TemplateManager
 	templateManager := NewTemplateManager()
 	template, err := templateManager.FindTemplate(directive.Template)
@@ -1851,13 +1827,6 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
-
-	// Warn if a pinned file is also swept into the cx-generated context — that
-	// double-places it (wasted tokens) and makes the stable prefix edit-sensitive
-	// again, defeating the point of pinning. Best-effort; needs contextDir.
-	if len(pinnedFilePaths) > 0 {
-		warnPinnedContextOverlap(ctx, contextDir, chatJobCtx, pinnedFilePaths)
-	}
 
 	contextPaths := e.collectContextFiles(job, plan, worktreePath, chatJobCtx)
 
@@ -1909,8 +1878,8 @@ interpret and continue through YOUR current system instructions.
 </conversation_note>
 `)
 
-	// Add context section if we have dependencies, include files, pinned files, or context files
-	if len(prependedDependencies) > 0 || len(dependencyFilePaths) > 0 || len(includeFilePaths) > 0 || len(pinnedFilePaths) > 0 || len(validContextPaths) > 0 {
+	// Add context section if we have dependencies, include files, or context files
+	if len(prependedDependencies) > 0 || len(dependencyFilePaths) > 0 || len(includeFilePaths) > 0 || len(validContextPaths) > 0 {
 		promptBuilder.WriteString("\n<context>\n")
 
 		// Add prepended dependencies (inlined content from upstream jobs)
@@ -1928,11 +1897,6 @@ interpret and continue through YOUR current system instructions.
 		// Add include files (explicitly included files for this task)
 		for _, includePath := range includeFilePaths {
 			promptBuilder.WriteString(fmt.Sprintf("    <uploaded_context_file file=\"%s\" type=\"include\" importance=\"high\" description=\"File explicitly included for this task.\"/>\n", filepath.Base(includePath)))
-		}
-
-		// Add pinned files (stable cached context added mid-chat)
-		for _, pinnedPath := range pinnedFilePaths {
-			promptBuilder.WriteString(fmt.Sprintf("    <uploaded_context_file file=\"%s\" type=\"pinned\" importance=\"high\" description=\"Pinned reference file kept in the stable cached context region.\"/>\n", filepath.Base(pinnedPath)))
 		}
 
 		// Add context files (concatenated project/source code)
@@ -2050,6 +2014,85 @@ interpret and continue through YOUR current system instructions.
 	// paths are handed to the runners explicitly via chatHotCtx/chatColdCtx.
 	chatHotCtx, chatColdCtx := chatJobCtx.existingPaths()
 
+	// --- Ladder bridge (spec 19 P2) ---
+	// The chat path opts into the Anthropic stability-ladder cache layout
+	// (D1) with the job's cache TTL (D2, default 1h). The layer engine (P3)
+	// doesn't exist yet, so this turn's per-job cx context rides up as a
+	// single synthetic layer sequence: [cold (if non-empty), hot] followed by
+	// the dependency uploads and includes, in that stable order. Under ladder
+	// grove-anthropic skips its own hot/cold/CLAUDE.md resolution (D6), so
+	// these paths are passed explicitly here; deps/includes travel inside
+	// LayerFiles (not ContextFiles) so they sit under the last-layer
+	// breakpoint and keep the cache coverage the legacy layout's
+	// last-document breakpoint gave them. P3 replaces this bridge with the
+	// frozen on-disk layer store.
+	var chatLayerFiles []string
+	if chatColdCtx != "" && !anthropic.IsEmptyColdContext(chatColdCtx) {
+		chatLayerFiles = append(chatLayerFiles, chatColdCtx)
+	}
+	if chatHotCtx != "" {
+		chatLayerFiles = append(chatLayerFiles, chatHotCtx)
+	}
+	chatLayerFiles = append(chatLayerFiles, allIncludeFiles...)
+
+	// The full Anthropic request options for this turn, shared by the live
+	// claude dispatch below and the request manifest (the mock path describes
+	// the same options so e2e runs assert the real assembly). The chat
+	// template is NOT moved to SystemPrompt yet (that's P4): fullPrompt stays
+	// the single volatile text block, so under ladder there is no system or
+	// history breakpoint yet — just the last-layer one.
+	anthropicOpts := anthropic.RequestOptions{
+		Model:       effectiveModel,
+		Prompt:      fullPrompt,
+		WorkDir:     contextDir,
+		CacheLayout: anthropic.CacheLayoutLadder,
+		CacheTTL:    cacheTTL,
+		LayerFiles:  chatLayerFiles,
+		MaxTokens:   modelpkg.MaxTokens(effectiveModel),
+		NoCache:     job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
+		Caller:      "grove-flow-chat",
+		JobID:       job.ID,
+		PlanName:    plan.Name,
+	}
+
+	// Per-turn request manifest (spec 19 D9): record, next to the briefing
+	// file, exactly which bytes go up in which order and where the cache save
+	// points sit. Written from the same pre-dispatch data that builds the
+	// request — including for mock runs, which are the e2e assertion surface.
+	// Best-effort: manifest problems warn and never fail the turn.
+	writeTurnManifest := func(provider string, entries []RequestManifestEntry, entriesErr error) {
+		if entriesErr != nil {
+			ulog.Warn("Failed to assemble request manifest entries").
+				Err(entriesErr).
+				Field("job_id", job.ID).
+				Field("turn_id", turnID).
+				Log(ctx)
+			return
+		}
+		manifest := RequestManifest{
+			TurnID:    turnID,
+			JobID:     job.ID,
+			Model:     effectiveModel,
+			Provider:  provider,
+			CreatedAt: time.Now().UTC(),
+			Entries:   entries,
+		}
+		if provider != requestManifestProviderGemini {
+			manifest.CacheLayout = anthropic.CacheLayoutLadder
+			manifest.CacheTTL = cacheTTL
+			manifest.NoCache = job.NoCache
+		}
+		if manifestPath, mErr := WriteRequestManifest(plan.Directory, job.ID, turnID, manifest); mErr != nil {
+			ulog.Warn("Failed to write request manifest").
+				Err(mErr).
+				Field("job_id", job.ID).
+				Field("turn_id", turnID).
+				Log(ctx)
+		} else {
+			log.WithField("manifest", manifestPath).Debug("Wrote per-turn request manifest")
+		}
+	}
+
 	// Call LLM based on model type with automatic retry for transient failures
 	log.WithField("model", effectiveModel).Debug("Calling LLM")
 	var response string
@@ -2060,7 +2103,11 @@ interpret and continue through YOUR current system instructions.
 	// a successful turn. Gemini/mock/other providers leave it nil.
 	var apiUsage *anthropic.UsageResult
 	if os.Getenv("GROVE_MOCK_LLM_RESPONSE_FILE") != "" {
-		// Check if mocking is enabled - if so, always use llmClient regardless of model
+		// Check if mocking is enabled - if so, always use llmClient regardless of model.
+		// The manifest still describes the REAL ladder assembly for these options —
+		// the mock path is the tend e2e suite's assertion surface (D9).
+		entries, entriesErr := DescribeChatRequestManifest(anthropicOpts)
+		writeTurnManifest(requestManifestProviderMock, entries, entriesErr)
 		response, _ = e.llmClient.Complete(ctx, job, plan, fullPrompt, llmOpts, output)
 	} else if strings.HasPrefix(effectiveModel, "gemini") {
 		// Resolve API key here where we have the correct execution context
@@ -2069,20 +2116,19 @@ interpret and continue through YOUR current system instructions.
 			// Don't fail immediately, let the runner handle it for a more consistent error
 			apiKey = ""
 		}
-		// pinned_context is an Anthropic-only caching feature; gemini has a
-		// separate caching model. Rather than silently drop the files, fold them
-		// into the volatile PromptFiles upload so their content still reaches the
-		// model (no stable-region caching win). Warn once so the misconfiguration
-		// is visible.
-		geminiPromptFiles := allIncludeFiles
-		if len(pinnedFilePaths) > 0 {
-			ulog.Warn("pinned_context is Anthropic-only; folding pinned files into the gemini upload (no stable-region caching)").
-				Field("job_id", job.ID).
-				Field("model", effectiveModel).
-				Field("count", len(pinnedFilePaths)).
-				Log(ctx)
-			geminiPromptFiles = append(append([]string{}, allIncludeFiles...), pinnedFilePaths...)
+		// The ladder cache layout is Anthropic-only; gemini keeps its flat
+		// upload (hot/cold passed explicitly + dependency/include attachments).
+		// Record the flattened shape in the manifest — no breakpoints (D9).
+		var geminiUploads []string
+		if chatColdCtx != "" {
+			geminiUploads = append(geminiUploads, chatColdCtx)
 		}
+		if chatHotCtx != "" {
+			geminiUploads = append(geminiUploads, chatHotCtx)
+		}
+		geminiUploads = append(geminiUploads, allIncludeFiles...)
+		entries, entriesErr := BuildFlattenedRequestManifestEntries(geminiUploads, fullPrompt)
+		writeTurnManifest(requestManifestProviderGemini, entries, entriesErr)
 		// Use grove-gemini package for Gemini models with retry
 		err = e.executeWithRetry(ctx, job, func() error {
 			// The grove context (hot/cold) is passed explicitly via
@@ -2092,8 +2138,8 @@ interpret and continue through YOUR current system instructions.
 			opts := gemini.RequestOptions{
 				Model:            llmOpts.Model,
 				Prompt:           fullPrompt,
-				APIKey:           apiKey,            // Pass the resolved API key
-				PromptFiles:      geminiPromptFiles, // Dependency + include (+ folded pinned) attachments
+				APIKey:           apiKey,          // Pass the resolved API key
+				PromptFiles:      allIncludeFiles, // Dependency + include attachments
 				WorkDir:          contextDir,
 				HotContextFile:   chatHotCtx,               // Job-scoped, avoids cross-job race
 				ColdContextFile:  chatColdCtx,              // Job-scoped, avoids cross-job race
@@ -2125,23 +2171,15 @@ interpret and continue through YOUR current system instructions.
 		if anthropicErr != nil {
 			err = fmt.Errorf("resolving Anthropic API key: %w", anthropicErr)
 		} else {
-			// Use grove-anthropic package for Claude models with retry
+			// Record what this turn uploads and where the save points sit (D9)
+			// from the exact options the runner is about to receive.
+			entries, entriesErr := DescribeChatRequestManifest(anthropicOpts)
+			writeTurnManifest(requestManifestProviderAnthropic, entries, entriesErr)
+			// Use grove-anthropic package for Claude models with retry, under
+			// the ladder layout (anthropicOpts — see the bridge above).
 			err = e.executeWithRetry(ctx, job, func() error {
-				opts := anthropic.RequestOptions{
-					Model:           effectiveModel,
-					Prompt:          fullPrompt,
-					ContextFiles:    allIncludeFiles, // hot/cold passed explicitly below
-					PinnedFiles:     pinnedFilePaths, // stable cached region w/ own breakpoint
-					WorkDir:         contextDir,
-					HotContextFile:  chatHotCtx,  // Job-scoped, avoids cross-job race
-					ColdContextFile: chatColdCtx, // Job-scoped, avoids cross-job race
-					APIKey:          apiKey,
-					MaxTokens:       modelpkg.MaxTokens(effectiveModel),
-					NoCache:         job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
-					Caller:          "grove-flow-chat",
-					JobID:           job.ID,
-					PlanName:        plan.Name,
-				}
+				opts := anthropicOpts
+				opts.APIKey = apiKey
 				if isTUIMode() {
 					fmt.Fprintf(output, "\n%s Calling Anthropic API with model: %s\n\n", theme.IconRobot, effectiveModel)
 				}
