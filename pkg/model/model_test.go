@@ -42,6 +42,8 @@ func TestMaxTokens(t *testing.T) {
 		{"claude-opus-4-8", 64000},
 		{"claude-sonnet-4-6", 64000},
 		{"claude-sonnet-4-6-20260115", 64000},
+		{"claude-sonnet-5", 64000},
+		{"claude-sonnet-5-20991231", 64000},
 		{"claude-opus-4-6-20260115", 64000},
 		{"claude-haiku-4-5", 64000},
 		{"claude-haiku-4-5-20251001", 64000},
