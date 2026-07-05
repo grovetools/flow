@@ -2,17 +2,25 @@ package add
 
 import "testing"
 
+// baseSlotCount is the number of original (Phase 4a) form slots
+// — title, jobType, templateOrSkill, deps, prompt. Phase 4b appends
+// conditionally-visible provider/model slots after these; the parity
+// checks below cover only the base slots, and rely on a zero-value
+// Model (no job type selected) leaving the 4b slots invisible so the
+// wrap/first/last targets are unchanged.
+const baseSlotCount = 5
+
 // TestSlotNavParity locks in the Phase 4a invariant: the slot
 // descriptor table must classify and wrap exactly like the previous
 // hardcoded index logic. Slots 0 and 4 are text entries; 1, 2, and 3
 // are lists; the focus cycle wraps 4→0 and 0→4.
 func TestSlotNavParity(t *testing.T) {
-	if len(addFormSlots) != 5 {
-		t.Fatalf("expected 5 slots, got %d", len(addFormSlots))
+	if len(addFormSlots) < baseSlotCount {
+		t.Fatalf("expected at least %d slots, got %d", baseSlotCount, len(addFormSlots))
 	}
 
 	var m Model
-	for idx := 0; idx < len(addFormSlots); idx++ {
+	for idx := 0; idx < baseSlotCount; idx++ {
 		m.focusIndex = idx
 
 		// Old hardcoded classification from update.go:

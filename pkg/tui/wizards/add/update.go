@@ -227,6 +227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.unfocused = true
 			m.titleInput.Blur()
 			m.promptInput.Blur()
+			m.modelInput.Blur()
 			return m, nil
 
 		case "ctrl+c":
@@ -325,6 +326,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case slotTitle: // Title input
 			m.titleInput, cmd = m.titleInput.Update(msg)
 		case slotJobType: // Job type list
+			prevModelKind := slotModelKind(&m)
 			prevSelection := m.jobTypeList.SelectedItem()
 			m.jobTypeList, cmd = m.jobTypeList.Update(msg)
 			// Check if job type selection changed
@@ -339,6 +341,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.slot2IsSkills = false
 					m.templateList = m.buildTemplateList(selectedJobType)
 				}
+				// The model slot's widget kind depends on the job type
+				// (agent vs. LLM-API) and provider; reset the model value
+				// when the kind flips so a stale list/text value doesn't
+				// carry across.
+				if slotModelKind(&m) != prevModelKind {
+					m.resetModelWidget()
+				}
 			}
 		case slotTemplateOrSkill: // Slot 2: Skills or Template list
 			if m.slot2IsSkills {
@@ -350,10 +359,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.depList, cmd = m.depList.Update(msg)
 		case slotPrompt: // Prompt textarea
 			m.promptInput, cmd = m.promptInput.Update(msg)
+		case slotProvider: // Provider picker
+			prevModelKind := slotModelKind(&m)
+			prevSelection := m.providerList.SelectedItem()
+			m.providerList, cmd = m.providerList.Update(msg)
+			// A provider change can flip the model widget list↔text
+			// (claude → list, others → free-form); drop the now
+			// incompatible model value when it does.
+			if prevSelection != m.providerList.SelectedItem() && slotModelKind(&m) != prevModelKind {
+				m.resetModelWidget()
+			}
+		case slotModel: // Model picker (list for claude, text otherwise)
+			if m.currentSlotKind() == slotList {
+				m.modelList, cmd = m.modelList.Update(msg)
+			} else {
+				m.modelInput, cmd = m.modelInput.Update(msg)
+			}
 		}
 	}
 
 	return m, cmd
+}
+
+// resetModelWidget clears the model slot's value on both backing
+// widgets, so a stale selection doesn't survive a provider/job-type
+// change that flips the widget kind between the claude picker and the
+// free-form input.
+func (m *Model) resetModelWidget() {
+	m.modelList.Select(0)
+	m.modelInput.SetValue("")
 }
 
 // updateFocus updates focus state for all components based on the
@@ -362,6 +396,7 @@ func (m Model) updateFocus() Model {
 	// Blur all text inputs
 	m.titleInput.Blur()
 	m.promptInput.Blur()
+	m.modelInput.Blur()
 
 	// Only focus if not in unfocused state
 	if !m.unfocused {
@@ -370,6 +405,13 @@ func (m Model) updateFocus() Model {
 			m.titleInput.Focus()
 		case slotPrompt:
 			m.promptInput.Focus()
+		case slotModel:
+			// The model slot only owns a focusable text input when its
+			// provider-dependent kind is slotText; the claude picker is
+			// a list and needs no text focus.
+			if m.currentSlotKind() == slotText {
+				m.modelInput.Focus()
+			}
 		}
 	}
 

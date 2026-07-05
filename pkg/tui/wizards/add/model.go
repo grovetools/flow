@@ -10,6 +10,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
+	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	skillservice "github.com/grovetools/skills/pkg/service"
 
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -63,6 +64,22 @@ type Model struct {
 	skillList    list.Model
 	promptInput  textarea.Model
 
+	// Provider + model pickers (Phase 4b). providerList is the agent
+	// CLI provider picker (agent job types only). The model slot is
+	// provider-dependent: modelList (claude-family picker) when the
+	// effective provider is claude and the job is an agent type, else
+	// modelInput (free-form; codex/pi/opencode own their model
+	// namespaces, and oneshot/chat validate downstream).
+	providerList list.Model
+	modelList    list.Model
+	modelInput   textinput.Model
+
+	// defaultProviderName is the effective provider when the provider
+	// slot is hidden or set to "default" (flow.interactive_provider or
+	// the claude default). Resolved once in New to avoid reloading the
+	// flow config on every keystroke.
+	defaultProviderName string
+
 	// Slot 2 mode: skills for agent types, templates for chat/oneshot
 	slot2IsSkills bool
 
@@ -81,6 +98,8 @@ type Model struct {
 	jobSkill         string
 	jobSkillSequence []string
 	jobPrompt        string
+	jobProvider      string
+	jobModel         string
 
 	// Claw (channel + autonomous) toggle
 	clawEnabled bool
@@ -100,6 +119,8 @@ const (
 	slotTemplateOrSkill
 	slotDeps
 	slotPrompt
+	slotProvider
+	slotModel
 )
 
 // slotKind classifies a slot's input widget for focus/keystroke
@@ -135,12 +156,80 @@ func alwaysVisible(*Model) bool  { return true }
 // addFormSlots is the wizard's ordered slot table. The order defines
 // the tab/nav cycle. Kinds are static and every slot is visible, so
 // Phase 4a behaves identically to the previous hardcoded index logic.
+//
+// Phase 4b appends slotProvider and slotModel. Both are conditionally
+// visible (provider: agent types only; model: agent + oneshot/chat),
+// and slotModel's kind is provider-dependent — a claude-family list
+// when the effective provider is claude, else a free-form text input.
 var addFormSlots = []formSlot{
 	{id: slotTitle, kind: staticText, visible: alwaysVisible},
 	{id: slotJobType, kind: staticList, visible: alwaysVisible},
 	{id: slotTemplateOrSkill, kind: staticList, visible: alwaysVisible},
 	{id: slotDeps, kind: staticList, visible: alwaysVisible},
 	{id: slotPrompt, kind: staticText, visible: alwaysVisible},
+	{id: slotProvider, kind: staticList, visible: slotProviderVisible},
+	{id: slotModel, kind: slotModelKind, visible: slotModelVisible},
+}
+
+// selectedJobType returns the currently selected job type string, or
+// "" when nothing is selected.
+func (m *Model) selectedJobType() string {
+	if selected := m.jobTypeList.SelectedItem(); selected != nil {
+		return string(selected.(item))
+	}
+	return ""
+}
+
+// isAgentJobType reports whether a job type dispatches to an agent CLI
+// (and therefore carries a provider).
+func isAgentJobType(jobType string) bool {
+	switch jobType {
+	case "interactive_agent", "isolated_agent", "headless_agent":
+		return true
+	}
+	return false
+}
+
+// slotProviderVisible reports whether the provider slot applies to the
+// selected job type. Only agent jobs have a CLI provider; chat/oneshot
+// dispatch to LLM APIs and shell/file have none.
+func slotProviderVisible(m *Model) bool {
+	return isAgentJobType(m.selectedJobType())
+}
+
+// slotModelVisible reports whether the model slot applies. Agent jobs
+// and the LLM-API job types (oneshot, chat) take a model; shell/file
+// do not.
+func slotModelVisible(m *Model) bool {
+	jobType := m.selectedJobType()
+	return isAgentJobType(jobType) || jobType == "oneshot" || jobType == "chat"
+}
+
+// effectiveProvider returns the provider that governs the model slot's
+// widget kind: the picked provider when the provider slot is visible
+// and not "default", else the config/default provider resolved once in
+// New.
+func (m *Model) effectiveProvider() string {
+	if slotProviderVisible(m) {
+		if selected := m.providerList.SelectedItem(); selected != nil {
+			if name := string(selected.(item)); name != "default" {
+				return name
+			}
+		}
+	}
+	return m.defaultProviderName
+}
+
+// slotModelKind picks the model slot's widget: a claude-family picker
+// (slotList) only when the effective provider is claude AND the job is
+// an agent type; otherwise a free-form text input (slotText) — codex/
+// pi/opencode own their model namespaces, and oneshot/chat models are
+// validated downstream.
+func slotModelKind(m *Model) slotKind {
+	if isAgentJobType(m.selectedJobType()) && m.effectiveProvider() == "claude" {
+		return slotList
+	}
+	return slotText
 }
 
 // currentSlot returns the slot the focus index currently points at.
@@ -217,6 +306,14 @@ func (m *Model) activeList() *list.Model {
 		return &m.templateList
 	case slotDeps:
 		return &m.depList
+	case slotProvider:
+		return &m.providerList
+	case slotModel:
+		// Only a list when the provider-dependent kind is slotList;
+		// otherwise the model slot is a free-form text input.
+		if m.currentSlotKind() == slotList {
+			return &m.modelList
+		}
 	}
 	return nil
 }
@@ -246,6 +343,61 @@ func (m Model) isListFiltering() bool {
 		return l.FilterState() == list.Filtering
 	}
 	return false
+}
+
+// applyPickerListStyle applies the shared list styling used by every
+// single-column picker in the wizard (job type, provider, model).
+func applyPickerListStyle(l *list.Model) {
+	l.Title = ""
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.SetShowHelp(false)
+	l.SetShowPagination(true)
+	l.FilterInput.Prompt = " "
+	l.FilterInput.PromptStyle = theme.DefaultTheme.Bold
+	l.FilterInput.TextStyle = theme.DefaultTheme.Selected
+}
+
+// newProviderList builds the agent-provider picker: a leading "default"
+// entry (empty provider: → config/claude fallback, matching CLI
+// semantics) followed by the registered provider names.
+func newProviderList() list.Model {
+	items := []list.Item{item("default")}
+	for _, name := range orchestration.AgentProviderNames() {
+		items = append(items, item(name))
+	}
+	l := list.New(items, itemDelegate{}, 20, 7)
+	applyPickerListStyle(&l)
+	return l
+}
+
+// newModelList builds the claude-family model picker used when the
+// effective provider is claude: a leading "(default)" entry followed by
+// each model's short alias (falling back to its full ID).
+func newModelList() list.Model {
+	items := []list.Item{item("(default)")}
+	for _, md := range anthropicmodels.Models() {
+		name := md.Alias
+		if name == "" {
+			name = md.ID
+		}
+		items = append(items, item(name))
+	}
+	l := list.New(items, itemDelegate{}, 20, 7)
+	applyPickerListStyle(&l)
+	return l
+}
+
+// newModelInput builds the free-form model text input used for
+// non-claude providers (and oneshot/chat), which own their own model
+// namespaces.
+func newModelInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "provider default (e.g. gpt-5.5)"
+	ti.CharLimit = 156
+	ti.Width = 40
+	return ti
 }
 
 // New constructs a Model from the given Config. It initializes all
@@ -369,6 +521,14 @@ func New(cfg Config) Model {
 	m.promptInput.Placeholder = "Enter prompt here..."
 	m.promptInput.SetWidth(41)
 	m.promptInput.SetHeight(7)
+
+	// 6. Provider + model pickers (Phase 4b). The default provider is
+	// resolved once here so effectiveProvider doesn't reload the flow
+	// config on every keystroke.
+	m.defaultProviderName = orchestration.ResolveJobProviderNameFromConfig(nil)
+	m.providerList = newProviderList()
+	m.modelList = newModelList()
+	m.modelInput = newModelInput()
 
 	return m
 }

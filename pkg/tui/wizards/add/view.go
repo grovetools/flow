@@ -128,6 +128,35 @@ func (m Model) View() string {
 
 	// Join all rows vertically for a compact layout
 	allRows := lipgloss.JoinVertical(lipgloss.Left, titleRow, row2WithMargin, row3WithMargin)
+
+	// Row 4: Provider | Model (Phase 4b). Each field renders only when
+	// its slot is visible for the selected job type — provider for
+	// agent jobs, model for agent + oneshot/chat — so the row reflows
+	// (no greyed placeholders) and disappears entirely for shell/file.
+	var row4Fields []string
+	if slotProviderVisible(&m) {
+		row4Fields = append(row4Fields, renderField(int(slotProvider), "Provider:", m.providerList.View(), 0))
+	}
+	if slotModelVisible(&m) {
+		var modelView string
+		if slotModelKind(&m) == slotList {
+			modelView = m.modelList.View()
+		} else {
+			modelView = m.modelInput.View()
+		}
+		row4Fields = append(row4Fields, renderField(int(slotModel), "Model:", modelView, 0))
+	}
+	if len(row4Fields) > 0 {
+		var row4 string
+		if len(row4Fields) == 2 {
+			row4 = lipgloss.JoinHorizontal(lipgloss.Top, row4Fields[0], "  ", row4Fields[1])
+		} else {
+			row4 = row4Fields[0]
+		}
+		row4WithMargin := lipgloss.NewStyle().MarginLeft(2).Render(row4)
+		allRows = lipgloss.JoinVertical(lipgloss.Left, allRows, row4WithMargin)
+	}
+
 	b.WriteString(allRows)
 
 	out := b.String()

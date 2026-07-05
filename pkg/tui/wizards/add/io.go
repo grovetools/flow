@@ -259,6 +259,32 @@ func (m *Model) extractValues() {
 	}
 
 	m.jobPrompt = m.promptInput.Value()
+
+	// Provider (agent job types only). "default" → empty (config /
+	// claude fallback, matching CLI semantics).
+	m.jobProvider = ""
+	if slotProviderVisible(m) {
+		if selected := m.providerList.SelectedItem(); selected != nil {
+			if name := string(selected.(item)); name != "default" {
+				m.jobProvider = name
+			}
+		}
+	}
+
+	// Model (agent + oneshot/chat). Read from whichever widget backs
+	// the provider-dependent kind. "(default)" / empty → empty.
+	m.jobModel = ""
+	if slotModelVisible(m) {
+		if slotModelKind(m) == slotList {
+			if selected := m.modelList.SelectedItem(); selected != nil {
+				if name := string(selected.(item)); name != "(default)" {
+					m.jobModel = name
+				}
+			}
+		} else {
+			m.jobModel = strings.TrimSpace(m.modelInput.Value())
+		}
+	}
 }
 
 // toJob converts the captured form values into a new Job struct.
@@ -294,6 +320,8 @@ func (m Model) toJob(plan *orchestration.Plan) *orchestration.Job {
 		Template:      m.jobTemplate,
 		Skill:         m.jobSkill,
 		SkillSequence: m.jobSkillSequence,
+		Provider:      m.jobProvider,
+		Model:         m.jobModel,
 	}
 
 	if m.clawEnabled {
