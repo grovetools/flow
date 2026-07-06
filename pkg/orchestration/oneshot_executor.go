@@ -1911,13 +1911,21 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 				continue
 			}
 			parentModel := lineageEffectiveModel(dep, plan)
+			// The parent's effective template mirrors the child's resolution:
+			// dep frontmatter template, else the "chat" default (spec 27 §3).
+			parentTemplate := dep.Template
+			if parentTemplate == "" {
+				parentTemplate = "chat"
+			}
 			lineageParents = append(lineageParents, LineageParent{
-				JobID:      dep.ID,
-				Title:      dep.Title,
-				FilePath:   dep.FilePath,
-				PlanDir:    plan.Directory,
-				Model:      parentModel,
-				ModelMatch: parentModel == effectiveModel,
+				JobID:         dep.ID,
+				Title:         dep.Title,
+				FilePath:      dep.FilePath,
+				PlanDir:       plan.Directory,
+				Model:         parentModel,
+				ModelMatch:    parentModel == effectiveModel,
+				Template:      parentTemplate,
+				TemplateMatch: parentTemplate == directive.Template,
 			})
 			lineageDepIDs[dep.ID] = true
 		}
@@ -1928,6 +1936,53 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// D7 / P4): byte-stable per-turn history blocks and the volatile current
 	// turn (the only part carrying status="awaiting_response").
 	conversation := FormatConversationRegions(turns)
+
+	// --- Stream lineage splice (spec 27 §3) ---
+	// Under the stream layout the FIRST fully-eligible parent's dialogue rides
+	// as spliced history blocks (so its interleaved layers reproduce in
+	// position) rather than a dep-transcript document. Determined here (before
+	// the layer engine) so the child's own layers anchor after the parent's
+	// final exchange. Degrade-safe: any doubt — model/template mismatch, a
+	// missing manifest, a failed prefix hash-verify, an unreadable/edited chat
+	// file — falls back to the transcript-document path (splicedParentHistory
+	// stays nil), exactly the ladder behavior. Only the primary parent is
+	// spliced; parents 2..n keep their transcript documents.
+	var splicedParentHistory HistoryBlocks
+	var splicedParentID string
+	if cacheLayout == anthropic.CacheLayoutStream {
+		for _, parent := range lineageParents {
+			if !parent.ModelMatch || !parent.TemplateMatch {
+				continue
+			}
+			content, rerr := os.ReadFile(parent.FilePath)
+			if rerr != nil {
+				break
+			}
+			pBlocks, perr := parentTranscriptBlocks(content)
+			if perr != nil || len(pBlocks) == 0 {
+				break
+			}
+			manifestPath := locateParentLastManifest(parent.PlanDir, parent.JobID)
+			if manifestPath == "" {
+				ulog.Warn("Stream lineage: parent has no request manifest — inheriting via transcript document (no history splice)").
+					Field("job_id", job.ID).
+					Field("parent_job_id", parent.JobID).
+					Log(ctx)
+				break
+			}
+			if verr := verifyInheritedPrefix(manifestPath, pBlocks); verr != nil {
+				ulog.Warn("Stream lineage: inherited-prefix verify failed — inheriting via transcript document (no history splice)").
+					Err(verr).
+					Field("job_id", job.ID).
+					Field("parent_job_id", parent.JobID).
+					Log(ctx)
+				break
+			}
+			splicedParentHistory = pBlocks
+			splicedParentID = parent.JobID
+			break
+		}
+	}
 
 	// Handle dependencies - either inline into prompt or collect for upload
 	// Uses ShouldInline to support both new inline field and legacy prepend_dependencies
@@ -2079,13 +2134,22 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 		// lastExchangeID anchors any layer frozen THIS turn to the last completed
 		// assistant exchange (spec 27): under stream that places a mid-chat
-		// widening immediately after that exchange. Empty on a plain turn 1
-		// (no completed exchange yet) and harmless under ladder.
+		// widening immediately after that exchange. It walks the COMBINED history
+		// (spliced parent blocks + this chat's own), so on a stream-lineage
+		// turn 1 the child's base anchors after the parent's final exchange
+		// rather than at the head. Empty on a plain turn 1 and harmless under
+		// ladder.
 		lastExchangeID := ""
-		for i := len(conversation.HistoryBlocks) - 1; i >= 0; i-- {
-			if id := conversation.HistoryBlocks[i].ExchangeID; id != "" {
-				lastExchangeID = id
-				break
+		for _, hb := range conversation.HistoryBlocks {
+			if hb.ExchangeID != "" {
+				lastExchangeID = hb.ExchangeID
+			}
+		}
+		if lastExchangeID == "" {
+			for _, hb := range splicedParentHistory {
+				if hb.ExchangeID != "" {
+					lastExchangeID = hb.ExchangeID
+				}
 			}
 		}
 		layerResult, err = PrepareContextLayers(ctx, LayerEngineParams{
@@ -2285,7 +2349,24 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// first, then context docs, then the exchanges — with any layer frozen
 		// this or a prior turn interleaved right after the exchange it anchors
 		// to. It is the single source of truth, so the split fields stay nil.
-		anthropicOpts.Stream = buildStreamItems(ctx, job.ID, chatLayerFiles, chatLayerAnchors, allIncludeFiles, conversation.HistoryBlocks)
+		//
+		// Stream lineage (spec 27 §3): when a primary parent is spliced, prepend
+		// its dialogue as history blocks and drop its transcript document (its
+		// interleaved layers reproduce in position via their exchange anchors).
+		streamHistory := conversation.HistoryBlocks
+		streamLayerFiles := chatLayerFiles
+		if len(splicedParentHistory) > 0 {
+			streamHistory = append(append(HistoryBlocks{}, splicedParentHistory...), conversation.HistoryBlocks...)
+			streamLayerFiles = make([]string, 0, len(chatLayerFiles))
+			for _, path := range chatLayerFiles {
+				if chatLayerSources[path] == LayerSourceDepTranscript &&
+					strings.Contains(filepath.Base(path), "transcript-"+splicedParentID+".") {
+					continue // spliced as history instead of an uploaded document
+				}
+				streamLayerFiles = append(streamLayerFiles, path)
+			}
+		}
+		anthropicOpts.Stream = buildStreamItems(ctx, job.ID, streamLayerFiles, chatLayerAnchors, allIncludeFiles, streamHistory)
 	} else {
 		// Ladder (spec 19 D1): frozen layer artifacts form the document region
 		// (BP2 on the last), context docs follow with no breakpoint, and the

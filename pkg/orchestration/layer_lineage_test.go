@@ -61,12 +61,14 @@ The plan is layers.
 // the fixture plan dir.
 func parentOf(f *layerFixture, jobID, mdPath string, modelMatch bool) LineageParent {
 	return LineageParent{
-		JobID:      jobID,
-		Title:      "parent chat",
-		FilePath:   mdPath,
-		PlanDir:    f.planDir,
-		Model:      "claude-parent-model",
-		ModelMatch: modelMatch,
+		JobID:         jobID,
+		Title:         "parent chat",
+		FilePath:      mdPath,
+		PlanDir:       f.planDir,
+		Model:         "claude-parent-model",
+		ModelMatch:    modelMatch,
+		Template:      "chat",
+		TemplateMatch: true,
 	}
 }
 

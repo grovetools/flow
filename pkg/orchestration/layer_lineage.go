@@ -3,6 +3,7 @@ package orchestration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/grove-anthropic/pkg/anthropic"
 	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 )
 
@@ -56,6 +58,13 @@ type LineageParent struct {
 	// whether it equals this job's effective model (the D8 lineage guard).
 	Model      string
 	ModelMatch bool
+	// Template is the parent's resolved effective chat template; TemplateMatch
+	// reports whether it equals this job's template (spec 27 §3). The cache
+	// prefix starts at the system block, which carries the template, so a
+	// template mismatch diverges at block 0 — same class of guard as the model
+	// mismatch, and enforced the same way (fall back to fresh layers).
+	Template      string
+	TemplateMatch bool
 }
 
 // lineageEffectiveModel resolves a dependency chat's effective model for the
@@ -159,6 +168,18 @@ func integrateLineage(ctx context.Context, writer io.Writer, p LayerEngineParams
 				Field("job_id", p.JobID).
 				Field("parent_job_id", parent.JobID).
 				Field("parent_model", parent.Model).
+				Log(ctx)
+		case !parent.TemplateMatch:
+			// Spec 27 §3 guard: the cache prefix starts at the system block,
+			// which carries the template — a different template diverges at
+			// block 0 and shares nothing. Same degrade-not-fail behavior as the
+			// model mismatch; the dep-transcript layer below still carries the
+			// conversation.
+			fmt.Fprintf(writer, "Context lineage warning: dependency chat %s used template %q but this chat resolves to a different template — starting fresh layers (no inherited refs; the system block diverges at block 0); align the templates to share the parent's cache lineage\n", parent.JobID, parent.Template)
+			ulog.Warn("Cross-job lineage template mismatch — not inheriting parent layers").
+				Field("job_id", p.JobID).
+				Field("parent_job_id", parent.JobID).
+				Field("parent_template", parent.Template).
 				Log(ctx)
 		default:
 			inheritedCount := 0
@@ -353,13 +374,37 @@ func renderDepTranscriptLayer(n int, parent LineageParent, content []byte) ([]by
 }
 
 // renderChatTranscriptXML serializes a chat file's completed turns as <turn>
-// elements (see renderDepTranscriptLayer).
+// elements (see renderDepTranscriptLayer). It joins parentTranscriptBlocks so
+// the document form and the stream-spliced per-turn form share ONE byte-exact
+// serialization.
 func renderChatTranscriptXML(content []byte) (string, error) {
-	turns, err := ParseChatFile(content)
+	blocks, err := parentTranscriptBlocks(content)
 	if err != nil {
 		return "", err
 	}
 	var sb strings.Builder
+	for _, b := range blocks {
+		sb.WriteString(b.Text)
+	}
+	return sb.String(), nil
+}
+
+// parentTranscriptBlocks serializes a completed parent chat's turns as
+// per-turn HistoryBlocks (spec 27 §3), tagging assistant blocks with their
+// directive id so the child's stream can reproduce a parent's interleaved
+// layers in position. The per-turn bytes are byte-identical to what
+// FormatConversationRegions produced for the same turns (both use formatTurnXML
+// with the same attribute threading), so the child can hash-verify the
+// inherited prefix against the parent's last request manifest. Unlike
+// FormatConversationRegions there is no volatile split and no
+// status="awaiting_response" — the parent is completed, so every turn is
+// history.
+func parentTranscriptBlocks(content []byte) (HistoryBlocks, error) {
+	turns, err := ParseChatFile(content)
+	if err != nil {
+		return nil, err
+	}
+	var blocks HistoryBlocks
 	var pendingTemplate string
 	for _, turn := range turns {
 		// Skip incomplete turns, mirroring the history formatter.
@@ -376,6 +421,7 @@ func renderChatTranscriptXML(content []byte) (string, error) {
 		}
 		attrs := []string{fmt.Sprintf(`role="%s"`, role)}
 		body := turn.Content
+		var exchangeID string
 		if role == "user" {
 			if turn.Directive != nil && turn.Directive.Template != "" {
 				pendingTemplate = turn.Directive.Template
@@ -387,6 +433,7 @@ func renderChatTranscriptXML(content []byte) (string, error) {
 			}
 			if turn.Directive != nil && turn.Directive.ID != "" {
 				attrs = append(attrs, fmt.Sprintf(`id="%s"`, turn.Directive.ID))
+				exchangeID = turn.Directive.ID
 			}
 			if matches := timestampRegex.FindStringSubmatch(body); len(matches) > 1 {
 				attrs = append(attrs, fmt.Sprintf(`timestamp="%s"`, matches[1]))
@@ -397,7 +444,80 @@ func renderChatTranscriptXML(content []byte) (string, error) {
 		if cleaned == "" {
 			continue
 		}
-		sb.WriteString(formatTurnXML(attrs, cleaned))
+		blocks = append(blocks, HistoryBlock{Text: formatTurnXML(attrs, cleaned), ExchangeID: exchangeID})
 	}
-	return sb.String(), nil
+	return blocks, nil
+}
+
+// errInheritedPrefixMismatch is the sentinel verifyInheritedPrefix returns when
+// the re-derived parent prefix no longer matches the parent's recorded hashes
+// — the caller degrades to the transcript-document path (no history splice).
+var errInheritedPrefixMismatch = errors.New("inherited prefix hash mismatch")
+
+// verifyInheritedPrefix confirms the parent's re-derived history prefix
+// (turns 1…K−1) still byte-matches what the parent's LAST request manifest
+// recorded (spec 27 §3). It compares only the prefix that the parent actually
+// cached — the parent's FINAL exchange appears in no manifest (it rode as the
+// volatile turn) and gets no gate. A mismatch (parent chat file edited or the
+// serializer drifted) returns errInheritedPrefixMismatch so the caller inherits
+// without cache-reuse expectations via the transcript fallback. A missing or
+// unreadable manifest is a distinct error the caller also degrades on.
+func verifyInheritedPrefix(parentManifestPath string, parentBlocks HistoryBlocks) error {
+	data, err := os.ReadFile(parentManifestPath)
+	if err != nil {
+		return fmt.Errorf("reading parent request manifest %s: %w", parentManifestPath, err)
+	}
+	var m RequestManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("parsing parent request manifest %s: %w", parentManifestPath, err)
+	}
+	var manifestHistory []RequestManifestEntry
+	for _, e := range m.Entries {
+		if e.Kind == anthropic.RequestBlockHistory {
+			manifestHistory = append(manifestHistory, e)
+		}
+	}
+	if len(parentBlocks) < len(manifestHistory) {
+		return fmt.Errorf("%w: parent has %d history blocks, manifest recorded %d", errInheritedPrefixMismatch, len(parentBlocks), len(manifestHistory))
+	}
+	for i, e := range manifestHistory {
+		if got := sha256Hex([]byte(parentBlocks[i].Text)); got != e.ContentHash {
+			return fmt.Errorf("%w: history block %d hash %s, manifest recorded %s", errInheritedPrefixMismatch, i, got, e.ContentHash)
+		}
+	}
+	return nil
+}
+
+// locateParentLastManifest finds the parent's last request manifest path (spec
+// 27 §3): the snapshot.json LastManifest pointer if set, else the newest
+// request-manifest-*.json by CreatedAt. Returns "" when none is found.
+func locateParentLastManifest(planDir, jobID string) string {
+	if snap, err := LoadLayerSnapshot(planDir, jobID); err == nil && snap != nil && snap.LastManifest != "" {
+		candidate := filepath.Join(planDir, ".artifacts", jobID, snap.LastManifest)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	// Fallback: glob and take the newest by CreatedAt.
+	matches, err := filepath.Glob(filepath.Join(planDir, ".artifacts", jobID, "request-manifest-*.json"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	var newest string
+	var newestAt time.Time
+	for _, path := range matches {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var m RequestManifest
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		if newest == "" || m.CreatedAt.After(newestAt) {
+			newest = path
+			newestAt = m.CreatedAt
+		}
+	}
+	return newest
 }
