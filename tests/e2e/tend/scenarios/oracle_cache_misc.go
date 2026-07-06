@@ -269,11 +269,11 @@ var OracleCacheTranscriptStabilityScenario = harness.NewScenario(
 
 			return ctx.Verify(func(v *verify.Collector) {
 				for i, e := range h3 {
-					v.Equal(fmt.Sprintf("re-serialized history block %d reproduces turn-3's uploaded bytes", i), e.ContentHash, sha256String(regions.HistoryBlocks[i]))
+					v.Equal(fmt.Sprintf("re-serialized history block %d reproduces turn-3's uploaded bytes", i), e.ContentHash, sha256String(regions.HistoryBlocks[i].Text))
 				}
 				for i, block := range regions.HistoryBlocks {
-					v.NotContains(fmt.Sprintf("history block %d free of awaiting_response", i), block, "awaiting_response")
-					v.NotContains(fmt.Sprintf("history block %d free of respond_as", i), block, "respond_as")
+					v.NotContains(fmt.Sprintf("history block %d free of awaiting_response", i), block.Text, "awaiting_response")
+					v.NotContains(fmt.Sprintf("history block %d free of respond_as", i), block.Text, "respond_as")
 				}
 				v.Contains("the volatile current turn is where awaiting_response lives", regions.CurrentTurn, "awaiting_response")
 			})

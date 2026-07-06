@@ -355,7 +355,7 @@ func TestLineage_BrokenParentArtifact(t *testing.T) {
 	// Restore, inherit cleanly, then break the parent AFTER inheritance: the
 	// child's next-turn audit must catch it.
 	f.writeRules("src/a.go\n") // re-render identical parent base bytes
-	data, _, rerr := renderLayerXML(f.contextDir, false, 0, LayerSourceRulesBase, []string{"src/a.go"}, nil)
+	data, _, rerr := renderLayerXML(f.contextDir, false, 0, LayerSourceRulesBase, []string{"src/a.go"}, nil, "")
 	if rerr != nil {
 		t.Fatal(rerr)
 	}

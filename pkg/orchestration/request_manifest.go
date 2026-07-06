@@ -85,9 +85,20 @@ func DescribeChatRequestManifest(opts anthropic.RequestOptions) ([]RequestManife
 	if err != nil {
 		return nil, err
 	}
-	// The plan describes the post-normalization history blocks; index them the
-	// same way the upload path does.
-	history := anthropic.FilterHistoryBlocks(opts.HistoryBlocks)
+	// The plan describes the history blocks in order; index them the same way
+	// the upload path does. Under stream (spec 27) the history text rides in
+	// opts.Stream items, not opts.HistoryBlocks — source it from there so the
+	// manifest hashes the exact bytes the stream request uploads, in wire order.
+	var history []string
+	if opts.CacheLayout == anthropic.CacheLayoutStream {
+		for _, it := range opts.Stream {
+			if it.Kind == anthropic.RequestBlockHistory {
+				history = append(history, it.Text)
+			}
+		}
+	} else {
+		history = anthropic.FilterHistoryBlocks(opts.HistoryBlocks)
+	}
 	historyIdx := 0
 
 	entries := make([]RequestManifestEntry, 0, len(planEntries))

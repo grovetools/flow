@@ -177,6 +177,14 @@
       ],
       "description": "Anthropic prompt-cache TTL for chat turns: 5m or 1h (default 1h for chat jobs). Anthropic oracle-chat only"
     },
+    "cache_layout": {
+      "type": "string",
+      "enum": [
+        "ladder",
+        "stream"
+      ],
+      "description": "Chat request cache layout: ladder (default) or stream (append-only"
+    },
     "context_snapshot": {
       "type": "boolean",
       "description": "Freeze the chat's turn-1 context as immutable cache layers (default: true). Set false to fully regenerate context every turn (tracks a moving worktree"

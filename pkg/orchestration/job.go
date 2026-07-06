@@ -167,6 +167,16 @@ type Job struct {
 	// default to "1h" when unset; oneshot/agent jobs ignore it (they stay on
 	// the legacy request layout). Anthropic (claude) oracle chats only.
 	CacheTTL string `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty" jsonschema:"enum=5m,enum=1h,description=Anthropic prompt-cache TTL for chat turns: 5m or 1h (default 1h for chat jobs). Anthropic oracle-chat only"`
+	// CacheLayout selects the chat request assembly layout (spec 27). "ladder"
+	// (default when unset) segregates all layer documents above the dialogue;
+	// "stream" is the append-only layout that interleaves mid-chat layer
+	// widenings adjacent to the exchange that pulled them in, so a widening
+	// turn writes only the new bytes instead of re-uploading the whole
+	// conversation. Layout is lifetime-stable (frozen on the layer manifest's
+	// first save); a ladder-born chat may be reopened as stream for free, but
+	// stream→ladder is refused (use --rebase-context). Anthropic (claude)
+	// oracle chats only.
+	CacheLayout string `yaml:"cache_layout,omitempty" json:"cache_layout,omitempty" jsonschema:"enum=ladder,enum=stream,description=Chat request cache layout: ladder (default) or stream (append-only, eliminates the mid-chat widen tax). Anthropic oracle-chat only"`
 	// ContextSnapshot controls the chat layer engine's freeze semantics
 	// (spec 19 P3). Default (unset/true): the turn-1 rules sweep is frozen
 	// as an immutable layer-0 and later turns only append layers — worktree
@@ -289,6 +299,22 @@ func (j *Job) ChatCacheTTL() (string, error) {
 		return j.CacheTTL, nil
 	default:
 		return "", fmt.Errorf("invalid cache_ttl %q in job frontmatter: valid values are \"5m\" or \"1h\" (chat jobs default to \"1h\" when unset)", j.CacheTTL)
+	}
+}
+
+// ChatCacheLayout resolves the job's cache_layout frontmatter for its Anthropic
+// chat turns (spec 27): "ladder" and "stream" pass through, unset defaults to
+// "ladder" (the validated default; stream is opt-in during validation), and
+// anything else is an actionable error. Chat-path only; oneshot/agent jobs
+// never consult it (they stay on the legacy request layout).
+func (j *Job) ChatCacheLayout() (string, error) {
+	switch j.CacheLayout {
+	case "":
+		return "ladder", nil
+	case "ladder", "stream":
+		return j.CacheLayout, nil
+	default:
+		return "", fmt.Errorf("invalid cache_layout %q in job frontmatter: valid values are \"ladder\" or \"stream\" (chat jobs default to \"ladder\" when unset)", j.CacheLayout)
 	}
 }
 

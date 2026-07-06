@@ -40,8 +40,36 @@ import (
 //     occur at the tail of a chat file, so their later completion appends
 //     blocks rather than inserting them.
 type ConversationRegions struct {
-	HistoryBlocks []string
+	HistoryBlocks HistoryBlocks
 	CurrentTurn   string
+}
+
+// HistoryBlock is one serialized <turn> element of the byte-stable history
+// region, tagged with the exchange it belongs to. ExchangeID is the assistant
+// turn's directive id (empty on user blocks); the stream layout (spec 27) uses
+// it to interleave a mid-chat layer immediately after the exchange that pulled
+// it in. Text is the same byte-stable serialization the ladder uploaded — the
+// tag is metadata only, so history bytes are unchanged and migration stays free.
+type HistoryBlock struct {
+	Text       string
+	ExchangeID string
+}
+
+// HistoryBlocks is the ordered, append-only sequence of history blocks.
+type HistoryBlocks []HistoryBlock
+
+// Texts returns just the serialized <turn> strings, for callers on the ladder
+// path (anthropic RequestOptions.HistoryBlocks) and the flatten/gemini/mock
+// paths that consume plain strings.
+func (h HistoryBlocks) Texts() []string {
+	if len(h) == 0 {
+		return nil
+	}
+	out := make([]string, len(h))
+	for i, b := range h {
+		out[i] = b.Text
+	}
+	return out
 }
 
 // timestampRegex extracts the timestamp from an LLM Response header.
@@ -111,6 +139,9 @@ func FormatConversationRegions(turns []*ChatTurn) ConversationRegions {
 		var attrs []string
 		attrs = append(attrs, fmt.Sprintf(`role="%s"`, role))
 
+		// exchangeID tags the block with the assistant turn's directive id
+		// (empty on user blocks) — the stream layout's interleave anchor key.
+		var exchangeID string
 		content := turn.Content
 		if role == "user" {
 			if turn.Directive != nil && turn.Directive.Template != "" {
@@ -131,6 +162,7 @@ func FormatConversationRegions(turns []*ChatTurn) ConversationRegions {
 			}
 			if turn.Directive != nil && turn.Directive.ID != "" {
 				attrs = append(attrs, fmt.Sprintf(`id="%s"`, turn.Directive.ID))
+				exchangeID = turn.Directive.ID
 			}
 			// Convert the LLM Response header to a timestamp attribute.
 			if matches := timestampRegex.FindStringSubmatch(content); len(matches) > 1 {
@@ -141,7 +173,7 @@ func FormatConversationRegions(turns []*ChatTurn) ConversationRegions {
 
 		serialized := formatTurnXML(attrs, cleanTurnContent(content))
 		if i < splitAt {
-			regions.HistoryBlocks = append(regions.HistoryBlocks, serialized)
+			regions.HistoryBlocks = append(regions.HistoryBlocks, HistoryBlock{Text: serialized, ExchangeID: exchangeID})
 		} else {
 			current.WriteString(serialized)
 		}
@@ -170,7 +202,7 @@ func formatTurnXML(attrs []string, content string) string {
 func FlattenConversationRegions(regions ConversationRegions) string {
 	var sb strings.Builder
 	for _, h := range regions.HistoryBlocks {
-		sb.WriteString(h)
+		sb.WriteString(h.Text)
 	}
 	sb.WriteString(regions.CurrentTurn)
 	return sb.String()

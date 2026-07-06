@@ -1522,6 +1522,57 @@ func (e *OneShotExecutor) displayContextInfo(ctx context.Context, worktreePath s
 	return nil
 }
 
+// buildStreamItems assembles the stream layout's ordered item sequence (spec
+// 27): head-region layers (anchor "") in layer order, then the context
+// documents (include: files + non-chat dep attachments), then the exchanges —
+// with any layer anchored to an exchange interleaved immediately after that
+// exchange's history block. A layer whose anchor id is absent from the history
+// (an edited chat file dropped the exchange) falls back to the head so its
+// bytes are never lost; the lost interleave position is warned. With every
+// anchor empty (a ladder-born store reopened as stream) this is the
+// stream-at-head layout, byte-identical to the ladder.
+func buildStreamItems(ctx context.Context, jobID string, layerPaths []string, anchorsByPath map[string]string, includeFiles []string, history HistoryBlocks) []anthropic.StreamItem {
+	historyIDs := make(map[string]bool, len(history))
+	for _, hb := range history {
+		if hb.ExchangeID != "" {
+			historyIDs[hb.ExchangeID] = true
+		}
+	}
+	var headLayers []string
+	interleaved := make(map[string][]string)
+	for _, path := range layerPaths {
+		anchor := anchorsByPath[path]
+		switch {
+		case anchor == "":
+			headLayers = append(headLayers, path)
+		case historyIDs[anchor]:
+			interleaved[anchor] = append(interleaved[anchor], path)
+		default:
+			ulog.Warn("Stream layer anchored to an exchange missing from history — placing at head").
+				Field("job_id", jobID).
+				Field("anchor_exchange", anchor).
+				Log(ctx)
+			headLayers = append(headLayers, path)
+		}
+	}
+	items := make([]anthropic.StreamItem, 0, len(layerPaths)+len(includeFiles)+len(history))
+	for _, path := range headLayers {
+		items = append(items, anthropic.StreamItem{Kind: anthropic.RequestBlockLayer, Path: path})
+	}
+	for _, f := range includeFiles {
+		items = append(items, anthropic.StreamItem{Kind: anthropic.RequestBlockContext, Path: f})
+	}
+	for _, hb := range history {
+		items = append(items, anthropic.StreamItem{Kind: anthropic.RequestBlockHistory, Text: hb.Text})
+		if hb.ExchangeID != "" {
+			for _, path := range interleaved[hb.ExchangeID] {
+				items = append(items, anthropic.StreamItem{Kind: anthropic.RequestBlockLayer, Path: path})
+			}
+		}
+	}
+	return items
+}
+
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan, output io.Writer) (retErr error) {
 	// Generate a unique request ID for tracing this turn
@@ -1653,6 +1704,16 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	cacheTTL, ttlErr := job.ChatCacheTTL()
 	if ttlErr != nil {
 		execErr = ttlErr
+		return execErr
+	}
+
+	// Resolve the chat cache layout the same way (spec 27): "ladder" (default)
+	// or "stream". This single local drives both the request assembly and the
+	// per-turn manifest stamp below — leaving either hardcoded would assemble a
+	// stream chat as ladder and/or make the manifest lie about the layout.
+	cacheLayout, layoutErr := job.ChatCacheLayout()
+	if layoutErr != nil {
+		execErr = layoutErr
 		return execErr
 	}
 
@@ -2016,6 +2077,17 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		case directive.AppendDelta:
 			refresh = LayerRefreshAppendDelta
 		}
+		// lastExchangeID anchors any layer frozen THIS turn to the last completed
+		// assistant exchange (spec 27): under stream that places a mid-chat
+		// widening immediately after that exchange. Empty on a plain turn 1
+		// (no completed exchange yet) and harmless under ladder.
+		lastExchangeID := ""
+		for i := len(conversation.HistoryBlocks) - 1; i >= 0; i-- {
+			if id := conversation.HistoryBlocks[i].ExchangeID; id != "" {
+				lastExchangeID = id
+				break
+			}
+		}
 		layerResult, err = PrepareContextLayers(ctx, LayerEngineParams{
 			PlanDir:         plan.Directory,
 			JobID:           job.ID,
@@ -2025,6 +2097,8 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			StripComments:   job.IsStripCommentsEnabled(),
 			SnapshotEnabled: job.IsContextSnapshotEnabled(),
 			Refresh:         refresh,
+			Layout:          cacheLayout,
+			AnchorExchange:  lastExchangeID,
 			Lineage:         lineageParents,
 		})
 		if err != nil {
@@ -2090,12 +2164,20 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		volatileBuilder.WriteString(contextBlock)
 		volatileBuilder.WriteString("\n")
 	}
+	// <current-files> supersession index (spec 27 §5b): when a delta layer has
+	// superseded earlier copies, a compact `path → layer N` map rides in the
+	// volatile turn (uncached, regenerated fresh each turn, both layouts) so the
+	// oracle always knows the winning copy even when a supersession pair
+	// straddles interleaved dialogue.
+	if layerResult != nil && layerResult.SupersededIndex != "" {
+		volatileBuilder.WriteString(layerResult.SupersededIndex)
+	}
 	volatileBuilder.WriteString(conversation.CurrentTurn)
 	volatilePrompt := volatileBuilder.String()
 
 	// Flattened single-prompt form for callers without a block-structured
 	// upload: gemini, the mock LLM client, and the briefing file.
-	fullPrompt := flattenChatPrompt(systemPrompt, conversation.HistoryBlocks, volatilePrompt)
+	fullPrompt := flattenChatPrompt(systemPrompt, conversation.HistoryBlocks.Texts(), volatilePrompt)
 
 	// Log the prompt content for debugging
 	log.WithFields(logrus.Fields{
@@ -2170,32 +2252,47 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// (no layer store) upload only deps/includes + the volatile prompt.
 	var chatLayerFiles []string
 	var chatLayerSources map[string]string
+	var chatLayerAnchors map[string]string
 	if layerResult != nil {
 		chatLayerFiles = layerResult.LayerPaths
 		chatLayerSources = layerResult.SourcesByPath
+		chatLayerAnchors = layerResult.AnchorsByPath
 	}
 
 	// The full Anthropic request options for this turn, shared by the live
 	// claude dispatch below and the request manifest (the mock path describes
-	// the same options so e2e runs assert the real assembly). P4 transcript
-	// caching: the chat template travels as SystemPrompt (BP1), the completed
-	// prior turns as per-turn HistoryBlocks (BP3 on the last), and only the
-	// volatile current turn + <context> block ride in Prompt (never cached).
+	// the same options so e2e runs assert the real assembly). The chat template
+	// travels as SystemPrompt (BP1); how the layers, context docs, and history
+	// blocks are laid out depends on the cache layout (spec 19 ladder / spec 27
+	// stream). Only the volatile current turn + <context> block ride in Prompt
+	// (never cached) either way.
 	anthropicOpts := anthropic.RequestOptions{
-		Model:         effectiveModel,
-		Prompt:        volatilePrompt,
-		SystemPrompt:  systemPrompt,
-		HistoryBlocks: conversation.HistoryBlocks,
-		WorkDir:       contextDir,
-		CacheLayout:   anthropic.CacheLayoutLadder,
-		CacheTTL:      cacheTTL,
-		LayerFiles:    chatLayerFiles,
-		ContextFiles:  allIncludeFiles,
-		MaxTokens:     modelpkg.MaxTokens(effectiveModel),
-		NoCache:       job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
-		Caller:        "grove-flow-chat",
-		JobID:         job.ID,
-		PlanName:      plan.Name,
+		Model:        effectiveModel,
+		Prompt:       volatilePrompt,
+		SystemPrompt: systemPrompt,
+		WorkDir:      contextDir,
+		CacheLayout:  cacheLayout,
+		CacheTTL:     cacheTTL,
+		MaxTokens:    modelpkg.MaxTokens(effectiveModel),
+		NoCache:      job.NoCache, // Frontmatter no_cache: true opts out of prompt caching
+		Caller:       "grove-flow-chat",
+		JobID:        job.ID,
+		PlanName:     plan.Name,
+	}
+	if cacheLayout == anthropic.CacheLayoutStream {
+		// Stream (spec 27): one ordered heterogeneous sequence replaces the
+		// LayerFiles+ContextFiles+HistoryBlocks split. Head layers (anchor "")
+		// first, then context docs, then the exchanges — with any layer frozen
+		// this or a prior turn interleaved right after the exchange it anchors
+		// to. It is the single source of truth, so the split fields stay nil.
+		anthropicOpts.Stream = buildStreamItems(ctx, job.ID, chatLayerFiles, chatLayerAnchors, allIncludeFiles, conversation.HistoryBlocks)
+	} else {
+		// Ladder (spec 19 D1): frozen layer artifacts form the document region
+		// (BP2 on the last), context docs follow with no breakpoint, and the
+		// completed prior turns ride as per-turn HistoryBlocks (BP3 on the last).
+		anthropicOpts.HistoryBlocks = conversation.HistoryBlocks.Texts()
+		anthropicOpts.LayerFiles = chatLayerFiles
+		anthropicOpts.ContextFiles = allIncludeFiles
 	}
 
 	// Per-turn request manifest (spec 19 D9): record, next to the briefing
@@ -2223,7 +2320,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			Entries:   entries,
 		}
 		if provider != requestManifestProviderGemini && provider != requestManifestProviderOpenRouter {
-			manifest.CacheLayout = anthropic.CacheLayoutLadder
+			manifest.CacheLayout = cacheLayout
 			manifest.CacheTTL = cacheTTL
 			manifest.NoCache = job.NoCache
 		}
@@ -2235,6 +2332,18 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 				Log(ctx)
 		} else {
 			log.WithField("manifest", manifestPath).Debug("Wrote per-turn request manifest")
+			// Record this manifest as the lineage's last (spec 27 P3): a stream
+			// child locates the parent's last manifest via snapshot.json to
+			// verify the inherited prefix. Only chats with a layer store carry a
+			// snapshot; best-effort, never fails the turn.
+			if layerResult != nil {
+				if snapErr := UpdateLayerSnapshotLastManifest(plan.Directory, job.ID, filepath.Base(manifestPath)); snapErr != nil {
+					ulog.Warn("Failed to record last request manifest in snapshot").
+						Err(snapErr).
+						Field("job_id", job.ID).
+						Log(ctx)
+				}
+			}
 		}
 	}
 

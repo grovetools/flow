@@ -66,8 +66,8 @@ func TestFormatConversationRegions_HistoryAppendOnly(t *testing.T) {
 			}
 		}
 		// Byte-level: previous concatenation is a strict prefix.
-		prevConcat := strings.Join(prev.HistoryBlocks, "")
-		concat := strings.Join(regions.HistoryBlocks, "")
+		prevConcat := strings.Join(prev.HistoryBlocks.Texts(), "")
+		concat := strings.Join(regions.HistoryBlocks.Texts(), "")
 		if !strings.HasPrefix(concat, prevConcat) {
 			t.Errorf("turn %d: history is not append-only:\nprev: %q\nnow:  %q", k, prevConcat, concat)
 		}
@@ -88,8 +88,8 @@ func TestFormatConversationRegions_MutatingAttrsOnlyVolatile(t *testing.T) {
 		regions := FormatConversationRegions(growingConversation(k))
 		for i, b := range regions.HistoryBlocks {
 			for _, forbidden := range []string{"awaiting_response", "respond_as"} {
-				if strings.Contains(b, forbidden) {
-					t.Errorf("turn %d history block %d contains %q: %q", k, i, forbidden, b)
+				if strings.Contains(b.Text, forbidden) {
+					t.Errorf("turn %d history block %d contains %q: %q", k, i, forbidden, b.Text)
 				}
 			}
 		}
@@ -121,8 +121,8 @@ func TestFormatConversationRegions_Serialization(t *testing.T) {
 		t.Fatalf("history blocks = %q, want %d blocks", regions.HistoryBlocks, len(wantHistory))
 	}
 	for i, want := range wantHistory {
-		if regions.HistoryBlocks[i] != want {
-			t.Errorf("history block %d:\n got %q\nwant %q", i, regions.HistoryBlocks[i], want)
+		if regions.HistoryBlocks[i].Text != want {
+			t.Errorf("history block %d:\n got %q\nwant %q", i, regions.HistoryBlocks[i].Text, want)
 		}
 	}
 	// respond_as comes from the awaiting turn's own directive template; the
@@ -149,7 +149,7 @@ func TestFormatConversationRegions_FiltersIncompleteTurns(t *testing.T) {
 		pending,
 	}
 	regions := FormatConversationRegions(turns)
-	flat := strings.Join(regions.HistoryBlocks, "") + regions.CurrentTurn
+	flat := strings.Join(regions.HistoryBlocks.Texts(), "") + regions.CurrentTurn
 	if strings.Contains(flat, "still thinking") {
 		t.Errorf("incomplete turn leaked into the serialization: %q", flat)
 	}

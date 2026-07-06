@@ -94,6 +94,15 @@ type LayerEntry struct {
 	// TurnID / CreatedAt record when the layer was appended.
 	TurnID    string    `json:"turn_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// AnchorExchange is the stream layout's position marker (spec 27): the
+	// directive id of the last COMPLETED assistant exchange at freeze time.
+	// Empty = the head region (turn-1 layers, inherited refs, transcripts,
+	// and every ladder-born layer). A non-empty value places this layer in the
+	// stream immediately after the exchange with that id — this is how a
+	// mid-chat widening interleaves adjacent to the turn that pulled it in.
+	// NOT joined on TurnID, which is the in-flight turn and would dangle if a
+	// turn fails before its assistant response exists. Ignored under ladder.
+	AnchorExchange string `json:"anchor_exchange,omitempty"`
 }
 
 // LayerRemoval is the annotation recorded when a file disappears from the
@@ -119,6 +128,12 @@ type LayerManifest struct {
 	Root     string         `json:"root,omitempty"`
 	Layers   []LayerEntry   `json:"layers"`
 	Removals []LayerRemoval `json:"removals,omitempty"`
+	// Layout stamps the request cache layout this lineage was frozen under
+	// (spec 27): "ladder" (or empty on v1 stores, read as ladder) or "stream".
+	// Layout is lifetime-stable; PrepareContextLayers fails a turn whose job
+	// frontmatter disagrees, except the free ladder→stream migration (§0
+	// equivalence) which rewrites the stamp in place.
+	Layout string `json:"layout,omitempty"`
 }
 
 // LayerSnapshot is the snapshot.json document written when a lineage's base
@@ -137,6 +152,12 @@ type LayerSnapshot struct {
 	RulesHash string            `json:"rules_hash"`
 	GitHeads  map[string]string `json:"git_heads,omitempty"`
 	Dirty     bool              `json:"dirty,omitempty"`
+	// LastManifest is the filename (within the job's .artifacts/<jobID>/ dir)
+	// of the most recently written per-turn request manifest (spec 27 P3).
+	// Stream lineage uses it to locate the parent's last manifest for the
+	// prefix hash-verify without globbing; empty falls back to newest-by-
+	// CreatedAt globbing.
+	LastManifest string `json:"last_manifest,omitempty"`
 }
 
 // ContextLayersDir returns the job's layer-store directory.
@@ -225,6 +246,23 @@ func LoadLayerSnapshot(planDir, jobID string) (*LayerSnapshot, error) {
 		return nil, fmt.Errorf("parsing snapshot.json: %w", err)
 	}
 	return &s, nil
+}
+
+// UpdateLayerSnapshotLastManifest records the filename of the job's most recent
+// per-turn request manifest in snapshot.json (spec 27 P3). Load-modify-save; a
+// missing snapshot is created with just the pointer set (a chat with no frozen
+// base — e.g. context_snapshot: false — still records its last manifest so a
+// stream child can locate it).
+func UpdateLayerSnapshotLastManifest(planDir, jobID, filename string) error {
+	s, err := LoadLayerSnapshot(planDir, jobID)
+	if err != nil {
+		return err
+	}
+	if s == nil {
+		s = &LayerSnapshot{}
+	}
+	s.LastManifest = filename
+	return WriteLayerSnapshot(planDir, jobID, *s)
 }
 
 // WriteLayerArtifact writes a layer artifact under the write-once contract:

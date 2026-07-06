@@ -196,6 +196,13 @@ func integrateLineage(ctx context.Context, writer io.Writer, p LayerEngineParams
 					InheritedFrom: inheritedFrom,
 					TurnID:        p.TurnID,
 					CreatedAt:     time.Now().UTC(),
+					// Copy the parent's AnchorExchange (spec 27): the child
+					// inherits the parent's exchanges verbatim, so a parent's
+					// interleaved-layer anchor id stays a valid key in the
+					// child's stream and reproduces the layer in position rather
+					// than collapsing it to the head. "" for head-region /
+					// ladder-parent layers.
+					AnchorExchange: pe.AnchorExchange,
 				}
 				manifest.Layers = append(manifest.Layers, entry)
 				newInherited = append(newInherited, entry)
@@ -283,7 +290,11 @@ func integrateLineage(ctx context.Context, writer io.Writer, p LayerEngineParams
 			heads, dirty := collectGitState(p.ContextDir)
 			n := len(manifest.Layers)
 			name := fmt.Sprintf("%02d-delta-%s.xml", n, deltaSlug(heads))
-			data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceGitDelta, changedFiles, changedFiles)
+			// The lineage git-delta completes the child's head material: under
+			// stream lineage p.AnchorExchange is the parent's final exchange id,
+			// so this delta anchors after the inherited stream, before the
+			// child's q1; "" (head) otherwise (spec 27 §3).
+			data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceGitDelta, changedFiles, changedFiles, p.AnchorExchange)
 			if err != nil {
 				return false, err
 			}
@@ -291,17 +302,18 @@ func integrateLineage(ctx context.Context, writer io.Writer, p LayerEngineParams
 				return false, err
 			}
 			manifest.Layers = append(manifest.Layers, LayerEntry{
-				N:          n,
-				File:       name,
-				Source:     LayerSourceGitDelta,
-				Hash:       sha256Hex(data),
-				Bytes:      int64(len(data)),
-				GitHeads:   heads,
-				Dirty:      dirty,
-				Files:      records,
-				Supersedes: append([]string{}, changedFiles...),
-				TurnID:     p.TurnID,
-				CreatedAt:  time.Now().UTC(),
+				N:              n,
+				File:           name,
+				Source:         LayerSourceGitDelta,
+				Hash:           sha256Hex(data),
+				Bytes:          int64(len(data)),
+				GitHeads:       heads,
+				Dirty:          dirty,
+				Files:          records,
+				Supersedes:     append([]string{}, changedFiles...),
+				TurnID:         p.TurnID,
+				CreatedAt:      time.Now().UTC(),
+				AnchorExchange: p.AnchorExchange,
 			})
 			fmt.Fprintf(writer, "Context lineage: appended delta %s (%d file(s) changed since the inherited lineage was frozen)\n", name, len(changedFiles))
 			ulog.Info("Appended lineage git-delta layer").

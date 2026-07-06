@@ -55,6 +55,12 @@ const (
 // suggests --rebase-context in job.log (spec 19 D4 — advise, never auto-bust).
 const rebaseAdvisoryRatio = 0.30
 
+// layerManifestVersion is the version stamped on manifests written by the
+// current engine. v2 adds the stream layout's LayerEntry.AnchorExchange and
+// LayerManifest.Layout (spec 27); v1 stores read back with zero-value fields
+// (no anchors = head region, empty Layout = ladder).
+const layerManifestVersion = 2
+
 // LayerEngineParams carries one turn's inputs to PrepareContextLayers.
 type LayerEngineParams struct {
 	PlanDir    string // plan directory (owns .artifacts/)
@@ -70,6 +76,17 @@ type LayerEngineParams struct {
 	// guard is deliberately bypassed (the store is wiped first).
 	SnapshotEnabled bool
 	Refresh         LayerRefreshMode
+	// Layout is the resolved chat cache layout for this turn (spec 27):
+	// "ladder" (or empty, treated as ladder) or "stream". It is stamped on a
+	// fresh manifest and checked against an existing store's stamp — a
+	// disagreement fails the turn, except the free ladder→stream migration.
+	Layout string
+	// AnchorExchange is the directive id of the last COMPLETED assistant
+	// exchange at this turn's freeze time (spec 27). Layers appended this turn
+	// (rules-diff, git-delta, and the child's own base under lineage) carry it
+	// so the stream interleave places them after that exchange. Empty on a
+	// plain turn 1 and under ladder → head region.
+	AnchorExchange string
 	// Lineage lists the job's completed chat dependencies whose layer
 	// sequences this job extends (spec 19 P5 / D8), in depends_on order.
 	// Integrated append-only and idempotently: parents already represented in
@@ -86,6 +103,16 @@ type LayerEngineResult struct {
 	// SourcesByPath maps each layer path to its provenance source, for
 	// request-manifest annotation.
 	SourcesByPath map[string]string
+	// AnchorsByPath maps each layer path to its AnchorExchange (spec 27): ""
+	// for head-region layers, else the directive id of the exchange the layer
+	// interleaves after. The stream interleave in executeChatJob consults it.
+	AnchorsByPath map[string]string
+	// SupersededIndex is the compact `<current-files>` block (spec 27 §5b):
+	// `path → layer N` for every superseded path in the lineage, or "" when
+	// nothing is superseded. It rides in the volatile turn (uncached, both
+	// layouts) so the oracle always has the winning-copy map even when a
+	// supersession pair straddles interleaved dialogue.
+	SupersededIndex string
 	// AppendedLayer / DeltaLayer name the artifacts appended this turn
 	// (empty when none). Rebased reports a --rebase-context re-freeze.
 	AppendedLayer string
@@ -153,7 +180,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	// job's own base from whatever the rules resolve BEYOND the inherited
 	// union — files the lineage already carries are never duplicated.
 	if manifest == nil {
-		manifest = &LayerManifest{Version: 1, Root: rootCanon}
+		manifest = &LayerManifest{Version: layerManifestVersion, Root: rootCanon, Layout: p.Layout}
 		if _, err := integrateLineage(ctx, writer, p, layersDir, manifest); err != nil {
 			return nil, err
 		}
@@ -169,7 +196,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 		// (even an empty one) so the store visibly exists.
 		if len(baseFiles) > 0 || len(manifest.Layers) == 0 {
 			n := len(manifest.Layers)
-			data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceRulesBase, baseFiles, nil)
+			data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceRulesBase, baseFiles, nil, p.AnchorExchange)
 			if err != nil {
 				return nil, err
 			}
@@ -179,17 +206,18 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 				return nil, err
 			}
 			manifest.Layers = append(manifest.Layers, LayerEntry{
-				N:         n,
-				File:      baseName,
-				Source:    LayerSourceRulesBase,
-				Hash:      sha256Hex(data),
-				Bytes:     int64(len(data)),
-				RulesHash: rulesHash,
-				GitHeads:  heads,
-				Dirty:     dirty,
-				Files:     records,
-				TurnID:    p.TurnID,
-				CreatedAt: time.Now().UTC(),
+				N:              n,
+				File:           baseName,
+				Source:         LayerSourceRulesBase,
+				Hash:           sha256Hex(data),
+				Bytes:          int64(len(data)),
+				RulesHash:      rulesHash,
+				GitHeads:       heads,
+				Dirty:          dirty,
+				Files:          records,
+				TurnID:         p.TurnID,
+				CreatedAt:      time.Now().UTC(),
+				AnchorExchange: p.AnchorExchange,
 			})
 			fmt.Fprintf(writer, "Context layers: froze %s (%d files, %s)\n", baseName, len(records), formatByteCount(int64(len(data))))
 		}
@@ -209,6 +237,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 		}
 		res := layerResultFromManifest(layersDir, manifest)
 		res.Rebased = rebased
+		res.SupersededIndex = buildSupersededIndex(manifest, p.ContextDir)
 		return res, nil
 	}
 
@@ -229,6 +258,32 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	if manifest.Root == "" {
 		manifest.Root = rootCanon
 		changed = true
+	}
+
+	// Layout stamp (spec 27): the request layout is lifetime-stable. A store
+	// frozen under one layout must not be reassembled under another mid-lineage
+	// — except the free ladder→stream migration (§0 equivalence: stream with
+	// every layer head-anchored is byte-identical to ladder), which rewrites the
+	// stamp in place. stream→ladder is refused (reordering interleaved layers
+	// back above the dialogue would shift bytes); --rebase-context is the escape.
+	storeLayout := manifest.Layout
+	if storeLayout == "" {
+		storeLayout = "ladder"
+	}
+	wantLayout := p.Layout
+	if wantLayout == "" {
+		wantLayout = "ladder"
+	}
+	if storeLayout != wantLayout {
+		if storeLayout == "ladder" && wantLayout == "stream" {
+			manifest.Layout = "stream"
+			changed = true
+			ulog.Info("Migrating chat cache layout ladder→stream (free; layers stay head-anchored)").
+				Field("job_id", p.JobID).
+				Log(ctx)
+		} else {
+			return nil, fmt.Errorf("layer store for job %s was frozen under cache layout %q but this turn requests %q — layout is lifetime-stable; archive and re-freeze with --rebase-context to switch", p.JobID, storeLayout, wantLayout)
+		}
 	}
 
 	// Enforce immutability before trusting anything in the store — including
@@ -274,7 +329,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	if len(newFiles) > 0 {
 		n := len(manifest.Layers)
 		name := fmt.Sprintf("%02d-add-%s.xml", n, layerSlug(p.TurnID))
-		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceRulesDiff, newFiles, nil)
+		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceRulesDiff, newFiles, nil, p.AnchorExchange)
 		if err != nil {
 			return nil, err
 		}
@@ -282,17 +337,18 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 			return nil, err
 		}
 		manifest.Layers = append(manifest.Layers, LayerEntry{
-			N:         n,
-			File:      name,
-			Source:    LayerSourceRulesDiff,
-			Hash:      sha256Hex(data),
-			Bytes:     int64(len(data)),
-			RulesHash: rulesHash,
-			GitHeads:  heads,
-			Dirty:     dirty,
-			Files:     records,
-			TurnID:    p.TurnID,
-			CreatedAt: time.Now().UTC(),
+			N:              n,
+			File:           name,
+			Source:         LayerSourceRulesDiff,
+			Hash:           sha256Hex(data),
+			Bytes:          int64(len(data)),
+			RulesHash:      rulesHash,
+			GitHeads:       heads,
+			Dirty:          dirty,
+			Files:          records,
+			TurnID:         p.TurnID,
+			CreatedAt:      time.Now().UTC(),
+			AnchorExchange: p.AnchorExchange,
 		})
 		changed = true
 		result.AppendedLayer = name
@@ -361,7 +417,7 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	case p.Refresh == LayerRefreshAppendDelta && len(staleFiles) > 0:
 		n := len(manifest.Layers)
 		name := fmt.Sprintf("%02d-delta-%s.xml", n, deltaSlug(heads))
-		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceGitDelta, staleFiles, staleFiles)
+		data, records, err := renderLayerXML(p.ContextDir, p.StripComments, n, LayerSourceGitDelta, staleFiles, staleFiles, p.AnchorExchange)
 		if err != nil {
 			return nil, err
 		}
@@ -369,17 +425,18 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 			return nil, err
 		}
 		manifest.Layers = append(manifest.Layers, LayerEntry{
-			N:          n,
-			File:       name,
-			Source:     LayerSourceGitDelta,
-			Hash:       sha256Hex(data),
-			Bytes:      int64(len(data)),
-			GitHeads:   heads,
-			Dirty:      dirty,
-			Files:      records,
-			Supersedes: append([]string{}, staleFiles...),
-			TurnID:     p.TurnID,
-			CreatedAt:  time.Now().UTC(),
+			N:              n,
+			File:           name,
+			Source:         LayerSourceGitDelta,
+			Hash:           sha256Hex(data),
+			Bytes:          int64(len(data)),
+			GitHeads:       heads,
+			Dirty:          dirty,
+			Files:          records,
+			Supersedes:     append([]string{}, staleFiles...),
+			TurnID:         p.TurnID,
+			CreatedAt:      time.Now().UTC(),
+			AnchorExchange: p.AnchorExchange,
 		})
 		changed = true
 		result.DeltaLayer = name
@@ -421,18 +478,60 @@ func PrepareContextLayers(ctx context.Context, p LayerEngineParams) (*LayerEngin
 	res.Rebased = result.Rebased
 	res.AppendedLayer = result.AppendedLayer
 	res.DeltaLayer = result.DeltaLayer
+	res.SupersededIndex = buildSupersededIndex(manifest, p.ContextDir)
 	return res, nil
 }
 
-// layerResultFromManifest builds the ordered upload list + provenance map.
+// layerResultFromManifest builds the ordered upload list + provenance/anchor
+// maps.
 func layerResultFromManifest(layersDir string, m *LayerManifest) *LayerEngineResult {
-	res := &LayerEngineResult{SourcesByPath: make(map[string]string, len(m.Layers))}
+	res := &LayerEngineResult{
+		SourcesByPath: make(map[string]string, len(m.Layers)),
+		AnchorsByPath: make(map[string]string, len(m.Layers)),
+	}
 	for _, e := range m.Layers {
 		path := LayerArtifactPath(layersDir, e)
 		res.LayerPaths = append(res.LayerPaths, path)
 		res.SourcesByPath[path] = e.Source
+		res.AnchorsByPath[path] = e.AnchorExchange
 	}
 	return res
+}
+
+// buildSupersededIndex renders the `<current-files>` block (spec 27 §5b): for
+// every file captured by more than one layer (a later copy supersedes an
+// earlier one), the path and the layer N that holds the winning (latest) copy.
+// Empty when nothing is superseded. It rides in the volatile turn so the oracle
+// always has the winning-copy map even when a supersession pair straddles
+// interleaved dialogue. Paths are canonical layer keys relative to root,
+// matching the union diff's identity.
+func buildSupersededIndex(m *LayerManifest, root string) string {
+	winning := make(map[string]int) // canonical path → highest layer N capturing it
+	count := make(map[string]int)   // canonical path → number of layers capturing it
+	for _, layer := range m.Layers {
+		for _, f := range layer.Files {
+			key := canonicalLayerKey(root, f.Path)
+			count[key]++
+			winning[key] = layer.N // layers iterate in ascending N, so last wins
+		}
+	}
+	var paths []string
+	for key, c := range count {
+		if c > 1 {
+			paths = append(paths, key)
+		}
+	}
+	if len(paths) == 0 {
+		return ""
+	}
+	sort.Strings(paths)
+	var buf strings.Builder
+	buf.WriteString("<current-files>\n")
+	for _, p := range paths {
+		fmt.Fprintf(&buf, "  %s → layer %d\n", p, winning[p])
+	}
+	buf.WriteString("</current-files>\n")
+	return buf.String()
 }
 
 // archiveLayerStore moves every entry of the context-layers dir (artifacts +
@@ -519,11 +618,17 @@ func readRenderedFile(contextDir, file string, strip bool) (renderedFile, error)
 // wrapped in a `<layer>` envelope carrying provenance attributes (spec 19
 // §3). Unreadable files are hard errors (spec 19 e2e 22) — cx's inline
 // `<error>` placeholder would silently thin the oracle's context.
-func renderLayerXML(contextDir string, strip bool, n int, source string, files, supersedes []string) ([]byte, []LayerFileRecord, error) {
+func renderLayerXML(contextDir string, strip bool, n int, source string, files, supersedes []string, afterTurn string) ([]byte, []LayerFileRecord, error) {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "<layer n=\"%d\" source=%q files=\"%d\"", n, source, len(files))
 	if len(supersedes) > 0 {
 		fmt.Fprintf(&buf, " supersedes=%q", strings.Join(supersedes, ","))
+	}
+	// after_turn marks a stream layer interleaved mid-dialogue (spec 27 §5a):
+	// the exchange id it sits after. Head-region layers pass "" → no attribute,
+	// so existing ladder-born artifact bytes are unchanged (immutability holds).
+	if afterTurn != "" {
+		fmt.Fprintf(&buf, " after_turn=%q", afterTurn)
 	}
 	buf.WriteString(">\n")
 
