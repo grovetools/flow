@@ -170,8 +170,15 @@ func (r *LocalRuntime) ExecuteJob(ctx context.Context, job *Job, plan *Plan) err
 	// 4. Delegate to executor
 	execErr := executor.Execute(jobCtx, job, plan)
 
-	// 5. Update final status (skip for chat and interactive agent jobs - they manage their own status)
-	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent {
+	// 5. Update final status (skip for chat and interactive agent jobs - they
+	// manage their own status). Headless agents are also excluded (A6): they
+	// detach — Execute returns nil while the agent is still running — so the
+	// exit watcher (waitAndWriteStatus → FinalizeHeadlessJob) writes the real
+	// terminal status once the process exits. Stamping `completed` here at
+	// detach was the premature-completion bug. Isolated agents are deliberately
+	// NOT excluded: they have no headless-style finalizer, so they keep the
+	// existing auto-complete-at-detach behavior.
+	if job.Type != JobTypeChat && job.Type != JobTypeInteractiveAgent && job.Type != JobTypeAgent && job.Type != JobTypeHeadlessAgent {
 		finalStatus := JobStatusCompleted
 		if execErr != nil {
 			finalStatus = JobStatusFailed

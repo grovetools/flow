@@ -610,7 +610,17 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 			Field("job", job.Title).
 			Pretty(fmt.Sprintf("%s Job running: %s", color.BlueString(theme.IconInfo), job.Title)).
 			Log(ctx)
-		fmt.Println("Use 'flow plan status' to monitor progress, and 'flow plan complete' when done.")
+		if job.Type == orchestration.JobTypeHeadlessAgent {
+			// Headless jobs finalize themselves: the daemon runs the agent in
+			// the background and it transitions to completed/failed on its own
+			// via the exit watcher. Do NOT tell the user to run `flow plan
+			// complete` — that trained coordinators to force-complete jobs that
+			// were finishing on their own.
+			fmt.Println("The daemon is executing this job in the background; it will transition to completed/failed on its own.")
+			fmt.Println("Watch with 'flow plan status' or tail the job.log.")
+		} else {
+			fmt.Println("Use 'flow plan status' to monitor progress, and 'flow plan complete' when done.")
+		}
 	} else {
 		ulog.Success("Job completed").
 			Field("job", job.Title).
@@ -618,6 +628,29 @@ func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *o
 			Log(ctx)
 	}
 	return nil
+}
+
+// planHasRunningHeadless reports whether any job in the plan is a headless
+// agent currently in the running state. Used to tailor the "still running"
+// epilogue: headless jobs finalize themselves and must NOT be paired with a
+// "run flow plan complete" instruction.
+func planHasRunningHeadless(plan *orchestration.Plan) bool {
+	for _, j := range plan.Jobs {
+		if j != nil && j.Status == orchestration.JobStatusRunning && j.Type == orchestration.JobTypeHeadlessAgent {
+			return true
+		}
+	}
+	return false
+}
+
+// jobsIncludeHeadless reports whether any job in the slice is a headless agent.
+func jobsIncludeHeadless(jobs []*orchestration.Job) bool {
+	for _, j := range jobs {
+		if j != nil && j.Type == orchestration.JobTypeHeadlessAgent {
+			return true
+		}
+	}
+	return false
 }
 
 // runNextJobs executes all currently runnable jobs.
@@ -643,6 +676,9 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 			fmt.Printf("\n%s All runnable jobs submitted. %d job(s) still running (e.g. interactive agents).\n",
 				color.BlueString(theme.IconInfo), status.Running)
 			fmt.Println("Use 'flow plan status' to monitor progress.")
+			if planHasRunningHeadless(plan) {
+				fmt.Println("Headless jobs transition to completed/failed on their own — no 'flow plan complete' needed.")
+			}
 			return nil
 		}
 		return fmt.Errorf("no runnable jobs - check for failed dependencies")
@@ -681,6 +717,9 @@ func runNextJobs(ctx context.Context, orch *orchestration.Orchestrator, plan *or
 		fmt.Printf("\n%s %d job(s) launched and still running (e.g. interactive agents).\n",
 			color.BlueString(theme.IconInfo), postStatus.Running)
 		fmt.Println("Use 'flow plan status' to monitor progress.")
+		if planHasRunningHeadless(plan) {
+			fmt.Println("Headless jobs transition to completed/failed on their own — no 'flow plan complete' needed.")
+		}
 	} else {
 		fmt.Printf("%s All jobs completed\n", color.GreenString(theme.IconSuccess))
 	}
@@ -840,6 +879,9 @@ func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orche
 	}
 
 	fmt.Println("\nJobs submitted. Use 'flow plan status' to monitor progress.")
+	if jobsIncludeHeadless(jobs) {
+		fmt.Println("Headless jobs transition to completed/failed on their own — no 'flow plan complete' needed.")
+	}
 	return nil
 }
 

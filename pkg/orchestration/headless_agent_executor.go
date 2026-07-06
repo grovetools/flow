@@ -407,6 +407,11 @@ func buildHeadlessEnv(job *Job, plan *Plan, providerName, worktreePath string, a
 		"GROVE_FLOW_JOB_PATH="+job.FilePath,
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
+		// Signal-at-launch (A2): tells the grove-hooks Stop hook this is a
+		// headless job so it records session type "headless_agent" and never
+		// parks the frontmatter at `idle` (the finalizer owns headless
+		// frontmatter). Mirrors the GROVE_FLOW_ISOLATED precedent.
+		"GROVE_FLOW_HEADLESS=true",
 	)
 	if spec, ok := LookupAgentProvider(providerName); ok && spec.ProviderEnv != "" {
 		// Non-claude providers (e.g. opencode plugins) use this to identify
@@ -674,8 +679,9 @@ func (e *HeadlessAgentExecutor) waitAndWriteStatus(ctx context.Context, job *Job
 	}
 
 	// Construct the .status file path in the job's artifacts directory
-	// The path follows: .artifacts/<job-id>/.status
-	statusPath := filepath.Join(plan.Directory, ".artifacts", job.ID, ".status")
+	// The path follows: .artifacts/<job-id>/.status (shared with the finalizer's
+	// reader and the daemon adoption reader via headlessStatusPath).
+	statusPath := headlessStatusPath(plan, job)
 	statusDir := filepath.Dir(statusPath)
 
 	// Ensure the directory exists
@@ -719,27 +725,28 @@ func (e *HeadlessAgentExecutor) waitAndWriteStatus(ctx context.Context, job *Job
 		Field("path", statusPath).
 		Log(ctx)
 
-	// Finalize the job now that the agent has REALLY exited. CompleteJob is the
-	// unified completion handler: it flips status to completed (writing an
-	// accurate completed_at + duration measured from job.StartTime), notifies
-	// the daemon to end the session, archives session artifacts + workflow
-	// runs, and appends the transcript. Doing this here — rather than in a
-	// detach-time defer — is the core of the lifecycle fix: status, duration,
-	// and process lifetime finally agree, and the completed→pending flap and
-	// duplicate ad-hoc session records disappear.
+	// Finalize the job now that the agent has REALLY exited. FinalizeHeadlessJob
+	// re-reads the frontmatter from disk (never trusting the in-memory status,
+	// which the Stop hook may have rewritten to `idle`) and drives it to a
+	// terminal state: exit_code 0 → CompleteJob (status, duration, EndSession,
+	// archive, transcript); non-zero → failed + last_error. Delegating here
+	// instead of unconditionally calling CompleteJob is the lifecycle fix AND
+	// the fix for the crash→`completed` bug (a crashing agent used to be stamped
+	// completed).
 	//
 	// CAVEAT (CLI-spawned jobs): when a headless job is launched by `flow plan
 	// run`, this goroutine lives in the short-lived CLI process and is killed
-	// when the CLI exits — so CompleteJob may never run for that path. The
-	// .status file written just above is the durable source of truth a daemon
-	// collector can reconcile from. For daemon-spawned jobs (JobRunner), the
-	// executor runs inside the long-lived groved process, so this goroutine
-	// survives until the agent exits and completion happens here as intended.
+	// when the CLI exits — so this may never run for that path. The .status file
+	// written just above (and, under --local, the Stop hook's fallback .status)
+	// is the durable source of truth the daemon's adoption sweep reconciles from
+	// at its next boot. For daemon-spawned jobs (JobRunner), the executor runs
+	// inside the long-lived groved process, so this goroutine survives until the
+	// agent exits and finalization happens here as intended.
 	//
-	// CompleteJob is idempotent for agent jobs (archival/transcript re-runs are
-	// overwrites/no-ops), so a later `flow plan complete` recovering a
-	// CLI-spawned job does no harm.
-	if err := CompleteJob(job, plan, true); err != nil {
+	// FinalizeHeadlessJob is idempotent (no-op when disk status is already
+	// terminal), so a later adoption sweep recovering a CLI-spawned job does no
+	// harm.
+	if err := FinalizeHeadlessJob(job, plan); err != nil {
 		ulog.Warn("[HEADLESS] Failed to finalize job after agent exit").
 			Field("job_id", job.ID).
 			Field("exit_code", exitCode).

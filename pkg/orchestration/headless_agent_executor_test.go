@@ -2,7 +2,9 @@ package orchestration
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -161,4 +163,183 @@ func TestHeadlessAgentExecutor_BuildPrompt(t *testing.T) {
 
 func TestHeadlessAgentExecutor_BuildPrompt_ReferenceBasedPrompts(t *testing.T) {
 	t.Skip("Test uses removed buildPromptFromSources function - refactored into executor method")
+}
+
+// --- J3: headless terminal-status finalizer tests ---
+
+// writeHeadlessJobFixture writes a minimal headless job .md to disk with the
+// given frontmatter status and returns the plan + loaded job. It isolates all
+// daemon/state side effects to a throwaway GROVE_HOME so the finalizer's
+// EndSession/CompleteJob paths never touch real state or spawn a daemon.
+func writeHeadlessJobFixture(t *testing.T, status JobStatus) (*Plan, *Job) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	// Fully hermetic daemon isolation for the completed path (CompleteJob →
+	// daemon.NewWithAutoStart().EndSession): redirect all grove state to a
+	// throwaway GROVE_HOME AND strip grove's bin dir from PATH so autostart
+	// cannot find `groved`. With no reachable binary, NewWithAutoStart falls back
+	// to a no-op LocalClient — EndSession becomes a harmless error we ignore —
+	// so the test never spawns or touches a real daemon. `sh`/`git` stay
+	// available via the standard system dirs.
+	t.Setenv("GROVE_HOME", filepath.Join(tmpDir, "grovehome"))
+	t.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+
+	plan := &Plan{
+		Name:      "test-plan",
+		Directory: tmpDir,
+		Jobs:      []*Job{},
+		JobsByID:  make(map[string]*Job),
+	}
+	content := "---\nid: hjob\ntitle: headless job\nstatus: " + string(status) +
+		"\ntype: headless_agent\n---\n\nbody\n"
+	jobPath := filepath.Join(tmpDir, "hjob.md")
+	if err := os.WriteFile(jobPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job, err := LoadJob(jobPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Filename = filepath.Base(jobPath)
+	job.FilePath = jobPath
+	// A non-zero StartTime so completed/failed writes get a duration.
+	job.StartTime = time.Now().Add(-time.Minute)
+	plan.Jobs = append(plan.Jobs, job)
+	plan.JobsByID[job.ID] = job
+	return plan, job
+}
+
+func writeHeadlessStatusFixture(t *testing.T, plan *Plan, job *Job, exitCode int) {
+	t.Helper()
+	p := headlessStatusPath(plan, job)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(fmt.Sprintf(`{"exit_code":%d,"timestamp":%q,"job_id":%q}`,
+		exitCode, time.Now().Format(time.RFC3339), job.ID))
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func assertFrontmatterStatus(t *testing.T, path, want string) {
+	t.Helper()
+	content := readFileString(t, path)
+	if !strings.Contains(content, "status: "+want) {
+		t.Errorf("expected frontmatter status %q, file:\n%s", want, content)
+	}
+}
+
+func TestFinalizeHeadlessJob(t *testing.T) {
+	t.Run("exit 0 completes", func(t *testing.T) {
+		plan, job := writeHeadlessJobFixture(t, JobStatusRunning)
+		writeHeadlessStatusFixture(t, plan, job, 0)
+		if err := FinalizeHeadlessJob(job, plan); err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		assertFrontmatterStatus(t, job.FilePath, "completed")
+	})
+
+	t.Run("nonzero exit fails with last_error containing code", func(t *testing.T) {
+		// Disk status idle (the strander) — proves idle is reconciled, not kept.
+		plan, job := writeHeadlessJobFixture(t, JobStatusIdle)
+		writeHeadlessStatusFixture(t, plan, job, 3)
+		if err := FinalizeHeadlessJob(job, plan); err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		content := readFileString(t, job.FilePath)
+		if !strings.Contains(content, "status: failed") {
+			t.Errorf("expected status failed, file:\n%s", content)
+		}
+		if !strings.Contains(content, "code: 3") {
+			t.Errorf("expected last_error to contain 'code: 3', file:\n%s", content)
+		}
+	})
+
+	t.Run("missing status fails with launcher-died message", func(t *testing.T) {
+		plan, job := writeHeadlessJobFixture(t, JobStatusRunning)
+		// No .status file written.
+		if err := FinalizeHeadlessJob(job, plan); err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		content := readFileString(t, job.FilePath)
+		if !strings.Contains(content, "status: failed") {
+			t.Errorf("expected status failed, file:\n%s", content)
+		}
+		if !strings.Contains(content, "without status file") {
+			t.Errorf("expected launcher-died message, file:\n%s", content)
+		}
+	})
+
+	t.Run("already terminal on disk is a no-op (A3 LoadJob-before-guard)", func(t *testing.T) {
+		plan, job := writeHeadlessJobFixture(t, JobStatusCompleted)
+		// A non-zero .status would flip a non-terminal job to failed; the guard
+		// must read DISK (completed) and no-op, ignoring both the .status and the
+		// stale in-memory running status below.
+		writeHeadlessStatusFixture(t, plan, job, 3)
+		job.Status = JobStatusRunning // the exact stale in-memory strander
+		before := readFileString(t, job.FilePath)
+		if err := FinalizeHeadlessJob(job, plan); err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		after := readFileString(t, job.FilePath)
+		if before != after {
+			t.Errorf("expected file bytes unchanged for already-terminal disk status\nbefore:\n%s\nafter:\n%s", before, after)
+		}
+	})
+}
+
+func TestWaitAndWriteStatus(t *testing.T) {
+	t.Run("clean exit writes status 0 and completes", func(t *testing.T) {
+		plan, job := writeHeadlessJobFixture(t, JobStatusRunning)
+		e := NewHeadlessAgentExecutor(NewMockLLMClient(), &ExecutorConfig{})
+		cmd := exec.Command("sh", "-c", "exit 0")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		e.waitAndWriteStatus(context.Background(), job, plan, cmd)
+
+		sc, err := readHeadlessStatus(headlessStatusPath(plan, job))
+		if err != nil {
+			t.Fatalf("read status: %v", err)
+		}
+		if sc.ExitCode != 0 {
+			t.Errorf("expected exit_code 0, got %d", sc.ExitCode)
+		}
+		assertFrontmatterStatus(t, job.FilePath, "completed")
+	})
+
+	t.Run("nonzero exit writes status and fails", func(t *testing.T) {
+		plan, job := writeHeadlessJobFixture(t, JobStatusRunning)
+		e := NewHeadlessAgentExecutor(NewMockLLMClient(), &ExecutorConfig{})
+		cmd := exec.Command("sh", "-c", "exit 3")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		e.waitAndWriteStatus(context.Background(), job, plan, cmd)
+
+		sc, err := readHeadlessStatus(headlessStatusPath(plan, job))
+		if err != nil {
+			t.Fatalf("read status: %v", err)
+		}
+		if sc.ExitCode != 3 {
+			t.Errorf("expected exit_code 3, got %d", sc.ExitCode)
+		}
+		content := readFileString(t, job.FilePath)
+		if !strings.Contains(content, "status: failed") {
+			t.Errorf("expected status failed, file:\n%s", content)
+		}
+		if !strings.Contains(content, "code: 3") {
+			t.Errorf("expected last_error to contain 'code: 3', file:\n%s", content)
+		}
+	})
 }
