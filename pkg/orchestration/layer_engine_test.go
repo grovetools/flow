@@ -825,3 +825,117 @@ Second question after landing changes.
 		t.Errorf("bare stamp = (%v, %v), want (false, nil)", stamped, err)
 	}
 }
+
+// TestValidateFrozenContextCoverage covers the fire-time empty-freeze gate
+// (oracle-plays J1): P1 (declared rules resolve zero files) and P2 (a resolved
+// file is captured in no frozen layer) trip; legitimate empty/covered/re-frozen
+// turns do not. Each row arranges an on-disk layer store via the engine, then
+// calls the gate directly.
+func TestValidateFrozenContextCoverage(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, f *layerFixture) *Job
+		wantErr string // "" = must pass (no trip)
+	}{
+		{
+			name: "P1 declared rules resolve zero files",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				f.writeRules("no/such/*.go\n")
+				f.run("t1", LayerRefreshNone) // freezes an empty base
+				return &Job{ID: "job-1", RulesFile: "ctx.rules", Filename: "01-chat.md"}
+			},
+			wantErr: "0 files",
+		},
+		{
+			name: "P2 resolved file captured in no layer",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				f.run("t1", LayerRefreshNone) // freezes src/a.go
+				m := f.manifest()
+				m.Layers[0].Files = nil // the file still resolves but nothing captured it
+				if err := SaveLayerManifest(f.layersDir(), m); err != nil {
+					t.Fatal(err)
+				}
+				return &Job{ID: "job-1", RulesFile: "ctx.rules", Filename: "01-chat.md"}
+			},
+			wantErr: "freeze gap",
+		},
+		{
+			name: "no trip on a normal freeze",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				f.run("t1", LayerRefreshNone)
+				return &Job{ID: "job-1", RulesFile: "ctx.rules"}
+			},
+		},
+		{
+			name: "no trip when the file rides only an inherited layer",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				f.run("t1", LayerRefreshNone)
+				m := f.manifest()
+				m.Layers[0].Source = LayerSourceInherited // union still carries the file
+				if err := SaveLayerManifest(f.layersDir(), m); err != nil {
+					t.Fatal(err)
+				}
+				return &Job{ID: "job-1", RulesFile: "ctx.rules"}
+			},
+		},
+		{
+			name: "no trip on an empty widen turn",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				f.run("t1", LayerRefreshNone)
+				f.run("t2", LayerRefreshNone) // rules unchanged: no new layer, all files covered
+				return &Job{ID: "job-1", RulesFile: "ctx.rules"}
+			},
+		},
+		{
+			name: "no trip when a removed file is no longer resolved",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				f.writeRules("src/a.go\nsrc/b.go\n")
+				f.run("t1", LayerRefreshNone)
+				f.writeRules("src/a.go\n") // drops b.go → removal annotation; a.go still covered
+				f.run("t2", LayerRefreshNone)
+				return &Job{ID: "job-1", RulesFile: "ctx.rules"}
+			},
+		},
+		{
+			name: "no trip with context_snapshot false re-freeze",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				p := f.params("t1", LayerRefreshNone)
+				p.SnapshotEnabled = false
+				if _, err := PrepareContextLayers(f.ctx, p); err != nil {
+					t.Fatal(err)
+				}
+				return &Job{ID: "job-1", RulesFile: "ctx.rules"}
+			},
+		},
+		{
+			name: "no trip on empty resolution when no rules are declared",
+			setup: func(t *testing.T, f *layerFixture) *Job {
+				f.writeRules("no/such/*.go\n")
+				f.run("t1", LayerRefreshNone)
+				return &Job{ID: "job-1"} // RulesFile == "": P1 does not apply
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newLayerFixture(t)
+			job := tt.setup(t, f)
+			err := validateFrozenContextCoverage(f.ctx, f.planDir, job, f.contextDir, f.rulesPath)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateFrozenContextCoverage() = %v, want no trip", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("validateFrozenContextCoverage() = nil, want error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("gate error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), "--rebase-context") {
+				t.Errorf("gate error %q does not name the recovery verb", err.Error())
+			}
+		})
+	}
+}

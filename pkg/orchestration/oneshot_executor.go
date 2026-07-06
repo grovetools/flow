@@ -2037,6 +2037,21 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			Log(ctx)
 	}
 
+	// Empty-freeze gate (oracle-plays J1): the layer engine just froze this
+	// turn's context. Before assembling the prompt or dispatching to the
+	// provider, verify the freeze actually captured the files the job's own
+	// rules resolve to — a rules file that was empty/nothing-matching at freeze
+	// time would otherwise fire blind on inherited layers and waste a full
+	// generation. A trip returns a plain error; the runtime funnel stamps
+	// status: failed + last_error (no persister calls here). Only runs when the
+	// engine ran (layerResult != nil, i.e. chatUsedRulesPath != "").
+	if layerResult != nil {
+		if gateErr := validateFrozenContextCoverage(ctx, plan.Directory, job, contextDir, chatUsedRulesPath); gateErr != nil {
+			execErr = gateErr
+			return execErr
+		}
+	}
+
 	// --- Transcript split (spec 19 D7 / P4) ---
 	// The chat request travels in three regions, ordered by lifetime:
 	//

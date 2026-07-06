@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -775,4 +776,126 @@ func TestExecuteChatJob_RefreshVerbsMutuallyExclusive(t *testing.T) {
 		t.Fatalf("Execute() = %v, want the mutually-exclusive rejection", err)
 	}
 	assertJobFileFailed(t, job)
+}
+
+// TestExecuteChatJob_EmptyFreezeGateTrips is the oracle-plays J1 gate at unit
+// level: a chat job that DECLARES a rules file which resolves to zero files at
+// freeze time must abort the turn BEFORE the (mock) provider call with the
+// actionable error, land at status: failed, write NO request manifest, and
+// leave the chat body byte-identical (no history mutation). Per addendum R4 the
+// frontmatter DOES change (pending→running→failed + last_error), so the body
+// assertion diffs only the post-frontmatter region, not the whole file.
+func TestExecuteChatJob_EmptyFreezeGateTrips(t *testing.T) {
+	mockResponse := filepath.Join(t.TempDir(), "mock-response.md")
+	if err := os.WriteFile(mockResponse, []byte("mock oracle response"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", mockResponse)
+
+	plan, job := newChatJobFixture(t, "rules_file: ctx.rules\n", "Please answer.")
+	gitInitDir(t, plan.Directory)
+	// A rules file whose pattern matches nothing — the empty-freeze incident.
+	if err := os.WriteFile(filepath.Join(plan.Directory, "ctx.rules"), []byte("no/such/*.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bodyBefore, err := ParseFrontmatter(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
+	err = executor.Execute(context.Background(), job, plan)
+	if err == nil {
+		t.Fatal("Execute() = nil, want the empty-freeze gate trip")
+	}
+	for _, want := range []string{"ctx.rules", "0 files", "--rebase-context"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("gate error %q does not mention %q", err.Error(), want)
+		}
+	}
+	assertJobFileFailed(t, job)
+
+	// The turn aborted before provider dispatch: no request manifest exists.
+	matches, _ := filepath.Glob(filepath.Join(plan.Directory, ".artifacts", job.ID, "request-manifest-*.json"))
+	if len(matches) != 0 {
+		t.Errorf("gate-tripped turn wrote request manifest(s): %v", matches)
+	}
+
+	// The chat body is untouched: no LLM response appended, no history mutation.
+	after, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bodyAfter, err := ParseFrontmatter(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bodyBefore, bodyAfter) {
+		t.Errorf("chat body changed across a gate-tripped turn:\nbefore: %q\nafter:  %q", bodyBefore, bodyAfter)
+	}
+}
+
+// TestExecuteChatJob_EmptyFreezeGateRetryRoundTrip proves a gate-failed job
+// recovers with no manual edits (contract A3 door 1): trip the gate, fix the
+// rules to select a real file, reset via RetryJob, re-run → pending_user with a
+// frozen manifest present.
+func TestExecuteChatJob_EmptyFreezeGateRetryRoundTrip(t *testing.T) {
+	mockResponse := filepath.Join(t.TempDir(), "mock-response.md")
+	if err := os.WriteFile(mockResponse, []byte("mock oracle response"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", mockResponse)
+
+	plan, job := newChatJobFixture(t, "rules_file: ctx.rules\n", "Please answer.")
+	gitInitDir(t, plan.Directory)
+	rulesPath := filepath.Join(plan.Directory, "ctx.rules")
+	if err := os.WriteFile(rulesPath, []byte("no/such/*.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewOneShotExecutor(NewMockLLMClient(), nil)
+	if err := executor.Execute(context.Background(), job, plan); err == nil {
+		t.Fatal("first run: want the empty-freeze trip")
+	}
+	assertJobFileFailed(t, job)
+
+	// Fix the rules so they resolve a real file.
+	if err := os.MkdirAll(filepath.Join(plan.Directory, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plan.Directory, "src", "a.go"), []byte("package src\n\nvar A = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rulesPath, []byte("src/a.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Door 1: flow retry resets failed → pending, clearing last_error.
+	if err := RetryJob(job, plan, false, false); err != nil {
+		t.Fatalf("RetryJob after gate trip: %v", err)
+	}
+
+	reloaded, err := LoadJob(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded.Filename = job.Filename
+	reloaded.FilePath = job.FilePath
+	plan.Jobs = []*Job{reloaded}
+	plan.JobsByID[reloaded.ID] = reloaded
+
+	if err := executor.Execute(context.Background(), reloaded, plan); err != nil {
+		t.Fatalf("re-run after fixing rules: %v", err)
+	}
+	if reloaded.Status != JobStatusPendingUser {
+		t.Errorf("re-run status = %v, want pending_user", reloaded.Status)
+	}
+	if m, err := LoadLayerManifest(ContextLayersDir(plan.Directory, reloaded.ID)); err != nil || m == nil {
+		t.Fatalf("layer manifest after fixed re-run = (%v, %v), want present", m, err)
+	}
 }
