@@ -1,12 +1,37 @@
 package add
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/tui/embed"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
+
+// goTop implements the GoTop action: jump to the first item of the current
+// list, or the first visible slot otherwise. Shared by the "home" key and the
+// hand-rolled "gg" chord (see the Update key switch).
+func (m Model) goTop(inList bool) (tea.Model, tea.Cmd) {
+	if inList {
+		// NOTE: the slot-2 case operates on templateList even when the skills
+		// list is shown, preserving the exact pre-refactor behavior
+		// (keystroke-identical). Do not substitute activeList() here — that
+		// would change what gg/G move on the skills slot.
+		switch m.currentSlot().id {
+		case slotJobType:
+			m.jobTypeList.Select(0)
+		case slotTemplateOrSkill:
+			m.templateList.Select(0)
+		case slotDeps:
+			m.depList.Select(0)
+		}
+		return m, nil
+	}
+	m.focusIndex = m.firstVisibleSlot()
+	return m.updateFocus(), nil
+}
 
 // doneWithJob returns a tea.Cmd that emits embed.DoneMsg carrying the
 // freshly-built *orchestration.Job as its Result. Hosts intercept the
@@ -114,29 +139,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+		case !inTextInput && msg.String() == "g":
+			// "gg" chord (go to top). The wizard has no Sequence engine, so
+			// hand-roll the two-press timer here (mirrors grove-config); this
+			// is what makes advertising "gg" on GoTop truthful.
+			if time.Since(m.lastGPress) < 500*time.Millisecond {
+				m.lastGPress = time.Time{}
+				return m.goTop(inList)
+			}
+			m.lastGPress = time.Now()
+			return m, nil
+
 		case key.Matches(msg, m.keys.GoTop):
 			if inTextInput {
 				break
 			}
-			if inList {
-				// NOTE: the slot-2 case operates on templateList even
-				// when the skills list is shown, preserving the exact
-				// pre-refactor behavior (keystroke-identical). Do not
-				// substitute activeList() here — that would change what
-				// gg/G move on the skills slot.
-				switch m.currentSlot().id {
-				case slotJobType:
-					m.jobTypeList.Select(0)
-				case slotTemplateOrSkill:
-					m.templateList.Select(0)
-				case slotDeps:
-					m.depList.Select(0)
-				}
-			} else {
-				m.focusIndex = m.firstVisibleSlot()
-				return m.updateFocus(), nil
-			}
-			return m, nil
+			return m.goTop(inList)
 
 		case key.Matches(msg, m.keys.GoBottom):
 			if inTextInput {

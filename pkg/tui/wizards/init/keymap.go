@@ -16,7 +16,6 @@ type KeyMap struct {
 	NextField      key.Binding
 	PrevField      key.Binding
 	Submit         key.Binding
-	Back           key.Binding
 	Escape         key.Binding
 	Insert         key.Binding
 	Help           key.Binding
@@ -47,10 +46,6 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		Submit: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "submit form"),
-		),
-		Back: key.NewBinding(
-			key.WithKeys("q"),
-			key.WithHelp("q", "cancel"),
 		),
 		Escape: key.NewBinding(
 			key.WithKeys("esc"),
@@ -94,7 +89,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "General")),
 			k.Help,
-			k.Back,
 			k.Base.Quit,
 		},
 	}
@@ -113,7 +107,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		},
 		{
 			Name:     "System",
-			Bindings: []key.Binding{k.Help, k.Back, k.Base.Quit},
+			Bindings: []key.Binding{k.Help, k.Base.Quit},
 		},
 	}
 }

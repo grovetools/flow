@@ -1,6 +1,8 @@
 package add
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -106,6 +108,11 @@ type Model struct {
 
 	// Terminal dimensions for width-clamping the View output.
 	width, height int
+
+	// lastGPress arms the hand-rolled "gg" (go-to-top) chord — the wizard
+	// has no Sequence engine, so two "g" presses within the window fire
+	// GoTop (see update.go). Mirrors grove-config's gg handler.
+	lastGPress time.Time
 }
 
 // slotID identifies a wizard form slot independently of its position

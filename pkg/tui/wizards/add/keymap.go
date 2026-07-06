@@ -64,11 +64,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys(" "),
 			key.WithHelp("space", "toggle"),
 		),
-		// Only "home" is bound: the wizard has no Sequence engine, so a bare
-		// "g" keypress never produces the "gg" chord — advertising it lied.
+		// "gg" is advertised truthfully: the wizard has no Sequence engine, so
+		// update.go hand-rolls the two-press "g" chord timer (mirrors
+		// grove-config's gg handler). "home" is the single-press alternate.
 		GoTop: key.NewBinding(
-			key.WithKeys("home"),
-			key.WithHelp("home", "go to top"),
+			key.WithKeys("gg", "home"),
+			key.WithHelp("gg/home", "go to top"),
 		),
 		GoBottom: key.NewBinding(
 			key.WithKeys("G", "end"),
