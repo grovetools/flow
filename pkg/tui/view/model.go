@@ -566,8 +566,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Check if text entry is active in the status model
 		textEntryActive := m.mode == modeStatus && m.s.statusModel != nil && m.s.statusModel.IsTextEntryActive()
+		// A pending chord in the status model owns its continuation keys. Without
+		// this, the host `a`→add-job shortcut steals the "a" that completes the
+		// "va" chord (preview agent pane — what flat "p" used to do), opening the
+		// "flow plan add" dialog instead. Same interception hazard the esc guard
+		// below handles: host letter-shortcuts must stand down while a chord arms.
+		chordPending := m.mode == modeStatus && m.s.statusModel != nil && m.s.statusModel.IsChordPending()
 
-		if !textEntryActive {
+		if !textEntryActive && !chordPending {
 			if m.mode == modeStatus && (ks == "ctrl+f" || ks == "ctrl+F") && m.s.statusModel != nil && m.s.statusModel.Plan != nil {
 				return m.switchToTab(tabFinishPlan)
 			}
@@ -580,12 +586,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// esc in status mode: if the status model has an active detail
-		// pane (or text entry), delegate esc to it so the detail pane
-		// is closed properly (including BSP splits). Only pop back to
-		// the browser when nothing is open in the status view.
+		// pane (or text entry), or an armed chord / which-key popup, delegate
+		// esc to it so the detail pane is closed / the chord is cancelled
+		// properly (including BSP splits). Only pop back to the browser when
+		// nothing is open in the status view. The chord check is what keeps an
+		// esc pressed to dismiss the which-key popup from accidentally exiting
+		// the whole status TUI (jobs 43/46 goal) — the status seam consumes it
+		// via SequenceCancel.
 		if m.mode == modeStatus && ks == "esc" {
-			if m.s.statusModel != nil && (m.s.statusModel.ActiveDetailPane != status.NoPane || m.s.statusModel.IsTextEntryActive()) {
-				// Let the status model handle esc (close detail pane, etc.)
+			if m.s.statusModel != nil && (m.s.statusModel.ActiveDetailPane != status.NoPane || m.s.statusModel.IsTextEntryActive() || m.s.statusModel.IsChordPending()) {
+				// Let the status model handle esc (close detail pane, cancel chord, etc.)
 				break // fall through to pager delegation below
 			}
 			if m.s.statusModel != nil {

@@ -316,6 +316,16 @@ func (m Model) IsTextEntryActive() bool {
 		m.selectingRecipe || m.columnSelectMode
 }
 
+// IsChordPending returns true when a multi-key sequence is armed (a namespace
+// prefix like "v"/"c" with the which-key popup showing, or the gg motion). The
+// host (view.Model) consults this so an esc pressed to dismiss the chord/popup
+// is delegated INTO this model — where the seam's SequenceCancel consumes it —
+// instead of being read by the host as "pop back to the plan browser". Without
+// this, esc-to-close-which-key accidentally exits the whole status TUI.
+func (m Model) IsChordPending() bool {
+	return m.Sequence != nil && m.Sequence.IsPending()
+}
+
 // closeCurrentDetail tears down whatever detail view is currently active and
 // resets the model to NoPane/FocusJobs. It returns a tea.Cmd that emits the
 // appropriate BSP close message when leaving a host-managed split (agent or
@@ -1069,14 +1079,23 @@ func (m Model) View() string {
 
 	layout := m.Manager.View()
 
-	// ── Which-key popup (centered) once a namespace chord has been armed for
-	// at least the show-delay. Gating on PendingFor() keeps a fast "vl" from
-	// flashing the popup; the delay elapsing forces a re-render via the
+	// ── Which-key popup: overlaid onto the BOTTOM rows of the pane area (just
+	// above the input/footer), matching treemux (popup sits above the status
+	// bar). Overlaying rather than stacking keeps the view's height fixed —
+	// appending it as an extra section grew the view past the terminal height so
+	// the popup scrolled off-screen. Gating on PendingFor() keeps a fast "vl"
+	// from flashing it; the delay elapsing forces a re-render via the
 	// whichKeyShowMsg tick scheduled in update.go's chord seam.
 	if m.whichKeyPopupVisible() {
 		if group, _ := keymap.ResolvePending(m.Sequence.Buffer(), m.KeyMap.Namespaces()); group != nil && len(group.Rows) > 0 {
-			popup := whichkey.RenderKeyGroups(group.Title, []whichkey.KeyGroup{*group}, *theme.DefaultTheme, m.Width, m.Height)
-			layout = whichkey.OverlayCenter(layout, popup, lipgloss.Width(layout))
+			// Use the namespace title as the popup header and render the rows
+			// under an untitled group — otherwise "View (v…)" prints twice (once
+			// as the header, once as the group title).
+			popup := whichkey.RenderKeyGroups(group.Title, []whichkey.KeyGroup{{Rows: group.Rows}}, *theme.DefaultTheme, m.Width, m.Height)
+			// A full-width rule directly above the popup separates the chord panel
+			// from the job list, so it reads as a docked bottom panel when active.
+			rule := theme.DefaultTheme.Muted.Render(strings.Repeat("─", lipgloss.Width(layout)))
+			layout = overlayWhichKeyBottom(layout, popup, rule)
 		}
 	}
 
@@ -1120,6 +1139,31 @@ func (m Model) View() string {
 		Render(finalView)
 
 	return result
+}
+
+// overlayWhichKeyBottom composites the which-key popup onto the bottom rows of
+// base, each covered row replaced by a full-width horizontally-centered popup
+// line so no ANSI escape is ever cut (the whole-row swap whichkey.OverlayCenter
+// uses, anchored bottom instead of center). base keeps its height, so the popup
+// never pushes the footer off-screen — the bug when it was stacked as an extra
+// section. topBorder, when non-empty, is drawn full-width on the row directly
+// above the popup as a docked-panel separator. If the popup is at least as tall
+// as base it falls back to centered replacement (no border).
+func overlayWhichKeyBottom(base, popup, topBorder string) string {
+	baseLines := strings.Split(base, "\n")
+	popupLines := strings.Split(popup, "\n")
+	width := lipgloss.Width(base)
+	if len(popupLines) >= len(baseLines) {
+		return whichkey.OverlayCenter(base, popup, width)
+	}
+	start := len(baseLines) - len(popupLines)
+	if topBorder != "" && start-1 >= 0 {
+		baseLines[start-1] = topBorder
+	}
+	for i, pl := range popupLines {
+		baseLines[start+i] = lipgloss.PlaceHorizontal(width, lipgloss.Center, pl)
+	}
+	return strings.Join(baseLines, "\n")
 }
 
 // calculateFocusJobsWidth calculates the optimal width for the jobs pane
