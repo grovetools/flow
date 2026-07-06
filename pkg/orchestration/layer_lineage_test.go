@@ -614,7 +614,10 @@ func TestExecuteChatJob_CrossJobLineage(t *testing.T) {
 	}
 
 	// e2e 10: manifest layer region = parent sequence + transcript + own
-	// layers, same hashes, breakpoint on the LAST layer.
+	// layers, same hashes. Breakpoints ride BOTH the last layer AND — per K1
+	// (lineage-boundary breakpoint) — the last lineage-sourced layer (the
+	// dep-transcript at index 1), so sibling chats sharing this lineage prefix
+	// cache-READ the transcript region instead of re-writing it.
 	var layerEntries []RequestManifestEntry
 	for _, e := range manifests[0].Entries {
 		if e.Kind == "layer" {
@@ -625,12 +628,14 @@ func TestExecuteChatJob_CrossJobLineage(t *testing.T) {
 		t.Fatalf("manifest layer entries = %+v, want 3", layerEntries)
 	}
 	wantSources := []string{LayerSourceInherited, LayerSourceDepTranscript, LayerSourceRulesBase}
+	// Boundary on the last lineage layer (index 1), plus the last layer (index 2).
+	wantBreakpoints := []bool{false, true, true}
 	for i, e := range layerEntries {
 		if e.Source != wantSources[i] {
 			t.Errorf("layer entry %d source = %q, want %q", i, e.Source, wantSources[i])
 		}
-		if e.Breakpoint != (i == len(layerEntries)-1) {
-			t.Errorf("layer entry %d breakpoint = %v (the save point rides the LAST layer)", i, e.Breakpoint)
+		if e.Breakpoint != wantBreakpoints[i] {
+			t.Errorf("layer entry %d breakpoint = %v, want %v (K1: last-layer + lineage boundary)", i, e.Breakpoint, wantBreakpoints[i])
 		}
 	}
 	if layerEntries[0].ContentHash != parentBaseHash {

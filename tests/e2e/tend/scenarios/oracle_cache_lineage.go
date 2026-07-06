@@ -70,6 +70,109 @@ func addLineageChild(ctx *harness.Context, model string) error {
 	return nil
 }
 
+// addLineageSibling adds a sibling chat titled `title` depending on completed
+// chat A, with the shared child.rules (beta.go). Because every sibling inherits
+// the same parent lineage on the same model, its lineage prefix — the inherited
+// base ref + the dep-transcript — is byte-identical across siblings, which is
+// the precondition the K1 lineage-boundary breakpoint exploits.
+func addLineageSibling(ctx *harness.Context, title, model string) (*orchestration.Job, error) {
+	env := oracleEnv(ctx)
+	if err := fs.WriteString(filepath.Join(env.ProjectDir, "child.rules"), "beta.go\n"); err != nil {
+		return nil, err
+	}
+	return env.addChat(ctx, title, "Plan phase 2 on top of the design.", map[string]interface{}{
+		"rules_file": "child.rules",
+		"model":      model,
+	}, "--depends-on", ctx.GetString("job_a_filename"))
+}
+
+// OracleCacheSiblingFanoutScenario — K1 (oracle-plays/41): a sibling fan-out
+// over one parent lineage. Two children depend on the same completed parent;
+// each child's request manifest must carry the lineage-boundary breakpoint on
+// its LAST lineage-sourced (dep-transcript) layer, and the two children must be
+// byte-identical through that boundary by (Kind, ContentHash) — the prefix a
+// second sibling cache-READs instead of re-writing.
+var OracleCacheSiblingFanoutScenario = harness.NewScenario(
+	"sibling-fanout",
+	"Two sibling chats inheriting the same completed parent share a byte-identical lineage prefix; each manifest carries the K1 lineage-boundary breakpoint on its last dep-transcript layer.",
+	[]string{"oracle-cache-lineage", "chat", "cache", "lineage"},
+	[]harness.Step{
+		harness.NewStep("Setup sandboxed environment", func(ctx *harness.Context) error {
+			_, err := setupOracleCacheEnv(ctx, "fanout")
+			return err
+		}),
+		harness.SetupMocks(
+			harness.Mock{CommandName: "grove"},
+			harness.Mock{CommandName: "cx"},
+		),
+		harness.NewStep("Complete parent chat A", func(ctx *harness.Context) error {
+			return setupLineageParent(ctx, lineageModelA)
+		}),
+		harness.NewStep("Fan out two sibling chats on A (same model), run each", func(ctx *harness.Context) error {
+			env := oracleEnv(ctx)
+			b, err := addLineageSibling(ctx, "sibling-b", lineageModelA)
+			if err != nil {
+				return err
+			}
+			ctx.Set("job_b_id", b.ID)
+			if err := env.runTurn(ctx, b.Filename).AssertSuccess(); err != nil {
+				return err
+			}
+			c, err := addLineageSibling(ctx, "sibling-c", lineageModelA)
+			if err != nil {
+				return err
+			}
+			ctx.Set("job_c_id", c.ID)
+			return env.runTurn(ctx, c.Filename).AssertSuccess()
+		}),
+		harness.NewStep("Both siblings breakpoint the lineage boundary and share it byte-for-byte", func(ctx *harness.Context) error {
+			env := oracleEnv(ctx)
+			bManifests, err := env.loadManifests(ctx.GetString("job_b_id"))
+			if err != nil {
+				return err
+			}
+			cManifests, err := env.loadManifests(ctx.GetString("job_c_id"))
+			if err != nil {
+				return err
+			}
+			if len(bManifests) == 0 || len(cManifests) == 0 {
+				return fmt.Errorf("missing sibling manifests (B=%d, C=%d)", len(bManifests), len(cManifests))
+			}
+			bLayers := entriesOfKind(bManifests[len(bManifests)-1], "layer")
+			cLayers := entriesOfKind(cManifests[len(cManifests)-1], "layer")
+
+			// Lineage prefix is [inherited, dep-transcript]; index 1 is the last
+			// lineage-sourced layer (the K1 boundary), then the child's own base.
+			const lineagePrefix = 2
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.True("sibling B has the full lineage prefix + own base", len(bLayers) >= 3)
+				v.True("sibling C has the full lineage prefix + own base", len(cLayers) >= 3)
+				if len(bLayers) < lineagePrefix || len(cLayers) < lineagePrefix {
+					return
+				}
+				v.Equal("B boundary layer is the dep-transcript", "dep-transcript", bLayers[lineagePrefix-1].Source)
+				v.Equal("C boundary layer is the dep-transcript", "dep-transcript", cLayers[lineagePrefix-1].Source)
+				v.True("K1: B breakpoints its last lineage layer", bLayers[lineagePrefix-1].Breakpoint)
+				v.True("K1: C breakpoints its last lineage layer", cLayers[lineagePrefix-1].Breakpoint)
+				v.Equal("earlier inherited layer carries no boundary breakpoint (B)", false, bLayers[0].Breakpoint)
+				v.Equal("earlier inherited layer carries no boundary breakpoint (C)", false, cLayers[0].Breakpoint)
+				// The child's own last layer keeps its breakpoint too (BP on both
+				// the boundary and the last layer — the ladder's full 4-BP budget).
+				v.True("B still breakpoints its own last layer", bLayers[len(bLayers)-1].Breakpoint)
+				v.True("C still breakpoints its own last layer", cLayers[len(cLayers)-1].Breakpoint)
+				// Siblings share the lineage prefix byte-for-byte (Kind, ContentHash);
+				// Path differs (each child owns its transcript copy) but bytes match,
+				// so a second sibling cache-READs what the first wrote.
+				for i := 0; i < lineagePrefix; i++ {
+					v.Equal(fmt.Sprintf("lineage entry %d kind matches across siblings", i), bLayers[i].Kind, cLayers[i].Kind)
+					v.Equal(fmt.Sprintf("lineage entry %d content hash matches across siblings", i), bLayers[i].ContentHash, cLayers[i].ContentHash)
+				}
+			})
+		}),
+	},
+)
+
 // OracleCacheLineageInheritScenario — spec 19 e2e scenario 10.
 var OracleCacheLineageInheritScenario = harness.NewScenario(
 	"lineage-inherit",

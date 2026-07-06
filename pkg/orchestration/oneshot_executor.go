@@ -1573,6 +1573,30 @@ func buildStreamItems(ctx context.Context, jobID string, layerPaths []string, an
 	return items
 }
 
+// leadingLineageLayerCount returns the length of the leading run of layer paths
+// whose provenance is an inherited parent lineage or a dep-transcript (K1). The
+// run STOPS at the first non-lineage source, so the auto lineage git-delta
+// layer (LayerSourceGitDelta) — whose bytes are worktree-time-dependent and
+// differ per sibling — plus the child's own base / rules-diff layers are
+// excluded. grove-anthropic places the sibling-reuse cache breakpoint on the
+// last layer of this leading prefix (see RequestOptions.LineageLayerCount):
+// siblings inheriting the same lineage cache-READ that region instead of
+// re-writing it. Lineage integrated mid-chat on a later turn is anchored later
+// in the layer list, so it is not part of the leading run and correctly gets no
+// boundary breakpoint.
+func leadingLineageLayerCount(paths []string, sources map[string]string) int {
+	n := 0
+	for _, p := range paths {
+		switch sources[p] {
+		case LayerSourceInherited, LayerSourceDepTranscript:
+			n++
+		default:
+			return n
+		}
+	}
+	return n
+}
+
 // executeChatJob handles the conversational logic for chat-type jobs
 func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Plan, output io.Writer) (retErr error) {
 	// Generate a unique request ID for tracing this turn
@@ -2367,6 +2391,11 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			}
 		}
 		anthropicOpts.Stream = buildStreamItems(ctx, job.ID, streamLayerFiles, chatLayerAnchors, allIncludeFiles, streamHistory)
+		// K1 lineage boundary: count the leading lineage run over the layers that
+		// actually ride the stream (streamLayerFiles drops a spliced parent's
+		// transcript doc), since buildStreamItems places head layers first in that
+		// order — the leading stream items are exactly those lineage layers.
+		anthropicOpts.LineageLayerCount = leadingLineageLayerCount(streamLayerFiles, chatLayerSources)
 	} else {
 		// Ladder (spec 19 D1): frozen layer artifacts form the document region
 		// (BP2 on the last), context docs follow with no breakpoint, and the
@@ -2374,6 +2403,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		anthropicOpts.HistoryBlocks = conversation.HistoryBlocks.Texts()
 		anthropicOpts.LayerFiles = chatLayerFiles
 		anthropicOpts.ContextFiles = allIncludeFiles
+		// K1 lineage boundary: a leading inherited-lineage/dep-transcript prefix
+		// gets a 4th breakpoint on its last layer so sibling chats cache-READ the
+		// shared transcript region instead of re-writing it.
+		anthropicOpts.LineageLayerCount = leadingLineageLayerCount(chatLayerFiles, chatLayerSources)
 	}
 
 	// Per-turn request manifest (spec 19 D9): record, next to the briefing
