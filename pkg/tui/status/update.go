@@ -948,6 +948,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case whichKeyShowMsg:
+		// The which-key show-delay elapsed. This is a pure re-render nudge — the
+		// popup's visibility is decided in View() by IsPending() && PendingFor()
+		// >= whichKeyDelay. If the chord already resolved, IsPending() is false
+		// and no popup renders.
+		return m, nil
+
 	case TickMsg:
 		// Toggle cursor visibility for blinking effect
 		m.CursorVisible = !m.CursorVisible
@@ -1838,12 +1845,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// Dispatch to focused pane handlers for detail and secondary panes
-		if m.ShowLogs && (m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary) {
-			// Global keys that should pass through to the main switch
+		// Dispatch to focused pane handlers for detail and secondary panes.
+		// A pending top-level namespace chord (v…/c…) owns its continuation keys,
+		// so when one is armed we skip this whitelist entirely and let the chord's
+		// 2nd char fall through to the chord seam below — otherwise the seam's
+		// per-key whitelist would misroute the "l" in "vl" to a viewport handler.
+		if m.ShowLogs && (m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary) && !m.namespaceArmed() {
+			// Global keys that should pass through to the main switch. "v"/"c" arm
+			// the View/Change namespaces; "f" toggles fullscreen (former flat "z"
+			// is gone — rebound to "f"). The legacy flat aliases (F,L,b,m,p,w)
+			// were dropped (chord-only, sign-off E4), so they no longer need a
+			// pass-through here — they now route to the pane handlers (scrolling
+			// etc.) while a detail pane is focused.
 			switch msg.String() {
-			case "q", "ctrl+c", "?", "F", "L", "left", "right", "f", "b", "m", "p", "v", "w",
-				"tab", "shift+tab", "V", "z", "i", "s", "esc":
+			case "q", "ctrl+c", "?", "left", "right", "f", "v", "c",
+				"tab", "shift+tab", "V", "i", "s", "esc":
 				// Let these be handled by the main logic below
 			default:
 				if m.Focus == FocusDetailPrimary {
@@ -1853,27 +1869,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Handle 'gg' sequence for going to top
-		if msg.String() == "g" {
-			result, _ := m.Sequence.Process(msg, m.KeyMap.Top)
-			if result == keymap.SequenceMatch {
-				// gg - go to top
-				m.Cursor = 0
-				m.ScrollOffset = 0
+		// Top-level chord processing: the v/c namespaces, the gg motion, and the
+		// legacy single-key aliases (L, b, O, …) all resolve here through the
+		// shared Sequence engine. A pending prefix renders the which-key popup
+		// from View() via Sequence.IsPending(). A completed chord for the gg
+		// motion jumps to top; any other completed chord is resolved to its
+		// canonical key and falls through to the flat-key switch, whose
+		// key.Matches arms still carry each action's handler. A non-chord key
+		// clears the buffer and falls through unchanged.
+		{
+			// Capture arm state BEFORE Process mutates the buffer: a stray key
+			// (e.g. "x" after "v") makes Process append then clear, so
+			// namespaceArmed() would read false afterward.
+			wasArmed := m.namespaceArmed()
+			res, idx := m.Sequence.Process(msg, m.chordBindings()...)
+			switch res {
+			case keymap.SequenceMatch:
 				m.Sequence.Clear()
-				if m.ActiveDetailPane != NoPane {
-					m, reloadCmd := m.reloadActiveDetailPane()
-					if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
-						return m, tea.Batch(reloadCmd, scopeCmd)
-					}
-					return m, reloadCmd
+				if idx == 0 {
+					// gg — go to top of the job list.
+					return m.gotoTop()
+				}
+				// Re-enter the flat dispatch switch as the resolved chord.
+				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(m.chordBindings()[idx].Keys()[0])}
+			case keymap.SequencePending:
+				// First 'g'/'v'/'c' or a chord in progress — wait for more input.
+				// For a namespace prefix, schedule a tick so the popup re-renders
+				// once the show-delay elapses (Bubble Tea won't repaint without an
+				// event). No tick for the flat gg motion — its footer PendingHint
+				// is immediate and needs no delayed reveal.
+				if m.namespaceArmed() {
+					return m, tea.Tick(m.whichKeyDelay, func(time.Time) tea.Msg { return whichKeyShowMsg{} })
+				}
+				return m, nil
+			case keymap.SequenceCancel:
+				// esc dismissed an armed chord — consume it so it closes the
+				// which-key popup instead of falling through to Back/Quit.
+				return m, nil
+			default:
+				m.Sequence.Clear()
+				// While a namespace menu was open, a stray non-continuation key
+				// (not a valid completion) closes the menu and is consumed — the
+				// which-key idiom, so "v" then "x" doesn't fire AddXmlPlan. Flat
+				// single-key chords (gg) keep falling through so "g" then "j"
+				// still moves down.
+				if wasArmed {
+					return m, nil
 				}
 			}
-			// First 'g' or sequence in progress - sequence is tracking it
-			return m, nil
-		} else {
-			// Any other key clears the sequence
-			m.Sequence.Clear()
 		}
 
 		switch {
@@ -2000,6 +2043,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.ToggleFullscreen):
+			// "f" delivers logs fullscreen from anywhere: if the logs pane isn't
+			// open, open it first (same internal path vl/ViewLogs uses), then
+			// apply the fullscreen toggle — so a bare "f" no longer no-ops when
+			// the pane is closed. Remains a toggle (fullscreen → restore).
+			var openCmd tea.Cmd
+			if !m.ShowLogs {
+				mdl, c := m.openDetailPane(LogsPaneDetail)
+				m = mdl.(Model)
+				openCmd = c
+			}
 			if m.ShowLogs {
 				// Let the Manager toggle fullscreen
 				m.Manager, _ = m.Manager.Update(msg)
@@ -2011,9 +2064,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Update log viewer with new dimensions
 				m.LogViewer, cmd = m.LogViewer.Update(tea.WindowSizeMsg{Width: m.LogViewerWidth, Height: m.LogViewerHeight - logHeaderHeight})
-				return m, cmd
+				return m, tea.Batch(openCmd, cmd)
 			}
-			return m, nil
+			return m, openCmd
 
 		case key.Matches(msg, m.KeyMap.Up):
 			if m.Cursor > 0 {
@@ -2709,7 +2762,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							"time_since_start": timeSinceStart,
 						}).Warn("Blocked: attempted to complete job that just started (< 5 seconds)")
 						m.StatusSummary = theme.DefaultTheme.Warning.Render(
-							fmt.Sprintf("Job '%s' just started %s ago. Wait a moment before completing.", job.Title, timeSinceStart.Round(time.Second)))
+							fmt.Sprintf("Job '%s' just started %s ago. Wait a moment before completing.", job.Title, timeSinceStart.Round(time.Second)),
+						)
 						return m, nil
 					}
 				}
@@ -2983,6 +3037,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	return m, nil
+}
+
+// whichKeyShowMsg is emitted by the chord seam's SequencePending tick once the
+// which-key show-delay elapses. Its only job is to force a Bubble Tea re-render
+// so View() can reveal the popup; the handler is a no-op.
+type whichKeyShowMsg struct{}
+
+// chordBindings returns the ordered set of bindings the top-level Sequence
+// engine resolves: the gg motion at index 0, followed by every View (v…) and
+// Change (c…) namespace member in Namespaces() order. The index a SequenceMatch
+// reports is meaningful only against THIS order (0 == gg; the rest fall through
+// to the flat-key switch via their canonical key), so keep it in lockstep with
+// KeyMap.Namespaces().
+func (m Model) chordBindings() []key.Binding {
+	bindings := []key.Binding{m.KeyMap.Top}
+	for _, ns := range m.KeyMap.Namespaces() {
+		bindings = append(bindings, ns.Bindings...)
+	}
+	return bindings
+}
+
+// namespaceArmed reports whether the Sequence buffer currently has a View/Change
+// namespace prefix armed (e.g. "v" while "vl"/"vf"/… remain). Used to keep a
+// chord's continuation key from being stolen by the detail-pane whitelist. A
+// pane-level gg (buffer "g") is NOT a namespace prefix, so it stays with the
+// viewport handler.
+func (m Model) namespaceArmed() bool {
+	buf := m.Sequence.Buffer()
+	for _, ns := range m.KeyMap.Namespaces() {
+		if ns.Armed(buf) {
+			return true
+		}
+	}
+	return false
+}
+
+// gotoTop jumps the job-list cursor to the top (the gg motion). When a detail
+// pane is open it reloads that pane's content for the new cursor row and emits
+// a context-scope update, mirroring the pre-chord-seam gg handling.
+func (m Model) gotoTop() (tea.Model, tea.Cmd) {
+	m.Cursor = 0
+	m.ScrollOffset = 0
+	if m.ActiveDetailPane != NoPane {
+		m, reloadCmd := m.reloadActiveDetailPane()
+		if scopeCmd := m.emitContextScopeUpdate(); scopeCmd != nil {
+			return m, tea.Batch(reloadCmd, scopeCmd)
+		}
+		return m, reloadCmd
+	}
 	return m, nil
 }
 
@@ -3540,6 +3644,9 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 		return m, nil
 	case keymap.SequencePending:
 		return m, nil
+	case keymap.SequenceCancel:
+		// esc dismissed a pending gg — buffer already cleared; consume it.
+		return m, nil
 	}
 
 	// No sequence match — clear and delegate to the active viewport
@@ -3578,6 +3685,9 @@ func (m Model) handleSkillTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshSkillPane()
 		return m, nil
 	case keymap.SequencePending:
+		return m, nil
+	case keymap.SequenceCancel:
+		// esc dismissed a pending gg — buffer already cleared; consume it.
 		return m, nil
 	}
 
@@ -3658,6 +3768,9 @@ func (m Model) handleArtifactViewportKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case keymap.SequencePending:
+		return m, nil
+	case keymap.SequenceCancel:
+		// esc dismissed a pending gg — buffer already cleared; consume it.
 		return m, nil
 	}
 

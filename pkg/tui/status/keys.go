@@ -68,21 +68,26 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("r"),
 			key.WithHelp("r", "run job"),
 		),
+		// Change (c…) namespace. Chord-only — the legacy flat aliases were
+		// dropped (sign-off E4, no deprecation window; this is the fleet
+		// precedent). "cc" already had no flat key because flat "c" is the
+		// change prefix (Process checks MatchesAny before IsPrefixOfAny, so a
+		// flat "c" would fire before the chord could arm).
 		SetCompleted: key.NewBinding(
-			key.WithKeys("c"),
-			key.WithHelp("c", "mark completed"),
+			key.WithKeys("cc"),
+			key.WithHelp("cc", "mark completed"),
 		),
 		SetStatus: key.NewBinding(
-			key.WithKeys("S"),
-			key.WithHelp("S", "set status"),
+			key.WithKeys("cs"),
+			key.WithHelp("cs", "set status"),
 		),
 		SetType: key.NewBinding(
-			key.WithKeys("Y"),
-			key.WithHelp("Y", "set type"),
+			key.WithKeys("ct"),
+			key.WithHelp("ct", "set type"),
 		),
 		SetTemplate: key.NewBinding(
-			key.WithKeys("E"),
-			key.WithHelp("E", "set template"),
+			key.WithKeys("ce"),
+			key.WithHelp("ce", "set template"),
 		),
 		AddJob: key.NewBinding(
 			key.WithKeys("A"),
@@ -127,41 +132,45 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("T"),
 			key.WithHelp("T", "toggle columns"),
 		),
+		// View (v…) namespace. Chord-only — the legacy flat aliases were dropped
+		// (sign-off E4). "vv" (preview job file) never had a flat alias because
+		// flat "v" is the view prefix; "vf" (frontmatter) likewise, since its
+		// old flat "t" is a reserved toggle prefix.
 		ViewLogs: key.NewBinding(
-			key.WithKeys("L"),
-			key.WithHelp("L", "view logs"),
+			key.WithKeys("vl"),
+			key.WithHelp("vl", "view logs"),
 		),
 		ViewFrontmatter: key.NewBinding(
-			key.WithKeys("t"),
-			key.WithHelp("t", "view frontmatter"),
+			key.WithKeys("vf"),
+			key.WithHelp("vf", "view frontmatter"),
 		),
 		ViewBriefing: key.NewBinding(
-			key.WithKeys("b"),
-			key.WithHelp("b", "view briefing"),
+			key.WithKeys("vb"),
+			key.WithHelp("vb", "view briefing"),
 		),
 		ViewEdit: key.NewBinding(
-			key.WithKeys("v"),
-			key.WithHelp("v", "preview job file"),
+			key.WithKeys("vv"),
+			key.WithHelp("vv", "preview job file"),
 		),
 		ViewTokens: key.NewBinding(
-			key.WithKeys("O"),
-			key.WithHelp("O", "view token usage"),
+			key.WithKeys("vt"),
+			key.WithHelp("vt", "view token usage"),
 		),
 		ViewContext: key.NewBinding(
-			key.WithKeys("w"),
-			key.WithHelp("w", "view context"),
+			key.WithKeys("vc"),
+			key.WithHelp("vc", "view context"),
 		),
 		ViewNativeAgent: key.NewBinding(
-			key.WithKeys("p"),
-			key.WithHelp("p", "preview agent pane"),
+			key.WithKeys("va"),
+			key.WithHelp("va", "preview agent pane"),
 		),
 		ViewMemory: key.NewBinding(
-			key.WithKeys("M"),
-			key.WithHelp("M", "memory search"),
+			key.WithKeys("vm"),
+			key.WithHelp("vm", "memory search"),
 		),
 		ViewSkillPane: key.NewBinding(
-			key.WithKeys("F"),
-			key.WithHelp("F", "skills"),
+			key.WithKeys("vs"),
+			key.WithHelp("vs", "skills"),
 		),
 		CloseDetailPane: key.NewBinding(
 			key.WithKeys("esc"),
@@ -183,9 +192,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("V"),
 			key.WithHelp("V", "toggle h/v split"),
 		),
+		// Rebound from flat "z": "z" is the reserved fold prefix. "f" is free and
+		// mnemonic (fullscreen). No alias — a flat "z" alias would re-flag the
+		// squatter.
 		ToggleFullscreen: key.NewBinding(
-			key.WithKeys("z"),
-			key.WithHelp("z", "fullscreen logs"),
+			key.WithKeys("f"),
+			key.WithHelp("f", "fullscreen logs"),
 		),
 		SendInput: key.NewBinding(
 			key.WithKeys("i"),
@@ -232,19 +244,44 @@ func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Quit}
 }
 
+// Namespaces returns the which-key chord namespaces for this TUI, built from the
+// named KeyMap fields (so any user override applied by ApplyTUIOverrides is
+// reflected). The "v" View namespace and the "c" Change namespace group the
+// two-key chords declared in NewKeyMap (vl, vf, …, cs, ct, …); the update loop
+// arms them through the shared Sequence engine and View() renders the popup.
+// Order here is the wire order the update loop's dispatchChord relies on.
+func (k KeyMap) Namespaces() []keymap.Namespace {
+	return []keymap.Namespace{
+		{Prefix: "v", Label: "View", Bindings: []key.Binding{
+			k.ViewLogs, k.ViewFrontmatter, k.ViewBriefing, k.ViewEdit,
+			k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane,
+		}},
+		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
+			k.SetStatus, k.SetType, k.SetTemplate, k.SetCompleted,
+		}},
+	}
+}
+
 // Sections returns all keybinding sections for the flow status TUI.
-// It includes the base sections plus flow-specific sections.
+// It includes the base sections plus flow-specific sections. The View (v…) and
+// Change (c…) namespaces surface as their own sections so the ? overlay and the
+// generated registry list the chord members (vl, vf, cs, …) as ordinary
+// bindings; the residual Panes section keeps the pane-management controls, and
+// the set-family bindings are no longer duplicated into Actions.
 func (k KeyMap) Sections() []keymap.Section {
+	ns := k.Namespaces()
 	return []keymap.Section{
 		keymap.NavigationSection(k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown),
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
-		keymap.NewSectionWithIcon("Views", theme.IconViewDashboard,
-			k.ToggleColumns, k.ViewLogs, k.ViewFrontmatter,
-			k.ViewBriefing, k.ViewEdit, k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane,
-			k.CloseDetailPane, k.SwitchFocus, k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
+		ns[0].Section(),
+		ns[1].Section(),
+		keymap.NewSectionWithIcon(
+			"Panes", theme.IconViewDashboard,
+			k.ToggleColumns, k.CloseDetailPane, k.SwitchFocus,
+			k.FocusLeft, k.FocusRight, k.ToggleLayout, k.ToggleFullscreen,
 		),
 		keymap.ActionsSection(
-			k.Run, k.Edit, k.Confirm, k.SetCompleted, k.SetStatus, k.SetType, k.SetTemplate,
+			k.Run, k.Edit, k.Confirm,
 			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.AgentFromChat, k.Rename,
 			k.Resume, k.EditDeps, k.DemoteToNote, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath,
 		),

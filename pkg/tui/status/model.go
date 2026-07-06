@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -21,6 +22,7 @@ import (
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/logviewer"
+	"github.com/grovetools/core/tui/components/whichkey"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/panes"
 	"github.com/grovetools/core/tui/theme"
@@ -106,6 +108,7 @@ type Model struct {
 	KeyMap                KeyMap
 	Help                  help.Model
 	Sequence              *keymap.SequenceState // For detecting multi-key sequences (gg)
+	whichKeyDelay         time.Duration         // Hold time before the which-key popup shows (keymap.WhichKeyDelay)
 	CursorVisible         bool                  // Track cursor visibility for blinking animation
 	Renaming              bool
 	RenameInput           textinput.Model
@@ -713,6 +716,14 @@ func New(cfg Config) Model {
 		panes.Pane{ID: "jobs", Model: NewJobsPaneModel(), Flex: 1, MinSize: 20},
 		panes.Pane{ID: "detail", Model: NewDetailPaneModel(), Flex: 2, MinSize: 20, Hidden: true},
 	)
+	// The pane Manager toggles fullscreen ("zoom") on its own KeyMap, which
+	// defaults to "z". flow-status rebound its ToggleFullscreen action off the
+	// reserved fold prefix "z" onto "f" (sign-off E2); the fullscreen handler
+	// forwards the keypress via m.Manager.Update(msg), so the Manager's binding
+	// must match "f" too — otherwise the toggle silently no-ops (the original
+	// "fullscreen f didn't work" bug had this second cause beyond the ShowLogs
+	// gate).
+	mgr.KeyMap.ToggleFullscreen = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "zoom"))
 	if logSplitVertical {
 		mgr.Direction = panes.DirectionHorizontal
 		mgr.Panes[0].Fixed = 45 // Will be recalculated on first WindowSizeMsg
@@ -738,6 +749,7 @@ func New(cfg Config) Model {
 		KeyMap:                   keyMap,
 		Help:                     helpModel,
 		Sequence:                 keymap.NewSequenceState(),
+		whichKeyDelay:            keymap.WhichKeyDelay(cliCfg),
 		CursorVisible:            true,
 		LogViewer:                logViewerModel,
 		ShowLogs:                 false, // Start with logs hidden by default
@@ -972,7 +984,26 @@ func (m Model) renderFooter() string {
 			followStatus = theme.DefaultTheme.Muted.Render(" • Follow: OFF")
 		}
 	}
-	return helpView + followStatus
+	footer := helpView + followStatus
+	// When a flat multi-key chord is armed (gg — the only enabled one here), show
+	// a pending indicator so single-key arming is not invisible. Namespace chords
+	// (v…/c…) render the which-key popup instead, so PendingHint returns "" for
+	// them and only the popup shows.
+	if m.Sequence.IsPending() {
+		if hint := keymap.PendingHint(m.Sequence.Buffer(), keymap.CommonSequenceBindings(m.KeyMap.Base)...); hint != "" {
+			footer += theme.DefaultTheme.Muted.Render("  " + hint)
+		}
+	}
+	return footer
+}
+
+// whichKeyPopupVisible reports whether the which-key popup should render: a
+// chord must be pending AND armed for at least the show-delay. This is the
+// SHOW gate — the delay swallows a fast two-key chord (e.g. "vl") so the popup
+// only appears on a deliberate hold. The chord seam schedules a whichKeyShowMsg
+// tick so the frame re-renders once the delay elapses.
+func (m Model) whichKeyPopupVisible() bool {
+	return m.Sequence.IsPending() && m.Sequence.PendingFor() >= m.whichKeyDelay
 }
 
 // View renders the TUI
@@ -1037,6 +1068,17 @@ func (m Model) View() string {
 	// ── Render layout via Manager ────────────────────────────────────
 
 	layout := m.Manager.View()
+
+	// ── Which-key popup (centered) once a namespace chord has been armed for
+	// at least the show-delay. Gating on PendingFor() keeps a fast "vl" from
+	// flashing the popup; the delay elapsing forces a re-render via the
+	// whichKeyShowMsg tick scheduled in update.go's chord seam.
+	if m.whichKeyPopupVisible() {
+		if group, _ := keymap.ResolvePending(m.Sequence.Buffer(), m.KeyMap.Namespaces()); group != nil && len(group.Rows) > 0 {
+			popup := whichkey.RenderKeyGroups(group.Title, []whichkey.KeyGroup{*group}, *theme.DefaultTheme, m.Width, m.Height)
+			layout = whichkey.OverlayCenter(layout, popup, lipgloss.Width(layout))
+		}
+	}
 
 	// ── Input area (below Manager, not managed by it) ────────────────
 
