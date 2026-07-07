@@ -306,6 +306,15 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 	// Use the CWD captured at function entry (before flow changes directories)
 	inheritSkillSequence(job, startingDir)
 
+	// Lineage-overlap advisory (oracle-plays K2): if a completed sibling chat
+	// already froze layers this chat's rules re-resolve, `-d`-ing it would
+	// inherit them warm instead of paying a fresh cold base write. Advisory only
+	// — printed to stderr (so it never pollutes --json stdout), never blocks the
+	// add, all errors swallowed to nil advice.
+	if advice, _ := orchestration.AdviseLineageOverlapAtAdd(plan, job); advice != nil {
+		fmt.Fprintln(os.Stderr, "Note: "+advice.FormatAdvice())
+	}
+
 	// Generate job file
 	filename, err := orchestration.AddJob(plan, job)
 	if err != nil {

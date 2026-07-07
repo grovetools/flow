@@ -242,6 +242,7 @@ func main() {
 		scenarios.OracleCacheLegacyUntouchedScenario,       // 23
 		scenarios.OracleCacheInvokerCwdRootingScenario,     // 24 (job-25 rooting regression)
 		scenarios.OracleCacheSiblingFanoutScenario,         // 25 (K1 lineage-boundary breakpoint)
+		scenarios.OracleCacheLineageAdvisorScenario,        // 26 (K2 lineage-overlap advisor)
 	}
 
 	if err := app.Execute(context.TODO(), allScenarios); err != nil {

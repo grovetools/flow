@@ -86,6 +86,7 @@ scenarios = [
   "concurrent-chats",
   "unreadable-glob-file",
   "legacy-untouched",
+  "lineage-overlap-advisor",
 ]
 
 [[hooks.on_stop]]

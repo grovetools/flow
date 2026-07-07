@@ -2149,6 +2149,25 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	}
 	var layerResult *LayerEngineResult
 	if chatUsedRulesPath != "" {
+		// Lineage-overlap advisory (oracle-plays K2): fire only on a genuine
+		// turn 1 (no layer store yet — nil manifest). A completed sibling chat
+		// NOT already among this job's deps, whose frozen layers cover this
+		// turn's resolved fileset, would inherit warm under `-d`. Emitted BEFORE
+		// PrepareContextLayers freezes the base, so acting on it is still a dep
+		// edit rather than a --rebase-context. Advisory only; errors swallowed.
+		if existing, _ := LoadLayerManifest(ContextLayersDir(plan.Directory, job.ID)); existing == nil {
+			if advice, _ := AdviseLineageOverlapAtFire(plan, job, contextDir, chatUsedRulesPath, effectiveModel); advice != nil {
+				fmt.Fprintf(grovelogging.GetWriter(ctx), "Lineage advisory: %s\n", advice.FormatAdvice())
+				ulog.Warn("Lineage overlap: a completed sibling chat's frozen layers cover this chat's rules — `-d` would inherit them warm").
+					Field("job_id", job.ID).
+					Field("parent_job_id", advice.ParentJobID).
+					Field("matched_files", advice.MatchedFiles).
+					Field("warm_bytes", advice.MatchedBytes).
+					Field("model_match", advice.ModelMatch).
+					Log(ctx)
+			}
+		}
+
 		refresh := LayerRefreshNone
 		switch {
 		case directive.RebaseContext:
