@@ -30,9 +30,11 @@ func configureDefaultContextRules(repoPath string) error {
 	// This function doesn't read any existing .grove/rules file.
 	defaultContent, rulesDestPath := mgr.LoadDefaultRulesContent()
 
-	// If no default is configured in grove.yml, create a basic boilerplate.
+	// If no default is configured in grove.yml, seed a commented, non-including
+	// placeholder. We intentionally do NOT default to a whole-repo "*" — an
+	// uncurated repo must not silently pull its entire tree into context.
 	if defaultContent == nil {
-		defaultContent = []byte("# Default context rules: include all non-gitignored files.\n*\n")
+		defaultContent = []byte(grovecontext.DefaultRulesTemplate)
 	}
 
 	// Ensure the .grove directory exists within the target repo path.
