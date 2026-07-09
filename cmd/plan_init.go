@@ -59,13 +59,15 @@ var provisionEnvironmentFn = provisionEnvironment
 
 // executePlanInit contains the core logic for initializing a plan and returns a result string.
 func executePlanInit(cmd *PlanInitCmd) (string, error) {
-	// Derive ExtractAllFrom and NoteRef from FromNote if provided
-	// --from-note takes precedence over --extract-all-from and --note-ref
-	if cmd.FromNote != "" {
+	// Derive ExtractAllFrom and NoteRef from the FIRST --from-note if provided.
+	// --from-note takes precedence over --extract-all-from and --note-ref.
+	// Additional --from-note entries become their own jobs later (see roster
+	// block below the first-job extraction).
+	if firstNote := cmd.firstFromNote(); firstNote != "" {
 		// Resolve the path to an absolute path
-		fromNotePath, err := filepath.Abs(cmd.FromNote)
+		fromNotePath, err := filepath.Abs(firstNote)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve path for --from-note file %s: %w", cmd.FromNote, err)
+			return "", fmt.Errorf("failed to resolve path for --from-note file %s: %w", firstNote, err)
 		}
 
 		// Set ExtractAllFrom to the note path for content extraction
@@ -327,6 +329,67 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		result.WriteString(fmt.Sprintf("* Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename))
 	}
 
+	// Roster: each additional --from-note becomes its own chat job appended to
+	// the plan. The first note already produced the note-target job via the
+	// ExtractAllFrom block above; here we fan the remaining notes out into one
+	// job each, so a group of related tickets can seed a single plan+worktree.
+	if len(cmd.FromNotes) > 1 {
+		rosterPlan, err := orchestration.LoadPlan(planPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to reload plan for roster jobs: %w", err)
+		}
+
+		var repoName, worktreeName string
+		if currentNode != nil {
+			repoName = currentNode.Name
+		}
+		if rosterPlan.Config != nil && rosterPlan.Config.Worktree != "" {
+			worktreeName = rosterPlan.Config.Worktree
+		}
+
+		for _, notePath := range cmd.FromNotes[1:] {
+			absPath, err := filepath.Abs(notePath)
+			if err != nil {
+				return "", fmt.Errorf("failed to resolve path for --from-note file %s: %w", notePath, err)
+			}
+			content, err := os.ReadFile(absPath)
+			if err != nil {
+				return "", fmt.Errorf("failed to read --from-note file %s: %w", absPath, err)
+			}
+			_, body, err := orchestration.ParseFrontmatter(content)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse frontmatter from --from-note file %s: %w", absPath, err)
+			}
+
+			jobTitle := strings.TrimSuffix(filepath.Base(absPath), filepath.Ext(filepath.Base(absPath)))
+			job := &orchestration.Job{
+				Title:      jobTitle,
+				Type:       orchestration.JobTypeChat,
+				Status:     orchestration.JobStatusPendingUser,
+				ID:         orchestration.GenerateUniqueJobID(rosterPlan, jobTitle),
+				PromptBody: string(body),
+				Model:      cmd.Model,
+			}
+
+			// Each roster job links to its OWN source note. Note that only the
+			// first note (cmd.NoteRef) drives the plan's on_start/on_review/
+			// on_finish nb-lifecycle hooks; the additional notes are linked for
+			// traceability but are not moved through the notebook lifecycle.
+			enrichJob(job, JobEnrichmentOptions{
+				NoteRef:      absPath,
+				Repository:   repoName,
+				Worktree:     worktreeName,
+				IsNoteTarget: true,
+			})
+
+			filename, err := orchestration.AddJob(rosterPlan, job)
+			if err != nil {
+				return "", fmt.Errorf("failed to add roster job for %s: %w", absPath, err)
+			}
+			result.WriteString(fmt.Sprintf("* Added roster job from %s: %s\n", notePath, filename))
+		}
+	}
+
 	// Execute on_start hook if plan was initialized from a note
 	// This runs after extraction to avoid file path conflicts
 	if cmd.NoteRef != "" {
@@ -394,13 +457,18 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 
 // runPlanInitFromRecipe initializes a plan from a predefined recipe.
 func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
-	// Derive ExtractAllFrom and NoteRef from FromNote if provided
-	// --from-note takes precedence over --extract-all-from and --note-ref
-	if cmd.FromNote != "" {
+	// Derive ExtractAllFrom and NoteRef from the FIRST --from-note if provided.
+	// --from-note takes precedence over --extract-all-from and --note-ref.
+	// The recipe path does not support the multi-note roster (recipes define
+	// their own job set); warn and use only the first note.
+	if len(cmd.FromNotes) > 1 {
+		fmt.Fprintf(os.Stderr, "Warning: --recipe uses only the first --from-note; the remaining %d note(s) are ignored (roster is unsupported with recipes).\n", len(cmd.FromNotes)-1)
+	}
+	if firstNote := cmd.firstFromNote(); firstNote != "" {
 		// Resolve the path to an absolute path
-		fromNotePath, err := filepath.Abs(cmd.FromNote)
+		fromNotePath, err := filepath.Abs(firstNote)
 		if err != nil {
-			return fmt.Errorf("failed to resolve path for --from-note file %s: %w", cmd.FromNote, err)
+			return fmt.Errorf("failed to resolve path for --from-note file %s: %w", firstNote, err)
 		}
 
 		// Set ExtractAllFrom to the note path for content extraction

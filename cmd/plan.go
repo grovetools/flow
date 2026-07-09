@@ -126,7 +126,7 @@ var (
 	planInitRecipeCmd         string
 	planInitSiblingWorkspaces []string
 	planInitNoteRef           string
-	planInitFromNote          string
+	planInitFromNotes         []string
 	planInitNoteTargetFile    string
 	planInitRunInit           bool
 	planInitPlaybook          string
@@ -194,7 +194,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().Lookup("sibling-workspaces").NoOptDefVal = "__ALL__" // Bare flag => link all discovered direct-child repos
 	planInitCmd.Flags().BoolVarP(&planInitTUI, "tui", "t", false, "Launch interactive TUI to create a new plan")
 	planInitCmd.Flags().StringVar(&planInitNoteRef, "note-ref", "", "Path to the source note to link to this plan")
-	planInitCmd.Flags().StringVar(&planInitFromNote, "from-note", "", "Path to a note file whose body will be used as the prompt for the first job")
+	planInitCmd.Flags().StringArrayVar(&planInitFromNotes, "from-note", nil, "Path to a note file whose body will be used as the prompt for the first job. Repeatable: each additional note becomes its own job in the plan (a roster)")
 	planInitCmd.Flags().StringVar(&planInitNoteTargetFile, "note-target-file", "", "Filename of the job within the recipe to apply the --from-note content and reference to")
 	planInitCmd.Flags().BoolVar(&planInitRunInit, "init", false, "Execute init actions from the recipe's workspace_init.yml")
 	planInitCmd.Flags().StringVar(&planInitPlaybook, "playbook", "", "Name of a playbook whose skills, prompts, and recipes scope this plan (e.g., gdv2). Written to .grove-plan.yml; jobs in the plan inherit $PLAYBOOK_ROOT at execution time.")
@@ -332,7 +332,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		SiblingWorkspaces: planInitSiblingWorkspaces,
 		Anchor:            planInitAnchor,
 		NoteRef:           planInitNoteRef,
-		FromNote:          planInitFromNote,
+		FromNotes:         planInitFromNotes,
 		NoteTargetFile:    planInitNoteTargetFile,
 		RunInit:           planInitRunInit,
 		Playbook:          planInitPlaybook,
@@ -428,10 +428,18 @@ type PlanInitCmd struct {
 	RecipeCmd         string
 	SiblingWorkspaces []string // Sibling workspaces to link into the ecosystem worktree
 	NoteRef           string
-	FromNote          string
+	FromNotes         []string // Repeatable --from-note; the first drives ExtractAllFrom/NoteRef, each additional note becomes its own job
 	NoteTargetFile    string
 	RunInit           bool // Run init actions from workspace_init.yml
 	Playbook          string
 	Layout            string // Worktree layout: "xdg" or "legacy" (empty = resolver default)
 	Anchor            string // Repo name to anchor the worktree to (driving repo)
+}
+
+// firstFromNote returns the first --from-note path, or "" when none given.
+func (c *PlanInitCmd) firstFromNote() string {
+	if len(c.FromNotes) == 0 {
+		return ""
+	}
+	return c.FromNotes[0]
 }

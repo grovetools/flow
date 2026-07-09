@@ -473,6 +473,108 @@ Different reference note.
 			return nil
 		}),
 
+		harness.NewStep("Test roster: multiple --from-note become one job each", func(ctx *harness.Context) error {
+			projectDir := ctx.GetString("project_dir")
+			notebooksRoot := ctx.GetString("notebooks_root")
+			notesDir := filepath.Join(notebooksRoot, "test-notes")
+
+			rosterNoteA := `---
+title: Roster Note Alpha
+---
+
+# Roster Feature Alpha
+
+Alpha roster body content.
+`
+			rosterNoteB := `---
+title: Roster Note Bravo
+---
+
+# Roster Feature Bravo
+
+Bravo roster body content.
+`
+			rosterNoteC := `---
+title: Roster Note Charlie
+---
+
+# Roster Feature Charlie
+
+Charlie roster body content.
+`
+			pathA := filepath.Join(notesDir, "roster-alpha.md")
+			pathB := filepath.Join(notesDir, "roster-bravo.md")
+			pathC := filepath.Join(notesDir, "roster-charlie.md")
+			for path, body := range map[string]string{pathA: rosterNoteA, pathB: rosterNoteB, pathC: rosterNoteC} {
+				if err := fs.WriteString(path, body); err != nil {
+					return err
+				}
+			}
+
+			// Three notes → a plan with three jobs (first drives note_ref/hooks,
+			// the other two are appended as roster jobs).
+			cmd := ctx.Bin("plan", "init", "roster-plan",
+				"--from-note", pathA,
+				"--from-note", pathB,
+				"--from-note", pathC)
+			cmd.Dir(projectDir)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("plan init with roster --from-note failed: %w", err)
+			}
+
+			rosterPlanPath := filepath.Join(notebooksRoot, "workspaces", "from-note-project", "plans", "roster-plan")
+			ctx.Set("roster_plan_path", rosterPlanPath)
+			return fs.AssertExists(rosterPlanPath)
+		}),
+
+		harness.NewStep("Verify roster produced one job per note", func(ctx *harness.Context) error {
+			rosterPlanPath := ctx.GetString("roster_plan_path")
+
+			allFiles, err := fs.ListFiles(rosterPlanPath)
+			if err != nil {
+				return err
+			}
+
+			var jobFiles []string
+			for _, f := range allFiles {
+				if strings.HasSuffix(f, ".md") && !strings.HasPrefix(f, ".") {
+					jobFiles = append(jobFiles, f)
+				}
+			}
+
+			if len(jobFiles) != 3 {
+				return fmt.Errorf("expected 3 roster jobs, got %d: %v", len(jobFiles), jobFiles)
+			}
+
+			// Concatenate every job body and assert each note's content landed
+			// in exactly one job.
+			var combined strings.Builder
+			for _, f := range jobFiles {
+				content, err := fs.ReadString(filepath.Join(rosterPlanPath, f))
+				if err != nil {
+					return err
+				}
+				combined.WriteString(content)
+				combined.WriteString("\n")
+			}
+			all := combined.String()
+			for _, want := range []string{"Alpha roster body content", "Bravo roster body content", "Charlie roster body content"} {
+				if !strings.Contains(all, want) {
+					return fmt.Errorf("roster jobs missing expected content: %q", want)
+				}
+			}
+
+			// Each roster job should link to its own source note.
+			for _, want := range []string{"roster-alpha.md", "roster-bravo.md", "roster-charlie.md"} {
+				if !strings.Contains(all, want) {
+					return fmt.Errorf("roster jobs missing note_ref for %q", want)
+				}
+			}
+			return nil
+		}),
+
 		harness.NewStep("Test --note-target-file with recipe", func(ctx *harness.Context) error {
 			projectDir := ctx.GetString("project_dir")
 			notebooksRoot := ctx.GetString("notebooks_root")

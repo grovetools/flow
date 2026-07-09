@@ -65,7 +65,7 @@ func planInitCmdToRequest(c *PlanInitCmd) *planinit.Request {
 		RecipeCmd:         c.RecipeCmd,
 		SiblingWorkspaces: c.SiblingWorkspaces,
 		NoteRef:           c.NoteRef,
-		FromNote:          c.FromNote,
+		FromNote:          c.firstFromNote(),
 		NoteTargetFile:    c.NoteTargetFile,
 		RunInit:           c.RunInit,
 	}
@@ -89,9 +89,11 @@ func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanI
 		RecipeCmd:         req.RecipeCmd,
 		SiblingWorkspaces: req.SiblingWorkspaces,
 		NoteRef:           req.NoteRef,
-		FromNote:          req.FromNote,
 		NoteTargetFile:    req.NoteTargetFile,
 		RunInit:           req.RunInit,
+	}
+	if req.FromNote != "" {
+		cmd.FromNotes = []string{req.FromNote}
 	}
 	// Carry through CLI-only fields that the wizard doesn't
 	// surface in its form. The wizard never clears these, so they
@@ -114,6 +116,12 @@ func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanI
 		}
 		if !cmd.Force {
 			cmd.Force = initialCmd.Force
+		}
+		// The wizard surfaces a single from-note; when the CLI passed a
+		// roster whose first note the wizard kept, preserve the rest.
+		if len(initialCmd.FromNotes) > 1 &&
+			len(cmd.FromNotes) == 1 && cmd.FromNotes[0] == initialCmd.FromNotes[0] {
+			cmd.FromNotes = initialCmd.FromNotes
 		}
 	}
 	return cmd
