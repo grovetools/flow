@@ -216,6 +216,38 @@ func TestExecuteChatJob_PinnedContextRejected(t *testing.T) {
 	assertJobFileFailed(t, job)
 }
 
+func TestExecuteChatJob_AbsentAndEmptyRulesFailIdentically(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		create bool
+	}{
+		{name: "absent"},
+		{name: "empty", create: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			plan, job := newChatJobFixture(t, "rules_file: ctx.rules\n", "Please answer.")
+			if tt.create {
+				if err := os.WriteFile(filepath.Join(plan.Directory, "ctx.rules"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			err := NewOneShotExecutor(NewMockLLMClient(), nil).Execute(context.Background(), job, plan)
+			if err == nil || !strings.Contains(err.Error(), "rules file 'ctx.rules' not found") {
+				t.Fatalf("Execute() error = %v, want missing-rules error", err)
+			}
+			assertJobFileFailed(t, job)
+			matches, globErr := filepath.Glob(filepath.Join(plan.Directory, ".artifacts", job.ID, "request-manifest-*.json"))
+			if globErr != nil {
+				t.Fatal(globErr)
+			}
+			if len(matches) != 0 {
+				t.Errorf("request manifests = %v, want none for pre-provider failure", matches)
+			}
+		})
+	}
+}
+
 // TestExecuteChatJob_InvalidCacheTTLFails asserts a junk cache_ttl fails the
 // turn actionably (and terminally) instead of silently degrading caching.
 func TestExecuteChatJob_InvalidCacheTTLFails(t *testing.T) {

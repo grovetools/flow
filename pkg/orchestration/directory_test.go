@@ -176,6 +176,21 @@ func TestAddJob(t *testing.T) {
 	}
 }
 
+func TestAddJobLeavesUnseededRulesFileAbsent(t *testing.T) {
+	plan := &Plan{Directory: t.TempDir(), JobsByID: make(map[string]*Job)}
+	job := &Job{ID: "no-rules-stub", Title: "No Rules Stub", PromptBody: "Do something"}
+
+	if _, err := AddJob(plan, job); err != nil {
+		t.Fatalf("AddJob() error = %v", err)
+	}
+	if job.RulesFile == "" {
+		t.Fatal("RulesFile = empty; want canonical per-job path")
+	}
+	if _, err := os.Stat(filepath.Join(plan.Directory, job.RulesFile)); !os.IsNotExist(err) {
+		t.Errorf("rules file exists or stat failed: %v; want absent", err)
+	}
+}
+
 func TestAddJobErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 

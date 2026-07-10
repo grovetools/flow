@@ -154,8 +154,13 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 			rulesContent, _ = os.ReadFile(cfg.Context.DefaultRulesPath)
 		}
 
-		if err := os.WriteFile(rulesAbsPath, rulesContent, 0o600); err != nil {
-			return "", fmt.Errorf("writing rules file: %w", err)
+		// Leave an unseeded rules file absent. Agents can then author it without
+		// tripping harnesses that require a Read before overwriting an existing
+		// file; the frontmatter still names the canonical destination.
+		if len(bytes.TrimSpace(rulesContent)) > 0 {
+			if err := os.WriteFile(rulesAbsPath, rulesContent, 0o600); err != nil {
+				return "", fmt.Errorf("writing rules file: %w", err)
+			}
 		}
 
 		job.RulesFile = rulesRelPath

@@ -1236,6 +1236,12 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		if !foundPath {
 			return "", jobCtx, fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
 		}
+		// Treat an empty rules file as not yet authored, matching the absent-file
+		// path used for newly created jobs. Do this before context generation so
+		// both cases fail through the same pre-provider error funnel.
+		if info, err := os.Stat(rulesFilePath); err != nil || info.Size() == 0 {
+			return "", jobCtx, fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
+		}
 
 		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
 		fmt.Fprintf(writer, "Using job-specific context from: %s\n", rulesFilePath)
