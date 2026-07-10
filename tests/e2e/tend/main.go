@@ -243,6 +243,8 @@ func main() {
 		scenarios.OracleCacheInvokerCwdRootingScenario,     // 24 (job-25 rooting regression)
 		scenarios.OracleCacheSiblingFanoutScenario,         // 25 (K1 lineage-boundary breakpoint)
 		scenarios.OracleCacheLineageAdvisorScenario,        // 26 (K2 lineage-overlap advisor)
+		scenarios.OracleCacheWarmScenario,                  // 27 (J5 flow plan warm)
+		scenarios.OracleCacheWarmNeverFiredScenario,        // 28 (J5 warm refuses a never-fired chat)
 	}
 
 	if err := app.Execute(context.TODO(), allScenarios); err != nil {
