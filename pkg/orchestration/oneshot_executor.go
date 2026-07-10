@@ -2715,6 +2715,27 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 				Field("job_id", job.ID).
 				Log(ctx)
 		}
+
+		// Advisory per-turn cache-health line (oracle-plays J6). One write
+		// reaches job.log, `flow plan run`, and the flow-status TUI. Anthropic
+		// only: apiUsage is nil for gemini/mock, so nothing is emitted there.
+		// Compute errors degrade to a ulog.Warn and no line — never a job error.
+		logPath, _ := GetJobLogPath(plan, job)
+		priorHealth, hasPrior := LastCacheHealthFromLog(logPath)
+		if health, chErr := ComputeCacheHealth(plan.Directory, job.ID, turnID, apiUsage, priorHealth.HitPct, hasPrior); chErr != nil {
+			ulog.Warn("Failed to compute chat turn cache health").
+				Err(chErr).
+				Field("job_id", job.ID).
+				Log(ctx)
+		} else if health != nil {
+			fmt.Fprintf(grovelogging.GetWriter(ctx), "%s\n", FormatCacheHealthLine(*health))
+			ulog.Info("chat turn cache health").
+				Field("turn_id", health.TurnID).
+				Field("hit_pct", health.HitPct).
+				Field("written", health.Written).
+				Field("buster", health.Buster).
+				Log(ctx)
+		}
 	}
 
 	// Use the same turnID that was generated earlier for the briefing file

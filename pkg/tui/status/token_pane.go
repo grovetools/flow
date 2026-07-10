@@ -2,6 +2,7 @@ package status
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,10 @@ type TokenUsageLoadedMsg struct {
 	Summary usage.Summary
 	Found   bool
 	Err     error
+	// LatestHealth is the most recent per-turn cache-health line from the job's
+	// job.log (oracle-plays J6), or nil when the job has emitted none. Additive:
+	// consumed only by the token detail pane's Cache stanza.
+	LatestHealth *orchestration.CacheHealth
 }
 
 // loadTokenUsageCmd resolves a job's token usage for the detail pane. A
@@ -33,11 +38,19 @@ func loadTokenUsageCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd
 	planDir := plan.Directory
 	jobType := job.Type
 	return func() tea.Msg {
+		// The latest per-turn cache-health line, if this job has emitted any
+		// (oracle-plays J6). Same path GetJobLogPath yields, without its mkdir
+		// side effect; a read-only tail, safe from the event loop.
+		var latestHealth *orchestration.CacheHealth
+		if h, ok := orchestration.LastCacheHealthFromLog(filepath.Join(planDir, ".artifacts", jobID, "job.log")); ok {
+			latestHealth = &h
+		}
+
 		// Prefer the persisted artifact regardless of status: completed agent
 		// jobs and chat/oneshot jobs (which accumulate one after every turn, even
 		// while pending_user) are both served from it.
 		if s, ok := orchestration.ReadTokenUsageArtifact(planDir, jobID); ok {
-			return TokenUsageLoadedMsg{JobID: jobID, Summary: s, Found: true}
+			return TokenUsageLoadedMsg{JobID: jobID, Summary: s, Found: true, LatestHealth: latestHealth}
 		}
 
 		// Only agent jobs have a Claude session worth summarizing live.
@@ -63,7 +76,7 @@ func loadTokenUsageCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd
 		if s.Usage.Total() == 0 {
 			return TokenUsageLoadedMsg{JobID: jobID, Found: false}
 		}
-		return TokenUsageLoadedMsg{JobID: jobID, Summary: s, Found: true}
+		return TokenUsageLoadedMsg{JobID: jobID, Summary: s, Found: true, LatestHealth: latestHealth}
 	}
 }
 
@@ -240,10 +253,29 @@ func (m *Model) renderTokenColumnCell(job *orchestration.Job) string {
 // lack ContextSize, so fall back to the cumulative total there.
 func formatTokenCell(s usage.Summary) string {
 	cost := orchestration.FormatCostUSD(s.CostUSD, s.MissingPricing)
+	var cell string
 	if s.ContextSize > 0 {
-		return fmt.Sprintf("%s · %s ctx", cost, orchestration.FormatTokenCount(s.ContextSize))
+		cell = fmt.Sprintf("%s · %s ctx", cost, orchestration.FormatTokenCount(s.ContextSize))
+	} else {
+		cell = fmt.Sprintf("%s · %s", cost, orchestration.FormatTokenCount(s.Usage.Total()))
 	}
-	return fmt.Sprintf("%s · %s", cost, orchestration.FormatTokenCount(s.Usage.Total()))
+	// Cumulative cache hit% (oracle-plays J6) for jobs with any cache traffic.
+	if pct, ok := cumulativeCacheHitPct(s); ok {
+		cell += fmt.Sprintf(" · %.0f%%", pct)
+	}
+	return cell
+}
+
+// cumulativeCacheHitPct returns the summary's cumulative cache hit rate as a
+// percentage (cache reads / (reads + writes)), and false when there is no cache
+// traffic at all (so callers omit the badge rather than show "0%").
+func cumulativeCacheHitPct(s usage.Summary) (float64, bool) {
+	reads := s.Usage.CacheRead
+	writes := s.Usage.CacheWrite5m + s.Usage.CacheWrite1h
+	if reads+writes == 0 {
+		return 0, false
+	}
+	return float64(reads) / float64(reads+writes) * 100, true
 }
 
 // clearTokenColumnCache invalidates the memoized TOKENS column cells so the
@@ -338,7 +370,7 @@ func formatAgentTokenCell(au usage.AgentUsage) string {
 // renderTokenPaneContent renders the full token usage detail pane body from a
 // resolved Summary: a totals block, a token-class breakdown, a per-model
 // breakdown, and a per-agent (job→agent) tree built from Summary.Agents.
-func renderTokenPaneContent(s usage.Summary, found bool, loadErr error, width int) string {
+func renderTokenPaneContent(s usage.Summary, found bool, loadErr error, width int, latestHealth *orchestration.CacheHealth) string {
 	t := theme.DefaultTheme
 	var b strings.Builder
 
@@ -375,6 +407,20 @@ func renderTokenPaneContent(s usage.Summary, found bool, loadErr error, width in
 	fmt.Fprintf(&b, "  Cache write 5m: %s\n", orchestration.FormatTokenCount(s.Usage.CacheWrite5m))
 	if s.Usage.CacheWrite1h > 0 {
 		fmt.Fprintf(&b, "  Cache write 1h: %s\n", orchestration.FormatTokenCount(s.Usage.CacheWrite1h))
+	}
+
+	// Cache stanza (oracle-plays J6): cumulative hit% plus the latest per-turn
+	// cache-health line verbatim (the same line that streams into the log pane).
+	if pct, ok := cumulativeCacheHitPct(s); ok || latestHealth != nil {
+		b.WriteString("\n")
+		b.WriteString(t.Bold.Render("Cache"))
+		b.WriteString("\n")
+		if ok {
+			fmt.Fprintf(&b, "  Hit rate: %.0f%% (cumulative)\n", pct)
+		}
+		if latestHealth != nil {
+			fmt.Fprintf(&b, "  Latest:   %s\n", orchestration.FormatCacheHealthLine(*latestHealth))
+		}
 	}
 
 	if len(s.ModelBreakdown) > 0 {

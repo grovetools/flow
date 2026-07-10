@@ -326,7 +326,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateLayoutDimensions()
 			m.tokenViewport.Width = m.LogViewerWidth
 			m.tokenViewport.Height = m.LogViewerHeight - logHeaderHeight
-			content := renderTokenPaneContent(msg.Summary, msg.Found, msg.Err, m.tokenViewport.Width)
+			content := renderTokenPaneContent(msg.Summary, msg.Found, msg.Err, m.tokenViewport.Width, msg.LatestHealth)
 			m.tokenRawContent = content
 			m.tokenViewport.SetContent(wrapContentForViewport(content, m.tokenViewport.Width-1))
 		}

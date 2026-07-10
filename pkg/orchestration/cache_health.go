@@ -1,10 +1,13 @@
 package orchestration
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/grovetools/grove-anthropic/pkg/anthropic"
@@ -284,4 +287,292 @@ func sprintfStaleness(mins int, ttlLabel, tokens string, keepaliveImpractical bo
 		base += " — the 5m TTL makes `flow plan warm` keepalive impractical"
 	}
 	return base
+}
+
+// ---------------------------------------------------------------------------
+// Per-turn cache-health line (oracle-plays J6).
+//
+// After each Anthropic chat turn, flow emits one grep-able advisory line —
+// turn id, cache hit%, tokens written, and (only on a material hit% drop) the
+// first manifest entry whose bytes changed vs the prior successful turn. The
+// numbers come from the in-memory anthropic.UsageResult at the single accounting
+// site in executeChatJob; the "what busted the cache" label comes from diffing
+// the current request manifest against the baseline turn's manifest. The line
+// is read-only over existing artifacts — no new persistent state — and is
+// purely advisory: compute failures degrade to a ulog.Warn + no line, never a
+// job error (mech-contract §2).
+// ---------------------------------------------------------------------------
+
+// cacheHitDropPoints is the percentage-point drop in hit% (vs the prior turn's
+// recorded hit%) that flips cache-health from "healthy" to "look for the
+// buster". 15pp separates routine breakpoint churn from a real cold rewrite.
+const cacheHitDropPoints = 15
+
+// CacheHealth is one chat turn's cache accounting: the turn id, the fraction of
+// the prompt served from cache (HitPct in [0,1]), the tokens cold-written this
+// turn, and — only when set — the first manifest entry that busted the cached
+// suffix.
+type CacheHealth struct {
+	TurnID  string
+	HitPct  float64
+	Written int64
+	Buster  string
+}
+
+// ComputeCacheHealth builds the per-turn CacheHealth from the turn's usage plus
+// a manifest diff against the prior successful turn. HitPct = CacheReadTokens /
+// (CacheReadTokens + CacheWrite5m + CacheWrite1h); Written = CacheWrite5m +
+// CacheWrite1h. The buster diff runs only when hit% dropped materially vs
+// priorHitPct (>= cacheHitDropPoints pp) OR — with no prior hit% — this turn's
+// writes dominated its reads; a healthy turn returns stats with an empty Buster
+// and never touches the manifests.
+//
+// The baseline manifest is keyed off the PRIOR cache-health line's turn id
+// (recovered from job.log, addendum A3): loading
+// RequestManifestPath(planDir, jobID, priorHealth.TurnID) pairs the hit%
+// baseline and the manifest baseline to the same successful turn, so a failed
+// pre-dispatch orphan manifest (written before an API error, with no health
+// line) can never be selected. No prior health line → first-turn behavior
+// (stats, no diff). Missing that specific baseline manifest → degrade to no diff
+// (advisory-only; the caller's ulog carries the state).
+func ComputeCacheHealth(planDir, jobID, turnID string, u *anthropic.UsageResult, priorHitPct float64, hasPrior bool) (*CacheHealth, error) {
+	if u == nil {
+		return nil, fmt.Errorf("cache health: nil usage result")
+	}
+	written := u.CacheWrite5m + u.CacheWrite1h
+	read := u.CacheReadTokens
+	var hit float64
+	if denom := read + written; denom > 0 {
+		hit = float64(read) / float64(denom)
+	}
+	h := &CacheHealth{TurnID: turnID, HitPct: hit, Written: written}
+
+	// Only hunt for a buster when the cache visibly regressed: a material hit%
+	// drop vs the prior turn, or (with no prior baseline) writes dominating reads.
+	dropped := hasPrior && (priorHitPct-hit) >= float64(cacheHitDropPoints)/100
+	writesDominate := !hasPrior && written > read
+	if !dropped && !writesDominate {
+		return h, nil
+	}
+
+	// Current turn's manifest (written pre-dispatch, so already on disk).
+	cur, err := loadRequestManifestFile(RequestManifestPath(planDir, jobID, turnID))
+	if err != nil || cur == nil {
+		return h, nil // no manifest to diff against; stats only
+	}
+
+	// Baseline = the prior successful turn, keyed off its cache-health line.
+	prior, ok := LastCacheHealthFromLog(filepath.Join(planDir, ".artifacts", jobID, "job.log"))
+	if !ok {
+		return h, nil // first turn (or only orphan turns so far): stats only
+	}
+	prev, err := loadRequestManifestFile(RequestManifestPath(planDir, jobID, prior.TurnID))
+	if err != nil || prev == nil {
+		return h, nil // baseline manifest gone (manual cleanup): degrade to no diff
+	}
+
+	h.Buster = firstChangedEntry(prev.Entries, cur.Entries)
+	return h, nil
+}
+
+// loadRequestManifestFile reads and unmarshals a single request manifest by
+// path. Returns (nil, nil) when the file is absent so callers can degrade to a
+// stats-only line.
+func loadRequestManifestFile(path string) (*RequestManifest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var m RequestManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// firstChangedEntry names the first manifest entry that busted the cached suffix
+// between two turns, or "" when the shared prefix is byte-identical. Turn
+// entries are filtered from BOTH slices first (each manifest has exactly one,
+// always last — addendum A1); left in, prev's trailing turn entry would pair
+// against cur's first new history block and report a false history buster every
+// turn >= 2. Only ContentHash is compared — never Breakpoint/TTL, which move
+// every turn by design as the last-history breakpoint slides.
+//
+// At the first mismatch index i (addendum A2):
+//   - cur[i] is a layer whose Path is absent from prev → routine mid-list layer
+//     growth (spec-19 lineage): "new layer <base> (<source>) — appended, suffix
+//     re-cached", NOT an anomaly.
+//   - same Kind+Path, different ContentHash → a genuine byte-level buster:
+//     "<kind> <label> changed".
+//   - anything else (disappeared / reordered / kind swap) → "ordering anomaly at
+//     <kind>[i]".
+//
+// A clean common prefix returns "" — remaining cur entries (appended history
+// before the always-last turn, or a tail-appended layer) are expected growth.
+func firstChangedEntry(prev, cur []RequestManifestEntry) string {
+	fp := filterOutTurnEntries(prev)
+	fc := filterOutTurnEntries(cur)
+	n := min(len(fp), len(fc))
+	for i := 0; i < n; i++ {
+		p, c := fp[i], fc[i]
+		if p.Kind == c.Kind && p.Path == c.Path && p.ContentHash == c.ContentHash {
+			continue
+		}
+		switch {
+		case c.Kind == anthropic.RequestBlockLayer && !entriesContainPath(fp, c.Path):
+			return fmt.Sprintf("new layer %s (%s) — appended, suffix re-cached", filepath.Base(c.Path), c.Source)
+		case p.Kind == c.Kind && p.Path == c.Path:
+			return fmt.Sprintf("%s %s changed", c.Kind, entryLabel(c, i))
+		default:
+			return fmt.Sprintf("ordering anomaly at %s[%d]", c.Kind, i)
+		}
+	}
+	return ""
+}
+
+// filterOutTurnEntries returns the entries with the volatile turn block removed
+// (it is always last and never cached, so it must never participate in the walk).
+func filterOutTurnEntries(entries []RequestManifestEntry) []RequestManifestEntry {
+	out := make([]RequestManifestEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.Kind == anthropic.RequestBlockTurn {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// entriesContainPath reports whether any entry uploads the given file path
+// (used to tell a brand-new layer from a byte-changed existing one).
+func entriesContainPath(entries []RequestManifestEntry, path string) bool {
+	if path == "" {
+		return false
+	}
+	for _, e := range entries {
+		if e.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// entryLabel renders the human identifier for a manifest entry at filtered index
+// i: layers by base name + source, history positionally, system/context by name.
+func entryLabel(e RequestManifestEntry, i int) string {
+	switch e.Kind {
+	case anthropic.RequestBlockLayer:
+		return fmt.Sprintf("%s (%s)", filepath.Base(e.Path), e.Source)
+	case anthropic.RequestBlockHistory:
+		return fmt.Sprintf("history[%d]", i)
+	case anthropic.RequestBlockSystem:
+		return "system"
+	default: // context (and any document block)
+		return filepath.Base(e.Path)
+	}
+}
+
+// FormatCacheHealthLine renders the stable, grep-able cache-health line, e.g.
+//
+//	cache-health t=794c99…: 89% hit, 10.3k written — buster: layer 02-delta (git-delta) changed
+//
+// The FULL turn id is embedded (not truncated) so ParseCacheHealthLine can
+// recover it and load the matching manifest. The buster suffix appears only when
+// non-empty.
+func FormatCacheHealthLine(h CacheHealth) string {
+	line := fmt.Sprintf("cache-health t=%s: %.0f%% hit, %s written", h.TurnID, h.HitPct*100, FormatTokenCount(h.Written))
+	if h.Buster != "" {
+		line += " — buster: " + h.Buster
+	}
+	return line
+}
+
+// cacheHealthBusterSep is the delimiter between the stats and the buster label.
+const cacheHealthBusterSep = " — buster: "
+
+// ParseCacheHealthLine parses a cache-health line (tolerating any leading log
+// decoration by scanning for the "cache-health t=" marker) back into a
+// CacheHealth. It round-trips with FormatCacheHealthLine. The bool is false when
+// the line is not a cache-health line.
+func ParseCacheHealthLine(line string) (CacheHealth, bool) {
+	const marker = "cache-health t="
+	idx := strings.Index(line, marker)
+	if idx < 0 {
+		return CacheHealth{}, false
+	}
+	rest := line[idx+len(marker):]
+
+	colon := strings.Index(rest, ": ")
+	if colon < 0 {
+		return CacheHealth{}, false
+	}
+	h := CacheHealth{TurnID: strings.TrimSpace(rest[:colon])}
+	stats := rest[colon+2:]
+
+	if b := strings.Index(stats, cacheHealthBusterSep); b >= 0 {
+		h.Buster = strings.TrimSpace(stats[b+len(cacheHealthBusterSep):])
+		stats = stats[:b]
+	}
+
+	// stats == "<pct>% hit, <written> written"
+	parts := strings.SplitN(stats, " hit, ", 2)
+	if len(parts) != 2 {
+		return CacheHealth{}, false
+	}
+	pct, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(parts[0]), "%"), 64)
+	if err != nil {
+		return CacheHealth{}, false
+	}
+	h.HitPct = pct / 100
+	h.Written = parseHumanTokenCount(strings.TrimSuffix(strings.TrimSpace(parts[1]), " written"))
+	return h, true
+}
+
+// parseHumanTokenCount inverts FormatTokenCount ("10.3k" → 10300, "1.2M" →
+// 1200000, "500" → 500). Best-effort: unparseable input yields 0.
+func parseHumanTokenCount(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	mult := 1.0
+	switch {
+	case strings.HasSuffix(s, "M"), strings.HasSuffix(s, "m"):
+		mult = 1_000_000
+		s = s[:len(s)-1]
+	case strings.HasSuffix(s, "k"), strings.HasSuffix(s, "K"):
+		mult = 1000
+		s = s[:len(s)-1]
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return int64(v * mult)
+}
+
+// LastCacheHealthFromLog scans a job.log for the last cache-health line and
+// returns it parsed. The bool is false when the log has no such line (a fresh
+// job, or a job whose only turns were pre-dispatch failures). Used for both the
+// prior-hit baseline in ComputeCacheHealth and the TUI token pane's latest-line.
+func LastCacheHealthFromLog(logPath string) (CacheHealth, bool) {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return CacheHealth{}, false
+	}
+	defer f.Close()
+
+	var last CacheHealth
+	var found bool
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		if h, ok := ParseCacheHealthLine(sc.Text()); ok {
+			last, found = h, true
+		}
+	}
+	return last, found
 }

@@ -16,28 +16,36 @@ func TestFormatTokenCell(t *testing.T) {
 		CostUSD:     0.3114,
 		ContextSize: 27242,
 	}
-	if got := formatTokenCell(withCtx); got != "$0.31 · 27.2k ctx" {
-		t.Errorf("formatTokenCell(withCtx) = %q, want %q", got, "$0.31 · 27.2k ctx")
+	// With cache traffic the cumulative hit% badge is appended (oracle-plays J6):
+	// 20310 / (20310 + 27240) = 43%.
+	if got := formatTokenCell(withCtx); got != "$0.31 · 27.2k ctx · 43%" {
+		t.Errorf("formatTokenCell(withCtx) = %q, want %q", got, "$0.31 · 27.2k ctx · 43%")
 	}
 	// Legacy artifact (no ContextSize): fall back to cumulative total.
+	// 210280 / (210280 + 11671) = 95% hit.
 	legacy := usage.Summary{
 		Usage:   usage.Usage{Input: 4448, Output: 2833, CacheWrite5m: 11671, CacheRead: 210280},
 		CostUSD: 0.3149,
 	}
-	if got := formatTokenCell(legacy); got != "$0.31 · 229.2k" {
-		t.Errorf("formatTokenCell(legacy) = %q, want %q", got, "$0.31 · 229.2k")
+	if got := formatTokenCell(legacy); got != "$0.31 · 229.2k · 95%" {
+		t.Errorf("formatTokenCell(legacy) = %q, want %q", got, "$0.31 · 229.2k · 95%")
+	}
+	// No cache traffic at all → no hit% badge.
+	noCache := usage.Summary{Usage: usage.Usage{Input: 100, Output: 50}, CostUSD: 0.01, ContextSize: 150}
+	if got := formatTokenCell(noCache); got != "$0.01 · 150 ctx" {
+		t.Errorf("formatTokenCell(noCache) = %q, want %q", got, "$0.01 · 150 ctx")
 	}
 }
 
 func TestRenderTokenPaneContentError(t *testing.T) {
-	out := renderTokenPaneContent(usage.Summary{}, false, errors.New("boom"), 80)
+	out := renderTokenPaneContent(usage.Summary{}, false, errors.New("boom"), 80, nil)
 	if !strings.Contains(out, "boom") {
 		t.Errorf("expected error text in pane, got: %s", out)
 	}
 }
 
 func TestRenderTokenPaneContentNotFound(t *testing.T) {
-	out := renderTokenPaneContent(usage.Summary{}, false, nil, 80)
+	out := renderTokenPaneContent(usage.Summary{}, false, nil, 80, nil)
 	if !strings.Contains(out, "No token usage recorded") {
 		t.Errorf("expected not-found message, got: %s", out)
 	}
@@ -63,7 +71,7 @@ func TestRenderTokenPaneContentFull(t *testing.T) {
 			{AgentID: "agent-bbb", Usage: usage.Usage{Input: 100, Output: 20}, CostUSD: 0.02},
 		},
 	}
-	out := renderTokenPaneContent(s, true, nil, 80)
+	out := renderTokenPaneContent(s, true, nil, 80, nil)
 
 	for _, want := range []string{
 		"Totals",
@@ -158,7 +166,7 @@ func TestRenderTokenPaneContentParentAgentFallback(t *testing.T) {
 			{Usage: usage.Usage{Input: 10, Output: 5}, CostUSD: 0.01},
 		},
 	}
-	out := renderTokenPaneContent(s, true, nil, 80)
+	out := renderTokenPaneContent(s, true, nil, 80, nil)
 	if !strings.Contains(out, "(parent)") {
 		t.Errorf("expected (parent) fallback label\n%s", out)
 	}
