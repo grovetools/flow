@@ -198,6 +198,16 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 							return orchestration.NoUserTurnError(job.FilePath)
 						}
 					}
+
+					// TTL staleness warning (oracle-plays J5): a chat whose cached
+					// lineage last saw activity beyond the warn threshold will
+					// cold-write the whole prefix this turn. Surface it before the
+					// run confirmation so the user can keep it hot with `flow plan
+					// warm` next time.
+					if msg, stale := orchestration.ChatCacheStaleness(plan.Directory, job); stale {
+						fmt.Printf("%s Cache staleness: %s. Keep it hot next time with: flow plan warm %s\n",
+							color.YellowString(theme.IconWarning), msg, job.Filename)
+					}
 				}
 
 				if job.Status == orchestration.JobStatusFailed || job.Status == orchestration.JobStatusAbandoned {

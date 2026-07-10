@@ -2239,6 +2239,23 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		}
 	}
 
+	// TTL staleness advisory (oracle-plays J5): the universal channel that the
+	// daemon path also sees (the CLI warning in plan_run.go is skipped under the
+	// daemon). Anthropic-only — the ladder cache is Anthropic-only — and only
+	// once the layer store exists (a fresh chat with no lineage has nothing that
+	// can go stale). Mirrors the "Context staleness advisory" idiom in
+	// layer_engine.go: one writer line plus a ulog.Warn. Read of prior activity
+	// only — this turn's manifest isn't written yet.
+	if layerResult != nil && strings.HasPrefix(effectiveModel, "claude") {
+		if msg, stale := ChatCacheStaleness(plan.Directory, job); stale {
+			fmt.Fprintf(grovelogging.GetWriter(ctx),
+				"Cache staleness advisory: %s — keep it hot between turns with `flow plan warm %s`\n", msg, job.Filename)
+			ulog.Warn("Chat cache lineage is stale — the cached prefix will be cold-written this turn").
+				Field("job_id", job.ID).
+				Log(ctx)
+		}
+	}
+
 	// --- Transcript split (spec 19 D7 / P4) ---
 	// The chat request travels in three regions, ordered by lifetime:
 	//
