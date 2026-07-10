@@ -87,6 +87,8 @@ scenarios = [
   "unreadable-glob-file",
   "legacy-untouched",
   "lineage-overlap-advisor",
+  "warm",
+  "warm-never-fired",
 ]
 
 [[hooks.on_stop]]
