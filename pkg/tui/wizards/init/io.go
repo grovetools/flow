@@ -8,9 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/tui/theme"
-	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
-	geminimodels "github.com/grovetools/grove-gemini/pkg/models"
-	openroutermodels "github.com/grovetools/grove-openrouter/pkg/models"
+
+	flowmodel "github.com/grovetools/flow/pkg/model"
 )
 
 // flowConfigSubset captures the fields of the flow grove.yml
@@ -99,37 +98,13 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	fmt.Fprint(w, str)
 }
 
-// getAvailableModels returns the list of current, non-legacy LLM
-// models used by the plan-init wizard's model picker.
+// getAvailableModels delegates aggregation to the shared direct-API model
+// axis, so init and add expose the same cached OpenRouter catalog.
 func getAvailableModels() []modelInfo {
-	var models []modelInfo
-	for _, m := range geminimodels.CurrentModels() {
-		models = append(models, modelInfo{
-			ID:       m.ID,
-			Provider: m.Provider,
-			Note:     m.Note,
-		})
-	}
-	for _, m := range anthropicmodels.CurrentModels() {
-		id := m.ID
-		if m.Alias != "" {
-			id = m.Alias
-		}
-		models = append(models, modelInfo{
-			ID:       id,
-			Provider: m.Provider,
-			Note:     m.Note,
-		})
-	}
-	// OpenRouter: use the prefixed ID, not the bare alias — flow only accepts
-	// the "openrouter/<vendor>/<model>" form (intentional divergence from the
-	// anthropic loop above, which prefers the alias).
-	for _, m := range openroutermodels.CurrentModels() {
-		models = append(models, modelInfo{
-			ID:       m.ID,
-			Provider: m.Provider,
-			Note:     m.Note,
-		})
+	available := flowmodel.AllModels()
+	models := make([]modelInfo, 0, len(available))
+	for _, m := range available {
+		models = append(models, modelInfo{ID: m.ID, Provider: m.Provider, Note: m.Note})
 	}
 	return models
 }

@@ -35,6 +35,11 @@ func newTestModel(jobType, provider string) Model {
 	m.providerList = newProviderList()
 	selectItem(&m.providerList, provider)
 	m.modelList = newModelList()
+	if jobType == "oneshot" || jobType == "chat" {
+		m.providerList = buildProviderList(jobType)
+		selectItem(&m.providerList, provider)
+		m.modelList = buildLLMModelList(provider)
+	}
 	m.modelInput = newModelInput()
 	return m
 }
@@ -89,12 +94,11 @@ func TestModelSlotKind_ProviderDependent(t *testing.T) {
 		}
 	}
 
-	// A non-agent LLM job (oneshot) is always free-form even with the
-	// claude default — it validates downstream, not against the
-	// claude-family list.
-	mo := newTestModel("oneshot", "default")
-	if got := slotModelKind(&mo); got != slotText {
-		t.Errorf("oneshot: slotModelKind = %v, want %v", got, slotText)
+	// Direct-API jobs use a provider-filtered list; their provider is only a
+	// UI filter and is not persisted.
+	mo := newTestModel("oneshot", "(all)")
+	if got := slotModelKind(&mo); got != slotList {
+		t.Errorf("oneshot: slotModelKind = %v, want %v", got, slotList)
 	}
 }
 
@@ -121,10 +125,10 @@ func TestSlotVisibility_ShellHidesBoth(t *testing.T) {
 		t.Errorf("prevVisibleSlot(0) = %d, want 4 (skips hidden provider/model)", got)
 	}
 
-	// Sanity: oneshot keeps the model slot but hides the provider slot.
-	mo := newTestModel("oneshot", "default")
-	if slotProviderVisible(&mo) {
-		t.Error("provider slot must be hidden for oneshot")
+	// Oneshot has an API-provider filter as well as its model picker.
+	mo := newTestModel("oneshot", "(all)")
+	if !slotProviderVisible(&mo) {
+		t.Error("provider slot must be visible for oneshot")
 	}
 	if !slotModelVisible(&mo) {
 		t.Error("model slot must be visible for oneshot")

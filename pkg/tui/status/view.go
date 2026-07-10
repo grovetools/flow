@@ -122,7 +122,7 @@ func (m Model) renderTableViewWithWidth(maxWidth int) string {
 func columnDropPriority() []string {
 	return []string{
 		"DURATION", "COMPLETED", "UPDATED", "INLINE",
-		"WORKTREE", "MODEL", "SKILL", "TEMPLATE", "TITLE", "STATUS", "TYPE",
+		"WORKTREE", "SESSION", "MODEL", "SKILL", "TEMPLATE", "TITLE", "STATUS", "TYPE",
 	}
 }
 
@@ -456,6 +456,8 @@ func (m Model) renderTableView() string {
 				cell = templateText
 			case "MODEL":
 				cell = m.renderModelColumnCell(job)
+			case "SESSION":
+				cell = m.renderSessionColumnCell(job)
 			case "WORKTREE":
 				worktreeText := job.Worktree
 				if worktreeText == "" {

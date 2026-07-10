@@ -363,10 +363,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.slot2IsSkills = false
 					m.templateList = m.buildTemplateList(selectedJobType)
 				}
-				// The model slot's widget kind depends on the job type
-				// (agent vs. LLM-API) and provider; reset the model value
-				// when the kind flips so a stale list/text value doesn't
-				// carry across.
+				// Job type changes switch provider axes and must not retain an
+				// agent provider as an API-provider filter (or vice versa).
+				m.providerList = buildProviderList(selectedJobType)
+				m.resetModelWidget()
 				if slotModelKind(&m) != prevModelKind {
 					m.resetModelWidget()
 				}
@@ -385,11 +385,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			prevModelKind := slotModelKind(&m)
 			prevSelection := m.providerList.SelectedItem()
 			m.providerList, cmd = m.providerList.Update(msg)
-			// A provider change can flip the model widget list↔text
-			// (claude → list, others → free-form); drop the now
-			// incompatible model value when it does.
-			if prevSelection != m.providerList.SelectedItem() && slotModelKind(&m) != prevModelKind {
+			// Rebuild on every provider selection change: direct-API provider
+			// changes alter list contents even though its widget kind stays list.
+			if prevSelection != m.providerList.SelectedItem() {
+				if isAgentJobType(m.selectedJobType()) {
+					if m.effectiveProvider() == "claude" {
+						m.modelList = newModelList()
+					}
+				} else if selected := m.providerList.SelectedItem(); selected != nil {
+					m.modelList = buildLLMModelList(string(selected.(item)))
+				}
 				m.resetModelWidget()
+				_ = prevModelKind
 			}
 		case slotModel: // Model picker (list for claude, text otherwise)
 			if m.currentSlotKind() == slotList {

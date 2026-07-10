@@ -463,12 +463,12 @@ model: gemini-3.1-pro-preview
 		t.Errorf("expected in-memory job.Model updated, got %q", job.Model)
 	}
 
-	// Empty model is a no-op (and must not error).
+	// Empty model clears the explicit value, restoring the provider default.
 	if err := sp.UpdateJobModel(job, ""); err != nil {
-		t.Fatalf("UpdateJobModel(\"\") should be a no-op, got error %v", err)
+		t.Fatalf("UpdateJobModel(\"\") should clear, got error %v", err)
 	}
-	if job.Model != "claude-sonnet-4-6" {
-		t.Errorf("empty UpdateJobModel must not change job.Model, got %q", job.Model)
+	if job.Model != "" {
+		t.Errorf("empty UpdateJobModel must clear job.Model, got %q", job.Model)
 	}
 }
 

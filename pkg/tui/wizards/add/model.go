@@ -12,9 +12,9 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
-	anthropicmodels "github.com/grovetools/grove-anthropic/pkg/models"
 	skillservice "github.com/grovetools/skills/pkg/service"
 
+	flowmodel "github.com/grovetools/flow/pkg/model"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -201,7 +201,8 @@ func isAgentJobType(jobType string) bool {
 // selected job type. Only agent jobs have a CLI provider; chat/oneshot
 // dispatch to LLM APIs and shell/file have none.
 func slotProviderVisible(m *Model) bool {
-	return isAgentJobType(m.selectedJobType())
+	jobType := m.selectedJobType()
+	return isAgentJobType(jobType) || jobType == "oneshot" || jobType == "chat"
 }
 
 // slotModelVisible reports whether the model slot applies. Agent jobs
@@ -233,7 +234,11 @@ func (m *Model) effectiveProvider() string {
 // pi/opencode own their model namespaces, and oneshot/chat models are
 // validated downstream.
 func slotModelKind(m *Model) slotKind {
-	if isAgentJobType(m.selectedJobType()) && m.effectiveProvider() == "claude" {
+	jobType := m.selectedJobType()
+	if jobType == "oneshot" || jobType == "chat" {
+		return slotList
+	}
+	if isAgentJobType(jobType) && m.effectiveProvider() == "claude" {
 		return slotList
 	}
 	return slotText
@@ -369,10 +374,22 @@ func applyPickerListStyle(l *list.Model) {
 // newProviderList builds the agent-provider picker: a leading "default"
 // entry (empty provider: → config/claude fallback, matching CLI
 // semantics) followed by the registered provider names.
-func newProviderList() list.Model {
-	items := []list.Item{item("default")}
-	for _, name := range orchestration.AgentProviderNames() {
-		items = append(items, item(name))
+func newProviderList() list.Model { return buildProviderList("interactive_agent") }
+
+// buildProviderList chooses the correct provider axis for a job type. Agent
+// provider names are CLI implementations; chat/oneshot names are API routes.
+func buildProviderList(jobType string) list.Model {
+	items := []list.Item{}
+	if isAgentJobType(jobType) {
+		items = append(items, item("default"))
+		for _, name := range orchestration.AgentProviderNames() {
+			items = append(items, item(name))
+		}
+	} else {
+		items = append(items, item("(all)"))
+		for _, name := range flowmodel.LLMProviderNames() {
+			items = append(items, item(name))
+		}
 	}
 	l := list.New(items, itemDelegate{}, 20, 7)
 	applyPickerListStyle(&l)
@@ -382,14 +399,20 @@ func newProviderList() list.Model {
 // newModelList builds the claude-family model picker used when the
 // effective provider is claude: a leading "(default)" entry followed by
 // each model's short alias (falling back to its full ID).
-func newModelList() list.Model {
+// newModelList is the Claude agent picker; direct-API jobs use
+// buildLLMModelList with their selected API provider instead.
+func newModelList() list.Model { return buildLLMModelList(flowmodel.ProviderAnthropic) }
+
+// buildLLMModelList builds a searchable direct-API picker. An empty provider
+// means the all-provider view (including the cached OpenRouter catalog).
+func buildLLMModelList(provider string) list.Model {
 	items := []list.Item{item("(default)")}
-	for _, md := range anthropicmodels.Models() {
-		name := md.Alias
-		if name == "" {
-			name = md.ID
-		}
-		items = append(items, item(name))
+	models := flowmodel.AllModels()
+	if provider != "" && provider != "(all)" {
+		models = flowmodel.ModelsForProvider(provider)
+	}
+	for _, md := range models {
+		items = append(items, llmModelItem{ModelInfo: md})
 	}
 	l := list.New(items, itemDelegate{}, 20, 7)
 	applyPickerListStyle(&l)
@@ -533,7 +556,7 @@ func New(cfg Config) Model {
 	// resolved once here so effectiveProvider doesn't reload the flow
 	// config on every keystroke.
 	m.defaultProviderName = orchestration.ResolveJobProviderNameFromConfig(nil)
-	m.providerList = newProviderList()
+	m.providerList = buildProviderList("interactive_agent")
 	m.modelList = newModelList()
 	m.modelInput = newModelInput()
 

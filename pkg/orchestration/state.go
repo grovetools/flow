@@ -156,11 +156,9 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 // Unlike the other StatePersister writers, this uses the package-level
 // UpdateFrontmatter (the yaml.Node-based writer) so existing key order and
 // formatting are preserved — the job file is human-curated and we patch a
-// single key. It also bumps updated_at. No-op when newModel is empty.
+// single key. It also bumps updated_at. An empty value removes model from
+// frontmatter, allowing status-TUI users to restore a CLI default.
 func (sp *StatePersister) UpdateJobModel(job *Job, newModel string) error {
-	if newModel == "" {
-		return nil
-	}
 
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
@@ -236,6 +234,60 @@ func (sp *StatePersister) UpdateJobType(job *Job, newType JobType) error {
 }
 
 // UpdateJobTemplate updates the template of a job in its markdown file.
+// UpdateJobProvider updates an agent CLI provider. Callers must keep this
+// axis separate from the direct-API provider inferred from a chat/oneshot model.
+func (sp *StatePersister) UpdateJobProvider(job *Job, newProvider string) error {
+	return sp.updateJobString(job, "provider", newProvider, func() { job.Provider = newProvider })
+}
+
+// UpdateJobSkill updates a job's selected skill and clears any eagerly-derived
+// sequence, preventing a stale sequence from surviving a skill replacement.
+func (sp *StatePersister) UpdateJobSkill(job *Job, newSkill string) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("read job file: %w", err)
+	}
+	newContent, err := sp.updateFrontmatter(content, map[string]interface{}{"skill": newSkill, "skill_sequence": nil, "updated_at": time.Now().Format(time.RFC3339)})
+	if err != nil {
+		return fmt.Errorf("update frontmatter: %w", err)
+	}
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+	job.Skill, job.SkillSequence = newSkill, nil
+	return nil
+}
+
+func (sp *StatePersister) updateJobString(job *Job, field, value string, apply func()) error {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("read job file: %w", err)
+	}
+	newContent, err := sp.updateFrontmatter(content, map[string]interface{}{field: value, "updated_at": time.Now().Format(time.RFC3339)})
+	if err != nil {
+		return fmt.Errorf("update frontmatter: %w", err)
+	}
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+	apply()
+	return nil
+}
+
 func (sp *StatePersister) UpdateJobTemplate(job *Job, newTemplate string) error {
 	sp.mu.Lock()
 	defer sp.mu.Unlock()

@@ -13,6 +13,7 @@ import (
 	skillservice "github.com/grovetools/skills/pkg/service"
 	"github.com/grovetools/skills/pkg/skills"
 
+	flowmodel "github.com/grovetools/flow/pkg/model"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -21,6 +22,11 @@ import (
 type item string
 
 func (i item) FilterValue() string { return string(i) }
+
+// llmModelItem keeps display metadata while persisting the canonical model ID.
+type llmModelItem struct{ flowmodel.ModelInfo }
+
+func (i llmModelItem) FilterValue() string { return i.ID + " " + i.Provider + " " + i.Note }
 
 // dependencyItem represents a job that can be selected as a dependency.
 type dependencyItem struct {
@@ -56,6 +62,9 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	switch i := listItem.(type) {
 	case item:
 		str = fmt.Sprintf("%s%s", cursor, i)
+	case llmModelItem:
+		suffix := theme.DefaultTheme.Muted.Render(" — " + i.Provider + ": " + i.Note)
+		str = fmt.Sprintf("%s%s%s", cursor, i.ID, suffix)
 	case skillItem:
 		authBadge := theme.DefaultTheme.Muted.Render("○")
 		if i.authorized {
@@ -260,10 +269,11 @@ func (m *Model) extractValues() {
 
 	m.jobPrompt = m.promptInput.Value()
 
-	// Provider (agent job types only). "default" → empty (config /
-	// claude fallback, matching CLI semantics).
+	// Provider is persisted only for agent jobs. For direct-API jobs the
+	// selected provider is a UI filter; the canonical model remains routing's
+	// single source of truth.
 	m.jobProvider = ""
-	if slotProviderVisible(m) {
+	if isAgentJobType(m.jobType) {
 		if selected := m.providerList.SelectedItem(); selected != nil {
 			if name := string(selected.(item)); name != "default" {
 				m.jobProvider = name
@@ -277,8 +287,13 @@ func (m *Model) extractValues() {
 	if slotModelVisible(m) {
 		if slotModelKind(m) == slotList {
 			if selected := m.modelList.SelectedItem(); selected != nil {
-				if name := string(selected.(item)); name != "(default)" {
-					m.jobModel = name
+				switch selected := selected.(type) {
+				case llmModelItem:
+					m.jobModel = selected.ID
+				case item:
+					if name := string(selected); name != "(default)" {
+						m.jobModel = name
+					}
 				}
 			}
 		} else {

@@ -218,6 +218,9 @@ type Model struct {
 	// invalidated at the same three sites (evictJobRenderCaches /
 	// clearTokenColumnCache).
 	modelColumnCache map[string]string
+	// sessionColumnCache memoizes native session IDs (including misses) so the
+	// filesystem registry is never queried once per frame.
+	sessionColumnCache map[string]string
 	// defaultProviderName is the config-default agent provider, resolved
 	// once in New() (LoadFlowConfig + ResolveJobProviderName). Used by the
 	// MODEL cell so a job with empty `provider:` folds under the effective
@@ -661,7 +664,7 @@ func New(cfg Config) Model {
 	}
 
 	// Column Visibility Setup
-	availableColumns := []string{"JOB", "TITLE", "SKILL", "TYPE", "STATUS", "TEMPLATE", "MODEL", "WORKTREE", "INLINE", "UPDATED", "COMPLETED", "DURATION", "TOKENS"}
+	availableColumns := []string{"JOB", "TITLE", "SKILL", "TYPE", "STATUS", "TEMPLATE", "MODEL", "SESSION", "WORKTREE", "INLINE", "UPDATED", "COMPLETED", "DURATION", "TOKENS"}
 	state, err := loadState()
 	if err != nil {
 		// On error, use defaults
@@ -782,6 +785,7 @@ func New(cfg Config) Model {
 		editViewport:             editVp,
 		tokenColumnCache:         make(map[string]string),
 		modelColumnCache:         make(map[string]string),
+		sessionColumnCache:       make(map[string]string),
 		defaultProviderName:      defaultProviderName,
 		tokenAgentArtifact:       make(map[string]map[string]usage.AgentUsage),
 		tokenAgentLive:           make(map[string]map[string]usage.AgentUsage),

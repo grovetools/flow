@@ -255,6 +255,7 @@ func formatTokenCell(s usage.Summary) string {
 func (m *Model) clearTokenColumnCache() {
 	m.tokenColumnCache = make(map[string]string)
 	m.modelColumnCache = make(map[string]string)
+	m.sessionColumnCache = make(map[string]string)
 }
 
 // evictJobRenderCaches drops both memoized table cells (TOKENS + MODEL) for a
@@ -266,6 +267,7 @@ func (m *Model) clearTokenColumnCache() {
 func (m *Model) evictJobRenderCaches(jobID string) {
 	delete(m.tokenColumnCache, jobID)
 	delete(m.modelColumnCache, jobID)
+	delete(m.sessionColumnCache, jobID)
 }
 
 // renderAgentTokenCell renders the TOKENS cell for a RowTypeAgent (subagent)
