@@ -126,6 +126,7 @@ Examples:
 	runCmd.Flags().BoolVar(&planRunSkipInteractive, "skip-interactive", false, "Skip interactive agent jobs (useful for CI/automation)")
 	runCmd.Flags().BoolVar(&planRunLocal, "local", false, "Force local execution (bypass daemon)")
 	runCmd.Flags().BoolVar(&planRunBackground, "background", false, "Submit to daemon and exit without waiting")
+	runCmd.Flags().BoolVar(&planRunForce, "force", false, "Override an advisory satellite dispatch lease (.grove-lease.yml) on the plan dir")
 	return runCmd
 }
 

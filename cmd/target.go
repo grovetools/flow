@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/grovetools/core/pkg/plan"
 	"github.com/spf13/cobra"
@@ -17,6 +18,31 @@ type targetKeyType struct{}
 // (*plan.ResolvedTarget) is stashed by the root PersistentPreRunE. Leaf
 // commands read it via TargetFromContext.
 var TargetContextKey = targetKeyType{}
+
+// satelliteKeyType is a private type for the satellite-dispatch context key.
+type satelliteKeyType struct{}
+
+// SatelliteContextKey is the context key under which a `--at satellite:<name>`
+// dispatch target's satellite NAME is stashed by the root PersistentPreRunE.
+// It is set INSTEAD of TargetContextKey (satellite dispatch does not resolve a
+// local worktree target); leaf commands read it via SatelliteFromContext.
+var SatelliteContextKey = satelliteKeyType{}
+
+// SatellitePrefix is the `--at` prefix that routes a plan run to a satellite.
+const SatellitePrefix = "satellite:"
+
+// SatelliteFromContext returns the satellite name stashed on ctx when `--at`
+// used the satellite: prefix, or ("", false) otherwise.
+func SatelliteFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	name, ok := ctx.Value(SatelliteContextKey).(string)
+	if !ok || name == "" {
+		return "", false
+	}
+	return name, true
+}
 
 // TargetFromContext returns the resolved target stashed on ctx by the root
 // PersistentPreRunE, or (nil, false) when `--at` was not provided.
@@ -58,6 +84,19 @@ func SetupTargetFlag(rootCmd *cobra.Command) {
 		}
 
 		if ref == "" {
+			return nil
+		}
+
+		// Satellite dispatch: `--at satellite:<name>` routes the run to a
+		// satellite rather than a local worktree. Intercept BEFORE
+		// plan.ResolveTarget (which stays worktree-only — F2). The local plan
+		// dir is resolved by the leaf command from its positional args.
+		if satName, isSat := strings.CutPrefix(ref, SatellitePrefix); isSat {
+			satName = strings.TrimSpace(satName)
+			if satName == "" {
+				return fmt.Errorf("--at %s requires a satellite name (e.g. --at satellite:grove-satellite)", SatellitePrefix)
+			}
+			cmd.SetContext(context.WithValue(cmd.Context(), SatelliteContextKey, satName))
 			return nil
 		}
 

@@ -140,6 +140,7 @@ var (
 	planRunBackground         bool // Submit to daemon and exit without waiting
 	planRunAppendDelta        bool // Stamp append_delta into the targeted chat turn (spec 19 D4)
 	planRunRebaseContext      bool // Stamp rebase_context into the targeted chat turn (spec 19 D4)
+	planRunForce              bool // Override an advisory .grove-lease.yml on the plan dir (P9 C14)
 
 	// Add flags
 	planAddTemplate            string
@@ -214,6 +215,7 @@ func NewPlanCmd() *cobra.Command {
 	planRunCmd.Flags().BoolVar(&planRunBackground, "background", false, "Submit to daemon and exit without waiting")
 	planRunCmd.Flags().BoolVar(&planRunAppendDelta, "append-delta", false, "Chat jobs: append a supersede-annotated context layer with files changed since the layers were frozen (cache-preserving refresh)")
 	planRunCmd.Flags().BoolVar(&planRunRebaseContext, "rebase-context", false, "Chat jobs: archive all context layers and re-freeze a fresh base from the current worktree (one deliberate cold cache write)")
+	planRunCmd.Flags().BoolVar(&planRunForce, "force", false, "Override an advisory satellite dispatch lease (.grove-lease.yml) on the plan dir")
 
 	// Add-step command flags
 	planAddCmd.Flags().StringVar(&planAddTemplate, "template", "", "Name of the job template to use")

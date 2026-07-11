@@ -137,6 +137,19 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Advisory-lease refusal (M2 C14): a plan dir dispatched to a satellite
+	// carries a .grove-lease.yml until the remote job terminates. Refuse to run
+	// it (locally, or a fresh satellite dispatch into it) while an unexpired
+	// lease is present, unless --force. `plan` here is still the imported
+	// package — the local *orchestration.Plan below shadows it.
+	if lease, lerr := plan.ReadLease(planDir); lerr == nil && lease != nil && !lease.Expired() && !planRunForce {
+		return fmt.Errorf(
+			"plan %q is leased to satellite %q (job %s, until %s); pass --force to override",
+			filepath.Base(planDir), lease.HolderOrigin, lease.JobID,
+			lease.AcquiredAt.Add(lease.TTL).Format(time.RFC3339),
+		)
+	}
+
 	// Load the plan
 	plan, err := orchestration.LoadPlan(planDir)
 	if err != nil {
@@ -146,6 +159,14 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// Prevent running jobs in a held plan
 	if plan.Config != nil && plan.Config.Status == "hold" {
 		return fmt.Errorf("cannot run jobs: plan is on hold. Use 'flow plan unhold' to resume")
+	}
+
+	// Satellite dispatch (P9): when `--at satellite:<name>` was given, ship the
+	// plan bundle to the satellite through the local global daemon and exit.
+	// This is background-by-nature — no local orchestrator run — so it precedes
+	// all the local mux / worktree / oneshot setup below.
+	if satName, ok := SatelliteFromContext(cmd.Context()); ok {
+		return submitJobsSatellite(ctx, plan, targetJobs, satName)
 	}
 
 	// Check for multiple worktrees
@@ -893,6 +914,69 @@ func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orche
 		fmt.Println("Headless jobs transition to completed/failed on their own — no 'flow plan complete' needed.")
 	}
 	return nil
+}
+
+// submitJobsSatellite ships the plan bundle to a satellite via the local global
+// daemon and exits (M2 C11). Job selection mirrors submitJobsBackground; each
+// request carries the Satellite name + PlanBundle and the LOCAL plan dir (used
+// laptop-side for the advisory lease). AgentTarget is left empty — the laptop
+// mux target is meaningless satellite-side (C4).
+func submitJobsSatellite(ctx context.Context, plan *orchestration.Plan, targetJobs []string, satelliteName string) error {
+	jobs := jobsToSubmit(plan, targetJobs)
+	if len(jobs) == 0 {
+		return fmt.Errorf("no jobs to submit")
+	}
+
+	bundle, err := buildPlanBundle(plan.Directory)
+	if err != nil {
+		return fmt.Errorf("build plan bundle: %w", err)
+	}
+
+	// The satellite ConnManager lives ONLY in the global (unscoped) daemon
+	// (C10), so dispatch must go through it — not the scoped auto-start client.
+	client := daemon.NewGlobalClient()
+	if !client.IsRunning() {
+		return fmt.Errorf("satellite dispatch requires the global grove daemon; start it with 'grove daemon start'")
+	}
+
+	fmt.Printf("Dispatching %d job(s) to satellite %q...\n", len(jobs), satelliteName)
+	failures := 0
+	for _, job := range jobs {
+		info, err := client.SubmitJob(ctx, models.JobSubmitRequest{
+			Satellite:  satelliteName,
+			PlanBundle: bundle,
+			PlanDir:    plan.Directory,
+			JobFile:    job.Filename,
+		})
+		if err != nil {
+			failures++
+			fmt.Printf("  %s %s: %v\n", color.RedString(theme.IconError), job.Filename, err)
+			continue
+		}
+		fmt.Printf("  %s %s → %s (id: %s, origin: %s)\n",
+			color.GreenString(theme.IconSuccess), job.Filename, info.Status, info.ID, info.Origin)
+	}
+	if failures == len(jobs) {
+		return fmt.Errorf("all %d satellite dispatch(es) failed", failures)
+	}
+	fmt.Printf("\nDispatched to %q. Watch with 'grove status' or 'flow plan status'.\n", satelliteName)
+	return nil
+}
+
+// jobsToSubmit selects jobs to dispatch: explicit targetJobs (by filename),
+// else the plan's next runnable jobs. Shared by the satellite dispatch path.
+func jobsToSubmit(plan *orchestration.Plan, targetJobs []string) []*orchestration.Job {
+	if len(targetJobs) > 0 {
+		var jobs []*orchestration.Job
+		for _, jf := range targetJobs {
+			if job, found := plan.GetJobByFilename(jf); found {
+				jobs = append(jobs, job)
+			}
+		}
+		return jobs
+	}
+	graph, _ := orchestration.BuildDependencyGraph(plan)
+	return graph.GetRunnableJobs()
 }
 
 // looksLikeFilePath returns true if the string appears to be a file path rather than a title.
