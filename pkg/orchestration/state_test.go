@@ -405,6 +405,74 @@ func TestStatePersister_UpdateJobMetadata(t *testing.T) {
 	}
 }
 
+// TestStatePersister_UpdateJobStatus_ClearsStaleLastError covers the
+// failed-then-rerun path: a job whose frontmatter carries last_error from an
+// earlier failed run must shed it (file and in-memory) when it completes
+// successfully, but keep it when it fails again without a new error.
+func TestStatePersister_UpdateJobStatus_ClearsStaleLastError(t *testing.T) {
+	tests := []struct {
+		name          string
+		newStatus     JobStatus
+		wantLastError bool
+	}{
+		{name: "completed clears stale last_error", newStatus: JobStatusCompleted, wantLastError: false},
+		{name: "failed keeps last_error", newStatus: JobStatusFailed, wantLastError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			job := &Job{
+				ID:       "rerun-job",
+				Title:    "Rerun Test Job",
+				Status:   JobStatusRunning,
+				FilePath: filepath.Join(dir, "rerun-job.md"),
+			}
+
+			// Simulate a job file left behind by a failed run (loader carries
+			// last_error into job.Metadata).
+			staleError := "job not found: old-failure"
+			job.Metadata.LastError = staleError
+			content := createJobFile(job)
+			if err := os.WriteFile(job.FilePath, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			sp := NewStatePersister()
+			if err := sp.UpdateJobMetadata(job, job.Metadata); err != nil {
+				t.Fatalf("UpdateJobMetadata() error = %v", err)
+			}
+
+			if err := sp.UpdateJobStatus(job, tt.newStatus); err != nil {
+				t.Fatalf("UpdateJobStatus() error = %v", err)
+			}
+
+			updatedContent, err := os.ReadFile(job.FilePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			contentStr := string(updatedContent)
+
+			if tt.wantLastError {
+				if !strings.Contains(contentStr, "last_error:") {
+					t.Errorf("Expected last_error to survive %s, got:\n%s", tt.newStatus, contentStr)
+				}
+				if job.Metadata.LastError != staleError {
+					t.Errorf("Expected in-memory LastError %q, got %q", staleError, job.Metadata.LastError)
+				}
+			} else {
+				if strings.Contains(contentStr, "last_error:") {
+					t.Errorf("Expected last_error cleared from frontmatter on %s, got:\n%s", tt.newStatus, contentStr)
+				}
+				if job.Metadata.LastError != "" {
+					t.Errorf("Expected in-memory LastError cleared, got %q", job.Metadata.LastError)
+				}
+			}
+		})
+	}
+}
+
 func TestStatePersister_UpdateJobModel(t *testing.T) {
 	dir := t.TempDir()
 	job := &Job{

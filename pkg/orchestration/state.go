@@ -123,6 +123,15 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 			}
 		}
 
+		// Successful completion invalidates any last_error left over from an
+		// earlier failed run (the loader carries it into job.Metadata, and
+		// updateFrontmatter deletes keys with empty values). Without this a
+		// failed-then-rerun job reports status: completed alongside the stale
+		// error, and the success job.finished log event echoes it.
+		if newStatus == JobStatusCompleted {
+			updates["last_error"] = ""
+		}
+
 		// Apply update
 		newContent, err := sp.updateFrontmatter(content, updates)
 		if err != nil {
@@ -137,6 +146,12 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 
 	// Update in-memory state
 	job.Status = newStatus
+	if newStatus == JobStatusCompleted {
+		// Keep in-memory metadata consistent with the cleared frontmatter so
+		// downstream logging (e.g. the orchestrator's job.finished event) and
+		// any later UpdateJobMetadata call don't resurrect the stale error.
+		job.Metadata.LastError = ""
+	}
 	if newStatus == JobStatusRunning && job.StartTime.IsZero() {
 		job.StartTime = time.Now()
 	}
