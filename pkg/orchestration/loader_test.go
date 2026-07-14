@@ -3,6 +3,7 @@ package orchestration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -535,4 +536,52 @@ func containsHelper(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestPlanConfigSatelliteRoundTrip pins the PlanConfig.Satellite yaml wiring:
+// a .grove-plan.yml `satellite:` key loads into Config.Satellite, survives a
+// SavePlan→LoadPlan round trip, and is omitted entirely when unset
+// (omitempty — older plans must not grow a satellite key on rewrite).
+func TestPlanConfigSatelliteRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".grove-plan.yml"),
+		[]byte("model: test-model\nsatellite: mysat\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := LoadPlan(dir)
+	if err != nil {
+		t.Fatalf("LoadPlan: %v", err)
+	}
+	if plan.Config == nil || plan.Config.Satellite != "mysat" {
+		t.Fatalf("Config.Satellite = %+v, want mysat", plan.Config)
+	}
+
+	// Round trip: SavePlan re-marshals Config; LoadPlan must read it back.
+	if err := SavePlan(dir, plan); err != nil {
+		t.Fatalf("SavePlan: %v", err)
+	}
+	reloaded, err := LoadPlan(dir)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Config.Satellite != "mysat" {
+		t.Errorf("round-tripped Satellite = %q, want mysat", reloaded.Config.Satellite)
+	}
+	if reloaded.Config.Model != "test-model" {
+		t.Errorf("round trip dropped Model: %q", reloaded.Config.Model)
+	}
+
+	// Unset satellite must not appear in the marshaled file (omitempty).
+	reloaded.Config.Satellite = ""
+	if err := SavePlan(dir, reloaded); err != nil {
+		t.Fatalf("SavePlan (unset): %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".grove-plan.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "satellite") {
+		t.Errorf("unset satellite leaked into .grove-plan.yml:\n%s", data)
+	}
 }

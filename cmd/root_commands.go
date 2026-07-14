@@ -110,10 +110,20 @@ outside it (e.g. a headless orchestrator in the main checkout). --at accepts
 a plan name, an absolute container path, or <container-id>/<name>. Positional
 arguments are then treated as job filenames within the resolved plan dir.
 
+Satellite dispatch: '--at satellite:<name>' ships the jobs to a grove
+satellite VM instead of running locally. A plan whose .grove-plan.yml carries
+'satellite: <name>' ('flow plan init --satellite <name>') dispatches there BY
+DEFAULT when no --at is given; any explicit --at wins, and the reserved
+'--at satellite:local' forces a local run. Ship the plan worktree first with
+'grove satellite worktree push <name> --plan <plan>', and fetch agent commits
+back with 'grove satellite worktree pull <name> --plan <plan> [--ff]'.
+
 Examples:
   flow plan run --at my-feature                 # run next jobs in plan "my-feature"
   flow plan run --at my-feature 02-impl.md      # run a specific job by filename
-  flow plan run 02-impl.md                      # implicit: from inside the worktree`,
+  flow plan run 02-impl.md                      # implicit: from inside the worktree
+  flow plan run --at satellite:mysat            # dispatch to satellite "mysat"
+  flow plan run --at satellite:local            # force local despite a plan satellite`,
 		RunE: runPlanRun,
 	}
 	runCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "[DEPRECATED] Plan directory; use --at <target> instead")

@@ -235,7 +235,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create default .grove-plan.yml
-	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.NoteRef, "", cmd.Playbook, cmd.SiblingWorkspaces); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, worktreeToSet, cmd.NoteRef, "", cmd.Playbook, cmd.Satellite, cmd.SiblingWorkspaces); err != nil {
 		result.WriteString(fmt.Sprintf("Warning: failed to create .grove-plan.yml: %v\n", err))
 	}
 
@@ -246,6 +246,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		result.WriteString(fmt.Sprintf("* Created worktree: %s\n", worktreeToSet))
 	}
 	result.WriteString("* Created .grove-plan.yml with default configuration\n")
+	result.WriteString(satelliteNextStepHint(cmd.Satellite, planName))
 
 	// Environment provisioning: if the config has an environment provider, spin it up.
 	// Capture any error but keep running — the plan dir + worktree are still valid
@@ -893,10 +894,13 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 	// Create a default .grove-plan.yml, using the determined worktree and recipe name
 	// Use recipeVars["model"] which includes workspace config fallback
 	effectiveModel := recipeVars["model"]
-	if err := createDefaultPlanConfig(planPath, effectiveModel, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Playbook, cmd.SiblingWorkspaces); err != nil {
+	if err := createDefaultPlanConfig(planPath, effectiveModel, finalWorktree, cmd.NoteRef, cmd.Recipe, cmd.Playbook, cmd.Satellite, cmd.SiblingWorkspaces); err != nil {
 		fmt.Printf("Warning: failed to create .grove-plan.yml: %v\n", err)
 	} else {
 		fmt.Println("* Created .grove-plan.yml")
+	}
+	if hint := satelliteNextStepHint(cmd.Satellite, planName); hint != "" {
+		fmt.Print(hint)
 	}
 
 	// Execute init actions after everything is set up (only if --init flag is set)
@@ -1079,6 +1083,51 @@ func validateInitInputs(cmd *PlanInitCmd, resolvedPath string) error {
 		return fmt.Errorf("directory '%s' already exists (use --force to overwrite)", resolvedPath)
 	}
 
+	// Validate the satellite designation. Flow deliberately does NOT consult
+	// grove's satellite registry here (flow must be able to parse and write
+	// plan config without grove); only the name's shape is checked, plus the
+	// reserved dispatch-time sentinel "local".
+	if err := validateSatelliteName(cmd.Satellite); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// satelliteNextStepHint renders the post-init teaching line for a
+// satellite-designated plan: the worktree must be shipped to the VM before
+// `flow plan run` (which now auto-routes there) can find it. Empty when no
+// satellite was designated.
+func satelliteNextStepHint(satellite, planName string) string {
+	if satellite == "" {
+		return ""
+	}
+	return fmt.Sprintf("* Designated satellite: %s ('flow plan run' dispatches there by default)\n"+
+		"  Next: grove satellite worktree push %s --plan %s\n", satellite, satellite, planName)
+}
+
+// satelliteNameRe is the shape a satellite designation must have to be safely
+// round-trippable through .grove-plan.yml and CLI hints. Matches the repo/
+// registry-name charset grove uses.
+var satelliteNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// validateSatelliteName checks a --satellite value: empty is fine (no
+// designation), otherwise the name must be non-blank, shaped like a registry
+// name, and not the reserved "local" (which `flow plan run --at
+// satellite:local` uses to force a local run).
+func validateSatelliteName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("--satellite requires a non-empty satellite name")
+	}
+	if name == "local" {
+		return fmt.Errorf("--satellite: %q is reserved (it forces local dispatch via --at satellite:local); pick another satellite name", name)
+	}
+	if !satelliteNameRe.MatchString(name) {
+		return fmt.Errorf("--satellite: invalid satellite name %q (allowed: A-Za-z0-9._-)", name)
+	}
 	return nil
 }
 
@@ -1207,7 +1256,7 @@ func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
 }
 
 // createDefaultPlanConfig creates a default .grove-plan.yml file in the plan directory.
-func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playbook string, siblingWorkspaces []string) error {
+func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playbook, satellite string, siblingWorkspaces []string) error {
 	var configContent strings.Builder
 
 	// Recipe field (if applicable)
@@ -1221,6 +1270,15 @@ func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playboo
 	if playbook != "" {
 		configContent.WriteString("# Playbook scoping: jobs in this plan inherit $PLAYBOOK_ROOT\n")
 		configContent.WriteString(fmt.Sprintf("playbook: %s\n", playbook))
+		configContent.WriteString("\n")
+	}
+
+	// Satellite designation (if applicable): `flow plan run` dispatches to
+	// this satellite by default (see PlanConfig.Satellite).
+	if satellite != "" {
+		configContent.WriteString("# Satellite this plan's remote work runs on: 'flow plan run' dispatches\n")
+		configContent.WriteString("# there by default (--at satellite:local forces a local run)\n")
+		configContent.WriteString(fmt.Sprintf("satellite: %s\n", satellite))
 		configContent.WriteString("\n")
 	}
 

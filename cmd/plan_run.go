@@ -161,12 +161,25 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot run jobs: plan is on hold. Use 'flow plan unhold' to resume")
 	}
 
-	// Satellite dispatch (P9): when `--at satellite:<name>` was given, ship the
-	// plan bundle to the satellite through the local global daemon and exit.
-	// This is background-by-nature — no local orchestrator run — so it precedes
-	// all the local mux / worktree / oneshot setup below.
-	if satName, ok := SatelliteFromContext(cmd.Context()); ok {
-		return submitJobsSatellite(ctx, plan, targetJobs, satName)
+	// Satellite dispatch (P9): when `--at satellite:<name>` was given — or the
+	// plan's .grove-plan.yml designates a satellite and no explicit --at
+	// overrides it — ship the plan bundle to the satellite through the local
+	// global daemon and exit. This is background-by-nature — no local
+	// orchestrator run — so it precedes all the local mux / worktree / oneshot
+	// setup below. Precedence lives in resolveDispatchSatellite.
+	{
+		atSat, atSatSet := SatelliteFromContext(cmd.Context())
+		_, hasLocalTarget := TargetFromContext(cmd.Context())
+		planSat := ""
+		if plan.Config != nil {
+			planSat = plan.Config.Satellite
+		}
+		if satName, ok := resolveDispatchSatellite(atSat, atSatSet, hasLocalTarget, planSat); ok {
+			if !atSatSet {
+				fmt.Printf("Plan designates satellite %q (.grove-plan.yml) — dispatching there. Use '--at satellite:local' to run locally.\n", satName)
+			}
+			return submitJobsSatellite(ctx, plan, targetJobs, satName)
+		}
 	}
 
 	// Check for multiple worktrees
@@ -914,6 +927,38 @@ func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orche
 		fmt.Println("Headless jobs transition to completed/failed on their own — no 'flow plan complete' needed.")
 	}
 	return nil
+}
+
+// satelliteLocalSentinel is the reserved satellite name that forces a LOCAL
+// run: `--at satellite:local` overrides a plan-config satellite designation.
+const satelliteLocalSentinel = "local"
+
+// resolveDispatchSatellite decides where a plan run dispatches, with
+// flag > plan config > local precedence:
+//
+//   - `--at satellite:<name>` (atSatelliteSet) always wins; the reserved
+//     name "local" forces a local run (returns ok=false).
+//   - an explicit LOCAL `--at` target (hasLocalTarget) also forces a local
+//     run — an explicit flag of either kind beats the plan config.
+//   - otherwise the plan's .grove-plan.yml satellite designation (planSatellite,
+//     whitespace-trimmed) applies.
+//   - no flag, no designation → local (ok=false).
+//
+// Pure so the precedence table is unit-testable.
+func resolveDispatchSatellite(atSatellite string, atSatelliteSet, hasLocalTarget bool, planSatellite string) (string, bool) {
+	if atSatelliteSet {
+		if atSatellite == satelliteLocalSentinel {
+			return "", false
+		}
+		return atSatellite, true
+	}
+	if hasLocalTarget {
+		return "", false
+	}
+	if s := strings.TrimSpace(planSatellite); s != "" && s != satelliteLocalSentinel {
+		return s, true
+	}
+	return "", false
 }
 
 // submitJobsSatellite ships the plan bundle to a satellite via the local global

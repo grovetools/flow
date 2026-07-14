@@ -15,6 +15,14 @@ type PlanConfig struct {
 	// inherit this value unless they declare their own override. Primary
 	// source of truth for $PLAYBOOK_ROOT env injection at execution time.
 	Playbook string `yaml:"playbook,omitempty" json:"playbook,omitempty"`
+	// Satellite designates the grove satellite this plan's remote work runs
+	// on (written by `flow plan init --satellite <name>`). When set,
+	// `flow plan run` defaults to dispatching jobs to that satellite as if
+	// `--at satellite:<name>` had been passed; an explicit `--at` (any
+	// target, or the reserved `--at satellite:local`) overrides it. Flow
+	// treats the value as an opaque registry name — it is validated against
+	// grove's satellite registry only at dispatch time, by the daemon.
+	Satellite string `yaml:"satellite,omitempty" json:"satellite,omitempty"`
 	// ArchiveAgentTranscripts opts in to copying the RAW per-agent jsonl
 	// transcripts (agent-*.jsonl) for both workflow and standalone (Agent-tool)
 	// subagents when archiving on job completion. Off by default: raw

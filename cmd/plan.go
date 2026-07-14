@@ -51,7 +51,15 @@ var planRunCmd = &cobra.Command{
 	Long: `Run jobs in an orchestration plan.
 Without arguments, runs the next available jobs.
 With a single job file argument, runs that specific job.
-With multiple job file arguments, runs those jobs in parallel.`,
+With multiple job file arguments, runs those jobs in parallel.
+
+Satellite dispatch: '--at satellite:<name>' ships the jobs to a grove
+satellite VM instead of running locally. A plan whose .grove-plan.yml carries
+'satellite: <name>' ('flow plan init --satellite <name>') dispatches there BY
+DEFAULT when no --at is given; any explicit --at wins, and the reserved
+'--at satellite:local' forces a local run. Ship the plan worktree first with
+'grove satellite worktree push <name> --plan <plan>', and fetch agent commits
+back with 'grove satellite worktree pull <name> --plan <plan> [--ff]'.`,
 	RunE: runPlanRun,
 }
 
@@ -132,6 +140,7 @@ var (
 	planInitPlaybook          string
 	planInitLayout            string
 	planInitAnchor            string
+	planInitSatellite         string
 	planRunDir                string
 	planRunAll                bool
 	planRunNext               bool
@@ -201,6 +210,7 @@ func NewPlanCmd() *cobra.Command {
 	planInitCmd.Flags().StringVar(&planInitPlaybook, "playbook", "", "Name of a playbook whose skills, prompts, and recipes scope this plan (e.g., gdv2). Written to .grove-plan.yml; jobs in the plan inherit $PLAYBOOK_ROOT at execution time.")
 	planInitCmd.Flags().StringVar(&planInitLayout, "layout", "", "Worktree layout: 'xdg' (XDG data dir, default for ecosystems) or 'legacy' (in-repo .grove-worktrees/). Overrides GROVE_WORKTREE_LAYOUT and grove.toml [worktree] layout.")
 	planInitCmd.Flags().StringVar(&planInitAnchor, "anchor", "", "Repo to anchor the worktree to (driving repo). The worktree will be placed under this repo's XDG base directory. Auto-inferred when run from inside a sub-project.")
+	planInitCmd.Flags().StringVar(&planInitSatellite, "satellite", "", "Designate a grove satellite for this plan's remote work (written to .grove-plan.yml). Workflow: init --satellite <name>, then 'grove satellite worktree push <name> --plan <plan>' to ship the plan worktree to the VM; 'flow plan run' then auto-dispatches to the satellite (force a local run with --at satellite:local); fetch agent commits back with 'grove satellite worktree pull <name> --plan <plan> [--ff]'.")
 
 	// Run command flags
 	planRunCmd.Flags().StringVarP(&planRunDir, "dir", "d", ".", "Plan directory")
@@ -340,6 +350,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 		RunInit:           planInitRunInit,
 		Playbook:          planInitPlaybook,
 		Layout:            planInitLayout,
+		Satellite:         planInitSatellite,
 	}
 
 	// Launch TUI if no directory is provided and we are in a TTY, or if --tui is explicitly set.
@@ -435,6 +446,7 @@ type PlanInitCmd struct {
 	NoteTargetFile    string
 	RunInit           bool // Run init actions from workspace_init.yml
 	Playbook          string
+	Satellite         string // Satellite the plan's remote work is designated to (written to .grove-plan.yml)
 	Layout            string // Worktree layout: "xdg" or "legacy" (empty = resolver default)
 	Anchor            string // Repo name to anchor the worktree to (driving repo)
 }
