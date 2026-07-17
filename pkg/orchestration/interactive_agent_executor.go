@@ -57,6 +57,14 @@ func (e *InteractiveAgentExecutor) Name() string {
 // Execute runs an interactive agent job in a tmux session and blocks until completion.
 // The output writer is ignored for interactive agents as they run in a separate tmux session.
 func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *Plan) error {
+	// Early progress: launching an interactive agent can take tens of seconds
+	// (memory prefetch, worktree prep, pane attach) with nothing visible until
+	// the pane appears. Emit through the same log stream the user already sees.
+	e.ulog.Info("Launching interactive agent").
+		Field("job_id", job.ID).
+		Pretty(theme.IconInteractiveAgent + " Launching interactive agent...").
+		Log(ctx)
+
 	// Load config up front: provider resolution and per-provider model
 	// validation both need it, and an unknown provider or bad model should
 	// fail before any setup work. A malformed config shouldn't hard-fail an
@@ -176,8 +184,13 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			return fmt.Errorf("failed to gather context files: %w", err)
 		}
 
-		// Query memory database for related memories
-		memories := FetchRelatedMemories(ctx, job)
+		// Query memory database for related memories, bounded so an offline
+		// embedding path can't stall the launch (see memoryPrefetchTimeout).
+		e.ulog.Info("Fetching related memories").
+			Field("job_id", job.ID).
+			Pretty(theme.IconSearch + " Fetching related memories (bounded 15s)...").
+			Log(ctx)
+		memories := FetchRelatedMemoriesBounded(ctx, job)
 
 		// Build the XML prompt and get the list of files to upload.
 		// NOTE: interactive agents currently don't support separate file uploads, so filesToUpload is ignored.

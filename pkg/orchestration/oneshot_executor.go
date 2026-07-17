@@ -256,8 +256,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// their default WorkDir resolution.
 	hotCtxFile, coldCtxFile := jobCtx.existingPaths()
 
-	// Query memory database for related memories
-	memories := FetchRelatedMemories(ctx, job)
+	// Query memory database for related memories (bounded; see memoryPrefetchTimeout)
+	memories := FetchRelatedMemoriesBounded(ctx, job)
 
 	// Build the XML prompt and get the list of files to upload
 	prompt, promptSourceFiles, err := BuildXMLPrompt(job, plan, workDir, contextFiles, memories)

@@ -4,10 +4,42 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/grovetools/core/tui/theme"
 	"github.com/grovetools/grove-gemini/pkg/gemini"
 	"github.com/grovetools/memory/pkg/memory"
 )
+
+// memoryPrefetchTimeout bounds the ENTIRE memory prefetch (api_key command +
+// Gemini client init + EmbedQuery + store search). Offline, the embedding call
+// and the api_key command can each stall for tens of seconds with no deadline;
+// without this bound the agent launch is delayed with no user-visible progress.
+// On expiry the prefetch is abandoned and the agent launches with no memories.
+const memoryPrefetchTimeout = 15 * time.Second
+
+// FetchRelatedMemoriesBounded runs FetchRelatedMemories under memoryPrefetchTimeout
+// so a slow/offline embedding path can never delay the agent-launch critical
+// path past the bound. On timeout it logs a Warn and returns nil so the launch
+// proceeds without memories. The passed ctx is still honored for earlier
+// cancellation (e.g. job cancellation).
+func FetchRelatedMemoriesBounded(ctx context.Context, job *Job) []memory.SearchResult {
+	bctx, cancel := context.WithTimeout(ctx, memoryPrefetchTimeout)
+	defer cancel()
+
+	results := FetchRelatedMemories(bctx, job)
+
+	if bctx.Err() == context.DeadlineExceeded {
+		ulog.Warn("memory prefetch timed out; launching without memories").
+			Field("job_id", job.ID).
+			Field("timeout", memoryPrefetchTimeout.String()).
+			Pretty(theme.IconWarning + " Memory prefetch timed out; launching without memories").
+			Log(ctx)
+		return nil
+	}
+
+	return results
+}
 
 // FetchRelatedMemories queries the memory DB for semantic matches to the job prompt.
 // It returns nil gracefully when the DB is missing, the API key is unavailable,
