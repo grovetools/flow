@@ -863,7 +863,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// the user's intent by nuking the directory directly.
 				// Gated by a strict path check to keep os.RemoveAll
 				// from ever escaping the .grove-worktrees boundary.
-				if err != nil && opts.Force && isDirNotEmptyErr(err) && pathIsUnderGroveWorktrees(wPath, gitRoot) {
+				if err != nil && opts.Force && isDirNotEmptyErr(err) && pathIsUnderGroveWorktrees(wPath, gitRoot, planRepos(plan)) {
 					wPathClean := filepath.Clean(wPath)
 					if rmErr := os.RemoveAll(wPathClean); rmErr != nil {
 						return fmt.Errorf("force-remove worktree dir: %w", rmErr)
@@ -954,12 +954,6 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				foreachCmd := fmt.Sprintf("git branch %s %s 2>/dev/null || true", deleteFlag, branchName)
 				cmd := exec.Command("git", "-C", gitRoot, "submodule", "foreach", foreachCmd)
 				_ = cmd.Run()
-				var notMergedErr error
-				recordNotMerged := func(repoLabel string, err error) {
-					if notMergedErr == nil {
-						notMergedErr = fmt.Errorf("branch %q not fully merged in %s (re-run with --force to destroy unmerged commits): %w", branchName, repoLabel, err)
-					}
-				}
 				gitmodulesPath := filepath.Join(gitRoot, ".gitmodules")
 				if _, err := os.Stat(gitmodulesPath); err == nil {
 					submodulePaths, _ := parseGitmodules(gitmodulesPath)
@@ -992,10 +986,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 							if output, err := deleteCmd.CombinedOutput(); err != nil {
 								outputStr := string(output)
 								if !strings.Contains(outputStr, "not found") {
-									if !opts.Force && strings.Contains(outputStr, "not fully merged") {
-										recordNotMerged(submoduleName+" (main checkout)", err)
-									}
-									fmt.Printf("    Note: could not delete branch '%s' from %s main checkout: %v\n", branchName, submoduleName, err)
+									fmt.Printf("    Warning: could not delete branch '%s' from %s main checkout: %v\n", branchName, submoduleName, err)
 								}
 							}
 						}
@@ -1015,16 +1006,15 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 							if output, err := deleteCmd.CombinedOutput(); err != nil {
 								outputStr := string(output)
 								if !strings.Contains(outputStr, "not found") {
-									if !opts.Force && strings.Contains(outputStr, "not fully merged") {
-										recordNotMerged(submoduleName+" (local workspace)", err)
-									}
 									fmt.Printf("    Warning: failed to delete branch '%s' from %s local workspace: %v\n", branchName, submoduleName, err)
 								}
 							}
 						}
 					}
 				}
-				return notMergedErr
+				// Branch-delete failures degrade to warnings above: the worktree is
+				// already pruned, so they must not abort mark_finished + archive_plan.
+				return nil
 			},
 		},
 		{
@@ -1121,7 +1111,6 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// failures so one unmerged/locked repo doesn't abort the rest.
 				if plan.Config != nil && len(plan.Config.Repos) > 0 {
 					sources := resolveEcosystemRepoSources(gitRoot, plan.Config.Repos, provider)
-					var firstErr error
 					for _, repo := range plan.Config.Repos {
 						repoPath, ok := sources[repo]
 						if !ok {
@@ -1131,39 +1120,59 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 							continue // branch already gone in this repo
 						}
 						if err := deleteLocalBranch(repoPath, branchName, opts.Force); err != nil {
+							// Degrade to a warning: the worktree has already been
+							// pruned by this point, so a branch-delete failure must
+							// NOT abort the finish (which would skip mark_finished +
+							// archive_plan and strand the plan in 'review').
 							fmt.Printf("    Warning: failed to delete branch '%s' from %s: %v\n", branchName, repo, err)
-							if firstErr == nil {
-								firstErr = err
-							}
 							continue
 						}
 						fmt.Printf("    Deleted branch '%s' from %s\n", branchName, repo)
 					}
-					return firstErr
+					return nil
 				}
-				err := executor.Execute("git", "-C", gitRoot, "branch", "-d", branchName)
+				// Authoritative merged-check independent of gitRoot's ambient
+				// HEAD (Bug 2): `git branch -d` treats an ancestor-of-main branch
+				// as "not fully merged" when HEAD is parked elsewhere. Consult
+				// main/master directly and escalate to -D when provably merged.
+				delFlag := "-d"
+				if opts.Force {
+					delFlag = "-D"
+				} else {
+					for _, baseBranch := range []string{"main", "master"} {
+						if exec.Command("git", "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Run() != nil { //nolint:gosec // baseBranch is a literal
+							continue
+						}
+						if exec.Command("git", "-C", gitRoot, "merge-base", "--is-ancestor", branchName, baseBranch).Run() == nil { //nolint:gosec // refs are internal
+							delFlag = "-D" // provably merged; -D is safe
+							break
+						}
+					}
+				}
+				err := executor.Execute("git", "-C", gitRoot, "branch", delFlag, branchName)
 				if err != nil {
 					if strings.Contains(err.Error(), "not found") {
 						// Idempotent: the branch is already gone.
 						return nil
-					} else if strings.Contains(err.Error(), "checked out at") {
+					}
+					if strings.Contains(err.Error(), "checked out at") {
 						// Worktree was pruned earlier in the cleanup
 						// sequence; the branch ref just has a stale
 						// worktree pointer, so -D here does not lose
 						// work.
 						fmt.Printf("    Using -D (force) to delete branch that was in worktree...\n")
-						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
-					} else if strings.Contains(err.Error(), "not fully merged") {
-						// Destroys unmerged commits. Only allowed
-						// when the user explicitly asked for force.
-						if !opts.Force {
-							return err
+						if derr := executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName); derr != nil {
+							fmt.Printf("    Warning: failed to delete branch '%s': %v\n", branchName, derr)
 						}
-						fmt.Printf("    Using -D (force) due to unmerged commits...\n")
-						return executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName)
+						return nil
 					}
+					// Any other failure (including a genuinely-unmerged branch
+					// without --force) degrades to a warning so archive +
+					// mark_finished still run; the branch is left intact, so no
+					// unmerged work is destroyed.
+					fmt.Printf("    Warning: failed to delete branch '%s': %v\n", branchName, err)
 				}
-				return err
+				return nil
 			},
 		},
 		{
@@ -1665,8 +1674,35 @@ func resolveEcosystemRepoSources(gitRoot string, repos []string, provider *works
 // destroy unmerged commits. Returns an error when the branch is unmerged and
 // force is false so the caller can surface the data-loss risk; a missing branch
 // is treated as success (idempotent).
+//
+// Before the safe delete it runs an authoritative merged-check. `git branch -d`
+// evaluates "merged" against the repo's ambient HEAD (or the branch's upstream),
+// so a branch that IS an ancestor of main is falsely reported "not fully merged"
+// whenever HEAD is parked on some other branch — the common case after a
+// worktree prune, where the source repo's checkout is on its own feature branch
+// or a stale ref. We instead consult main/master directly with
+// `git merge-base --is-ancestor <branch> <base>`; when the branch is provably an
+// ancestor of a base, we escalate to `-D` so the delete still succeeds WITHOUT
+// destroying any unmerged work (there is none — it's already in the base).
 func deleteLocalBranch(repoPath, branchName string, force bool) error {
-	out, err := exec.Command("git", "-C", repoPath, "branch", "-d", branchName).CombinedOutput() //nolint:gosec // branchName is internal
+	if !force {
+		for _, baseBranch := range []string{"main", "master"} {
+			if exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", "refs/heads/"+baseBranch).Run() != nil { //nolint:gosec // baseBranch is a literal
+				continue
+			}
+			if exec.Command("git", "-C", repoPath, "merge-base", "--is-ancestor", branchName, baseBranch).Run() == nil { //nolint:gosec // refs are internal
+				// Provably merged into a base branch: -D is safe.
+				force = true
+				break
+			}
+		}
+	}
+
+	delFlag := "-d"
+	if force {
+		delFlag = "-D"
+	}
+	out, err := exec.Command("git", "-C", repoPath, "branch", delFlag, branchName).CombinedOutput() //nolint:gosec // branchName is internal
 	if err == nil {
 		return nil
 	}
@@ -1777,7 +1813,7 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		if !exists {
 			fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping branch cleanup\n", repo)
 			if force {
-				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot) {
+				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot, repos) {
 					fmt.Printf("      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
 				} else if err := os.RemoveAll(repoWorktreePath); err != nil {
 					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
@@ -1804,7 +1840,7 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 				// Already gone; nothing to do.
 			} else if force {
 				fmt.Printf("      Warning: git worktree remove failed, removing directory manually: %s\n", outputStr)
-				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot) {
+				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot, repos) {
 					fmt.Printf("      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
 				} else if err := os.RemoveAll(repoWorktreePath); err != nil {
 					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
@@ -1842,7 +1878,7 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		// recover any preserved work.
 		return firstErr
 	}
-	if !pathIsUnderGroveWorktrees(ecosystemDir, gitRoot) {
+	if !pathIsUnderGroveWorktrees(ecosystemDir, gitRoot, repos) {
 		return fmt.Errorf("refusing to remove ecosystem directory outside worktree boundary: %s", ecosystemDir)
 	}
 	if err := os.RemoveAll(ecosystemDir); err != nil {
@@ -1890,7 +1926,7 @@ func reapLegacyStubWorktree(ctx context.Context, gitRoot, worktreeName string, f
 	}
 	// The legacy (non-XDG) location for this ecosystem's worktree.
 	legacyPath := workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
-	if !pathIsUnderGroveWorktrees(legacyPath, gitRoot) {
+	if !pathIsUnderGroveWorktrees(legacyPath, gitRoot, nil) {
 		return
 	}
 	if _, err := os.Stat(legacyPath); err != nil {
@@ -1945,44 +1981,61 @@ func worktreeListContainsPath(porcelain, target string) bool {
 	return false
 }
 
-// pathIsUnderGroveWorktrees reports whether wPath is a safe target
-// for force-removal: it must live strictly beneath one of gitRoot's
-// worktree bases (the identifier-level container directories returned
-// by workspace.WorktreeBases). Returns false if gitRoot is empty, if
-// wPath is a base container itself, or if wPath escapes every base
-// (after cleaning). Guards os.RemoveAll against catastrophic misuse.
-func pathIsUnderGroveWorktrees(wPath, gitRoot string) bool {
+// planRepos returns the participating repo names of plan, or nil when the plan
+// carries no repo list. It exists so callers can pass the anchor-scope to
+// pathIsUnderGroveWorktrees without repeating the nil-guard.
+func planRepos(plan *orchestration.Plan) []string {
+	if plan == nil || plan.Config == nil {
+		return nil
+	}
+	return plan.Config.Repos
+}
+
+// pathIsUnderGroveWorktrees reports whether wPath is a safe target for
+// force-removal: it must live strictly beneath one of the worktree bases
+// (the identifier-level container directories returned by
+// workspace.WorktreeBases) of gitRoot OR of one of this ecosystem's anchor
+// repos. Returns false if gitRoot is empty, if wPath is a base container
+// itself, or if wPath escapes every base (after cleaning). Guards os.RemoveAll
+// against catastrophic misuse.
+//
+// repos is the plan's participating repo names. An anchored worktree
+// (`--anchor <sub-repo>`) lives under the ANCHOR repo's OWN identifier dir
+// (WorktreeBases(<gitRoot>/<repo>)), not gitRoot's — so the guard must accept
+// those too. Crucially it does so by matching each anchor repo's *specific*
+// identifier dir, NOT by blanket-accepting anything under the shared XDG
+// worktrees tree: a different clone's worktrees live under a different
+// identifier and must stay out of bounds (cross-clone protection).
+func pathIsUnderGroveWorktrees(wPath, gitRoot string, repos []string) bool {
 	if gitRoot == "" || wPath == "" {
 		return false
 	}
 	wPathClean := filepath.Clean(wPath)
-	for _, base := range workspace.WorktreeBases(gitRoot) {
-		container := filepath.Clean(base)
-		if wPathClean == container {
-			// The container itself is never a removal target.
-			return false
-		}
-		if strings.HasPrefix(wPathClean, container+string(filepath.Separator)) {
-			return true
-		}
-	}
-	// Anchored worktrees (`--anchor <sub-repo>`) live under the anchor repo's
-	// XDG base, not gitRoot's, so the gitRoot-scoped check above misses them.
-	// They still live inside the global XDG worktrees tree
-	// (WorktreesDir()/<identifier>/<name>), which IS the grove-managed boundary
-	// this guard exists to enforce. Accept a path that is a LEAF (>= 2 levels
-	// below the root: an identifier dir and the worktree name), never the root
-	// or a bare identifier dir.
-	if wtd := paths.WorktreesDir(); wtd != "" {
-		root := filepath.Clean(wtd)
-		if strings.HasPrefix(wPathClean, root+string(filepath.Separator)) {
-			rel, err := filepath.Rel(root, wPathClean)
-			if err == nil {
-				depth := len(strings.Split(rel, string(filepath.Separator)))
-				if depth >= 2 {
-					return true
-				}
+
+	// underBasesOf reports true when wPath is strictly beneath one of root's
+	// worktree bases, and false when it equals a base container (never a
+	// removal target). The second return says whether a decision was made.
+	underBasesOf := func(root string) (bool, bool) {
+		for _, base := range workspace.WorktreeBases(root) {
+			container := filepath.Clean(base)
+			if wPathClean == container {
+				return false, true
 			}
+			if strings.HasPrefix(wPathClean, container+string(filepath.Separator)) {
+				return true, true
+			}
+		}
+		return false, false
+	}
+
+	if ok, decided := underBasesOf(gitRoot); decided {
+		return ok
+	}
+	// Anchor repos: an `--anchor <sub-repo>` worktree lives under the sub-repo's
+	// identifier dir. Scope acceptance to THIS ecosystem's repos only.
+	for _, r := range repos {
+		if ok, decided := underBasesOf(filepath.Join(gitRoot, r)); decided {
+			return ok
 		}
 	}
 	return false
@@ -2196,7 +2249,7 @@ func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitR
 		if err := fs.CopyDir(containerPath, destPath); err != nil {
 			return fmt.Errorf("failed to copy worktree to archive: %w", err)
 		}
-		if !pathIsUnderGroveWorktrees(containerPath, gitRoot) {
+		if !pathIsUnderGroveWorktrees(containerPath, gitRoot, repos) {
 			return fmt.Errorf("worktree copied to %s but refusing to remove source outside worktree boundary: %s", destPath, containerPath)
 		}
 		if err := os.RemoveAll(filepath.Clean(containerPath)); err != nil {
