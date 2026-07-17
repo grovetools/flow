@@ -52,7 +52,14 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Register session intent with the daemon BEFORE launching the agent.
 	// This eliminates the PID race condition by pre-registering the session.
 	// The daemon will track this session and wait for confirmation with the actual PID.
-	daemonClient := daemon.NewWithAutoStart()
+	//
+	// Resolve the client against the job's owning scope (not the executor's
+	// env-implied default) so the intent, the agent-env GROVE_SCOPE the hook
+	// reads, and the later ConfirmSession all target ONE daemon. Otherwise a
+	// scoped agent's intent lands on the global daemon while its hook record
+	// lands on the scoped daemon, leaving a stale pending on one and an orphan
+	// running on the other.
+	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -188,12 +195,16 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// descendants. Typing `export` into the pane would leak these vars
 		// into the user's interactive shell after the agent exits.
 		//
-		// GROVE_SCOPE is inherited from the executor's env (treemux exports
-		// it at startup; the daemon process exports its own scope on boot).
-		// If the executor has no GROVE_SCOPE set, we don't inject one —
-		// agents launched from plain tmux hit the unscoped global daemon.
+		// GROVE_SCOPE must match the daemon the session intent was registered
+		// against, or the hook (agent env) and confirm (executor) land on
+		// different daemons — leaving a stale pending record on one and an orphan
+		// running record on the other. Prefer the executor's own GROVE_SCOPE, but
+		// fall back to resolving it from the job's working directory (the same
+		// resolver core's daemon factory uses) so a scope is injected whenever the
+		// workDir belongs to an ecosystem — not only when the executor happened to
+		// have GROVE_SCOPE exported.
 		scopePrefix := ""
-		if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+		if scope := resolveJobScope(workDir); scope != "" {
 			scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 		}
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
@@ -355,9 +366,10 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Inline env vars on the agent command itself (see the matching site
 	// above for rationale). Scoping env to the agent process avoids
 	// polluting the user's interactive shell after the agent exits.
-	// GROVE_SCOPE is inherited from the executor's env, not forced.
+	// GROVE_SCOPE is derived from the executor's env, falling back to the
+	// job's working directory, so intent/agent-env/confirm land on one daemon.
 	scopePrefix := ""
-	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+	if scope := resolveJobScope(workDir); scope != "" {
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
@@ -414,6 +426,20 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	}
 
 	return nil
+}
+
+// resolveJobScope resolves the owning daemon scope for a job launched into
+// workDir. It prefers the executor's explicit GROVE_SCOPE (set by treemux/the
+// daemon on boot), and otherwise resolves the scope from the job's working
+// directory exactly as core's daemon factory does. The result is injected into
+// the agent env (so the hook's registry record is stamped with it) and used to
+// resolve the intent/confirm daemon clients, keeping all three on one daemon.
+// An empty return means the unscoped/global daemon.
+func resolveJobScope(workDir string) string {
+	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+		return scope
+	}
+	return workspace.ResolveScope(workDir)
 }
 
 // validateClaudeAgentModel is the claude provider's per-job model predicate:
@@ -616,8 +642,11 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		claudeSessionID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
 	}
 
-	// Confirm the session with the daemon using the discovered PID
-	daemonClient := daemon.NewWithAutoStart()
+	// Confirm the session with the daemon using the discovered PID. Resolve the
+	// client against the job's working directory (same scope as the intent and
+	// the agent-env GROVE_SCOPE) so confirm updates the pending intent record on
+	// the SAME daemon instead of orphaning a running record on a different one.
+	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
@@ -649,6 +678,9 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 			JobFilePath:      job.FilePath,
 			Type:             "interactive_agent",
 			TranscriptPath:   transcriptPath,
+			// Stamp the owning scope so a scoped daemon can recover this live
+			// session after a restart (RecoverSessionsForScope filters on Scope).
+			Scope: resolveJobScope(workDir),
 		}
 
 		registry, regErr := sessions.NewFileSystemRegistry()
