@@ -68,8 +68,9 @@ const (
 	ContextPaneDetail
 	MemoryPaneDetail
 	NativeAgentPaneDetail
-	EditorPaneDetail // BSP split editor (hosted mode only)
-	TokenPaneDetail  // Per-job token usage + cost breakdown
+	EditorPaneDetail        // BSP split editor (hosted mode only)
+	TokenPaneDetail         // Per-job token usage + cost breakdown
+	AccessedFilesPaneDetail // Per-job accessed-files trace (context transfer)
 )
 
 // Model represents the state of the TUI
@@ -134,6 +135,9 @@ type Model struct {
 	briefingViewport      viewport.Model
 	tokenViewport         viewport.Model
 	editViewport          viewport.Model
+	accessedFilesViewport viewport.Model
+	accessedFiles         []orchestration.AccessedFile // Deduped trace for the accessed-files pane (absolute paths)
+	accessedFilesDisplay  []string                     // Workspace-rooted display form, index-aligned with accessedFiles
 	skillPaneViewport     viewport.Model
 	skillArtifactViewport viewport.Model                              // Scrollable artifact detail viewport
 	skillPaneCursor       int                                         // Cursor position in the skill pane tree
@@ -204,6 +208,7 @@ type Model struct {
 	tokenRawContent          string
 	editRawContent           string
 	skillPaneRawContent      string
+	accessedFilesRawContent  string
 	// tokenColumnCache memoizes the rendered TOKENS column cell per job ID
 	// so the table render doesn't re-read the artifact (or re-summarize) on
 	// every frame. Invalidated by refreshes via clearTokenColumnCache.
@@ -467,6 +472,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Memory"
 	case TokenPaneDetail:
 		paneTitle = "Token Usage"
+	case AccessedFilesPaneDetail:
+		paneTitle = "Accessed Files"
 	}
 
 	jobIcon := getJobIcon(currentJob)
@@ -515,6 +522,8 @@ func (m Model) renderDetailContent() string {
 		return addScrollbarToViewport(&m.briefingViewport)
 	case TokenPaneDetail:
 		return addScrollbarToViewport(&m.tokenViewport)
+	case AccessedFilesPaneDetail:
+		return addScrollbarToViewport(&m.accessedFilesViewport)
 	case EditPane:
 		return addScrollbarToViewport(&m.editViewport)
 	case SkillPane:
@@ -559,6 +568,8 @@ func (m *Model) resizeAllDetailViewports() {
 	m.briefingViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.tokenViewport.Width = m.LogViewerWidth
 	m.tokenViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.accessedFilesViewport.Width = m.LogViewerWidth
+	m.accessedFilesViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.updateSkillViewportSizes()
@@ -576,6 +587,10 @@ func (m *Model) resizeAllDetailViewports() {
 	if m.tokenRawContent != "" {
 		wrappedContent := wrapContentForViewport(m.tokenRawContent, m.tokenViewport.Width-1)
 		m.tokenViewport.SetContent(wrappedContent)
+	}
+	if m.accessedFilesRawContent != "" {
+		wrappedContent := wrapContentForViewport(m.accessedFilesRawContent, m.accessedFilesViewport.Width-1)
+		m.accessedFilesViewport.SetContent(wrappedContent)
 	}
 	if m.editRawContent != "" {
 		styledContent := renderStyledMarkdown(m.editRawContent)
@@ -635,6 +650,7 @@ func New(cfg Config) Model {
 	frontmatterVp := viewport.New(80, 20)
 	briefingVp := viewport.New(80, 20)
 	tokenVp := viewport.New(80, 20)
+	accessedFilesVp := viewport.New(80, 20)
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
 	skillArtifactVp := viewport.New(80, 10)
@@ -777,6 +793,7 @@ func New(cfg Config) Model {
 		frontmatterViewport:      frontmatterVp,
 		briefingViewport:         briefingVp,
 		tokenViewport:            tokenVp,
+		accessedFilesViewport:    accessedFilesVp,
 		editViewport:             editVp,
 		tokenColumnCache:         make(map[string]string),
 		modelColumnCache:         make(map[string]string),

@@ -39,24 +39,25 @@ type KeyMap struct {
 	EditDeps           key.Binding
 	DemoteToNote       key.Binding
 	// View operations (TUI-specific)
-	ToggleColumns    key.Binding
-	ViewLogs         key.Binding
-	ViewFrontmatter  key.Binding
-	ViewBriefing     key.Binding
-	ViewEdit         key.Binding
-	ViewTokens       key.Binding
-	ViewSkillPane    key.Binding
-	CloseDetailPane  key.Binding
-	SwitchFocus      key.Binding
-	FocusLeft        key.Binding // Spatial navigation: focus left pane (jobs)
-	FocusRight       key.Binding // Spatial navigation: focus right pane (detail)
-	ToggleLayout     key.Binding
-	ToggleFullscreen key.Binding
-	ViewContext      key.Binding // View context panel (groveterm only)
-	ViewNativeAgent  key.Binding // Preview native agent PTY pane (groveterm only)
-	ViewMemory       key.Binding // View memory search panel (groveterm only)
-	SendInput        key.Binding // For isolated agents: toggle input mode
-	ToggleClaw       key.Binding // Enable/disable claw (channels + autonomous)
+	ToggleColumns     key.Binding
+	ViewLogs          key.Binding
+	ViewFrontmatter   key.Binding
+	ViewBriefing      key.Binding
+	ViewEdit          key.Binding
+	ViewTokens        key.Binding
+	ViewSkillPane     key.Binding
+	ViewAccessedFiles key.Binding
+	CloseDetailPane   key.Binding
+	SwitchFocus       key.Binding
+	FocusLeft         key.Binding // Spatial navigation: focus left pane (jobs)
+	FocusRight        key.Binding // Spatial navigation: focus right pane (detail)
+	ToggleLayout      key.Binding
+	ToggleFullscreen  key.Binding
+	ViewContext       key.Binding // View context panel (groveterm only)
+	ViewNativeAgent   key.Binding // Preview native agent PTY pane (groveterm only)
+	ViewMemory        key.Binding // View memory search panel (groveterm only)
+	SendInput         key.Binding // For isolated agents: toggle input mode
+	ToggleClaw        key.Binding // Enable/disable claw (channels + autonomous)
 }
 
 // NewKeyMap creates a new KeyMap with user configuration applied.
@@ -219,6 +220,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("vs"),
 			key.WithHelp("vs", "skills"),
 		),
+		ViewAccessedFiles: key.NewBinding(
+			key.WithKeys("vy"),
+			key.WithHelp("vy", "accessed files"),
+		),
 		CloseDetailPane: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "close detail pane"),
@@ -302,6 +307,7 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 		{Prefix: "v", Label: "View", Bindings: []key.Binding{
 			k.ViewLogs, k.ViewFrontmatter, k.ViewBriefing, k.ViewEdit,
 			k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane,
+			k.ViewAccessedFiles,
 		}},
 		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
 			k.SetStatus, k.SetType, k.SetTemplate, k.SetCompleted,

@@ -50,15 +50,15 @@ func TestChordArmsAndFires(t *testing.T) {
 	}
 }
 
-// TestPopupRowsWhileArmed asserts the View namespace surfaces its 9 completions
+// TestPopupRowsWhileArmed asserts the View namespace surfaces its 10 completions
 // (trimmed to the remaining suffix) while "v" is armed.
 func TestPopupRowsWhileArmed(t *testing.T) {
 	m := newChordModel()
 	rows := m.KeyMap.Namespaces()[0].PendingRows("v")
-	if len(rows) != 9 {
-		t.Fatalf("PendingRows(\"v\") = %d rows, want 9", len(rows))
+	if len(rows) != 10 {
+		t.Fatalf("PendingRows(\"v\") = %d rows, want 10", len(rows))
 	}
-	wantSuffix := map[string]bool{"l": true, "f": true, "b": true, "v": true, "t": true, "c": true, "m": true, "a": true, "s": true}
+	wantSuffix := map[string]bool{"l": true, "f": true, "b": true, "v": true, "t": true, "c": true, "m": true, "a": true, "s": true, "y": true}
 	for _, r := range rows {
 		if !wantSuffix[r.Keys] {
 			t.Errorf("unexpected pending row suffix %q", r.Keys)

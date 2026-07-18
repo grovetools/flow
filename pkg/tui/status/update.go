@@ -332,6 +332,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case AccessedFilesLoadedMsg:
+		m.accessedFiles = msg.Files
+		m.accessedFilesDisplay = msg.Display
+		if m.ActiveDetailPane == AccessedFilesPaneDetail {
+			m.updateLayoutDimensions()
+			m.accessedFilesViewport.Width = m.LogViewerWidth
+			m.accessedFilesViewport.Height = m.LogViewerHeight - logHeaderHeight
+			content := renderAccessedFilesPaneContent(msg.Files, msg.Display, msg.Err)
+			m.accessedFilesRawContent = content
+			m.accessedFilesViewport.SetContent(wrapContentForViewport(content, m.accessedFilesViewport.Width-1))
+		}
+		return m, nil
+
 	case EditContentLoadedMsg:
 		if m.ActiveDetailPane == EditPane {
 			if msg.Err != nil {
@@ -2002,6 +2015,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, editJob(job, m.Hosted)
 			}
 
+		case (msg.String() == "y" || msg.String() == "Y") && m.ActiveDetailPane == AccessedFilesPaneDetail:
+			// In-pane copy keys work from the jobs pane too, so the accessed
+			// files can be yanked without tabbing focus into the detail pane.
+			return m.copyAccessedFilesToClipboard(msg.String() == "Y")
+
 		case key.Matches(msg, m.KeyMap.CopyPath):
 			if job := m.CurrentJob(); job != nil {
 				path := job.FilePath
@@ -2135,6 +2153,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			return m.openDetailPane(SkillPane)
+
+		case key.Matches(msg, m.KeyMap.ViewAccessedFiles):
+			if m.ActiveDetailPane == AccessedFilesPaneDetail {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			return m.openDetailPane(AccessedFilesPaneDetail)
 
 		case key.Matches(msg, m.KeyMap.ViewContext):
 			if !m.Hosted {
@@ -2921,6 +2946,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.briefingViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading briefing for %s...", job.Title)))
 	case TokenPaneDetail:
 		m.tokenViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading token usage for %s...", job.Title)))
+	case AccessedFilesPaneDetail:
+		m.accessedFilesViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading accessed files for %s...", job.Title)))
 	case EditPane:
 		m.editViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading file content for %s...", job.Title)))
 	case SkillPane:
@@ -2949,6 +2976,10 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		return m, loadBriefingCmd(m.Plan, job)
 	case TokenPaneDetail:
 		return m, loadTokenUsageCmd(m.Plan, job)
+	case AccessedFilesPaneDetail:
+		m.accessedFiles = nil
+		m.accessedFilesDisplay = nil
+		return m, loadAccessedFilesCmd(m.Plan, job)
 	case EditPane:
 		return m, loadJobFileContentCmd(job)
 	case EditorPaneDetail:
@@ -3235,6 +3266,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.briefingViewport.Height = logHeight
 	m.tokenViewport.Width = m.LogViewerWidth
 	m.tokenViewport.Height = logHeight
+	m.accessedFilesViewport.Width = m.LogViewerWidth
+	m.accessedFilesViewport.Height = logHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
@@ -3260,6 +3293,13 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.tokenRawContent = ""
 		m.tokenViewport.SetContent(wrapContentForViewport(theme.DefaultTheme.Muted.Render("Loading token usage…"), m.tokenViewport.Width-1))
 		cmds = append(cmds, loadTokenUsageCmd(m.Plan, job))
+	case AccessedFilesPaneDetail:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading accessed files for %s...", job.Title))
+		m.accessedFilesRawContent = ""
+		m.accessedFiles = nil
+		m.accessedFilesDisplay = nil
+		m.accessedFilesViewport.SetContent(wrapContentForViewport(theme.DefaultTheme.Muted.Render("Loading accessed files…"), m.accessedFilesViewport.Width-1))
+		cmds = append(cmds, loadAccessedFilesCmd(m.Plan, job))
 	case EditPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
 		cmds = append(cmds, loadJobFileContentCmd(job))
@@ -3384,6 +3424,14 @@ func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ActiveDetailPane == SkillPane {
 		return m.handleSkillTreeKey(msg)
 	}
+	if m.ActiveDetailPane == AccessedFilesPaneDetail {
+		switch msg.String() {
+		case "y":
+			return m.copyAccessedFilesToClipboard(false)
+		case "Y":
+			return m.copyAccessedFilesToClipboard(true)
+		}
+	}
 	return m.handleViewportKey(msg, m.ActiveDetailPane)
 }
 
@@ -3427,6 +3475,12 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 			} else {
 				m.tokenViewport.GotoBottom()
 			}
+		case AccessedFilesPaneDetail:
+			if idx == 0 {
+				m.accessedFilesViewport.GotoTop()
+			} else {
+				m.accessedFilesViewport.GotoBottom()
+			}
 		case EditPane:
 			if idx == 0 {
 				m.editViewport.GotoTop()
@@ -3461,6 +3515,8 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 		m.briefingViewport, cmd = m.briefingViewport.Update(msg)
 	case TokenPaneDetail:
 		m.tokenViewport, cmd = m.tokenViewport.Update(msg)
+	case AccessedFilesPaneDetail:
+		m.accessedFilesViewport, cmd = m.accessedFilesViewport.Update(msg)
 	case EditPane:
 		m.editViewport, cmd = m.editViewport.Update(msg)
 	case SkillPane:
