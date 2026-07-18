@@ -120,6 +120,20 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
+	// Record per-repo start HEADs (commits.json sidecar) on the worktree
+	// CONTAINER (workDir may be scoped to a sub-repo); CompleteJob finalizes
+	// the record. Best-effort: a capture failure must never block the launch.
+	if job.Worktree != "" {
+		if container, cerr := resolveJobWorktreeContainer(job, plan); cerr == nil {
+			if cerr := CaptureJobCommitsStart(job, plan, container); cerr != nil {
+				e.ulog.Warn("Failed to capture start commit record").
+					Field("job_id", job.ID).
+					Err(cerr).
+					Log(ctx)
+			}
+		}
+	}
+
 	var briefingFilePath string
 
 	// If generate_plan_from is true, we first call an LLM to generate a plan from the chat.

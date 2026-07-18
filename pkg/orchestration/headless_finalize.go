@@ -106,6 +106,16 @@ func FinalizeHeadlessJob(job *Job, plan *Plan) error {
 			Log(ctx)
 	}
 
+	// Record end-of-job commit state (commits.json sidecar) before the status
+	// branching so BOTH the success and failure paths capture what the agent
+	// committed. Best-effort and idempotent (skipped once finished_at is set).
+	if err := FinalizeJobCommits(job, plan); err != nil {
+		ulog.Warn("[HEADLESS] Finalize: failed to record job commits").
+			Field("job_id", job.ID).
+			Err(err).
+			Log(ctx)
+	}
+
 	statusPath := headlessStatusPath(plan, job)
 	status, statusErr := readHeadlessStatus(statusPath)
 

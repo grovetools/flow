@@ -225,6 +225,16 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		daemonClient.Close()
 	}
 
+	// Finalize the per-repo commit record (commits.json sidecar). Idempotent:
+	// once a prior finalize (e.g. FinalizeHeadlessJob) stamped finished_at, a
+	// late repeat completion leaves the record untouched instead of
+	// misattributing commits made after the job.
+	if job.Type == JobTypeInteractiveAgent || job.Type == JobTypeHeadlessAgent {
+		if err := FinalizeJobCommits(job, plan); err != nil {
+			logger.WithError(err).Debug("Failed to finalize job commit record")
+		}
+	}
+
 	// Archive session artifacts for agent jobs — runs even when already
 	// completed so a late/repeat `flow plan complete` recovers artifacts the
 	// first completion missed (e.g. a headless job whose deferred status

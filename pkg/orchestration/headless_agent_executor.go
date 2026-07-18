@@ -160,6 +160,15 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 			execErr = fmt.Errorf("prepare worktree: %w", err)
 			return execErr
 		}
+		// Record per-repo start HEADs (commits.json sidecar) so finalize can
+		// compute exactly which commits this job produced. Best-effort: a
+		// capture failure must never block the launch.
+		if err := CaptureJobCommitsStart(job, plan, workDir); err != nil {
+			ulog.Warn("[HEADLESS] Failed to capture start commit record").
+				Field("job_id", job.ID).
+				Err(err).
+				Log(ctx)
+		}
 	} else {
 		var err error
 		workDir, err = GetProjectGitRoot(plan.Directory)
