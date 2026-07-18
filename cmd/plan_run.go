@@ -449,6 +449,9 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		} else {
 			// Daemon not available, fall back to local
 			ulog.Info("Daemon not available, falling back to local execution").Log(ctx)
+			if diag := daemon.LastConnectDiagnosis(); diag != nil && diag.PermissionDenied {
+				ulog.Warn(fmt.Sprintf("Connecting to daemon socket %s was denied (operation not permitted) — this process is likely sandboxed (e.g. Claude Code sandbox); the daemon may be running but unreachable", diag.SocketPath)).Log(ctx)
+			}
 			daemonClient = nil
 		}
 	}
@@ -478,7 +481,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// Handle --background mode: submit jobs to daemon and exit
 	if planRunBackground {
 		if daemonClient == nil {
-			return fmt.Errorf("--background requires the daemon; start it with 'grove daemon start' or remove --local flag")
+			return backgroundNeedsDaemonError()
 		}
 		return submitJobsBackground(ctx, daemonClient, plan, targetJobs, jobsToRun, agentTarget)
 	}
@@ -886,6 +889,28 @@ var (
 	planRunYes             bool
 	planRunSkipInteractive bool
 )
+
+// claudeSandboxLikely reports whether this process looks like it is running
+// inside a Claude Code session, whose Seatbelt sandbox denies unix-socket
+// connect() to the daemon while os.Stat on the socket file succeeds.
+func claudeSandboxLikely() bool {
+	return os.Getenv("CLAUDECODE") != "" || os.Getenv("CLAUDE_CODE_ENTRYPOINT") != ""
+}
+
+// backgroundNeedsDaemonError builds the error for --background without a
+// daemon client. When the factory diagnosed a sandbox-denied connect (or env
+// markers say we're inside Claude Code), explain that the daemon is likely
+// alive but unreachable and how to escape the sandbox, instead of the
+// misleading "start the daemon" advice.
+func backgroundNeedsDaemonError() error {
+	if diag := daemon.LastConnectDiagnosis(); diag != nil && diag.PermissionDenied {
+		return fmt.Errorf("--background requires the daemon, which is unreachable from this (likely sandboxed) process: connecting to %s was denied (operation not permitted). Under the Claude Code sandbox, run the command in an unsandboxed shell (`! flow plan run ... --background`) or disable the sandbox (/sandbox). Otherwise start the daemon with 'grove daemon start'", diag.SocketPath)
+	}
+	if claudeSandboxLikely() {
+		return fmt.Errorf("--background requires the daemon, which is unavailable from this (likely sandboxed) Claude Code process. Run the command in an unsandboxed shell (`! flow plan run ... --background`) or disable the sandbox (/sandbox). Otherwise start the daemon with 'grove daemon start'")
+	}
+	return fmt.Errorf("--background requires the daemon; start it with 'grove daemon start' or remove --local flag")
+}
 
 // submitJobsBackground submits jobs to the daemon and exits without waiting.
 func submitJobsBackground(ctx context.Context, client daemon.Client, plan *orchestration.Plan, targetJobs []string, jobsToRun []*orchestration.Job, agentTarget string) error {
