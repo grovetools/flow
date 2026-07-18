@@ -1574,182 +1574,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle status picker first
-		if m.ShowStatusPicker {
-			switch msg.String() {
-			case "up", "k":
-				if m.StatusPickerCursor > 0 {
-					m.StatusPickerCursor--
-				}
-				return m, nil
-			case "down", "j":
-				if m.StatusPickerCursor < 8 { // 9 status options (0-8)
-					m.StatusPickerCursor++
-				}
-				return m, nil
-			case "enter":
-				m.ShowStatusPicker = false
-				statuses := []orchestration.JobStatus{
-					orchestration.JobStatusPending,
-					orchestration.JobStatusTodo,
-					orchestration.JobStatusHold,
-					orchestration.JobStatusRunning,
-					orchestration.JobStatusCompleted,
-					orchestration.JobStatusFailed,
-					orchestration.JobStatusBlocked,
-					orchestration.JobStatusNeedsReview,
-					orchestration.JobStatusAbandoned,
-				}
-				selectedStatus := statuses[m.StatusPickerCursor]
-
-				// Set status for selected jobs or current job if none selected
-				if len(m.Selected) > 0 {
-					// Set status for all selected jobs
-					var jobsToUpdate []*orchestration.Job
-					for id := range m.Selected {
-						for _, job := range m.Jobs {
-							if job.ID == id {
-								jobsToUpdate = append(jobsToUpdate, job)
-								break
-							}
-						}
-					}
-					return m, tea.Sequence(
-						setMultipleJobStatus(jobsToUpdate, m.Plan, selectedStatus),
-						refreshPlan(m.PlanDir),
-					)
-				} else if job := m.CurrentJob(); job != nil {
-					// Set status for cursor job only
-					return m, tea.Sequence(
-						setJobStatus(job, m.Plan, selectedStatus),
-						refreshPlan(m.PlanDir),
-					)
-				}
-				return m, nil
-			case "esc", "ctrl+c", "q", "b":
-				m.ShowStatusPicker = false
-				return m, nil
-			default:
-				// Any other key while status picker is open - just consume it
-				return m, nil
-			}
-		}
-
-		// Handle type picker
-		if m.ShowTypePicker {
-			switch msg.String() {
-			case "up", "k":
-				if m.TypePickerCursor > 0 {
-					m.TypePickerCursor--
-				}
-				return m, nil
-			case "down", "j":
-				if m.TypePickerCursor < 7 { // 8 type options (0-7)
-					m.TypePickerCursor++
-				}
-				return m, nil
-			case "enter":
-				m.ShowTypePicker = false
-				types := []orchestration.JobType{
-					orchestration.JobTypeShell,
-					orchestration.JobTypeOneshot,
-					orchestration.JobTypeChat,
-					orchestration.JobTypeAgent,
-					orchestration.JobTypeInteractiveAgent,
-					orchestration.JobTypeHeadlessAgent,
-					orchestration.JobTypeGenerateRecipe,
-					orchestration.JobTypeFile,
-				}
-				selectedType := types[m.TypePickerCursor]
-
-				// Set type for selected jobs or current job if none selected
-				if len(m.Selected) > 0 {
-					// Set type for all selected jobs
-					var jobsToUpdate []*orchestration.Job
-					for id := range m.Selected {
-						for _, job := range m.Jobs {
-							if job.ID == id {
-								jobsToUpdate = append(jobsToUpdate, job)
-								break
-							}
-						}
-					}
-					return m, tea.Sequence(
-						setMultipleJobType(jobsToUpdate, m.Plan, selectedType),
-						refreshPlan(m.PlanDir),
-					)
-				} else if job := m.CurrentJob(); job != nil {
-					// Set type for cursor job only
-					return m, tea.Sequence(
-						setJobType(job, m.Plan, selectedType),
-						refreshPlan(m.PlanDir),
-					)
-				}
-				return m, nil
-			case "esc", "ctrl+c", "q", "b":
-				m.ShowTypePicker = false
-				return m, nil
-			default:
-				// Any other key while type picker is open - just consume it
-				return m, nil
-			}
-		}
-
-		// Handle template picker
-		if m.ShowTemplatePicker {
-			switch msg.String() {
-			case "up", "k":
-				if m.TemplatePickerCursor > 0 {
-					m.TemplatePickerCursor--
-				}
-				return m, nil
-			case "down", "j":
-				if m.TemplatePickerCursor < 4 { // 5 common templates (0-4)
-					m.TemplatePickerCursor++
-				}
-				return m, nil
-			case "enter":
-				m.ShowTemplatePicker = false
-				templates := []string{
-					"", // No template (clear)
-					"agent-xml",
-					"agent-run",
-					"agent-from-chat",
-					"chat",
-				}
-				selectedTemplate := templates[m.TemplatePickerCursor]
-
-				// Set template for selected jobs or current job if none selected
-				if len(m.Selected) > 0 {
-					// Set template for all selected jobs
-					var jobsToUpdate []*orchestration.Job
-					for id := range m.Selected {
-						for _, job := range m.Jobs {
-							if job.ID == id {
-								jobsToUpdate = append(jobsToUpdate, job)
-								break
-							}
-						}
-					}
-					return m, tea.Sequence(
-						setMultipleJobTemplate(jobsToUpdate, m.Plan, selectedTemplate),
-						refreshPlan(m.PlanDir),
-					)
-				} else if job := m.CurrentJob(); job != nil {
-					// Set template for cursor job only
-					return m, tea.Sequence(
-						setJobTemplate(job, m.Plan, selectedTemplate),
-						refreshPlan(m.PlanDir),
-					)
-				}
-				return m, nil
-			case "esc", "ctrl+c", "q", "b":
-				m.ShowTemplatePicker = false
-				return m, nil
-			default:
-				// Any other key while template picker is open - just consume it
-				return m, nil
-			}
+		// Handle the schema-driven field editor (the c… Change namespace). This
+		// one block replaced the three bespoke ShowStatusPicker/ShowTypePicker/
+		// ShowTemplatePicker blocks; enum navigation, text entry, commit, and
+		// cancel all live in updateFieldEditor.
+		if m.fieldEditor != nil {
+			return m.updateFieldEditor(msg)
 		}
 
 		// Handle confirmation dialog
@@ -2763,22 +2593,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.SetStatus):
-			if m.CurrentJob() != nil {
-				m.ShowStatusPicker = true
-				m.StatusPickerCursor = 0
-			}
+			return m, m.openFieldEditor("status")
 
 		case key.Matches(msg, m.KeyMap.SetType):
-			if m.CurrentJob() != nil || len(m.Selected) > 0 {
-				m.ShowTypePicker = true
-				m.TypePickerCursor = 0
-			}
+			return m, m.openFieldEditor("type")
 
 		case key.Matches(msg, m.KeyMap.SetTemplate):
-			if m.CurrentJob() != nil || len(m.Selected) > 0 {
-				m.ShowTemplatePicker = true
-				m.TemplatePickerCursor = 0
-			}
+			return m, m.openFieldEditor("template")
+
+		case key.Matches(msg, m.KeyMap.SetModel):
+			return m, m.openFieldEditor("model")
+
+		case key.Matches(msg, m.KeyMap.SetProvider):
+			return m, m.openFieldEditor("provider")
+
+		case key.Matches(msg, m.KeyMap.SetEffort):
+			return m, m.openFieldEditor("effort")
+
+		case key.Matches(msg, m.KeyMap.SetResponder):
+			return m, m.openFieldEditor("responder")
+
+		case key.Matches(msg, m.KeyMap.SetCacheTTL):
+			return m, m.openFieldEditor("cache_ttl")
+
+		case key.Matches(msg, m.KeyMap.SetCacheLayout):
+			return m, m.openFieldEditor("cache_layout")
+
+		case key.Matches(msg, m.KeyMap.ToggleMemory):
+			return m.toggleJobField("memory")
+
+		case key.Matches(msg, m.KeyMap.ToggleAutoComplete):
+			return m.toggleJobField("auto_complete")
 
 		case key.Matches(msg, m.KeyMap.AddXmlPlan):
 			if len(m.Selected) > 0 {

@@ -59,8 +59,10 @@ func TestNoFlatPrefixKeys(t *testing.T) {
 }
 
 // TestNamespaceMembership asserts the View namespace has 9 members and Change
-// has 4, and every member key is either a chord under its prefix or a retained
-// non-prefix legacy alias.
+// has 14 (the four original set-family members plus the schema-driven field
+// editor's model/provider/effort/responder/cache_ttl/cache_layout enums, the
+// memory/auto_complete toggles, and the migrated rename/edit_deps mutators), and
+// every member key is a chord under its prefix.
 func TestNamespaceMembership(t *testing.T) {
 	km := NewKeyMap(nil)
 	ns := km.Namespaces()
@@ -70,8 +72,8 @@ func TestNamespaceMembership(t *testing.T) {
 	if ns[0].Prefix != "v" || len(ns[0].Bindings) != 9 {
 		t.Errorf("View namespace: prefix=%q members=%d, want v/9", ns[0].Prefix, len(ns[0].Bindings))
 	}
-	if ns[1].Prefix != "c" || len(ns[1].Bindings) != 4 {
-		t.Errorf("Change namespace: prefix=%q members=%d, want c/4", ns[1].Prefix, len(ns[1].Bindings))
+	if ns[1].Prefix != "c" || len(ns[1].Bindings) != 14 {
+		t.Errorf("Change namespace: prefix=%q members=%d, want c/14", ns[1].Prefix, len(ns[1].Bindings))
 	}
 	for _, n := range ns {
 		for _, b := range n.Bindings {

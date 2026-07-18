@@ -88,21 +88,19 @@ type Model struct {
 	// FoldState records explicit user fold overrides keyed by NodeID
 	// (true = collapsed). Nodes absent from the map follow the default
 	// policy (running jobs auto-expand, everything else collapsed).
-	FoldState             map[string]bool
-	Cursor                int
-	ScrollOffset          int             // Track scroll position for viewport
-	Selected              map[string]bool // For multi-select
-	StatusSummary         string
-	Err                   error
-	Width                 int
-	Height                int
-	ConfirmArchive        bool   // Show archive confirmation
-	ShowStatusPicker      bool   // Show status picker
-	StatusPickerCursor    int    // Cursor position in status picker
-	ShowTypePicker        bool   // Show type picker
-	TypePickerCursor      int    // Cursor position in type picker
-	ShowTemplatePicker    bool   // Show template picker
-	TemplatePickerCursor  int    // Cursor position in template picker
+	FoldState      map[string]bool
+	Cursor         int
+	ScrollOffset   int             // Track scroll position for viewport
+	Selected       map[string]bool // For multi-select
+	StatusSummary  string
+	Err            error
+	Width          int
+	Height         int
+	ConfirmArchive bool // Show archive confirmation
+	// fieldEditor is the single schema-driven config-field editor (the c…
+	// Change namespace). Non-nil while open; it replaced the three bespoke
+	// ShowStatusPicker/ShowTypePicker/ShowTemplatePicker bool+cursor pairs.
+	fieldEditor           *fieldEditorState
 	PlanDir               string // Store plan directory for refresh
 	KeyMap                KeyMap
 	Help                  help.Model
@@ -312,8 +310,8 @@ type Model struct {
 // signalling that single-letter shortcuts should not be intercepted.
 func (m Model) IsTextEntryActive() bool {
 	return m.IsolatedAgentInputActive || m.Renaming || m.CreatingJob ||
-		m.ClawDialogActive || m.ClawTargetSelectorActive || m.skillSearchActive || m.ShowStatusPicker ||
-		m.ShowTypePicker || m.ShowTemplatePicker || m.EditingDeps ||
+		m.ClawDialogActive || m.ClawTargetSelectorActive || m.skillSearchActive || m.fieldEditor != nil ||
+		m.EditingDeps ||
 		m.selectingRecipe || m.columnSelectMode
 }
 
@@ -1034,14 +1032,8 @@ func (m Model) View() string {
 	if m.selectingRecipe {
 		return m.renderRecipeSelector()
 	}
-	if m.ShowStatusPicker {
-		return m.renderStatusPicker()
-	}
-	if m.ShowTypePicker {
-		return m.renderTypePicker()
-	}
-	if m.ShowTemplatePicker {
-		return m.renderTemplatePicker()
+	if m.fieldEditor != nil {
+		return m.renderFieldEditor()
 	}
 	if m.Help.ShowAll {
 		return m.Help.View()

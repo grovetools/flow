@@ -570,219 +570,65 @@ func (m Model) getStatusIcon(status orchestration.JobStatus) string {
 	return style.Render(icon)
 }
 
-func (m Model) renderStatusPicker() string {
+// renderFieldEditor renders the single schema-driven config-field editor that
+// replaced the three bespoke renderStatusPicker/renderTypePicker/
+// renderTemplatePicker methods. It generalizes their visual idiom (bold title +
+// optional "(N jobs selected)" / "for: <filename>" line + option list or text
+// input + help line, boxed with a rounded border) across every enum and text
+// descriptor in jobFields. Toggles never reach here — they dispatch directly.
+func (m Model) renderFieldEditor() string {
 	t := theme.DefaultTheme
-
-	statusOptions := []struct {
-		status orchestration.JobStatus
-		label  string
-		icon   string
-	}{
-		{orchestration.JobStatusPending, "Pending", theme.IconPending},
-		{orchestration.JobStatusTodo, "Todo", theme.IconStatusTodo},
-		{orchestration.JobStatusHold, "On Hold", theme.IconStatusHold},
-		{orchestration.JobStatusRunning, "Running", theme.IconStatusRunning},
-		{orchestration.JobStatusCompleted, "Completed", theme.IconSuccess},
-		{orchestration.JobStatusFailed, "Failed", theme.IconStatusFailed},
-		{orchestration.JobStatusBlocked, "Blocked", theme.IconStatusBlocked},
-		{orchestration.JobStatusNeedsReview, "Needs Review", theme.IconStatusNeedsReview},
-		{orchestration.JobStatusAbandoned, "Abandoned", theme.IconStatusAbandoned},
-	}
+	desc := m.fieldEditor.desc
 
 	var lines []string
 
-	// Add title
-	if job := m.CurrentJob(); job != nil {
-		title := lipgloss.NewStyle().
-			Bold(true).
-			Render(fmt.Sprintf("Set Status for: %s", job.Filename))
-		lines = append(lines, title)
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Render("Set " + desc.Label)
+	lines = append(lines, title)
+
+	if len(m.Selected) > 0 {
+		lines = append(lines, fmt.Sprintf("(%d jobs selected)", len(m.Selected)))
+	} else if job := m.CurrentJob(); job != nil {
+		lines = append(lines, fmt.Sprintf("for: %s", job.Filename))
+	}
+	lines = append(lines, "")
+
+	switch desc.Kind {
+	case fieldText:
+		lines = append(lines, m.fieldEditor.input.View())
 		lines = append(lines, "")
-	}
-
-	// Add status options
-	for i, opt := range statusOptions {
-		prefix := "  "
-		var style lipgloss.Style
-
-		if i == m.StatusPickerCursor {
-			prefix = theme.IconSelect + " "
-			// Use background color for selection highlight, text uses terminal default
-			style = lipgloss.NewStyle().
-				Bold(true).
-				Background(theme.DefaultColors.SubtleBackground)
-		} else {
-			style = t.Muted
+		lines = append(lines, t.Muted.Render("Enter to save • Esc to cancel"))
+	default: // fieldEnum
+		for i, opt := range desc.Options {
+			prefix := "  "
+			var style lipgloss.Style
+			if i == m.fieldEditor.cursor {
+				prefix = theme.IconSelect + " "
+				style = lipgloss.NewStyle().
+					Bold(true).
+					Background(theme.DefaultColors.SubtleBackground)
+			} else {
+				style = t.Muted
+			}
+			label := opt
+			if label == "" {
+				label = "(none / clear)"
+			}
+			lines = append(lines, style.Render(fmt.Sprintf("%s%s", prefix, label)))
 		}
-
-		line := fmt.Sprintf("%s%s %s", prefix, opt.icon, opt.label)
-		lines = append(lines, style.Render(line))
+		lines = append(lines, "")
+		lines = append(lines, t.Muted.Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back"))
 	}
-
-	lines = append(lines, "")
-
-	// Add help text at bottom
-	help := t.Muted.Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
-	lines = append(lines, help)
 
 	content := strings.Join(lines, "\n")
 
-	// Wrap in a box with border
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.DefaultColors.Border).
 		Padding(1, 2).
 		Render(content)
 
-	// Add margin to position it slightly from the edge
-	return lipgloss.NewStyle().
-		Margin(1, 2).
-		Render(box)
-}
-
-func (m Model) renderTypePicker() string {
-	t := theme.DefaultTheme
-
-	typeOptions := []struct {
-		jobType orchestration.JobType
-		label   string
-	}{
-		{orchestration.JobTypeShell, "Shell"},
-		{orchestration.JobTypeOneshot, "Oneshot"},
-		{orchestration.JobTypeChat, "Chat"},
-		{orchestration.JobTypeAgent, "Agent"},
-		{orchestration.JobTypeInteractiveAgent, "Interactive Agent"},
-		{orchestration.JobTypeIsolatedAgent, "Isolated Agent"},
-		{orchestration.JobTypeHeadlessAgent, "Headless Agent"},
-		{orchestration.JobTypeGenerateRecipe, "Generate Recipe"},
-		{orchestration.JobTypeFile, "File"},
-	}
-
-	var lines []string
-
-	// Add title
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Render("Set Job Type")
-	lines = append(lines, title)
-
-	if len(m.Selected) > 0 {
-		count := lipgloss.NewStyle().
-			Render(fmt.Sprintf("(%d jobs selected)", len(m.Selected)))
-		lines = append(lines, count)
-	} else if job := m.CurrentJob(); job != nil {
-		filename := lipgloss.NewStyle().
-			Render(fmt.Sprintf("for: %s", job.Filename))
-		lines = append(lines, filename)
-	}
-	lines = append(lines, "")
-
-	// Add type options
-	for i, opt := range typeOptions {
-		prefix := "  "
-		var style lipgloss.Style
-
-		if i == m.TypePickerCursor {
-			prefix = theme.IconSelect + " "
-			style = lipgloss.NewStyle().
-				Bold(true).
-				Background(theme.DefaultColors.SubtleBackground)
-		} else {
-			style = t.Muted
-		}
-
-		line := fmt.Sprintf("%s%s", prefix, opt.label)
-		lines = append(lines, style.Render(line))
-	}
-
-	lines = append(lines, "")
-
-	// Add help text at bottom
-	help := t.Muted.Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
-	lines = append(lines, help)
-
-	content := strings.Join(lines, "\n")
-
-	// Wrap in a box with border
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.DefaultColors.Border).
-		Padding(1, 2).
-		Render(content)
-
-	// Add margin to position it slightly from the edge
-	return lipgloss.NewStyle().
-		Margin(1, 2).
-		Render(box)
-}
-
-func (m Model) renderTemplatePicker() string {
-	t := theme.DefaultTheme
-
-	templateOptions := []struct {
-		template string
-		label    string
-	}{
-		{"", "(No Template / Clear)"},
-		{"agent-xml", "Agent XML"},
-		{"agent-run", "Agent Run"},
-		{"agent-from-chat", "Agent from Chat"},
-		{"chat", "Chat"},
-	}
-
-	var lines []string
-
-	// Add title
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Render("Set Job Template")
-	lines = append(lines, title)
-
-	if len(m.Selected) > 0 {
-		count := lipgloss.NewStyle().
-			Render(fmt.Sprintf("(%d jobs selected)", len(m.Selected)))
-		lines = append(lines, count)
-	} else if job := m.CurrentJob(); job != nil {
-		filename := lipgloss.NewStyle().
-			Render(fmt.Sprintf("for: %s", job.Filename))
-		lines = append(lines, filename)
-	}
-	lines = append(lines, "")
-
-	// Add template options
-	for i, opt := range templateOptions {
-		prefix := "  "
-		var style lipgloss.Style
-
-		if i == m.TemplatePickerCursor {
-			prefix = theme.IconSelect + " "
-			style = lipgloss.NewStyle().
-				Bold(true).
-				Background(theme.DefaultColors.SubtleBackground)
-		} else {
-			style = t.Muted
-		}
-
-		line := fmt.Sprintf("%s%s", prefix, opt.label)
-		lines = append(lines, style.Render(line))
-	}
-
-	lines = append(lines, "")
-
-	// Add help text at bottom
-	help := t.Muted.Render("↑/↓ or j/k to navigate • Enter to select • Esc/b to go back")
-	lines = append(lines, help)
-
-	content := strings.Join(lines, "\n")
-
-	// Wrap in a box with border
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.DefaultColors.Border).
-		Padding(1, 2).
-		Render(content)
-
-	// Add margin to position it slightly from the edge
 	return lipgloss.NewStyle().
 		Margin(1, 2).
 		Render(box)

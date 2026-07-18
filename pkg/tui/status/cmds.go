@@ -1524,13 +1524,24 @@ func setJobCompleted(job *orchestration.Job, plan *orchestration.Plan, completeJ
 	}
 }
 
-func setJobStatus(job *orchestration.Job, plan *orchestration.Plan, status orchestration.JobStatus) tea.Cmd {
+// setJobFieldCmd commits one scalar config field to every target job through the
+// generic persistence layer (orchestration.StatePersister.UpdateJobFields, a thin
+// wrapper over UpdateFrontmatter that bumps updated_at and syncs the in-memory
+// Job). It is the single command behind the schema-driven field editor and the
+// bool toggles, replacing the per-field setJob*/setMultiple* pairs. value is a
+// string for enum/text fields and a bool for the memory/auto_complete toggles.
+// Returns RefreshMsg on success so the caller's tea.Sequence + refreshPlan idiom
+// still reloads the plan from disk.
+func setJobFieldCmd(jobs []*orchestration.Job, fieldName string, value any) tea.Cmd {
 	return func() tea.Msg {
 		sp := orchestration.NewStatePersister()
-		if err := sp.UpdateJobStatus(job, status); err != nil {
-			return err
+		updates := map[string]interface{}{fieldName: value}
+		for _, job := range jobs {
+			if err := sp.UpdateJobFields(job, updates); err != nil {
+				return err
+			}
 		}
-		return RefreshMsg{} // Refresh to show the status change
+		return RefreshMsg{}
 	}
 }
 
@@ -1551,62 +1562,6 @@ func demoteJobCmd(job *orchestration.Job) tea.Cmd {
 		}
 		notePath := strings.TrimSpace(string(output))
 		return DemoteJobMsg{NotePath: notePath}
-	}
-}
-
-func setMultipleJobStatus(jobs []*orchestration.Job, plan *orchestration.Plan, status orchestration.JobStatus) tea.Cmd {
-	return func() tea.Msg {
-		sp := orchestration.NewStatePersister()
-		for _, job := range jobs {
-			if err := sp.UpdateJobStatus(job, status); err != nil {
-				return err
-			}
-		}
-		return RefreshMsg{} // Refresh to show the status change
-	}
-}
-
-func setJobType(job *orchestration.Job, plan *orchestration.Plan, jobType orchestration.JobType) tea.Cmd {
-	return func() tea.Msg {
-		sp := orchestration.NewStatePersister()
-		if err := sp.UpdateJobType(job, jobType); err != nil {
-			return err
-		}
-		return RefreshMsg{} // Refresh to show the type change
-	}
-}
-
-func setMultipleJobType(jobs []*orchestration.Job, plan *orchestration.Plan, jobType orchestration.JobType) tea.Cmd {
-	return func() tea.Msg {
-		sp := orchestration.NewStatePersister()
-		for _, job := range jobs {
-			if err := sp.UpdateJobType(job, jobType); err != nil {
-				return err
-			}
-		}
-		return RefreshMsg{} // Refresh to show the type change
-	}
-}
-
-func setJobTemplate(job *orchestration.Job, plan *orchestration.Plan, template string) tea.Cmd {
-	return func() tea.Msg {
-		sp := orchestration.NewStatePersister()
-		if err := sp.UpdateJobTemplate(job, template); err != nil {
-			return err
-		}
-		return RefreshMsg{} // Refresh to show the template change
-	}
-}
-
-func setMultipleJobTemplate(jobs []*orchestration.Job, plan *orchestration.Plan, template string) tea.Cmd {
-	return func() tea.Msg {
-		sp := orchestration.NewStatePersister()
-		for _, job := range jobs {
-			if err := sp.UpdateJobTemplate(job, template); err != nil {
-				return err
-			}
-		}
-		return RefreshMsg{} // Refresh to show the template change
 	}
 }
 

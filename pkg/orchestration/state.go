@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -174,7 +175,6 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 // single key. It also bumps updated_at. An empty value removes model from
 // frontmatter, allowing status-TUI users to restore a CLI default.
 func (sp *StatePersister) UpdateJobModel(job *Job, newModel string) error {
-
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 
@@ -205,6 +205,99 @@ func (sp *StatePersister) UpdateJobModel(job *Job, newModel string) error {
 
 	job.Model = newModel
 	return nil
+}
+
+// UpdateJobFields writes an arbitrary set of frontmatter fields to a job in one
+// atomic update, bumps updated_at, and syncs the in-memory Job so observers
+// holding the pointer stay consistent. It is the generic persistence backend
+// behind the status TUI's schema-driven field editor (the c… Change namespace):
+// the typed UpdateJobStatus/UpdateJobType/… wrappers remain for API
+// compatibility, but the TUI now commits every scalar config field through here.
+//
+// Like UpdateJobModel it uses the package-level UpdateFrontmatter (the yaml.Node
+// writer) so existing key order and formatting in the human-curated job file are
+// preserved — only the touched keys change. Callers pass frontmatter keys
+// (e.g. "provider", "cache_ttl", "memory") mapped to their new values: a string
+// for enum/text fields, a bool for the memory/auto_complete toggles.
+func (sp *StatePersister) UpdateJobFields(job *Job, updates map[string]interface{}) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("read job file: %w", err)
+	}
+
+	// Copy so updated_at can be added without mutating the caller's map.
+	fmUpdates := make(map[string]interface{}, len(updates)+1)
+	for k, v := range updates {
+		fmUpdates[k] = v
+	}
+	fmUpdates["updated_at"] = time.Now().Format(time.RFC3339)
+
+	newContent, err := UpdateFrontmatter(content, fmUpdates)
+	if err != nil {
+		return fmt.Errorf("update frontmatter: %w", err)
+	}
+
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	// Keep the in-memory Job consistent with the on-disk change (the typed
+	// setters each do `job.X = value`; do it generically by yaml tag).
+	for k, v := range updates {
+		applyJobFieldInMemory(job, k, v)
+	}
+
+	return nil
+}
+
+// applyJobFieldInMemory sets the Job struct field whose yaml tag matches key to
+// value, covering the scalar kinds the field editor edits (string / bool /
+// *bool). Unknown keys or type mismatches are ignored — the on-disk write is the
+// source of truth and a RefreshMsg reload reconciles anything missed.
+func applyJobFieldInMemory(job *Job, key string, value interface{}) {
+	rv := reflect.ValueOf(job).Elem()
+	rt := rv.Type()
+	for i := 0; i < rt.NumField(); i++ {
+		name := strings.Split(rt.Field(i).Tag.Get("yaml"), ",")[0]
+		if name != key {
+			continue
+		}
+		fv := rv.Field(i)
+		if !fv.CanSet() {
+			return
+		}
+		switch fv.Kind() {
+		case reflect.String:
+			if s, ok := value.(string); ok {
+				fv.SetString(s)
+			}
+		case reflect.Bool:
+			if b, ok := value.(bool); ok {
+				fv.SetBool(b)
+			}
+		case reflect.Ptr:
+			if fv.Type().Elem().Kind() == reflect.Bool {
+				if b, ok := value.(bool); ok {
+					nb := b
+					fv.Set(reflect.ValueOf(&nb))
+				}
+			}
+		}
+		return
+	}
 }
 
 // UpdateJobType updates the type of a job in its markdown file.

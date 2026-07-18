@@ -13,21 +13,31 @@ import (
 type KeyMap struct {
 	keymap.Base
 	// Job operations (TUI-specific)
-	Archive       key.Binding
-	AddXmlPlan    key.Binding
-	Run           key.Binding
-	SetCompleted  key.Binding
-	SetStatus     key.Binding
-	SetType       key.Binding
-	SetTemplate   key.Binding
-	AddJob        key.Binding
-	AddFromRecipe key.Binding
-	Implement     key.Binding
-	AgentFromChat key.Binding
-	Rename        key.Binding
-	Resume        key.Binding
-	EditDeps      key.Binding
-	DemoteToNote  key.Binding
+	Archive      key.Binding
+	AddXmlPlan   key.Binding
+	Run          key.Binding
+	SetCompleted key.Binding
+	SetStatus    key.Binding
+	SetType      key.Binding
+	SetTemplate  key.Binding
+	// Change (c…) namespace — schema-driven field editor members. Each opens the
+	// single field editor over its frontmatter key (toggles dispatch directly).
+	SetModel           key.Binding
+	SetProvider        key.Binding
+	SetEffort          key.Binding
+	SetResponder       key.Binding
+	SetCacheTTL        key.Binding
+	SetCacheLayout     key.Binding
+	ToggleMemory       key.Binding
+	ToggleAutoComplete key.Binding
+	AddJob             key.Binding
+	AddFromRecipe      key.Binding
+	Implement          key.Binding
+	AgentFromChat      key.Binding
+	Rename             key.Binding
+	Resume             key.Binding
+	EditDeps           key.Binding
+	DemoteToNote       key.Binding
 	// View operations (TUI-specific)
 	ToggleColumns    key.Binding
 	ViewLogs         key.Binding
@@ -89,6 +99,38 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("ce"),
 			key.WithHelp("ce", "set template"),
 		),
+		SetModel: key.NewBinding(
+			key.WithKeys("cm"),
+			key.WithHelp("cm", "set model"),
+		),
+		SetProvider: key.NewBinding(
+			key.WithKeys("cp"),
+			key.WithHelp("cp", "set provider"),
+		),
+		SetEffort: key.NewBinding(
+			key.WithKeys("cf"),
+			key.WithHelp("cf", "set effort"),
+		),
+		SetResponder: key.NewBinding(
+			key.WithKeys("cr"),
+			key.WithHelp("cr", "set responder"),
+		),
+		SetCacheTTL: key.NewBinding(
+			key.WithKeys("cy"),
+			key.WithHelp("cy", "set cache TTL"),
+		),
+		SetCacheLayout: key.NewBinding(
+			key.WithKeys("cl"),
+			key.WithHelp("cl", "set cache layout"),
+		),
+		ToggleMemory: key.NewBinding(
+			key.WithKeys("cM"),
+			key.WithHelp("cM", "toggle memory"),
+		),
+		ToggleAutoComplete: key.NewBinding(
+			key.WithKeys("cA"),
+			key.WithHelp("cA", "toggle auto-complete"),
+		),
 		AddJob: key.NewBinding(
 			key.WithKeys("A"),
 			key.WithHelp("A", "add job"),
@@ -105,9 +147,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("I"),
 			key.WithHelp("I", "agent from chat"),
 		),
+		// Rename migrated into the c… Change namespace (chord-only, no flat "R"
+		// alias — E4 fleet precedent; the grove keys deviation for cn=rename
+		// suppresses the canonical-consistency finding). ConfigKey stays "rename".
 		Rename: key.NewBinding(
-			key.WithKeys("R"),
-			key.WithHelp("R", "rename job"),
+			key.WithKeys("cn"),
+			key.WithHelp("cn", "rename job"),
 		),
 		// Rebound from "ctrl+R": bubbletea lowercases ctrl chords, so
 		// "ctrl+R" never matched. "ctrl+e" is a FreeKeys entry (canonical.go)
@@ -116,12 +161,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("ctrl+e"),
 			key.WithHelp("ctrl+e", "resume job"),
 		),
-		// Rebound from "ctrl+d": that key is shadowed by Base.PageDown
-		// (ctrl+d/pgdown), whose case runs earlier in the Update switch, so
-		// the dependency editor could never open. "ctrl+o" is a free key.
+		// Migrated into the c… Change namespace (chord-only; the flat "ctrl+o"
+		// is retired and returns to FreeKeys). cd opens the existing multi-select
+		// EditingDeps editor unchanged — it's a job-set editor, not a scalar
+		// field, so it doesn't route through the field editor. ConfigKey stays
+		// "edit_deps".
 		EditDeps: key.NewBinding(
-			key.WithKeys("ctrl+o"),
-			key.WithHelp("ctrl+o", "edit dependencies"),
+			key.WithKeys("cd"),
+			key.WithHelp("cd", "edit dependencies"),
 		),
 		DemoteToNote: key.NewBinding(
 			key.WithKeys("D"),
@@ -258,6 +305,9 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 		}},
 		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
 			k.SetStatus, k.SetType, k.SetTemplate, k.SetCompleted,
+			k.SetModel, k.SetProvider, k.SetEffort, k.SetResponder,
+			k.SetCacheTTL, k.SetCacheLayout, k.ToggleMemory, k.ToggleAutoComplete,
+			k.Rename, k.EditDeps,
 		}},
 	}
 }
@@ -282,8 +332,8 @@ func (k KeyMap) Sections() []keymap.Section {
 		),
 		keymap.ActionsSection(
 			k.Run, k.Edit, k.Confirm,
-			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.AgentFromChat, k.Rename,
-			k.Resume, k.EditDeps, k.DemoteToNote, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath,
+			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.AgentFromChat,
+			k.Resume, k.DemoteToNote, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath,
 		),
 		k.Base.SystemSection(),
 	}
