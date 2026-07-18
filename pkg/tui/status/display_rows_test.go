@@ -337,7 +337,7 @@ func TestVirtualRows_NeverEnterJobsAndNotSelectable(t *testing.T) {
 	}
 	mm := *m
 	mm.KeyMap = NewKeyMap(nil)
-	mm.Sequence = keymap.NewSequenceState()
+	mm.WhichKey = keymap.NewWhichKeyHost(nil, mm.KeyMap.Namespaces()...)
 	updated, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
 	mm = updated.(Model)
 	if len(mm.Selected) != 0 {

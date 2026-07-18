@@ -22,7 +22,6 @@ import (
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/components/logviewer"
-	"github.com/grovetools/core/tui/components/whichkey"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/panes"
 	"github.com/grovetools/core/tui/theme"
@@ -107,9 +106,8 @@ type Model struct {
 	PlanDir               string // Store plan directory for refresh
 	KeyMap                KeyMap
 	Help                  help.Model
-	Sequence              *keymap.SequenceState // For detecting multi-key sequences (gg)
-	whichKeyDelay         time.Duration         // Hold time before the which-key popup shows (keymap.WhichKeyDelay)
-	CursorVisible         bool                  // Track cursor visibility for blinking animation
+	WhichKey              keymap.WhichKeyHost // Chord/which-key mixin: shared Sequence engine + namespaces + show-delay
+	CursorVisible         bool                // Track cursor visibility for blinking animation
 	Renaming              bool
 	RenameInput           textinput.Model
 	RenameJobIndex        int
@@ -326,7 +324,7 @@ func (m Model) IsTextEntryActive() bool {
 // instead of being read by the host as "pop back to the plan browser". Without
 // this, esc-to-close-which-key accidentally exits the whole status TUI.
 func (m Model) IsChordPending() bool {
-	return m.Sequence != nil && m.Sequence.IsPending()
+	return m.WhichKey.IsPending()
 }
 
 // closeCurrentDetail tears down whatever detail view is currently active and
@@ -761,8 +759,7 @@ func New(cfg Config) Model {
 		PlanDir:                  plan.Directory,
 		KeyMap:                   keyMap,
 		Help:                     helpModel,
-		Sequence:                 keymap.NewSequenceState(),
-		whichKeyDelay:            keymap.WhichKeyDelay(cliCfg),
+		WhichKey:                 keymap.NewWhichKeyHost(cliCfg, keyMap.Namespaces()...),
 		CursorVisible:            true,
 		LogViewer:                logViewerModel,
 		ShowLogs:                 false, // Start with logs hidden by default
@@ -1003,21 +1000,10 @@ func (m Model) renderFooter() string {
 	// a pending indicator so single-key arming is not invisible. Namespace chords
 	// (v…/c…) render the which-key popup instead, so PendingHint returns "" for
 	// them and only the popup shows.
-	if m.Sequence.IsPending() {
-		if hint := keymap.PendingHint(m.Sequence.Buffer(), keymap.CommonSequenceBindings(m.KeyMap.Base)...); hint != "" {
-			footer += theme.DefaultTheme.Muted.Render("  " + hint)
-		}
+	if hint := m.WhichKey.FooterHint(keymap.CommonSequenceBindings(m.KeyMap.Base)...); hint != "" {
+		footer += theme.DefaultTheme.Muted.Render("  " + hint)
 	}
 	return footer
-}
-
-// whichKeyPopupVisible reports whether the which-key popup should render: a
-// chord must be pending AND armed for at least the show-delay. This is the
-// SHOW gate — the delay swallows a fast two-key chord (e.g. "vl") so the popup
-// only appears on a deliberate hold. The chord seam schedules a whichKeyShowMsg
-// tick so the frame re-renders once the delay elapses.
-func (m Model) whichKeyPopupVisible() bool {
-	return m.Sequence.IsPending() && m.Sequence.PendingFor() >= m.whichKeyDelay
 }
 
 // View renders the TUI
@@ -1085,23 +1071,10 @@ func (m Model) View() string {
 
 	// ── Which-key popup: overlaid onto the BOTTOM rows of the pane area (just
 	// above the input/footer), matching treemux (popup sits above the status
-	// bar). Overlaying rather than stacking keeps the view's height fixed —
-	// appending it as an extra section grew the view past the terminal height so
-	// the popup scrolled off-screen. Gating on PendingFor() keeps a fast "vl"
-	// from flashing it; the delay elapsing forces a re-render via the
-	// whichKeyShowMsg tick scheduled in update.go's chord seam.
-	if m.whichKeyPopupVisible() {
-		if group, _ := keymap.ResolvePending(m.Sequence.Buffer(), m.KeyMap.Namespaces()); group != nil && len(group.Rows) > 0 {
-			// Use the namespace title as the popup header and render the rows
-			// under an untitled group — otherwise "View (v…)" prints twice (once
-			// as the header, once as the group title).
-			popup := whichkey.RenderKeyGroups(group.Title, []whichkey.KeyGroup{{Rows: group.Rows}}, *theme.DefaultTheme, m.Width, m.Height)
-			// A full-width rule directly above the popup separates the chord panel
-			// from the job list, so it reads as a docked bottom panel when active.
-			rule := theme.DefaultTheme.Muted.Render(strings.Repeat("─", lipgloss.Width(layout)))
-			layout = overlayWhichKeyBottom(layout, popup, rule)
-		}
-	}
+	// bar). The host gates on the show-delay + arm state and keeps the frame
+	// height fixed (see keymap.WhichKeyHost.RenderOverlay); the delayed
+	// keymap.WhichKeyShowMsg tick from the chord seam forces the re-render.
+	layout = m.WhichKey.RenderOverlay(layout, lipgloss.Width(layout), *theme.DefaultTheme)
 
 	// ── Input area (below Manager, not managed by it) ────────────────
 
@@ -1143,31 +1116,6 @@ func (m Model) View() string {
 		Render(finalView)
 
 	return result
-}
-
-// overlayWhichKeyBottom composites the which-key popup onto the bottom rows of
-// base, each covered row replaced by a full-width horizontally-centered popup
-// line so no ANSI escape is ever cut (the whole-row swap whichkey.OverlayCenter
-// uses, anchored bottom instead of center). base keeps its height, so the popup
-// never pushes the footer off-screen — the bug when it was stacked as an extra
-// section. topBorder, when non-empty, is drawn full-width on the row directly
-// above the popup as a docked-panel separator. If the popup is at least as tall
-// as base it falls back to centered replacement (no border).
-func overlayWhichKeyBottom(base, popup, topBorder string) string {
-	baseLines := strings.Split(base, "\n")
-	popupLines := strings.Split(popup, "\n")
-	width := lipgloss.Width(base)
-	if len(popupLines) >= len(baseLines) {
-		return whichkey.OverlayCenter(base, popup, width)
-	}
-	start := len(baseLines) - len(popupLines)
-	if topBorder != "" && start-1 >= 0 {
-		baseLines[start-1] = topBorder
-	}
-	for i, pl := range popupLines {
-		baseLines[start+i] = lipgloss.PlaceHorizontal(width, lipgloss.Center, pl)
-	}
-	return strings.Join(baseLines, "\n")
 }
 
 // calculateFocusJobsWidth calculates the optimal width for the jobs pane

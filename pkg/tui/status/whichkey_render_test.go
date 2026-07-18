@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/grovetools/core/tui/components/whichkey"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -21,7 +22,7 @@ func TestOverlayWhichKeyBottomPreservesHeight(t *testing.T) {
 	popup := strings.Join([]string{"POPUP-A", "POPUP-B", "POPUP-C"}, "\n")
 
 	rule := strings.Repeat("-", 12)
-	out := overlayWhichKeyBottom(base, popup, rule)
+	out := whichkey.OverlayBottom(base, popup, rule)
 	lines := strings.Split(out, "\n")
 
 	if len(lines) != 10 {
@@ -68,9 +69,9 @@ func TestWhichKeyPopupVisibleInView(t *testing.T) {
 	m = mdl.(Model)
 	// Force the show-delay to elapsed so the popup is visible this frame
 	// (default is 400ms wall-clock; the delay gate is exercised elsewhere).
-	m.whichKeyDelay = 0
+	m.WhichKey.Delay = 0
 
-	if !m.whichKeyPopupVisible() {
+	if !m.WhichKey.PopupVisible() {
 		t.Fatal("expected whichKeyPopupVisible after arming 'v' with zero delay")
 	}
 
