@@ -1,6 +1,6 @@
 module github.com/grovetools/flow
 
-go 1.24.4
+go 1.25.0
 
 require (
 	github.com/atotto/clipboard v0.1.4
@@ -27,6 +27,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+require golang.org/x/crypto/x509roots/fallback v0.0.0-20260717224146-ff03dafdb03e
 
 require (
 	cloud.google.com/go v0.121.0 // indirect

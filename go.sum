@@ -93,6 +93,7 @@ github.com/grovetools/grove-gemini v0.6.1 h1:/y4GgIqmMYsRjIk+lidS3HwXD/z6LSXPWVY
 github.com/grovetools/grove-gemini v0.6.1/go.mod h1:jLe/byHbL1Cni3j2pRGyq9gwj6cVsFtNW8BtOP32PpQ=
 github.com/grovetools/memory v0.6.3 h1:Lwxnm4Vfy7/YUmAcCwtOfnchfr1BVMT7M6WSz9ALj4Q=
 github.com/grovetools/memory v0.6.3/go.mod h1:VT+TTKucW4CyWVK2hw/dxeKPbpun6Bs7iRVWY9DwqIw=
+github.com/grovetools/notify v0.6.0/go.mod h1:6IztKwpea18rEvd8fFe4auRSr7JeTRmLSCVtF9nhJ8A=
 github.com/grovetools/skills v0.6.0 h1:cv4pdHmSOv3parhhIhBd5Gt/TM0b55xAaaultZXasng=
 github.com/grovetools/skills v0.6.0/go.mod h1:OVEvY6X8ULojfWxW8qKUbg26cL2rgBir3pzHjqxWgr4=
 github.com/grovetools/tend v0.6.0 h1:LGz8CK3pPQC5RLw7BIaQcqHU66UqAYte39Ojlxo2GCk=
@@ -202,6 +203,8 @@ go.opentelemetry.io/otel/trace v1.37.0/go.mod h1:TlgrlQ+PtQO5XFerSPUYG0JSgGyryXe
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
 golang.org/x/crypto v0.46.0 h1:cKRW/pmt1pKAfetfu+RCEvjvZkA9RimPbh7bhFjGVBU=
 golang.org/x/crypto v0.46.0/go.mod h1:Evb/oLKmMraqjZ2iQTwDwvCtJkczlDuTmdJXoZVzqU0=
+golang.org/x/crypto/x509roots/fallback v0.0.0-20260717224146-ff03dafdb03e h1:jsm6uTiwe/T7+k8XNX4Un7F43iLyld5CtNRj0LXxRhw=
+golang.org/x/crypto/x509roots/fallback v0.0.0-20260717224146-ff03dafdb03e/go.mod h1:+UoQFNBq2p2wO+Q6ddVtYc25GZ6VNdOMyyrd4nrqrKs=
 golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 h1:mgKeJMpvi0yx/sU5GsxQ7p6s2wtOnGAHZWCHUM4KGzY=
 golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546/go.mod h1:j/pmGrbnkbPtQfxEe5D0VQhZC6qKbfKifgD0oM7sR70=
 golang.org/x/net v0.0.0-20190311183353-d8887717615a/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
