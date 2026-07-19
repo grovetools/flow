@@ -261,6 +261,20 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 	}
 
+	// Open-mode split (hosted in treemux): enter opens the job file in its
+	// own pinned per-file pane; e quick-opens it in the host's singleton
+	// Editor pane. Keys are unchanged (Confirm keeps its enter,y pair) —
+	// only Base's generic help text is overridden so the help menu reflects
+	// the split.
+	km.Base.Edit = key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "quick edit in Editor pane"),
+	)
+	km.Base.Confirm = key.NewBinding(
+		key.WithKeys("enter", "y"),
+		key.WithHelp("enter", "open in own pane / confirm"),
+	)
+
 	// Apply TUI-specific overrides from config
 	keymap.ApplyTUIOverrides(cfg, "flow", "status", &km)
 
