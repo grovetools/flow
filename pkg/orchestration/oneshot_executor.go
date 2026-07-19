@@ -298,6 +298,10 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return fmt.Errorf("failed to write briefing file: %w", err)
 	}
 
+	// Stamp the config vector alongside the briefing. contextFiles is nil for
+	// this family: jobCtx carries the generated cold/hot bundle instead.
+	stampJobConfigVector(ctx, job, plan, e.config, workDir, jobCtx, nil, briefingFilePath)
+
 	// --- Concept Gathering Logic ---
 	if job.GatherConceptNotes || job.GatherConceptPlans {
 		conceptContextFile, err := gatherConcepts(ctx, job, plan, workDir)
@@ -356,34 +360,12 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		defer os.Unsetenv("GROVE_REQUEST_ID")
 	}
 
-	// Determine the effective model to use with clear precedence
-	var effectiveModel string
-	var modelSource string
-
-	// 1. CLI flag (highest priority)
-	if e.config.ModelOverride != "" {
-		effectiveModel = e.config.ModelOverride
-		modelSource = "CLI override"
-	} else if job.Model != "" {
-		// 2. Job frontmatter model
-		effectiveModel = job.Model
-		modelSource = "job frontmatter"
-	} else if plan.Config != nil && plan.Config.Model != "" {
-		// 3. Plan config model
-		effectiveModel = plan.Config.Model
-		modelSource = "plan config"
-	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
-		// 4. Global config model
-		effectiveModel = plan.Orchestration.OneshotModel
-		modelSource = "global config"
-	} else {
-		// 5. Hardcoded fallback - use Anthropic default
-		effectiveModel = anthropicmodels.DefaultModel
-		modelSource = "default fallback"
-	}
-
-	// Resolve model aliases (e.g., "claude-sonnet-4-5" -> "claude-sonnet-4-5-20250929")
-	effectiveModel = resolveModelAlias(effectiveModel)
+	// Determine the effective model to use with clear precedence:
+	// CLI override > job frontmatter > plan config > global config > default,
+	// then alias resolution. The chain lives in resolveEffectiveModel
+	// (config_vector.go) so the config-vector stamp records exactly the model
+	// this call site uses — duplicating it would let the two drift apart.
+	effectiveModel, modelSource := resolveEffectiveModel(e.config, job, plan)
 
 	logrus.WithFields(logrus.Fields{
 		"job_id":       job.ID,
@@ -581,6 +563,8 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	// Archive the accumulated token usage into the job .md, for parity with the
 	// agent on-disk record (best-effort).
 	WriteTokenUsageSection(plan, job)
+
+	writeMetricsRecordQuietly(job, plan)
 
 	return nil
 }
@@ -1809,6 +1793,12 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		// Archive the accumulated token usage into the job .md at completion,
 		// for parity with the agent on-disk record (best-effort).
 		WriteTokenUsageSection(plan, job)
+		// The gated completion path — the one eval rider chats take. No new
+		// vector is stamped here (this branch renders no new briefing bytes),
+		// so the record joins against the last response-producing turn's
+		// vector, which is exactly D12's "a record's vector is the stamping
+		// turn's".
+		writeMetricsRecordQuietly(job, plan)
 		return nil
 	}
 
@@ -2326,6 +2316,10 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 			Err(err).
 			Log(ctx)
 	} else {
+		// Chat vectors are per-turn (D12): each response-producing turn
+		// overwrites the artifact, so the vector on disk always describes the
+		// turn that produced the latest response.
+		stampJobConfigVector(ctx, job, plan, e.config, worktreePath, chatJobCtx, nil, briefingFilePath)
 		ulog.Success("Chat briefing file created").
 			Field("job_id", job.ID).
 			Field("request_id", requestID).
@@ -2787,6 +2781,7 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// them (handled by the directive.Action == "complete" path above).
 	if finalStatus == JobStatusCompleted {
 		WriteTokenUsageSection(plan, job)
+		writeMetricsRecordQuietly(job, plan)
 	}
 
 	return nil

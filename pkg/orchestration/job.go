@@ -136,6 +136,13 @@ type Job struct {
 	Skill         string    `yaml:"skill,omitempty" json:"skill,omitempty" jsonschema:"description=Skill name to inject into the agent context (resolved via skills package)"`
 	SkillSequence []string  `yaml:"skill_sequence,omitempty" json:"skill_sequence,omitempty" jsonschema:"description=List of skills to execute in sequence"`
 
+	// ConfigComponents carries harness-supplied entries that are merged into
+	// the job's config vector before its hash is computed, so an axis the
+	// executor cannot see (an eval cell's environment, say) still lands inside
+	// ConfigHash rather than outside it. Keys colliding with the reserved
+	// component names are refused at merge time.
+	ConfigComponents map[string]string `yaml:"config_components,omitempty" json:"config_components,omitempty" jsonschema:"description=Harness-supplied config-vector components merged into the job's config hash"`
+
 	// Playbook is a per-job override for the plan-level playbook setting.
 	// Jobs normally inherit the playbook from the parent plan's
 	// .grove-plan.yml; setting this field here is an escape hatch for

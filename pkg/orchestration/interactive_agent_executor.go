@@ -135,6 +135,11 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	}
 
 	var briefingFilePath string
+	// Hoisted out of the else branch so the single post-convergence config
+	// vector stamp can see it. Stays nil on the GeneratePlanFrom branch, which
+	// gathers no context files — the context component is then omitted rather
+	// than hashed as empty (D4/D10).
+	var stampContextFiles []string
 
 	// If generate_plan_from is true, we first call an LLM to generate a plan from the chat.
 	if job.GeneratePlanFrom {
@@ -197,6 +202,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			}
 			return fmt.Errorf("failed to gather context files: %w", err)
 		}
+		stampContextFiles = contextFiles
 
 		// Query memory database for related memories, bounded so an offline
 		// embedding path can't stall the launch (see memoryPrefetchTimeout).
@@ -248,6 +254,11 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 			Pretty(theme.IconCode + "  Briefing file created at: " + theme.DefaultTheme.Accent.Render(briefingFilePath)).
 			Log(ctx)
 	}
+
+	// Stamp the config vector once, after both briefing branches converge.
+	// Because the vector hashes the bytes at briefingFilePath rather than a
+	// content string, this single site covers both branches correctly.
+	stampJobConfigVector(ctx, job, plan, nil, workDir, nil, stampContextFiles, briefingFilePath)
 
 	// --- Concept Gathering Logic ---
 	if job.GatherConceptNotes || job.GatherConceptPlans {

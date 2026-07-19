@@ -275,6 +275,14 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 	}
 
+	// Capture the partial run record. Placed after the archival block above so
+	// token-usage.json is already on disk for the Cost mapping to read back.
+	// Attached unconditionally, for every job type: this single site covers all
+	// three agent families (both the `flow plan complete` route and the
+	// FinalizeHeadlessJob success route) and pending_user chats completed via
+	// `flow complete`, which never re-enter executeChatJob.
+	writeMetricsRecordQuietly(job, plan)
+
 	// Append transcript for agent jobs — runs even when already completed so
 	// `flow plan complete` recovers the transcript if the agent was killed
 	// before the first completion call landed. AppendAgentTranscript compares

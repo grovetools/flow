@@ -131,6 +131,13 @@
       "type": "array",
       "description": "List of skills to execute in sequence"
     },
+    "config_components": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object",
+      "description": "Harness-supplied config-vector components merged into the job's config hash"
+    },
     "playbook": {
       "type": "string",
       "description": "Per-job playbook override (normally inherited from .grove-plan.yml)"

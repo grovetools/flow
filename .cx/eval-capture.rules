@@ -1,0 +1,30 @@
+# eval-capture feature rules
+# Scopes the P1 capture surface: the config-vector writer and the partial
+# run-record writer, plus every seam they attach to. The vector is stamped at
+# each executor's WriteBriefingFile site; the metrics record is written at the
+# completion seams (CompleteJob for all agent families and pending_user chats,
+# plus the oneshot tail and both chat terminal branches).
+#
+# Changes to any of these should trigger the eval-capture E2E scenarios, which
+# run real oneshot/chat/headless jobs and assert the artifacts parse back into
+# the record schema — in particular that a mock-path Cost stays nil (D4) and
+# that wall clock is never non-positive (D25).
+#
+# The record package is cross-repo: it is the sole schema authority (D1), so a
+# field change there invalidates every assertion here.
+# Paths are relative to the flow repo root.
+
+pkg/orchestration/config_vector.go
+pkg/orchestration/metrics_record.go
+pkg/orchestration/job.go
+pkg/orchestration/job_complete.go
+pkg/orchestration/oneshot_executor.go
+pkg/orchestration/headless_agent_executor.go
+pkg/orchestration/interactive_agent_executor.go
+pkg/orchestration/isolated_agent_executor.go
+pkg/orchestration/briefing.go
+pkg/orchestration/token_usage.go
+pkg/orchestration/skill_fidelity.go
+pkg/orchestration/loader.go
+../eval/pkg/record/record.go
+tests/e2e/tend/scenarios/eval_capture.go

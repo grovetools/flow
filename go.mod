@@ -12,6 +12,7 @@ require (
 	github.com/grovetools/compositor v0.0.1
 	github.com/grovetools/core v0.6.4-0.20260521140340-5660efd35db0
 	github.com/grovetools/cx v0.6.0
+	github.com/grovetools/eval v0.0.0-00010101000000-000000000000
 	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/grove-gemini v0.6.1
 	github.com/grovetools/grove-openrouter v0.0.0-00010101000000-000000000000
@@ -106,3 +107,9 @@ require (
 // builds work with GOWORK off too. Land-time: publish grove-openrouter, bump the
 // require to the tagged version, and drop this replace (go.work already `use`s it).
 replace github.com/grovetools/grove-openrouter => ../grove-openrouter
+
+// eval has no published release yet; the require above carries the null
+// pseudo-version and this replace resolves it from the local worktree so
+// builds work with GOWORK off too. Land-time: publish eval, bump the require
+// to the tagged version, and drop this replace (go.work already `use`s it).
+replace github.com/grovetools/eval => ../eval

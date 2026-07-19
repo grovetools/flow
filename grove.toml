@@ -112,3 +112,8 @@ public interfaces, invoke the concept-maintainer skill to update or add
 concept docs. Skip if this was a trivial fix or docs-only change.
 """
 
+
+[[test_scopes]]
+name = "eval-capture"
+rules = ".cx/eval-capture.rules"
+scenarios = ["eval-capture-oneshot", "eval-capture-chat", "eval-capture-headless-wallclock"]
