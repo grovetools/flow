@@ -3,80 +3,31 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
-
-	"github.com/grovetools/flow/pkg/orchestration"
 )
 
+// planUpdateNoteRefCmd is a deprecated NO-OP shim. In the old note↔plan design,
+// note lifecycle was driven by generated shell hooks in .grove-plan.yml that
+// called `flow plan update-note-ref <plan> <new-note-path>` to rewrite each
+// job's note_ref after a note moved. That design is gone: NOTE frontmatter
+// (plan_ref/plan_job) is now the source of truth and flow resolves notes by
+// querying nb. note_ref is a non-load-bearing provenance hint that is never
+// rewritten on move.
+//
+// Existing plans still have this call frozen into their .grove-plan.yml hooks,
+// so the command must keep accepting the same args and exit 0 — it just does
+// nothing but print a deprecation warning to stderr.
 var planUpdateNoteRefCmd = &cobra.Command{
 	Use:    "update-note-ref [plan] [new-note-path]",
-	Short:  "Updates the note_ref in all job files for a plan",
-	Long:   `Internal command to update the note_ref field in all job frontmatter after a note has been moved.`,
+	Short:  "Deprecated no-op (note_ref is no longer rewritten on move)",
+	Long:   `Deprecated no-op. Retained only so legacy .grove-plan.yml hooks that call it do not break. Note lifecycle is now driven by native Go code keyed on note frontmatter (plan_ref/plan_job); note_ref is provenance-only and is never rewritten.`,
 	Args:   cobra.ExactArgs(2),
-	RunE:   runPlanUpdateNoteRef,
 	Hidden: true,
-}
-
-func runPlanUpdateNoteRef(cmd *cobra.Command, args []string) error {
-	planName := args[0]
-	newNotePath := args[1]
-
-	planPath, err := resolvePlanPathWithActiveJobCtx(cmd.Context(), planName, ".")
-	if err != nil {
-		return err
-	}
-
-	plan, err := orchestration.LoadPlan(planPath)
-	if err != nil {
-		return fmt.Errorf("failed to load plan: %w", err)
-	}
-
-	// Update note_ref in all jobs that have one
-	updated := 0
-	for _, job := range plan.Jobs {
-		if job.NoteRef != "" {
-			jobPath := filepath.Join(planPath, job.Filename)
-
-			// Read job file
-			content, err := os.ReadFile(jobPath)
-			if err != nil {
-				fmt.Printf("Warning: failed to read %s: %v\n", job.Filename, err)
-				continue
-			}
-
-			// Parse frontmatter
-			frontmatter, body, err := orchestration.ParseFrontmatter(content)
-			if err != nil {
-				fmt.Printf("Warning: failed to parse frontmatter in %s: %v\n", job.Filename, err)
-				continue
-			}
-
-			// Update note_ref
-			frontmatter["note_ref"] = newNotePath
-
-			// Rebuild and write
-			newContent, err := orchestration.RebuildMarkdownWithFrontmatter(frontmatter, body)
-			if err != nil {
-				fmt.Printf("Warning: failed to rebuild %s: %v\n", job.Filename, err)
-				continue
-			}
-
-			if err := os.WriteFile(jobPath, newContent, 0o600); err != nil {
-				fmt.Printf("Warning: failed to write %s: %v\n", job.Filename, err)
-				continue
-			}
-
-			updated++
-		}
-	}
-
-	if updated > 0 {
-		fmt.Printf("* Updated note_ref in %d job(s)\n", updated)
-	}
-
-	return nil
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Fprintln(os.Stderr, "Warning: 'flow plan update-note-ref' is deprecated and does nothing. Note lifecycle is now handled natively via note frontmatter (plan_ref/plan_job).")
+		return nil
+	},
 }
 
 func init() {

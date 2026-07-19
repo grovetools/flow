@@ -59,49 +59,44 @@ func runPlanDemote(cmd *cobra.Command, args []string) error {
 	job.FilePath = jobFilePath
 	job.Filename = filepath.Base(jobFilePath)
 
-	// Lifecycle path: if the job has a note_ref, find the note and move it
-	// back to inbox/. The note may be at the exact note_ref path, or it may
-	// have been moved to .archive/ or in_progress/ by older code.
-	if job.NoteRef != "" {
-		actualPath := findNoteRef(job.NoteRef)
-		if actualPath != "" {
-			job.NoteRef = actualPath
-			return demoteViaRename(job)
+	// The note is resolved by QUERYING nb for the plan's notes and filtering on
+	// plan_job — note frontmatter (plan_ref/plan_job) is the source of truth, not
+	// the job's note_ref (which is now a non-load-bearing provenance hint).
+	planName := filepath.Base(filepath.Dir(jobFilePath))
+	note, qErr := orchestration.JobNote(planName, job.Filename)
+	if qErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: nb query for plan notes failed: %v\n", qErr)
+	}
+	if note != nil {
+		return demoteResolvedNote(note.Path, job)
+	}
+
+	// Fallback: only when the query finds nothing, honor a path-shaped legacy
+	// note_ref that still stats clean (older job files stored absolute note
+	// paths). Say so in the output so the resolution path is not silent.
+	if job.NoteRef != "" && filepath.IsAbs(job.NoteRef) {
+		if _, statErr := os.Stat(job.NoteRef); statErr == nil {
+			fmt.Fprintln(os.Stderr, "Note: nb query found no linked note; falling back to legacy note_ref path.")
+			return demoteResolvedNote(job.NoteRef, job)
 		}
 	}
 
-	// Fallback path: create a new note via nb new
+	// Last resort: no resolvable note anywhere — recreate one via nb new.
 	return demoteViaNbNew(job, jobFilePath)
 }
 
-// demoteViaRename moves an in_progress note back to inbox/ and marks the job abandoned.
-func demoteViaRename(job *orchestration.Job) error {
-	// Determine the target inbox directory
-	var inboxDir string
-	if demoteWorkspaceFlag != "" {
-		absWorkspace, err := filepath.Abs(demoteWorkspaceFlag)
-		if err != nil {
-			return fmt.Errorf("resolving workspace path: %w", err)
-		}
-		inboxDir = filepath.Join(absWorkspace, "inbox")
-	} else {
-		// Derive inbox from the note_ref location using workspace extraction.
-		// The note may be in in_progress/, .archive/, inbox/.archive/, etc.
-		wsDir := extractWorkspaceDir(job.NoteRef)
-		if wsDir != "" {
-			inboxDir = filepath.Join(wsDir, "inbox")
-		} else {
-			inboxDir = filepath.Join(filepath.Dir(filepath.Dir(job.NoteRef)), "inbox")
-		}
+// demoteResolvedNote moves an already-resolved note back to inbox/ via nb,
+// clears its plan_ref/plan_job frontmatter, and marks the job abandoned. It
+// prints the note's new path to stdout.
+func demoteResolvedNote(notePath string, job *orchestration.Job) error {
+	newPath, err := orchestration.MoveNote(notePath, "inbox")
+	if err != nil {
+		return fmt.Errorf("moving note back to inbox: %w", err)
 	}
 
-	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
-		return fmt.Errorf("creating inbox directory: %w", err)
-	}
-
-	destPath := filepath.Join(inboxDir, filepath.Base(job.NoteRef))
-	if err := os.Rename(job.NoteRef, destPath); err != nil {
-		return fmt.Errorf("moving note from in_progress to inbox: %w", err)
+	// Clear the note↔plan link now that the note is back in the inbox.
+	if err := orchestration.ClearNoteLink(newPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not clear note link on %s: %v\n", newPath, err)
 	}
 
 	// Mark the job as abandoned
@@ -110,7 +105,7 @@ func demoteViaRename(job *orchestration.Job) error {
 		return fmt.Errorf("updating job status to abandoned: %w", err)
 	}
 
-	fmt.Println(destPath)
+	fmt.Println(newPath)
 	return nil
 }
 
@@ -206,36 +201,6 @@ func extractWorkspaceDir(absPath string) string {
 	}
 	// Last resort: use the plan directory's parent
 	return filepath.Dir(filepath.Dir(absPath))
-}
-
-// findNoteRef searches for a note at its expected path and common fallback
-// locations (.archive/, in_progress/). Returns the actual path if found, or
-// empty string if the note can't be located anywhere.
-func findNoteRef(noteRef string) string {
-	// Check the exact path first
-	if _, err := os.Stat(noteRef); err == nil {
-		return noteRef
-	}
-
-	noteDir := filepath.Dir(noteRef)
-	parentDir := filepath.Dir(noteDir)
-	base := filepath.Base(noteRef)
-
-	// Check sibling directories: in_progress/, .archive/, inbox/, completed/
-	for _, dir := range []string{"in_progress", ".archive", "inbox", "completed"} {
-		candidate := filepath.Join(parentDir, dir, base)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-
-	// Also check .archive/ inside the original directory (inbox/.archive/)
-	archiveInDir := filepath.Join(noteDir, ".archive", base)
-	if _, err := os.Stat(archiveInDir); err == nil {
-		return archiveInDir
-	}
-
-	return ""
 }
 
 // parseNotePathFromOutput extracts the note file path from nb new output.

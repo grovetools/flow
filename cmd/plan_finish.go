@@ -77,6 +77,7 @@ func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
 	cmd.Flags().BoolVar(&opts.PruneOrphans, "prune-orphans", false, "Run `grove env prune --worktree <slug> --yes` after env teardown (local orphans only)")
 	cmd.Flags().BoolVar(&opts.PruneCloud, "prune-cloud", false, "Additionally pass --include-cloud to the orphan-prune step (requires --prune-orphans)")
 	cmd.Flags().BoolVar(&opts.PreserveCloud, "preserve-cloud", false, "Honor skip_destroy during env teardown (preserve cloud resources across plan finish; default is to destroy)")
+	cmd.Flags().BoolVar(&opts.KeepNotes, "keep-notes", false, "Skip moving the plan's linked notes to completed/ during finish")
 	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 }
 
@@ -187,13 +188,32 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 		}
 	}
 
-	// Execute on_finish hook before running cleanup actions.
-	// ItemMarkFinished will update .grove-plan.yml status AFTER the
-	// destructive steps succeed; writing it here before execution
-	// would orphan the plan slug if a later action fails.
-	if plan.Config != nil && plan.Config.Status == "review" {
-		plan_finish.RunOnFinishHook(plan, planName)
+	// Note lifecycle + on_finish hook run on EVERY finish (no longer gated on
+	// status == "review"). Ordering is deliberate:
+	//
+	//  1. Native note handling runs FIRST and is authoritative — it queries nb
+	//     for the plan's notes (by plan_ref) and moves each to completed/,
+	//     wherever they currently live. Notes go straight to completed; they no
+	//     longer pass through review/.
+	//  2. The (legacy) on_finish hook runs SECOND. Old frozen hooks do
+	//     `nb move "$OLD_PATH" completed`; by the time they run the note has
+	//     already been relocated, so their move is a harmless no-op/failure.
+	//     Combined with MoveNoteToGroup's idempotency (already-in-completed →
+	//     already-completed, not an error) and RunOnFinishHook's non-fatal
+	//     warnings, a stale frozen hook cannot corrupt the end state.
+	//
+	// This runs before the cleanup actions: ItemMarkFinished only flips
+	// .grove-plan.yml status AFTER the destructive steps succeed, so writing it
+	// here would orphan the plan slug if a later action failed.
+	if !opts.KeepNotes {
+		outcomes, err := orchestration.FinishPlanNotes(planName)
+		if err != nil {
+			fmt.Printf("Warning: could not query plan notes for finish: %v\n", err)
+		} else {
+			reportNoteOutcomes(outcomes)
+		}
 	}
+	plan_finish.RunOnFinishHook(plan, planName)
 
 	// Execute enabled actions. Returns a non-nil error if any enabled
 	// action failed; when that happens archive_plan and mark_finished
@@ -217,6 +237,26 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 
 	fmt.Println("\nPlan cleanup finished.")
 	return nil
+}
+
+// reportNoteOutcomes prints the per-note results of the native finish note
+// handling. Every note is reported (moved / already-completed / failed) so a
+// note that fails to move is visible rather than silently skipped.
+func reportNoteOutcomes(outcomes []orchestration.NoteOutcome) {
+	if len(outcomes) == 0 {
+		return
+	}
+	fmt.Println("\nNote lifecycle (moving linked notes to completed):")
+	for _, o := range outcomes {
+		switch o.State {
+		case orchestration.NoteFailed:
+			fmt.Printf("  - %-50s %s\n", o.Path, color.RedString(o.String()))
+		case orchestration.NoteAlreadyCompleted:
+			fmt.Printf("  - %-50s %s\n", o.Path, color.YellowString(o.String()))
+		default:
+			fmt.Printf("  - %-50s %s\n", o.Path, color.GreenString(o.String()))
+		}
+	}
 }
 
 // executeFinishActions runs the Action closure on every enabled item,

@@ -27,7 +27,11 @@ func MarkPlanReview(planDir string) error {
 		return nil
 	}
 
-	// Find the first job with a note_ref to expose to the hook template.
+	// Find the first job with a note_ref to expose to the hook template. This is
+	// back-compat only: note lifecycle no longer runs through review/ (native
+	// finish handling moves notes straight to completed), but legacy frozen
+	// on_review hooks still reference {{.NoteRef}}, so the template var stays
+	// populated. MarkPlanReview itself moves no notes.
 	var noteRef string
 	for _, job := range plan.Jobs {
 		if job.NoteRef != "" {
@@ -36,7 +40,8 @@ func MarkPlanReview(planDir string) error {
 		}
 	}
 
-	// Execute on_review hook if it exists.
+	// Execute on_review hook if it exists. Hook failures are non-fatal warnings:
+	// a broken/stale user hook must not block the plan from entering review.
 	if plan.Config != nil && plan.Config.Hooks != nil {
 		if hookCmdStr, ok := plan.Config.Hooks["on_review"]; ok && hookCmdStr != "" {
 			fmt.Println("▶️  Executing on_review hook...")
@@ -53,21 +58,23 @@ func MarkPlanReview(planDir string) error {
 			// Render the hook command.
 			tmpl, err := template.New("hook").Parse(hookCmdStr)
 			if err != nil {
-				return fmt.Errorf("failed to parse on_review hook template: %w", err)
+				fmt.Printf("Warning: failed to parse on_review hook template: %v\n", err)
+			} else {
+				var renderedCmd bytes.Buffer
+				if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
+					fmt.Printf("Warning: failed to render on_review hook command: %v\n", err)
+				} else {
+					// Execute the command.
+					hookCmd := exec.Command("sh", "-c", renderedCmd.String()) //nolint:gosec // on_review hook comes from trusted plan config
+					hookCmd.Stdout = os.Stdout
+					hookCmd.Stderr = os.Stderr
+					if err := hookCmd.Run(); err != nil {
+						fmt.Printf("Warning: on_review hook execution failed: %v\n", err)
+					} else {
+						fmt.Println("* on_review hook executed successfully.")
+					}
+				}
 			}
-			var renderedCmd bytes.Buffer
-			if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
-				return fmt.Errorf("failed to render on_review hook command: %w", err)
-			}
-
-			// Execute the command.
-			hookCmd := exec.Command("sh", "-c", renderedCmd.String()) //nolint:gosec // on_review hook comes from trusted plan config
-			hookCmd.Stdout = os.Stdout
-			hookCmd.Stderr = os.Stderr
-			if err := hookCmd.Run(); err != nil {
-				return fmt.Errorf("on_review hook execution failed: %w", err)
-			}
-			fmt.Println("* on_review hook executed successfully.")
 		}
 	}
 

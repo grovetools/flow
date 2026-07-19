@@ -110,6 +110,10 @@ type Options struct {
 	// this flag in the rare case that the caller wants to iterate
 	// again across finish (e.g. recovery of a legacy plan slug).
 	PreserveCloud bool
+	// KeepNotes skips the native note lifecycle at finish — the plan's
+	// linked notes are NOT moved to completed/. Default is false:
+	// every finish moves all of the plan's notes to completed.
+	KeepNotes bool
 }
 
 // Stable item identifiers. Hosts look items up by these constants

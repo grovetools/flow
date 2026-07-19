@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -300,18 +299,32 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 	}
 
-	// Move linked note from in_progress/ to completed/ if note_ref exists
+	// Move this job's linked note to completed/. The note is resolved by
+	// QUERYING nb (plan_ref + plan_job), never by reading job.NoteRef — which is
+	// now a non-load-bearing provenance hint. A non-empty note_ref is used only
+	// as a cheap "this job had a note" signal to avoid an nb query for ordinary
+	// jobs. Resolution failures are reported, never silently skipped.
 	if job.NoteRef != "" && !alreadyCompleted {
-		if _, err := os.Stat(job.NoteRef); err == nil {
-			noteDir := filepath.Dir(job.NoteRef)
-			parentDir := filepath.Dir(noteDir)
-			completedDir := filepath.Join(parentDir, "completed")
-			if err := os.MkdirAll(completedDir, 0o755); err == nil {
-				dest := filepath.Join(completedDir, filepath.Base(job.NoteRef))
-				if err := os.Rename(job.NoteRef, dest); err == nil {
-					if !silent {
-						fmt.Printf("%s Moved linked note to completed/\n", color.GreenString("*"))
-					}
+		note, err := JobNote(plan.Name, job.Filename)
+		switch {
+		case err != nil:
+			if !silent {
+				fmt.Printf("Warning: could not query nb for linked note of %s: %v\n", job.Filename, err)
+			}
+		case note == nil:
+			if !silent {
+				fmt.Printf("Warning: no note resolved via nb for job %s (plan_ref=plans/%s, plan_job=%s); leaving note unmoved\n", job.Filename, plan.Name, job.Filename)
+			}
+		default:
+			outcome := MoveNoteToGroup(note.Path, "completed")
+			if !silent {
+				switch outcome.State {
+				case NoteMoved:
+					fmt.Printf("%s Moved linked note to completed/: %s\n", color.GreenString("*"), outcome.Path)
+				case NoteAlreadyCompleted:
+					fmt.Printf("%s Linked note already in completed/: %s\n", color.GreenString("*"), outcome.Path)
+				case NoteFailed:
+					fmt.Printf("Warning: failed to move linked note %s to completed/: %v\n", outcome.Path, outcome.Err)
 				}
 			}
 		}

@@ -387,8 +387,15 @@ See linked note: %s
 				return fmt.Errorf("parsing round-tripped note frontmatter: %w", err)
 			}
 
+			// Under the inverted note↔plan linkage, demote CLEARS the note's
+			// plan_ref/plan_job when it returns to the inbox (the note is no
+			// longer linked to any plan). This asserts the new contract; note
+			// that the flow demote path now resolves and clears the link via the
+			// nb CLI (nb move + nb internal update-frontmatter), so this scenario
+			// requires a NEW nb binary on PATH to execute end-to-end.
 			return ctx.Verify(func(v *verify.Collector) {
-				v.Equal("note plan_ref preserved after round-trip", "round-trip-plan/02-round-trip-job.md", fm.PlanRef)
+				v.Equal("note plan_ref cleared after demote", "", fm.PlanRef)
+				v.Equal("note plan_job cleared after demote", "", fm.PlanJob)
 			})
 		}),
 

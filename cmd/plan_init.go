@@ -314,8 +314,15 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if plan.Config != nil && plan.Config.Worktree != "" {
 			worktreeName = plan.Config.Worktree
 		}
+		// For a --from-note note, note_ref is provenance-only: prefer the note's
+		// frontmatter id over its absolute path.
+		firstNoteRef := cmd.NoteRef
+		fromNote := cmd.firstFromNote()
+		if fromNote != "" {
+			firstNoteRef = noteProvenanceRef(cmd.NoteRef)
+		}
 		enrichOpts := JobEnrichmentOptions{
-			NoteRef:      cmd.NoteRef,
+			NoteRef:      firstNoteRef,
 			Repository:   repoName,
 			Worktree:     worktreeName,
 			IsNoteTarget: true, // Extraction creates the first job
@@ -328,6 +335,13 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 			return "", fmt.Errorf("failed to add extracted job to plan: %w", err)
 		}
 		result.WriteString(fmt.Sprintf("* Extracted content from %s to new job: %s\n", cmd.ExtractAllFrom, filename))
+
+		// Native note lifecycle for the first --from-note note: link it to this
+		// plan+job and move it into in_progress. Only for actual --from-note
+		// notes (a plain --extract-all-from file is not a notebook note).
+		if fromNote != "" {
+			linkNoteToJob(cmd.NoteRef, planName, filename, &result)
+		}
 	}
 
 	// Roster: each additional --from-note becomes its own chat job appended to
@@ -372,12 +386,13 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 				Model:      cmd.Model,
 			}
 
-			// Each roster job links to its OWN source note. Note that only the
-			// first note (cmd.NoteRef) drives the plan's on_start/on_review/
-			// on_finish nb-lifecycle hooks; the additional notes are linked for
-			// traceability but are not moved through the notebook lifecycle.
+			// Each roster job links to its OWN source note. note_ref is
+			// provenance-only (the note's frontmatter id when parseable, else the
+			// absolute path). Every roster note now enters the lifecycle natively:
+			// its plan_ref/plan_job is written and it is moved to in_progress —
+			// previously roster notes 2..N were left stranded in inbox.
 			enrichJob(job, JobEnrichmentOptions{
-				NoteRef:      absPath,
+				NoteRef:      noteProvenanceRef(absPath),
 				Repository:   repoName,
 				Worktree:     worktreeName,
 				IsNoteTarget: true,
@@ -388,6 +403,10 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 				return "", fmt.Errorf("failed to add roster job for %s: %w", absPath, err)
 			}
 			result.WriteString(fmt.Sprintf("* Added roster job from %s: %s\n", notePath, filename))
+
+			// Native note lifecycle: link this roster note to its job and move
+			// it into in_progress.
+			linkNoteToJob(absPath, planName, filename, &result)
 		}
 	}
 
@@ -854,8 +873,14 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		if currentNode != nil {
 			repoName = currentNode.Name
 		}
+		// note_ref is provenance-only for --from-note notes: prefer the note's
+		// frontmatter id over its absolute path.
+		recipeNoteRef := cmd.NoteRef
+		if cmd.firstFromNote() != "" {
+			recipeNoteRef = noteProvenanceRef(cmd.NoteRef)
+		}
 		enrichOpts := JobEnrichmentOptions{
-			NoteRef:      cmd.NoteRef,
+			NoteRef:      recipeNoteRef,
 			Repository:   repoName,
 			Worktree:     worktreeOverride,
 			IsNoteTarget: isNoteTarget,
@@ -886,6 +911,15 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		if err := os.WriteFile(destPath, finalContent, 0o600); err != nil {
 			return fmt.Errorf("writing recipe job file %s: %w", filename, err)
 		}
+	}
+
+	// Native note lifecycle for the recipe path: recipes support only the first
+	// --from-note note (roster is unsupported with recipes). Link the note-target
+	// job's note to this plan+job and move the note into in_progress.
+	if cmd.firstFromNote() != "" && targetFilename != "" {
+		var nb strings.Builder
+		linkNoteToJob(cmd.NoteRef, planName, targetFilename, &nb)
+		fmt.Print(nb.String())
 	}
 
 	// The final worktree to use in .grove-plan.yml is simply the one from the CLI flag
@@ -1236,6 +1270,40 @@ func enrichJobFrontmatter(frontmatter map[string]interface{}, opts JobEnrichment
 	}
 }
 
+// noteProvenanceRef returns the value to stamp into a job's note_ref for a
+// --from-note note. note_ref is now a non-load-bearing provenance hint (flow
+// resolves notes by querying nb, never by reading note_ref), so we prefer the
+// note's frontmatter `id`; when the note can't be read/parsed or carries no id
+// we fall back to the absolute path.
+func noteProvenanceRef(notePath string) string {
+	content, err := os.ReadFile(notePath)
+	if err == nil {
+		if fm, _, perr := orchestration.ParseFrontmatter(content); perr == nil {
+			if id, ok := fm["id"].(string); ok && id != "" {
+				return id
+			}
+		}
+	}
+	return notePath
+}
+
+// linkNoteToJob performs the native per-note lifecycle for a --from-note note
+// after its job has been created: it writes the note's plan_ref/plan_job
+// frontmatter (linking it to this plan+job), then moves the note into
+// in_progress/. Failures are reported loudly to the result buffer rather than
+// silently swallowed — a note that fails to move must be visible.
+func linkNoteToJob(notePath, planName, jobFilename string, result *strings.Builder) {
+	if err := orchestration.SetNoteLink(notePath, planName, jobFilename); err != nil {
+		result.WriteString(fmt.Sprintf("%s  Warning: could not link note %s to plan: %v\n", theme.IconWarning, notePath, err))
+	}
+	newPath, err := orchestration.MoveNote(notePath, "in_progress")
+	if err != nil {
+		result.WriteString(fmt.Sprintf("%s  Warning: could not move note %s to in_progress: %v\n", theme.IconWarning, notePath, err))
+		return
+	}
+	result.WriteString(fmt.Sprintf("* Linked note to job %s and moved to in_progress: %s\n", jobFilename, newPath))
+}
+
 // enrichJob applies common field enrichments to a Job struct during plan init.
 // This is the Job struct equivalent of enrichJobFrontmatter.
 func enrichJob(job *orchestration.Job, opts JobEnrichmentOptions) {
@@ -1321,31 +1389,21 @@ func createDefaultPlanConfig(planPath, model, worktree, noteRef, recipe, playboo
 	configContent.WriteString("#   url: https://github.com/my-org/my-repo/issues/123\n")
 	configContent.WriteString("\n")
 
+	// Note↔plan lifecycle is now handled natively in Go (plan_init writes the
+	// note's plan_ref/plan_job and moves it to in_progress; finish moves all
+	// plan notes to completed). We no longer generate note-moving shell hooks —
+	// only the commented example hooks, for user-defined automation. The noteRef
+	// parameter is retained for signature stability but no longer drives hook
+	// generation.
+	_ = noteRef
 	configContent.WriteString("# Hooks to run at different plan lifecycle events\n")
-	if noteRef != "" {
-		configContent.WriteString("hooks:\n")
-		configContent.WriteString("  on_start: |\n")
-		configContent.WriteString(`    OLD_PATH="{{.NoteRef}}"` + "\n")
-		configContent.WriteString(`    nb internal update-frontmatter --path "$OLD_PATH" --field plan_ref --value "plans/{{.PlanName}}"` + "\n")
-		configContent.WriteString(`    NEW_PATH=$(nb move "$OLD_PATH" in_progress --force | grep "To:" | awk '{print $2}')` + "\n")
-		configContent.WriteString(`    flow plan update-note-ref "{{.PlanName}}" "$NEW_PATH"` + "\n")
-		configContent.WriteString("  on_review: |\n")
-		configContent.WriteString(`    OLD_PATH="{{.NoteRef}}"` + "\n")
-		configContent.WriteString(`    nb internal update-note --path "$OLD_PATH" --append-content "\n\n---\n**Completed by plan:** [[plans/{{.PlanName}}]]"` + "\n")
-		configContent.WriteString(`    NEW_PATH=$(nb move "$OLD_PATH" review --force | grep "To:" | awk '{print $2}')` + "\n")
-		configContent.WriteString(`    flow plan update-note-ref "{{.PlanName}}" "$NEW_PATH"` + "\n")
-		configContent.WriteString("  on_finish: |\n")
-		configContent.WriteString(`    OLD_PATH="{{.NoteRef}}"` + "\n")
-		configContent.WriteString(`    nb move "$OLD_PATH" completed --force` + "\n")
-	} else {
-		configContent.WriteString("# hooks:\n")
-		configContent.WriteString("#   on_start: |\n")
-		configContent.WriteString(`#     echo "Plan {{.PlanName}} is starting..."` + "\n")
-		configContent.WriteString("#   on_review: |\n")
-		configContent.WriteString(`#     echo "Plan {{.PlanName}} is now in review."` + "\n")
-		configContent.WriteString("#   on_finish: |\n")
-		configContent.WriteString(`#     echo "Plan {{.PlanName}} is finished."` + "\n")
-	}
+	configContent.WriteString("# hooks:\n")
+	configContent.WriteString("#   on_start: |\n")
+	configContent.WriteString(`#     echo "Plan {{.PlanName}} is starting..."` + "\n")
+	configContent.WriteString("#   on_review: |\n")
+	configContent.WriteString(`#     echo "Plan {{.PlanName}} is now in review."` + "\n")
+	configContent.WriteString("#   on_finish: |\n")
+	configContent.WriteString(`#     echo "Plan {{.PlanName}} is finished."` + "\n")
 
 	configPath := filepath.Join(planPath, ".grove-plan.yml")
 	return os.WriteFile(configPath, []byte(configContent.String()), 0o600)
