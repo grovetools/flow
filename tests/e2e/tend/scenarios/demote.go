@@ -21,6 +21,10 @@ var DemoteToNoteScenario = harness.NewScenario(
 	"Verifies flow plan demote moves in_progress note back to inbox, marks job abandoned.",
 	[]string{"plan", "demote", "cross-workspace"},
 	[]harness.Step{
+		// flow's demote path drives nb (list --plan-ref / move / internal
+		// update-frontmatter); the compiled nb mock backs those verbs.
+		harness.SetupMocks(harness.Mock{CommandName: "nb"}),
+
 		harness.NewStep("Setup cross-workspace sandbox", func(ctx *harness.Context) error {
 			homeDir := ctx.HomeDir()
 
@@ -51,10 +55,14 @@ var DemoteToNoteScenario = harness.NewScenario(
 
 			// Create a note in in_progress/ (simulates a previously promoted note)
 			noteRefPath := filepath.Join(wsAInProgress, "original-bug-report.md")
+			// Note frontmatter is the source of truth for the note<->plan link:
+			// a plan_ref slug plus the plan_job filename. flow resolves this
+			// note by querying nb (list --plan-ref), not via the job's note_ref.
 			noteContent := `---
 title: Original Bug Report
 type: inbox
-plan_ref: active-plan/01-stale-task.md
+plan_ref: plans/active-plan
+plan_job: 01-stale-task.md
 ---
 
 ## Bug: Widget crashes on empty input
@@ -170,6 +178,10 @@ var DemoteWithWorkspaceFlagScenario = harness.NewScenario(
 	"Verifies flow plan demote --workspace routes note to specified workspace inbox.",
 	[]string{"plan", "demote", "workspace-flag"},
 	[]harness.Step{
+		// flow's demote path drives nb (list --plan-ref / move / internal
+		// update-frontmatter); the compiled nb mock backs those verbs.
+		harness.SetupMocks(harness.Mock{CommandName: "nb"}),
+
 		harness.NewStep("Setup sandbox with workspace override target", func(ctx *harness.Context) error {
 			homeDir := ctx.HomeDir()
 			notebookRoot := filepath.Join(homeDir, "notebooks", "test-notebook")
@@ -283,6 +295,10 @@ var PromoteDemoteRoundTripScenario = harness.NewScenario(
 	"Verifies promote → demote round-trip: note ends up back in inbox with plan_ref.",
 	[]string{"plan", "promote", "demote", "round-trip"},
 	[]harness.Step{
+		// flow's demote path drives nb (list --plan-ref / move / internal
+		// update-frontmatter); the compiled nb mock backs those verbs.
+		harness.SetupMocks(harness.Mock{CommandName: "nb"}),
+
 		harness.NewStep("Setup sandbox simulating post-promote state", func(ctx *harness.Context) error {
 			homeDir := ctx.HomeDir()
 			notebookRoot := filepath.Join(homeDir, "notebooks", "test-notebook")
@@ -303,7 +319,8 @@ var PromoteDemoteRoundTripScenario = harness.NewScenario(
 			noteContent := `---
 title: Round Trip Note
 type: inbox
-plan_ref: round-trip-plan/02-round-trip-job.md
+plan_ref: plans/round-trip-plan
+plan_job: 02-round-trip-job.md
 ---
 
 This note was promoted and should be demoted back.

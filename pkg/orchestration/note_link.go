@@ -140,13 +140,56 @@ func MoveNote(path, group string) (string, error) {
 	return path, nil
 }
 
-// parseMoveDest extracts the destination path from `nb move` output, which
-// includes a line like "To: <newpath>".
+// MoveNoteToWorkspace moves a note into another workspace's lifecycle group
+// directory, i.e. <workspaceDir>/<group>/<basename>. It uses `nb move`'s
+// explicit DESTINATION PATH form (`nb move <src> <destdir>`, see nb/cmd/move.go
+// moveToPath) rather than the note-type form, because the note-type form always
+// resolves the group relative to the note's OWN workspace and has no way to
+// express "somewhere else".
+//
+// This keeps cross-workspace relocation inside the same nb shell-out seam as
+// every other note move, so the daemon still observes a typed move event
+// instead of a raw rename behind its back.
+//
+// workspaceDir must be an absolute path. The returned path is the note's new
+// location.
+func MoveNoteToWorkspace(path, workspaceDir, group string) (string, error) {
+	if !filepath.IsAbs(workspaceDir) {
+		return "", fmt.Errorf("workspace dir must be absolute, got %q", workspaceDir)
+	}
+	destDir := filepath.Join(workspaceDir, group)
+	expected := filepath.Join(destDir, filepath.Base(path))
+
+	// Pass the full destination FILE path, not destDir. `nb move` only appends
+	// the source basename when the destination already exists as a directory
+	// (os.Stat + IsDir); for a not-yet-created group dir it would treat the
+	// argument as a literal filename and rename the note INTO a file named
+	// "inbox". The full path is correct either way, since nb MkdirAll's the
+	// destination's parent.
+	out, err := runNb("move", path, expected, "--force")
+	if err != nil {
+		return "", err
+	}
+	if newPath := parseMoveDest(out); newPath != "" {
+		return newPath, nil
+	}
+	return expected, nil
+}
+
+// parseMoveDest extracts the destination path from `nb move` output. The
+// note-type form prints a "To: <newpath>" line; the destination-path form
+// prints "Moved successfully: <src> -> <dst>". Both are recognized so callers
+// always learn the real landing path when nb reports one.
 func parseMoveDest(out string) string {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "To:") {
 			return strings.TrimSpace(strings.TrimPrefix(line, "To:"))
+		}
+		if rest, ok := strings.CutPrefix(line, "Moved successfully:"); ok {
+			if _, dst, found := strings.Cut(rest, "->"); found {
+				return strings.TrimSpace(dst)
+			}
 		}
 	}
 	return ""

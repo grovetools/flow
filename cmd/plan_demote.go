@@ -88,8 +88,23 @@ func runPlanDemote(cmd *cobra.Command, args []string) error {
 // demoteResolvedNote moves an already-resolved note back to inbox/ via nb,
 // clears its plan_ref/plan_job frontmatter, and marks the job abandoned. It
 // prints the note's new path to stdout.
+//
+// When --workspace is set the note is routed to THAT workspace's inbox/ rather
+// than its own, using nb move's explicit destination-path form. Without the
+// flag the behavior is unchanged: a plain group move within the note's own
+// workspace.
 func demoteResolvedNote(notePath string, job *orchestration.Job) error {
-	newPath, err := orchestration.MoveNote(notePath, "inbox")
+	workspaceOverride, err := resolveWorkspaceOverride()
+	if err != nil {
+		return err
+	}
+
+	var newPath string
+	if workspaceOverride != "" {
+		newPath, err = orchestration.MoveNoteToWorkspace(notePath, workspaceOverride, "inbox")
+	} else {
+		newPath, err = orchestration.MoveNote(notePath, "inbox")
+	}
 	if err != nil {
 		return fmt.Errorf("moving note back to inbox: %w", err)
 	}
@@ -111,15 +126,14 @@ func demoteResolvedNote(notePath string, job *orchestration.Job) error {
 
 // demoteViaNbNew creates a new note via nb new (fallback when no in_progress note exists).
 func demoteViaNbNew(job *orchestration.Job, jobFilePath string) error {
-	// Determine the target workspace directory
-	var targetWorkspaceDir string
-	if demoteWorkspaceFlag != "" {
-		absWorkspace, err := filepath.Abs(demoteWorkspaceFlag)
-		if err != nil {
-			return fmt.Errorf("resolving workspace path: %w", err)
-		}
-		targetWorkspaceDir = absWorkspace
-	} else {
+	// Determine the target workspace directory. --workspace wins here exactly as
+	// it does on the resolved path; both routes share resolveWorkspaceOverride
+	// so the flag can never be honored by one and ignored by the other.
+	targetWorkspaceDir, err := resolveWorkspaceOverride()
+	if err != nil {
+		return err
+	}
+	if targetWorkspaceDir == "" {
 		targetWorkspaceDir = resolveTargetWorkspace(jobFilePath, job.NoteRef)
 	}
 
@@ -157,6 +171,22 @@ func demoteViaNbNew(job *orchestration.Job, jobFilePath string) error {
 	}
 
 	return nil
+}
+
+// resolveWorkspaceOverride returns the absolute workspace directory requested
+// via --workspace, or "" when the flag was not set. It is the single reader of
+// demoteWorkspaceFlag: BOTH demote routes (the resolved-note move and the
+// nb new fallback) call it, so the flag cannot regress into being honored on
+// one path and silently dropped on the other.
+func resolveWorkspaceOverride() (string, error) {
+	if demoteWorkspaceFlag == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(demoteWorkspaceFlag)
+	if err != nil {
+		return "", fmt.Errorf("resolving workspace path: %w", err)
+	}
+	return abs, nil
 }
 
 // resolveTargetWorkspace determines the workspace directory for note creation.
