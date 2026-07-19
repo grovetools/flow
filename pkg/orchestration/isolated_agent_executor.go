@@ -110,7 +110,7 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return fmt.Errorf("failed to write briefing file: %w", err)
 	}
 
-	stampJobConfigVector(ctx, job, plan, nil, workDir, nil, contextFiles, briefingFilePath)
+	stampJobConfigVector(ctx, job, plan, "", workDir, nil, contextFiles, briefingFilePath)
 
 	// Log briefing file creation
 	requestID, _ := ctx.Value(contextKey("request_id")).(string)

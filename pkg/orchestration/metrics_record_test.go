@@ -128,11 +128,24 @@ func TestWriteMetricsRecordIsIdempotent(t *testing.T) {
 	if err := WriteMetricsRecord(job, plan); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	first, _ := os.ReadFile(MetricsRecordArtifactPath(dir, "job-3"))
+	// Both reads are checked, and the first is asserted non-empty. Discarding
+	// the read errors made this test vacuous: against a writer that silently
+	// wrote nothing, first and second were both nil and "" != "" is false, so
+	// it reported idempotence about a file that never existed.
+	first, err := os.ReadFile(MetricsRecordArtifactPath(dir, "job-3"))
+	if err != nil {
+		t.Fatalf("first write produced no readable record: %v", err)
+	}
+	if len(first) == 0 {
+		t.Fatal("first write produced an empty record; there is nothing to be idempotent about")
+	}
 	if err := WriteMetricsRecord(job, plan); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
-	second, _ := os.ReadFile(MetricsRecordArtifactPath(dir, "job-3"))
+	second, err := os.ReadFile(MetricsRecordArtifactPath(dir, "job-3"))
+	if err != nil {
+		t.Fatalf("second write left no readable record: %v", err)
+	}
 
 	if string(first) != string(second) {
 		t.Fatal("two writes produced different bytes; the writer is not idempotent")

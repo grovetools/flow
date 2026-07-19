@@ -136,16 +136,22 @@ func appendSkillSequenceBytes(b *strings.Builder, nodes []SkillSequenceNode, wor
 }
 
 // resolveEffectiveModel applies the oneshot/chat model precedence chain:
-// CLI override > job frontmatter > plan config > global config > the
-// Anthropic default, then resolves aliases.
+// CLI override > chat turn directive > job frontmatter > plan config >
+// global config > the Anthropic default, then resolves aliases.
 //
-// Extracted from (*OneShotExecutor).Execute so the config-vector stamp and the
-// execution path cannot drift apart — duplicating the chain would guarantee
-// they eventually disagree about what model a run used.
-func resolveEffectiveModel(cfg *ExecutorConfig, job *Job, plan *Plan) (model, source string) {
+// It is the ONE chain in the codebase: both (*OneShotExecutor).Execute and
+// executeChatJob call it, so no execution path can pick a model by a rule this
+// function does not know. The chat directive branch lives here rather than in
+// a private copy inside executeChatJob because that copy is exactly what let a
+// `model:` directive select a model the config vector never heard of.
+//
+// directive is the chat turn's active directive; oneshot callers pass nil.
+func resolveEffectiveModel(cfg *ExecutorConfig, job *Job, plan *Plan, directive *ChatDirective) (model, source string) {
 	switch {
 	case cfg != nil && cfg.ModelOverride != "":
 		model, source = cfg.ModelOverride, "CLI override"
+	case directive != nil && directive.Model != "":
+		model, source = directive.Model, "chat directive"
 	case job != nil && job.Model != "":
 		model, source = job.Model, "job frontmatter"
 	case plan != nil && plan.Config != nil && plan.Config.Model != "":
@@ -172,15 +178,19 @@ func resolveEffectiveModel(cfg *ExecutorConfig, job *Job, plan *Plan) (model, so
 // This function never fails: every component that cannot be resolved is simply
 // omitted, because nil/absent means "not measured" (D4) and a stamping failure
 // must never fail a job.
-// cfg supplies the CLI model override for the oneshot/chat precedence chain.
-// It is a parameter rather than something derived inside this function because
-// ModelOverride lives on the executor, and omitting it would make the stamped
-// model disagree with the model the run actually used whenever `--model` is
-// passed. Agent-family callers may pass nil.
+//
+// resolvedModel is the model the calling execution path ACTUALLY resolved and
+// ran on (resolveEffectiveModel's output at the call site); for oneshot/chat
+// it is stamped verbatim. This function deliberately re-derives nothing: a
+// stamp that runs the precedence chain itself can disagree with the run — a
+// chat `model:` directive did exactly that, because the copy of the chain
+// reached from here had no directive case — whereas a stamp that can only
+// record the value it was handed cannot drift by construction. Agent-family
+// callers pass "": their model is job.Model.
 func ComputeJobConfigVector(
 	job *Job,
 	plan *Plan,
-	cfg *ExecutorConfig,
+	resolvedModel string,
 	workDir string,
 	jobCtx *jobContextPaths,
 	contextFiles []string,
@@ -249,10 +259,10 @@ func ComputeJobConfigVector(
 	if job != nil {
 		switch job.Type {
 		case JobTypeOneshot, JobTypeChat:
-			// Grove-internal API calls: the model comes from the precedence
-			// chain, and Provider stays empty because there is no agent
-			// runtime involved.
-			v.Model, _ = resolveEffectiveModel(cfg, job, plan)
+			// Grove-internal API calls: the model is whatever the execution
+			// path resolved and handed us, and Provider stays empty because
+			// there is no agent runtime involved.
+			v.Model = resolvedModel
 		default:
 			// Agent families: the model that actually reaches the agent is
 			// job.Model, passed through as the provider's model flag. It may
@@ -285,7 +295,7 @@ func stampJobConfigVector(
 	ctx context.Context,
 	job *Job,
 	plan *Plan,
-	cfg *ExecutorConfig,
+	resolvedModel string,
 	workDir string,
 	jobCtx *jobContextPaths,
 	contextFiles []string,
@@ -294,7 +304,7 @@ func stampJobConfigVector(
 	if job == nil || plan == nil {
 		return
 	}
-	v := ComputeJobConfigVector(job, plan, cfg, workDir, jobCtx, contextFiles, briefingPath)
+	v := ComputeJobConfigVector(job, plan, resolvedModel, workDir, jobCtx, contextFiles, briefingPath)
 	if err := WriteConfigVectorArtifact(plan.Directory, job.ID, v); err != nil {
 		ulog.Warn("Failed to write config vector artifact").
 			Err(err).

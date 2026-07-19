@@ -298,9 +298,23 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		return fmt.Errorf("failed to write briefing file: %w", err)
 	}
 
+	// Determine the effective model to use with clear precedence:
+	// CLI override > job frontmatter > plan config > global config > default,
+	// then alias resolution. The chain lives in resolveEffectiveModel
+	// (config_vector.go). It is resolved HERE, above the stamp, so the stamp
+	// can be handed the very value this call site runs on rather than
+	// re-deriving it — the vector must never compute a model of its own.
+	effectiveModel, modelSource := resolveEffectiveModel(e.config, job, plan, nil)
+
+	logrus.WithFields(logrus.Fields{
+		"job_id":       job.ID,
+		"model":        effectiveModel,
+		"model_source": modelSource,
+	}).Debug("Resolved model for job execution")
+
 	// Stamp the config vector alongside the briefing. contextFiles is nil for
 	// this family: jobCtx carries the generated cold/hot bundle instead.
-	stampJobConfigVector(ctx, job, plan, e.config, workDir, jobCtx, nil, briefingFilePath)
+	stampJobConfigVector(ctx, job, plan, effectiveModel, workDir, jobCtx, nil, briefingFilePath)
 
 	// --- Concept Gathering Logic ---
 	if job.GatherConceptNotes || job.GatherConceptPlans {
@@ -360,18 +374,9 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 		defer os.Unsetenv("GROVE_REQUEST_ID")
 	}
 
-	// Determine the effective model to use with clear precedence:
-	// CLI override > job frontmatter > plan config > global config > default,
-	// then alias resolution. The chain lives in resolveEffectiveModel
-	// (config_vector.go) so the config-vector stamp records exactly the model
-	// this call site uses — duplicating it would let the two drift apart.
-	effectiveModel, modelSource := resolveEffectiveModel(e.config, job, plan)
-
-	logrus.WithFields(logrus.Fields{
-		"job_id":       job.ID,
-		"model":        effectiveModel,
-		"model_source": modelSource,
-	}).Debug("Resolved model for job execution")
+	// effectiveModel was resolved above (before the config-vector stamp) so the
+	// stamped model and the model this dispatch uses are literally the same
+	// value, not two evaluations of the same chain.
 
 	// Call LLM based on model type, with automatic retry for transient failures
 	var response string
@@ -1872,40 +1877,18 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// This ensures chat uses the correct context files
 	worktreePath = ScopeToSubProject(worktreePath, job)
 
-	// Determine effective model with clear precedence. Resolved BEFORE
+	// Determine effective model with clear precedence:
+	// CLI override > this turn's directive > job frontmatter > plan config >
+	// global config > default, then alias resolution. Resolved BEFORE
 	// dependency handling because the cross-job lineage guard (spec 19 P5)
 	// compares it against each parent chat's effective model.
-	var effectiveModel string
-	var modelSource string
-
-	// 1. CLI flag (highest priority)
-	if e.config.ModelOverride != "" {
-		effectiveModel = e.config.ModelOverride
-		modelSource = "CLI override"
-	} else if directive.Model != "" {
-		// 2. Chat directive model (for specific turns)
-		effectiveModel = directive.Model
-		modelSource = "chat directive"
-	} else if job.Model != "" {
-		// 3. Job frontmatter model
-		effectiveModel = job.Model
-		modelSource = "job frontmatter"
-	} else if plan.Config != nil && plan.Config.Model != "" {
-		// 4. Plan config model
-		effectiveModel = plan.Config.Model
-		modelSource = "plan config"
-	} else if plan.Orchestration != nil && plan.Orchestration.OneshotModel != "" {
-		// 5. Global config model
-		effectiveModel = plan.Orchestration.OneshotModel
-		modelSource = "global config"
-	} else {
-		// 6. Hardcoded fallback - use Anthropic default
-		effectiveModel = anthropicmodels.DefaultModel
-		modelSource = "default fallback"
-	}
-
-	// Resolve model aliases (e.g., "claude-sonnet-4-5" -> "claude-sonnet-4-5-20250929")
-	effectiveModel = resolveModelAlias(effectiveModel)
+	//
+	// The chain lives in resolveEffectiveModel (config_vector.go) — this call
+	// site used to keep its own copy of it, which is precisely how a `model:`
+	// directive came to select a model the config-vector stamp knew nothing
+	// about. There is now one chain, and the resolved value below is what gets
+	// stamped.
+	effectiveModel, modelSource := resolveEffectiveModel(e.config, job, plan, directive)
 
 	logrus.WithFields(logrus.Fields{
 		"job_id":       job.ID,
@@ -2318,8 +2301,9 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	} else {
 		// Chat vectors are per-turn (D12): each response-producing turn
 		// overwrites the artifact, so the vector on disk always describes the
-		// turn that produced the latest response.
-		stampJobConfigVector(ctx, job, plan, e.config, worktreePath, chatJobCtx, nil, briefingFilePath)
+		// turn that produced the latest response — including, via
+		// effectiveModel, the model THIS turn's directive selected.
+		stampJobConfigVector(ctx, job, plan, effectiveModel, worktreePath, chatJobCtx, nil, briefingFilePath)
 		ulog.Success("Chat briefing file created").
 			Field("job_id", job.ID).
 			Field("request_id", requestID).

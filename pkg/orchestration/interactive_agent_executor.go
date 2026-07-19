@@ -258,7 +258,7 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	// Stamp the config vector once, after both briefing branches converge.
 	// Because the vector hashes the bytes at briefingFilePath rather than a
 	// content string, this single site covers both branches correctly.
-	stampJobConfigVector(ctx, job, plan, nil, workDir, nil, stampContextFiles, briefingFilePath)
+	stampJobConfigVector(ctx, job, plan, "", workDir, nil, stampContextFiles, briefingFilePath)
 
 	// --- Concept Gathering Logic ---
 	if job.GatherConceptNotes || job.GatherConceptPlans {

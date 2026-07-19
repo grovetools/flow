@@ -216,7 +216,7 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return execErr
 	}
 
-	stampJobConfigVector(ctx, job, plan, nil, workDir, nil, contextFiles, briefingFilePath)
+	stampJobConfigVector(ctx, job, plan, "", workDir, nil, contextFiles, briefingFilePath)
 
 	// Create instruction to read the briefing file (like interactive_agent does)
 	instructionPrompt := fmt.Sprintf("Read the briefing file at '%s' and execute the task.", briefingFilePath)

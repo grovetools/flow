@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -30,7 +31,7 @@ func TestComputeConfigVectorHashesBriefingBytes(t *testing.T) {
 	job := &Job{ID: "j1", Type: JobTypeHeadlessAgent}
 	plan := &Plan{Directory: dir}
 
-	v := ComputeJobConfigVector(job, plan, nil, "", nil, nil, briefing)
+	v := ComputeJobConfigVector(job, plan, "", "", nil, nil, briefing)
 	got := v.Components[componentBriefing]
 	if got == "" {
 		t.Fatal("briefing component missing")
@@ -57,9 +58,9 @@ func TestContextHashIsOrderSensitive(t *testing.T) {
 	job := &Job{ID: "j1", Type: JobTypeOneshot}
 	plan := &Plan{Directory: dir}
 
-	forward := ComputeJobConfigVector(job, plan, nil, "",
+	forward := ComputeJobConfigVector(job, plan, "", "",
 		&jobContextPaths{Cold: cold, Hot: hot}, nil, "")
-	swapped := ComputeJobConfigVector(job, plan, nil, "",
+	swapped := ComputeJobConfigVector(job, plan, "", "",
 		&jobContextPaths{Cold: hot, Hot: cold}, nil, "")
 
 	if forward.Components[componentContext] == "" {
@@ -76,7 +77,7 @@ func TestContextKeyOmittedWhenNoSource(t *testing.T) {
 	job := &Job{ID: "j1", Type: JobTypeInteractiveAgent}
 	plan := &Plan{Directory: t.TempDir()}
 
-	v := ComputeJobConfigVector(job, plan, nil, "", nil, nil, "")
+	v := ComputeJobConfigVector(job, plan, "", "", nil, nil, "")
 	if _, present := v.Components[componentContext]; present {
 		t.Fatal("context key present despite there being no context source")
 	}
@@ -91,7 +92,7 @@ func TestPlanComponentHashesPromptBody(t *testing.T) {
 	job := &Job{ID: "j1", Type: JobTypeHeadlessAgent, PromptBody: "do the thing"}
 	plan := &Plan{Directory: t.TempDir()}
 
-	v := ComputeJobConfigVector(job, plan, nil, "", nil, nil, "")
+	v := ComputeJobConfigVector(job, plan, "", "", nil, nil, "")
 	if v.Components[componentPlan] != hashBytes([]byte("do the thing")) {
 		t.Fatalf("plan component = %q", v.Components[componentPlan])
 	}
@@ -108,8 +109,8 @@ func TestHarnessSuppliedComponentsParticipateInHash(t *testing.T) {
 		ConfigComponents: map[string]string{"env": "deadbeef"},
 	}
 
-	bv := ComputeJobConfigVector(base, plan, nil, "", nil, nil, "")
-	ev := ComputeJobConfigVector(withEnv, plan, nil, "", nil, nil, "")
+	bv := ComputeJobConfigVector(base, plan, "", "", nil, nil, "")
+	ev := ComputeJobConfigVector(withEnv, plan, "", "", nil, nil, "")
 
 	if ev.Components["env"] != "deadbeef" {
 		t.Fatalf("env component = %q, want deadbeef", ev.Components["env"])
@@ -134,7 +135,7 @@ func TestReservedComponentKeysAreRefused(t *testing.T) {
 			ID: "j1", Type: JobTypeHeadlessAgent,
 			ConfigComponents: map[string]string{reserved: "attacker-supplied"},
 		}
-		v := ComputeJobConfigVector(job, plan, nil, "", nil, nil, briefing)
+		v := ComputeJobConfigVector(job, plan, "", "", nil, nil, briefing)
 		if v.Components[reserved] == "attacker-supplied" {
 			t.Errorf("reserved key %q was overwritten by a harness-supplied value", reserved)
 		}
@@ -145,14 +146,14 @@ func TestReservedComponentKeysAreRefused(t *testing.T) {
 		ID: "j1", Type: JobTypeHeadlessAgent,
 		ConfigComponents: map[string]string{componentBriefing: "attacker-supplied"},
 	}
-	v := ComputeJobConfigVector(job, plan, nil, "", nil, nil, briefing)
+	v := ComputeJobConfigVector(job, plan, "", "", nil, nil, briefing)
 	if v.Components[componentBriefing] != hashBytes([]byte("REAL")) {
 		t.Fatal("computed briefing hash was disturbed by a colliding harness key")
 	}
 }
 
 // P1-07: the extracted helper must reproduce the original inline precedence
-// for all five branches, or the stamped model will disagree with the model the
+// for all six branches, or the stamped model will disagree with the model the
 // run actually used.
 //
 // Every case asserts the returned MODEL as well as the source. Asserting only
@@ -170,19 +171,51 @@ func TestResolveEffectiveModelPrecedence(t *testing.T) {
 		cfg        *ExecutorConfig
 		job        *Job
 		plan       *Plan
+		directive  *ChatDirective
 		wantModel  string
 		wantSource string
 	}{
 		{
-			name: "CLI override wins over everything",
-			cfg:  &ExecutorConfig{ModelOverride: "cli-model"},
-			job:  &Job{Model: "job-model"},
+			name:      "CLI override wins over everything",
+			cfg:       &ExecutorConfig{ModelOverride: "cli-model"},
+			job:       &Job{Model: "job-model"},
+			directive: &ChatDirective{Model: "directive-model"},
 			plan: &Plan{
 				Config:        &PlanConfig{Model: "plan-model"},
 				Orchestration: &Config{OneshotModel: "global-model"},
 			},
 			wantModel:  "cli-model",
 			wantSource: "CLI override",
+		},
+		{
+			// The chat turn directive (`<!-- grove: {"model": ...} -->`) sits
+			// at priority 2: it beats the job's own frontmatter, which is the
+			// whole point of a per-turn model. Omitting this branch here is
+			// what let the stamp and the chat run disagree.
+			name:      "chat directive beats job frontmatter",
+			cfg:       &ExecutorConfig{},
+			job:       &Job{Model: "job-model"},
+			directive: &ChatDirective{Model: "directive-model"},
+			plan: &Plan{
+				Config:        &PlanConfig{Model: "plan-model"},
+				Orchestration: &Config{OneshotModel: "global-model"},
+			},
+			wantModel:  "directive-model",
+			wantSource: "chat directive",
+		},
+		{
+			// A directive with no model must not shadow the frontmatter —
+			// every chat turn has a directive object, most carry no model.
+			name:      "empty directive model falls through to job frontmatter",
+			cfg:       &ExecutorConfig{},
+			job:       &Job{Model: "job-model"},
+			directive: &ChatDirective{Template: "chat"},
+			plan: &Plan{
+				Config:        &PlanConfig{Model: "plan-model"},
+				Orchestration: &Config{OneshotModel: "global-model"},
+			},
+			wantModel:  "job-model",
+			wantSource: "job frontmatter",
 		},
 		{
 			name: "job frontmatter beats plan config",
@@ -229,7 +262,7 @@ func TestResolveEffectiveModelPrecedence(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			model, source := resolveEffectiveModel(tc.cfg, tc.job, tc.plan)
+			model, source := resolveEffectiveModel(tc.cfg, tc.job, tc.plan, tc.directive)
 			if source != tc.wantSource {
 				t.Errorf("source = %q, want %q", source, tc.wantSource)
 			}
@@ -261,7 +294,7 @@ func TestResolveEffectiveModelResolvesAliases(t *testing.T) {
 	}
 
 	model, source := resolveEffectiveModel(
-		&ExecutorConfig{}, &Job{Model: alias}, &Plan{})
+		&ExecutorConfig{}, &Job{Model: alias}, &Plan{}, nil)
 	if source != "job frontmatter" {
 		t.Errorf("source = %q, want %q", source, "job frontmatter")
 	}
@@ -278,7 +311,7 @@ func TestProviderScalarByFamily(t *testing.T) {
 
 	agentV := ComputeJobConfigVector(
 		&Job{ID: "j1", Type: JobTypeHeadlessAgent, Model: "claude-opus-4-8"},
-		plan, nil, "", nil, nil, "")
+		plan, "", "", nil, nil, "")
 	if agentV.Provider == "" {
 		t.Error("agent-family vector has no Provider")
 	}
@@ -288,7 +321,7 @@ func TestProviderScalarByFamily(t *testing.T) {
 
 	oneshotV := ComputeJobConfigVector(
 		&Job{ID: "j2", Type: JobTypeOneshot}, plan,
-		&ExecutorConfig{ModelOverride: "cli-model"}, "", nil, nil, "")
+		"cli-model", "", nil, nil, "")
 	if oneshotV.Provider != "" {
 		t.Errorf("oneshot vector carries Provider %q, want empty", oneshotV.Provider)
 	}
@@ -300,7 +333,7 @@ func TestProviderScalarByFamily(t *testing.T) {
 func TestAgentModelStaysEmptyWhenUnset(t *testing.T) {
 	v := ComputeJobConfigVector(
 		&Job{ID: "j1", Type: JobTypeHeadlessAgent},
-		&Plan{Directory: t.TempDir()}, nil, "", nil, nil, "")
+		&Plan{Directory: t.TempDir()}, "", "", nil, nil, "")
 	if v.Model != "" {
 		t.Fatalf("Model = %q, want empty for an agent job with no declared model", v.Model)
 	}
@@ -329,7 +362,7 @@ func TestWorktreeCommitScalar(t *testing.T) {
 		}
 
 		v := ComputeJobConfigVector(&Job{ID: "j1", Type: JobTypeHeadlessAgent},
-			&Plan{Directory: dir}, nil, dir, nil, nil, "")
+			&Plan{Directory: dir}, "", dir, nil, nil, "")
 
 		if len(v.WorktreeCommit) != 40 {
 			t.Fatalf("worktree commit = %q (len %d), want a full 40-char hash",
@@ -343,7 +376,7 @@ func TestWorktreeCommitScalar(t *testing.T) {
 	t.Run("non-git dir yields empty and no failure", func(t *testing.T) {
 		dir := t.TempDir()
 		v := ComputeJobConfigVector(&Job{ID: "j1", Type: JobTypeHeadlessAgent},
-			&Plan{Directory: dir}, nil, dir, nil, nil, "")
+			&Plan{Directory: dir}, "", dir, nil, nil, "")
 		if v.WorktreeCommit != "" {
 			t.Fatalf("worktree commit = %q, want empty outside a git repo", v.WorktreeCommit)
 		}
@@ -403,5 +436,151 @@ func TestWriteConfigVectorArtifactRoundTrips(t *testing.T) {
 func TestReadConfigVectorArtifactMissing(t *testing.T) {
 	if _, _, ok := ReadConfigVectorArtifact(t.TempDir(), "nope"); ok {
 		t.Fatal("ok=true for an absent config vector")
+	}
+}
+
+// newDirectiveChatFixture builds a runnable chat job whose single user turn
+// carries a `model:` directive, plus the rules file and swept source the chat
+// path requires (a chat whose rules resolve zero files fails the empty-freeze
+// gate before the turn ever fires). The plan dir is git-inited but never
+// committed, so WorktreeCommit is empty for every fixture — two fixtures
+// therefore differ in nothing but the directive model.
+func newDirectiveChatFixture(t *testing.T, jobModel, directiveModel string) (*Plan, *Job) {
+	t.Helper()
+
+	front := "rules_file: ctx.rules\n"
+	if jobModel != "" {
+		front += "model: " + jobModel + "\n"
+	}
+	// A user turn is a grove directive carrying a template (the parser reads a
+	// template-less directive as an LLM response), with the ask quoted beneath
+	// it — exactly the shape `flow` writes back into a chat file and a user
+	// then edits to add `"model"`.
+	body := `Kick off the chat.
+
+<!-- grove: {"template": "chat", "model": "` + directiveModel + `"} -->
+> Please answer.`
+
+	plan, job := newChatJobFixture(t, front, body)
+	gitInitDir(t, plan.Directory)
+	if err := os.MkdirAll(filepath.Join(plan.Directory, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plan.Directory, "src", "a.go"),
+		[]byte("package src\n\nvar A = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plan.Directory, "ctx.rules"),
+		[]byte("src/a.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return plan, job
+}
+
+// runChatTurnAndReadVector runs one mock chat turn and returns the vector the
+// turn stamped, parsed back off disk.
+func runChatTurnAndReadVector(t *testing.T, plan *Plan, job *Job) record.ConfigVector {
+	t.Helper()
+	mockResponse := filepath.Join(t.TempDir(), "mock-response.md")
+	if err := os.WriteFile(mockResponse, []byte("mock response"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GROVE_MOCK_LLM_RESPONSE_FILE", mockResponse)
+
+	if err := NewOneShotExecutor(NewMockLLMClient(), nil).
+		Execute(context.Background(), job, plan); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	raw, err := os.ReadFile(ConfigVectorArtifactPath(plan.Directory, job.ID))
+	if err != nil {
+		t.Fatalf("chat turn stamped no config vector: %v", err)
+	}
+	var v record.ConfigVector
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("stamped vector does not parse: %v", err)
+	}
+	return v
+}
+
+// The BLOCKER regression test, and the one the helper-level coverage could not
+// stand in for: this exercises the chat CALL PATH, executeChatJob → stamp, not
+// resolveEffectiveModel in isolation. The chat path used to run its own private
+// copy of the precedence chain — the copy that knew about directives — while
+// the stamp ran a copy that did not, so a turn dispatched to the directive's
+// model recorded the frontmatter's.
+//
+// The two models are deliberately distinct sentinels rather than real ids: the
+// assertion must pin WHICH BRANCH won, and a literal expectation cannot be
+// satisfied by an alias table (alias expansion has its own test) or by any
+// other branch of the chain firing.
+func TestChatTurnStampsTheDirectiveModel(t *testing.T) {
+	const (
+		jobModel       = "chat-frontmatter-model"
+		directiveModel = "chat-directive-model"
+	)
+	plan, job := newDirectiveChatFixture(t, jobModel, directiveModel)
+
+	v := runChatTurnAndReadVector(t, plan, job)
+
+	if v.Model != directiveModel {
+		t.Fatalf("stamped model = %q, want the directive's %q "+
+			"(the turn ran on the directive model; the vector must say so)",
+			v.Model, directiveModel)
+	}
+	if v.Model == jobModel {
+		t.Fatalf("stamped model = %q: the vector recorded the frontmatter "+
+			"model for a turn the directive redirected", v.Model)
+	}
+}
+
+// The consequence that makes the above a data-corruption bug rather than a
+// cosmetic one: ConfigHash is the key the whole D6 comparison matrix joins on,
+// so two turns on genuinely different models MUST NOT collide.
+//
+// Read the control assertion before changing this test. A bare
+// `vA.Hash() != vB.Hash()` would be CONFOUNDED and therefore worthless here:
+// the `plan` component hashes the job's prompt body, and the directive comment
+// carrying the model lives in that body, so the two fixtures' hashes differ on
+// those bytes whether or not the model scalar was stamped at all. The load-
+// bearing assertion is instead the control swap — take the vector the B turn
+// really stamped and change NOTHING but the model to A's — which can only pass
+// when the model the turn ran on actually reached the key. Under a stamp that
+// ignores directives both turns stamp the same model, the swap is a no-op, and
+// this fails.
+func TestChatTurnsOnDifferentModelsDoNotShareAConfigHash(t *testing.T) {
+	const modelA = "chat-model-alpha"
+	const modelB = "chat-model-beta"
+
+	planA, jobA := newDirectiveChatFixture(t, "", modelA)
+	vA := runChatTurnAndReadVector(t, planA, jobA)
+
+	planB, jobB := newDirectiveChatFixture(t, "", modelB)
+	vB := runChatTurnAndReadVector(t, planB, jobB)
+
+	if vA.Model != modelA || vB.Model != modelB {
+		t.Fatalf("stamped models = (%q, %q), want (%q, %q)",
+			vA.Model, vB.Model, modelA, modelB)
+	}
+
+	// The two turns sent byte-identical prompts: the directive selects the
+	// model, it does not change what was asked. So "same request, different
+	// model" is exactly the pair of conditions D6 must keep apart.
+	if vA.Components[componentBriefing] != vB.Components[componentBriefing] {
+		t.Fatalf("briefing hashes differ (%s vs %s); the fixtures no longer "+
+			"isolate the model", vA.Components[componentBriefing], vB.Components[componentBriefing])
+	}
+
+	control := vB
+	control.Model = vA.Model
+	if control.Hash() == vB.Hash() {
+		t.Fatalf("swapping the stamped model (%q -> %q) left ConfigHash at %s; "+
+			"the model is invisible to the join key and two conditions merge",
+			vB.Model, vA.Model, vB.Hash())
+	}
+
+	if vA.Hash() == vB.Hash() {
+		t.Fatalf("two chat turns on different models share ConfigHash %s; "+
+			"the D6 join would treat them as one condition", vA.Hash())
 	}
 }

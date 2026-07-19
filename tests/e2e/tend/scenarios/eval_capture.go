@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/grovetools/tend/pkg/fs"
@@ -114,6 +115,26 @@ func jobFileByTitle(planPath, title string) (string, error) {
 	return "", fmt.Errorf("no job titled %q in %s", title, planPath)
 }
 
+// setJobModel writes a `model:` into a job's frontmatter, so a scenario can
+// assert the stamped model against a literal.
+func setJobModel(planPath, title, model string) error {
+	filename, err := jobFileByTitle(planPath, title)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(planPath, filename)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	const marker = "---\n"
+	if !strings.HasPrefix(string(raw), marker) {
+		return fmt.Errorf("job file %s does not open with frontmatter", path)
+	}
+	out := marker + "model: " + model + "\n" + string(raw)[len(marker):]
+	return os.WriteFile(path, []byte(out), 0o600)
+}
+
 // jobIDByTitle finds a job's id by its title.
 func jobIDByTitle(planPath, title string) (string, error) {
 	plan, err := orchestration.LoadPlan(planPath)
@@ -127,6 +148,13 @@ func jobIDByTitle(planPath, title string) (string, error) {
 	}
 	return "", fmt.Errorf("no job titled %q in %s", title, planPath)
 }
+
+// evalCaptureOneshotModel is the model the oneshot capture job is created
+// with. It is asserted verbatim on the stamped vector, so it must stay a
+// non-aliased id: claude-opus-4-8's alias IS its id, so it survives alias
+// resolution unchanged. It is deliberately NOT the default model, so a stamp
+// that fell through to the default fallback fails this scenario.
+const evalCaptureOneshotModel = "claude-opus-4-8"
 
 // EvalCaptureOneshotScenario covers P1-23(a): a oneshot job under the mock LLM
 // stamps a config vector and writes a metrics record, both parsing back into
@@ -174,6 +202,15 @@ var EvalCaptureOneshotScenario = harness.NewScenario(
 			if err := seedJobRulesFiles(planPath); err != nil {
 				return err
 			}
+			// Pin the job's model in its frontmatter so the stamped model can
+			// be asserted against a literal. It is written into the file
+			// rather than passed as `plan add --model` because that flag
+			// validates against the host's configured providers, and the
+			// sandbox configures none — the frontmatter is the same surface a
+			// real user's job carries either way.
+			if err := setJobModel(planPath, "capture-oneshot", evalCaptureOneshotModel); err != nil {
+				return err
+			}
 
 			responseFile := filepath.Join(ctx.RootDir, "mock_llm_response.txt")
 			runCmd := ctx.Bin("plan", "run", "--local", "--all", "--yes")
@@ -198,7 +235,12 @@ var EvalCaptureOneshotScenario = harness.NewScenario(
 			}
 
 			return ctx.Verify(func(vc *verify.Collector) {
-				vc.NotEqual("config vector carries a model", "", v.Model)
+				// Not `!= ""`: a wrong-but-non-empty model — the exact
+				// failure mode a stamp that re-derives the precedence chain
+				// produces — passes a non-empty check and corrupts the join
+				// key silently. Pin the value.
+				vc.Equal("config vector records the model the run used",
+					evalCaptureOneshotModel, v.Model)
 				vc.Equal("oneshot vectors carry no agent provider", "", v.Provider)
 				vc.True("briefing component was hashed",
 					v.Components["briefing"] != "")
