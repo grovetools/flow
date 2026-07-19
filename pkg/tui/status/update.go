@@ -2004,12 +2004,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				job := row.Job
 				if m.Hosted {
-					// Full edit mode: emit EditRequestMsg so the host
-					// hides Flow, mounts $EDITOR in the rail, and restores
-					// Flow on :wq via EditFinishedMsg.
+					// Emit EditRequestMsg so the host opens the job file.
+					// enter asks for a dedicated per-file pane; e is a
+					// quick open the host routes into its singleton
+					// Editor pane (mirrors the nb browser's split).
 					path := job.FilePath
+					dedicated := key.Matches(msg, m.KeyMap.Confirm)
 					return m, func() tea.Msg {
-						return embed.EditRequestMsg{Path: path}
+						return embed.EditRequestMsg{Path: path, Dedicated: dedicated}
 					}
 				}
 				return m, editJob(job, m.Hosted)
