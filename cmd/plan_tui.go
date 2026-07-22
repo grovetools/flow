@@ -8,13 +8,12 @@ import (
 	"github.com/grovetools/compositor"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/core/tui/embed"
-	"github.com/grovetools/core/util/delegation"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"github.com/grovetools/flow/pkg/tui/browser"
+	"github.com/grovetools/flow/pkg/tui/view"
 )
 
 // Plan TUI command - interactive version of `flow plan list`.
@@ -80,12 +79,18 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 		cwdGitRoot, _ = git.GetGitRoot(".")
 	}
 
-	model := browser.New(browser.Config{
+	daemonClient := daemon.NewWithAutoStart()
+	defer daemonClient.Close()
+	model := view.New(view.Config{
 		PlansDir:     plansDirectory,
 		WorkspaceDir: cwdGitRoot,
+		DaemonClient: daemonClient,
 	})
 
-	host := newStandalonePlanTUIHost(model)
+	// Use the same coordinator host as `flow plan status --tui`. Enter now
+	// opens the highlighted row in-process, independent of selected-plan state,
+	// and Esc returns to the preserved portfolio cursor.
+	host := newStatusTUIHost(model)
 	compModel := compositor.NewModel(host)
 	program := tea.NewProgram(compModel, tea.WithAltScreen())
 	finalModel, err := program.Run()
@@ -96,51 +101,4 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 		cm.Free()
 	}
 	return nil
-}
-
-// standalonePlanTUIHost wraps a browser.Model for standalone CLI use.
-// It behaves like embed.StandaloneHost but additionally intercepts
-// browser.BrowserPlanSelectedMsg to launch `flow plan status --tui` as
-// a subprocess, reproducing the original TUI's "enter opens status"
-// behavior without the browser package itself having to know about
-// status navigation.
-type standalonePlanTUIHost struct {
-	model browser.Model
-}
-
-func newStandalonePlanTUIHost(m browser.Model) standalonePlanTUIHost {
-	return standalonePlanTUIHost{model: m}
-}
-
-func (h standalonePlanTUIHost) Init() tea.Cmd {
-	return h.model.Init()
-}
-
-func (h standalonePlanTUIHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case browser.BrowserPlanSelectedMsg:
-		// Reproduce the old in-process behavior: set the active plan
-		// and exec the status TUI as a subprocess. We intentionally do
-		// NOT dispatch the message to the inner model — the browser
-		// has no opinion on selection, and forwarding would be a no-op.
-		execCmd := delegation.Command("flow", "plan", "status", "--tui")
-		_ = msg // PlanName/PlanPath/Plan available here if we later want to pass them explicitly
-		return h, tea.ExecProcess(execCmd, func(err error) tea.Msg { return nil })
-
-	case embed.DoneMsg:
-		return h, tea.Quit
-
-	case embed.CloseRequestMsg, embed.CloseConfirmMsg:
-		return h, tea.Quit
-	}
-
-	updated, cmd := h.model.Update(msg)
-	if m, ok := updated.(browser.Model); ok {
-		h.model = m
-	}
-	return h, cmd
-}
-
-func (h standalonePlanTUIHost) View() string {
-	return h.model.View()
 }

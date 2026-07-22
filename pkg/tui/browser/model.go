@@ -122,6 +122,28 @@ type Model struct {
 // PlanCount returns the number of plans in the browser list.
 func (m Model) PlanCount() int { return len(m.plans) }
 
+// SelectedPlanName returns the stable identity under the cursor. Hosts use it
+// to restore portfolio history after opening and closing a plan workspace.
+func (m Model) SelectedPlanName() string {
+	if m.cursor < 0 || m.cursor >= len(m.plans) {
+		return ""
+	}
+	return m.plans[m.cursor].Name
+}
+
+// SelectPlan relocates the cursor by stable plan identity. It deliberately
+// leaves the cursor unchanged when the plan is absent (for example, filtered
+// or archived between views).
+func (m *Model) SelectPlan(name string) bool {
+	for i := range m.plans {
+		if m.plans[i].Name == name {
+			m.cursor = i
+			return true
+		}
+	}
+	return false
+}
+
 // CurrentPlan returns the *orchestration.Plan currently under the
 // browser's cursor, or nil if the list is empty or the cursor is
 // out of range. Hosts call this when they need to promote the

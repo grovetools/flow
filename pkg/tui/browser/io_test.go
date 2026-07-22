@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/grovetools/flow/pkg/orchestration"
 )
 
 // writeTestPlan creates a minimal loadable plan directory: a
@@ -107,6 +109,24 @@ func TestLoadPlansListMissingArchiveDir(t *testing.T) {
 	}
 	if len(items) != 1 {
 		t.Fatalf("expected 1 plan, got %d", len(items))
+	}
+}
+
+func TestRefreshPreservesSelectionByPlanName(t *testing.T) {
+	first := &orchestration.Plan{Name: "first"}
+	selected := &orchestration.Plan{Name: "selected"}
+	m := Model{
+		plans:  []PlanListItem{{Name: first.Name, Plan: first}, {Name: selected.Name, Plan: selected}},
+		cursor: 1,
+	}
+
+	updated, _ := m.Update(planListLoadCompleteMsg{plans: []PlanListItem{
+		{Name: selected.Name, Plan: selected},
+		{Name: first.Name, Plan: first},
+	}})
+	got := updated.(Model)
+	if got.cursor != 0 || got.SelectedPlanName() != selected.Name {
+		t.Fatalf("selection moved after reorder: cursor=%d name=%q", got.cursor, got.SelectedPlanName())
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -43,7 +44,8 @@ type finishActionError struct {
 // on success) so the meta-panel can decide whether to transition to
 // the new plan's status view or surface the failure.
 type initCompletedMsg struct {
-	err error
+	output string
+	err    error
 }
 
 // *WizardReadyMsg messages carry a freshly-built wizard model from
@@ -85,8 +87,8 @@ const (
 	// on top of the browser view. Constructed lazily when the user
 	// presses `n` in browser mode and torn down when it emits
 	// embed.DoneMsg. On submit the meta-panel launches the actual
-	// plan creation via tea.ExecProcess (mirroring the pre-embed
-	// browser's subprocess shellout) so the worktree/disk I/O
+	// plan creation via an asynchronous command with captured output so
+	// the worktree/disk I/O
 	// never runs inside the bubbletea event loop.
 	modeInitWizard
 )
@@ -148,6 +150,12 @@ type Model struct {
 	// Set when the init wizard submits; consulted after the
 	// `flow plan init` subprocess returns to locate the new plan.
 	pendingInitPlanName string
+	// lastInitRequest preserves all entered identity/options across a failed
+	// creation so retrying the Add Plan tab never starts from a blank form.
+	lastInitRequest *planinit.Request
+	// initFailure is intentionally durable (unlike finishTransient): it stays
+	// visible until the user retries, cancels, changes workspace, or succeeds.
+	initFailure string
 
 	width  int
 	height int
@@ -251,6 +259,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.s.initWizardModel = nil
 		}
 		m.pendingInitPlanName = ""
+		m.lastInitRequest = nil
+		m.initFailure = ""
 		// Invalidate any in-flight async wizard builds — their ready
 		// msgs will arrive with a stale generation and be dropped.
 		m.wizardBuildGen++
@@ -373,6 +383,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		graph, err := orchestration.BuildDependencyGraph(plan)
 		if err != nil {
+			m.finishTransient = fmt.Sprintf("open plan %q: %v", plan.Name, err)
 			return m, nil
 		}
 
@@ -415,11 +426,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		pendingName := m.pendingInitPlanName
 		m.pendingInitPlanName = ""
 		if msg.err != nil {
-			m.finishTransient = fmt.Sprintf("plan init: %v", msg.err)
-			// Stay in browser mode; refresh so the user sees any
-			// partial state.
-			return m, m.s.browserModel.Init()
+			detail := strings.TrimSpace(msg.output)
+			if detail == "" {
+				detail = msg.err.Error()
+			} else {
+				detail = fmt.Sprintf("%v\n%s", msg.err, detail)
+			}
+			if pendingName != "" {
+				partialPath := filepath.Join(m.s.cfg.PlansDir, pendingName)
+				if _, statErr := os.Stat(partialPath); statErr == nil {
+					detail += "\nPartial plan residue: " + partialPath
+				}
+			}
+			m.initFailure = "Plan creation failed (edit and submit to retry, or return to Plans):\n" + detail
+			// Rebuild immediately from lastInitRequest. This keeps the Add Plan
+			// page usable instead of leaving a nil model behind its loading gate.
+			m.mode = modeInitWizard
+			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabAddPlan})
+			return m, tea.Batch(m.startInitWizardBuild(), m.s.browserModel.Init())
 		}
+		m.initFailure = ""
+		m.lastInitRequest = nil
 		// Subprocess succeeded. Try to locate and load the new plan
 		// directly so we can switch straight to its status view.
 		if pendingName != "" {
@@ -456,7 +483,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Fallback: refresh browser.
+		// Fallback: creation succeeded but the new plan could not be loaded.
+		// Never leave the pager on Add Plan with a nil wizard.
+		m.mode = modeBrowser
+		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
+		m.finishTransient = "plan created, but its workspace could not be loaded"
 		return m, m.s.browserModel.Init()
 
 	case embed.DoneMsg:
@@ -467,6 +498,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeInitWizard:
 			m.s.initWizardModel = nil
 			if msg.Result == nil {
+				m.lastInitRequest = nil
+				m.initFailure = ""
 				m.mode = modeBrowser
 				m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
 				return m, nil
@@ -478,6 +511,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.pendingInitPlanName = req.Dir
+			requestCopy := *req
+			m.lastInitRequest = &requestCopy
+			m.initFailure = "Creating plan " + req.Dir + "…"
 			return m, runInitSubprocess(req)
 		case modeAddWizard:
 			m.s.wizardModel = nil
@@ -665,9 +701,9 @@ func formatFinishErrors(errs []finishActionError) string {
 	return fmt.Sprintf("finish: %s: %v (+%d more)", first.itemTitle, first.err, len(errs)-1)
 }
 
-// runInitSubprocess shells out to `flow plan init` via tea.ExecProcess
-// so worktree creation / ecosystem bootstrap doesn't block the loop.
-// NOTE: req.SiblingWorkspaces (--sibling-workspaces) is not forwarded yet.
+// runInitSubprocess shells out to `flow plan init` from a tea.Cmd so
+// worktree creation / ecosystem bootstrap doesn't block the event loop. Both
+// stdout and stderr are captured and returned durably on failure.
 func runInitSubprocess(req *planinit.Request) tea.Cmd {
 	args := []string{"plan", "init", req.Dir}
 	if req.Recipe != "" {
@@ -679,7 +715,22 @@ func runInitSubprocess(req *planinit.Request) tea.Cmd {
 	if req.Worktree == "__AUTO__" {
 		args = append(args, "--worktree")
 	} else if req.Worktree != "" {
-		args = append(args, "--worktree", req.Worktree)
+		args = append(args, "--worktree="+req.Worktree)
+	}
+	if req.ExtractAllFrom != "" {
+		args = append(args, "--extract-all-from", req.ExtractAllFrom)
+	}
+	for _, recipeVar := range req.RecipeVars {
+		args = append(args, "--recipe-vars", recipeVar)
+	}
+	if req.RecipeCmd != "" {
+		args = append(args, "--recipe-cmd", req.RecipeCmd)
+	}
+	if len(req.SiblingWorkspaces) > 0 {
+		args = append(args, "--sibling-workspaces="+strings.Join(req.SiblingWorkspaces, ","))
+	}
+	if req.NoteRef != "" {
+		args = append(args, "--note-ref", req.NoteRef)
 	}
 	if req.FromNote != "" {
 		args = append(args, "--from-note", req.FromNote)
@@ -701,10 +752,11 @@ func runInitSubprocess(req *planinit.Request) tea.Cmd {
 	if req.EnvProfile != "" {
 		args = append(args, "--env", req.EnvProfile)
 	}
-	cmd := delegation.Command("flow", args...)
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return initCompletedMsg{err: err}
-	})
+	return func() tea.Msg {
+		cmd := delegation.Command("flow", args...)
+		output, err := cmd.CombinedOutput()
+		return initCompletedMsg{output: string(output), err: err}
+	}
 }
 
 // modeForTab maps a tab index to the host's mode enum.
@@ -917,6 +969,8 @@ func (m *Model) startInitWizardBuild() tea.Cmd {
 		RunInitByDefault: runInitByDefault,
 		DaemonClient:     m.s.cfg.DaemonClient,
 		WorkspaceDir:     m.s.cfg.WorkspaceDir,
+		Initial:          m.lastInitRequest,
+		InitialExact:     m.lastInitRequest != nil,
 	}
 	return func() tea.Msg {
 		return initWizardReadyMsg{
@@ -958,6 +1012,9 @@ func (m *Model) startFinishWizardBuild(plan *orchestration.Plan) tea.Cmd {
 // message when present.
 func (m Model) View() string {
 	content := m.pager.View()
+	if m.initFailure != "" && m.mode == modeInitWizard {
+		content = m.initFailure + "\n\n" + content
+	}
 	if m.finishTransient != "" {
 		content = m.finishTransient + "\n" + content
 	}

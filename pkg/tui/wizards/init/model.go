@@ -64,6 +64,10 @@ type Config struct {
 	// Initial, if non-nil, pre-populates form fields (used by the
 	// CLI wrapper when flags are passed alongside --tui).
 	Initial *Request
+	// InitialExact makes false boolean values in Initial authoritative. The
+	// coordinator uses it when rebuilding a failed request; CLI flag defaults
+	// leave it false so configured defaults are not accidentally overwritten.
+	InitialExact bool
 	// GetRecipeCmd is the dynamic recipe command from the flow
 	// config. Empty is acceptable — the wizard will only show
 	// built-in recipes in that case.
@@ -212,7 +216,7 @@ func New(cfg Config) Model {
 		Build()
 
 	// Apply pre-populated values (may override defaults).
-	m.prePopulate(cfg.Initial)
+	m.prePopulate(cfg.Initial, cfg.InitialExact)
 
 	// Auto-detect sub-project worktree context and inherit the
 	// parent ecosystem worktree name.
@@ -228,7 +232,7 @@ func New(cfg Config) Model {
 
 // prePopulate sets the initial wizard state from a partially-filled
 // Request (e.g. from CLI flags).
-func (m *Model) prePopulate(initial *Request) {
+func (m *Model) prePopulate(initial *Request, exact bool) {
 	if initial == nil {
 		return
 	}
@@ -255,6 +259,18 @@ func (m *Model) prePopulate(initial *Request) {
 		}
 	}
 
+	switch initial.Worktree {
+	case "__AUTO__":
+		m.withWorktree = true
+	case "":
+		if exact {
+			m.withWorktree = false
+		}
+	default:
+		m.withWorktree = false
+		m.worktreeInput.SetValue(initial.Worktree)
+	}
+
 	if initial.FromNote != "" {
 		m.extractFromInput.SetValue(initial.FromNote)
 	}
@@ -263,8 +279,8 @@ func (m *Model) prePopulate(initial *Request) {
 	}
 
 	m.openSession = initial.OpenSession
-	if initial.RunInit {
-		m.runInit = true
+	if initial.RunInit || exact {
+		m.runInit = initial.RunInit
 	}
 }
 

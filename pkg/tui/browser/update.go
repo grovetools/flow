@@ -100,7 +100,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Clear any prior error on a successful (re)load — recovery path.
 		m.err = nil
+		// Refresh sorting is updated-time based, so preserving only the numeric
+		// cursor can silently switch the highlighted plan. Re-match by identity.
+		selectedName := m.SelectedPlanName()
 		m.plans = msg.plans
+		if selectedName != "" {
+			m.SelectPlan(selectedName)
+		}
 		activePlan, _ := state.GetString(stateDir(), coreplan.StateKey)
 		m.activePlan = activePlan
 		if m.cursor >= len(m.plans) {
@@ -183,6 +189,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, m.keys.Quit), msg.String() == "ctrl+c":
+		if m.embedMode {
+			return m, func() tea.Msg { return embed.CloseRequestMsg{} }
+		}
 		return m, tea.Quit
 
 	case key.Matches(msg, m.keys.Help):
