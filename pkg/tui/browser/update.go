@@ -88,6 +88,68 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 
+	case planIndexConnectedMsg:
+		if m.streamCancel != nil {
+			m.streamCancel()
+		}
+		m.streamCancel = msg.cancel
+		m.dataSource = "daemon live"
+		if msg.snapshot != nil {
+			m.planIndexRevision = msg.snapshot.Revision
+		}
+		m.loading = true
+		return m, tea.Batch(
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+			listenPlanIndexCmd(msg.updates),
+		)
+
+	case planIndexConnectFailedMsg:
+		m.dataSource = "local fallback — daemon unavailable"
+		m.statusMessage = m.dataSource
+		m.loading = true
+		return m, tea.Batch(
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+			fallbackRefreshTick(),
+			planIndexReconnectTick(),
+		)
+
+	case planIndexStreamClosedMsg:
+		m.streamCancel = nil
+		m.dataSource = "local fallback — daemon disconnected"
+		m.statusMessage = m.dataSource
+		return m, tea.Batch(fallbackRefreshTick(), planIndexReconnectTick())
+
+	case planIndexReconnectMsg:
+		if m.cfg.DaemonClient == nil || m.dataSource == "daemon live" || m.dataSource == "connecting" {
+			return m, nil
+		}
+		m.dataSource = "connecting"
+		return m, connectPlanIndexCmd(m.cfg.DaemonClient)
+
+	case planIndexStreamMsg:
+		cmds := []tea.Cmd{listenPlanIndexCmd(msg.updates)}
+		if msg.update.PlanIndexSnapshot != nil && msg.update.PlanIndexSnapshot.Revision > m.planIndexRevision {
+			m.planIndexRevision = msg.update.PlanIndexSnapshot.Revision
+			m.loading = true
+			cmds = append(cmds, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived))
+		}
+		if delta := msg.update.PlanIndex; delta != nil {
+			if delta.Revision != m.planIndexRevision+1 {
+				// Pub/sub intentionally drops for slow readers. Reconnect performs a
+				// full snapshot fetch rather than guessing across the gap.
+				if m.streamCancel != nil {
+					m.streamCancel()
+					m.streamCancel = nil
+				}
+				m.dataSource = "connecting"
+				return m, connectPlanIndexCmd(m.cfg.DaemonClient)
+			}
+			m.planIndexRevision = delta.Revision
+			m.loading = true
+			cmds = append(cmds, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived))
+		}
+		return m, tea.Batch(cmds...)
+
 	case planListLoadCompleteMsg:
 		m.loading = false
 		// Mark the context loaded regardless of success/failure so a
@@ -121,14 +183,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Skip heavy I/O if a load is already in-flight or the panel
 		// isn't focused. Keep the tick heartbeat running so resuming
 		// after focus/idle happens on the next period.
+		if m.dataSource == "daemon live" || m.dataSource == "connecting" {
+			return m, nil
+		}
 		if m.loading || !m.focused {
-			return m, refreshTick()
+			return m, fallbackRefreshTick()
 		}
 		m.loading = true
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 			fetchGitLogCmd(m.cwdGitRoot),
-			refreshTick(),
+			fallbackRefreshTick(),
 		)
 
 	case tea.WindowSizeMsg:

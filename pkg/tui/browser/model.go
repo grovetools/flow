@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -21,7 +22,10 @@ const RollingPlanName = coreplan.RollingPlanName
 
 // refreshInterval controls how often the browser re-polls the plans
 // directory and git log while running.
-const refreshInterval = 2 * time.Second
+const (
+	fallbackRefreshInterval = 45 * time.Second
+	daemonReconnectInterval = 5 * time.Second
+)
 
 // PlanListItem describes a single row rendered by the browser: the loaded
 // plan plus all the derived status fields (worktree, git state, merge
@@ -117,6 +121,12 @@ type Model struct {
 	repoCursor           int
 	repoGitLogContent    string
 	repoGitLogError      error
+
+	// Portfolio refresh source. Daemon mode is push-driven; local fallback is
+	// explicitly labelled and uses a slow/manual refresh cadence.
+	dataSource        string
+	planIndexRevision uint64
+	streamCancel      context.CancelFunc
 }
 
 // PlanCount returns the number of plans in the browser list.
@@ -196,16 +206,20 @@ func New(cfg Config) Model {
 		keys:           km,
 		showGitLog:     false,
 		embedMode:      cfg.EmbedMode,
+		dataSource:     "connecting",
 	}
 }
 
 // Init is the standard bubbletea entry point: kicks off an initial plans
 // load, a top-level git log fetch, and the periodic refresh tick.
 func (m Model) Init() tea.Cmd {
+	if m.cfg.DaemonClient != nil {
+		return tea.Batch(connectPlanIndexCmd(m.cfg.DaemonClient), fetchGitLogCmd(m.cwdGitRoot))
+	}
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 		fetchGitLogCmd(m.cwdGitRoot),
-		refreshTick(),
+		fallbackRefreshTick(),
 	)
 }
 
@@ -215,5 +229,9 @@ func (m Model) Init() tea.Cmd {
 // sub-model and so future features (e.g. a daemon subscription) can add
 // teardown here without changing the embedding contract.
 func (m *Model) Close() error {
+	if m.streamCancel != nil {
+		m.streamCancel()
+		m.streamCancel = nil
+	}
 	return nil
 }

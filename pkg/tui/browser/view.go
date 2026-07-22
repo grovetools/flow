@@ -141,6 +141,10 @@ func (m Model) View() string {
 func (m Model) footerLine() string {
 	var b strings.Builder
 	b.WriteString(m.help.View())
+	if m.dataSource != "" {
+		b.WriteString("\n")
+		b.WriteString(theme.DefaultTheme.Muted.Render("Plan data: " + m.dataSource))
+	}
 	if m.statusMessage != "" {
 		b.WriteString("\n\n")
 		b.WriteString(theme.DefaultTheme.Success.Render(m.statusMessage))

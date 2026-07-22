@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/state"
@@ -25,15 +26,57 @@ import (
 	"github.com/grovetools/flow/pkg/planutil"
 )
 
-// refreshTickMsg is emitted on the periodic refresh tick.
+// refreshTickMsg is emitted only for the deliberately slow local fallback.
 type refreshTickMsg time.Time
 
-// refreshTick returns a tea.Cmd that emits refreshTickMsg after
-// refreshInterval has elapsed.
-func refreshTick() tea.Cmd {
-	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
-		return refreshTickMsg(t)
-	})
+type planIndexConnectedMsg struct {
+	snapshot *models.PlanIndexSnapshot
+	updates  <-chan daemon.StateUpdate
+	cancel   context.CancelFunc
+}
+type planIndexConnectFailedMsg struct{ err error }
+type planIndexStreamMsg struct {
+	update  daemon.StateUpdate
+	updates <-chan daemon.StateUpdate
+}
+type planIndexStreamClosedMsg struct{}
+type planIndexReconnectMsg struct{}
+
+func fallbackRefreshTick() tea.Cmd {
+	return tea.Tick(fallbackRefreshInterval, func(t time.Time) tea.Msg { return refreshTickMsg(t) })
+}
+
+func planIndexReconnectTick() tea.Cmd {
+	return tea.Tick(daemonReconnectInterval, func(time.Time) tea.Msg { return planIndexReconnectMsg{} })
+}
+
+func connectPlanIndexCmd(client daemon.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		updates, err := client.StreamState(ctx)
+		if err != nil {
+			cancel()
+			return planIndexConnectFailedMsg{err: err}
+		}
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 3*time.Second)
+		snapshot, err := client.GetPlanIndex(fetchCtx)
+		fetchCancel()
+		if err != nil {
+			cancel()
+			return planIndexConnectFailedMsg{err: err}
+		}
+		return planIndexConnectedMsg{snapshot: snapshot, updates: updates, cancel: cancel}
+	}
+}
+
+func listenPlanIndexCmd(updates <-chan daemon.StateUpdate) tea.Cmd {
+	return func() tea.Msg {
+		update, ok := <-updates
+		if !ok {
+			return planIndexStreamClosedMsg{}
+		}
+		return planIndexStreamMsg{update: update, updates: updates}
+	}
 }
 
 // planListLoadCompleteMsg carries the result of an async plans list load.

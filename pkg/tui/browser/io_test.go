@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -109,6 +111,22 @@ func TestLoadPlansListMissingArchiveDir(t *testing.T) {
 	}
 	if len(items) != 1 {
 		t.Fatalf("expected 1 plan, got %d", len(items))
+	}
+}
+
+func TestPlanIndexDeltaAdvancesRevisionAndKeepsListening(t *testing.T) {
+	updates := make(chan daemon.StateUpdate, 1)
+	m := Model{planIndexRevision: 4, dataSource: "daemon live"}
+	updated, cmd := m.Update(planIndexStreamMsg{
+		update:  daemon.StateUpdate{PlanIndex: &models.PlanIndexDelta{Revision: 5}},
+		updates: updates,
+	})
+	got := updated.(Model)
+	if got.planIndexRevision != 5 {
+		t.Fatalf("revision=%d want 5", got.planIndexRevision)
+	}
+	if cmd == nil {
+		t.Fatal("delta should schedule refresh and continue listening")
 	}
 }
 
