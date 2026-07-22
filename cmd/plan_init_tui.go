@@ -68,6 +68,8 @@ func planInitCmdToRequest(c *PlanInitCmd) *planinit.Request {
 		FromNote:          c.firstFromNote(),
 		NoteTargetFile:    c.NoteTargetFile,
 		RunInit:           c.RunInit,
+		Anchor:            c.Anchor,
+		Layout:            c.Layout,
 	}
 }
 
@@ -91,6 +93,8 @@ func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanI
 		NoteRef:           req.NoteRef,
 		NoteTargetFile:    req.NoteTargetFile,
 		RunInit:           req.RunInit,
+		Anchor:            req.Anchor,
+		Layout:            req.Layout,
 	}
 	if req.FromNote != "" {
 		cmd.FromNotes = []string{req.FromNote}

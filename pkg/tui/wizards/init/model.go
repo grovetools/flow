@@ -9,6 +9,7 @@
 package planinit
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/grovetools/core/tui/theme"
 
 	"github.com/grovetools/flow/pkg/orchestration"
+	"github.com/grovetools/flow/pkg/plancreate"
 )
 
 // Screen represents the current screen in the plan init wizard.
@@ -30,6 +32,7 @@ type Screen int
 const (
 	MainScreen Screen = iota
 	AdvancedScreen
+	ReviewScreen
 )
 
 // Request captures every form field the wizard collects. Hosts map
@@ -51,6 +54,8 @@ type Request struct {
 	FromNote          string
 	NoteTargetFile    string
 	RunInit           bool
+	Anchor            string
+	Layout            string
 }
 
 // Config carries the dependencies the init wizard needs. Hosts build
@@ -90,6 +95,7 @@ type Config struct {
 // embed.DoneMsg with a *Request as Result (or nil on cancel).
 type Model struct {
 	plansDirectory    string
+	workspaceDir      string
 	getRecipeCmd      string
 	focusIndex        int
 	unfocused         bool
@@ -106,12 +112,17 @@ type Model struct {
 
 	// Screen navigation
 	currentScreen Screen
+	validating    bool
+	validation    *plancreate.ValidationReport
+	manifest      *plancreate.MutationManifest
 
 	// Advanced options
 	withWorktree        bool
 	worktreeInput       textinput.Model
 	extractFromInput    textinput.Model
 	noteTargetFileInput textinput.Model
+	anchorInput         textinput.Model
+	layoutInput         textinput.Model
 
 	keys KeyMap
 	help help.Model
@@ -130,14 +141,21 @@ func (m Model) IsTextEntryActive() bool {
 	return m.nameInput.Focused() ||
 		m.worktreeInput.Focused() ||
 		m.extractFromInput.Focused() ||
-		m.noteTargetFileInput.Focused()
+		m.noteTargetFileInput.Focused() ||
+		m.anchorInput.Focused() ||
+		m.layoutInput.Focused()
 }
 
 // New constructs a Model from the given Config. Form defaults mirror
 // the legacy flow/cmd/plan_init_tui.go behavior.
 func New(cfg Config) Model {
+	workspaceDir := cfg.WorkspaceDir
+	if workspaceDir == "" {
+		workspaceDir, _ = os.Getwd()
+	}
 	m := Model{
 		plansDirectory: cfg.PlansDir,
+		workspaceDir:   workspaceDir,
 		getRecipeCmd:   cfg.GetRecipeCmd,
 		runInit:        cfg.RunInitByDefault,
 		// Start in navigation mode so switching to the Add Plan tab
@@ -196,6 +214,13 @@ func New(cfg Config) Model {
 	m.noteTargetFileInput.Placeholder = initialNoteTarget
 	m.noteTargetFileInput.SetValue(initialNoteTarget)
 	m.noteTargetFileInput.Width = 41
+
+	m.anchorInput = textinput.New()
+	m.anchorInput.Placeholder = "repo name (auto-inferred when empty)"
+	m.anchorInput.Width = 41
+	m.layoutInput = textinput.New()
+	m.layoutInput.Placeholder = "xdg or legacy (default when empty)"
+	m.layoutInput.Width = 41
 
 	// Defaults
 	m.withWorktree = true
@@ -277,6 +302,8 @@ func (m *Model) prePopulate(initial *Request, exact bool) {
 	if initial.NoteTargetFile != "" {
 		m.noteTargetFileInput.SetValue(initial.NoteTargetFile)
 	}
+	m.anchorInput.SetValue(initial.Anchor)
+	m.layoutInput.SetValue(initial.Layout)
 
 	m.openSession = initial.OpenSession
 	if initial.RunInit || exact {
@@ -306,6 +333,8 @@ func (m Model) toRequest() *Request {
 		NoteTargetFile: m.noteTargetFileInput.Value(),
 		OpenSession:    m.openSession,
 		RunInit:        m.runInit,
+		Anchor:         m.anchorInput.Value(),
+		Layout:         m.layoutInput.Value(),
 	}
 	if selected := m.recipeList.SelectedItem(); selected != nil {
 		if recipeItem, ok := selected.(item); ok && string(recipeItem) != "none" {
@@ -331,7 +360,9 @@ func (m Model) getMaxFocusIndex() int {
 	case MainScreen:
 		return 4
 	case AdvancedScreen:
-		return 3
+		return 5
+	case ReviewScreen:
+		return 0
 	}
 	return 4
 }
@@ -343,6 +374,8 @@ func (m Model) updateFocus() Model {
 	m.worktreeInput.Blur()
 	m.extractFromInput.Blur()
 	m.noteTargetFileInput.Blur()
+	m.anchorInput.Blur()
+	m.layoutInput.Blur()
 
 	if !m.unfocused {
 		switch m.currentScreen {
@@ -360,6 +393,10 @@ func (m Model) updateFocus() Model {
 				m.extractFromInput.Focus()
 			case 3:
 				m.noteTargetFileInput.Focus()
+			case 4:
+				m.anchorInput.Focus()
+			case 5:
+				m.layoutInput.Focus()
 			}
 		}
 	}

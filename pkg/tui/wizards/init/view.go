@@ -21,6 +21,11 @@ func (m Model) View() string {
 		b.WriteString(m.renderMainScreen())
 	case AdvancedScreen:
 		b.WriteString(m.renderAdvancedScreen())
+	case ReviewScreen:
+		b.WriteString(m.renderReviewScreen())
+	}
+	if m.validating {
+		b.WriteString("\n" + theme.DefaultTheme.Info.Render("Validating target, collisions, git state, registry ownership, and permissions…") + "\n")
 	}
 
 	if m.err != nil {
@@ -151,6 +156,44 @@ func (m Model) renderMainScreen() string {
 }
 
 // renderAdvancedScreen renders the advanced options screen.
+func (m Model) renderReviewScreen() string {
+	var b strings.Builder
+	b.WriteString(theme.DefaultTheme.Header.Bold(true).Render("󰄬 Validate & Review"))
+	b.WriteString("\n\n")
+	if m.validation == nil {
+		return b.String()
+	}
+	for _, check := range m.validation.Checks {
+		icon := theme.IconSuccess
+		style := theme.DefaultTheme.Success
+		if !check.OK {
+			icon = theme.IconWarning
+			style = theme.DefaultTheme.Warning
+			if check.Severity == "error" {
+				style = theme.DefaultTheme.Error
+			}
+		}
+		b.WriteString(style.Render(icon + " " + check.ID + ": " + check.Detail))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n" + theme.DefaultTheme.Bold.Render("Mutations") + "\n")
+	if m.manifest != nil {
+		for _, step := range m.manifest.Steps {
+			reversibility := "rollback available"
+			if !step.Reversible {
+				reversibility = "not automatically reversible"
+			}
+			b.WriteString("  • " + step.Kind + " → " + step.Target + " (" + reversibility + ")\n")
+		}
+	}
+	if m.validation.Valid() {
+		b.WriteString("\n" + theme.DefaultTheme.Success.Render("Press Enter to create; Esc returns without mutation."))
+	} else {
+		b.WriteString("\n" + theme.DefaultTheme.Error.Render("Creation is blocked. Esc to correct the failed checks."))
+	}
+	return b.String()
+}
+
 func (m Model) renderAdvancedScreen() string {
 	var b strings.Builder
 
@@ -236,6 +279,11 @@ func (m Model) renderAdvancedScreen() string {
 	extractField := renderField(2, "Extract from File (from-note)", m.extractFromInput.View(), false)
 	targetField := renderField(3, "Note Target File", m.noteTargetFileInput.View(), false)
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, extractField, "  ", targetField))
+	b.WriteString("\n")
+
+	anchorField := renderField(4, "Anchor Repository", m.anchorInput.View(), false)
+	layoutField := renderField(5, "Worktree Location Layout", m.layoutInput.View(), false)
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, anchorField, "  ", layoutField))
 	b.WriteString("\n\n")
 
 	b.WriteString(theme.DefaultTheme.Muted.Render("Press 'Esc' or 'b' to return to main screen"))

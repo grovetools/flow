@@ -6,6 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/tui/embed"
+
+	"github.com/grovetools/flow/pkg/plancreate"
 )
 
 // doneWithRequest returns a tea.Cmd that emits embed.DoneMsg carrying
@@ -18,6 +20,18 @@ func doneWithRequest(req *Request) tea.Cmd {
 
 // doneCancelled returns a tea.Cmd that emits embed.DoneMsg with a nil
 // Result, signaling that the user dismissed the wizard.
+type validationCompleteMsg struct {
+	report   plancreate.ValidationReport
+	manifest plancreate.MutationManifest
+}
+
+func validateRequestCmd(req plancreate.Request) tea.Cmd {
+	return func() tea.Msg {
+		report, manifest := plancreate.Validate(req)
+		return validationCompleteMsg{report: report, manifest: manifest}
+	}
+}
+
 func doneCancelled() tea.Cmd {
 	return func() tea.Msg {
 		return embed.DoneMsg{Result: nil}
@@ -30,6 +44,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case validationCompleteMsg:
+		m.validating = false
+		m.validation = &msg.report
+		m.manifest = &msg.manifest
+		m.currentScreen = ReviewScreen
+		m.unfocused = true
+		return m, nil
+
 	case embed.SetWorkspaceMsg:
 		// Workspace changed under us; cancel the wizard so the host
 		// returns to its previous view in the new workspace.
@@ -60,6 +82,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2)
+		if m.validating {
+			return m, nil
+		}
 
 		// Navigate to advanced screen (only from main screen; and
 		// only when not actively typing in a text input).
@@ -74,6 +99,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "esc", "escape":
+			if m.currentScreen == ReviewScreen {
+				m.currentScreen = MainScreen
+				m.validation = nil
+				m.manifest = nil
+				m.focusIndex = 0
+				m.unfocused = true
+				return m.updateFocus(), nil
+			}
 			if m.currentScreen == AdvancedScreen {
 				m.currentScreen = MainScreen
 				m.focusIndex = 0
@@ -85,6 +118,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.worktreeInput.Blur()
 			m.extractFromInput.Blur()
 			m.noteTargetFileInput.Blur()
+			m.anchorInput.Blur()
+			m.layoutInput.Blur()
 			return m, nil
 
 		case "i":
@@ -178,6 +213,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter":
+			if m.currentScreen == ReviewScreen {
+				if m.validation != nil && m.validation.Valid() {
+					return m, doneWithRequest(m.toRequest())
+				}
+				m.err = fmt.Errorf("resolve validation errors before creating the plan")
+				return m, nil
+			}
 			if inList {
 				m.unfocused = false
 				m.focusIndex++
@@ -196,7 +238,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = fmt.Errorf("plan name cannot be empty")
 					return m, nil
 				}
-				return m, doneWithRequest(m.toRequest())
+				m.err = nil
+				m.validating = true
+				req := m.toRequest()
+				worktree := req.Worktree
+				if worktree == "__AUTO__" {
+					worktree = req.Dir
+				}
+				return m, validateRequestCmd(plancreate.Request{
+					TargetWorkspace: m.workspaceDir, PlansDir: m.plansDirectory,
+					PlanName: req.Dir, WorktreeName: worktree,
+					Anchor: req.Anchor, Layout: req.Layout, RunInitHooks: req.RunInit, Force: req.Force,
+				})
 			}
 		}
 	}
@@ -240,6 +293,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.extractFromInput, cmd = m.extractFromInput.Update(msg)
 			case 3:
 				m.noteTargetFileInput, cmd = m.noteTargetFileInput.Update(msg)
+			case 4:
+				m.anchorInput, cmd = m.anchorInput.Update(msg)
+			case 5:
+				m.layoutInput, cmd = m.layoutInput.Update(msg)
 			}
 		}
 	}

@@ -8,10 +8,13 @@
 package view
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -443,7 +446,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// page usable instead of leaving a nil model behind its loading gate.
 			m.mode = modeInitWizard
 			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabAddPlan})
-			return m, tea.Batch(m.startInitWizardBuild(), m.s.browserModel.Init())
+			cmds := []tea.Cmd{m.startInitWizardBuild(), m.s.browserModel.Init()}
+			if m.s.cfg.DaemonClient != nil {
+				cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
+			}
+			return m, tea.Batch(cmds...)
 		}
 		m.initFailure = ""
 		m.lastInitRequest = nil
@@ -479,6 +486,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if c := m.s.statusModel.Init(); c != nil {
 						cmds = append(cmds, c)
 					}
+					_ = state.Set(m.s.cfg.WorkspaceDir, groveplan.StateKey, plan.Name)
+					if m.s.cfg.DaemonClient != nil {
+						cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
+					}
 					return m, tea.Batch(cmds...)
 				}
 			}
@@ -488,7 +499,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowser
 		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
 		m.finishTransient = "plan created, but its workspace could not be loaded"
-		return m, m.s.browserModel.Init()
+		cmds := []tea.Cmd{m.s.browserModel.Init()}
+		if m.s.cfg.DaemonClient != nil {
+			cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
+		}
+		return m, tea.Batch(cmds...)
 
 	case embed.DoneMsg:
 		// Wizard payloads on submit: add → *orchestration.Job,
@@ -514,7 +529,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			requestCopy := *req
 			m.lastInitRequest = &requestCopy
 			m.initFailure = "Creating plan " + req.Dir + "…"
-			return m, runInitSubprocess(req)
+			return m, runInitSubprocess(req, m.s.cfg.PlansDir)
 		case modeAddWizard:
 			m.s.wizardModel = nil
 			m.mode = modeStatus
@@ -688,6 +703,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+type initJournal struct {
+	PlanName   string    `json:"plan_name"`
+	Phase      string    `json:"phase"`
+	StartedAt  time.Time `json:"started_at,omitempty"`
+	FinishedAt time.Time `json:"finished_at,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	Output     string    `json:"output,omitempty"`
+}
+
+func initJournalPath(plansDir, planName string) string {
+	return filepath.Join(plansDir, ".init-"+filepath.Base(planName)+".journal.json")
+}
+
+func writeInitJournal(path string, journal initJournal) error {
+	data, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
+}
+
+func refreshDaemonCmd(client daemon.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = client.Refresh(ctx)
+		return nil
+	}
+}
+
 // formatFinishErrors renders a list of action errors as one
 // status-bar line: first entry + "(+N more)" suffix if any.
 func formatFinishErrors(errs []finishActionError) string {
@@ -704,7 +749,7 @@ func formatFinishErrors(errs []finishActionError) string {
 // runInitSubprocess shells out to `flow plan init` from a tea.Cmd so
 // worktree creation / ecosystem bootstrap doesn't block the event loop. Both
 // stdout and stderr are captured and returned durably on failure.
-func runInitSubprocess(req *planinit.Request) tea.Cmd {
+func runInitSubprocess(req *planinit.Request, plansDir string) tea.Cmd {
 	args := []string{"plan", "init", req.Dir}
 	if req.Recipe != "" {
 		args = append(args, "--recipe", req.Recipe)
@@ -752,9 +797,31 @@ func runInitSubprocess(req *planinit.Request) tea.Cmd {
 	if req.EnvProfile != "" {
 		args = append(args, "--env", req.EnvProfile)
 	}
+	if req.Anchor != "" {
+		args = append(args, "--anchor", req.Anchor)
+	}
+	if req.Layout != "" {
+		args = append(args, "--layout", req.Layout)
+	}
 	return func() tea.Msg {
+		journalPath := initJournalPath(plansDir, req.Dir)
+		_ = writeInitJournal(journalPath, initJournal{PlanName: req.Dir, Phase: "running", StartedAt: time.Now()})
 		cmd := delegation.Command("flow", args...)
 		output, err := cmd.CombinedOutput()
+		journal := initJournal{PlanName: req.Dir, Phase: "completed", Output: string(output), FinishedAt: time.Now()}
+		if err != nil {
+			journal.Phase = "failed"
+			journal.Error = err.Error()
+		}
+		finalJournalPath := journalPath
+		planDir := filepath.Join(plansDir, req.Dir)
+		if info, statErr := os.Stat(planDir); statErr == nil && info.IsDir() {
+			finalJournalPath = filepath.Join(planDir, ".init-journal.json")
+		}
+		_ = writeInitJournal(finalJournalPath, journal)
+		if finalJournalPath != journalPath {
+			_ = os.Remove(journalPath)
+		}
 		return initCompletedMsg{output: string(output), err: err}
 	}
 }
