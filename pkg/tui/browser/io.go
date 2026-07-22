@@ -152,6 +152,43 @@ func fetchRepoGitLogCmd(repoPath string) tea.Cmd {
 	}
 }
 
+func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool) tea.Cmd {
+	return func() tea.Msg {
+		byPlansDir := make(map[string][]models.PlanSummary)
+		for _, summary := range summaries {
+			if summary.Lifecycle == "finished" || (!showOnHold && summary.Lifecycle == "hold") {
+				continue
+			}
+			byPlansDir[summary.PlansDir] = append(byPlansDir[summary.PlansDir], summary)
+		}
+		var all []PlanListItem
+		for plansDir, group := range byPlansDir {
+			workspaceRoot := ""
+			allowed := make(map[string]struct{}, len(group))
+			for _, summary := range group {
+				workspaceRoot = summary.WorkspaceRoot
+				allowed[summary.PlanDir] = struct{}{}
+			}
+			items, err := loadPlansList(plansDir, workspaceRoot, showOnHold, false)
+			if err != nil {
+				return planListLoadCompleteMsg{error: err}
+			}
+			for _, item := range items {
+				if _, ok := allowed[item.Plan.Directory]; ok {
+					summary := summaries[item.Plan.Directory]
+					item.Workspace = filepath.Base(summary.WorkspaceRoot)
+					item.WorkspaceRoot = summary.WorkspaceRoot
+					item.Repositories = append([]string(nil), summary.Repositories...)
+					item.Selected = summary.Selected
+					all = append(all, item)
+				}
+			}
+		}
+		sort.Slice(all, func(i, j int) bool { return all[i].LastUpdated.After(all[j].LastUpdated) })
+		return planListLoadCompleteMsg{plans: all}
+	}
+}
+
 func loadPlansListCmd(plansDirectory, cwdGitRoot string, showOnHold, showArchived bool) tea.Cmd {
 	return func() tea.Msg {
 		plans, err := loadPlansList(plansDirectory, cwdGitRoot, showOnHold, showArchived)

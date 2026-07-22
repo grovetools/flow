@@ -114,6 +114,30 @@ func TestLoadPlansListMissingArchiveDir(t *testing.T) {
 	}
 }
 
+func TestPortfolioLoadsPlansAcrossWorkspaces(t *testing.T) {
+	root := t.TempDir()
+	plansA := filepath.Join(root, "workspace-a", "plans")
+	plansB := filepath.Join(root, "workspace-b", "plans")
+	writeTestPlan(t, filepath.Join(plansA, "plan-a"), "")
+	writeTestPlan(t, filepath.Join(plansB, "plan-b"), "")
+	summaries := map[string]models.PlanSummary{
+		filepath.Join(plansA, "plan-a"): {PlanDir: filepath.Join(plansA, "plan-a"), PlanName: "plan-a", PlansDir: plansA, WorkspaceRoot: filepath.Join(root, "workspace-a"), Selected: true},
+		filepath.Join(plansB, "plan-b"): {PlanDir: filepath.Join(plansB, "plan-b"), PlanName: "plan-b", PlansDir: plansB, WorkspaceRoot: filepath.Join(root, "workspace-b")},
+	}
+	msg := loadPortfolioCmd(summaries, false)()
+	loaded := msg.(planListLoadCompleteMsg)
+	if loaded.error != nil || len(loaded.plans) != 2 {
+		t.Fatalf("portfolio load: plans=%d err=%v", len(loaded.plans), loaded.error)
+	}
+	seen := map[string]bool{}
+	for _, item := range loaded.plans {
+		seen[item.Workspace] = true
+	}
+	if !seen["workspace-a"] || !seen["workspace-b"] {
+		t.Fatalf("workspace identities missing: %+v", seen)
+	}
+}
+
 func TestPlanIndexDeltaAdvancesRevisionAndKeepsListening(t *testing.T) {
 	updates := make(chan daemon.StateUpdate, 1)
 	m := Model{planIndexRevision: 4, dataSource: "daemon live"}

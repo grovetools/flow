@@ -9,6 +9,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/models"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
 
@@ -37,6 +38,10 @@ type PlanListItem struct {
 	Status                string
 	StatusParts           map[string]int
 	LastUpdated           time.Time
+	Workspace             string
+	WorkspaceRoot         string
+	Repositories          []string
+	Selected              bool
 	Worktree              string
 	GitStatus             *git.StatusInfo
 	ReviewStatus          string
@@ -126,6 +131,7 @@ type Model struct {
 	// explicitly labelled and uses a slow/manual refresh cadence.
 	dataSource        string
 	planIndexRevision uint64
+	planSummaries     map[string]models.PlanSummary
 	streamCancel      context.CancelFunc
 }
 
@@ -207,6 +213,7 @@ func New(cfg Config) Model {
 		showGitLog:     false,
 		embedMode:      cfg.EmbedMode,
 		dataSource:     "connecting",
+		planSummaries:  make(map[string]models.PlanSummary),
 	}
 }
 

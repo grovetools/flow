@@ -253,7 +253,7 @@ func (m Model) renderPlanTable() string {
 		return ""
 	}
 
-	headers := []string{"PLAN", "STATUS", "WORKTREE", "GIT", "MERGE", "REVIEWED", "NOTES", "UPDATED"}
+	headers := []string{"PLAN", "WORKSPACE / REPOS", "STATUS", "WORKTREE", "GIT", "MERGE", "REVIEWED", "NOTES", "UPDATED"}
 	rows := make([][]string, len(m.plans))
 	for i, plan := range m.plans {
 		statusText := m.formatStatusWithEmoji(plan)
@@ -268,7 +268,7 @@ func (m Model) renderPlanTable() string {
 			if plan.Name == RollingPlanName {
 				titleText = theme.DefaultTheme.Muted.Render("(rolling)")
 			}
-			if plan.Name == m.activePlan {
+			if plan.Selected || plan.Name == m.activePlan {
 				titleText = theme.DefaultTheme.Bold.Render(fmt.Sprintf("%s %s", theme.IconSelect, titleText))
 			}
 		}
@@ -342,8 +342,17 @@ func (m Model) renderPlanTable() string {
 			reviewedText = theme.DefaultTheme.Muted.Render("-")
 		}
 
+		identityText := plan.Workspace
+		if len(plan.Repositories) > 0 {
+			identityText += " / " + strings.Join(plan.Repositories, ",")
+		}
+		if identityText == "" {
+			identityText = theme.DefaultTheme.Muted.Render("-")
+		}
+
 		rows[i] = []string{
 			titleText,
+			identityText,
 			statusText,
 			worktreeText,
 			gitText,

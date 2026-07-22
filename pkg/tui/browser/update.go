@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/pkg/models"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/embed"
@@ -96,12 +97,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dataSource = "daemon live"
 		if msg.snapshot != nil {
 			m.planIndexRevision = msg.snapshot.Revision
+			m.planSummaries = make(map[string]models.PlanSummary, len(msg.snapshot.Plans))
+			for _, summary := range msg.snapshot.Plans {
+				m.planSummaries[summary.PlanDir] = summary
+			}
 		}
 		m.loading = true
-		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
-			listenPlanIndexCmd(msg.updates),
-		)
+		return m, tea.Batch(m.reloadPlansCmd(), listenPlanIndexCmd(msg.updates))
 
 	case planIndexConnectFailedMsg:
 		m.dataSource = "local fallback — daemon unavailable"
@@ -128,10 +130,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case planIndexStreamMsg:
 		cmds := []tea.Cmd{listenPlanIndexCmd(msg.updates)}
-		if msg.update.PlanIndexSnapshot != nil && msg.update.PlanIndexSnapshot.Revision > m.planIndexRevision {
-			m.planIndexRevision = msg.update.PlanIndexSnapshot.Revision
+		if snapshot := msg.update.PlanIndexSnapshot; snapshot != nil && snapshot.Revision > m.planIndexRevision {
+			m.planIndexRevision = snapshot.Revision
+			m.planSummaries = make(map[string]models.PlanSummary, len(snapshot.Plans))
+			for _, summary := range snapshot.Plans {
+				m.planSummaries[summary.PlanDir] = summary
+			}
 			m.loading = true
-			cmds = append(cmds, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived))
+			cmds = append(cmds, m.reloadPlansCmd())
 		}
 		if delta := msg.update.PlanIndex; delta != nil {
 			if delta.Revision != m.planIndexRevision+1 {
@@ -145,8 +151,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, connectPlanIndexCmd(m.cfg.DaemonClient)
 			}
 			m.planIndexRevision = delta.Revision
+			for _, dir := range delta.Removed {
+				delete(m.planSummaries, dir)
+			}
+			for _, summary := range delta.Upserts {
+				m.planSummaries[summary.PlanDir] = summary
+			}
 			m.loading = true
-			cmds = append(cmds, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived))
+			cmds = append(cmds, m.reloadPlansCmd())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -212,6 +224,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKeyMsg dispatches a keyboard event against the current mode
 // (help overlay, notes editor, normal browse). Split from Update so the
 // main switch stays readable.
+func (m Model) reloadPlansCmd() tea.Cmd {
+	if m.dataSource == "daemon live" && len(m.planSummaries) > 0 {
+		return loadPortfolioCmd(m.planSummaries, m.showOnHold)
+	}
+	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
+}
+
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.help.ShowAll {
 		// Any key closes help.
@@ -324,8 +343,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
-			if err := state.Set(stateDir(), coreplan.StateKey, selectedPlan.Name); err == nil {
+			stateRoot := selectedPlan.WorkspaceRoot
+			if stateRoot == "" {
+				stateRoot = stateDir()
+			}
+			if err := state.Set(stateRoot, coreplan.StateKey, selectedPlan.Name); err == nil {
 				m.activePlan = selectedPlan.Name
+				for i := range m.plans {
+					if m.plans[i].WorkspaceRoot == selectedPlan.WorkspaceRoot {
+						m.plans[i].Selected = i == m.cursor
+					}
+				}
 			}
 		}
 		return m, nil
@@ -435,7 +463,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showOnHold = !m.showOnHold
 		m.cursor = 0
 		m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
-		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
+		return m, m.reloadPlansCmd()
 
 	case key.Matches(msg, m.keys.ToggleArchived):
 		m.showArchived = !m.showArchived
