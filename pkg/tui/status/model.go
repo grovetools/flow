@@ -924,7 +924,16 @@ func (m Model) PlanTitle() string {
 	if m.Plan.Name == coreplan.RollingPlanName {
 		return label + theme.DefaultTheme.Muted.Render("(rolling)") + "  " + theme.DefaultTheme.Muted.Italic(true).Render("auto-created for quick tasks")
 	}
-	return label + m.Plan.Name
+	parts := []string{label + m.Plan.Name}
+	if m.Plan.Config != nil {
+		if m.Plan.Config.Worktree != "" {
+			parts = append(parts, theme.DefaultTheme.Muted.Render("worktree/branch: "+m.Plan.Config.Worktree))
+		}
+		if len(m.Plan.Config.Repos) > 0 {
+			parts = append(parts, theme.DefaultTheme.Muted.Render("repos: "+strings.Join(m.Plan.Config.Repos, ",")))
+		}
+	}
+	return strings.Join(parts, "  •  ")
 }
 
 // renderFocusJobs renders the top (or left) pane containing the jobs list.
