@@ -418,6 +418,7 @@ func buildHeadlessEnv(job *Job, plan *Plan, providerName, worktreePath string, a
 		"GROVE_FLOW_JOB_PATH="+job.FilePath,
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
+		"GROVE_CONFIG_FILE="+AgentConfigArtifactPath(plan.Directory, job.ID),
 		// Signal-at-launch (A2): tells the grove-hooks Stop hook this is a
 		// headless job so it records session type "headless_agent" and never
 		// parks the frontmatter at `idle` (the finalizer owns headless

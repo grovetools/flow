@@ -279,8 +279,9 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' ",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
+	configPath := strings.ReplaceAll(AgentConfigArtifactPath(plan.Directory, job.ID), "'", "'\\''")
+	envPrefix := agentEnvInline(agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' GROVE_CONFIG_FILE='%s' ",
+		job.ID, job.FilePath, plan.Name, escapedTitle, configPath)
 	envPrefix += playbookEnvInline(job, plan)
 
 	// Wrap agent command with deterministic PID capture, then prefix

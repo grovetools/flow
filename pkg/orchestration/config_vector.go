@@ -46,6 +46,23 @@ func ConfigVectorArtifactPath(planDir, jobID string) string {
 	return filepath.Join(planDir, ".artifacts", jobID, "config-vector.json")
 }
 
+// AgentConfigArtifactPath is the isolated, per-run config consumed by the
+// grove-pi metrics extension. It deliberately lives with the job artifacts,
+// never in the shared worktree's .pi directory.
+func AgentConfigArtifactPath(planDir, jobID string) string {
+	return filepath.Join(planDir, ".artifacts", jobID, "grove-config.json")
+}
+
+type agentConfigArtifact struct {
+	Version        int               `json:"version"`
+	Config         map[string]string `json:"config,omitempty"`
+	Model          string            `json:"model"`
+	Provider       string            `json:"provider,omitempty"`
+	FixtureCommit  string            `json:"fixture_commit,omitempty"`
+	WorktreeCommit string            `json:"worktree_commit,omitempty"`
+	BundleFiles    []string          `json:"bundle_files,omitempty"`
+}
+
 // hashBytes returns the lowercase, full-length hex sha256 of b (D37).
 func hashBytes(b []byte) string {
 	sum := sha256.Sum256(b)
@@ -311,6 +328,42 @@ func stampJobConfigVector(
 			Field("job_id", job.ID).
 			Log(ctx)
 	}
+	if err := WriteAgentConfigArtifact(plan.Directory, job.ID, v, workDir, contextFiles); err != nil {
+		ulog.Warn("Failed to write isolated agent config artifact").
+			Err(err).
+			Field("job_id", job.ID).
+			Log(ctx)
+	}
+}
+
+// WriteAgentConfigArtifact materializes the exact flow-computed vector for the
+// Pi launch. Components remain hashes; human arm labels belong in eval fixtures.
+func WriteAgentConfigArtifact(planDir, jobID string, v record.ConfigVector, workDir string, contextFiles []string) error {
+	if planDir == "" || jobID == "" {
+		return fmt.Errorf("agent config: empty planDir or jobID")
+	}
+	path := AgentConfigArtifactPath(planDir, jobID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creating job artifact directory: %w", err)
+	}
+	bundle := make([]string, 0, len(contextFiles))
+	for _, name := range contextFiles {
+		if rel, err := filepath.Rel(workDir, name); err == nil {
+			bundle = append(bundle, filepath.ToSlash(rel))
+		}
+	}
+	artifact := agentConfigArtifact{
+		Version: 1, Config: v.Components, Model: v.Model, Provider: v.Provider,
+		FixtureCommit: v.FixtureCommit, WorktreeCommit: v.WorktreeCommit, BundleFiles: bundle,
+	}
+	out, err := json.MarshalIndent(artifact, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling agent config: %w", err)
+	}
+	if err := os.WriteFile(path, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("writing agent config: %w", err)
+	}
+	return nil
 }
 
 // WriteConfigVectorArtifact writes the vector to

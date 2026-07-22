@@ -164,8 +164,9 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='pi' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
+	configPath := strings.ReplaceAll(AgentConfigArtifactPath(plan.Directory, job.ID), "'", "'\\''")
+	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='pi' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_CONFIG_FILE='%s' ",
+		job.ID, job.FilePath, plan.Name, escapedTitle, configPath)
 	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
 		envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
