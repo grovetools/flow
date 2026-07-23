@@ -32,16 +32,16 @@ func TestViewportNavigationResizeAndRange(t *testing.T) {
 	rows := browserRows(t, 12)
 	m := Model{plans: rows, height: 10, embedMode: true, keys: NewKeyMap(nil), holdPending: map[string]bool{}}
 	m.ensureCursorVisible()
-	if got := m.visibleRowCount(); got != 5 {
-		t.Fatalf("visible rows=%d, want 5", got)
+	if got := m.visibleRowCount(); got != 4 {
+		t.Fatalf("visible rows=%d, want 4", got)
 	}
 
 	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyPgDown})
 	m = updated.(Model)
-	if m.cursor != 5 || m.scrollOffset != 5 {
-		t.Fatalf("page down cursor/offset=%d/%d, want 5/5", m.cursor, m.scrollOffset)
+	if m.cursor != 4 || m.scrollOffset != 4 {
+		t.Fatalf("page down cursor/offset=%d/%d, want 4/4", m.cursor, m.scrollOffset)
 	}
-	if view := m.renderPlanTable(); !strings.Contains(view, "6–10 of 12") {
+	if view := m.renderPlanTable(); !strings.Contains(view, "5–8 of 12") {
 		t.Fatalf("range indicator missing from %q", view)
 	}
 
@@ -100,6 +100,19 @@ func TestHoldCompletionRemovesSelectedRowAndPreservesNearest(t *testing.T) {
 	}
 	if _, pending := m.holdPending[key]; pending {
 		t.Fatal("hold remained pending")
+	}
+}
+
+func TestInvalidBindingDisablesHoldMutation(t *testing.T) {
+	rows := browserRows(t, 1)
+	rows[0].Plan.Config = &orchestration.PlanConfig{Worktree: "plan-00"}
+	rows[0].Binding = coreplan.PlanBinding{Health: coreplan.BindingMismatch}
+	m := Model{plans: rows, keys: NewKeyMap(nil), holdPending: map[string]bool{}}
+
+	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = updated.(Model)
+	if cmd != nil || len(m.holdPending) != 0 || !strings.Contains(m.statusMessage, "binding mismatch") {
+		t.Fatalf("invalid binding allowed Hold: cmd=%v pending=%v status=%q", cmd, m.holdPending, m.statusMessage)
 	}
 }
 

@@ -251,6 +251,10 @@ func New(cfg Config) Model {
 	pg.SetConfig(pager.Config{
 		OuterPadding: [4]int{1, 2, 0, 2},
 		ShowTitleRow: true,
+		// Plans can render help + source plus a blank separator and action
+		// status. Reserve that real maximum footer chrome in SubSize so the
+		// selected row and range cannot be clipped when a status is present.
+		FooterHeight: 4,
 	})
 	m.pager = pg
 

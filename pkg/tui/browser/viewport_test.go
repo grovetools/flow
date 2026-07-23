@@ -97,4 +97,11 @@ func TestInvalidBindingDisablesPathSensitiveAction(t *testing.T) {
 	if cmd != nil || !strings.Contains(m.statusMessage, "binding mismatch") {
 		t.Fatalf("invalid binding action was not refused: cmd=%v status=%q", cmd, m.statusMessage)
 	}
+
+	m.statusMessage = ""
+	updated, cmd = m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	m = updated.(Model)
+	if cmd != nil || !strings.Contains(m.statusMessage, "binding mismatch") || len(m.holdPending) != 0 {
+		t.Fatalf("invalid binding hold was not refused: cmd=%v status=%q pending=%v", cmd, m.statusMessage, m.holdPending)
+	}
 }

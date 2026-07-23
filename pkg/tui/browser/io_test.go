@@ -125,7 +125,7 @@ func TestPortfolioLoadsPlansAcrossWorkspaces(t *testing.T) {
 		filepath.Join(plansA, "plan-a"): {PlanDir: filepath.Join(plansA, "plan-a"), PlanName: "plan-a", PlansDir: plansA, WorkspaceRoot: filepath.Join(root, "workspace-a"), Selected: true},
 		filepath.Join(plansB, "plan-b"): {PlanDir: filepath.Join(plansB, "plan-b"), PlanName: "plan-b", PlansDir: plansB, WorkspaceRoot: filepath.Join(root, "workspace-b")},
 	}
-	msg := loadPortfolioCmd(summaries, false)()
+	msg := loadPortfolioCmd(summaries, false, false)()
 	loaded := msg.(planListLoadCompleteMsg)
 	if loaded.error != nil || len(loaded.plans) != 2 {
 		t.Fatalf("portfolio load: plans=%d err=%v", len(loaded.plans), loaded.error)
@@ -136,6 +136,38 @@ func TestPortfolioLoadsPlansAcrossWorkspaces(t *testing.T) {
 	}
 	if !seen["workspace-a"] || !seen["workspace-b"] {
 		t.Fatalf("workspace identities missing: %+v", seen)
+	}
+}
+
+func TestPortfolioShowsQualifiedArchivesWithoutIndexingArchiveContainer(t *testing.T) {
+	root := t.TempDir()
+	plansDir := filepath.Join(root, "workspace-a", "plans")
+	liveDir := filepath.Join(plansDir, "live")
+	archivedDir := filepath.Join(plansDir, ".archive", "old")
+	writeTestPlan(t, liveDir, "")
+	writeTestPlan(t, archivedDir, "finished")
+
+	summaries := map[string]models.PlanSummary{
+		liveDir:     {PlanDir: liveDir, PlanName: "live", PlansDir: plansDir, WorkspaceRoot: filepath.Join(root, "workspace-a")},
+		archivedDir: {PlanDir: archivedDir, PlanName: "old", PlansDir: plansDir, WorkspaceRoot: filepath.Join(root, "workspace-a"), Lifecycle: "finished", Archived: true},
+	}
+	items, err := loadPortfolio(summaries, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("portfolio rows=%d, want live + archived: %+v", len(items), items)
+	}
+	seen := map[string]PlanListItem{}
+	for _, item := range items {
+		seen[item.Name] = item
+	}
+	if _, exists := seen[".archive"]; exists {
+		t.Fatal("archive container was represented as a plan")
+	}
+	archived, exists := seen["old"]
+	if !exists || !archived.Archived || archived.Workspace != "workspace-a" || archived.Binding.Health != "archived" {
+		t.Fatalf("archive row is not qualified/read-only: %+v", archived)
 	}
 }
 

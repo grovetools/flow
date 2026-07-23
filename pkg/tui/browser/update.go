@@ -222,7 +222,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = ""
 		m.streamConnecting = true
 		m.streamGeneration++
-		return m, connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold)
+		return m, connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold, m.showArchived)
 
 	case planIndexStreamMsg:
 		if msg.generation != m.streamGeneration {
@@ -256,7 +256,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMessage = ""
 				m.streamConnecting = true
 				m.streamGeneration++
-				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration, m.showOnHold)
+				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration, m.showOnHold, m.showArchived)
 			}
 			m.planIndexRevision = delta.Revision
 			for _, dir := range delta.Removed {
@@ -354,7 +354,7 @@ func (m Model) reloadPlansCmd() tea.Cmd {
 		for key, summary := range m.planSummaries {
 			summaries[key] = summary
 		}
-		return loadPortfolioCmd(summaries, m.showOnHold, m.planIndexRevision, m.streamGeneration)
+		return loadPortfolioCmd(summaries, m.showOnHold, m.showArchived, m.planIndexRevision, m.streamGeneration)
 	}
 	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 }
@@ -642,7 +642,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.ToggleArchived):
 		m.showArchived = !m.showArchived
 		m.statusMessage = fmt.Sprintf("Archived plans: %v", m.showArchived)
-		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
+		return m, m.reloadPlansCmd()
 
 	case key.Matches(msg, m.keys.SetHoldStatus):
 		if m.selectedArchived() {
@@ -652,6 +652,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
 			plan := selectedPlan.Plan
+			currentStatus := ""
+			if plan.Config != nil {
+				currentStatus = plan.Config.Status
+			}
+			action := "hold"
+			if currentStatus == "hold" {
+				action = "unhold"
+			}
+			if !m.selectedBindingValid(action) {
+				return m, nil
+			}
 			key := planItemKey(selectedPlan)
 			if m.holdPending == nil {
 				m.holdPending = make(map[string]bool)
@@ -660,10 +671,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-			currentStatus := ""
-			if plan.Config != nil {
-				currentStatus = plan.Config.Status
-			}
 			hold := currentStatus != "hold"
 			m.holdPending[key] = hold
 			if hold {

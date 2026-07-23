@@ -206,10 +206,12 @@ func (m *Model) selectPlanKey(key string) bool {
 }
 
 func (m Model) visibleRowCount() int {
-	// Header/table chrome, range indicator and outer padding consume five rows.
-	rows := m.height - 5
+	// Table borders/header consume four rows, followed by the range indicator;
+	// the browser view itself adds one row of top padding. Embedded host chrome
+	// is already deducted by pager.SubSize.
+	rows := m.height - 6
 	if !m.embedMode {
-		rows -= 4 // inline help/source footer
+		rows -= 3 // blank separator plus the two-line inline footer
 	}
 	if m.showGitLog {
 		rows -= 13
@@ -317,7 +319,7 @@ func New(cfg Config) Model {
 // when the detail pane is first opened.
 func (m Model) Init() tea.Cmd {
 	if factory := m.daemonClientFactory(); factory != nil {
-		return connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold)
+		return connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold, m.showArchived)
 	}
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
