@@ -8,16 +8,21 @@
 package view
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
 	"github.com/grovetools/core/pkg/daemon"
 	groveplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
@@ -42,13 +47,36 @@ type finishActionError struct {
 	err       error
 }
 
-// initCompletedMsg is dispatched after the `flow plan init`
-// subprocess returns. It carries the error from the subprocess (nil
-// on success) so the meta-panel can decide whether to transition to
-// the new plan's status view or surface the failure.
+// InitExecutionReport is the durable account of one delegated Add Plan
+// attempt. Command is an unambiguous JSON rendering of Argv (not shell text),
+// and Executable is the path actually selected by the delegation boundary.
+type InitExecutionReport struct {
+	AttemptID          string    `json:"attempt_id"`
+	Phase              string    `json:"phase"`
+	Executable         string    `json:"executable"`
+	Argv               []string  `json:"argv"`
+	Command            string    `json:"command"`
+	WorkingDirectory   string    `json:"working_directory"`
+	PlansDir           string    `json:"plans_dir"`
+	PlanDir            string    `json:"plan_dir"`
+	StartedAt          time.Time `json:"started_at"`
+	FinishedAt         time.Time `json:"finished_at,omitempty"`
+	ExitCause          string    `json:"exit_cause,omitempty"`
+	ExitCode           *int      `json:"exit_code,omitempty"`
+	Signal             string    `json:"signal,omitempty"`
+	Stdout             string    `json:"stdout,omitempty"`
+	Stderr             string    `json:"stderr,omitempty"`
+	JournalPath        string    `json:"journal_path"`
+	JournalWriteErrors []string  `json:"journal_write_errors,omitempty"`
+	Residue            []string  `json:"residue,omitempty"`
+
+	Err error `json:"-"`
+}
+
+// initCompletedMsg is dispatched only after the terminal report has been
+// atomically persisted (or the persistence error has been recorded).
 type initCompletedMsg struct {
-	output string
-	err    error
+	report InitExecutionReport
 }
 
 // *WizardReadyMsg messages carry a freshly-built wizard model from
@@ -428,20 +456,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clear pending name regardless of success/failure.
 		pendingName := m.pendingInitPlanName
 		m.pendingInitPlanName = ""
-		if msg.err != nil {
-			detail := strings.TrimSpace(msg.output)
-			if detail == "" {
-				detail = msg.err.Error()
-			} else {
-				detail = fmt.Sprintf("%v\n%s", msg.err, detail)
-			}
-			if pendingName != "" {
-				partialPath := filepath.Join(m.s.cfg.PlansDir, pendingName)
-				if _, statErr := os.Stat(partialPath); statErr == nil {
-					detail += "\nPartial plan residue: " + partialPath
-				}
-			}
-			m.initFailure = "Plan creation failed (edit and submit to retry, or return to Plans):\n" + detail
+		if msg.report.Err != nil {
+			m.initFailure = formatInitFailure(msg.report)
 			// Rebuild immediately from lastInitRequest. This keeps the Add Plan
 			// page usable instead of leaving a nil model behind its loading gate.
 			m.mode = modeInitWizard
@@ -454,6 +470,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.initFailure = ""
 		m.lastInitRequest = nil
+		if len(msg.report.JournalWriteErrors) > 0 {
+			m.finishTransient = "plan created; journal finalization warning: " + strings.Join(msg.report.JournalWriteErrors, "; ")
+		}
 		// Subprocess succeeded. Try to locate and load the new plan
 		// directly so we can switch straight to its status view.
 		if pendingName != "" {
@@ -529,7 +548,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			requestCopy := *req
 			m.lastInitRequest = &requestCopy
 			m.initFailure = "Creating plan " + req.Dir + "…"
-			return m, runInitSubprocess(req, m.s.cfg.PlansDir)
+			return m, runInitSubprocess(req, m.s.cfg.PlansDir, m.s.cfg.WorkspaceDir)
 		case modeAddWizard:
 			m.s.wizardModel = nil
 			m.mode = modeStatus
@@ -704,6 +723,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 type initJournal struct {
+	Schema   string                `json:"schema"`
+	PlanName string                `json:"plan_name"`
+	Attempts []InitExecutionReport `json:"attempts"`
+}
+
+// legacyInitJournal is read only to preserve evidence written by versions that
+// predate attempt IDs. A malformed journal is never overwritten.
+type legacyInitJournal struct {
 	PlanName   string    `json:"plan_name"`
 	Phase      string    `json:"phase"`
 	StartedAt  time.Time `json:"started_at,omitempty"`
@@ -716,12 +743,66 @@ func initJournalPath(plansDir, planName string) string {
 	return filepath.Join(plansDir, ".init-"+filepath.Base(planName)+".journal.json")
 }
 
-func writeInitJournal(path string, journal initJournal) error {
+func atomicWriteInitJournal(path string, journal initJournal) error {
 	data, err := json.MarshalIndent(journal, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o600)
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".init-journal-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func readInitJournal(path, planName string) (initJournal, error) {
+	journal := initJournal{Schema: "flow.plan-init-journal/v2", PlanName: planName}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return journal, nil
+	}
+	if err != nil {
+		return journal, err
+	}
+	if err := json.Unmarshal(data, &journal); err == nil && journal.Schema != "" {
+		return journal, nil
+	}
+	var legacy legacyInitJournal
+	if err := json.Unmarshal(data, &legacy); err != nil || legacy.PlanName == "" {
+		return initJournal{}, fmt.Errorf("read existing journal: invalid JSON")
+	}
+	legacyAttempt := InitExecutionReport{
+		AttemptID:  "legacy-" + legacy.StartedAt.UTC().Format("20060102T150405.000000000Z"),
+		Phase:      legacy.Phase,
+		StartedAt:  legacy.StartedAt,
+		FinishedAt: legacy.FinishedAt,
+		ExitCause:  legacy.Error,
+		Stdout:     legacy.Output,
+	}
+	journal.PlanName = legacy.PlanName
+	journal.Attempts = append(journal.Attempts, legacyAttempt)
+	return journal, nil
 }
 
 func refreshDaemonCmd(client daemon.Client) tea.Cmd {
@@ -746,10 +827,113 @@ func formatFinishErrors(errs []finishActionError) string {
 	return fmt.Sprintf("finish: %s: %v (+%d more)", first.itemTitle, first.err, len(errs)-1)
 }
 
+type initExecutionDeps struct {
+	command      func(string, ...string) *exec.Cmd
+	writeJournal func(string, initJournal) error
+	now          func() time.Time
+	attemptID    func() string
+}
+
+func defaultInitExecutionDeps() initExecutionDeps {
+	return initExecutionDeps{
+		command:      delegation.Command,
+		writeJournal: atomicWriteInitJournal,
+		now:          time.Now,
+		attemptID:    func() string { return uuid.NewString() },
+	}
+}
+
 // runInitSubprocess shells out to `flow plan init` from a tea.Cmd so
-// worktree creation / ecosystem bootstrap doesn't block the event loop. Both
-// stdout and stderr are captured and returned durably on failure.
-func runInitSubprocess(req *planinit.Request, plansDir string) tea.Cmd {
+// worktree creation / ecosystem bootstrap doesn't block the event loop.
+func runInitSubprocess(req *planinit.Request, plansDir, workspaceDir string) tea.Cmd {
+	return func() tea.Msg {
+		return initCompletedMsg{report: executeInitSubprocess(req, plansDir, workspaceDir, defaultInitExecutionDeps())}
+	}
+}
+
+func executeInitSubprocess(req *planinit.Request, plansDir, workspaceDir string, deps initExecutionDeps) InitExecutionReport {
+	plansDir = absolutePath(plansDir)
+	workspaceDir = absolutePath(workspaceDir)
+	if workspaceDir == "" {
+		workspaceDir, _ = os.Getwd()
+		workspaceDir = absolutePath(workspaceDir)
+	}
+	planDir := filepath.Join(plansDir, req.Dir)
+	args := initSubprocessArgs(req)
+	cmd := deps.command("flow", args...)
+	cmd.Dir = workspaceDir
+
+	report := InitExecutionReport{
+		AttemptID:        deps.attemptID(),
+		Phase:            "running",
+		Executable:       cmd.Path,
+		Argv:             append([]string(nil), cmd.Args...),
+		WorkingDirectory: workspaceDir,
+		PlansDir:         plansDir,
+		PlanDir:          planDir,
+		StartedAt:        deps.now(),
+	}
+	report.Command = safeArgv(report.Argv)
+	siblingPath := initJournalPath(plansDir, req.Dir)
+	report.JournalPath = siblingPath
+
+	journal, readErr := readInitJournal(siblingPath, req.Dir)
+	if readErr != nil {
+		// Preserve unreadable evidence and give this attempt its own journal.
+		siblingPath = filepath.Join(plansDir, ".init-"+filepath.Base(req.Dir)+"-"+report.AttemptID+".journal.json")
+		report.JournalPath = siblingPath
+		report.JournalWriteErrors = append(report.JournalWriteErrors, readErr.Error())
+		journal = initJournal{Schema: "flow.plan-init-journal/v2", PlanName: req.Dir}
+	}
+	journal.Attempts = append(journal.Attempts, report)
+	attemptIndex := len(journal.Attempts) - 1
+	if err := deps.writeJournal(siblingPath, journal); err != nil {
+		report.JournalWriteErrors = append(report.JournalWriteErrors, "write running report: "+err.Error())
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	report.Stdout = stdout.String()
+	report.Stderr = stderr.String()
+	report.FinishedAt = deps.now()
+	report.Err = err
+	setInitExitCause(&report, err)
+	if err != nil {
+		report.Phase = "failed"
+	} else {
+		report.Phase = "completed"
+	}
+
+	// Persist the terminal state at the sibling location first. If moving the
+	// finalized journal fails, this still leaves complete evidence to discover.
+	journal.Attempts[attemptIndex] = report
+	if writeErr := deps.writeJournal(siblingPath, journal); writeErr != nil {
+		report.JournalWriteErrors = append(report.JournalWriteErrors, "write terminal report: "+writeErr.Error())
+	} else if info, statErr := os.Stat(planDir); statErr == nil && info.IsDir() {
+		finalPath := filepath.Join(planDir, ".init-journal.json")
+		report.JournalPath = finalPath
+		journal.Attempts[attemptIndex] = report
+		if writeErr := deps.writeJournal(finalPath, journal); writeErr != nil {
+			report.JournalPath = siblingPath
+			report.JournalWriteErrors = append(report.JournalWriteErrors, "finalize journal: "+writeErr.Error())
+		} else if removeErr := os.Remove(siblingPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			report.JournalWriteErrors = append(report.JournalWriteErrors, "remove sibling journal: "+removeErr.Error())
+		}
+	}
+	report.Residue = discoverInitResidue(plansDir, req.Dir, planDir)
+	// Persist the fully-populated report, including final journal location,
+	// write/finalization errors, and post-finalization residue, before Bubble Tea
+	// receives it. A failure here is still returned independently to the UI.
+	journal.Attempts[attemptIndex] = report
+	if writeErr := deps.writeJournal(report.JournalPath, journal); writeErr != nil {
+		report.JournalWriteErrors = append(report.JournalWriteErrors, "persist completed report: "+writeErr.Error())
+	}
+	return report
+}
+
+func initSubprocessArgs(req *planinit.Request) []string {
 	args := []string{"plan", "init", req.Dir}
 	if req.Recipe != "" {
 		args = append(args, "--recipe", req.Recipe)
@@ -790,8 +974,6 @@ func runInitSubprocess(req *planinit.Request, plansDir string) tea.Cmd {
 		args = append(args, "--force")
 	}
 	if !req.RunInit {
-		// RunInit defaults to true; only pass the override when
-		// the user turned it off in the wizard.
 		args = append(args, "--init=false")
 	}
 	if req.EnvProfile != "" {
@@ -803,27 +985,99 @@ func runInitSubprocess(req *planinit.Request, plansDir string) tea.Cmd {
 	if req.Layout != "" {
 		args = append(args, "--layout", req.Layout)
 	}
-	return func() tea.Msg {
-		journalPath := initJournalPath(plansDir, req.Dir)
-		_ = writeInitJournal(journalPath, initJournal{PlanName: req.Dir, Phase: "running", StartedAt: time.Now()})
-		cmd := delegation.Command("flow", args...)
-		output, err := cmd.CombinedOutput()
-		journal := initJournal{PlanName: req.Dir, Phase: "completed", Output: string(output), FinishedAt: time.Now()}
-		if err != nil {
-			journal.Phase = "failed"
-			journal.Error = err.Error()
-		}
-		finalJournalPath := journalPath
-		planDir := filepath.Join(plansDir, req.Dir)
-		if info, statErr := os.Stat(planDir); statErr == nil && info.IsDir() {
-			finalJournalPath = filepath.Join(planDir, ".init-journal.json")
-		}
-		_ = writeInitJournal(finalJournalPath, journal)
-		if finalJournalPath != journalPath {
-			_ = os.Remove(journalPath)
-		}
-		return initCompletedMsg{output: string(output), err: err}
+	return args
+}
+
+func safeArgv(argv []string) string {
+	data, _ := json.Marshal(argv)
+	return string(data)
+}
+
+func absolutePath(path string) string {
+	if path == "" {
+		return ""
 	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(abs)
+}
+
+func setInitExitCause(report *InitExecutionReport, err error) {
+	if err == nil {
+		report.ExitCause = "completed successfully"
+		code := 0
+		report.ExitCode = &code
+		return
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		report.ExitCause = "could not start: " + err.Error()
+		return
+	}
+	code := exitErr.ExitCode()
+	report.ExitCode = &code
+	report.ExitCause = fmt.Sprintf("exited with status %d", code)
+	if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+		report.Signal = status.Signal().String()
+		report.ExitCause = "terminated by signal " + report.Signal
+	}
+}
+
+func discoverInitResidue(plansDir, planName, planDir string) []string {
+	seen := make(map[string]bool)
+	var residue []string
+	add := func(path string) {
+		if path == "" || seen[path] {
+			return
+		}
+		if _, err := os.Lstat(path); err == nil {
+			seen[path] = true
+			residue = append(residue, path)
+		}
+	}
+	add(planDir)
+	matches, _ := filepath.Glob(filepath.Join(plansDir, ".init-"+filepath.Base(planName)+"*.journal.json"))
+	for _, match := range matches {
+		add(match)
+	}
+	add(filepath.Join(planDir, ".init-journal.json"))
+	return residue
+}
+
+func formatInitFailure(report InitExecutionReport) string {
+	var b strings.Builder
+	b.WriteString("Plan creation failed (edit and submit to retry, or return to Plans):\n")
+	cause := report.ExitCause
+	if cause == "" && report.Err != nil {
+		cause = report.Err.Error()
+	}
+	fmt.Fprintf(&b, "Cause: %s\nCommand: %s\nExecutable: %s\nTarget: %s\nPlans directory: %s\n", cause, report.Command, report.Executable, report.WorkingDirectory, report.PlansDir)
+	if report.Stdout == "" && report.Stderr == "" {
+		b.WriteString("Output: no stdout or stderr was captured\n")
+	} else {
+		if report.Stdout != "" {
+			b.WriteString("Stdout:\n" + report.Stdout)
+			if !strings.HasSuffix(report.Stdout, "\n") {
+				b.WriteByte('\n')
+			}
+		}
+		if report.Stderr != "" {
+			b.WriteString("Stderr:\n" + report.Stderr)
+			if !strings.HasSuffix(report.Stderr, "\n") {
+				b.WriteByte('\n')
+			}
+		}
+	}
+	b.WriteString("Journal: " + report.JournalPath + "\n")
+	for _, writeErr := range report.JournalWriteErrors {
+		b.WriteString("Journal error: " + writeErr + "\n")
+	}
+	for _, path := range report.Residue {
+		b.WriteString("Residue: " + path + "\n")
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // modeForTab maps a tab index to the host's mode enum.
