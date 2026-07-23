@@ -16,6 +16,7 @@ type managedPiRuntimeMetadata struct {
 	Version           string `json:"version"`
 	AuthPath          string `json:"auth_path"`
 	AuthHelper        string `json:"auth_helper"`
+	AuthRuntimeModule string `json:"auth_runtime_module"`
 	IsolationBoundary string `json:"isolation_boundary"`
 }
 
@@ -77,7 +78,12 @@ func requireManagedPiCodexAuth() error {
 	if !strings.HasPrefix(filepath.Clean(metadata.AuthHelper), storePrefix) || filepath.Clean(metadata.AuthPath) != filepath.Join(home, ".pi", "agent", "auth.json") {
 		return fmt.Errorf("managed Pi runtime metadata is unhealthy")
 	}
-	cmd := exec.Command("node", metadata.AuthHelper, "status", "--auth-path", metadata.AuthPath) //nolint:gosec // path is confined to the managed content store above
+	runtimeSuffix := filepath.Join("node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")
+	if !filepath.IsAbs(metadata.AuthRuntimeModule) || !strings.HasSuffix(filepath.Clean(metadata.AuthRuntimeModule), runtimeSuffix) {
+		return fmt.Errorf("managed Pi runtime metadata is unhealthy")
+	}
+	cmd := exec.Command("node", metadata.AuthHelper, "status", "--auth-path", metadata.AuthPath) //nolint:gosec // paths are confined to the managed runtime metadata contract
+	cmd.Env = append(os.Environ(), "GROVE_PI_RUNTIME_MODULE="+metadata.AuthRuntimeModule)
 	cmd.Stderr = io.Discard
 	out, err := cmd.Output()
 	if err != nil || len(out) > 1024 {

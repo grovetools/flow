@@ -25,7 +25,14 @@ func setupManagedPiRuntime(t *testing.T, helperOutput string) {
 	if err := os.MkdirAll(metadataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	metadata := map[string]any{"schema_version": 1, "version": "0.80.10", "auth_path": filepath.Join(home, ".pi", "agent", "auth.json"), "auth_helper": helper, "isolation_boundary": "tart-vm"}
+	runtimeModule := filepath.Join(home, "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "index.js")
+	if err := os.MkdirAll(filepath.Dir(runtimeModule), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runtimeModule, []byte("export {};\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metadata := map[string]any{"schema_version": 1, "version": "0.80.10", "auth_path": filepath.Join(home, ".pi", "agent", "auth.json"), "auth_helper": helper, "auth_runtime_module": runtimeModule, "isolation_boundary": "tart-vm"}
 	data, _ := json.Marshal(metadata)
 	if err := os.WriteFile(filepath.Join(metadataDir, "metadata.json"), data, 0o600); err != nil {
 		t.Fatal(err)
