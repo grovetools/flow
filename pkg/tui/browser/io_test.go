@@ -201,8 +201,12 @@ func TestReconnectUsesFreshFactoryAndClearsFallbackStatus(t *testing.T) {
 
 	updated, cmd := m.Update(planIndexReconnectMsg{})
 	got := updated.(Model)
-	if got.streamGeneration != 5 || cmd == nil {
-		t.Fatalf("reconnect generation=%d cmd=%v", got.streamGeneration, cmd)
+	if got.streamGeneration != 5 || !got.streamConnecting || cmd == nil {
+		t.Fatalf("reconnect generation=%d connecting=%v cmd=%v", got.streamGeneration, got.streamConnecting, cmd)
+	}
+	duplicate, duplicateCmd := got.Update(planIndexReconnectMsg{})
+	if duplicate.(Model).streamGeneration != 5 || duplicateCmd != nil {
+		t.Fatal("a reconnect tick launched a concurrent connection attempt")
 	}
 	connected := cmd().(planIndexConnectedMsg)
 	if calls != 1 || connected.generation != 5 {
@@ -210,10 +214,65 @@ func TestReconnectUsesFreshFactoryAndClearsFallbackStatus(t *testing.T) {
 	}
 	updated, _ = got.Update(connected)
 	got = updated.(Model)
-	if got.dataSource != "daemon live" || got.statusMessage != "" {
-		t.Fatalf("reconnect source/status=%q/%q", got.dataSource, got.statusMessage)
+	if got.dataSource != "daemon live" || got.statusMessage != "" || got.streamConnecting {
+		t.Fatalf("reconnect source/status/connecting=%q/%q/%v", got.dataSource, got.statusMessage, got.streamConnecting)
 	}
 	got.Close()
+}
+
+func TestReconnectCommitsFreshProjectionAtomically(t *testing.T) {
+	oldBeta := &orchestration.Plan{Name: "beta-live", Directory: "/workspace-b/plans/beta-live"}
+	freshBeta := &orchestration.Plan{Name: "beta-live", Directory: oldBeta.Directory}
+	alphaGap := &orchestration.Plan{Name: "alpha-gap", Directory: "/workspace-a/plans/alpha-gap"}
+	updates := make(chan daemon.StateUpdate)
+	m := Model{
+		plans:             []PlanListItem{{Name: "alpha-old", Plan: &orchestration.Plan{Directory: "/workspace-a/plans/alpha-old"}}, {Name: oldBeta.Name, Plan: oldBeta}},
+		cursor:            1,
+		dataSource:        "stale · reconnecting",
+		hasDaemonSnapshot: true,
+		streamGeneration:  5,
+	}
+
+	updated, cmd := m.Update(planIndexConnectedMsg{
+		snapshot: &models.PlanIndexSnapshot{Revision: 12, Plans: []models.PlanSummary{
+			{PlanDir: alphaGap.Directory}, {PlanDir: freshBeta.Directory},
+		}},
+		plans:      []PlanListItem{{Name: alphaGap.Name, Plan: alphaGap}, {Name: freshBeta.Name, Plan: freshBeta}},
+		updates:    updates,
+		cancel:     func() {},
+		generation: 5,
+	})
+	got := updated.(Model)
+	if got.dataSource != "daemon live" || got.statusMessage != "" || got.planIndexRevision != 12 {
+		t.Fatalf("source/status/revision=%q/%q/%d", got.dataSource, got.statusMessage, got.planIndexRevision)
+	}
+	if len(got.plans) != 2 || got.plans[0].Name != "alpha-gap" {
+		t.Fatalf("fresh projection not committed exactly once: %+v", got.plans)
+	}
+	if got.selectedPlanKey() != freshBeta.Directory {
+		t.Fatalf("qualified selection moved to %q", got.selectedPlanKey())
+	}
+	if cmd == nil {
+		t.Fatal("connected projection must begin listening")
+	}
+	got.Close()
+}
+
+func TestBufferedSnapshotRevisionDoesNotTriggerReconnect(t *testing.T) {
+	updates := make(chan daemon.StateUpdate, 1)
+	m := Model{planIndexRevision: 9, dataSource: "daemon live", streamGeneration: 3}
+	updated, cmd := m.Update(planIndexStreamMsg{
+		update:     daemon.StateUpdate{PlanIndex: &models.PlanIndexDelta{Revision: 9}},
+		updates:    updates,
+		generation: 3,
+	})
+	got := updated.(Model)
+	if got.dataSource != "daemon live" || got.streamGeneration != 3 || got.planIndexRevision != 9 {
+		t.Fatalf("buffered revision caused reconnect: source=%q generation=%d revision=%d", got.dataSource, got.streamGeneration, got.planIndexRevision)
+	}
+	if cmd == nil {
+		t.Fatal("buffered revision must keep listening")
+	}
 }
 
 func TestRefreshPreservesQualifiedSelection(t *testing.T) {

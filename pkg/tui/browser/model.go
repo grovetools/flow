@@ -141,6 +141,7 @@ type Model struct {
 	hasDaemonSnapshot bool
 	streamGeneration  uint64
 	streamCancel      context.CancelFunc
+	streamConnecting  bool
 }
 
 // PlanCount returns the number of plans in the browser list.
@@ -248,6 +249,7 @@ func New(cfg Config) Model {
 		dataSource:       "connecting",
 		planSummaries:    make(map[string]models.PlanSummary),
 		streamGeneration: 1,
+		streamConnecting: true,
 	}
 }
 
@@ -255,7 +257,7 @@ func New(cfg Config) Model {
 // load, a top-level git log fetch, and the periodic refresh tick.
 func (m Model) Init() tea.Cmd {
 	if factory := m.daemonClientFactory(); factory != nil {
-		return tea.Batch(connectPlanIndexCmd(factory, m.streamGeneration), fetchGitLogCmd(m.cwdGitRoot))
+		return tea.Batch(connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold), fetchGitLogCmd(m.cwdGitRoot))
 	}
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),

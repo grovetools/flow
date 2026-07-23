@@ -44,12 +44,14 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	workspaceDir := filepath.Dir(plansDir)
 
 	metaModel := view.New(view.Config{
-		WorkspaceDir:        workspaceDir,
-		PlansDir:            plansDir,
-		DaemonClient:        daemonClient,
-		DaemonClientFactory: func() daemon.Client { return daemon.NewWithAutoStart(workspaceDir) },
-		InitialPlan:         plan,
-		InitialGraph:        graph,
+		WorkspaceDir: workspaceDir,
+		PlansDir:     plansDir,
+		DaemonClient: daemonClient,
+		DaemonClientFactory: func() daemon.Client {
+			return daemon.NewWithAutoStartOpts(workspaceDir, daemon.SuppressStartNotice())
+		},
+		InitialPlan:  plan,
+		InitialGraph: graph,
 	})
 
 	host := newStatusTUIHost(metaModel)

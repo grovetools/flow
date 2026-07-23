@@ -88,28 +88,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.cancel()
 			return m, nil
 		}
+		m.streamConnecting = false
+		if msg.err != nil {
+			msg.cancel()
+			m.loading = !m.hasDaemonSnapshot
+			m.statusMessage = ""
+			if m.hasDaemonSnapshot {
+				m.dataSource = "stale · reconnecting"
+				return m, planIndexReconnectTick()
+			}
+			m.dataSource = "local fallback — daemon unavailable"
+			return m, tea.Batch(
+				loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+				fallbackRefreshTick(),
+				planIndexReconnectTick(),
+			)
+		}
 		if m.streamCancel != nil {
 			m.streamCancel()
 		}
+
+		// Commit the source, revision and hydrated rows as one state transition.
+		// Until this point reconnect continues rendering the retained stale
+		// portfolio; it never advertises live data over an older projection.
+		selectedKey := m.selectedPlanKey()
 		m.streamCancel = msg.cancel
 		m.dataSource = "daemon live"
-		// Source state and the durable status line must never contradict.
 		m.statusMessage = ""
+		m.hasDaemonSnapshot = true
+		m.planSummaries = make(map[string]models.PlanSummary)
 		if msg.snapshot != nil {
-			m.hasDaemonSnapshot = true
 			m.planIndexRevision = msg.snapshot.Revision
 			m.planSummaries = make(map[string]models.PlanSummary, len(msg.snapshot.Plans))
 			for _, summary := range msg.snapshot.Plans {
 				m.planSummaries[summary.PlanDir] = summary
 			}
 		}
-		m.loading = true
-		return m, tea.Batch(m.reloadPlansCmd(), listenPlanIndexCmd(msg.updates, msg.generation))
+		m = m.replacePlanRows(msg.plans, selectedKey)
+		return m, listenPlanIndexCmd(msg.updates, msg.generation)
 
 	case planIndexConnectFailedMsg:
 		if msg.generation != m.streamGeneration {
 			return m, nil
 		}
+		m.streamConnecting = false
 		m.loading = !m.hasDaemonSnapshot
 		if m.hasDaemonSnapshot {
 			m.dataSource = "stale · reconnecting"
@@ -117,7 +139,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, planIndexReconnectTick()
 		}
 		m.dataSource = "local fallback — daemon unavailable"
-		m.statusMessage = m.dataSource
+		m.statusMessage = ""
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 			fallbackRefreshTick(),
@@ -128,6 +150,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.streamGeneration {
 			return m, nil
 		}
+		m.streamConnecting = false
 		m.streamCancel = nil
 		if m.hasDaemonSnapshot {
 			m.dataSource = "stale · reconnecting"
@@ -135,17 +158,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, planIndexReconnectTick()
 		}
 		m.dataSource = "local fallback — daemon disconnected"
-		m.statusMessage = m.dataSource
+		m.statusMessage = ""
 		return m, tea.Batch(fallbackRefreshTick(), planIndexReconnectTick())
 
 	case planIndexReconnectMsg:
 		factory := m.daemonClientFactory()
-		if factory == nil || m.dataSource == "daemon live" || m.dataSource == "connecting" {
+		if factory == nil || m.dataSource == "daemon live" || m.streamConnecting {
 			return m, nil
 		}
-		m.dataSource = "connecting"
+		if m.hasDaemonSnapshot {
+			m.dataSource = "stale · reconnecting"
+		} else {
+			m.dataSource = "connecting"
+		}
+		m.statusMessage = ""
+		m.streamConnecting = true
 		m.streamGeneration++
-		return m, connectPlanIndexCmd(factory, m.streamGeneration)
+		return m, connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold)
 
 	case planIndexStreamMsg:
 		if msg.generation != m.streamGeneration {
@@ -162,16 +191,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.reloadPlansCmd())
 		}
 		if delta := msg.update.PlanIndex; delta != nil {
-			if delta.Revision != m.planIndexRevision+1 {
+			// Stream subscription precedes snapshot fetch. A revision already
+			// represented by that snapshot can therefore be buffered on the stream;
+			// ignore it instead of misclassifying it as a gap and reconnecting forever.
+			if delta.Revision <= m.planIndexRevision {
+				return m, tea.Batch(cmds...)
+			}
+			if delta.Revision > m.planIndexRevision+1 {
 				// Pub/sub intentionally drops for slow readers. Reconnect performs a
 				// full snapshot fetch rather than guessing across the gap.
 				if m.streamCancel != nil {
 					m.streamCancel()
 					m.streamCancel = nil
 				}
-				m.dataSource = "connecting"
+				m.dataSource = "stale · reconnecting"
+				m.statusMessage = ""
+				m.streamConnecting = true
 				m.streamGeneration++
-				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration)
+				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration, m.showOnHold)
 			}
 			m.planIndexRevision = delta.Revision
 			for _, dir := range delta.Removed {
@@ -206,24 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.error
 			return m, nil
 		}
-		// Clear any prior error on a successful (re)load — recovery path.
-		m.err = nil
-		// Refresh sorting is updated-time based, so preserving only the numeric
-		// cursor can silently switch the highlighted plan. Re-match by identity.
-		selectedKey := m.selectedPlanKey()
-		m.plans = msg.plans
-		if selectedKey != "" {
-			m.selectPlanKey(selectedKey)
-		}
-		activePlan, _ := state.GetString(stateDir(), coreplan.StateKey)
-		m.activePlan = activePlan
-		if m.cursor >= len(m.plans) {
-			m.cursor = len(m.plans) - 1
-		}
-		if m.cursor < 0 && len(m.plans) > 0 {
-			m.cursor = 0
-		}
-		return m, nil
+		return m.replacePlanRows(msg.plans, m.selectedPlanKey()), nil
 
 	case refreshTickMsg:
 		// Skip heavy I/O if a load is already in-flight or the panel
@@ -258,6 +278,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleKeyMsg dispatches a keyboard event against the current mode
 // (help overlay, notes editor, normal browse). Split from Update so the
 // main switch stays readable.
+func (m Model) replacePlanRows(plans []PlanListItem, selectedKey string) Model {
+	m.loading = false
+	m.initialLoaded = true
+	m.err = nil
+	m.plans = plans
+	if selectedKey != "" {
+		m.selectPlanKey(selectedKey)
+	}
+	activePlan, _ := state.GetString(stateDir(), coreplan.StateKey)
+	m.activePlan = activePlan
+	if m.cursor >= len(m.plans) {
+		m.cursor = len(m.plans) - 1
+	}
+	if m.cursor < 0 && len(m.plans) > 0 {
+		m.cursor = 0
+	}
+	return m
+}
+
 func (m Model) reloadPlansCmd() tea.Cmd {
 	if m.hasDaemonSnapshot {
 		// Commands run concurrently with later Update calls. Copy the revisioned

@@ -31,6 +31,8 @@ type refreshTickMsg time.Time
 
 type planIndexConnectedMsg struct {
 	snapshot   *models.PlanIndexSnapshot
+	plans      []PlanListItem
+	err        error
 	updates    <-chan daemon.StateUpdate
 	cancel     context.CancelFunc
 	generation uint64
@@ -55,7 +57,7 @@ func planIndexReconnectTick() tea.Cmd {
 	return tea.Tick(daemonReconnectInterval, func(time.Time) tea.Msg { return planIndexReconnectMsg{} })
 }
 
-func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64) tea.Cmd {
+func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, showOnHold bool) tea.Cmd {
 	return func() tea.Msg {
 		client := factory()
 		if client == nil {
@@ -74,7 +76,19 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64) tea.Cmd
 			cancel()
 			return planIndexConnectFailedMsg{err: err, generation: generation}
 		}
-		return planIndexConnectedMsg{snapshot: snapshot, updates: updates, cancel: cancel, generation: generation}
+
+		// Hydrate the complete snapshot before reporting a live connection. This
+		// keeps reconnect atomic: the retained stale rows remain visible until
+		// one fresh, revision-qualified projection is ready to replace them.
+		summaries := make(map[string]models.PlanSummary)
+		if snapshot != nil {
+			summaries = make(map[string]models.PlanSummary, len(snapshot.Plans))
+			for _, summary := range snapshot.Plans {
+				summaries[summary.PlanDir] = summary
+			}
+		}
+		plans, projectionErr := loadPortfolio(summaries, showOnHold)
+		return planIndexConnectedMsg{snapshot: snapshot, plans: plans, err: projectionErr, updates: updates, cancel: cancel, generation: generation}
 	}
 }
 
@@ -173,39 +187,44 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool, 
 		generation = revisionAndGeneration[1]
 	}
 	return func() tea.Msg {
-		byPlansDir := make(map[string][]models.PlanSummary)
-		for _, summary := range summaries {
-			if summary.Lifecycle == "finished" || (!showOnHold && summary.Lifecycle == "hold") {
-				continue
-			}
-			byPlansDir[summary.PlansDir] = append(byPlansDir[summary.PlansDir], summary)
-		}
-		var all []PlanListItem
-		for plansDir, group := range byPlansDir {
-			workspaceRoot := ""
-			allowed := make(map[string]struct{}, len(group))
-			for _, summary := range group {
-				workspaceRoot = summary.WorkspaceRoot
-				allowed[summary.PlanDir] = struct{}{}
-			}
-			items, err := loadPlansList(plansDir, workspaceRoot, showOnHold, false)
-			if err != nil {
-				return planListLoadCompleteMsg{error: err, portfolio: true, planIndexRevision: rev, portfolioGeneration: generation}
-			}
-			for _, item := range items {
-				if _, ok := allowed[item.Plan.Directory]; ok {
-					summary := summaries[item.Plan.Directory]
-					item.Workspace = filepath.Base(summary.WorkspaceRoot)
-					item.WorkspaceRoot = summary.WorkspaceRoot
-					item.Repositories = append([]string(nil), summary.Repositories...)
-					item.Selected = summary.Selected
-					all = append(all, item)
-				}
-			}
-		}
-		sort.Slice(all, func(i, j int) bool { return all[i].LastUpdated.After(all[j].LastUpdated) })
-		return planListLoadCompleteMsg{plans: all, portfolio: true, planIndexRevision: rev, portfolioGeneration: generation}
+		plans, err := loadPortfolio(summaries, showOnHold)
+		return planListLoadCompleteMsg{plans: plans, error: err, portfolio: true, planIndexRevision: rev, portfolioGeneration: generation}
 	}
+}
+
+func loadPortfolio(summaries map[string]models.PlanSummary, showOnHold bool) ([]PlanListItem, error) {
+	byPlansDir := make(map[string][]models.PlanSummary)
+	for _, summary := range summaries {
+		if summary.Lifecycle == "finished" || (!showOnHold && summary.Lifecycle == "hold") {
+			continue
+		}
+		byPlansDir[summary.PlansDir] = append(byPlansDir[summary.PlansDir], summary)
+	}
+	var all []PlanListItem
+	for plansDir, group := range byPlansDir {
+		workspaceRoot := ""
+		allowed := make(map[string]struct{}, len(group))
+		for _, summary := range group {
+			workspaceRoot = summary.WorkspaceRoot
+			allowed[summary.PlanDir] = struct{}{}
+		}
+		items, err := loadPlansList(plansDir, workspaceRoot, showOnHold, false)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if _, ok := allowed[item.Plan.Directory]; ok {
+				summary := summaries[item.Plan.Directory]
+				item.Workspace = filepath.Base(summary.WorkspaceRoot)
+				item.WorkspaceRoot = summary.WorkspaceRoot
+				item.Repositories = append([]string(nil), summary.Repositories...)
+				item.Selected = summary.Selected
+				all = append(all, item)
+			}
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].LastUpdated.After(all[j].LastUpdated) })
+	return all, nil
 }
 
 func loadPlansListCmd(plansDirectory, cwdGitRoot string, showOnHold, showArchived bool) tea.Cmd {
