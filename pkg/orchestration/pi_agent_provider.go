@@ -128,6 +128,15 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 		p.log.WithField("session", sessionName).Info("Using existing session for interactive job")
 	}
 
+	// Pi sessions are owned by Flow and scoped to this guest job's artifact
+	// directory. --session-dir is appended after user args so callers cannot
+	// redirect transcripts into HOME or another job.
+	sessionDir, err := preparePiJobSessionDir(plan.Directory, job.ID)
+	if err != nil {
+		return err
+	}
+	agentArgs = append(agentArgs, "--session-dir", sessionDir)
+
 	// Build agent command via the provider registry so the pane command bytes
 	// stay identical with the groveterm/isolated launch paths.
 	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
@@ -289,18 +298,20 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 	// match to sessions started after this launch, so concurrent pi sessions
 	// don't race each other for "newest file".
 	transcriptPath, err := agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
-		Provider:  "pi",
-		WorkDir:   workDir,
-		AfterTime: jobStartTime,
+		Provider:   "pi",
+		WorkDir:    workDir,
+		AfterTime:  jobStartTime,
+		SessionDir: piJobSessionDir(plan.Directory, job.ID),
 	})
 	if err != nil {
 		logger.WithError(err).Warn("Failed to discover pi transcript, retrying...")
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
 			transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
-				Provider:  "pi",
-				WorkDir:   workDir,
-				AfterTime: jobStartTime,
+				Provider:   "pi",
+				WorkDir:    workDir,
+				AfterTime:  jobStartTime,
+				SessionDir: piJobSessionDir(plan.Directory, job.ID),
 			})
 			if err == nil {
 				break

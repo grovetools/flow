@@ -475,6 +475,14 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		}
 	}
 
+	if providerName == "pi" {
+		sessionDir, dirErr := preparePiJobSessionDir(plan.Directory, job.ID)
+		if dirErr != nil {
+			return dirErr
+		}
+		// Append after user arguments so Flow's job-scoped directory wins.
+		agentArgs = append(agentArgs, "--session-dir", sessionDir)
+	}
 	cmd, err := buildHeadlessCommand(ctx, providerName, prompt, agentArgs)
 	if err != nil {
 		ulog.Error("[HEADLESS] Provider cannot run headless").
@@ -624,21 +632,21 @@ func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDi
 	spec, specKnown := LookupAgentProvider(providerName)
 	if specKnown && spec.HeadlessTranscriptDiscovery {
 		var err error
-		transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+		discovery := agentstream.DiscoverOptions{
 			Provider:  providerName,
 			WorkDir:   workDir,
 			AfterTime: startTime,
-		})
+		}
+		if providerName == "pi" {
+			discovery.SessionDir = piJobSessionDir(plan.Directory, job.ID)
+		}
+		transcriptPath, err = agentstream.DiscoverTranscript(discovery)
 		if err != nil {
 			// Retry with backoff — the transcript file appears a beat after the
 			// process starts.
 			for i := 0; i < 10; i++ {
 				time.Sleep(1 * time.Second)
-				transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
-					Provider:  providerName,
-					WorkDir:   workDir,
-					AfterTime: startTime,
-				})
+				transcriptPath, err = agentstream.DiscoverTranscript(discovery)
 				if err == nil {
 					break
 				}

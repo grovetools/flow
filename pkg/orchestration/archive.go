@@ -86,6 +86,55 @@ func archiveRulesFile(plan *Plan, jobID, filename, usedRulesPath string) (string
 	return filepath.Join(".artifacts", jobID, filename), nil
 }
 
+// ArchiveFinalReport snapshots the completed job markdown into its artifact
+// root so a remote fetch returns a stable final report without granting the
+// artifact endpoint access to notebook documents outside .artifacts.
+func ArchiveFinalReport(job *Job, plan *Plan) error {
+	const maxFinalReportBytes = 1 << 20
+	f, err := os.Open(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("open final report: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxFinalReportBytes {
+		return fmt.Errorf("final report must be a regular file no larger than %d bytes", maxFinalReportBytes)
+	}
+	data, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(plan.Directory, ".artifacts", job.ID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".final-report-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, filepath.Join(dir, "final-report.md"))
+}
+
 // ArchiveInteractiveSession copies session metadata and the transcript to the plan's artifacts.
 func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 	ctx := context.Background()

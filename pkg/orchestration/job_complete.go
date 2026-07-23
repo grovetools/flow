@@ -297,6 +297,11 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		} else if !silent {
 			fmt.Println(color.GreenString("*") + " Appended session transcript.")
 		}
+		// Snapshot only after transcript insertion so final-report.md is the
+		// complete, fetchable operator record.
+		if err := ArchiveFinalReport(job, plan); err != nil && !silent {
+			fmt.Printf("Warning: failed to archive final report: %v\n", err)
+		}
 	}
 
 	// Move this job's linked note to completed/. The note is resolved by
