@@ -142,12 +142,8 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	// it (locally, or a fresh satellite dispatch into it) while an unexpired
 	// lease is present, unless --force. `plan` here is still the imported
 	// package — the local *orchestration.Plan below shadows it.
-	if lease, lerr := plan.ReadLease(planDir); lerr == nil && lease != nil && !lease.Expired() && !planRunForce {
-		return fmt.Errorf(
-			"plan %q is leased to satellite %q (job %s, until %s); pass --force to override",
-			filepath.Base(planDir), lease.HolderOrigin, lease.JobID,
-			lease.AcquiredAt.Add(lease.TTL).Format(time.RFC3339),
-		)
+	if err := enforcePlanLease(planDir, planRunForce); err != nil {
+		return err
 	}
 
 	// Load the plan
@@ -593,6 +589,27 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 }
 
 // runSingleJob executes a specific job.
+// enforcePlanLease keeps the advisory override policy while failing closed on
+// an unreadable or malformed claim. Silently treating corruption as absence
+// can permit concurrent laptop and satellite mutation of the same plan.
+func enforcePlanLease(planDir string, force bool) error {
+	lease, err := plan.ReadLease(planDir)
+	if err != nil {
+		if force {
+			return nil
+		}
+		return fmt.Errorf("cannot verify execution lease for plan %q: %w; inspect or remove %s, or pass --force to override", filepath.Base(planDir), err, plan.LeaseFileName)
+	}
+	if lease == nil || lease.Expired() || force {
+		return nil
+	}
+	return fmt.Errorf(
+		"plan %q is leased to satellite %q (job %s, until %s); pass --force to override",
+		filepath.Base(planDir), lease.HolderOrigin, lease.JobID,
+		lease.AcquiredAt.Add(lease.TTL).Format(time.RFC3339),
+	)
+}
+
 func runSingleJob(ctx context.Context, orch *orchestration.Orchestrator, plan *orchestration.Plan, jobFile string, skipConfirm bool) error {
 	// Find the job
 	job, found := plan.GetJobByFilename(jobFile)
