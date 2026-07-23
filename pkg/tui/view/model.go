@@ -139,6 +139,9 @@ type Config struct {
 	// sub-model. May be nil, in which case the status model runs in
 	// orchestrator-only mode.
 	DaemonClient daemon.Client
+	// DaemonClientFactory is passed to the Plans browser so reconnects can
+	// auto-start a daemon instead of retrying a dead startup client.
+	DaemonClientFactory browser.DaemonClientFactory
 	// InitialPlan, if non-nil, causes the meta-panel to start in
 	// status mode targeting this plan instead of the default browser
 	// mode. Used by the flow plan status CLI wrapper so invoking
@@ -208,10 +211,11 @@ type Model struct {
 // is set, in which case it boots straight into status.
 func New(cfg Config) Model {
 	b := browser.New(browser.Config{
-		PlansDir:     cfg.PlansDir,
-		WorkspaceDir: cfg.WorkspaceDir,
-		DaemonClient: cfg.DaemonClient,
-		EmbedMode:    true,
+		PlansDir:            cfg.PlansDir,
+		WorkspaceDir:        cfg.WorkspaceDir,
+		DaemonClient:        cfg.DaemonClient,
+		DaemonClientFactory: cfg.DaemonClientFactory,
+		EmbedMode:           true,
 	})
 	vs := &viewState{
 		cfg:          cfg,

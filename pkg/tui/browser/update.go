@@ -27,10 +27,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case embed.FocusMsg:
 		m.focused = true
 		m.loading = true
-		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
-			fetchGitLogCmd(m.cwdGitRoot),
-		)
+		return m, tea.Batch(m.reloadPlansCmd(), fetchGitLogCmd(m.cwdGitRoot))
 
 	case embed.BlurMsg:
 		// Host withdrew focus. Pause background polling until FocusMsg
@@ -58,10 +55,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// placeholder for the new workspace's first load.
 		m.loading = true
 		m.initialLoaded = false
-		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
-			fetchGitLogCmd(m.cwdGitRoot),
-		)
+		return m, tea.Batch(m.reloadPlansCmd(), fetchGitLogCmd(m.cwdGitRoot))
 
 	case fastForwardMsg:
 		if msg.err != nil {
@@ -87,15 +81,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.output != "" {
 			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s Plan marked for review", theme.IconSuccess))
 		}
-		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
+		return m, m.reloadPlansCmd()
 
 	case planIndexConnectedMsg:
+		if msg.generation != m.streamGeneration {
+			msg.cancel()
+			return m, nil
+		}
 		if m.streamCancel != nil {
 			m.streamCancel()
 		}
 		m.streamCancel = msg.cancel
 		m.dataSource = "daemon live"
+		// Source state and the durable status line must never contradict.
+		m.statusMessage = ""
 		if msg.snapshot != nil {
+			m.hasDaemonSnapshot = true
 			m.planIndexRevision = msg.snapshot.Revision
 			m.planSummaries = make(map[string]models.PlanSummary, len(msg.snapshot.Plans))
 			for _, summary := range msg.snapshot.Plans {
@@ -103,12 +104,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.loading = true
-		return m, tea.Batch(m.reloadPlansCmd(), listenPlanIndexCmd(msg.updates))
+		return m, tea.Batch(m.reloadPlansCmd(), listenPlanIndexCmd(msg.updates, msg.generation))
 
 	case planIndexConnectFailedMsg:
+		if msg.generation != m.streamGeneration {
+			return m, nil
+		}
+		m.loading = !m.hasDaemonSnapshot
+		if m.hasDaemonSnapshot {
+			m.dataSource = "stale · reconnecting"
+			m.statusMessage = ""
+			return m, planIndexReconnectTick()
+		}
 		m.dataSource = "local fallback — daemon unavailable"
 		m.statusMessage = m.dataSource
-		m.loading = true
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 			fallbackRefreshTick(),
@@ -116,20 +125,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case planIndexStreamClosedMsg:
+		if msg.generation != m.streamGeneration {
+			return m, nil
+		}
 		m.streamCancel = nil
+		if m.hasDaemonSnapshot {
+			m.dataSource = "stale · reconnecting"
+			m.statusMessage = ""
+			return m, planIndexReconnectTick()
+		}
 		m.dataSource = "local fallback — daemon disconnected"
 		m.statusMessage = m.dataSource
 		return m, tea.Batch(fallbackRefreshTick(), planIndexReconnectTick())
 
 	case planIndexReconnectMsg:
-		if m.cfg.DaemonClient == nil || m.dataSource == "daemon live" || m.dataSource == "connecting" {
+		factory := m.daemonClientFactory()
+		if factory == nil || m.dataSource == "daemon live" || m.dataSource == "connecting" {
 			return m, nil
 		}
 		m.dataSource = "connecting"
-		return m, connectPlanIndexCmd(m.cfg.DaemonClient)
+		m.streamGeneration++
+		return m, connectPlanIndexCmd(factory, m.streamGeneration)
 
 	case planIndexStreamMsg:
-		cmds := []tea.Cmd{listenPlanIndexCmd(msg.updates)}
+		if msg.generation != m.streamGeneration {
+			return m, nil
+		}
+		cmds := []tea.Cmd{listenPlanIndexCmd(msg.updates, msg.generation)}
 		if snapshot := msg.update.PlanIndexSnapshot; snapshot != nil && snapshot.Revision > m.planIndexRevision {
 			m.planIndexRevision = snapshot.Revision
 			m.planSummaries = make(map[string]models.PlanSummary, len(snapshot.Plans))
@@ -148,7 +170,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.streamCancel = nil
 				}
 				m.dataSource = "connecting"
-				return m, connectPlanIndexCmd(m.cfg.DaemonClient)
+				m.streamGeneration++
+				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration)
 			}
 			m.planIndexRevision = delta.Revision
 			for _, dir := range delta.Removed {
@@ -163,6 +186,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case planListLoadCompleteMsg:
+		// A local load started before daemon recovery, or a projection from an
+		// older index revision, must not replace the qualified portfolio.
+		if m.hasDaemonSnapshot && !msg.portfolio {
+			return m, nil
+		}
+		if msg.portfolio && msg.planIndexRevision != 0 && msg.planIndexRevision != m.planIndexRevision {
+			return m, nil
+		}
 		m.loading = false
 		// Mark the context loaded regardless of success/failure so a
 		// transient failing background tick doesn't drop the user back to
@@ -176,10 +207,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		// Refresh sorting is updated-time based, so preserving only the numeric
 		// cursor can silently switch the highlighted plan. Re-match by identity.
-		selectedName := m.SelectedPlanName()
+		selectedKey := m.selectedPlanKey()
 		m.plans = msg.plans
-		if selectedName != "" {
-			m.SelectPlan(selectedName)
+		if selectedKey != "" {
+			m.selectPlanKey(selectedKey)
 		}
 		activePlan, _ := state.GetString(stateDir(), coreplan.StateKey)
 		m.activePlan = activePlan
@@ -195,7 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Skip heavy I/O if a load is already in-flight or the panel
 		// isn't focused. Keep the tick heartbeat running so resuming
 		// after focus/idle happens on the next period.
-		if m.dataSource == "daemon live" || m.dataSource == "connecting" {
+		if m.dataSource == "daemon live" || m.dataSource == "connecting" || m.hasDaemonSnapshot {
 			return m, nil
 		}
 		if m.loading || !m.focused {
@@ -225,8 +256,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // (help overlay, notes editor, normal browse). Split from Update so the
 // main switch stays readable.
 func (m Model) reloadPlansCmd() tea.Cmd {
-	if m.dataSource == "daemon live" && len(m.planSummaries) > 0 {
-		return loadPortfolioCmd(m.planSummaries, m.showOnHold)
+	if m.hasDaemonSnapshot {
+		// Commands run concurrently with later Update calls. Copy the revisioned
+		// projection so a delta cannot mutate a map while an older load reads it.
+		summaries := make(map[string]models.PlanSummary, len(m.planSummaries))
+		for key, summary := range m.planSummaries {
+			summaries[key] = summary
+		}
+		return loadPortfolioCmd(summaries, m.showOnHold, m.planIndexRevision)
 	}
 	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 }

@@ -30,16 +30,21 @@ import (
 type refreshTickMsg time.Time
 
 type planIndexConnectedMsg struct {
-	snapshot *models.PlanIndexSnapshot
-	updates  <-chan daemon.StateUpdate
-	cancel   context.CancelFunc
+	snapshot   *models.PlanIndexSnapshot
+	updates    <-chan daemon.StateUpdate
+	cancel     context.CancelFunc
+	generation uint64
 }
-type planIndexConnectFailedMsg struct{ err error }
+type planIndexConnectFailedMsg struct {
+	err        error
+	generation uint64
+}
 type planIndexStreamMsg struct {
-	update  daemon.StateUpdate
-	updates <-chan daemon.StateUpdate
+	update     daemon.StateUpdate
+	updates    <-chan daemon.StateUpdate
+	generation uint64
 }
-type planIndexStreamClosedMsg struct{}
+type planIndexStreamClosedMsg struct{ generation uint64 }
 type planIndexReconnectMsg struct{}
 
 func fallbackRefreshTick() tea.Cmd {
@@ -50,39 +55,45 @@ func planIndexReconnectTick() tea.Cmd {
 	return tea.Tick(daemonReconnectInterval, func(time.Time) tea.Msg { return planIndexReconnectMsg{} })
 }
 
-func connectPlanIndexCmd(client daemon.Client) tea.Cmd {
+func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64) tea.Cmd {
 	return func() tea.Msg {
+		client := factory()
+		if client == nil {
+			return planIndexConnectFailedMsg{err: errors.New("daemon client unavailable"), generation: generation}
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		updates, err := client.StreamState(ctx)
 		if err != nil {
 			cancel()
-			return planIndexConnectFailedMsg{err: err}
+			return planIndexConnectFailedMsg{err: err, generation: generation}
 		}
 		fetchCtx, fetchCancel := context.WithTimeout(ctx, 3*time.Second)
 		snapshot, err := client.GetPlanIndex(fetchCtx)
 		fetchCancel()
 		if err != nil {
 			cancel()
-			return planIndexConnectFailedMsg{err: err}
+			return planIndexConnectFailedMsg{err: err, generation: generation}
 		}
-		return planIndexConnectedMsg{snapshot: snapshot, updates: updates, cancel: cancel}
+		return planIndexConnectedMsg{snapshot: snapshot, updates: updates, cancel: cancel, generation: generation}
 	}
 }
 
-func listenPlanIndexCmd(updates <-chan daemon.StateUpdate) tea.Cmd {
+func listenPlanIndexCmd(updates <-chan daemon.StateUpdate, generation uint64) tea.Cmd {
 	return func() tea.Msg {
 		update, ok := <-updates
 		if !ok {
-			return planIndexStreamClosedMsg{}
+			return planIndexStreamClosedMsg{generation: generation}
 		}
-		return planIndexStreamMsg{update: update, updates: updates}
+		return planIndexStreamMsg{update: update, updates: updates, generation: generation}
 	}
 }
 
 // planListLoadCompleteMsg carries the result of an async plans list load.
 type planListLoadCompleteMsg struct {
-	plans []PlanListItem
-	error error
+	plans             []PlanListItem
+	error             error
+	portfolio         bool
+	planIndexRevision uint64
 }
 
 // gitLogMsg carries the result of fetching the top-level workspace git log.
@@ -152,7 +163,11 @@ func fetchRepoGitLogCmd(repoPath string) tea.Cmd {
 	}
 }
 
-func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool) tea.Cmd {
+func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool, revision ...uint64) tea.Cmd {
+	var rev uint64
+	if len(revision) > 0 {
+		rev = revision[0]
+	}
 	return func() tea.Msg {
 		byPlansDir := make(map[string][]models.PlanSummary)
 		for _, summary := range summaries {
@@ -171,7 +186,7 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool) 
 			}
 			items, err := loadPlansList(plansDir, workspaceRoot, showOnHold, false)
 			if err != nil {
-				return planListLoadCompleteMsg{error: err}
+				return planListLoadCompleteMsg{error: err, portfolio: true, planIndexRevision: rev}
 			}
 			for _, item := range items {
 				if _, ok := allowed[item.Plan.Directory]; ok {
@@ -185,7 +200,7 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool) 
 			}
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].LastUpdated.After(all[j].LastUpdated) })
-		return planListLoadCompleteMsg{plans: all}
+		return planListLoadCompleteMsg{plans: all, portfolio: true, planIndexRevision: rev}
 	}
 }
 

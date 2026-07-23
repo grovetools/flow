@@ -59,6 +59,8 @@ type PlanListItem struct {
 // wrapper and the terminal meta-panel) construct a Config and pass it to
 // New so daemon clients, keymaps, and workspace paths are injected from
 // outside rather than rebuilt inside the TUI.
+type DaemonClientFactory func() daemon.Client
+
 type Config struct {
 	// PlansDir is the directory that holds the plan subdirectories this
 	// browser will list. Required.
@@ -74,6 +76,10 @@ type Config struct {
 	// features (e.g. job counts from live state) can be wired in without
 	// changing the embedding contract.
 	DaemonClient daemon.Client
+	// DaemonClientFactory creates a fresh, auto-start-capable client for each
+	// stream connection attempt. Without it reconnecting a dead scoped daemon
+	// would keep retrying the stale client captured at startup.
+	DaemonClientFactory DaemonClientFactory
 	// KeyMap, if non-nil, overrides the default browser keymap. Leave
 	// nil to use NewKeyMap(config.LoadDefault()).
 	KeyMap *KeyMap
@@ -132,14 +138,17 @@ type Model struct {
 	dataSource        string
 	planIndexRevision uint64
 	planSummaries     map[string]models.PlanSummary
+	hasDaemonSnapshot bool
+	streamGeneration  uint64
 	streamCancel      context.CancelFunc
 }
 
 // PlanCount returns the number of plans in the browser list.
 func (m Model) PlanCount() int { return len(m.plans) }
 
-// SelectedPlanName returns the stable identity under the cursor. Hosts use it
-// to restore portfolio history after opening and closing a plan workspace.
+// SelectedPlanName returns the display identity under the cursor. Hosts use it
+// for the legacy single-workspace navigation contract; portfolio refreshes use
+// selectedPlanKey so duplicate slugs in different workspaces stay distinct.
 func (m Model) SelectedPlanName() string {
 	if m.cursor < 0 || m.cursor >= len(m.plans) {
 		return ""
@@ -153,6 +162,30 @@ func (m Model) SelectedPlanName() string {
 func (m *Model) SelectPlan(name string) bool {
 	for i := range m.plans {
 		if m.plans[i].Name == name {
+			m.cursor = i
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) selectedPlanKey() string {
+	if m.cursor < 0 || m.cursor >= len(m.plans) {
+		return ""
+	}
+	if plan := m.plans[m.cursor].Plan; plan != nil && plan.Directory != "" {
+		return plan.Directory
+	}
+	return m.plans[m.cursor].Name
+}
+
+func (m *Model) selectPlanKey(key string) bool {
+	for i := range m.plans {
+		candidate := m.plans[i].Name
+		if plan := m.plans[i].Plan; plan != nil && plan.Directory != "" {
+			candidate = plan.Directory
+		}
+		if candidate == key {
 			m.cursor = i
 			return true
 		}
@@ -201,33 +234,44 @@ func New(cfg Config) Model {
 		Build()
 
 	return Model{
-		cfg:            cfg,
-		plans:          []PlanListItem{},
-		cursor:         0,
-		loading:        true,
-		focused:        !cfg.EmbedMode,
-		plansDirectory: cfg.PlansDir,
-		cwdGitRoot:     cfg.WorkspaceDir,
-		help:           helpModel,
-		keys:           km,
-		showGitLog:     false,
-		embedMode:      cfg.EmbedMode,
-		dataSource:     "connecting",
-		planSummaries:  make(map[string]models.PlanSummary),
+		cfg:              cfg,
+		plans:            []PlanListItem{},
+		cursor:           0,
+		loading:          true,
+		focused:          !cfg.EmbedMode,
+		plansDirectory:   cfg.PlansDir,
+		cwdGitRoot:       cfg.WorkspaceDir,
+		help:             helpModel,
+		keys:             km,
+		showGitLog:       false,
+		embedMode:        cfg.EmbedMode,
+		dataSource:       "connecting",
+		planSummaries:    make(map[string]models.PlanSummary),
+		streamGeneration: 1,
 	}
 }
 
 // Init is the standard bubbletea entry point: kicks off an initial plans
 // load, a top-level git log fetch, and the periodic refresh tick.
 func (m Model) Init() tea.Cmd {
-	if m.cfg.DaemonClient != nil {
-		return tea.Batch(connectPlanIndexCmd(m.cfg.DaemonClient), fetchGitLogCmd(m.cwdGitRoot))
+	if factory := m.daemonClientFactory(); factory != nil {
+		return tea.Batch(connectPlanIndexCmd(factory, m.streamGeneration), fetchGitLogCmd(m.cwdGitRoot))
 	}
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
 		fetchGitLogCmd(m.cwdGitRoot),
 		fallbackRefreshTick(),
 	)
+}
+
+func (m Model) daemonClientFactory() DaemonClientFactory {
+	if m.cfg.DaemonClientFactory != nil {
+		return m.cfg.DaemonClientFactory
+	}
+	if m.cfg.DaemonClient != nil {
+		return func() daemon.Client { return m.cfg.DaemonClient }
+	}
+	return nil
 }
 
 // Close releases resources owned by the browser. Currently the browser

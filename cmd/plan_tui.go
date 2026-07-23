@@ -82,9 +82,10 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()
 	model := view.New(view.Config{
-		PlansDir:     plansDirectory,
-		WorkspaceDir: cwdGitRoot,
-		DaemonClient: daemonClient,
+		PlansDir:            plansDirectory,
+		WorkspaceDir:        cwdGitRoot,
+		DaemonClient:        daemonClient,
+		DaemonClientFactory: func() daemon.Client { return daemon.NewWithAutoStart(cwdGitRoot) },
 	})
 
 	// Use the same coordinator host as `flow plan status --tui`. Enter now

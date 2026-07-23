@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -154,23 +155,121 @@ func TestPlanIndexDeltaAdvancesRevisionAndKeepsListening(t *testing.T) {
 	}
 }
 
-func TestRefreshPreservesSelectionByPlanName(t *testing.T) {
-	first := &orchestration.Plan{Name: "first"}
-	selected := &orchestration.Plan{Name: "selected"}
+func TestDaemonLossRetainsQualifiedPortfolioAsStale(t *testing.T) {
+	selected := &orchestration.Plan{Name: "beta", Directory: "/workspace-b/plans/beta"}
 	m := Model{
-		plans:  []PlanListItem{{Name: first.Name, Plan: first}, {Name: selected.Name, Plan: selected}},
+		plans:             []PlanListItem{{Name: "alpha", Plan: &orchestration.Plan{Name: "alpha", Directory: "/workspace-a/plans/alpha"}}, {Name: "beta", Plan: selected}},
+		cursor:            1,
+		dataSource:        "daemon live",
+		hasDaemonSnapshot: true,
+		streamGeneration:  3,
+	}
+
+	updated, cmd := m.Update(planIndexStreamClosedMsg{generation: 3})
+	got := updated.(Model)
+	if got.dataSource != "stale · reconnecting" {
+		t.Fatalf("dataSource=%q", got.dataSource)
+	}
+	if len(got.plans) != 2 || got.selectedPlanKey() != selected.Directory {
+		t.Fatalf("stale portfolio/selection changed: plans=%d key=%q", len(got.plans), got.selectedPlanKey())
+	}
+	if got.statusMessage != "" {
+		t.Fatalf("contradictory status remained: %q", got.statusMessage)
+	}
+	if cmd == nil {
+		t.Fatal("daemon loss must schedule reconnect")
+	}
+}
+
+func TestReconnectUsesFreshFactoryAndClearsFallbackStatus(t *testing.T) {
+	updates := make(chan daemon.StateUpdate)
+	calls := 0
+	client := &fakePlanIndexClient{
+		updates:  updates,
+		snapshot: &models.PlanIndexSnapshot{Revision: 8},
+	}
+	m := Model{
+		cfg: Config{DaemonClientFactory: func() daemon.Client {
+			calls++
+			return client
+		}},
+		dataSource:        "stale · reconnecting",
+		statusMessage:     "local fallback — daemon unavailable",
+		hasDaemonSnapshot: true,
+		streamGeneration:  4,
+	}
+
+	updated, cmd := m.Update(planIndexReconnectMsg{})
+	got := updated.(Model)
+	if got.streamGeneration != 5 || cmd == nil {
+		t.Fatalf("reconnect generation=%d cmd=%v", got.streamGeneration, cmd)
+	}
+	connected := cmd().(planIndexConnectedMsg)
+	if calls != 1 || connected.generation != 5 {
+		t.Fatalf("factory calls=%d message generation=%d", calls, connected.generation)
+	}
+	updated, _ = got.Update(connected)
+	got = updated.(Model)
+	if got.dataSource != "daemon live" || got.statusMessage != "" {
+		t.Fatalf("reconnect source/status=%q/%q", got.dataSource, got.statusMessage)
+	}
+	got.Close()
+}
+
+func TestRefreshPreservesQualifiedSelection(t *testing.T) {
+	workspaceA := &orchestration.Plan{Name: "same", Directory: "/workspace-a/plans/same"}
+	selected := &orchestration.Plan{Name: "same", Directory: "/workspace-b/plans/same"}
+	m := Model{
+		plans:  []PlanListItem{{Name: workspaceA.Name, Plan: workspaceA}, {Name: selected.Name, Plan: selected}},
 		cursor: 1,
 	}
 
 	updated, _ := m.Update(planListLoadCompleteMsg{plans: []PlanListItem{
 		{Name: selected.Name, Plan: selected},
-		{Name: first.Name, Plan: first},
+		{Name: workspaceA.Name, Plan: workspaceA},
 	}})
 	got := updated.(Model)
-	if got.cursor != 0 || got.SelectedPlanName() != selected.Name {
-		t.Fatalf("selection moved after reorder: cursor=%d name=%q", got.cursor, got.SelectedPlanName())
+	if got.cursor != 0 || got.selectedPlanKey() != selected.Directory {
+		t.Fatalf("selection moved after reorder: cursor=%d key=%q", got.cursor, got.selectedPlanKey())
 	}
 }
+
+func TestOlderPortfolioLoadCannotOverwriteNewRevision(t *testing.T) {
+	current := &orchestration.Plan{Name: "current", Directory: "/plans/current"}
+	m := Model{
+		plans:             []PlanListItem{{Name: current.Name, Plan: current}},
+		hasDaemonSnapshot: true,
+		planIndexRevision: 9,
+	}
+	old := &orchestration.Plan{Name: "old", Directory: "/plans/old"}
+	updated, _ := m.Update(planListLoadCompleteMsg{
+		plans:             []PlanListItem{{Name: old.Name, Plan: old}},
+		portfolio:         true,
+		planIndexRevision: 8,
+	})
+	got := updated.(Model)
+	if len(got.plans) != 1 || got.plans[0].Name != "current" {
+		t.Fatalf("stale generation replaced portfolio: %+v", got.plans)
+	}
+}
+
+// Embedding daemon.Client keeps the fake focused on the three methods used by
+// the plan-index connection command.
+type fakePlanIndexClient struct {
+	daemon.Client
+	updates  <-chan daemon.StateUpdate
+	snapshot *models.PlanIndexSnapshot
+}
+
+func (f *fakePlanIndexClient) StreamState(context.Context) (<-chan daemon.StateUpdate, error) {
+	return f.updates, nil
+}
+
+func (f *fakePlanIndexClient) GetPlanIndex(context.Context) (*models.PlanIndexSnapshot, error) {
+	return f.snapshot, nil
+}
+
+func (f *fakePlanIndexClient) Close() error { return nil }
 
 func TestArchivedRowRefusesMutatingActions(t *testing.T) {
 	plansDir := setupArchiveFixture(t)
