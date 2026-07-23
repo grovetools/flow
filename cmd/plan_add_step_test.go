@@ -103,6 +103,47 @@ func TestRunPlanAddStep(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "parent job ID persists as lineage without dependency",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan", Jobs: []*orchestration.Job{{
+					ID: "parent-id", Title: "Parent", Filename: "01-parent.md", Type: "interactive_agent", Status: "running",
+				}}}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type: "interactive_agent", Title: "Child", ParentJobID: "parent-id", Provider: "pi",
+				PromptFile: createTempFile(t, "Do child work"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Child")
+				if job.ParentJobID != "parent-id" {
+					t.Errorf("ParentJobID = %q, want parent-id", job.ParentJobID)
+				}
+				if len(job.DependsOn) != 0 {
+					t.Errorf("parent lineage changed dependencies: %v", job.DependsOn)
+				}
+				if !job.IsRunnable() {
+					t.Error("child with a running parent must remain runnable")
+				}
+			},
+		},
+		{
+			name: "invalid parent job ID",
+			setupPlan: func(t *testing.T, dir string) {
+				if err := orchestration.SavePlan(dir, &orchestration.Plan{Name: "test-plan"}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type: "interactive_agent", Title: "Child", ParentJobID: "missing", Provider: "pi",
+				PromptFile: createTempFile(t, "Do child work"),
+			},
+			wantErr: true,
+		},
+		{
 			name: "invalid dependency",
 			setupPlan: func(t *testing.T, dir string) {
 				plan := &orchestration.Plan{Name: "test-plan"}

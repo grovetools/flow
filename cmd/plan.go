@@ -156,6 +156,7 @@ var (
 	planAddType                string
 	planAddTitle               string
 	planAddDependsOn           []string
+	planAddParentJobID         string
 	planAddPromptFile          string
 	planAddPrompt              string
 	planAddInteractive         bool
@@ -239,6 +240,7 @@ func NewPlanCmd() *cobra.Command {
    • file             - Static file content, no execution`)
 	planAddCmd.Flags().StringVar(&planAddTitle, "title", "", "Job title")
 	planAddCmd.Flags().StringSliceVar(&planAddDependsOn, "depends-on", nil, "Dependencies (job filenames)")
+	planAddCmd.Flags().StringVar(&planAddParentJobID, "parent-job-id", "", "Owning parent Flow job ID (lineage only; does not create a dependency)")
 	planAddCmd.Flags().StringVarP(&planAddPromptFile, "prompt-file", "f", "", "File containing the prompt")
 	planAddCmd.Flags().StringVarP(&planAddPrompt, "prompt", "p", "", "Inline prompt text (alternative to --prompt-file)")
 	planAddCmd.Flags().BoolVarP(&planAddInteractive, "interactive", "i", false, "Interactive mode")
@@ -391,6 +393,7 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		Type:                planAddType,
 		Title:               planAddTitle,
 		DependsOn:           planAddDependsOn,
+		ParentJobID:         planAddParentJobID,
 		PromptFile:          planAddPromptFile,
 		Prompt:              planAddPrompt,
 		Interactive:         planAddInteractive,

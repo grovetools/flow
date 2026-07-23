@@ -151,6 +151,7 @@ type Job struct {
 
 	// Dependencies and context
 	DependsOn   []string `yaml:"depends_on,omitempty" json:"depends_on,omitempty" jsonschema:"description=List of job IDs that must complete before this job runs"`
+	ParentJobID string   `yaml:"parent_job_id,omitempty" json:"parent_job_id,omitempty" jsonschema:"description=Owning parent Flow job ID for dynamically spawned child jobs; does not affect scheduling"`
 	Include     []string `yaml:"include,omitempty" json:"include,omitempty" jsonschema:"description=Files or globs to include as context in the job prompt"`
 	SourceBlock string   `yaml:"source_block,omitempty" json:"source_block,omitempty" jsonschema:"description=Reference to a named block in another job to use as input"`
 	SourceFile  string   `yaml:"source_file,omitempty" json:"source_file,omitempty" jsonschema:"description=Path to source file for context"`

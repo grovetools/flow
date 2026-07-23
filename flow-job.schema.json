@@ -149,6 +149,10 @@
       "type": "array",
       "description": "List of job IDs that must complete before this job runs"
     },
+    "parent_job_id": {
+      "type": "string",
+      "description": "Owning parent Flow job ID for dynamically spawned child jobs; does not affect scheduling"
+    },
     "include": {
       "items": {
         "type": "string"

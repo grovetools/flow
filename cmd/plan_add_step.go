@@ -26,6 +26,7 @@ type PlanAddStepCmd struct {
 	Type                string   `flag:"t" default:"interactive_agent" help:"Job type: oneshot, chat, interactive_agent, isolated_agent, headless_agent, shell, or file"`
 	Title               string   `flag:"" help:"Job title"`
 	DependsOn           []string `flag:"d" help:"Dependencies (job filenames)"`
+	ParentJobID         string   `flag:"" help:"Owning parent Flow job ID (lineage only; does not create a dependency)"`
 	PromptFile          string   `flag:"f" help:"File containing the prompt"`
 	IncludeFiles        []string `flag:"" sep:"," help:"Comma-separated list of files to include as context"`
 	Prompt              string   `flag:"p" help:"Inline prompt text"`
@@ -259,6 +260,16 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 
 	if job == nil {
 		return fmt.Errorf("failed to create job: no job details collected")
+	}
+
+	// parent_job_id is ownership lineage, not dependency lineage. Validate it
+	// against the exact loaded plan and stamp it only after all template/flag
+	// merging has completed.
+	if cmd.ParentJobID != "" {
+		if _, found := plan.GetJobByID(cmd.ParentJobID); !found {
+			return fmt.Errorf("parent job ID not found in this plan: %s", cmd.ParentJobID)
+		}
+		job.ParentJobID = cmd.ParentJobID
 	}
 
 	// Add-time lint warnings for agent-responded chats (warn, never error):

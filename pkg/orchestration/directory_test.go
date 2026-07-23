@@ -1,7 +1,9 @@
 package orchestration
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,13 +150,14 @@ func TestAddJob(t *testing.T) {
 
 	// Add second job with dependencies
 	job2 := &Job{
-		ID:         "test-job-2",
-		Title:      "Second Test Job",
-		Type:       JobTypeAgent,
-		Status:     JobStatusPending,
-		DependsOn:  []string{"01-first-test-job.md"},
-		Worktree:   "feature-branch",
-		PromptBody: "Implement the feature",
+		ID:          "test-job-2",
+		Title:       "Second Test Job",
+		Type:        JobTypeAgent,
+		Status:      JobStatusPending,
+		DependsOn:   []string{"01-first-test-job.md"},
+		ParentJobID: "test-job-1",
+		Worktree:    "feature-branch",
+		PromptBody:  "Implement the feature",
 	}
 
 	if _, err := AddJob(plan, job2); err != nil {
@@ -173,6 +176,87 @@ func TestAddJob(t *testing.T) {
 		if !strings.Contains(contentStr, "worktree: feature-branch") {
 			t.Errorf("Second job missing worktree")
 		}
+		if !strings.Contains(contentStr, "parent_job_id: test-job-1") {
+			t.Errorf("Second job missing parent_job_id")
+		}
+	}
+	loaded, err := LoadJob(expectedFile2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ParentJobID != "test-job-1" {
+		t.Errorf("ParentJobID round trip = %q, want test-job-1", loaded.ParentJobID)
+	}
+	if !loaded.IsRunnable() {
+		t.Error("parent_job_id must not affect IsRunnable")
+	}
+}
+
+func TestAddJobConcurrentProcessesAllocateUniqueFiles(t *testing.T) {
+	if os.Getenv("FLOW_ADD_JOB_HELPER") == "1" {
+		dir := os.Getenv("FLOW_ADD_JOB_DIR")
+		index := os.Getenv("FLOW_ADD_JOB_INDEX")
+		plan, err := LoadPlan(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = AddJob(plan, &Job{
+			ID:         "process-job-" + index,
+			Title:      "Concurrent Job " + index,
+			Type:       JobTypeInteractiveAgent,
+			Provider:   "pi",
+			Status:     JobStatusPending,
+			PromptBody: "work",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	dir := t.TempDir()
+	const creators = 12
+	commands := make([]*exec.Cmd, creators)
+	for i := 0; i < creators; i++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestAddJobConcurrentProcessesAllocateUniqueFiles$")
+		cmd.Env = append(os.Environ(),
+			"FLOW_ADD_JOB_HELPER=1",
+			"FLOW_ADD_JOB_DIR="+dir,
+			fmt.Sprintf("FLOW_ADD_JOB_INDEX=%02d", i),
+		)
+		commands[i] = cmd
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start creator %d: %v", i, err)
+		}
+	}
+	for i, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("creator %d: %v", i, err)
+		}
+	}
+
+	files, err := ListJobs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != creators {
+		t.Fatalf("got %d job files, want %d: %v", len(files), creators, files)
+	}
+	for i, file := range files {
+		wantPrefix := fmt.Sprintf("%02d-", i+1)
+		if !strings.HasPrefix(file, wantPrefix) {
+			t.Errorf("file %d = %q, want prefix %q", i, file, wantPrefix)
+		}
+	}
+	plan, err := LoadPlan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.JobsByID) != creators {
+		t.Fatalf("loaded %d unique job IDs, want %d", len(plan.JobsByID), creators)
+	}
+	if _, err := os.Stat(filepath.Join(dir, planMutationLockName)); !os.IsNotExist(err) {
+		t.Errorf("plan mutation lock remains after creators exited: %v", err)
 	}
 }
 

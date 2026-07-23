@@ -229,13 +229,17 @@ func TestAppendProviderJobArgs_NonClaudeProviders(t *testing.T) {
 	})
 
 	t.Run("empty model and effort leaves args untouched", func(t *testing.T) {
-		base := []string{"--full-auto"}
-		args, err := appendProviderJobArgs(specForTest(t, "codex"), base, &Job{ID: "j"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if strings.Join(args, " ") != "--full-auto" {
-			t.Errorf("expected args unchanged, got %v", args)
+		for _, provider := range []string{"codex", "pi"} {
+			t.Run(provider, func(t *testing.T) {
+				base := []string{"--full-auto"}
+				args, err := appendProviderJobArgs(specForTest(t, provider), base, &Job{ID: "j"})
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if strings.Join(args, " ") != "--full-auto" {
+					t.Errorf("expected args unchanged with no --model, got %v", args)
+				}
+			})
 		}
 	})
 

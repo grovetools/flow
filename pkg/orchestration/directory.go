@@ -15,6 +15,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
+	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -90,6 +91,56 @@ func getWorkspaceContext(dir string) (repository, branch, worktree string) {
 	return repoName, branchName, worktree
 }
 
+const (
+	planMutationLockName    = ".flow-jobs.lock"
+	planMutationLockTimeout = 10 * time.Second
+	planMutationLockStale   = 2 * time.Minute
+)
+
+// acquirePlanMutationLock serializes job-number allocation and creation across
+// processes. O_CREATE|O_EXCL is the atomic primitive here; a PID and age check
+// makes the lock recoverable after a creator crashes.
+func acquirePlanMutationLock(dir string) (func(), error) {
+	lockPath := filepath.Join(dir, planMutationLockName)
+	deadline := time.Now().Add(planMutationLockTimeout)
+
+	for {
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = fmt.Fprintf(file, "%d\n", os.Getpid())
+			_ = file.Sync()
+			return func() {
+				_ = file.Close()
+				_ = os.Remove(lockPath)
+			}, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("creating plan mutation lock: %w", err)
+		}
+
+		stale := false
+		if content, readErr := os.ReadFile(lockPath); readErr == nil {
+			var pid int
+			if _, scanErr := fmt.Sscanf(string(content), "%d", &pid); scanErr == nil {
+				stale = !process.IsProcessAlive(pid)
+			}
+		}
+		if !stale {
+			if info, statErr := os.Stat(lockPath); statErr == nil {
+				stale = time.Since(info.ModTime()) > planMutationLockStale
+			}
+		}
+		if stale {
+			_ = os.Remove(lockPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for plan job-creation lock %s", lockPath)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
 // AddJob adds a new job to the plan directory.
 func AddJob(plan *Plan, job *Job) (string, error) {
 	// Validate job
@@ -126,12 +177,24 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 		}
 	}
 
-	// Check for duplicate ID
+	unlock, err := acquirePlanMutationLock(plan.Directory)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
+	// Check the caller's snapshot and the authoritative directory while holding
+	// the plan lock. Separate flow processes hold independently loaded Plan values.
 	if existing, exists := plan.JobsByID[job.ID]; exists {
 		return "", fmt.Errorf("job with ID %q already exists in file %s", job.ID, existing.Filename)
 	}
+	if diskPlan, loadErr := LoadPlan(plan.Directory); loadErr != nil {
+		return "", fmt.Errorf("reloading plan under job-creation lock: %w", loadErr)
+	} else if existing, exists := diskPlan.JobsByID[job.ID]; exists {
+		return "", fmt.Errorf("job with ID %q already exists in file %s", job.ID, existing.Filename)
+	}
 
-	// Generate filename
+	// Generate filename while holding the cross-process lock.
 	nextNum, err := GetNextJobNumber(plan.Directory)
 	if err != nil {
 		return "", fmt.Errorf("getting next job number: %w", err)
@@ -174,9 +237,32 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 		return "", fmt.Errorf("generating job content: %w", err)
 	}
 
-	// Write job file
-	if err := os.WriteFile(jobFilePath, content, 0o600); err != nil {
-		return "", fmt.Errorf("writing job file: %w", err)
+	// Write completely off-path, then publish with link(2). The hard-link step
+	// is atomic and refuses an existing destination, so readers never observe a
+	// partial job and a non-cooperating writer is never overwritten.
+	tmp, err := os.CreateTemp(plan.Directory, ".flow-job-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("creating temporary job file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("setting temporary job permissions: %w", err)
+	}
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("writing temporary job file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("syncing temporary job file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("closing temporary job file: %w", err)
+	}
+	if err := os.Link(tmpPath, jobFilePath); err != nil {
+		return "", fmt.Errorf("publishing job file: %w", err)
 	}
 
 	// Update plan structures
