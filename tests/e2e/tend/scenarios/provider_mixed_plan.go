@@ -94,10 +94,12 @@ func createMixedProviderPlanScenario() *harness.Scenario {
 			ctx.Set("plan_path", planPath)
 
 			for _, j := range jobs {
-				args := []string{"plan", "add", planName,
+				args := []string{
+					"plan", "add", planName,
 					"--type", "interactive_agent",
 					"--title", j.title,
-					"-p", fmt.Sprintf("Run under the %s provider", j.wantProvider)}
+					"-p", fmt.Sprintf("Run under the %s provider", j.wantProvider),
+				}
 				if j.providerFlag != "" {
 					args = append(args, "--provider", j.providerFlag)
 				}

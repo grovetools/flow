@@ -64,8 +64,10 @@ func TestWriteMetricsRecordWithConfigVector(t *testing.T) {
 	plan := &Plan{Directory: dir}
 	job := &Job{ID: "job-1", Type: JobTypeHeadlessAgent}
 
-	v := record.ConfigVector{Model: "claude-opus-4-8", Provider: "claude",
-		Components: map[string]string{"briefing": "h1"}}
+	v := record.ConfigVector{
+		Model: "claude-opus-4-8", Provider: "claude",
+		Components: map[string]string{"briefing": "h1"},
+	}
 	if err := WriteConfigVectorArtifact(dir, "job-1", v); err != nil {
 		t.Fatalf("stamp vector: %v", err)
 	}
@@ -733,8 +735,10 @@ func TestAdherenceDetFold(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 		states := []SkillFidelityState{
-			{Skill: "a", Status: "completed",
-				ArtifactsExpected: []string{"x", "y"}, ArtifactsProduced: []string{"x"}},
+			{
+				Skill: "a", Status: "completed",
+				ArtifactsExpected: []string{"x", "y"}, ArtifactsProduced: []string{"x"},
+			},
 			{Skill: "b", Status: "failed", ArtifactsExpected: []string{"z"}},
 			{Skill: "c", Status: "skipped"},
 			{Skill: "d", Status: "pending"},
