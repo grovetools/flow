@@ -191,6 +191,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hasDaemonSnapshot && !msg.portfolio {
 			return m, nil
 		}
+		if msg.portfolio && msg.portfolioGeneration != 0 && msg.portfolioGeneration != m.streamGeneration {
+			return m, nil
+		}
 		if msg.portfolio && msg.planIndexRevision != 0 && msg.planIndexRevision != m.planIndexRevision {
 			return m, nil
 		}
@@ -263,7 +266,7 @@ func (m Model) reloadPlansCmd() tea.Cmd {
 		for key, summary := range m.planSummaries {
 			summaries[key] = summary
 		}
-		return loadPortfolioCmd(summaries, m.showOnHold, m.planIndexRevision)
+		return loadPortfolioCmd(summaries, m.showOnHold, m.planIndexRevision, m.streamGeneration)
 	}
 	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 }

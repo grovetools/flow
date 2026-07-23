@@ -240,16 +240,29 @@ func TestOlderPortfolioLoadCannotOverwriteNewRevision(t *testing.T) {
 		plans:             []PlanListItem{{Name: current.Name, Plan: current}},
 		hasDaemonSnapshot: true,
 		planIndexRevision: 9,
+		streamGeneration:  4,
 	}
 	old := &orchestration.Plan{Name: "old", Directory: "/plans/old"}
 	updated, _ := m.Update(planListLoadCompleteMsg{
-		plans:             []PlanListItem{{Name: old.Name, Plan: old}},
-		portfolio:         true,
-		planIndexRevision: 8,
+		plans:               []PlanListItem{{Name: old.Name, Plan: old}},
+		portfolio:           true,
+		planIndexRevision:   8,
+		portfolioGeneration: 4,
 	})
 	got := updated.(Model)
 	if len(got.plans) != 1 || got.plans[0].Name != "current" {
-		t.Fatalf("stale generation replaced portfolio: %+v", got.plans)
+		t.Fatalf("stale revision replaced portfolio: %+v", got.plans)
+	}
+
+	updated, _ = m.Update(planListLoadCompleteMsg{
+		plans:               []PlanListItem{{Name: old.Name, Plan: old}},
+		portfolio:           true,
+		planIndexRevision:   9,
+		portfolioGeneration: 3,
+	})
+	got = updated.(Model)
+	if len(got.plans) != 1 || got.plans[0].Name != "current" {
+		t.Fatalf("stale stream generation replaced portfolio: %+v", got.plans)
 	}
 }
 

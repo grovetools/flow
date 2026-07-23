@@ -90,10 +90,11 @@ func listenPlanIndexCmd(updates <-chan daemon.StateUpdate, generation uint64) te
 
 // planListLoadCompleteMsg carries the result of an async plans list load.
 type planListLoadCompleteMsg struct {
-	plans             []PlanListItem
-	error             error
-	portfolio         bool
-	planIndexRevision uint64
+	plans               []PlanListItem
+	error               error
+	portfolio           bool
+	planIndexRevision   uint64
+	portfolioGeneration uint64
 }
 
 // gitLogMsg carries the result of fetching the top-level workspace git log.
@@ -163,10 +164,13 @@ func fetchRepoGitLogCmd(repoPath string) tea.Cmd {
 	}
 }
 
-func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool, revision ...uint64) tea.Cmd {
-	var rev uint64
-	if len(revision) > 0 {
-		rev = revision[0]
+func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool, revisionAndGeneration ...uint64) tea.Cmd {
+	var rev, generation uint64
+	if len(revisionAndGeneration) > 0 {
+		rev = revisionAndGeneration[0]
+	}
+	if len(revisionAndGeneration) > 1 {
+		generation = revisionAndGeneration[1]
 	}
 	return func() tea.Msg {
 		byPlansDir := make(map[string][]models.PlanSummary)
@@ -186,7 +190,7 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool, 
 			}
 			items, err := loadPlansList(plansDir, workspaceRoot, showOnHold, false)
 			if err != nil {
-				return planListLoadCompleteMsg{error: err, portfolio: true, planIndexRevision: rev}
+				return planListLoadCompleteMsg{error: err, portfolio: true, planIndexRevision: rev, portfolioGeneration: generation}
 			}
 			for _, item := range items {
 				if _, ok := allowed[item.Plan.Directory]; ok {
@@ -200,7 +204,7 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold bool, 
 			}
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].LastUpdated.After(all[j].LastUpdated) })
-		return planListLoadCompleteMsg{plans: all, portfolio: true, planIndexRevision: rev}
+		return planListLoadCompleteMsg{plans: all, portfolio: true, planIndexRevision: rev, portfolioGeneration: generation}
 	}
 }
 
