@@ -483,6 +483,22 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case key.Matches(msg, m.keys.ViewGit):
+		if !m.selectedBindingValid("inspect git") {
+			return m, nil
+		}
+		if m.cursor >= 0 && m.cursor < len(m.plans) {
+			target := m.plans[m.cursor].ActionTarget
+			if target.PlanDir == "" || target.ContainerPath == "" {
+				m.statusMessage = theme.DefaultTheme.Error.Render("Cannot inspect git: qualified workspace target unavailable")
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				return embed.OpenGitRequest{Target: target, Operation: embed.GitOperationInspect}
+			}
+		}
+		return m, nil
+
 	case key.Matches(msg, m.keys.OpenPlan):
 		if !m.selectedBindingValid("open") {
 			return m, nil

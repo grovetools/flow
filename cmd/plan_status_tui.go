@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/components/logviewer"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/util/delegation"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/tui/browser"
@@ -87,6 +88,14 @@ type statusTUIHost struct {
 	model view.Model
 }
 
+type gitViewerClosedMsg struct{ err error }
+
+func gitViewerExecCommand(req embed.OpenGitRequest) *exec.Cmd {
+	return delegation.Command("git-viewer", "view",
+		"--dir", req.Target.ContainerPath,
+		"--initial-operation", string(req.Operation))
+}
+
 func newStatusTUIHost(m view.Model) statusTUIHost {
 	return statusTUIHost{model: m}
 }
@@ -105,6 +114,25 @@ func (h statusTUIHost) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// completion (add-job, finish-plan) internally. Only quit
 		// if the inner model re-emits a close request.
 		updated, cmd := h.model.Update(msg)
+		if vm, ok := updated.(view.Model); ok {
+			h.model = vm
+		}
+		return h, cmd
+
+	case embed.OpenGitRequest:
+		// Standalone Flow suspends in the same terminal. The target is the
+		// qualified container carried by the request; no chdir/CWD discovery.
+		if msg.Target.ContainerPath == "" {
+			return h, nil
+		}
+		return h, tea.ExecProcess(gitViewerExecCommand(msg), func(err error) tea.Msg {
+			return gitViewerClosedMsg{err: err}
+		})
+
+	case gitViewerClosedMsg:
+		// Re-focus the preserved meta-panel after Git Viewer exits. Its qualified
+		// Plans cursor/scroll state was never replaced while the child ran.
+		updated, cmd := h.model.Update(embed.FocusMsg{})
 		if vm, ok := updated.(view.Model); ok {
 			h.model = vm
 		}

@@ -23,6 +23,7 @@ type KeyMap struct {
 	End               key.Binding
 	ViewPlan          key.Binding
 	OpenPlan          key.Binding
+	ViewGit           key.Binding
 	FinishPlan        key.Binding
 	NewPlan           key.Binding
 	SetActive         key.Binding
@@ -54,6 +55,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			k.End,
 			k.ViewPlan,
 			k.OpenPlan,
+			k.ViewGit,
 		},
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
@@ -80,7 +82,7 @@ func (k KeyMap) Sections() []keymap.Section {
 	return []keymap.Section{
 		{
 			Name:     "Navigation",
-			Bindings: []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Home, k.End, k.ViewPlan, k.OpenPlan},
+			Bindings: []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Home, k.End, k.ViewPlan, k.OpenPlan, k.ViewGit},
 		},
 		{
 			Name: "Actions",
@@ -137,6 +139,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("o"),
 			key.WithHelp("o", "open plan workspace"),
 		),
+		ViewGit: key.NewBinding(
+			key.WithKeys("V"),
+			key.WithHelp("V", "inspect in Git Viewer"),
+		),
 		FinishPlan: key.NewBinding(
 			key.WithKeys("ctrl+x"),
 			key.WithHelp("ctrl+x", "finish plan"),
@@ -183,5 +189,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 	}
 	keymap.ApplyTUIOverrides(cfg, "flow", "plan-list", &km)
+	// Mutation intentionally remains unavailable until U/M are routed through
+	// the shared preview/confirmation lifecycle service. This slice ships only
+	// the read-only V handoff.
+	km.FastForwardUpdate.SetEnabled(false)
+	km.FastForwardMain.SetEnabled(false)
 	return km
 }

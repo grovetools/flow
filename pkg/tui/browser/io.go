@@ -389,9 +389,16 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold, showArchived b
 	bindings := coreplan.ResolvePlanBindings(bindingRequests)
 
 	var items []PlanListItem
-	// Hoist workspace discovery out of the per-plan loop. It walks the
-	// full ecosystem and used to dominate CPU on plans with .Repos set.
+	// Hoist canonical workspace discovery out of the per-plan loop. The same
+	// immutable snapshot expands qualified action targets and powers status
+	// enrichment; actions never start a second scan or rediscover from CWD.
 	var provider *workspace.Provider
+	for _, binding := range bindings {
+		if binding.Valid() {
+			provider, _ = planutil.DiscoverWorkspaceProvider()
+			break
+		}
+	}
 
 	for _, entry := range entries {
 		plan := entry.plan
@@ -436,8 +443,14 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold, showArchived b
 			ReviewStatus:  formatConfigStatus(plan.Config),
 			Archived:      entry.archived,
 		}
+		if plan.Config != nil {
+			item.Repositories = append([]string(nil), plan.Config.Repos...)
+		}
 		if entry.archived {
 			item.ReviewStatus = "Archived"
+		}
+		if target, targetErr := coreplan.ResolvePlanActionTarget(item.Binding, item.Repositories, provider); targetErr == nil {
+			item.ActionTarget = target
 		}
 
 		if worktree != "" {
@@ -461,13 +474,6 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold, showArchived b
 			}
 
 			if gitRoot != "" {
-				if provider == nil {
-					p, perr := planutil.DiscoverWorkspaceProvider()
-					if perr == nil {
-						provider = p
-					}
-				}
-
 				worktreePath, ok := planutil.ResolveWorktreePath(gitRoot, worktree, provider)
 				if !ok {
 					worktreePath, ok = workspace.FindWorktreePath(gitRoot, worktree)

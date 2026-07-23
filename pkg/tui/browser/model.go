@@ -51,6 +51,7 @@ type PlanListItem struct {
 	EcosystemRepoStatuses []planutil.EcosystemRepoStatus
 	Key                   coreplan.PlanKey
 	Binding               coreplan.PlanBinding
+	ActionTarget          coreplan.PlanActionTarget
 	// Archived marks a plan loaded from the <plansDir>/.archive scan.
 	// Archived rows are read-only in the browser: mutating row-actions
 	// are refused and the row renders dimmed.
