@@ -81,13 +81,62 @@ type AgentProviderSpec struct {
 	// attempt agentstream transcript discovery after launch.
 	HeadlessTranscriptDiscovery bool
 
+	// PiRuntime parameterizes providers that use Pi's launch/session protocol.
+	// This lets rebranded distros share the implementation without inheriting
+	// stock Pi's binary or config roots.
+	PiRuntime *PiRuntimeDescriptor
+
 	// newTmuxProvider constructs the provider's legacy tmux-based
 	// InteractiveAgentProvider with flow.agent_env injected.
 	newTmuxProvider func(agentEnv map[string]string) InteractiveAgentProvider
 }
 
-// defaultAgentProviderName is the provider used when neither the job nor the
-// flow config selects one (backward compatibility).
+// PiRuntimeDescriptor is the product-specific portion of a Pi-family
+// provider. ConfigDirName is both the project resource directory and the
+// basename of the global ~/.<name>/agent root. ManagedCodexAuth is reserved
+// for the stock guest profile provisioned by grove satellite auth.
+type PiRuntimeDescriptor struct {
+	Name             string
+	Binary           string
+	ConfigDirName    string
+	ManagedCodexAuth bool
+}
+
+func newPiProviderSpec(runtime PiRuntimeDescriptor) *AgentProviderSpec {
+	headless := func(prompt string, agentArgs []string) *exec.Cmd {
+		// Pi print mode consumes piped stdin. Append -p after configured args so
+		// it cannot consume a following flag value as a positional prompt.
+		args := append([]string{}, agentArgs...)
+		args = append(args, "-p")
+		cmd := exec.Command(runtime.Binary, args...)
+		cmd.Stdin = strings.NewReader(prompt)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		return cmd
+	}
+	return &AgentProviderSpec{
+		Name:                        runtime.Name,
+		Binary:                      runtime.Binary,
+		SupportsHeadless:            true,
+		NewHeadlessCommand:          headless,
+		BuildShellCommand:           positionalShellCommand(runtime.Binary),
+		ModelFlag:                   "--model",
+		EffortFlag:                  "",
+		DefaultInputMode:            "standard",
+		SessionRegistration:         SessionRegistrationDaemon,
+		ProviderEnv:                 runtime.Name,
+		HeadlessTranscriptDiscovery: true,
+		PiRuntime:                   &runtime,
+		newTmuxProvider: func(agentEnv map[string]string) InteractiveAgentProvider {
+			p := newPiAgentProvider(runtime)
+			p.agentEnv = agentEnv
+			return p
+		},
+	}
+}
+
+// defaultAgentProviderName is intentionally unchanged: product runtimes are
+// selected explicitly by job or flow profile and never alter the ecosystem
+// fallback.
 const defaultAgentProviderName = "claude"
 
 // agentProviderRegistry holds all known agent providers, keyed by name.
@@ -143,51 +192,8 @@ var agentProviderRegistry = map[string]*AgentProviderSpec{
 			return p
 		},
 	},
-	"pi": {
-		Name:             "pi",
-		Binary:           "pi",
-		SupportsHeadless: true,
-		NewHeadlessCommand: func(prompt string, agentArgs []string) *exec.Cmd {
-			// pi headless: --print/-p enters print mode, and the prompt is
-			// piped via stdin like the claude headless path (pi reads all of
-			// piped stdin as the initial prompt: readPipedStdin in
-			// packages/coding-agent/src/main.ts, combined into the initial
-			// message by src/cli/initial-message.ts). -p is appended AFTER the
-			// provider args so it can never swallow a following flag value as
-			// a positional message (args.ts only consumes the next token when
-			// it doesn't start with "-").
-			args := append([]string{}, agentArgs...)
-			args = append(args, "-p")
-			cmd := exec.Command("pi", args...)
-			cmd.Stdin = strings.NewReader(prompt)
-			// Detach the process: place it in its own process group so signals
-			// sent to the daemon don't propagate to the agent.
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-			return cmd
-		},
-		// pi auto-submits a positional argument as the first prompt in the
-		// interactive TUI (packages/coding-agent/src/modes/interactive/
-		// interactive-mode.ts), so the claude/codex positional shape works.
-		BuildShellCommand: positionalShellCommand("pi"),
-		// pi accepts --model <pattern> (optionally provider/id, and a
-		// ":<thinking>" suffix); the CLI owns validation
-		// (packages/coding-agent/src/cli/args.ts).
-		ModelFlag: "--model",
-		// pi has no effort flag. Its closest analogue is --thinking / the
-		// ":<thinking>" model suffix, which is not effort semantics — reject
-		// job effort rather than mistranslating it.
-		EffortFlag:                  "",
-		ValidateJobModel:            nil, // pi owns its model patterns (provider/id, fuzzy match)
-		DefaultInputMode:            "standard",
-		SessionRegistration:         SessionRegistrationDaemon,
-		ProviderEnv:                 "pi",
-		HeadlessTranscriptDiscovery: true,
-		newTmuxProvider: func(agentEnv map[string]string) InteractiveAgentProvider {
-			p := NewPiAgentProvider()
-			p.agentEnv = agentEnv
-			return p
-		},
-	},
+	"pi":          newPiProviderSpec(PiRuntimeDescriptor{Name: "pi", Binary: "pi", ConfigDirName: ".pi", ManagedCodexAuth: true}),
+	"grove-agent": newPiProviderSpec(PiRuntimeDescriptor{Name: "grove-agent", Binary: "grove-agent", ConfigDirName: ".grove-agent"}),
 	"opencode": {
 		Name:             "opencode",
 		Binary:           "opencode",

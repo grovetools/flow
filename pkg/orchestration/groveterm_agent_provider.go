@@ -51,6 +51,19 @@ func NewGrovetermAgentProvider(spec *AgentProviderSpec, autoSplit bool, agentTar
 // Launch implements InteractiveAgentProvider. It registers a session intent
 // with the daemon and then requests groveterm to spawn a native agent pane.
 func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
+	if p.spec.PiRuntime != nil {
+		if p.spec.PiRuntime.ManagedCodexAuth {
+			if err := requireManagedPiCodexAuth(); err != nil {
+				return err
+			}
+		}
+		sessionDir, err := preparePiJobSessionDir(plan.Directory, job.ID)
+		if err != nil {
+			return err
+		}
+		agentArgs = append(agentArgs, "--session-dir", sessionDir)
+	}
+
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -202,22 +215,24 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		_ = agentstream.CleanupPIDFile(job.ID)
 	}
 
-	// Discover transcript path using agentstream
-	var transcriptPath string
-	transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+	// Discover transcript path using the product descriptor. Rebranded Pi
+	// providers emit Pi v3 files but keep their provider identity in records.
+	discovery := agentstream.DiscoverOptions{
 		Provider:  p.spec.Name,
 		WorkDir:   workDir,
 		AfterTime: jobStartTime,
-	})
+	}
+	if p.spec.PiRuntime != nil {
+		discovery.Provider = "pi"
+		discovery.SessionDir = piJobSessionDir(plan.Directory, job.ID)
+	}
+	var transcriptPath string
+	transcriptPath, err = agentstream.DiscoverTranscript(discovery)
 	if err != nil {
 		logger.WithError(err).Warn("Failed to discover transcript via agentstream, retrying...")
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
-			transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
-				Provider:  p.spec.Name,
-				WorkDir:   workDir,
-				AfterTime: jobStartTime,
-			})
+			transcriptPath, err = agentstream.DiscoverTranscript(discovery)
 			if err == nil {
 				break
 			}
@@ -236,7 +251,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		switch p.spec.Name {
 		case "codex":
 			nativeID = codexNativeSessionID(transcriptPath)
-		case "pi":
+		case "pi", "grove-agent":
 			nativeID = piNativeSessionID(transcriptPath)
 		default:
 			nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")

@@ -469,13 +469,14 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		return fmt.Errorf("failed to change to worktree directory: %w", err)
 	}
 
-	if providerName == "pi" {
+	spec, _ := LookupAgentProvider(providerName)
+	if spec != nil && spec.PiRuntime != nil && spec.PiRuntime.ManagedCodexAuth {
 		if err := requireManagedPiCodexAuth(); err != nil {
 			return err
 		}
 	}
 
-	if providerName == "pi" {
+	if spec != nil && spec.PiRuntime != nil {
 		sessionDir, dirErr := preparePiJobSessionDir(plan.Directory, job.ID)
 		if dirErr != nil {
 			return dirErr
@@ -637,7 +638,9 @@ func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDi
 			WorkDir:   workDir,
 			AfterTime: startTime,
 		}
-		if providerName == "pi" {
+		if spec.PiRuntime != nil {
+			// Product provider names differ, but both runtimes emit Pi v3 JSONL.
+			discovery.Provider = "pi"
 			discovery.SessionDir = piJobSessionDir(plan.Directory, job.ID)
 		}
 		transcriptPath, err = agentstream.DiscoverTranscript(discovery)

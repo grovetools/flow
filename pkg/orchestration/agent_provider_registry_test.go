@@ -16,13 +16,13 @@ func specForTest(t *testing.T, name string) *AgentProviderSpec {
 
 func TestAgentProviderRegistry_Names(t *testing.T) {
 	names := AgentProviderNames()
-	want := []string{"claude", "codex", "opencode", "pi"}
+	want := []string{"claude", "codex", "grove-agent", "opencode", "pi"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("expected sorted provider names %v, got %v", want, names)
 	}
 
 	headless := headlessAgentProviderNames()
-	wantHeadless := []string{"claude", "opencode", "pi"}
+	wantHeadless := []string{"claude", "grove-agent", "opencode", "pi"}
 	if strings.Join(headless, ",") != strings.Join(wantHeadless, ",") {
 		t.Errorf("expected headless providers %v, got %v", wantHeadless, headless)
 	}
@@ -32,7 +32,7 @@ func TestValidateAgentProviderName(t *testing.T) {
 	if err := ValidateAgentProviderName(""); err != nil {
 		t.Errorf("empty provider name should be valid (fallback), got: %v", err)
 	}
-	for _, name := range []string{"claude", "codex", "opencode", "pi"} {
+	for _, name := range []string{"claude", "codex", "grove-agent", "opencode", "pi"} {
 		if err := ValidateAgentProviderName(name); err != nil {
 			t.Errorf("provider %q should be valid, got: %v", name, err)
 		}
@@ -41,7 +41,7 @@ func TestValidateAgentProviderName(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unregistered provider")
 	}
-	if !strings.Contains(err.Error(), "gemini") || !strings.Contains(err.Error(), "claude, codex, opencode, pi") {
+	if !strings.Contains(err.Error(), "gemini") || !strings.Contains(err.Error(), "claude, codex, grove-agent, opencode, pi") {
 		t.Errorf("error should name the provider and list available ones, got: %v", err)
 	}
 }
@@ -126,10 +126,21 @@ func TestBuildShellCommand_Shapes(t *testing.T) {
 		}
 	})
 
-	t.Run("pi positional", func(t *testing.T) {
+	t.Run("pi family is parameterized", func(t *testing.T) {
 		got := specForTest(t, "pi").BuildShellCommand([]string{"--model", "sonnet"}, "instr")
 		if got != `pi --model sonnet "instr"` {
 			t.Errorf("unexpected pi command: %s", got)
+		}
+		grove := specForTest(t, "grove-agent")
+		if got := grove.BuildShellCommand(nil, "instr"); got != `grove-agent "instr"` {
+			t.Errorf("unexpected grove-agent command: %s", got)
+		}
+		if grove.PiRuntime == nil || grove.PiRuntime.ConfigDirName != ".grove-agent" || grove.PiRuntime.ManagedCodexAuth {
+			t.Errorf("grove-agent runtime descriptor = %#v", grove.PiRuntime)
+		}
+		stock := specForTest(t, "pi").PiRuntime
+		if stock == nil || stock.ConfigDirName != ".pi" || !stock.ManagedCodexAuth {
+			t.Errorf("stock Pi runtime descriptor = %#v", stock)
 		}
 	})
 }
@@ -151,6 +162,10 @@ func TestPiHeadlessCommand_StdinPromptAndPrintFlag(t *testing.T) {
 	}
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setpgid {
 		t.Error("headless pi should run in its own process group (Setpgid)")
+	}
+	grove := specForTest(t, "grove-agent").NewHeadlessCommand("do it", nil)
+	if strings.Join(grove.Args, " ") != "grove-agent -p" {
+		t.Errorf("grove-agent args = %v", grove.Args)
 	}
 }
 

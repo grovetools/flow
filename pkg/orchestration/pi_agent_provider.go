@@ -29,21 +29,39 @@ import (
 // discovery via agentstream (AfterTime-scoped), then ConfirmSession with a
 // filesystem-registry fallback.
 type PiAgentProvider struct {
-	log      *logrus.Entry
-	ulog     *grovelogging.UnifiedLogger
-	agentEnv map[string]string // flow.agent_env injected into the agent process
+	log          *logrus.Entry
+	ulog         *grovelogging.UnifiedLogger
+	agentEnv     map[string]string // flow.agent_env injected into the agent process
+	providerName string
+	runtime      PiRuntimeDescriptor
 }
 
 func NewPiAgentProvider() *PiAgentProvider {
+	return newPiAgentProvider(PiRuntimeDescriptor{Name: "pi", Binary: "pi", ConfigDirName: ".pi", ManagedCodexAuth: true})
+}
+
+func NewPiAgentProviderFor(providerName string) *PiAgentProvider {
+	spec, ok := LookupAgentProvider(providerName)
+	if !ok || spec.PiRuntime == nil {
+		panic("NewPiAgentProviderFor called with non-Pi provider " + providerName)
+	}
+	return newPiAgentProvider(*spec.PiRuntime)
+}
+
+func newPiAgentProvider(runtime PiRuntimeDescriptor) *PiAgentProvider {
 	return &PiAgentProvider{
-		log:  grovelogging.NewLogger("grove-flow"),
-		ulog: grovelogging.NewUnifiedLogger("grove-flow"),
+		log:          grovelogging.NewLogger("grove-flow"),
+		ulog:         grovelogging.NewUnifiedLogger("grove-flow"),
+		providerName: runtime.Name,
+		runtime:      runtime,
 	}
 }
 
 func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
-	if err := requireManagedPiCodexAuth(); err != nil {
-		return err
+	if p.runtime.ManagedCodexAuth {
+		if err := requireManagedPiCodexAuth(); err != nil {
+			return err
+		}
 	}
 	// Update job status to running
 	job.Status = JobStatusRunning
@@ -76,7 +94,7 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 
 	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
 		JobID:        job.ID,
-		Provider:     "pi",
+		Provider:     p.providerName,
 		JobFilePath:  job.FilePath,
 		PlanName:     plan.Name,
 		Title:        job.Title,
@@ -177,7 +195,7 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	configPath := strings.ReplaceAll(AgentConfigArtifactPath(plan.Directory, job.ID), "'", "'\\''")
-	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='pi' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_CONFIG_FILE='%s' ",
+	envPrefix := agentEnvInline(p.agentEnv) + fmt.Sprintf("GROVE_AGENT_PROVIDER='%s' ", p.providerName) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_CONFIG_FILE='%s' ",
 		job.ID, job.FilePath, plan.Name, escapedTitle, configPath)
 	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
@@ -242,7 +260,7 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 // startup in the pi source), so the standard positional briefing instruction
 // works unchanged.
 func (p *PiAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePath string, agentArgs []string) (string, error) {
-	spec, _ := LookupAgentProvider("pi")
+	spec, _ := LookupAgentProvider(p.providerName)
 	return spec.BuildShellCommand(agentArgs, buildBriefingInstruction(briefingFilePath)), nil
 }
 
@@ -278,7 +296,7 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		time.Sleep(500 * time.Millisecond)
 		maxPIDRetries := 30
 		for i := 0; i < maxPIDRetries; i++ {
-			piPID, pidErr = FindPiPIDForPane(targetPane)
+			piPID, pidErr = findPiPIDForPane(targetPane, p.runtime.Binary)
 			if pidErr == nil && piPID > 0 {
 				break
 			}
@@ -348,7 +366,7 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		metadata := sessions.SessionMetadata{
 			SessionID:        job.ID,
 			ClaudeSessionID:  nativeID,
-			Provider:         "pi",
+			Provider:         p.providerName,
 			PID:              piPID,
 			WorkingDirectory: workDir,
 			User:             user,
@@ -399,6 +417,10 @@ func piNativeSessionID(transcriptPath string) string {
 // FindPiPIDForPane finds the PID of the 'pi' process running within a specific
 // tmux pane by traversing the process tree from the pane's shell.
 func FindPiPIDForPane(targetPane string) (int, error) {
+	return findPiPIDForPane(targetPane, "pi")
+}
+
+func findPiPIDForPane(targetPane, binary string) (int, error) {
 	engine, err := mux.DetectMuxEngine(context.Background())
 	if err != nil {
 		return 0, fmt.Errorf("mux engine not available: %w", err)
@@ -409,6 +431,6 @@ func FindPiPIDForPane(targetPane string) (int, error) {
 		return 0, fmt.Errorf("failed to get pane PID: %w", err)
 	}
 
-	// Find the 'pi' process that is a descendant of that shell.
-	return process.FindDescendantPID(shellPID, "pi")
+	// Find this Pi-family runtime process beneath the pane shell.
+	return process.FindDescendantPID(shellPID, binary)
 }

@@ -272,6 +272,9 @@ func seedTrustForAddedWorktree(ctx context.Context, worktreePath string, union [
 		if seedErr := pitrust.SeedTrust(piPath); seedErr != nil {
 			fmt.Printf("Warning: failed to pre-seed pi trust: %v\n", seedErr)
 		}
+		if seedErr := pitrust.SeedTrustForConfigDir(".grove-agent", piPath); seedErr != nil {
+			fmt.Printf("Warning: failed to pre-seed grove-agent trust: %v\n", seedErr)
+		}
 	}
 
 	// Gate: grove only touches ~/.claude.json when this worktree's resolved
