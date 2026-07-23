@@ -469,6 +469,12 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		return fmt.Errorf("failed to change to worktree directory: %w", err)
 	}
 
+	if providerName == "pi" {
+		if err := requireManagedPiCodexAuth(); err != nil {
+			return err
+		}
+	}
+
 	cmd, err := buildHeadlessCommand(ctx, providerName, prompt, agentArgs)
 	if err != nil {
 		ulog.Error("[HEADLESS] Provider cannot run headless").

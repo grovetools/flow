@@ -42,6 +42,9 @@ func NewPiAgentProvider() *PiAgentProvider {
 }
 
 func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
+	if err := requireManagedPiCodexAuth(); err != nil {
+		return err
+	}
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
