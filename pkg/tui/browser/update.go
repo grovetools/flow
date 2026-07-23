@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -59,14 +58,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gitLogContent = ""
 		m.gitLogError = nil
 		return m, m.reloadPlansCmd()
-
-	case fastForwardMsg:
-		if msg.err != nil {
-			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error: %s", msg.err.Error()))
-		} else {
-			m.statusMessage = theme.DefaultTheme.Success.Render(fmt.Sprintf("%s %s", theme.IconSuccess, msg.message))
-		}
-		return m, nil
 
 	case gitLogMsg:
 		m.gitLogContent = msg.content
@@ -580,42 +571,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case key.Matches(msg, m.keys.FastForwardUpdate):
-		if m.selectedArchived() {
-			m.statusMessage = archivedReadOnlyMessage
-			return m, nil
-		}
-		if !m.selectedBindingValid("update") {
-			return m, nil
-		}
-		if m.cursor >= 0 && m.cursor < len(m.plans) {
-			selectedPlan := m.plans[m.cursor]
-			if selectedPlan.MergeStatus == "Needs Rebase" || selectedPlan.MergeStatus == "Behind" ||
-				strings.Contains(selectedPlan.MergeStatus, "Rebase") || strings.Contains(selectedPlan.MergeStatus, "Behind") {
-				m.statusMessage = "Updating branch from main..."
-				return m, fastForwardUpdateCmd(selectedPlan)
-			}
-			m.statusMessage = theme.DefaultTheme.Error.Render("Branch is not in a state that can be updated (status: " + selectedPlan.MergeStatus + ")")
-		}
-		return m, nil
-
-	case key.Matches(msg, m.keys.FastForwardMain):
-		if m.selectedArchived() {
-			m.statusMessage = archivedReadOnlyMessage
-			return m, nil
-		}
-		if !m.selectedBindingValid("merge") {
-			return m, nil
-		}
-		if m.cursor >= 0 && m.cursor < len(m.plans) {
-			selectedPlan := m.plans[m.cursor]
-			if selectedPlan.MergeStatus != "Ready" && !strings.Contains(selectedPlan.MergeStatus, "Ready") {
-				m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot merge: branch is not ready (status: %s). Use 'U' to update first.", selectedPlan.MergeStatus))
-				return m, nil
-			}
-			m.statusMessage = "Merging branch to main..."
-			return m, fastForwardMainCmd(selectedPlan)
-		}
+	case key.Matches(msg, m.keys.FastForwardUpdate), key.Matches(msg, m.keys.FastForwardMain):
+		// Plans U/M remain intentionally disabled until the following adapter
+		// slice can open Git Viewer's shared preview/confirmation UI. Keeping the
+		// old browser-local mutation loops unreachable prevents CWD-derived or
+		// stale rendered-status decisions from bypassing planops.
+		m.statusMessage = theme.DefaultTheme.Warning.Render("Update and Merge are temporarily disabled; inspect with V")
 		return m, nil
 
 	case key.Matches(msg, m.keys.ToggleGitLog):
