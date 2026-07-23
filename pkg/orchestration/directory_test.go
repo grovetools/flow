@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGetNextJobNumber(t *testing.T) {
@@ -255,8 +256,84 @@ func TestAddJobConcurrentProcessesAllocateUniqueFiles(t *testing.T) {
 	if len(plan.JobsByID) != creators {
 		t.Fatalf("loaded %d unique job IDs, want %d", len(plan.JobsByID), creators)
 	}
-	if _, err := os.Stat(filepath.Join(dir, planMutationLockName)); !os.IsNotExist(err) {
-		t.Errorf("plan mutation lock remains after creators exited: %v", err)
+	// Advisory lock files persist, but the released lock must be immediately reusable.
+	unlock, err := acquirePlanMutationLock(dir)
+	if err != nil {
+		t.Fatalf("reacquire plan mutation lock: %v", err)
+	}
+	unlock()
+}
+
+func TestPlanMutationLockBlocksContendingProcess(t *testing.T) {
+	if os.Getenv("FLOW_LOCK_HELPER") == "1" {
+		dir := os.Getenv("FLOW_LOCK_DIR")
+		unlock, err := acquirePlanMutationLock(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unlock()
+		if err := os.WriteFile(os.Getenv("FLOW_LOCK_READY"), []byte("ready"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		release := os.Getenv("FLOW_LOCK_RELEASE")
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if _, err := os.Stat(release); err == nil {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("timed out waiting for lock release")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "helper-ready")
+	release := filepath.Join(dir, "helper-release")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestPlanMutationLockBlocksContendingProcess$")
+	cmd.Env = append(os.Environ(),
+		"FLOW_LOCK_HELPER=1",
+		"FLOW_LOCK_DIR="+dir,
+		"FLOW_LOCK_READY="+ready,
+		"FLOW_LOCK_RELEASE="+release,
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill() }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for lock helper")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	releaseResult := make(chan error, 1)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		releaseResult <- os.WriteFile(release, []byte("release"), 0o600)
+	}()
+	started := time.Now()
+	unlock, err := acquirePlanMutationLock(dir)
+	if err != nil {
+		t.Fatalf("contending acquire: %v", err)
+	}
+	waited := time.Since(started)
+	unlock()
+	if err := <-releaseResult; err != nil {
+		t.Fatalf("release lock helper: %v", err)
+	}
+	if waited < 250*time.Millisecond {
+		t.Fatalf("contending acquire waited only %v; advisory lock did not serialize processes", waited)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("lock helper: %v", err)
 	}
 }
 

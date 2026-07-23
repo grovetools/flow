@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,11 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/google/uuid"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
-	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -94,51 +95,33 @@ func getWorkspaceContext(dir string) (repository, branch, worktree string) {
 const (
 	planMutationLockName    = ".flow-jobs.lock"
 	planMutationLockTimeout = 10 * time.Second
-	planMutationLockStale   = 2 * time.Minute
+	planMutationLockRetry   = 25 * time.Millisecond
 )
 
 // acquirePlanMutationLock serializes job-number allocation and creation across
-// processes. O_CREATE|O_EXCL is the atomic primitive here; a PID and age check
-// makes the lock recoverable after a creator crashes.
+// processes with an OS advisory lock held by an open descriptor. The lock file
+// is intentionally persistent: deleting a pathname cannot invalidate or steal
+// another process's live lock.
 func acquirePlanMutationLock(dir string) (func(), error) {
 	lockPath := filepath.Join(dir, planMutationLockName)
-	deadline := time.Now().Add(planMutationLockTimeout)
+	fileLock := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), planMutationLockTimeout)
+	defer cancel()
 
-	for {
-		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			_, _ = fmt.Fprintf(file, "%d\n", os.Getpid())
-			_ = file.Sync()
-			return func() {
-				_ = file.Close()
-				_ = os.Remove(lockPath)
-			}, nil
-		}
-		if !os.IsExist(err) {
-			return nil, fmt.Errorf("creating plan mutation lock: %w", err)
-		}
-
-		stale := false
-		if content, readErr := os.ReadFile(lockPath); readErr == nil {
-			var pid int
-			if _, scanErr := fmt.Sscanf(string(content), "%d", &pid); scanErr == nil {
-				stale = !process.IsProcessAlive(pid)
-			}
-		}
-		if !stale {
-			if info, statErr := os.Stat(lockPath); statErr == nil {
-				stale = time.Since(info.ModTime()) > planMutationLockStale
-			}
-		}
-		if stale {
-			_ = os.Remove(lockPath)
-			continue
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("timed out waiting for plan job-creation lock %s", lockPath)
-		}
-		time.Sleep(25 * time.Millisecond)
+	locked, err := fileLock.TryLockContext(ctx, planMutationLockRetry)
+	if err != nil {
+		_ = fileLock.Close()
+		return nil, fmt.Errorf("acquiring plan job-creation lock %s: %w", lockPath, err)
 	}
+	if !locked {
+		_ = fileLock.Close()
+		return nil, fmt.Errorf("timed out waiting for plan job-creation lock %s", lockPath)
+	}
+
+	return func() {
+		_ = fileLock.Unlock()
+		_ = fileLock.Close()
+	}, nil
 }
 
 // AddJob adds a new job to the plan directory.
