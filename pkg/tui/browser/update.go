@@ -27,7 +27,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case embed.FocusMsg:
 		m.focused = true
 		m.loading = true
-		return m, tea.Batch(m.reloadPlansCmd(), fetchGitLogCmd(m.cwdGitRoot))
+		return m, m.reloadPlansCmd()
 
 	case embed.BlurMsg:
 		// Host withdrew focus. Pause background polling until FocusMsg
@@ -55,7 +55,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// placeholder for the new workspace's first load.
 		m.loading = true
 		m.initialLoaded = false
-		return m, tea.Batch(m.reloadPlansCmd(), fetchGitLogCmd(m.cwdGitRoot))
+		m.gitLogLoaded = false
+		m.gitLogContent = ""
+		m.gitLogError = nil
+		return m, m.reloadPlansCmd()
 
 	case fastForwardMsg:
 		if msg.err != nil {
@@ -68,7 +71,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case gitLogMsg:
 		m.gitLogContent = msg.content
 		m.gitLogError = msg.err
+		m.gitLogLoaded = true
 		return m, nil
+
+	case holdCompleteMsg:
+		if _, pending := m.holdPending[msg.key]; !pending {
+			return m, nil
+		}
+		delete(m.holdPending, msg.key)
+		if msg.err != nil {
+			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Hold update failed: %v", msg.err))
+			return m, nil
+		}
+		idx := -1
+		for i := range m.plans {
+			if planItemKey(m.plans[i]) == msg.key {
+				idx = i
+				break
+			}
+		}
+		if idx >= 0 && m.plans[idx].Plan != nil {
+			if m.plans[idx].Plan.Config == nil {
+				m.plans[idx].Plan.Config = &orchestration.PlanConfig{}
+			}
+			if msg.hold {
+				m.plans[idx].Plan.Config.Status = "hold"
+			} else {
+				m.plans[idx].Plan.Config.Status = ""
+			}
+			m.plans[idx].ReviewStatus = formatConfigStatus(m.plans[idx].Plan.Config)
+		}
+		if msg.hold && !m.showOnHold && idx >= 0 {
+			m.plans = append(m.plans[:idx], m.plans[idx+1:]...)
+			if m.cursor > idx {
+				m.cursor--
+			}
+			m.ensureCursorVisible()
+		}
+		action := "held"
+		if !msg.hold {
+			action = "unheld"
+		}
+		m.statusMessage = fmt.Sprintf("Plan %s", action)
+		if m.hasDaemonSnapshot {
+			return m, nil
+		}
+		return m, m.reloadPlansCmd()
 
 	case repoGitLogMsg:
 		m.repoGitLogContent = msg.content
@@ -258,7 +306,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, tea.Batch(
 			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
-			fetchGitLogCmd(m.cwdGitRoot),
 			fallbackRefreshTick(),
 		)
 
@@ -266,6 +313,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.SetSize(msg.Width, msg.Height)
+		m.ensureCursorVisible()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -294,6 +342,7 @@ func (m Model) replacePlanRows(plans []PlanListItem, selectedKey string) Model {
 	if m.cursor < 0 && len(m.plans) > 0 {
 		m.cursor = 0
 	}
+	m.ensureCursorVisible()
 	return m
 }
 
@@ -375,6 +424,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		} else if m.cursor > 0 {
 			m.cursor--
+			m.ensureCursorVisible()
 		}
 		return m, nil
 
@@ -392,7 +442,32 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		} else if m.cursor < len(m.plans)-1 {
 			m.cursor++
+			m.ensureCursorVisible()
 		}
+		return m, nil
+
+	case key.Matches(msg, m.keys.PageUp):
+		page := m.visibleRowCount()
+		m.cursor -= page
+		m.scrollOffset -= page
+		m.ensureCursorVisible()
+		return m, nil
+
+	case key.Matches(msg, m.keys.PageDown):
+		page := m.visibleRowCount()
+		m.cursor += page
+		m.scrollOffset += page
+		m.ensureCursorVisible()
+		return m, nil
+
+	case key.Matches(msg, m.keys.Home):
+		m.cursor = 0
+		m.ensureCursorVisible()
+		return m, nil
+
+	case key.Matches(msg, m.keys.End):
+		m.cursor = len(m.plans) - 1
+		m.ensureCursorVisible()
 		return m, nil
 
 	case key.Matches(msg, m.keys.ViewPlan):
@@ -409,6 +484,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.OpenPlan):
+		if !m.selectedBindingValid("open") {
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			plan := m.plans[m.cursor]
 			return m, executePlanOpen(plan.Plan)
@@ -418,6 +496,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.SetActive):
 		if m.selectedArchived() {
 			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
+		if !m.selectedBindingValid("set active") {
 			return m, nil
 		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
@@ -474,6 +555,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusMessage = archivedReadOnlyMessage
 			return m, nil
 		}
+		if !m.selectedBindingValid("finish") {
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			plan := m.plans[m.cursor]
 			return m, executePlanFinish(plan.Plan)
@@ -483,6 +567,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.FastForwardUpdate):
 		if m.selectedArchived() {
 			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
+		if !m.selectedBindingValid("update") {
 			return m, nil
 		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
@@ -499,6 +586,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.FastForwardMain):
 		if m.selectedArchived() {
 			m.statusMessage = archivedReadOnlyMessage
+			return m, nil
+		}
+		if !m.selectedBindingValid("merge") {
 			return m, nil
 		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
@@ -523,6 +613,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showGitLog = false
 		} else {
 			m.showGitLog = true
+			m.ensureCursorVisible()
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				selectedPlan := m.plans[m.cursor]
 				if len(selectedPlan.EcosystemRepoStatuses) > 0 {
@@ -532,21 +623,24 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.statusMessage = ""
 						return m, c
 					}
+				} else if !m.gitLogLoaded {
+					m.statusMessage = ""
+					return m, fetchGitLogCmd(selectedPlan.WorkspaceRoot)
 				}
 			}
 		}
+		m.ensureCursorVisible()
 		m.statusMessage = ""
 		return m, nil
 
 	case key.Matches(msg, m.keys.ToggleHold):
 		m.showOnHold = !m.showOnHold
-		m.cursor = 0
 		m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
+		m.ensureCursorVisible()
 		return m, m.reloadPlansCmd()
 
 	case key.Matches(msg, m.keys.ToggleArchived):
 		m.showArchived = !m.showArchived
-		m.cursor = 0
 		m.statusMessage = fmt.Sprintf("Archived plans: %v", m.showArchived)
 		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
 
@@ -558,25 +652,26 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
 			plan := selectedPlan.Plan
+			key := planItemKey(selectedPlan)
+			if m.holdPending == nil {
+				m.holdPending = make(map[string]bool)
+			}
+			if _, pending := m.holdPending[key]; pending {
+				return m, nil
+			}
 
 			currentStatus := ""
 			if plan.Config != nil {
 				currentStatus = plan.Config.Status
 			}
-
 			hold := currentStatus != "hold"
-			action := "set to"
-			if !hold {
-				action = "removed from"
-			}
-
-			if err := orchestration.SetHold(plan.Directory, hold); err != nil {
-				m.statusMessage = fmt.Sprintf("Failed to update plan: %v", err)
+			m.holdPending[key] = hold
+			if hold {
+				m.statusMessage = "Holding…"
 			} else {
-				m.statusMessage = fmt.Sprintf("Plan '%s' %s hold", selectedPlan.Name, action)
+				m.statusMessage = "Unholding…"
 			}
-
-			return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
+			return m, setHoldCmd(key, plan.Directory, hold)
 		}
 		return m, nil
 	}
@@ -594,6 +689,24 @@ const archivedReadOnlyMessage = "plan is archived (read-only)"
 // (Enter) and the git-log toggle remain available.
 func (m Model) selectedArchived() bool {
 	return m.cursor >= 0 && m.cursor < len(m.plans) && m.plans[m.cursor].Archived
+}
+
+// selectedBindingValid refuses path-sensitive actions unless registry and plan
+// config agree on one live, qualified container.
+func (m *Model) selectedBindingValid(action string) bool {
+	if m.cursor < 0 || m.cursor >= len(m.plans) {
+		return false
+	}
+	binding := m.plans[m.cursor].Binding
+	if binding.Valid() {
+		return true
+	}
+	health := binding.Health
+	if health == "" {
+		health = coreplan.BindingUnbound
+	}
+	m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Cannot %s: %s", action, health))
+	return false
 }
 
 // fetchSelectedRepoGitLog resolves the repo path for the repo currently

@@ -17,6 +17,10 @@ type KeyMap struct {
 	keymap.Base
 	Up                key.Binding
 	Down              key.Binding
+	PageUp            key.Binding
+	PageDown          key.Binding
+	Home              key.Binding
+	End               key.Binding
 	ViewPlan          key.Binding
 	OpenPlan          key.Binding
 	FinishPlan        key.Binding
@@ -44,6 +48,10 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Navigation")),
 			k.Up,
 			k.Down,
+			k.PageUp,
+			k.PageDown,
+			k.Home,
+			k.End,
 			k.ViewPlan,
 			k.OpenPlan,
 		},
@@ -72,7 +80,7 @@ func (k KeyMap) Sections() []keymap.Section {
 	return []keymap.Section{
 		{
 			Name:     "Navigation",
-			Bindings: []key.Binding{k.Up, k.Down, k.ViewPlan, k.OpenPlan},
+			Bindings: []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Home, k.End, k.ViewPlan, k.OpenPlan},
 		},
 		{
 			Name: "Actions",
@@ -104,6 +112,22 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		Down: key.NewBinding(
 			key.WithKeys("j", "down"),
 			key.WithHelp("j/↓", "move down"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("pgup", "ctrl+u"),
+			key.WithHelp("pgup", "page up"),
+		),
+		PageDown: key.NewBinding(
+			key.WithKeys("pgdown", "ctrl+d"),
+			key.WithHelp("pgdn", "page down"),
+		),
+		Home: key.NewBinding(
+			key.WithKeys("home"),
+			key.WithHelp("home", "first plan"),
+		),
+		End: key.NewBinding(
+			key.WithKeys("end", "G"),
+			key.WithHelp("end", "last plan"),
 		),
 		ViewPlan: key.NewBinding(
 			key.WithKeys("enter"),

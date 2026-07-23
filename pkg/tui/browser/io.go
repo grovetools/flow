@@ -138,14 +138,26 @@ type reviewCompleteMsg struct {
 	err    error
 }
 
-func fetchGitLogCmd(plansDir string) tea.Cmd {
+type holdCompleteMsg struct {
+	key  string
+	hold bool
+	err  error
+}
+
+func setHoldCmd(key, planDir string, hold bool) tea.Cmd {
 	return func() tea.Msg {
-		gitRoot, err := git.GetGitRoot(plansDir)
+		return holdCompleteMsg{key: key, hold: hold, err: orchestration.SetHold(planDir, hold)}
+	}
+}
+
+func fetchGitLogCmd(workspacePath string) tea.Cmd {
+	return func() tea.Msg {
+		if workspacePath == "" {
+			return gitLogMsg{err: fmt.Errorf("selected plan has no qualified workspace")}
+		}
+		gitRoot, err := git.GetGitRoot(workspacePath)
 		if err != nil {
-			gitRoot, err = git.GetGitRoot(".")
-			if err != nil {
-				return gitLogMsg{err: fmt.Errorf("not in a git repository: %w", err)}
-			}
+			return gitLogMsg{err: fmt.Errorf("selected workspace is not a git repository: %w", err)}
 		}
 
 		cmd := exec.Command("git", "log", "--oneline", "--decorate", "--color=always", "--graph", "--all", "--max-count=20")
@@ -360,6 +372,19 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold, showArchived b
 		}
 	}
 
+	bindingRequests := make([]coreplan.BindingRequest, 0, len(entries))
+	for _, entry := range entries {
+		worktree := ""
+		if entry.plan.Config != nil {
+			worktree = entry.plan.Config.Worktree
+		}
+		bindingRequests = append(bindingRequests, coreplan.BindingRequest{
+			PlanDir: entry.plan.Directory, WorkspaceRoot: cwdGitRoot,
+			ConfiguredWorktree: worktree, Archived: entry.archived,
+		})
+	}
+	bindings := coreplan.ResolvePlanBindings(bindingRequests)
+
 	var items []PlanListItem
 	// Hoist workspace discovery out of the per-plan loop. It walks the
 	// full ecosystem and used to dominate CPU on plans with .Repos set.
@@ -393,16 +418,20 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold, showArchived b
 			notes = plan.Config.Notes
 		}
 
+		key := coreplan.NewPlanKey(plan.Directory)
 		item := PlanListItem{
-			Plan:         plan,
-			Name:         plan.Name,
-			JobCount:     len(plan.Jobs),
-			LastUpdated:  lastUpdated,
-			Worktree:     worktree,
-			Notes:        notes,
-			MergeStatus:  "-",
-			ReviewStatus: formatConfigStatus(plan.Config),
-			Archived:     entry.archived,
+			Plan:          plan,
+			Name:          plan.Name,
+			Key:           key,
+			Binding:       bindings[key.String()],
+			WorkspaceRoot: cwdGitRoot,
+			JobCount:      len(plan.Jobs),
+			LastUpdated:   lastUpdated,
+			Worktree:      worktree,
+			Notes:         notes,
+			MergeStatus:   "-",
+			ReviewStatus:  formatConfigStatus(plan.Config),
+			Archived:      entry.archived,
 		}
 		if entry.archived {
 			item.ReviewStatus = "Archived"

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components"
 	"github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
@@ -253,9 +254,21 @@ func (m Model) renderPlanTable() string {
 		return ""
 	}
 
-	headers := []string{"PLAN", "WORKSPACE / REPOS", "STATUS", "WORKTREE", "GIT", "MERGE", "REVIEWED", "NOTES", "UPDATED"}
-	rows := make([][]string, len(m.plans))
-	for i, plan := range m.plans {
+	headers := []string{"PLAN", "WORKSPACE / REPOS", "STATUS", "WORKTREE", "BINDING", "GIT", "MERGE", "REVIEWED", "NOTES", "UPDATED"}
+	start := m.scrollOffset
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(m.plans) {
+		start = len(m.plans) - 1
+	}
+	end := start + m.visibleRowCount()
+	if end > len(m.plans) {
+		end = len(m.plans)
+	}
+	rows := make([][]string, end-start)
+	for i := start; i < end; i++ {
+		plan := m.plans[i]
 		statusText := m.formatStatusWithEmoji(plan)
 		updatedText := theme.DefaultTheme.Muted.Render("◦ " + formatRelativeTime(plan.LastUpdated))
 
@@ -278,6 +291,18 @@ func (m Model) renderPlanTable() string {
 			worktreeText = theme.DefaultTheme.Muted.Render("-")
 		} else {
 			worktreeText = theme.IconGitBranch + " " + worktreeText
+		}
+
+		bindingText := string(plan.Binding.Health)
+		if bindingText == "" {
+			bindingText = string(coreplan.BindingUnbound)
+		}
+		if plan.Binding.Valid() {
+			bindingText = theme.DefaultTheme.Success.Render(theme.IconSuccess + " bound")
+		} else if plan.Binding.Health == coreplan.BindingArchived || plan.Binding.Health == coreplan.BindingUnbound {
+			bindingText = theme.DefaultTheme.Muted.Render(bindingText)
+		} else {
+			bindingText = theme.DefaultTheme.Error.Render(theme.IconWarning + " " + bindingText)
 		}
 
 		var gitText string
@@ -350,11 +375,20 @@ func (m Model) renderPlanTable() string {
 			identityText = theme.DefaultTheme.Muted.Render("-")
 		}
 
-		rows[i] = []string{
+		if hold, pending := m.holdPending[planItemKey(plan)]; pending {
+			if hold {
+				reviewedText = theme.DefaultTheme.Warning.Render("Holding…")
+			} else {
+				reviewedText = theme.DefaultTheme.Warning.Render("Unholding…")
+			}
+		}
+
+		rows[i-start] = []string{
 			titleText,
 			identityText,
 			statusText,
 			worktreeText,
+			bindingText,
 			gitText,
 			mergeText,
 			reviewedText,
@@ -363,7 +397,9 @@ func (m Model) renderPlanTable() string {
 		}
 	}
 
-	return table.SelectableTable(headers, rows, m.cursor)
+	tableView := table.SelectableTable(headers, rows, m.cursor-start)
+	rangeText := theme.DefaultTheme.Muted.Render(fmt.Sprintf("%d–%d of %d", start+1, end, len(m.plans)))
+	return lipgloss.JoinVertical(lipgloss.Left, tableView, rangeText)
 }
 
 // formatStatusWithEmoji produces the emoji-decorated status string shown

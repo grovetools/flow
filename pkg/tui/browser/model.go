@@ -49,6 +49,8 @@ type PlanListItem struct {
 	MergeVerdict          string
 	Notes                 string
 	EcosystemRepoStatuses []planutil.EcosystemRepoStatus
+	Key                   coreplan.PlanKey
+	Binding               coreplan.PlanBinding
 	// Archived marks a plan loaded from the <plansDir>/.archive scan.
 	// Archived rows are read-only in the browser: mutating row-actions
 	// are refused and the row renders dimmed.
@@ -96,12 +98,13 @@ type Config struct {
 type Model struct {
 	cfg Config
 
-	plans   []PlanListItem
-	cursor  int
-	width   int
-	height  int
-	err     error
-	loading bool
+	plans        []PlanListItem
+	cursor       int
+	scrollOffset int
+	width        int
+	height       int
+	err          error
+	loading      bool
 	// initialLoaded becomes true once the current workspace context has
 	// completed at least one load. The "Loading plans..." placeholder is
 	// gated on !initialLoaded so background refreshes (every refreshInterval)
@@ -120,6 +123,7 @@ type Model struct {
 	showGitLog     bool
 	gitLogContent  string
 	gitLogError    error
+	gitLogLoaded   bool
 	showOnHold     bool
 	showArchived   bool
 
@@ -142,6 +146,9 @@ type Model struct {
 	streamGeneration  uint64
 	streamCancel      context.CancelFunc
 	streamConnecting  bool
+
+	// holdPending is keyed by qualified PlanKey, never by slug or cursor.
+	holdPending map[string]bool
 }
 
 // PlanCount returns the number of plans in the browser list.
@@ -170,28 +177,80 @@ func (m *Model) SelectPlan(name string) bool {
 	return false
 }
 
+func planItemKey(item PlanListItem) string {
+	if key := item.Key.String(); key != "" {
+		return key
+	}
+	if item.Plan != nil && item.Plan.Directory != "" {
+		return coreplan.NewPlanKey(item.Plan.Directory).String()
+	}
+	return ""
+}
+
 func (m Model) selectedPlanKey() string {
 	if m.cursor < 0 || m.cursor >= len(m.plans) {
 		return ""
 	}
-	if plan := m.plans[m.cursor].Plan; plan != nil && plan.Directory != "" {
-		return plan.Directory
-	}
-	return m.plans[m.cursor].Name
+	return planItemKey(m.plans[m.cursor])
 }
 
 func (m *Model) selectPlanKey(key string) bool {
 	for i := range m.plans {
-		candidate := m.plans[i].Name
-		if plan := m.plans[i].Plan; plan != nil && plan.Directory != "" {
-			candidate = plan.Directory
-		}
-		if candidate == key {
+		if planItemKey(m.plans[i]) == key {
 			m.cursor = i
+			m.ensureCursorVisible()
 			return true
 		}
 	}
 	return false
+}
+
+func (m Model) visibleRowCount() int {
+	// Header/table chrome, range indicator and outer padding consume five rows.
+	rows := m.height - 5
+	if !m.embedMode {
+		rows -= 4 // inline help/source footer
+	}
+	if m.showGitLog {
+		rows -= 13
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	if len(m.plans) > 0 && rows > len(m.plans) {
+		rows = len(m.plans)
+	}
+	return rows
+}
+
+func (m *Model) ensureCursorVisible() {
+	if len(m.plans) == 0 {
+		m.cursor, m.scrollOffset = 0, 0
+		return
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.plans) {
+		m.cursor = len(m.plans) - 1
+	}
+	visible := m.visibleRowCount()
+	if m.cursor < m.scrollOffset {
+		m.scrollOffset = m.cursor
+	}
+	if m.cursor >= m.scrollOffset+visible {
+		m.scrollOffset = m.cursor - visible + 1
+	}
+	maxOffset := len(m.plans) - visible
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.scrollOffset > maxOffset {
+		m.scrollOffset = maxOffset
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
 }
 
 // CurrentPlan returns the *orchestration.Plan currently under the
@@ -250,18 +309,18 @@ func New(cfg Config) Model {
 		planSummaries:    make(map[string]models.PlanSummary),
 		streamGeneration: 1,
 		streamConnecting: true,
+		holdPending:      make(map[string]bool),
 	}
 }
 
-// Init is the standard bubbletea entry point: kicks off an initial plans
-// load, a top-level git log fetch, and the periodic refresh tick.
+// Init starts plan loading only. Git log is intentionally lazy and is fetched
+// when the detail pane is first opened.
 func (m Model) Init() tea.Cmd {
 	if factory := m.daemonClientFactory(); factory != nil {
-		return tea.Batch(connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold), fetchGitLogCmd(m.cwdGitRoot))
+		return connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold)
 	}
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
-		fetchGitLogCmd(m.cwdGitRoot),
 		fallbackRefreshTick(),
 	)
 }
