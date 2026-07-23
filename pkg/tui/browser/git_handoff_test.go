@@ -117,8 +117,22 @@ func TestDaemonLiveRowAssemblyResolvesQualifiedActionTarget(t *testing.T) {
 	if row.ActionTarget.PlanDir == "" || row.ActionTarget.ContainerPath == "" {
 		t.Fatalf("daemon-live row assembled an incomplete action target: %+v", row.ActionTarget)
 	}
-	if row.ActionTarget.ContainerPath != container {
-		t.Fatalf("action target names %q, want the row's exact container %q", row.ActionTarget.ContainerPath, container)
+	// The pilot's exact-container criterion: the target must carry the
+	// registry binding's abs_path verbatim — not the owner repo root above it,
+	// whose working tree can never show the member checkouts' changes — and
+	// the member checkouts must resolve WITHIN that container.
+	entry, err := worktreeregistry.Resolve(container, nil)
+	if err != nil || entry == nil {
+		t.Fatalf("registry entry unavailable for %q: %v", container, err)
+	}
+	if row.ActionTarget.ContainerPath != entry.AbsPath {
+		t.Fatalf("action target names %q, want the registry entry's exact abs_path %q", row.ActionTarget.ContainerPath, entry.AbsPath)
+	}
+	if row.ActionTarget.ContainerPath == owner {
+		t.Fatalf("action target collapsed to the owner repo root %q", owner)
+	}
+	if len(row.ActionTarget.Repos) != 1 || row.ActionTarget.Repos[0].Path != checkout {
+		t.Fatalf("member checkouts not resolved within the container: %+v", row.ActionTarget.Repos)
 	}
 
 	m := New(Config{})
