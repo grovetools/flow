@@ -915,7 +915,10 @@ func executeInitSubprocess(req *planinit.Request, plansDir, workspaceDir string,
 	journal.Attempts[attemptIndex] = report
 	if writeErr := deps.writeJournal(siblingPath, journal); writeErr != nil {
 		report.JournalWriteErrors = append(report.JournalWriteErrors, "write terminal report: "+writeErr.Error())
-	} else if info, statErr := os.Stat(planDir); statErr == nil && info.IsDir() {
+	}
+	// A transient sibling write failure must not prevent successful creation
+	// from finalizing evidence inside the plan directory.
+	if info, statErr := os.Stat(planDir); statErr == nil && info.IsDir() {
 		finalPath := filepath.Join(planDir, ".init-journal.json")
 		report.JournalPath = finalPath
 		journal.Attempts[attemptIndex] = report

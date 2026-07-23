@@ -159,6 +159,32 @@ func TestExecuteInitSubprocessRetryAppendsDistinctAttempts(t *testing.T) {
 	}
 }
 
+func TestExecuteInitSubprocessSuccessFinalizesAfterTransientSiblingWriteFailure(t *testing.T) {
+	plansDir := t.TempDir()
+	planDir := filepath.Join(plansDir, "transient-write")
+	deps := testInitDeps(func(string, ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", "mkdir -p "+shellQuote(planDir))
+	}, "attempt-transient-write")
+	writes := 0
+	deps.writeJournal = func(path string, journal initJournal) error {
+		writes++
+		if writes == 2 {
+			return errors.New("transient rename failure")
+		}
+		return atomicWriteInitJournal(path, journal)
+	}
+	report := executeInitSubprocess(&planinit.Request{Dir: "transient-write", RunInit: true}, plansDir, t.TempDir(), deps)
+	if report.Err != nil || report.JournalPath != filepath.Join(planDir, ".init-journal.json") {
+		t.Fatalf("successful attempt did not finalize: report=%#v", report)
+	}
+	if len(report.JournalWriteErrors) == 0 || !strings.Contains(report.JournalWriteErrors[0], "transient rename failure") {
+		t.Fatalf("transient write error was lost: %#v", report.JournalWriteErrors)
+	}
+	if _, err := os.Stat(initJournalPath(plansDir, "transient-write")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sibling journal remains after finalization: %v", err)
+	}
+}
+
 func TestExecuteInitSubprocessSuccessFinalizesJournalAndRemovesSibling(t *testing.T) {
 	plansDir := t.TempDir()
 	planDir := filepath.Join(plansDir, "success")
