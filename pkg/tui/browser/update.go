@@ -26,6 +26,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case embed.FocusMsg:
 		m.focused = true
 		m.loading = true
+		m.loadGeneration++
 		// Returning from Git Viewer completes the adapter lifecycle. Restore the
 		// exact qualified row that launched U/M before refreshing it; duplicate
 		// handoffs stay blocked until this point.
@@ -65,6 +66,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gitLogLoaded = false
 		m.gitLogContent = ""
 		m.gitLogError = nil
+		m.loadGeneration++
 		return m, m.reloadPlansCmd()
 
 	case gitLogMsg:
@@ -122,6 +124,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.repoGitLogError = msg.err
 		return m, nil
 
+	case planDetailMsg:
+		if msg.generation != m.detailGeneration || msg.key != m.detailPendingKey || msg.key != m.selectedPlanKey() {
+			return m, nil
+		}
+		m.detailPendingKey = ""
+		m.statusMessage = ""
+		if msg.err != nil {
+			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Live detail unavailable: %v", msg.err))
+			return m, nil
+		}
+		for i := range m.plans {
+			if planItemKey(m.plans[i]) != msg.key {
+				continue
+			}
+			// Preserve the daemon-qualified identity fields; the live load owns
+			// only expensive selected-row Git/merge/detail values.
+			msg.item.Workspace = m.plans[i].Workspace
+			msg.item.WorkspaceRoot = m.plans[i].WorkspaceRoot
+			msg.item.Repositories = m.plans[i].Repositories
+			msg.item.Selected = m.plans[i].Selected
+			msg.item.Key = m.plans[i].Key
+			msg.item.Binding = m.plans[i].Binding
+			msg.item.ActionTarget = m.plans[i].ActionTarget
+			msg.item.Archived = m.plans[i].Archived
+			m.plans[i] = msg.item
+			break
+		}
+		if len(msg.item.EcosystemRepoStatuses) > 0 {
+			m.inRepoNavigationMode = true
+			m.repoCursor = 0
+			return m, m.fetchSelectedRepoGitLog()
+		}
+		return m, fetchGitLogCmd(msg.item.WorkspaceRoot)
+
 	case reviewCompleteMsg:
 		if msg.err != nil {
 			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Review failed: %s", msg.err.Error()))
@@ -146,7 +182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.dataSource = "local fallback — daemon unavailable"
 			return m, tea.Batch(
-				loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+				loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration),
 				fallbackRefreshTick(),
 				planIndexReconnectTick(),
 			)
@@ -172,6 +208,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m = m.replacePlanRows(msg.plans, selectedKey)
+		if msg.snapshot != nil {
+			m.armRenderProbe(msg.snapshot.ScannedAt, msg.snapshot.Revision)
+		}
 		return m, listenPlanIndexCmd(msg.updates, msg.generation)
 
 	case planIndexConnectFailedMsg:
@@ -188,7 +227,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dataSource = "local fallback — daemon unavailable"
 		m.statusMessage = ""
 		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration),
 			fallbackRefreshTick(),
 			planIndexReconnectTick(),
 		)
@@ -230,6 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{listenPlanIndexCmd(msg.updates, msg.generation)}
 		if snapshot := msg.update.PlanIndexSnapshot; snapshot != nil && snapshot.Revision > m.planIndexRevision {
 			m.planIndexRevision = snapshot.Revision
+			m.latestSnapshotAt = snapshot.ScannedAt
 			m.planSummaries = make(map[string]models.PlanSummary, len(snapshot.Plans))
 			for _, summary := range snapshot.Plans {
 				m.planSummaries[summary.PlanDir] = summary
@@ -244,7 +284,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if delta.Revision <= m.planIndexRevision {
 				return m, tea.Batch(cmds...)
 			}
-			if delta.Revision > m.planIndexRevision+1 {
+			firstRevision := msg.firstRevision
+			if firstRevision == 0 {
+				firstRevision = delta.Revision
+			}
+			if firstRevision > m.planIndexRevision+1 {
 				// Pub/sub intentionally drops for slow readers. Reconnect performs a
 				// full snapshot fetch rather than guessing across the gap.
 				if m.streamCancel != nil {
@@ -258,6 +302,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration, m.showOnHold, m.showArchived)
 			}
 			m.planIndexRevision = delta.Revision
+			m.latestSnapshotAt = delta.ScannedAt
 			for _, dir := range delta.Removed {
 				delete(m.planSummaries, dir)
 			}
@@ -275,6 +320,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hasDaemonSnapshot && !msg.portfolio {
 			return m, nil
 		}
+		if !msg.portfolio && msg.loadGeneration != 0 && msg.loadGeneration != m.loadGeneration {
+			return m, nil
+		}
 		if msg.portfolio && msg.portfolioGeneration != 0 && msg.portfolioGeneration != m.streamGeneration {
 			return m, nil
 		}
@@ -290,7 +338,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.error
 			return m, nil
 		}
-		return m.replacePlanRows(msg.plans, m.selectedPlanKey()), nil
+		m = m.replacePlanRows(msg.plans, m.selectedPlanKey())
+		if msg.portfolio {
+			m.armRenderProbe(m.latestSnapshotAt, m.planIndexRevision)
+		}
+		return m, nil
 
 	case refreshTickMsg:
 		// Skip heavy I/O if a load is already in-flight or the panel
@@ -303,8 +355,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, fallbackRefreshTick()
 		}
 		m.loading = true
+		m.loadGeneration++
 		return m, tea.Batch(
-			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+			loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration),
 			fallbackRefreshTick(),
 		)
 
@@ -355,7 +408,7 @@ func (m Model) reloadPlansCmd() tea.Cmd {
 		}
 		return loadPortfolioCmd(summaries, m.showOnHold, m.showArchived, m.planIndexRevision, m.streamGeneration)
 	}
-	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived)
+	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration)
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -627,6 +680,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.ensureCursorVisible()
 			if m.cursor >= 0 && m.cursor < len(m.plans) {
 				selectedPlan := m.plans[m.cursor]
+				if m.hasDaemonSnapshot {
+					if summary, ok := m.planSummaries[planItemKey(selectedPlan)]; ok {
+						m.detailGeneration++
+						m.detailPendingKey = planItemKey(selectedPlan)
+						m.statusMessage = "Loading selected live detail…"
+						return m, loadSelectedPlanDetailCmd(summary, m.detailGeneration)
+					}
+				}
 				if len(selectedPlan.EcosystemRepoStatuses) > 0 {
 					m.inRepoNavigationMode = true
 					m.repoCursor = 0
@@ -646,12 +707,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.ToggleHold):
 		m.showOnHold = !m.showOnHold
+		m.loadGeneration++
 		m.statusMessage = fmt.Sprintf("On-hold plans: %v", m.showOnHold)
 		m.ensureCursorVisible()
 		return m, m.reloadPlansCmd()
 
 	case key.Matches(msg, m.keys.ToggleArchived):
 		m.showArchived = !m.showArchived
+		m.loadGeneration++
 		m.statusMessage = fmt.Sprintf("Archived plans: %v", m.showArchived)
 		return m, m.reloadPlansCmd()
 

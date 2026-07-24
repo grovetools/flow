@@ -2,12 +2,14 @@ package browser
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
+	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
 	coreplan "github.com/grovetools/core/pkg/plan"
@@ -148,6 +150,13 @@ type Model struct {
 	streamGeneration  uint64
 	streamCancel      context.CancelFunc
 	streamConnecting  bool
+	latestSnapshotAt  time.Time
+	renderProbe       *renderLatencyProbe
+
+	// Selected-row detail is the only live hydration allowed in daemon mode.
+	detailGeneration uint64
+	detailPendingKey string
+	loadGeneration   uint64
 
 	// holdPending/actionPending are keyed by qualified PlanKey, never by slug or
 	// cursor. actionPending covers the U/M handoff lifetime and is cleared only
@@ -155,6 +164,35 @@ type Model struct {
 	holdPending    map[string]bool
 	actionPending  map[string]embed.GitOperation
 	refreshPlanKey string
+}
+
+type renderLatencyProbe struct {
+	once        sync.Once
+	snapshotAt  time.Time
+	projectedAt time.Time
+	revision    uint64
+}
+
+func (p *renderLatencyProbe) record() {
+	if p == nil {
+		return
+	}
+	p.once.Do(func() {
+		now := time.Now()
+		logging.NewUnifiedLogger("flow.tui.plans").Debug("Plan snapshot rendered").
+			Field("revision", p.revision).
+			Field("snapshot_to_render", now.Sub(p.snapshotAt)).
+			Field("projection_to_render", now.Sub(p.projectedAt)).
+			Log(context.Background())
+	})
+}
+
+func (m *Model) armRenderProbe(snapshotAt time.Time, revision uint64) {
+	if snapshotAt.IsZero() {
+		snapshotAt = time.Now()
+	}
+	m.latestSnapshotAt = snapshotAt
+	m.renderProbe = &renderLatencyProbe{snapshotAt: snapshotAt, projectedAt: time.Now(), revision: revision}
 }
 
 // PlanCount returns the number of plans in the browser list.
@@ -317,6 +355,7 @@ func New(cfg Config) Model {
 		planSummaries:    make(map[string]models.PlanSummary),
 		streamGeneration: 1,
 		streamConnecting: true,
+		loadGeneration:   1,
 		holdPending:      make(map[string]bool),
 		actionPending:    make(map[string]embed.GitOperation),
 	}
@@ -329,7 +368,7 @@ func (m Model) Init() tea.Cmd {
 		return connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold, m.showArchived)
 	}
 	return tea.Batch(
-		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration),
 		fallbackRefreshTick(),
 	)
 }

@@ -42,9 +42,10 @@ type planIndexConnectFailedMsg struct {
 	generation uint64
 }
 type planIndexStreamMsg struct {
-	update     daemon.StateUpdate
-	updates    <-chan daemon.StateUpdate
-	generation uint64
+	update        daemon.StateUpdate
+	updates       <-chan daemon.StateUpdate
+	generation    uint64
+	firstRevision uint64 // first delta folded into update; detects real gaps after coalescing
 }
 type planIndexStreamClosedMsg struct{ generation uint64 }
 type planIndexReconnectMsg struct{}
@@ -94,12 +95,72 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, showOnH
 
 func listenPlanIndexCmd(updates <-chan daemon.StateUpdate, generation uint64) tea.Cmd {
 	return func() tea.Msg {
-		update, ok := <-updates
+		first, ok := <-updates
 		if !ok {
 			return planIndexStreamClosedMsg{generation: generation}
 		}
-		return planIndexStreamMsg{update: update, updates: updates, generation: generation}
+		if first.PlanIndex == nil {
+			return planIndexStreamMsg{update: first, updates: updates, generation: generation}
+		}
+		batch := []daemon.StateUpdate{first}
+		// SSE bursts commonly contain several filesystem revisions. Drain only
+		// what is already queued and fold it into one projection/render turn;
+		// never wait for a quiet period or delay interactive updates.
+		for {
+			select {
+			case next, open := <-updates:
+				if !open {
+					return coalescePlanIndexUpdates(batch, updates, generation)
+				}
+				batch = append(batch, next)
+			default:
+				return coalescePlanIndexUpdates(batch, updates, generation)
+			}
+		}
 	}
+}
+
+func coalescePlanIndexUpdates(batch []daemon.StateUpdate, updates <-chan daemon.StateUpdate, generation uint64) planIndexStreamMsg {
+	if len(batch) == 1 {
+		return planIndexStreamMsg{update: batch[len(batch)-1], updates: updates, generation: generation}
+	}
+	upserts := make(map[string]models.PlanSummary)
+	removed := make(map[string]struct{})
+	firstRevision := uint64(0)
+	latest := batch[0]
+	var scannedAt time.Time
+	var revision uint64
+	for _, update := range batch {
+		if update.PlanIndex == nil {
+			continue
+		}
+		delta := update.PlanIndex
+		if firstRevision == 0 {
+			firstRevision = delta.Revision
+		}
+		if delta.Revision > revision {
+			revision, scannedAt, latest = delta.Revision, delta.ScannedAt, update
+		}
+		for _, dir := range delta.Removed {
+			delete(upserts, dir)
+			removed[dir] = struct{}{}
+		}
+		for _, summary := range delta.Upserts {
+			delete(removed, summary.PlanDir)
+			upserts[summary.PlanDir] = summary
+		}
+	}
+	merged := &models.PlanIndexDelta{Revision: revision, ScannedAt: scannedAt}
+	for _, summary := range upserts {
+		merged.Upserts = append(merged.Upserts, summary)
+	}
+	for dir := range removed {
+		merged.Removed = append(merged.Removed, dir)
+	}
+	sort.Slice(merged.Upserts, func(i, j int) bool { return merged.Upserts[i].PlanDir < merged.Upserts[j].PlanDir })
+	sort.Strings(merged.Removed)
+	latest.PlanIndex = merged
+	return planIndexStreamMsg{update: latest, updates: updates, generation: generation, firstRevision: firstRevision}
 }
 
 // planListLoadCompleteMsg carries the result of an async plans list load.
@@ -109,6 +170,7 @@ type planListLoadCompleteMsg struct {
 	portfolio           bool
 	planIndexRevision   uint64
 	portfolioGeneration uint64
+	loadGeneration      uint64
 }
 
 // gitLogMsg carries the result of fetching the top-level workspace git log.
@@ -122,6 +184,50 @@ type gitLogMsg struct {
 type repoGitLogMsg struct {
 	content string
 	err     error
+}
+
+// planDetailMsg is a deliberately bounded, user-triggered live hydration. The
+// daemon projection never performs Git work for the whole portfolio; only the
+// selected row is eligible, and generation/key guards reject stale results.
+type planDetailMsg struct {
+	key        string
+	generation uint64
+	item       PlanListItem
+	err        error
+}
+
+func loadSelectedPlanDetailCmd(summary models.PlanSummary, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		items, err := loadPortfolio(map[string]models.PlanSummary{summary.PlanDir: summary}, true, true)
+		if err != nil || len(items) != 1 {
+			if err == nil {
+				err = fmt.Errorf("selected plan detail disappeared: %s", summary.PlanDir)
+			}
+			return planDetailMsg{key: summary.PlanDir, generation: generation, err: err}
+		}
+		item := items[0]
+		if !item.Binding.Valid() || summary.WorktreePath == "" {
+			return planDetailMsg{key: summary.PlanDir, generation: generation, item: item}
+		}
+		if len(summary.Repositories) == 0 {
+			status, statusErr := git.GetStatus(summary.WorktreePath)
+			if statusErr != nil {
+				return planDetailMsg{key: summary.PlanDir, generation: generation, err: statusErr}
+			}
+			status.AheadCount = planutil.CommitCount(summary.WorktreePath, "main..HEAD")
+			status.BehindCount = planutil.CommitCount(summary.WorktreePath, "HEAD..main")
+			item.GitStatus = status
+			item.MergeStatus = planutil.MergeStatus(summary.WorkspaceRoot, summary.Worktree)
+			item.MergeVerdict = item.MergeStatus
+			return planDetailMsg{key: summary.PlanDir, generation: generation, item: item}
+		}
+		provider, discoveryErr := planutil.DiscoverWorkspaceProvider()
+		if discoveryErr != nil {
+			return planDetailMsg{key: summary.PlanDir, generation: generation, err: discoveryErr}
+		}
+		item.EcosystemRepoStatuses, item.MergeStatus, item.MergeVerdict = planutil.EcosystemRepoDetails(item.Plan, summary.Worktree, summary.WorktreePath, provider)
+		return planDetailMsg{key: summary.PlanDir, generation: generation, item: item}
+	}
 }
 
 // reviewCompleteMsg carries the result of the external `flow plan review`
@@ -198,47 +304,126 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold, showA
 }
 
 func loadPortfolio(summaries map[string]models.PlanSummary, showOnHold, showArchived bool) ([]PlanListItem, error) {
-	byPlansDir := make(map[string][]models.PlanSummary)
+	// Daemon mode is a pure in-memory projection. In particular, do not call
+	// LoadPlan, resolve the registry, discover workspaces, stat plan dirs, or run
+	// Git here: a 24-row cold snapshot must be usable in milliseconds rather
+	// than paying one live hydration per row.
+	all := make([]PlanListItem, 0, len(summaries))
 	for _, summary := range summaries {
 		if (summary.Archived && !showArchived) ||
 			(!summary.Archived && summary.Lifecycle == "finished") ||
 			(!showOnHold && summary.Lifecycle == "hold") {
 			continue
 		}
-		byPlansDir[summary.PlansDir] = append(byPlansDir[summary.PlansDir], summary)
-	}
-	var all []PlanListItem
-	for plansDir, group := range byPlansDir {
-		workspaceRoot := ""
-		allowed := make(map[string]struct{}, len(group))
-		for _, summary := range group {
-			workspaceRoot = summary.WorkspaceRoot
-			allowed[summary.PlanDir] = struct{}{}
+		key := coreplan.NewPlanKey(summary.PlanDir)
+		config := &orchestration.PlanConfig{
+			Worktree: summary.Worktree, Status: summary.Lifecycle,
+			Repos: append([]string(nil), summary.Repositories...), Notes: summary.Notes,
 		}
-		items, err := loadPlansList(plansDir, workspaceRoot, showOnHold, showArchived)
-		if err != nil {
-			return nil, err
+		if config.Status == "live" {
+			config.Status = ""
 		}
-		for _, item := range items {
-			if _, indexed := allowed[item.Plan.Directory]; !indexed {
-				continue
+		plan := &orchestration.Plan{Name: summary.PlanName, Directory: summary.PlanDir, Config: config}
+		bindingHealth := coreplan.BindingHealth(summary.BindingHealth)
+		if bindingHealth == "" {
+			switch {
+			case summary.Archived:
+				bindingHealth = coreplan.BindingArchived
+			case summary.WorktreePath != "":
+				bindingHealth = coreplan.BindingValid
+			default:
+				bindingHealth = coreplan.BindingUnbound
 			}
-			summary := summaries[item.Plan.Directory]
-			item.Workspace = filepath.Base(summary.WorkspaceRoot)
-			item.WorkspaceRoot = summary.WorkspaceRoot
-			item.Repositories = append([]string(nil), summary.Repositories...)
-			item.Selected = summary.Selected
-			all = append(all, item)
 		}
+		binding := coreplan.PlanBinding{
+			Key: key, Health: bindingHealth, Reason: summary.BindingReason,
+			RegistryID: summary.RegistryID, ContainerPath: summary.WorktreePath,
+			WorkspaceRoot: summary.WorkspaceRoot, PlanName: summary.PlanName,
+			Repos: append([]string(nil), summary.Repositories...),
+		}
+		item := PlanListItem{
+			Plan: plan, Name: summary.PlanName, Key: key, Binding: binding,
+			Workspace: filepath.Base(summary.WorkspaceRoot), WorkspaceRoot: summary.WorkspaceRoot,
+			Repositories: append([]string(nil), summary.Repositories...), Selected: summary.Selected,
+			Worktree: summary.Worktree, JobCount: jobCount(summary.JobCounts),
+			StatusParts: normalizedJobCounts(summary.JobCounts), LastUpdated: summary.UpdatedAt,
+			ReviewStatus: formatSummaryLifecycle(summary.Lifecycle, summary.Archived),
+			Notes:        summary.Notes, GitStatus: summary.GitStatus, MergeStatus: "-", Archived: summary.Archived,
+		}
+		item.Status = formatStatusParts(item.StatusParts)
+		if binding.Valid() && binding.RegistryID != "" && binding.ContainerPath != "" {
+			item.ActionTarget = coreplan.PlanActionTarget{
+				PlanDir: summary.PlanDir, WorkspaceRoot: summary.WorkspaceRoot,
+				RegistryID: binding.RegistryID, ContainerPath: binding.ContainerPath,
+			}
+			if len(summary.Repositories) == 0 {
+				item.ActionTarget.Repos = []coreplan.RepoTarget{{Name: filepath.Base(binding.ContainerPath), Path: binding.ContainerPath}}
+			} else {
+				for _, repo := range summary.Repositories {
+					item.ActionTarget.Repos = append(item.ActionTarget.Repos, coreplan.RepoTarget{Name: repo, Path: filepath.Join(binding.ContainerPath, repo)})
+				}
+			}
+		}
+		all = append(all, item)
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].LastUpdated.After(all[j].LastUpdated) })
 	return all, nil
 }
 
-func loadPlansListCmd(plansDirectory, cwdGitRoot string, showOnHold, showArchived bool) tea.Cmd {
+func jobCount(counts map[string]int) int {
+	total := 0
+	for _, count := range counts {
+		total += count
+	}
+	return total
+}
+
+func normalizedJobCounts(counts map[string]int) map[string]int {
+	out := make(map[string]int)
+	for status, count := range counts {
+		switch status {
+		case "pending_user", "todo":
+			out["pending"] += count
+		default:
+			out[status] += count
+		}
+	}
+	return out
+}
+
+func formatStatusParts(parts map[string]int) string {
+	labels := []string{"completed", "running", "pending", "failed", "blocked", "hold", "abandoned"}
+	var out []string
+	for _, label := range labels {
+		if count := parts[label]; count > 0 {
+			text := label
+			if label == "hold" {
+				text = "on hold"
+			}
+			out = append(out, fmt.Sprintf("%d %s", count, text))
+		}
+	}
+	if len(out) == 0 {
+		return "no jobs"
+	}
+	return strings.Join(out, ", ")
+}
+
+func formatSummaryLifecycle(lifecycle string, archived bool) string {
+	if archived {
+		return "Archived"
+	}
+	return formatConfigStatus(&orchestration.PlanConfig{Status: lifecycle})
+}
+
+func loadPlansListCmd(plansDirectory, cwdGitRoot string, showOnHold, showArchived bool, generation ...uint64) tea.Cmd {
+	var gen uint64
+	if len(generation) > 0 {
+		gen = generation[0]
+	}
 	return func() tea.Msg {
 		plans, err := loadPlansList(plansDirectory, cwdGitRoot, showOnHold, showArchived)
-		return planListLoadCompleteMsg{plans: plans, error: err}
+		return planListLoadCompleteMsg{plans: plans, error: err, loadGeneration: gen}
 	}
 }
 

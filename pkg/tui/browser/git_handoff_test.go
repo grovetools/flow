@@ -101,6 +101,8 @@ func TestDaemonLiveRowAssemblyResolvesQualifiedActionTarget(t *testing.T) {
 		planDir: {
 			PlanDir: planDir, PlanName: "alpha-view", WorkspaceRoot: owner,
 			PlansDir: filepath.Dir(planDir), Lifecycle: "live", Worktree: "alpha-view",
+			WorktreePath: container, BindingHealth: string(coreplan.BindingValid), RegistryID: "alpha-view-fixture",
+			Repositories: []string{"alpha-repo"},
 		},
 	}
 	items, err := loadPortfolio(summaries, false, false)

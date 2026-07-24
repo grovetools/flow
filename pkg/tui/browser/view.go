@@ -14,6 +14,10 @@ import (
 
 // View renders the current state of the browser Model.
 func (m Model) View() string {
+	// View is the first point at which a projected snapshot is actually handed
+	// to Bubble Tea's renderer. The once-guard keeps steady-state rendering free
+	// of logging overhead while preserving end-to-end snapshot latency.
+	m.renderProbe.record()
 	padStyle := lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
 	if m.width > 0 {
 		padStyle = padStyle.MaxWidth(m.width)

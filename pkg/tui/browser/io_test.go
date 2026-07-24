@@ -2,13 +2,16 @@ package browser
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/models"
+	"github.com/grovetools/core/tui/embed"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -168,6 +171,77 @@ func TestPortfolioShowsQualifiedArchivesWithoutIndexingArchiveContainer(t *testi
 	archived, exists := seen["old"]
 	if !exists || !archived.Archived || archived.Workspace != "workspace-a" || archived.Binding.Health != "archived" {
 		t.Fatalf("archive row is not qualified/read-only: %+v", archived)
+	}
+}
+
+func TestDaemonProjectionColdStartDoesNotHydrateDisk(t *testing.T) {
+	summaries := make(map[string]models.PlanSummary, 24)
+	for i := 0; i < 24; i++ {
+		dir := filepath.Join("/definitely-not-present", fmt.Sprintf("workspace-%02d", i), "plans", fmt.Sprintf("plan-%02d", i))
+		summaries[dir] = models.PlanSummary{
+			PlanDir: dir, PlanName: filepath.Base(dir), WorkspaceRoot: filepath.Dir(filepath.Dir(dir)),
+			PlansDir: filepath.Dir(dir), JobCounts: map[string]int{"completed": i + 1},
+			UpdatedAt: time.Unix(int64(i+1), 0), ScannedAt: time.Now(),
+		}
+	}
+	started := time.Now()
+	items, err := loadPortfolio(summaries, false, false)
+	if err != nil || len(items) != 24 {
+		t.Fatalf("cheap projection rows=%d err=%v", len(items), err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("24-row in-memory projection took %s", elapsed)
+	}
+}
+
+func TestRapidPlanIndexDeltasAreCoalesced(t *testing.T) {
+	updates := make(chan daemon.StateUpdate, 3)
+	for revision := uint64(5); revision <= 7; revision++ {
+		dir := fmt.Sprintf("/plans/p%d", revision)
+		updates <- daemon.StateUpdate{PlanIndex: &models.PlanIndexDelta{
+			Revision: revision, ScannedAt: time.Now(), Upserts: []models.PlanSummary{{PlanDir: dir}},
+		}}
+	}
+	msg := listenPlanIndexCmd(updates, 9)().(planIndexStreamMsg)
+	if msg.firstRevision != 5 || msg.update.PlanIndex.Revision != 7 || len(msg.update.PlanIndex.Upserts) != 3 {
+		t.Fatalf("coalesced delta=%+v first=%d", msg.update.PlanIndex, msg.firstRevision)
+	}
+}
+
+func TestStaleLocalLoadGenerationIsIgnored(t *testing.T) {
+	current := &orchestration.Plan{Name: "current", Directory: "/plans/current"}
+	m := Model{plans: []PlanListItem{{Name: current.Name, Plan: current}}, loadGeneration: 4}
+	stale := &orchestration.Plan{Name: "stale", Directory: "/plans/stale"}
+	updated, _ := m.Update(planListLoadCompleteMsg{plans: []PlanListItem{{Name: stale.Name, Plan: stale}}, loadGeneration: 3})
+	got := updated.(Model)
+	if got.plans[0].Name != "current" {
+		t.Fatalf("stale generation replaced rows: %+v", got.plans)
+	}
+}
+
+func TestDaemonFocusUsesCheapProjectionOnly(t *testing.T) {
+	dir := "/not-on-disk/plans/selected"
+	m := Model{
+		hasDaemonSnapshot: true, dataSource: "daemon live", streamGeneration: 2, loadGeneration: 1,
+		planIndexRevision: 3, planSummaries: map[string]models.PlanSummary{dir: {PlanDir: dir, PlanName: "selected", PlansDir: "/not-on-disk/plans"}},
+	}
+	updated, cmd := m.Update(embed.FocusMsg{})
+	got := updated.(Model)
+	if cmd == nil {
+		t.Fatal("focus did not schedule daemon projection")
+	}
+	loaded := cmd().(planListLoadCompleteMsg)
+	if loaded.error != nil || len(loaded.plans) != 1 || got.loadGeneration != 2 {
+		t.Fatalf("focus projection=%+v generation=%d", loaded, got.loadGeneration)
+	}
+}
+
+func TestStaleSelectedDetailIsIgnored(t *testing.T) {
+	plan := &orchestration.Plan{Name: "selected", Directory: "/plans/selected"}
+	m := Model{plans: []PlanListItem{{Name: plan.Name, Plan: plan}}, detailGeneration: 3, detailPendingKey: plan.Directory}
+	updated, _ := m.Update(planDetailMsg{key: plan.Directory, generation: 2, item: PlanListItem{Name: "stale"}})
+	if got := updated.(Model); got.plans[0].Name != "selected" || got.detailPendingKey == "" {
+		t.Fatalf("stale selected detail was accepted: %+v", got)
 	}
 }
 
