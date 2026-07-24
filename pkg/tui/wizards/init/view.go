@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/theme"
 )
 
@@ -127,29 +126,17 @@ func (m Model) renderMainScreen() string {
 	b.WriteString(row2)
 	b.WriteString("\n")
 
-	isInheritedContext := false
-	currentNode, err := workspace.GetProjectByPath(".")
-	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
-		isInheritedContext = true
-	}
+	anchorField := renderField(3, "Anchor Repository (press / to search)", m.anchorList.View(), true)
+	b.WriteString(anchorField)
+	b.WriteString("\n")
 
 	autoWorktreeDisplay := "[ ]"
 	if m.withWorktree {
 		autoWorktreeDisplay = "[x]"
 	}
-	if isInheritedContext {
-		autoWorktreeDisplay = theme.DefaultTheme.Muted.Render("[ ] (Inherited)")
-	}
 
-	openSessionDisplay := "[ ]"
-	if m.openSession {
-		openSessionDisplay = "[x]"
-	}
-
-	autoWorktreeField := renderField(3, "Auto-create Worktree", autoWorktreeDisplay, false)
-	openSessionField := renderField(4, "Open Session on Create", openSessionDisplay, false)
-	row3 := lipgloss.JoinHorizontal(lipgloss.Top, autoWorktreeField, "  ", openSessionField)
-	b.WriteString(row3)
+	autoWorktreeField := renderField(4, "Auto-create Worktree", autoWorktreeDisplay, true)
+	b.WriteString(autoWorktreeField)
 	b.WriteString("\n")
 
 	return b.String()
@@ -258,17 +245,9 @@ func (m Model) renderAdvancedScreen() string {
 	b.WriteString(renderField(0, "Run Init Actions", runInitDisplay, true))
 	b.WriteString("\n")
 
-	isInheritedContext := false
-	currentNode, err := workspace.GetProjectByPath(".")
-	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
-		isInheritedContext = true
-	}
-
 	var worktreeDisplay string
 	if m.withWorktree {
 		worktreeDisplay = theme.DefaultTheme.Muted.Render("(matches plan name)")
-	} else if isInheritedContext {
-		worktreeDisplay = theme.DefaultTheme.Info.Render(m.worktreeInput.Value())
 	} else {
 		worktreeDisplay = m.worktreeInput.View()
 	}
@@ -281,9 +260,8 @@ func (m Model) renderAdvancedScreen() string {
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, extractField, "  ", targetField))
 	b.WriteString("\n")
 
-	anchorField := renderField(4, "Anchor Repository", m.anchorInput.View(), false)
-	layoutField := renderField(5, "Worktree Location Layout", m.layoutInput.View(), false)
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, anchorField, "  ", layoutField))
+	layoutField := renderField(4, "Worktree Location Layout", m.layoutInput.View(), true)
+	b.WriteString(layoutField)
 	b.WriteString("\n\n")
 
 	b.WriteString(theme.DefaultTheme.Muted.Render("Press 'Esc' or 'b' to return to main screen"))

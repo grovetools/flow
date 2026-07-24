@@ -21,12 +21,13 @@ var ErrTUIQuit = errors.New("quit")
 // existing CLI flags and feeding the wizard's DoneMsg result through
 // the executePlanInit code path.
 func runPlanInitTUI(plansDir string, initialCmd *PlanInitCmd) (*PlanInitCmd, error) {
-	getRecipeCmd, runInitByDefault := planinit.LoadFlowDefaults()
+	getRecipeCmd, runInitByDefault, defaultModel := planinit.LoadFlowDefaults()
 
 	cfg := planinit.Config{
 		PlansDir:         plansDir,
 		GetRecipeCmd:     getRecipeCmd,
 		RunInitByDefault: runInitByDefault,
+		DefaultModel:     defaultModel,
 		Initial:          planInitCmdToRequest(initialCmd),
 	}
 

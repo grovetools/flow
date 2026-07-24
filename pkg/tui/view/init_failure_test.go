@@ -1,6 +1,7 @@
 package view
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -54,6 +55,22 @@ func TestInitFailureRebuildsPrefilledWizardAndReportsExecutionContext(t *testing
 	}
 }
 
+func TestAddPlanPageShowsLiveCreationOutputInsteadOfWizardLoading(t *testing.T) {
+	state := &viewState{
+		initProgress: "Creating plan example…",
+		initOutput:   "checking repositories\ncreating worktree\n",
+	}
+	got := (&addPlanPage{s: state, width: 100, height: 30}).View()
+	for _, want := range []string{"Creating plan example", "Creation Output", "checking repositories", "creating worktree"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("creation view %q missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Loading plan wizard") {
+		t.Fatalf("creation placeholder is misleading: %q", got)
+	}
+}
+
 func TestInitSuccessLoadFailureReturnsToPortfolio(t *testing.T) {
 	m := New(Config{PlansDir: t.TempDir()})
 	m.mode = modeInitWizard
@@ -72,18 +89,24 @@ func TestInitSuccessLoadFailureReturnsToPortfolio(t *testing.T) {
 
 func TestExecuteInitSubprocessSeparatesNoisyOutputAndExitCause(t *testing.T) {
 	plansDir := t.TempDir()
-	report := executeInitSubprocess(&planinit.Request{Dir: "noisy", RunInit: true}, plansDir, t.TempDir(), testInitDeps(
+	deps := testInitDeps(
 		func(string, ...string) *exec.Cmd {
 			return exec.Command("sh", "-c", `printf 'stdout-line\n'; printf 'stderr-line\n' >&2; exit 9`)
 		},
 		"attempt-noisy",
-	))
+	)
+	var live bytes.Buffer
+	deps.liveOutput = &live
+	report := executeInitSubprocess(&planinit.Request{Dir: "noisy", RunInit: true}, plansDir, t.TempDir(), deps)
 
 	if report.Err == nil || report.ExitCode == nil || *report.ExitCode != 9 {
 		t.Fatalf("exit evidence = err:%v code:%v", report.Err, report.ExitCode)
 	}
 	if report.Stdout != "stdout-line\n" || report.Stderr != "stderr-line\n" {
 		t.Fatalf("output was not separated: stdout=%q stderr=%q", report.Stdout, report.Stderr)
+	}
+	if got := live.String(); !strings.Contains(got, "stdout-line") || !strings.Contains(got, "stderr-line") {
+		t.Fatalf("live output did not receive both streams: %q", got)
 	}
 	for _, want := range []string{"exited with status 9", "stderr-line", "stdout-line", "Journal: " + report.JournalPath} {
 		if got := formatInitFailure(report); !strings.Contains(got, want) {

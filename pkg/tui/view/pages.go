@@ -3,8 +3,10 @@ package view
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/grovetools/core/tui"
 	"github.com/grovetools/core/tui/components/pager"
@@ -305,8 +307,33 @@ func (p *addPlanPage) Name() string  { return "Add Plan" }
 func (p *addPlanPage) Title() string { return "󰠡 Create New Plan" }
 func (p *addPlanPage) Init() tea.Cmd { return nil }
 func (p *addPlanPage) View() (out string) {
+	if p.s.initProgress != "" {
+		output := strings.TrimRight(p.s.initOutput, "\n")
+		if output == "" {
+			output = "Waiting for flow plan init output…"
+		}
+		maxLines := p.height - 9
+		if maxLines < 6 {
+			maxLines = 6
+		}
+		lines := strings.Split(output, "\n")
+		if len(lines) > maxLines {
+			lines = lines[len(lines)-maxLines:]
+		}
+		popupWidth := p.width - 6
+		if popupWidth < 40 {
+			popupWidth = 40
+		}
+		outputBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(core_theme.DefaultColors.Border).
+			Padding(0, 1).
+			Width(popupWidth).
+			Render(core_theme.DefaultTheme.Bold.Render("Creation Output") + "\n" + strings.Join(lines, "\n"))
+		return core_theme.DefaultTheme.Info.Render(p.s.initProgress) + "\n\n" + outputBox
+	}
 	if p.s.initWizardModel == nil {
-		return ""
+		return core_theme.DefaultTheme.Info.Render("Loading plan wizard…")
 	}
 	defer tui.RecoverView(&out)
 	return p.s.initWizardModel.View()

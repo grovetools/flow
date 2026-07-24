@@ -38,9 +38,10 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	plansDir := filepath.Dir(plan.Directory)
 	workspaceDir := filepath.Dir(plansDir)
 
-	// Resolve the pre-TUI client from the SAME directory as the reconnect
-	// factory below, so both target one scoped daemon (see runPlanTUI).
-	daemonClient := daemon.NewWithAutoStart(workspaceDir)
+	// Daemon routing is ambient (GROVE_SCOPE when hosted by treemux, global
+	// otherwise). workspaceDir locates plan data; using it as a daemon scope
+	// makes every standalone status TUI spawn a plan/worktree-specific daemon.
+	daemonClient := daemon.NewWithAutoStart()
 	defer func() {
 		if daemonClient != nil {
 			daemonClient.Close()
@@ -52,7 +53,7 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 		PlansDir:     plansDir,
 		DaemonClient: daemonClient,
 		DaemonClientFactory: func() daemon.Client {
-			return daemon.NewWithAutoStartOpts(workspaceDir, daemon.SuppressStartNotice())
+			return daemon.NewWithAutoStartOpts("", daemon.SuppressStartNotice())
 		},
 		InitialPlan:  plan,
 		InitialGraph: graph,

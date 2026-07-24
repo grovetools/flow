@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,11 @@ type InitExecutionReport struct {
 // atomically persisted (or the persistence error has been recorded).
 type initCompletedMsg struct {
 	report InitExecutionReport
+}
+
+type initOutputTickMsg struct {
+	path    string
+	content string
 }
 
 // *WizardReadyMsg messages carry a freshly-built wizard model from
@@ -184,6 +190,12 @@ type viewState struct {
 	wizardModel       *add.Model
 	finishWizardModel *finish.Model
 	initWizardModel   *planinit.Model
+	// initProgress is non-empty only while the confirmed plan-init subprocess
+	// is running. It lets the Add Plan page distinguish creation from its
+	// separate asynchronous wizard-construction loading state.
+	initProgress      string
+	initOutputPath    string
+	initOutput        string
 	statusLoading     bool
 	statusLoadError   string
 	statusLoadingPlan string
@@ -343,6 +355,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingInitPlanName = ""
 		m.lastInitRequest = nil
 		m.initFailure = ""
+		removeInitOutput(m.s.initOutputPath)
+		m.s.initProgress = ""
+		m.s.initOutputPath = ""
+		m.s.initOutput = ""
 		// Invalidate any in-flight async wizard builds — their ready
 		// msgs will arrive with a stale generation and be dropped.
 		m.wizardBuildGen++
@@ -564,10 +580,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case initOutputTickMsg:
+		if msg.path != m.s.initOutputPath || m.s.initProgress == "" {
+			return m, nil
+		}
+		m.s.initOutput = msg.content
+		return m, pollInitOutputCmd(msg.path)
+
 	case initCompletedMsg:
-		// Clear pending name regardless of success/failure.
+		// Clear pending name/progress regardless of success/failure.
 		pendingName := m.pendingInitPlanName
 		m.pendingInitPlanName = ""
+		removeInitOutput(m.s.initOutputPath)
+		m.s.initProgress = ""
+		m.s.initOutputPath = ""
+		m.s.initOutput = ""
 		if msg.report.Err != nil {
 			m.initFailure = formatInitFailure(msg.report)
 			// Rebuild immediately from lastInitRequest. This keeps the Add Plan
@@ -646,6 +673,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Result == nil {
 				m.lastInitRequest = nil
 				m.initFailure = ""
+				removeInitOutput(m.s.initOutputPath)
+				m.s.initProgress = ""
+				m.s.initOutputPath = ""
+				m.s.initOutput = ""
 				m.mode = modeBrowser
 				m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
 				return m, nil
@@ -659,8 +690,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingInitPlanName = req.Dir
 			requestCopy := *req
 			m.lastInitRequest = &requestCopy
-			m.initFailure = "Creating plan " + req.Dir + "…"
-			return m, runInitSubprocess(req, m.s.cfg.PlansDir, m.s.cfg.WorkspaceDir)
+			m.initFailure = ""
+			m.s.initProgress = "Creating plan " + req.Dir + "…"
+			m.s.initOutputPath = initOutputPath(m.s.cfg.PlansDir, req.Dir)
+			m.s.initOutput = ""
+			return m, tea.Batch(
+				runInitSubprocess(req, m.s.cfg.PlansDir, planinit.ResolveTargetWorkspace(m.s.cfg.WorkspaceDir), m.s.initOutputPath),
+				pollInitOutputCmd(m.s.initOutputPath),
+			)
 		case modeAddWizard:
 			m.s.wizardModel = nil
 			m.mode = modeStatus
@@ -969,6 +1006,7 @@ type initExecutionDeps struct {
 	writeJournal func(string, initJournal) error
 	now          func() time.Time
 	attemptID    func() string
+	liveOutput   io.Writer
 }
 
 func defaultInitExecutionDeps() initExecutionDeps {
@@ -982,9 +1020,51 @@ func defaultInitExecutionDeps() initExecutionDeps {
 
 // runInitSubprocess shells out to `flow plan init` from a tea.Cmd so
 // worktree creation / ecosystem bootstrap doesn't block the event loop.
-func runInitSubprocess(req *planinit.Request, plansDir, workspaceDir string) tea.Cmd {
+func runInitSubprocess(req *planinit.Request, plansDir, workspaceDir, outputPath string) tea.Cmd {
 	return func() tea.Msg {
-		return initCompletedMsg{report: executeInitSubprocess(req, plansDir, workspaceDir, defaultInitExecutionDeps())}
+		deps := defaultInitExecutionDeps()
+		if outputPath != "" {
+			if output, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
+				defer output.Close()
+				deps.liveOutput = &lockedWriter{writer: output}
+			}
+		}
+		return initCompletedMsg{report: executeInitSubprocess(req, plansDir, workspaceDir, deps)}
+	}
+}
+
+type lockedWriter struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.Write(p)
+}
+
+func initOutputPath(plansDir, planName string) string {
+	return filepath.Join(absolutePath(plansDir), ".init-"+filepath.Base(planName)+".output.log")
+}
+
+func pollInitOutputCmd(path string) tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		data, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return initOutputTickMsg{path: path, content: "Unable to read live output: " + err.Error()}
+		}
+		const maxLiveOutput = 128 * 1024
+		if len(data) > maxLiveOutput {
+			data = append([]byte("… earlier output omitted …\n"), data[len(data)-maxLiveOutput:]...)
+		}
+		return initOutputTickMsg{path: path, content: string(data)}
+	})
+}
+
+func removeInitOutput(path string) {
+	if path != "" {
+		_ = os.Remove(path)
 	}
 }
 
@@ -1031,6 +1111,10 @@ func executeInitSubprocess(req *planinit.Request, plansDir, workspaceDir string,
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if deps.liveOutput != nil {
+		cmd.Stdout = io.MultiWriter(&stdout, deps.liveOutput)
+		cmd.Stderr = io.MultiWriter(&stderr, deps.liveOutput)
+	}
 	err := cmd.Run()
 	report.Stdout = stdout.String()
 	report.Stderr = stderr.String()
@@ -1423,13 +1507,15 @@ func (m *Model) startInitWizardBuild() tea.Cmd {
 	m.wizardBuildGen++
 	gen := m.wizardBuildGen
 	m.initWizardBuilding = true
-	getRecipeCmd, runInitByDefault := planinit.LoadFlowDefaults()
+	targetWorkspace := planinit.ResolveTargetWorkspace(m.s.cfg.WorkspaceDir)
+	getRecipeCmd, runInitByDefault, defaultModel := planinit.LoadFlowDefaultsAt(targetWorkspace)
 	cfg := planinit.Config{
 		PlansDir:         m.s.cfg.PlansDir,
 		GetRecipeCmd:     getRecipeCmd,
 		RunInitByDefault: runInitByDefault,
+		DefaultModel:     defaultModel,
 		DaemonClient:     m.s.cfg.DaemonClient,
-		WorkspaceDir:     m.s.cfg.WorkspaceDir,
+		WorkspaceDir:     targetWorkspace,
 		Initial:          m.lastInitRequest,
 		InitialExact:     m.lastInitRequest != nil,
 	}

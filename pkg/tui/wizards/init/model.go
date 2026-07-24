@@ -9,6 +9,7 @@
 package planinit
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,7 @@ import (
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/theme"
+	"github.com/sirupsen/logrus"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/plancreate"
@@ -81,6 +83,13 @@ type Config struct {
 	// Actions" checkbox. Callers that don't care can leave it
 	// false; the CLI wrapper reads flow config to populate it.
 	RunInitByDefault bool
+	// DefaultModel is flow.oneshot_model from the target ecosystem config.
+	// The default picker entry leaves Request.Model empty so plan init resolves
+	// that configured value normally.
+	DefaultModel string
+	// AnchorRepositories, when non-nil, supplies the canonical repositories in
+	// the target ecosystem. A nil slice asks New to discover them.
+	AnchorRepositories []string
 	// KeyMap, if non-nil, overrides the default wizard keymap.
 	KeyMap *KeyMap
 	// DaemonClient is accepted for API consistency with other flow
@@ -104,9 +113,14 @@ type Model struct {
 	width, height     int
 
 	// Form inputs
-	nameInput   textinput.Model
-	recipeList  list.Model
-	modelList   list.Model
+	nameInput  textinput.Model
+	recipeList list.Model
+	modelList  list.Model
+	anchorList list.Model
+	// openSession is retained only to preserve an explicit CLI
+	// --open-session value through the standalone --tui round trip. The
+	// embedded wizard no longer offers it: its host already enters the created
+	// plan, so spawning a second tmux status session is redundant.
 	openSession bool
 	runInit     bool
 
@@ -121,7 +135,6 @@ type Model struct {
 	worktreeInput       textinput.Model
 	extractFromInput    textinput.Model
 	noteTargetFileInput textinput.Model
-	anchorInput         textinput.Model
 	layoutInput         textinput.Model
 
 	keys KeyMap
@@ -142,14 +155,13 @@ func (m Model) IsTextEntryActive() bool {
 		m.worktreeInput.Focused() ||
 		m.extractFromInput.Focused() ||
 		m.noteTargetFileInput.Focused() ||
-		m.anchorInput.Focused() ||
 		m.layoutInput.Focused()
 }
 
 // New constructs a Model from the given Config. Form defaults mirror
 // the legacy flow/cmd/plan_init_tui.go behavior.
 func New(cfg Config) Model {
-	workspaceDir := cfg.WorkspaceDir
+	workspaceDir := ResolveTargetWorkspace(cfg.WorkspaceDir)
 	if workspaceDir == "" {
 		workspaceDir, _ = os.Getwd()
 	}
@@ -173,29 +185,34 @@ func New(cfg Config) Model {
 	recipes, _ := orchestration.ListAllRecipes(cfg.GetRecipeCmd)
 	recipeItems := make([]list.Item, len(recipes)+1)
 	recipeItems[0] = item("none")
-	defaultRecipeIndex := 0
 	for i, r := range recipes {
 		recipeItems[i+1] = item(r.Name)
-		if r.Name == "standard-feature" {
-			defaultRecipeIndex = i + 1
-		}
 	}
 	m.recipeList = newList(recipeItems, 35, 6)
-	m.recipeList.Select(defaultRecipeIndex)
+	m.recipeList.Select(0)
 
 	// Models list.
 	models := getAvailableModels()
 	modelItems := make([]list.Item, len(models)+1)
-	modelItems[0] = modelItem{modelInfo{ID: "(default)"}}
-	defaultModelIndex := 0
+	modelItems[0] = defaultModelItem(cfg.DefaultModel)
 	for i, model := range models {
 		modelItems[i+1] = modelItem{model}
-		if model.ID == "gemini-2.5-pro" {
-			defaultModelIndex = i + 1
-		}
 	}
 	m.modelList = newList(modelItems, 35, 6)
-	m.modelList.Select(defaultModelIndex)
+	m.modelList.Select(0)
+
+	anchorRepos := cfg.AnchorRepositories
+	if anchorRepos == nil {
+		anchorRepos = discoverAnchorRepositories(workspaceDir)
+	}
+	anchorRepos = sortedUnique(anchorRepos)
+	anchorItems := make([]list.Item, len(anchorRepos)+1)
+	anchorItems[0] = item("(auto-infer)")
+	for i, repo := range anchorRepos {
+		anchorItems[i+1] = item(repo)
+	}
+	m.anchorList = newList(anchorItems, 35, 6)
+	m.anchorList.Select(0)
 
 	m.worktreeInput = textinput.New()
 	m.worktreeInput.Placeholder = "feature/branch-name"
@@ -215,9 +232,6 @@ func New(cfg Config) Model {
 	m.noteTargetFileInput.SetValue(initialNoteTarget)
 	m.noteTargetFileInput.Width = 41
 
-	m.anchorInput = textinput.New()
-	m.anchorInput.Placeholder = "repo name (auto-inferred when empty)"
-	m.anchorInput.Width = 41
 	m.layoutInput = textinput.New()
 	m.layoutInput.Placeholder = "xdg or legacy (default when empty)"
 	m.layoutInput.Width = 41
@@ -242,15 +256,6 @@ func New(cfg Config) Model {
 
 	// Apply pre-populated values (may override defaults).
 	m.prePopulate(cfg.Initial, cfg.InitialExact)
-
-	// Auto-detect sub-project worktree context and inherit the
-	// parent ecosystem worktree name.
-	currentNode, err := workspace.GetProjectByPath(".")
-	if err == nil && currentNode.Kind == workspace.KindEcosystemWorktreeSubProjectWorktree {
-		parentWorktreeName := filepath.Base(currentNode.ParentEcosystemPath)
-		m.worktreeInput.SetValue(parentWorktreeName)
-		m.withWorktree = false
-	}
 
 	return m
 }
@@ -302,7 +307,14 @@ func (m *Model) prePopulate(initial *Request, exact bool) {
 	if initial.NoteTargetFile != "" {
 		m.noteTargetFileInput.SetValue(initial.NoteTargetFile)
 	}
-	m.anchorInput.SetValue(initial.Anchor)
+	if initial.Anchor != "" {
+		for i, listItem := range m.anchorList.Items() {
+			if anchorItem, ok := listItem.(item); ok && string(anchorItem) == initial.Anchor {
+				m.anchorList.Select(i)
+				break
+			}
+		}
+	}
 	m.layoutInput.SetValue(initial.Layout)
 
 	m.openSession = initial.OpenSession
@@ -333,7 +345,6 @@ func (m Model) toRequest() *Request {
 		NoteTargetFile: m.noteTargetFileInput.Value(),
 		OpenSession:    m.openSession,
 		RunInit:        m.runInit,
-		Anchor:         m.anchorInput.Value(),
 		Layout:         m.layoutInput.Value(),
 	}
 	if selected := m.recipeList.SelectedItem(); selected != nil {
@@ -342,8 +353,13 @@ func (m Model) toRequest() *Request {
 		}
 	}
 	if selected := m.modelList.SelectedItem(); selected != nil {
-		if mi, ok := selected.(modelItem); ok && mi.ID != "(default)" {
+		if mi, ok := selected.(modelItem); ok && !mi.IsDefault {
 			req.Model = mi.ID
+		}
+	}
+	if selected := m.anchorList.SelectedItem(); selected != nil {
+		if anchor, ok := selected.(item); ok && string(anchor) != "(auto-infer)" {
+			req.Anchor = string(anchor)
 		}
 	}
 	if m.withWorktree {
@@ -360,7 +376,7 @@ func (m Model) getMaxFocusIndex() int {
 	case MainScreen:
 		return 4
 	case AdvancedScreen:
-		return 5
+		return 4
 	case ReviewScreen:
 		return 0
 	}
@@ -374,7 +390,6 @@ func (m Model) updateFocus() Model {
 	m.worktreeInput.Blur()
 	m.extractFromInput.Blur()
 	m.noteTargetFileInput.Blur()
-	m.anchorInput.Blur()
 	m.layoutInput.Blur()
 
 	if !m.unfocused {
@@ -394,8 +409,6 @@ func (m Model) updateFocus() Model {
 			case 3:
 				m.noteTargetFileInput.Focus()
 			case 4:
-				m.anchorInput.Focus()
-			case 5:
 				m.layoutInput.Focus()
 			}
 		}
@@ -446,6 +459,52 @@ func newList(items []list.Item, width, height int) list.Model {
 	l.FilterInput.PromptStyle = theme.DefaultTheme.Bold
 	l.FilterInput.TextStyle = theme.DefaultTheme.Selected
 	return l
+}
+
+// ResolveTargetWorkspace returns the canonical ecosystem root for plan
+// creation. Plans launched from any ecosystem worktree are deliberately rooted
+// at the main ecosystem rather than the caller's transient checkout.
+func ResolveTargetWorkspace(dir string) string {
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	abs, err := filepath.Abs(dir)
+	if err == nil {
+		dir = abs
+	}
+	node, err := workspace.GetProjectByPath(dir)
+	if err != nil || node == nil {
+		return dir
+	}
+	if node.RootEcosystemPath != "" {
+		return node.RootEcosystemPath
+	}
+	if node.Kind == workspace.KindEcosystemRoot {
+		return node.Path
+	}
+	return dir
+}
+
+func discoverAnchorRepositories(ecosystemRoot string) []string {
+	node, err := workspace.GetProjectByPath(ecosystemRoot)
+	if err != nil || node == nil || (node.Kind != workspace.KindEcosystemRoot && node.RootEcosystemPath == "") {
+		return nil
+	}
+	root := ResolveTargetWorkspace(ecosystemRoot)
+	logger := logrus.New()
+	logger.SetOutput(io.Discard)
+	result, err := workspace.NewDiscoveryService(logger).DiscoverAll()
+	if err != nil {
+		return nil
+	}
+	provider := workspace.NewProvider(result)
+	var names []string
+	for _, candidate := range provider.All() {
+		if candidate != nil && provider.FindSubProjectByName(candidate.Name, root) != nil {
+			names = append(names, candidate.Name)
+		}
+	}
+	return sortedUnique(names)
 }
 
 // compile-time guard that Model satisfies tea.Model.

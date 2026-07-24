@@ -81,7 +81,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				inTextInput = true
 			}
 		}
-		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2)
+		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2 || m.focusIndex == 3)
 		if m.validating {
 			return m, nil
 		}
@@ -118,7 +118,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.worktreeInput.Blur()
 			m.extractFromInput.Blur()
 			m.noteTargetFileInput.Blur()
-			m.anchorInput.Blur()
 			m.layoutInput.Blur()
 			return m, nil
 
@@ -195,14 +194,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case " ":
 			if m.currentScreen == MainScreen {
 				switch m.focusIndex {
-				case 3:
+				case 4:
 					m.withWorktree = !m.withWorktree
 					if m.withWorktree {
 						m.worktreeInput.SetValue("")
 					}
-					return m, nil
-				case 4:
-					m.openSession = !m.openSession
 					return m, nil
 				}
 			} else if m.currentScreen == AdvancedScreen {
@@ -280,6 +276,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case 2:
 				m.modelList, cmd = m.modelList.Update(msg)
+			case 3:
+				m.anchorList, cmd = m.anchorList.Update(msg)
 			}
 		case AdvancedScreen:
 			switch m.focusIndex {
@@ -294,8 +292,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case 3:
 				m.noteTargetFileInput, cmd = m.noteTargetFileInput.Update(msg)
 			case 4:
-				m.anchorInput, cmd = m.anchorInput.Update(msg)
-			case 5:
 				m.layoutInput, cmd = m.layoutInput.Update(msg)
 			}
 		}
