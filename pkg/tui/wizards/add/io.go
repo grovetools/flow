@@ -63,8 +63,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	case item:
 		str = fmt.Sprintf("%s%s", cursor, i)
 	case llmModelItem:
-		suffix := theme.DefaultTheme.Muted.Render(" — " + i.Provider + ": " + i.Note)
-		str = fmt.Sprintf("%s%s%s", cursor, i.ID, suffix)
+		str = fmt.Sprintf("%s%s", cursor, i.ID)
 	case skillItem:
 		authBadge := theme.DefaultTheme.Muted.Render("○")
 		if i.authorized {

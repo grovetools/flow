@@ -115,6 +115,7 @@ func (p *statusPage) SetSize(w, h int) {
 func (p *statusPage) Enabled() bool {
 	return p.s.statusModel != nil || p.s.statusLoading || p.s.statusLoadError != ""
 }
+
 func (p *statusPage) Ready() (bool, string) {
 	return !p.s.statusLoading, "Loading jobs…"
 }
