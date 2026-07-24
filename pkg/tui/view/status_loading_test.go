@@ -9,19 +9,24 @@ import (
 	"github.com/grovetools/flow/pkg/tui/browser"
 )
 
-func TestPlanSelectionShowsLoadingUntilJobsAreHydrated(t *testing.T) {
+func writeStatusLoadingPlan(t *testing.T) string {
+	t.Helper()
 	planDir := filepath.Join(t.TempDir(), "selected-plan")
 	if err := os.MkdirAll(planDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(planDir, ".grove-plan.yml"), []byte("notes: test\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(planDir, ".grove-plan.yml"), []byte("notes: test\nstatus: review\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	job := "---\nid: job-1\ntitle: Loaded Job\ntype: oneshot\nstatus: pending\n---\n\nDo it.\n"
 	if err := os.WriteFile(filepath.Join(planDir, "01-loaded.md"), []byte(job), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return planDir
+}
 
+func TestPlanSelectionShowsLoadingUntilJobsAreHydrated(t *testing.T) {
+	planDir := writeStatusLoadingPlan(t)
 	m := New(Config{PlansDir: filepath.Dir(planDir)})
 	updated, cmd := m.Update(browser.BrowserPlanSelectedMsg{
 		PlanName: "selected-plan", PlanPath: planDir,
@@ -41,5 +46,28 @@ func TestPlanSelectionShowsLoadingUntilJobsAreHydrated(t *testing.T) {
 	}
 	if got := m.View(); !strings.Contains(got, "01-loaded.md") {
 		t.Fatalf("hydrated job missing:\n%s", got)
+	}
+}
+
+func TestFinishRequestLoadsExactPlanThenOpensFinishPage(t *testing.T) {
+	planDir := writeStatusLoadingPlan(t)
+	m := New(Config{PlansDir: filepath.Dir(planDir)})
+
+	updated, loadCmd := m.Update(browser.BrowserPlanFinishRequestedMsg{
+		PlanName: "selected-plan", PlanPath: planDir,
+	})
+	m = updated.(Model)
+	if !m.finishAfterStatusLoad || loadCmd == nil {
+		t.Fatal("finish request did not enter asynchronous plan loading")
+	}
+
+	updated, buildCmd := m.Update(loadCmd())
+	m = updated.(Model)
+	if m.mode != modeFinishWizard || m.s.statusModel == nil || buildCmd == nil {
+		t.Fatal("loaded finish request did not target the finish wizard")
+	}
+
+	if !m.finishWizardBuilding || m.pager.ActiveIndex() != tabFinishPlan {
+		t.Fatal("finish wizard build was not started on the Finish page")
 	}
 }

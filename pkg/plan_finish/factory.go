@@ -1201,29 +1201,27 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		},
 		{
 			ID:   ItemRebuildBinaries,
-			Name: "Rebuild main repo binaries",
+			Name: "Rebuild main repo binaries via grove build",
 			Check: func() (string, error) {
 				if gitRoot == "" {
 					return "N/A", nil
 				}
-				makefilePath := filepath.Join(gitRoot, "Makefile")
-				if _, err := os.Stat(makefilePath); os.IsNotExist(err) {
-					return "N/A (no Makefile)", nil
+				if _, err := exec.LookPath("grove"); err != nil {
+					return "N/A (grove not found)", nil
 				}
-				return color.YellowString("Available"), nil
+				return color.YellowString("Available (opt-in)"), nil
 			},
 			Action: func() error {
 				if gitRoot == "" {
 					return nil
 				}
-				fmt.Printf("    Building binaries in main repository...\n")
-				buildCmd := exec.Command("make", "build")
+				fmt.Printf("    Building binaries through grove build...\n")
+				buildCmd := exec.Command("grove", "build")
 				buildCmd.Dir = gitRoot
 				buildCmd.Stdout = os.Stdout
 				buildCmd.Stderr = os.Stderr
 				if err := buildCmd.Run(); err != nil {
-					fmt.Printf("    Warning: build failed: %v\n", err)
-					return nil
+					return fmt.Errorf("grove build failed: %w", err)
 				}
 				return nil
 			},

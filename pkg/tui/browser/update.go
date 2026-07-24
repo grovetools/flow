@@ -684,7 +684,28 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			plan := m.plans[m.cursor]
-			return m, executePlanFinish(plan.Plan)
+			if m.hosted {
+				workspacePath := plan.ActionTarget.ContainerPath
+				if workspacePath == "" {
+					workspacePath = plan.Binding.ContainerPath
+				}
+				if workspacePath == "" && plan.Name == RollingPlanName {
+					workspacePath = plan.WorkspaceRoot
+				}
+				return m, func() tea.Msg {
+					return embed.SwitchWorkspaceRequestMsg{
+						Path: workspacePath, FocusPanel: "plan",
+						FocusTabIndex: 4, HasFocusTab: true,
+					}
+				}
+			}
+			return m, func() tea.Msg {
+				return BrowserPlanFinishRequestedMsg{
+					PlanName: plan.Name,
+					PlanPath: plan.Plan.Directory,
+					Plan:     plan.Plan,
+				}
+			}
 		}
 		return m, nil
 

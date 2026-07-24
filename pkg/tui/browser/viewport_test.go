@@ -43,6 +43,27 @@ func TestHostedOpenRequestsWorkspaceNavigation(t *testing.T) {
 	}
 }
 
+func TestHostedFinishRequestsPlanPanelDeepLink(t *testing.T) {
+	const container = "/worktrees/feature-plan"
+	plan := &orchestration.Plan{Name: "feature-plan", Directory: "/plans/feature-plan"}
+	m := Model{
+		plans: []PlanListItem{{
+			Name: "feature-plan", Plan: plan,
+			Binding:      coreplan.PlanBinding{Health: coreplan.BindingValid, ContainerPath: container},
+			ActionTarget: coreplan.PlanActionTarget{ContainerPath: container},
+		}},
+		keys: NewKeyMap(nil), hosted: true,
+	}
+	_, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyCtrlX})
+	if cmd == nil {
+		t.Fatal("hosted finish returned no navigation command")
+	}
+	msg, ok := cmd().(embed.SwitchWorkspaceRequestMsg)
+	if !ok || msg.Path != container || msg.FocusPanel != "plan" || !msg.HasFocusTab || msg.FocusTabIndex != 4 {
+		t.Fatalf("hosted finish = %#v", msg)
+	}
+}
+
 func TestFixedWorktreePlanComesFromRegistry(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
 	root := filepath.Join(t.TempDir(), ".grove-worktrees", "feature-plan")

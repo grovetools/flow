@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -46,6 +47,15 @@ type finishActionError struct {
 	itemTitle string
 	err       error
 }
+
+type finishActionsCompletedMsg struct {
+	errs []finishActionError
+}
+
+// finishOutputMu protects the brief process-global stdout/stderr redirect used
+// by embedded cleanup actions. The terminal renderer retains its own writer;
+// redirecting action chatter prevents it from being painted through the TUI.
+var finishOutputMu sync.Mutex
 
 // InitExecutionReport is the durable account of one delegated Add Plan
 // attempt. Command is an unambiguous JSON rendering of Argv (not shell text),
@@ -208,6 +218,9 @@ type Model struct {
 	// One-shot status line shown over the body after a finish-wizard
 	// run; cleared on the next keypress.
 	finishTransient string
+	// finishAfterStatusLoad deep-links a browser selection into Finish once its
+	// plan and dependency graph have loaded off the event loop.
+	finishAfterStatusLoad bool
 
 	// wizardBuildGen + *Building flags guard async wizard
 	// construction. Stale ready msgs (after user navigates away or
@@ -337,6 +350,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.s.statusLoading = false
 		m.s.statusLoadError = ""
 		m.s.statusLoadingPlan = ""
+		m.finishAfterStatusLoad = false
 		m.addWizardBuilding = false
 		m.finishWizardBuilding = false
 		m.initWizardBuilding = false
@@ -442,6 +456,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case embed.SwitchTabMsg:
 		return m.switchToTab(msg.TabIndex)
 
+	case browser.BrowserPlanFinishRequestedMsg:
+		if m.s.statusModel != nil {
+			_ = m.s.statusModel.Close()
+			m.s.statusModel = nil
+		}
+		if msg.PlanPath == "" {
+			return m, nil
+		}
+		m.s.statusLoadGen++
+		generation := m.s.statusLoadGen
+		m.s.statusLoading = true
+		m.s.statusLoadError = ""
+		m.s.statusLoadingPlan = msg.PlanName
+		m.finishAfterStatusLoad = true
+		m.mode = modeFinishWizard
+		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabFinishPlan})
+		return m, loadStatusCmd(msg.PlanPath, generation)
+
 	case browser.BrowserPlanSelectedMsg:
 		// Daemon portfolio rows intentionally contain only summary data. Load the
 		// selected plan off the event loop and expose the Jobs page's loading gate
@@ -458,6 +490,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.s.statusLoading = true
 		m.s.statusLoadError = ""
 		m.s.statusLoadingPlan = msg.PlanName
+		m.finishAfterStatusLoad = false
 		m.mode = modeStatus
 		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabJobs})
 		return m, loadStatusCmd(msg.PlanPath, generation)
@@ -469,6 +502,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.s.statusLoading = false
 		if msg.err != nil {
 			m.s.statusLoadError = msg.err.Error()
+			m.finishAfterStatusLoad = false
 			return m, nil
 		}
 		newStatus := status.New(status.Config{
@@ -495,6 +529,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if fc != nil {
 			cmds = append(cmds, fc)
+		}
+		if m.finishAfterStatusLoad {
+			m.finishAfterStatusLoad = false
+			m.mode = modeFinishWizard
+			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabFinishPlan})
+			if c := m.startFinishWizardBuild(msg.plan); c != nil {
+				cmds = append(cmds, c)
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case finishActionsCompletedMsg:
+		m.finishTransient = formatFinishErrors(msg.errs)
+		if len(msg.errs) > 0 {
+			// Keep the plan loaded and resolvable so cleanup can be retried.
+			m.mode = modeStatus
+			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabJobs})
+			return m, nil
+		}
+		if m.s.statusModel != nil {
+			_ = m.s.statusModel.Close()
+			m.s.statusModel = nil
+		}
+		m.mode = modeBrowser
+		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
+		updated, _ := m.s.browserModel.Update(embed.FocusMsg{})
+		if bm, ok := updated.(browser.Model); ok {
+			m.s.browserModel = bm
+		}
+		cmds := []tea.Cmd{m.s.browserModel.Init()}
+		if m.s.cfg.DaemonClient != nil {
+			cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -627,43 +693,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabJobs})
 				return m, nil
 			}
-			// Execute enabled actions sequentially, collecting errors.
-			var actionErrs []finishActionError
-			for _, item := range items {
-				if item == nil || !item.IsEnabled || item.Action == nil {
-					continue
-				}
-				if err := item.Action(); err != nil {
-					actionErrs = append(actionErrs, finishActionError{itemTitle: item.Name, err: err})
-				}
-			}
-			// Run on_finish hook + clear active-plan state regardless
-			// of action errors.
-			plan := (*orchestration.Plan)(nil)
+			var plan *orchestration.Plan
 			if m.s.statusModel != nil {
 				plan = m.s.statusModel.Plan
 			}
-			if plan != nil {
-				plan_finish.RunOnFinishHook(plan, plan.Name)
-			}
-			sd := stateDirForView()
-			if err := state.Delete(sd, groveplan.StateKey); err != nil {
-				actionErrs = append(actionErrs, finishActionError{itemTitle: "unset active plan", err: err})
-			} else {
-				_ = state.Delete(sd, groveplan.LegacyStateKey)
-			}
-			m.finishTransient = formatFinishErrors(actionErrs)
-			if m.s.statusModel != nil {
-				_ = m.s.statusModel.Close()
-				m.s.statusModel = nil
-			}
-			m.mode = modeBrowser
-			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
-			updated, _ := m.s.browserModel.Update(embed.FocusMsg{})
-			if bm, ok := updated.(browser.Model); ok {
-				m.s.browserModel = bm
-			}
-			return m, m.s.browserModel.Init()
+			m.finishTransient = "Finishing plan…"
+			return m, runEmbeddedFinishActions(items, plan, stateDirForView())
 		default:
 			return m, nil
 		}
@@ -863,6 +898,56 @@ func refreshDaemonCmd(client daemon.Client) tea.Cmd {
 		defer cancel()
 		_ = client.Refresh(ctx)
 		return nil
+	}
+}
+
+// runEmbeddedFinishActions keeps slow cleanup off the Bubble Tea event loop
+// and silences action subprocess chatter that would otherwise corrupt the
+// alternate-screen render. Errors remain available in the completion message.
+func runEmbeddedFinishActions(items []*finish.Item, plan *orchestration.Plan, stateDir string) tea.Cmd {
+	return func() tea.Msg {
+		finishOutputMu.Lock()
+		defer finishOutputMu.Unlock()
+
+		stdout, stderr := os.Stdout, os.Stderr
+		if sink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0); err == nil {
+			os.Stdout, os.Stderr = sink, sink
+			defer func() {
+				os.Stdout, os.Stderr = stdout, stderr
+				_ = sink.Close()
+			}()
+		}
+
+		var errs []finishActionError
+		if plan != nil {
+			if _, err := orchestration.FinishPlanNotes(plan.Name); err != nil {
+				errs = append(errs, finishActionError{itemTitle: "finish linked notes", err: err})
+			}
+			plan_finish.RunOnFinishHook(plan, plan.Name)
+		}
+		terminal := map[string]bool{
+			plan_finish.ItemArchivePlan:  true,
+			plan_finish.ItemMarkFinished: true,
+		}
+		for _, item := range items {
+			if item == nil || !item.IsEnabled || item.Action == nil {
+				continue
+			}
+			if len(errs) > 0 && terminal[item.ID] {
+				continue
+			}
+			if err := item.Action(); err != nil {
+				errs = append(errs, finishActionError{itemTitle: item.Name, err: err})
+			}
+		}
+		if len(errs) == 0 {
+			if err := state.Delete(stateDir, groveplan.StateKey); err != nil {
+				errs = append(errs, finishActionError{itemTitle: "unset active plan", err: err})
+			} else {
+				_ = state.Delete(stateDir, groveplan.LegacyStateKey)
+			}
+		}
+		return finishActionsCompletedMsg{errs: errs}
 	}
 }
 

@@ -332,6 +332,15 @@ type BrowserPlanSelectedMsg struct {
 	Plan     *orchestration.Plan
 }
 
+// BrowserPlanFinishRequestedMsg asks the embedding flow meta-panel to open the
+// selected plan directly on its Finish page. Keeping this in-process avoids
+// tea.ExecProcess, which would suspend (and under treemux, exit) the host TUI.
+type BrowserPlanFinishRequestedMsg struct {
+	PlanName string
+	PlanPath string
+	Plan     *orchestration.Plan
+}
+
 // New builds a Model from the given Config. Most fields default to their
 // zero values; real data is fetched in Init via async tea.Cmds.
 func New(cfg Config) Model {
