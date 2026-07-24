@@ -154,6 +154,38 @@ var AnchorRegistryScenario = harness.NewScenario(
 			return nil
 		}),
 
+		harness.NewStep("Plan operations from the anchored container stay in the owning ecosystem notebook", func(ctx *harness.Context) error {
+			worktreePath := ctx.GetString("worktree_path")
+			planPath := ctx.GetString("plan_path")
+			notebooksRoot := ctx.GetString("notebooks_root")
+
+			// Exercise the user-visible regression path: after init, enter the
+			// anchored container and add a job without naming the plan. The active
+			// plan + workspace resolver must canonicalize the container back to the
+			// origin ecosystem (anchor-eco). The anchor repo controls XDG nesting
+			// only; it must never turn the plan name into a notebook workspace.
+			cmd := ctx.Bin("plan", "add",
+				"--type", "shell",
+				"--title", "anchored-context",
+				"--prompt", "true")
+			cmd.Dir(worktreePath)
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("plan add from anchored container failed: %w", err)
+			}
+
+			if err := fs.AssertExists(filepath.Join(planPath, "01-anchored-context.md")); err != nil {
+				return fmt.Errorf("job should be written to the origin ecosystem plan at %s: %w", planPath, err)
+			}
+
+			wrongPlanPath := filepath.Join(notebooksRoot, "workspaces", "anchored", "plans", "anchored")
+			if err := fs.AssertNotExists(wrongPlanPath); err != nil {
+				return fmt.Errorf("anchor/plan name must not become the notebook workspace (%s): %w", wrongPlanPath, err)
+			}
+			return nil
+		}),
+
 		harness.NewStep("plan finish --prune-worktree deletes the registry entry", func(ctx *harness.Context) error {
 			gitRoot := ctx.GetString("git_root")
 			worktreePath := ctx.GetString("worktree_path")

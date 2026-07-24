@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	groveplan "github.com/grovetools/core/pkg/plan"
+	"github.com/grovetools/core/state"
 	planinit "github.com/grovetools/flow/pkg/tui/wizards/init"
 )
 
@@ -68,6 +70,66 @@ func TestAddPlanPageShowsLiveCreationOutputInsteadOfWizardLoading(t *testing.T) 
 	}
 	if strings.Contains(got, "Loading plan wizard") {
 		t.Fatalf("creation placeholder is misleading: %q", got)
+	}
+}
+
+func TestCreatedPlanHostActivationMatchesCLI(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *planinit.Request
+		want bool
+	}{
+		{name: "plain plan activates in host", req: &planinit.Request{}, want: true},
+		{name: "named worktree stays isolated", req: &planinit.Request{Worktree: "feature"}, want: false},
+		{name: "automatic worktree stays isolated", req: &planinit.Request{Worktree: "__AUTO__"}, want: false},
+		{name: "opened session owns activation", req: &planinit.Request{OpenSession: true}, want: false},
+		{name: "missing request does not mutate host", req: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldActivateCreatedPlanInHost(tt.req); got != tt.want {
+				t.Fatalf("shouldActivateCreatedPlanInHost(%#v) = %v, want %v", tt.req, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInitSuccessWithWorktreePreservesHostActivePlan(t *testing.T) {
+	workspaceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceDir, "grove.toml"), []byte("workspaces = [\"*\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Set(workspaceDir, groveplan.StateKey, groveplan.RollingPlanName); err != nil {
+		t.Fatal(err)
+	}
+
+	plansDir := t.TempDir()
+	planName := "isolated-feature"
+	planDir := filepath.Join(plansDir, planName)
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, ".grove-plan.yml"), []byte("notes: isolated plan\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := New(Config{PlansDir: plansDir, WorkspaceDir: workspaceDir})
+	m.mode = modeInitWizard
+	m.pendingInitPlanName = planName
+	m.lastInitRequest = &planinit.Request{Dir: planName, Worktree: planName}
+
+	updated, _ := m.Update(initCompletedMsg{report: InitExecutionReport{}})
+	got := updated.(Model)
+	if got.mode != modeStatus {
+		t.Fatalf("successful init mode=%v, want status", got.mode)
+	}
+	active, err := state.GetString(workspaceDir, groveplan.StateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != groveplan.RollingPlanName {
+		t.Fatalf("host active plan = %q, want preserved %q", active, groveplan.RollingPlanName)
 	}
 }
 

@@ -588,8 +588,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, pollInitOutputCmd(msg.path)
 
 	case initCompletedMsg:
-		// Clear pending name/progress regardless of success/failure.
+		// Clear pending name/progress regardless of success/failure. Keep the
+		// submitted request long enough to decide whether success should change
+		// the host workspace's active plan.
 		pendingName := m.pendingInitPlanName
+		initRequest := m.lastInitRequest
 		m.pendingInitPlanName = ""
 		removeInitOutput(m.s.initOutputPath)
 		m.s.initProgress = ""
@@ -644,7 +647,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if c := m.s.statusModel.Init(); c != nil {
 						cmds = append(cmds, c)
 					}
-					_ = state.Set(m.s.cfg.WorkspaceDir, groveplan.StateKey, plan.Name)
+					// Match `flow plan init`: a plan with its own worktree is activated
+					// inside that worktree by the init subprocess. Do not also activate
+					// it in the host/main ecosystem, which should retain rolling (or
+					// whatever was active before creation). An opened session likewise
+					// owns its activation.
+					if shouldActivateCreatedPlanInHost(initRequest) {
+						_ = state.Set(m.s.cfg.WorkspaceDir, groveplan.StateKey, plan.Name)
+					}
 					if m.s.cfg.DaemonClient != nil {
 						cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
 					}
@@ -999,6 +1009,13 @@ func formatFinishErrors(errs []finishActionError) string {
 		return fmt.Sprintf("finish: %s: %v", first.itemTitle, first.err)
 	}
 	return fmt.Sprintf("finish: %s: %v (+%d more)", first.itemTitle, first.err, len(errs)-1)
+}
+
+// shouldActivateCreatedPlanInHost mirrors the activation rule in
+// cmd.executePlanInit. Worktree/session plans own their active state outside the
+// host workspace, so successful creation must not overwrite the host's state.
+func shouldActivateCreatedPlanInHost(req *planinit.Request) bool {
+	return req != nil && req.Worktree == "" && !req.OpenSession
 }
 
 type initExecutionDeps struct {
