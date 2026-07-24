@@ -30,6 +30,8 @@ import (
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
+var writeClipboard = clipboard.WriteAll
+
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -1693,7 +1695,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 2nd char fall through to the chord seam below — otherwise the seam's
 		// per-key whitelist would misroute the "l" in "vl" to a viewport handler.
 		if m.ShowLogs && (m.Focus == FocusDetailPrimary || m.Focus == FocusDetailSecondary) && !m.WhichKey.Armed() {
-			// Global keys that should pass through to the main switch. "v"/"c" arm
+			// Global keys that should pass through to the main switch. CopyPath is
+			// checked by binding below (rather than hard-coding ctrl+y) so configured
+			// overrides remain global while a detail pane has focus. "v"/"c" arm
 			// the View/Change namespaces; "f" toggles fullscreen (former flat "z"
 			// is gone — rebound to "f"). The legacy flat aliases (F,L,b,m,p,w)
 			// were dropped (chord-only, sign-off E4), so they no longer need a
@@ -1704,10 +1708,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"tab", "shift+tab", "V", "i", "s", "esc":
 				// Let these be handled by the main logic below
 			default:
-				if m.Focus == FocusDetailPrimary {
-					return m.handleDetailPrimaryKey(msg)
+				if !key.Matches(msg, m.KeyMap.CopyPath) {
+					if m.Focus == FocusDetailPrimary {
+						return m.handleDetailPrimaryKey(msg)
+					}
+					return m.handleDetailSecondaryKey(msg)
 				}
-				return m.handleDetailSecondaryKey(msg)
 			}
 		}
 
@@ -2025,7 +2031,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.CopyPath):
 			if job := m.CurrentJob(); job != nil {
 				path := job.FilePath
-				if err := clipboard.WriteAll(path); err != nil {
+				if err := writeClipboard(path); err != nil {
 					m.StatusSummary = fmt.Sprintf("Error copying path: %v", err)
 				} else {
 					m.StatusSummary = fmt.Sprintf("Copied: %s", path)
