@@ -156,10 +156,13 @@ func previewRepo(repo coreplan.RepoTarget, operation Operation) RepoPreview {
 	}
 
 	switch {
+	// Detached HEAD outranks every other verdict: porcelain v2 reports it as the
+	// literal "(detached)" (see git.IsDetachedHead), and a detached checkout must
+	// never be mutated regardless of what else preflight would conclude.
+	case git.IsDetachedHead(p.Branch):
+		p.Reason = "detached HEAD"
 	case p.Onto == "":
 		p.Reason = "no local main/master"
-	case p.Branch == "" || p.Branch == "HEAD":
-		p.Reason = "detached HEAD"
 	case p.Dirty:
 		p.Reason = "worktree is not clean"
 	case len(p.InProgress) > 0:
@@ -219,8 +222,12 @@ func statusClean(s *git.StatusInfo) bool {
 
 func inProgress(repoPath string) []string {
 	checks := []struct{ path, name string }{
-		{"rebase-merge", "rebase"}, {"rebase-apply", "rebase"}, {"MERGE_HEAD", "merge"},
-		{"CHERRY_PICK_HEAD", "cherry-pick"}, {"REVERT_HEAD", "revert"}, {"BISECT_LOG", "bisect"},
+		{"rebase-merge", "rebase"},
+		{"rebase-apply", "rebase"},
+		{"MERGE_HEAD", "merge"},
+		{"CHERRY_PICK_HEAD", "cherry-pick"},
+		{"REVERT_HEAD", "revert"},
+		{"BISECT_LOG", "bisect"},
 	}
 	seen := map[string]bool{}
 	var out []string

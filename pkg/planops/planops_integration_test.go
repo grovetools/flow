@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	coreplan "github.com/grovetools/core/pkg/plan"
@@ -180,4 +181,119 @@ func bytesTrimSpace(b []byte) []byte {
 		end--
 	}
 	return b[start:end]
+}
+
+// TestDetachedHeadBlocksPreflightWithoutMutation pins the porcelain v2
+// representation bug: a detached checkout reports its branch as the literal
+// "(detached)", and preflight must classify it as a distinct, durable failure
+// that blocks the whole all-repo operation — no repository may be mutated, not
+// even eligible peers.
+func TestDetachedHeadBlocksPreflightWithoutMutation(t *testing.T) {
+	_, alpha := repoFixture(t, "main")
+	betaMain, beta := repoFixture(t, "main")
+	commitFile(t, alpha, "alpha.txt", "alpha work")
+	commitFile(t, beta, "beta.txt", "beta work")
+	// Advance beta's main so beta is behind — an executed rebase would actually
+	// move its (detached) HEAD.
+	commitFile(t, betaMain, "main.txt", "main advance")
+	runGit(t, beta, "checkout", "--detach")
+
+	target := targetFor(
+		coreplan.RepoTarget{Name: "a-alpha", Path: alpha},
+		coreplan.RepoTarget{Name: "b-beta", Path: beta},
+	)
+	preview, err := Preview(context.Background(), target, OperationUpdateOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := preview.Repos[1]; got.Disposition != DispositionBlocked || got.Reason != "detached HEAD" {
+		t.Fatalf("detached repo must be blocked with a durable reason, got %#v", got)
+	}
+
+	alphaBefore := gitOut(t, alpha, "rev-parse", "HEAD")
+	betaBefore := gitOut(t, beta, "rev-parse", "HEAD")
+	result := Execute(context.Background(), preview)
+	if !result.Failed() {
+		t.Fatalf("execution with a detached repo must fail: %#v", result)
+	}
+	if result.Results[0].Outcome != OutcomeNotAttempted {
+		t.Errorf("eligible peer must not be attempted, got %#v", result.Results[0])
+	}
+	if result.Results[1].Outcome != OutcomeFailed || result.Results[1].Detail != "detached HEAD" {
+		t.Errorf("detached repo must fail with its reason, got %#v", result.Results[1])
+	}
+	if got := gitOut(t, alpha, "rev-parse", "HEAD"); got != alphaBefore {
+		t.Errorf("alpha was mutated despite detached peer: %s -> %s", alphaBefore, got)
+	}
+	if got := gitOut(t, beta, "rev-parse", "HEAD"); got != betaBefore {
+		t.Errorf("detached beta was mutated: %s -> %s", betaBefore, got)
+	}
+}
+
+// TestExecutionFailureYieldsPerRepoOutcomes injects a mid-sequence rebase
+// failure (a PATH shim fails `git rebase` only inside the middle repo) and
+// asserts the structured result attributes every repo: the first succeeded,
+// the failing repo carries its error detail, and later repos are explicitly
+// not-attempted and unmutated.
+func TestExecutionFailureYieldsPerRepoOutcomes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH shim requires a POSIX shell")
+	}
+	fixtures := make(map[string]string, 3)
+	var targets []coreplan.RepoTarget
+	for _, name := range []string{"a-alpha", "b-beta", "c-gamma"} {
+		main, worktree := repoFixture(t, "main")
+		commitFile(t, worktree, "feature.txt", name+" feature")
+		commitFile(t, main, "main.txt", name+" main advance")
+		fixtures[name] = worktree
+		targets = append(targets, coreplan.RepoTarget{Name: name, Path: worktree})
+	}
+
+	preview, err := Preview(context.Background(), targetFor(targets...), OperationUpdateOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range preview.Repos {
+		if repo.Disposition != DispositionReady {
+			t.Fatalf("fixture %s not ready: %#v", repo.Name, repo)
+		}
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	betaPath, err := filepath.EvalSymlinks(fixtures["b-beta"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	shimDir := t.TempDir()
+	shim := "#!/bin/sh\n" +
+		"if [ \"$1\" = rebase ] && [ \"$(pwd -P)\" = \"" + betaPath + "\" ]; then exit 86; fi\n" +
+		"exec \"" + realGit + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	gammaBefore := gitOut(t, fixtures["c-gamma"], "rev-parse", "HEAD")
+	result := Execute(context.Background(), preview)
+	if !result.Failed() {
+		t.Fatalf("injected failure not reported: %#v", result)
+	}
+	if len(result.Results) != 3 {
+		t.Fatalf("expected one result per repo, got %#v", result.Results)
+	}
+	if result.Results[0].Outcome != OutcomeSucceeded {
+		t.Errorf("alpha should have succeeded before the failure: %#v", result.Results[0])
+	}
+	if result.Results[1].Outcome != OutcomeFailed || result.Results[1].Detail == "" {
+		t.Errorf("beta must be Failed with its error detail: %#v", result.Results[1])
+	}
+	if result.Results[2].Outcome != OutcomeNotAttempted {
+		t.Errorf("gamma must be explicitly not-attempted: %#v", result.Results[2])
+	}
+	if got := gitOut(t, fixtures["c-gamma"], "rev-parse", "HEAD"); got != gammaBefore {
+		t.Errorf("not-attempted gamma was mutated: %s -> %s", gammaBefore, got)
+	}
 }
