@@ -105,20 +105,33 @@ func runSubjobWatch(cmd *cobra.Command, parentID string) error {
 				fmt.Fprintln(cmd.ErrOrStderr(), "flow subjob watch:", err)
 			}
 			backoff = time.Second
+			var reconcileTimer *time.Timer
+			var reconcileC <-chan time.Time
 			for {
 				select {
 				case <-cmd.Context().Done():
+					if reconcileTimer != nil {
+						reconcileTimer.Stop()
+					}
 					cancel()
 					return nil
 				case update, ok := <-stream:
 					if !ok {
+						if reconcileTimer != nil {
+							reconcileTimer.Stop()
+						}
 						cancel()
 						goto reconnect
 					}
-					if strings.HasPrefix(update.UpdateType, "subjob_") || strings.HasPrefix(update.UpdateType, "job_") {
-						if err := emitSubjobReconcile(cmd, client, canonical, parentID, delivered); err != nil {
-							fmt.Fprintln(cmd.ErrOrStderr(), "flow subjob watch:", err)
-						}
+					if (strings.HasPrefix(update.UpdateType, "subjob_") || strings.HasPrefix(update.UpdateType, "job_")) && reconcileTimer == nil {
+						reconcileTimer = time.NewTimer(100 * time.Millisecond)
+						reconcileC = reconcileTimer.C
+					}
+				case <-reconcileC:
+					reconcileTimer = nil
+					reconcileC = nil
+					if err := emitSubjobReconcile(cmd, client, canonical, parentID, delivered); err != nil {
+						fmt.Fprintln(cmd.ErrOrStderr(), "flow subjob watch:", err)
 					}
 				}
 			}
