@@ -189,10 +189,5 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 	}
 	keymap.ApplyTUIOverrides(cfg, "flow", "plan-list", &km)
-	// Mutation intentionally remains unavailable until U/M are routed through
-	// the shared preview/confirmation lifecycle service. This slice ships only
-	// the read-only V handoff.
-	km.FastForwardUpdate.SetEnabled(false)
-	km.FastForwardMain.SetEnabled(false)
 	return km
 }

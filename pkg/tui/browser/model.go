@@ -12,6 +12,7 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/embed"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/planutil"
@@ -148,8 +149,12 @@ type Model struct {
 	streamCancel      context.CancelFunc
 	streamConnecting  bool
 
-	// holdPending is keyed by qualified PlanKey, never by slug or cursor.
-	holdPending map[string]bool
+	// holdPending/actionPending are keyed by qualified PlanKey, never by slug or
+	// cursor. actionPending covers the U/M handoff lifetime and is cleared only
+	// when the preserved Plans model regains focus and refreshes that exact key.
+	holdPending    map[string]bool
+	actionPending  map[string]embed.GitOperation
+	refreshPlanKey string
 }
 
 // PlanCount returns the number of plans in the browser list.
@@ -313,6 +318,7 @@ func New(cfg Config) Model {
 		streamGeneration: 1,
 		streamConnecting: true,
 		holdPending:      make(map[string]bool),
+		actionPending:    make(map[string]embed.GitOperation),
 	}
 }
 

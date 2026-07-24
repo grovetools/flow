@@ -173,9 +173,57 @@ func TestViewGitRefusesMissingContainerDistinctly(t *testing.T) {
 	}
 }
 
-func TestMutationBindingsRemainDisabled(t *testing.T) {
+func TestPlanMutationKeysEmitExactQualifiedPreviewRequestsAndDeduplicate(t *testing.T) {
+	planDir := filepath.Join(t.TempDir(), "plans", "same")
+	target := coreplan.PlanActionTarget{
+		PlanDir: planDir, RegistryID: "registry/same", ContainerPath: "/containers/same",
+		Repos: []coreplan.RepoTarget{{Name: "beta", Path: "/containers/same/beta"}, {Name: "alpha", Path: "/containers/same/alpha"}},
+	}
+	for _, tc := range []struct {
+		key rune
+		op  embed.GitOperation
+	}{{'U', embed.GitOperationUpdateOnly}, {'M', embed.GitOperationLand}} {
+		m := New(Config{})
+		m.plans = []PlanListItem{{
+			Name: "same", Key: coreplan.NewPlanKey(planDir),
+			Binding:      coreplan.PlanBinding{Key: coreplan.NewPlanKey(planDir), Health: coreplan.BindingValid},
+			ActionTarget: target,
+		}}
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+		m = updated.(Model)
+		if cmd == nil {
+			t.Fatalf("%c did not open a preview: %s", tc.key, m.statusMessage)
+		}
+		req, ok := cmd().(embed.OpenGitRequest)
+		if !ok || req.Operation != tc.op || req.Target.PlanDir != planDir || len(req.Target.Repos) != 2 {
+			t.Fatalf("%c request lost exact target: %#v", tc.key, req)
+		}
+
+		updated, duplicate := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{tc.key}})
+		m = updated.(Model)
+		if duplicate != nil || !strings.Contains(m.statusMessage, "already in flight") {
+			t.Fatalf("%c duplicate was not refused: cmd=%v status=%q", tc.key, duplicate, m.statusMessage)
+		}
+		if m.refreshPlanKey != planDir {
+			t.Fatalf("refresh key = %q, want exact PlanKey %q", m.refreshPlanKey, planDir)
+		}
+	}
+}
+
+func TestPlanMutationFocusReturnClearsPendingAndRefreshesExactPlanKey(t *testing.T) {
+	firstDir := filepath.Join(t.TempDir(), "workspace-a", "plans", "same")
+	secondDir := filepath.Join(t.TempDir(), "workspace-b", "plans", "same")
 	m := New(Config{})
-	if m.keys.FastForwardUpdate.Enabled() || m.keys.FastForwardMain.Enabled() {
-		t.Fatal("U/M must remain disabled until the shared lifecycle service lands")
+	m.plans = []PlanListItem{
+		{Name: "same", Key: coreplan.NewPlanKey(firstDir), Binding: coreplan.PlanBinding{Health: coreplan.BindingValid}},
+		{Name: "same", Key: coreplan.NewPlanKey(secondDir), Binding: coreplan.PlanBinding{Health: coreplan.BindingValid}},
+	}
+	m.cursor = 1
+	m.refreshPlanKey = secondDir
+	m.actionPending[secondDir] = embed.GitOperationLand
+	updated, _ := m.Update(embed.FocusMsg{})
+	m = updated.(Model)
+	if m.selectedPlanKey() != secondDir || len(m.actionPending) != 0 || m.refreshPlanKey != "" {
+		t.Fatalf("focus return did not restore/clear exact lifecycle state: key=%q pending=%v refresh=%q", m.selectedPlanKey(), m.actionPending, m.refreshPlanKey)
 	}
 }

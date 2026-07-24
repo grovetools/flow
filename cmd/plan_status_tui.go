@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -91,9 +92,11 @@ type statusTUIHost struct {
 type gitViewerClosedMsg struct{ err error }
 
 func gitViewerExecCommand(req embed.OpenGitRequest) *exec.Cmd {
+	targetJSON, _ := json.Marshal(req.Target)
 	return delegation.Command("git-viewer", "view",
 		"--dir", req.Target.ContainerPath,
-		"--initial-operation", string(req.Operation))
+		"--initial-operation", string(req.Operation),
+		"--plan-action-target-json", string(targetJSON))
 }
 
 func newStatusTUIHost(m view.Model) statusTUIHost {

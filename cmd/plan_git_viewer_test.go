@@ -12,7 +12,10 @@ import (
 func TestGitViewerExecCommandCarriesExplicitQualifiedTarget(t *testing.T) {
 	container := filepath.Join(t.TempDir(), "qualified", "container")
 	cmd := gitViewerExecCommand(embed.OpenGitRequest{
-		Target:    coreplan.PlanActionTarget{PlanDir: "/plans/same", ContainerPath: container},
+		Target: coreplan.PlanActionTarget{
+			PlanDir: "/plans/same", ContainerPath: container,
+			Repos: []coreplan.RepoTarget{{Name: "repo", Path: filepath.Join(container, "repo")}},
+		},
 		Operation: embed.GitOperationInspect,
 	})
 	args := cmd.Args
@@ -23,7 +26,7 @@ func TestGitViewerExecCommandCarriesExplicitQualifiedTarget(t *testing.T) {
 	for _, arg := range args {
 		joined += "\x00" + arg
 	}
-	for _, want := range []string{"\x00view", "\x00--dir\x00" + container, "\x00--initial-operation\x00inspect"} {
+	for _, want := range []string{"\x00view", "\x00--dir\x00" + container, "\x00--initial-operation\x00inspect", "\x00--plan-action-target-json\x00", `"planDir":"/plans/same"`, `"repos":[`} {
 		if !contains(joined, want) {
 			t.Fatalf("argv %v does not contain %q", args, want)
 		}

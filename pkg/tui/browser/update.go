@@ -26,6 +26,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case embed.FocusMsg:
 		m.focused = true
 		m.loading = true
+		// Returning from Git Viewer completes the adapter lifecycle. Restore the
+		// exact qualified row that launched U/M before refreshing it; duplicate
+		// handoffs stay blocked until this point.
+		if m.refreshPlanKey != "" {
+			m.selectPlanKey(m.refreshPlanKey)
+			delete(m.actionPending, m.refreshPlanKey)
+			m.refreshPlanKey = ""
+		}
 		return m, m.reloadPlansCmd()
 
 	case embed.BlurMsg:
@@ -572,12 +580,38 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.FastForwardUpdate), key.Matches(msg, m.keys.FastForwardMain):
-		// Plans U/M remain intentionally disabled until the following adapter
-		// slice can open Git Viewer's shared preview/confirmation UI. Keeping the
-		// old browser-local mutation loops unreachable prevents CWD-derived or
-		// stale rendered-status decisions from bypassing planops.
-		m.statusMessage = theme.DefaultTheme.Warning.Render("Update and Merge are temporarily disabled; inspect with V")
-		return m, nil
+		action := "update"
+		operation := embed.GitOperationUpdateOnly
+		if key.Matches(msg, m.keys.FastForwardMain) {
+			action = "land"
+			operation = embed.GitOperationLand
+		}
+		if !m.selectedBindingValid(action) {
+			return m, nil
+		}
+		if m.cursor < 0 || m.cursor >= len(m.plans) {
+			return m, nil
+		}
+		item := m.plans[m.cursor]
+		key := planItemKey(item)
+		target := item.ActionTarget
+		if key == "" || target.PlanDir == "" || target.ContainerPath == "" || len(target.Repos) == 0 {
+			m.statusMessage = theme.DefaultTheme.Error.Render("Cannot " + action + ": exact qualified repository target unavailable")
+			return m, nil
+		}
+		if m.actionPending == nil {
+			m.actionPending = make(map[string]embed.GitOperation)
+		}
+		if pending, ok := m.actionPending[key]; ok {
+			m.statusMessage = theme.DefaultTheme.Warning.Render("Plan action already in flight: " + string(pending))
+			return m, nil
+		}
+		m.actionPending[key] = operation
+		m.refreshPlanKey = key
+		m.statusMessage = "Opening fresh " + action + " preview…"
+		return m, func() tea.Msg {
+			return embed.OpenGitRequest{Target: target, Operation: operation}
+		}
 
 	case key.Matches(msg, m.keys.ToggleGitLog):
 		if m.inRepoNavigationMode {
