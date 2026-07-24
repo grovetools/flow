@@ -111,9 +111,10 @@ func MaxTokens(model string) int64 {
 	switch {
 	// Claude 4.x families support 64K output tokens. (Opus 4.x can go up to
 	// 128K, but 64K is valid everywhere in the family and keeps prior behavior.)
-	// Sonnet 5 also supports 128K output; 64K keeps it on the same conservative
-	// budget as the rest of the cascade.
+	// Opus 5 and Sonnet 5 also support 128K output; 64K keeps them on the same
+	// conservative budget as the rest of the cascade.
 	case strings.HasPrefix(m, "claude-opus-4"),
+		strings.HasPrefix(m, "claude-opus-5"),
 		strings.HasPrefix(m, "claude-sonnet-4"),
 		strings.HasPrefix(m, "claude-sonnet-5"),
 		strings.HasPrefix(m, "claude-haiku-4"):

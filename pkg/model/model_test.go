@@ -11,6 +11,7 @@ func TestLookupModelProvider(t *testing.T) {
 		wantProv string
 		wantOK   bool
 	}{
+		{"claude-opus-5", "Anthropic", true},
 		{"claude-opus-4-8", "Anthropic", true},
 		// Dated snapshot ID: the registry ships claude-opus-4-6-20260115 (there is
 		// no dated snapshot for opus-4-8, which is aliased to itself).
@@ -84,6 +85,8 @@ func TestMaxTokens(t *testing.T) {
 		model string
 		want  int64
 	}{
+		{"claude-opus-5", 64000},
+		{"claude-opus-5-20991231", 64000},
 		{"claude-opus-4-8", 64000},
 		{"claude-sonnet-4-6", 64000},
 		{"claude-sonnet-4-6-20260115", 64000},
