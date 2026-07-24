@@ -111,6 +111,94 @@ func LoadPlan(dir string) (*Plan, error) {
 	return plan, nil
 }
 
+// LoadPlanLenient loads a plan for browse/index consumers, tolerating invalid
+// job files. LoadPlan's hard failure is right for execution paths — running a
+// plan with a malformed job must error — but an indexer that propagates it
+// makes the WHOLE plan vanish from every daemon client the moment one .md has
+// broken frontmatter, including the half-written window while a plan is being
+// created. Here such files are skipped and reported; the plan row survives
+// with the jobs that did load.
+func LoadPlanLenient(dir string) (*Plan, []error) {
+	if _, err := os.Stat(dir); err != nil {
+		return nil, []error{fmt.Errorf("plan directory not found: %w", err)}
+	}
+
+	plan := &Plan{
+		Name:      filepath.Base(dir),
+		Directory: dir,
+		Jobs:      []*Job{},
+		JobsByID:  make(map[string]*Job),
+	}
+	var problems []error
+
+	specPath := filepath.Join(dir, "spec.md")
+	if _, err := os.Stat(specPath); err == nil {
+		plan.SpecFile = specPath
+	}
+
+	planConfigPath := filepath.Join(dir, ".grove-plan.yml")
+	if _, err := os.Stat(planConfigPath); err == nil {
+		yamlFile, err := os.ReadFile(planConfigPath)
+		if err == nil {
+			var planConfig PlanConfig
+			if yaml.Unmarshal(yamlFile, &planConfig) == nil {
+				plan.Config = &planConfig
+			}
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, []error{fmt.Errorf("reading plan directory: %w", err)}
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		filename := entry.Name()
+		job, err := LoadJob(filepath.Join(dir, filename))
+		if err != nil {
+			var notAJob ErrNotAJob
+			if !errors.As(err, &notAJob) {
+				problems = append(problems, fmt.Errorf("skipping job %s: %w", filename, err))
+			}
+			continue
+		}
+		job.Filename = filename
+		job.FilePath = filepath.Join(dir, filename)
+		if job.ID != "" {
+			if existing, exists := plan.JobsByID[job.ID]; exists {
+				problems = append(problems, fmt.Errorf("skipping job %s: duplicate job ID %q also in %s",
+					filename, job.ID, existing.Filename))
+				continue
+			}
+			plan.JobsByID[job.ID] = job
+		}
+		plan.Jobs = append(plan.Jobs, job)
+	}
+
+	numPrefix := regexp.MustCompile(`^(\d+)`)
+	sort.Slice(plan.Jobs, func(i, j int) bool {
+		mi := numPrefix.FindString(plan.Jobs[i].Filename)
+		mj := numPrefix.FindString(plan.Jobs[j].Filename)
+		ni, _ := strconv.Atoi(mi)
+		nj, _ := strconv.Atoi(mj)
+		if ni != nj {
+			return ni < nj
+		}
+		return plan.Jobs[i].Filename < plan.Jobs[j].Filename
+	})
+
+	// Dependency cycles are an execution-time problem; for browsing, report
+	// and keep the plan.
+	if err := plan.ResolveDependencies(); err != nil {
+		problems = append(problems, err)
+	}
+
+	return plan, problems
+}
+
 // ErrNotAJob is returned when a file is not a valid job file
 type ErrNotAJob struct {
 	Reason string

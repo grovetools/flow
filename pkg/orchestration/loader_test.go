@@ -585,3 +585,56 @@ func TestPlanConfigSatelliteRoundTrip(t *testing.T) {
 		t.Errorf("unset satellite leaked into .grove-plan.yml:\n%s", data)
 	}
 }
+
+// TestLoadPlanLenientKeepsPlanWithInvalidJob is the loader-level regression
+// for the burst-insert index drop: a job file that fails validation (here:
+// missing title, the exact shape the TUI pilot's burst fixture wrote) must
+// not make the whole plan unloadable for browse/index consumers — LoadPlan
+// keeps failing hard for execution paths, LoadPlanLenient reports the bad
+// job and returns the plan with its remaining valid jobs.
+func TestLoadPlanLenientKeepsPlanWithInvalidJob(t *testing.T) {
+	dir := t.TempDir()
+	writeFile := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(".grove-plan.yml", "status: active\nworktree: burst-new\nrepos:\n  - beta-repo\n")
+	writeFile("01.md", "---\nid: burst\nstatus: pending\ntype: file\n---\nburst\n") // no title
+	writeFile("02-good.md", "---\nid: good\ntitle: Good Job\nstatus: pending\ntype: oneshot\n---\nok\n")
+
+	if _, err := LoadPlan(dir); err == nil {
+		t.Fatal("strict LoadPlan unexpectedly accepted a title-less job; lenient variant may be redundant")
+	}
+
+	plan, problems := LoadPlanLenient(dir)
+	if plan == nil {
+		t.Fatalf("lenient load returned nil plan (problems: %v)", problems)
+	}
+	if plan.Config == nil || plan.Config.Status != "active" {
+		t.Fatalf("plan config lost in lenient load: %+v", plan.Config)
+	}
+	if len(plan.Jobs) != 1 || plan.Jobs[0].ID != "good" {
+		t.Fatalf("lenient load should keep exactly the valid job, got %d jobs", len(plan.Jobs))
+	}
+	if len(problems) == 0 || !strings.Contains(problems[0].Error(), "title") {
+		t.Fatalf("lenient load should report the skipped job's validation error, got %v", problems)
+	}
+
+	// Duplicate IDs: first wins, second is reported, plan survives.
+	writeFile("03-dup.md", "---\nid: good\ntitle: Dup\nstatus: pending\ntype: oneshot\n---\ndup\n")
+	plan, problems = LoadPlanLenient(dir)
+	if plan == nil || len(plan.Jobs) != 1 {
+		t.Fatalf("duplicate-ID lenient load: plan=%v jobs=%d", plan != nil, len(plan.Jobs))
+	}
+	found := false
+	for _, problem := range problems {
+		if strings.Contains(problem.Error(), "duplicate job ID") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("duplicate job ID not reported: %v", problems)
+	}
+}

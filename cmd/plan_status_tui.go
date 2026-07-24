@@ -33,17 +33,19 @@ import (
 // Embedding hosts (terminal) bypass this file entirely and instantiate
 // view.New themselves with their own Config.
 func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph) error {
-	daemonClient := daemon.NewWithAutoStart()
+	// PlansDir is the parent directory of the active plan's directory.
+	// Used by the browser view to enumerate sibling plans.
+	plansDir := filepath.Dir(plan.Directory)
+	workspaceDir := filepath.Dir(plansDir)
+
+	// Resolve the pre-TUI client from the SAME directory as the reconnect
+	// factory below, so both target one scoped daemon (see runPlanTUI).
+	daemonClient := daemon.NewWithAutoStart(workspaceDir)
 	defer func() {
 		if daemonClient != nil {
 			daemonClient.Close()
 		}
 	}()
-
-	// PlansDir is the parent directory of the active plan's directory.
-	// Used by the browser view to enumerate sibling plans.
-	plansDir := filepath.Dir(plan.Directory)
-	workspaceDir := filepath.Dir(plansDir)
 
 	metaModel := view.New(view.Config{
 		WorkspaceDir: workspaceDir,

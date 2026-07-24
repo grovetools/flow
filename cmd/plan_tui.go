@@ -79,7 +79,12 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 		cwdGitRoot, _ = git.GetGitRoot(".")
 	}
 
-	daemonClient := daemon.NewWithAutoStart()
+	// Resolve the pre-TUI client from the SAME directory as the reconnect
+	// factory below. With mismatched inputs (no-arg here resolves GROVE_SCOPE,
+	// the factory resolves cwdGitRoot) the two calls can target two different
+	// scoped daemons — and pay two sequential daemon boots before the first
+	// row renders.
+	daemonClient := daemon.NewWithAutoStart(cwdGitRoot)
 	defer daemonClient.Close()
 	model := view.New(view.Config{
 		PlansDir:     plansDirectory,

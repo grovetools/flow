@@ -508,3 +508,89 @@ func TestArchivedRowRefusesMutatingActions(t *testing.T) {
 		t.Errorf("selected plan = %q, want old-plan", sel.PlanName)
 	}
 }
+
+// baselineFakeClient serves a pre-discovery revision-0 snapshot on the first
+// GetPlanIndex call and the populated baseline afterwards — the exact shape a
+// freshly auto-started daemon presents while workspace discovery runs.
+type baselineFakeClient struct {
+	daemon.Client
+	updates  <-chan daemon.StateUpdate
+	baseline *models.PlanIndexSnapshot
+	calls    int
+}
+
+func (f *baselineFakeClient) StreamState(context.Context) (<-chan daemon.StateUpdate, error) {
+	return f.updates, nil
+}
+
+func (f *baselineFakeClient) GetPlanIndex(context.Context) (*models.PlanIndexSnapshot, error) {
+	f.calls++
+	if f.calls == 1 {
+		return &models.PlanIndexSnapshot{Plans: []models.PlanSummary{}}, nil
+	}
+	return f.baseline, nil
+}
+
+func (f *baselineFakeClient) Close() error { return nil }
+
+// TestConnectWaitsForBaselineSnapshotBeforeGoingLive: a revision-0 empty
+// snapshot means "not scanned yet", not "empty portfolio". The connect
+// command must hold the live transition until the daemon's first index
+// publish, so reconnect never swaps retained stale rows for a pre-discovery
+// empty projection.
+func TestConnectWaitsForBaselineSnapshotBeforeGoingLive(t *testing.T) {
+	updates := make(chan daemon.StateUpdate, 1)
+	baseline := &models.PlanIndexSnapshot{
+		Revision: 1,
+		Plans: []models.PlanSummary{
+			{PlanDir: "/plans/alpha", PlanName: "alpha", Lifecycle: "live"},
+			{PlanDir: "/plans/beta", PlanName: "beta", Lifecycle: "live"},
+		},
+	}
+	client := &baselineFakeClient{updates: updates, baseline: baseline}
+	// The daemon's first publish arrives as a stream delta; it is only the
+	// wake-up — the refetched snapshot is authoritative.
+	updates <- daemon.StateUpdate{PlanIndex: &models.PlanIndexDelta{Revision: 1}}
+
+	msg := connectPlanIndexCmd(func() daemon.Client { return client }, 7, true, true)()
+	connected, ok := msg.(planIndexConnectedMsg)
+	if !ok {
+		t.Fatalf("expected planIndexConnectedMsg, got %T", msg)
+	}
+	defer connected.cancel()
+	if connected.snapshot == nil || connected.snapshot.Revision != 1 || len(connected.snapshot.Plans) != 2 {
+		t.Fatalf("connect did not adopt the baseline snapshot: %+v", connected.snapshot)
+	}
+	if client.calls != 2 {
+		t.Fatalf("expected a refetch after the baseline publish, calls=%d", client.calls)
+	}
+	if len(connected.plans) != 2 {
+		t.Fatalf("hydrated %d rows, want 2", len(connected.plans))
+	}
+}
+
+// TestConnectAcceptsGenuinelyEmptyPortfolioAfterBaselineWait: a daemon that
+// never publishes (nothing to index) must still complete the connection after
+// the bounded wait, preserving the empty-portfolio cold-start behavior.
+func TestConnectAcceptsGenuinelyEmptyPortfolioAfterBaselineWait(t *testing.T) {
+	prev := baselineSnapshotWait
+	baselineSnapshotWait = 50 * time.Millisecond
+	defer func() { baselineSnapshotWait = prev }()
+
+	updates := make(chan daemon.StateUpdate)
+	client := &baselineFakeClient{updates: updates}
+
+	start := time.Now()
+	msg := connectPlanIndexCmd(func() daemon.Client { return client }, 3, true, true)()
+	connected, ok := msg.(planIndexConnectedMsg)
+	if !ok {
+		t.Fatalf("expected planIndexConnectedMsg, got %T", msg)
+	}
+	defer connected.cancel()
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("empty-portfolio connect took %v; the baseline wait must stay bounded", elapsed)
+	}
+	if len(connected.plans) != 0 {
+		t.Fatalf("expected an empty portfolio, got %d rows", len(connected.plans))
+	}
+}

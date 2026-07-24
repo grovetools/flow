@@ -56,7 +56,7 @@ exit 0
 	return recordPath, setListJSON
 }
 
-func readRecord(t *testing.T, recordPath string) []string {
+func readRecordLines(t *testing.T, recordPath string) []string {
 	t.Helper()
 	data, err := os.ReadFile(recordPath)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestFinishPlanNotes_MovesAllAndReportsAlreadyCompleted(t *testing.T) {
 		t.Fatalf("expected 2 moved + 1 already-completed, got moved=%d already=%d", moved, already)
 	}
 
-	lines := readRecord(t, recordPath)
+	lines := readRecordLines(t, recordPath)
 	if got := countContaining(lines, "list --plan-ref plans/myplan --json --workspaces"); got != 1 {
 		t.Fatalf("expected 1 list query, got %d (%v)", got, lines)
 	}
@@ -180,7 +180,7 @@ func TestJobComplete_MoveNoteToGroupOutcomes(t *testing.T) {
 		t.Fatalf("expected already-completed, got %q", already.State)
 	}
 
-	lines := readRecord(t, recordPath)
+	lines := readRecordLines(t, recordPath)
 	if got := countContaining(lines, "move /nb/ws/in_progress/alpha.md completed --force"); got != 1 {
 		t.Fatalf("expected one move invocation, record: %v", lines)
 	}

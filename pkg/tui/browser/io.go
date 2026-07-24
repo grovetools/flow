@@ -47,8 +47,10 @@ type planIndexStreamMsg struct {
 	generation    uint64
 	firstRevision uint64 // first delta folded into update; detects real gaps after coalescing
 }
-type planIndexStreamClosedMsg struct{ generation uint64 }
-type planIndexReconnectMsg struct{}
+type (
+	planIndexStreamClosedMsg struct{ generation uint64 }
+	planIndexReconnectMsg    struct{}
+)
 
 func fallbackRefreshTick() tea.Cmd {
 	return tea.Tick(fallbackRefreshInterval, func(t time.Time) tea.Msg { return refreshTickMsg(t) })
@@ -57,6 +59,13 @@ func fallbackRefreshTick() tea.Cmd {
 func planIndexReconnectTick() tea.Cmd {
 	return tea.Tick(daemonReconnectInterval, func(time.Time) tea.Msg { return planIndexReconnectMsg{} })
 }
+
+// baselineSnapshotWait bounds how long a connect attempt waits for a freshly
+// spawned daemon's FIRST index publish before accepting its pre-discovery
+// empty snapshot. Discovery on a warm portfolio publishes within a second;
+// the ceiling only matters for daemons with nothing to index. Variable only
+// so tests can shorten the timeout path.
+var baselineSnapshotWait = 5 * time.Second
 
 func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, showOnHold, showArchived bool) tea.Cmd {
 	return func() tea.Msg {
@@ -76,6 +85,41 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, showOnH
 		if err != nil {
 			cancel()
 			return planIndexConnectFailedMsg{err: err, generation: generation}
+		}
+
+		// Revision 0 means the daemon accepted the connection before its first
+		// index publish (fresh auto-started daemon, discovery still running) —
+		// NOT that the portfolio is empty. Reporting it as live would replace
+		// retained stale rows with a pre-discovery empty projection on
+		// reconnect, and flash an empty list on cold start. Wait bounded for
+		// the baseline publish (any index event on the stream is the wake-up;
+		// the refetched snapshot is authoritative), then fall through with
+		// whatever the daemon has — a genuinely empty portfolio stays empty.
+		if snapshot == nil || snapshot.Revision == 0 {
+			deadline := time.After(baselineSnapshotWait)
+		baselineWait:
+			for {
+				select {
+				case update, open := <-updates:
+					if !open {
+						cancel()
+						return planIndexConnectFailedMsg{err: errors.New("daemon stream closed before first plan index publish"), generation: generation}
+					}
+					if update.PlanIndexSnapshot == nil && update.PlanIndex == nil {
+						continue
+					}
+					refetchCtx, refetchCancel := context.WithTimeout(ctx, 3*time.Second)
+					snapshot, err = client.GetPlanIndex(refetchCtx)
+					refetchCancel()
+					if err != nil {
+						cancel()
+						return planIndexConnectFailedMsg{err: err, generation: generation}
+					}
+					break baselineWait
+				case <-deadline:
+					break baselineWait
+				}
+			}
 		}
 
 		// Hydrate the complete snapshot before reporting a live connection. This
@@ -511,8 +555,10 @@ func loadPlansFromDisk(plansDirectory string) ([]*orchestration.Plan, error) {
 		if _, err := os.Stat(planConfigPath); err != nil && len(mdFiles) == 0 {
 			continue
 		}
-		plan, err := orchestration.LoadPlan(planPath)
-		if err != nil {
+		// Lenient like the daemon index: one malformed job file degrades to a
+		// row with fewer jobs instead of the plan vanishing from the list.
+		plan, _ := orchestration.LoadPlanLenient(planPath)
+		if plan == nil {
 			continue
 		}
 		plans = append(plans, plan)
