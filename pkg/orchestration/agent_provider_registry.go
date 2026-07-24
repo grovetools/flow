@@ -64,7 +64,9 @@ type AgentProviderSpec struct {
 	ValidateJobModel func(model string) error
 	// BackfillJobModel optionally records the model the agent will actually
 	// run with into the job frontmatter after args are resolved. nil = no-op.
-	BackfillJobModel func(job *Job)
+	// workDir and agentEnv are the launch context, so a provider whose CLI
+	// self-selects a model can read the same configuration the CLI will.
+	BackfillJobModel func(job *Job, workDir string, agentEnv map[string]string)
 
 	// DefaultInputMode is the input mode assumed when sending text into the
 	// provider's interactive UI ("vim" or "standard"), overridable per

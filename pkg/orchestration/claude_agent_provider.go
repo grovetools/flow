@@ -514,21 +514,27 @@ func canonicalClaudeModel(model string) string {
 // backfillClaudeAgentModel records the model a claude agent job will ACTUALLY
 // run with into the job's frontmatter, so the `model:` field stops lying.
 //
-//   - Empty job.Model: no --model is passed, so the claude CLI self-selects the
-//     user's configured default. We record the canonical agent default alias
-//     (anthropicmodels.DefaultAgentAlias) as a best-effort label instead of
-//     leaving the field blank. The runtime model still honors the user's CLI
-//     config; this is only the displayed label.
-//   - Non-empty job.Model: normalize it to its canonical alias.
+//   - Non-empty job.Model: it is passed as --model, so normalize it to its
+//     canonical alias.
+//   - Empty job.Model: no --model is passed, so the claude CLI self-selects
+//     from its own configuration. We read that configuration the same way the
+//     CLI does (see resolveClaudeCLIModel) and record what it resolves to.
+//     Only when that comes back unknown do we fall back to a guess —
+//     claudeCLIFallbackModel, the current member of the family the CLI
+//     defaults to. Either way this is the displayed label; the runtime model
+//     is whatever the CLI picks.
 //
 // The write is skipped when the value is already canonical (no churn). This is
 // best-effort: a frontmatter write failure is logged, never fatal — the agent
 // is already launching. Only called for the claude provider (via the registry
 // spec's BackfillJobModel hook).
-func backfillClaudeAgentModel(job *Job) {
+func backfillClaudeAgentModel(job *Job, workDir string, agentEnv map[string]string) {
 	resolved := canonicalClaudeModel(job.Model)
 	if resolved == "" {
-		resolved = anthropicmodels.DefaultAgentAlias
+		resolved = resolveClaudeCLIModel(workDir, agentEnv)
+	}
+	if resolved == "" {
+		resolved = claudeCLIFallbackModel()
 	}
 	if resolved == job.Model {
 		return // already canonical; nothing to write

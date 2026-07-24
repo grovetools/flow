@@ -321,10 +321,10 @@ func (e *InteractiveAgentExecutor) Execute(ctx context.Context, job *Job, plan *
 	if err != nil {
 		return err
 	}
-	// Record the model the agent will actually run with (for claude: its
-	// default when none was passed) into the job frontmatter.
+	// Record the model the agent will actually run with (for claude: the model
+	// its own config selects when none was passed) into the job frontmatter.
 	if spec.BackfillJobModel != nil {
-		spec.BackfillJobModel(job)
+		spec.BackfillJobModel(job, workDir, flowCfg.AgentEnv)
 	}
 
 	// Handle source_block reference if present
