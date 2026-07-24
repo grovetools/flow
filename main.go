@@ -69,6 +69,7 @@ func main() {
 
 	// Add the agent command (interactive agent management)
 	rootCmd.AddCommand(cmd.NewAgentCmd())
+	rootCmd.AddCommand(cmd.NewSubjobCmd())
 
 	// Add other top-level commands
 	rootCmd.AddCommand(cmd.GetChatCommand())
