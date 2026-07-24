@@ -89,12 +89,6 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s", errorMsg.String())
 	}
 
-	// Create a minimal plan object for the session helper.
-	planForSession := &orchestration.Plan{
-		Name:      plan.Name,
-		Directory: plan.Directory,
-	}
-
 	// The command to run after setting the active plan in the new session.
 	// This provides a good user experience by showing the plan's status.
 	commandToRun := []string{"flow", "plan", "status", "-t"}
@@ -102,7 +96,7 @@ func runPlanOpen(cmd *cobra.Command, args []string) error {
 	// Call the session helper.
 	err = CreateOrSwitchToWorktreeSessionAndRunCommand(
 		cmd.Context(),
-		planForSession,
+		plan,
 		worktreeName,
 		commandToRun,
 	)

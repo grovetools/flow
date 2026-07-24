@@ -93,6 +93,13 @@ type finishWizardReadyMsg struct {
 	generation uint64
 }
 
+type statusReadyMsg struct {
+	plan       *orchestration.Plan
+	graph      *orchestration.DependencyGraph
+	err        error
+	generation uint64
+}
+
 type initWizardReadyMsg struct {
 	model      planinit.Model
 	generation uint64
@@ -167,6 +174,10 @@ type viewState struct {
 	wizardModel       *add.Model
 	finishWizardModel *finish.Model
 	initWizardModel   *planinit.Model
+	statusLoading     bool
+	statusLoadError   string
+	statusLoadingPlan string
+	statusLoadGen     uint64
 }
 
 // Model is the flow meta-panel. The browser is built eagerly; status
@@ -207,6 +218,24 @@ type Model struct {
 	initWizardBuilding   bool
 }
 
+func loadStatusCmd(planPath string, generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		plan, problems := orchestration.LoadPlanLenient(planPath)
+		if plan == nil {
+			return statusReadyMsg{err: fmt.Errorf("load plan %q", planPath), generation: generation}
+		}
+		graph, err := orchestration.BuildDependencyGraph(plan)
+		if err != nil {
+			return statusReadyMsg{err: fmt.Errorf("open plan %q: %w", plan.Name, err), generation: generation}
+		}
+		// Lenient loading keeps valid jobs visible when one file is malformed.
+		// The status model already surfaces per-job failures; only a wholly
+		// unreadable plan blocks navigation.
+		_ = problems
+		return statusReadyMsg{plan: plan, graph: graph, generation: generation}
+	}
+}
+
 // New constructs a Model. Boots in browser mode unless InitialPlan
 // is set, in which case it boots straight into status.
 func New(cfg Config) Model {
@@ -216,6 +245,7 @@ func New(cfg Config) Model {
 		DaemonClient:        cfg.DaemonClient,
 		DaemonClientFactory: cfg.DaemonClientFactory,
 		EmbedMode:           true,
+		Hosted:              cfg.Hosted,
 	})
 	vs := &viewState{
 		cfg:          cfg,
@@ -303,6 +333,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Invalidate any in-flight async wizard builds — their ready
 		// msgs will arrive with a stale generation and be dropped.
 		m.wizardBuildGen++
+		m.s.statusLoadGen++
+		m.s.statusLoading = false
+		m.s.statusLoadError = ""
+		m.s.statusLoadingPlan = ""
 		m.addWizardBuilding = false
 		m.finishWizardBuilding = false
 		m.initWizardBuilding = false
@@ -409,33 +443,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.switchToTab(msg.TabIndex)
 
 	case browser.BrowserPlanSelectedMsg:
-		// Build a fresh status model for the selected plan and
-		// switch to status mode.
+		// Daemon portfolio rows intentionally contain only summary data. Load the
+		// selected plan off the event loop and expose the Jobs page's loading gate
+		// rather than briefly constructing a truthful-looking empty status model.
 		if m.s.statusModel != nil {
 			_ = m.s.statusModel.Close()
 			m.s.statusModel = nil
 		}
-
-		plan := msg.Plan
-		if plan == nil {
+		if msg.PlanPath == "" {
 			return m, nil
 		}
-		graph, err := orchestration.BuildDependencyGraph(plan)
-		if err != nil {
-			m.finishTransient = fmt.Sprintf("open plan %q: %v", plan.Name, err)
-			return m, nil
-		}
-
-		newStatus := status.New(status.Config{
-			Plan:         plan,
-			Graph:        graph,
-			DaemonClient: m.s.cfg.DaemonClient,
-			Hosted:       m.s.cfg.Hosted,
-		})
-		m.s.statusModel = &newStatus
+		m.s.statusLoadGen++
+		generation := m.s.statusLoadGen
+		m.s.statusLoading = true
+		m.s.statusLoadError = ""
+		m.s.statusLoadingPlan = msg.PlanName
 		m.mode = modeStatus
 		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabJobs})
+		return m, loadStatusCmd(msg.PlanPath, generation)
 
+	case statusReadyMsg:
+		if msg.generation != m.s.statusLoadGen {
+			return m, nil
+		}
+		m.s.statusLoading = false
+		if msg.err != nil {
+			m.s.statusLoadError = msg.err.Error()
+			return m, nil
+		}
+		newStatus := status.New(status.Config{
+			Plan: msg.plan, Graph: msg.graph,
+			DaemonClient: m.s.cfg.DaemonClient, Hosted: m.s.cfg.Hosted,
+		})
+		m.s.statusModel = &newStatus
 		var cmds []tea.Cmd
 		if m.width > 0 && m.height > 0 {
 			sized, c := m.s.statusModel.Update(m.pager.SubSize(m.width, m.height))
@@ -449,8 +489,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if c := m.s.statusModel.Init(); c != nil {
 			cmds = append(cmds, c)
 		}
-		// Give the new status model focus so any focus-driven
-		// behavior (refresh loops, etc.) arms itself.
 		focused, fc := m.s.statusModel.Update(embed.FocusMsg{})
 		if sm, ok := focused.(status.Model); ok {
 			*m.s.statusModel = sm
@@ -680,6 +718,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.s.statusModel.Close()
 				m.s.statusModel = nil
 			}
+			if m.s.statusLoading {
+				m.s.statusLoadGen++
+				m.s.statusLoading = false
+			}
+			m.s.statusLoadError = ""
+			m.s.statusLoadingPlan = ""
 			m.mode = modeBrowser
 			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
 			updated, _ := m.s.browserModel.Update(embed.FocusMsg{})

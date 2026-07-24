@@ -118,6 +118,31 @@ func TestLoadPlansListMissingArchiveDir(t *testing.T) {
 	}
 }
 
+type noteIndexClient struct {
+	daemon.Client
+	notes []*models.NoteIndexEntry
+}
+
+func (c noteIndexClient) GetNoteIndex(context.Context, string) ([]*models.NoteIndexEntry, error) {
+	return c.notes, nil
+}
+
+func TestTaggedNotebookNotesAreAttachedToPlans(t *testing.T) {
+	summaries := []models.PlanSummary{{PlanName: "feature-plan", Worktree: "feature-worktree"}}
+	client := noteIndexClient{notes: []*models.NoteIndexEntry{
+		{Title: "Relevant note", Tags: []string{"plan:feature-plan"}, ContentDir: "notes"},
+		{Title: "Worktree note", Tags: []string{"worktree:feature-worktree"}, ContentDir: "notes"},
+		{Title: "Unrelated", Tags: []string{"other"}, ContentDir: "notes"},
+	}}
+	attachTaggedPlanNotes(client, "/notebooks/grovetools/plans", summaries)
+	if got := summaries[0].NoteCount; got != 2 {
+		t.Fatalf("tagged note count = %d, want 2", got)
+	}
+	if summaries[0].Notes != "" {
+		t.Fatalf("tagged note titles leaked into editable plan notes: %q", summaries[0].Notes)
+	}
+}
+
 func TestPortfolioLoadsPlansAcrossWorkspaces(t *testing.T) {
 	root := t.TempDir()
 	plansA := filepath.Join(root, "workspace-a", "plans")
@@ -139,6 +164,36 @@ func TestPortfolioLoadsPlansAcrossWorkspaces(t *testing.T) {
 	}
 	if !seen["workspace-a"] || !seen["workspace-b"] {
 		t.Fatalf("workspace identities missing: %+v", seen)
+	}
+}
+
+func TestPlanWorkspaceDisplayNamePrefersCentralizedNotebookScope(t *testing.T) {
+	summary := models.PlanSummary{
+		PlansDir:      "/Users/solair/notebooks/grovetools/workspaces/grovetools/plans",
+		WorkspaceRoot: "/Users/solair/.local/share/grove/worktrees/grovetools-0bd46c64/Users",
+	}
+	if got := planWorkspaceDisplayName(summary); got != "grovetools" {
+		t.Fatalf("workspace display name = %q, want grovetools", got)
+	}
+}
+
+func TestPortfolioScopeExcludesOtherNotebookWorkspaces(t *testing.T) {
+	root := t.TempDir()
+	localPlans := filepath.Join(root, "notebooks", "grovetools", "plans")
+	foreignPlans := filepath.Join(root, "notebooks", "matts-website", "plans")
+	localDir := filepath.Join(localPlans, "local-plan")
+	foreignDir := filepath.Join(foreignPlans, "foreign-plan")
+	summaries := map[string]models.PlanSummary{
+		localDir:   {PlanDir: localDir, PlanName: "local-plan", PlansDir: localPlans},
+		foreignDir: {PlanDir: foreignDir, PlanName: "foreign-plan", PlansDir: foreignPlans},
+	}
+
+	filtered := scopedPlanSummaries(summaries, localPlans)
+	if len(filtered) != 1 {
+		t.Fatalf("scoped summaries=%d, want 1: %+v", len(filtered), filtered)
+	}
+	if _, ok := filtered[localDir]; !ok {
+		t.Fatalf("local plan missing from scoped summaries: %+v", filtered)
 	}
 }
 
@@ -552,7 +607,7 @@ func TestConnectWaitsForBaselineSnapshotBeforeGoingLive(t *testing.T) {
 	// wake-up — the refetched snapshot is authoritative.
 	updates <- daemon.StateUpdate{PlanIndex: &models.PlanIndexDelta{Revision: 1}}
 
-	msg := connectPlanIndexCmd(func() daemon.Client { return client }, 7, true, true)()
+	msg := connectPlanIndexCmd(func() daemon.Client { return client }, 7, "", true, true)()
 	connected, ok := msg.(planIndexConnectedMsg)
 	if !ok {
 		t.Fatalf("expected planIndexConnectedMsg, got %T", msg)
@@ -581,7 +636,7 @@ func TestConnectAcceptsGenuinelyEmptyPortfolioAfterBaselineWait(t *testing.T) {
 	client := &baselineFakeClient{updates: updates}
 
 	start := time.Now()
-	msg := connectPlanIndexCmd(func() daemon.Client { return client }, 3, true, true)()
+	msg := connectPlanIndexCmd(func() daemon.Client { return client }, 3, "", true, true)()
 	connected, ok := msg.(planIndexConnectedMsg)
 	if !ok {
 		t.Fatalf("expected planIndexConnectedMsg, got %T", msg)

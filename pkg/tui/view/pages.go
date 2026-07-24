@@ -37,14 +37,20 @@ type statusPage struct {
 
 func (p *statusPage) Name() string { return "Jobs" }
 func (p *statusPage) Title() string {
-	if p.s.statusModel == nil {
-		return ""
+	if p.s.statusModel != nil {
+		return p.s.statusModel.PlanTitle()
 	}
-	return p.s.statusModel.PlanTitle()
+	if p.s.statusLoadingPlan != "" {
+		return core_theme.IconPlan + " Plan Status: " + p.s.statusLoadingPlan
+	}
+	return ""
 }
 func (p *statusPage) Init() tea.Cmd { return nil }
 func (p *statusPage) View() (out string) {
 	if p.s.statusModel == nil {
+		if p.s.statusLoadError != "" {
+			return core_theme.DefaultTheme.Error.Render("Unable to load jobs: " + p.s.statusLoadError)
+		}
 		return ""
 	}
 	defer tui.RecoverView(&out)
@@ -104,7 +110,12 @@ func (p *statusPage) SetSize(w, h int) {
 	p.height = h
 }
 
-func (p *statusPage) Enabled() bool { return p.s.statusModel != nil }
+func (p *statusPage) Enabled() bool {
+	return p.s.statusModel != nil || p.s.statusLoading || p.s.statusLoadError != ""
+}
+func (p *statusPage) Ready() (bool, string) {
+	return !p.s.statusLoading, "Loading jobs…"
+}
 
 func (p *statusPage) IsTextEntryActive() bool {
 	return p.s.statusModel != nil && p.s.statusModel.IsTextEntryActive()
@@ -115,6 +126,7 @@ var (
 	_ pager.Page              = (*statusPage)(nil)
 	_ pager.PageWithTitle     = (*statusPage)(nil)
 	_ pager.PageWithEnabled   = (*statusPage)(nil)
+	_ pager.PageWithReady     = (*statusPage)(nil)
 	_ pager.PageWithTextInput = (*statusPage)(nil)
 )
 

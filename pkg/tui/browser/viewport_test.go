@@ -2,11 +2,14 @@ package browser
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	coreplan "github.com/grovetools/core/pkg/plan"
+	"github.com/grovetools/core/pkg/worktreeregistry"
+	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -17,6 +20,89 @@ func viewportPlans(n int) []PlanListItem {
 		plans[i] = PlanListItem{Name: fmt.Sprintf("p-%02d", i), Plan: &orchestration.Plan{Name: fmt.Sprintf("p-%02d", i), Directory: dir}, Key: coreplan.NewPlanKey(dir)}
 	}
 	return plans
+}
+
+func TestHostedOpenRequestsWorkspaceNavigation(t *testing.T) {
+	const container = "/worktrees/feature-plan"
+	plan := &orchestration.Plan{Name: "feature-plan", Directory: "/plans/feature-plan"}
+	m := Model{
+		plans: []PlanListItem{{
+			Name: "feature-plan", Plan: plan,
+			Binding:      coreplan.PlanBinding{Health: coreplan.BindingValid, ContainerPath: container},
+			ActionTarget: coreplan.PlanActionTarget{ContainerPath: container},
+		}},
+		keys: NewKeyMap(nil), hosted: true,
+	}
+	_, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd == nil {
+		t.Fatal("hosted open returned no navigation command")
+	}
+	msg, ok := cmd().(embed.SwitchWorkspaceRequestMsg)
+	if !ok || msg.Path != container || msg.FocusPanel != "shell" {
+		t.Fatalf("hosted open = %#v", msg)
+	}
+}
+
+func TestFixedWorktreePlanComesFromRegistry(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	root := filepath.Join(t.TempDir(), ".grove-worktrees", "feature-plan")
+	if err := worktreeregistry.Save(&worktreeregistry.Entry{AbsPath: root, Plan: "feature-plan"}); err != nil {
+		t.Fatal(err)
+	}
+	plan, fixed := fixedWorktreePlan(filepath.Join(root, "repo"))
+	if !fixed || plan != "feature-plan" {
+		t.Fatalf("fixed worktree plan = %q, %v", plan, fixed)
+	}
+}
+
+func TestWorktreeColumnOnlyAppearsForDistinctWorktree(t *testing.T) {
+	m := Model{plans: []PlanListItem{
+		{Name: "feature", Worktree: "feature"},
+		{Name: RollingPlanName},
+	}}
+	if m.hasDistinctWorktree() {
+		t.Fatal("redundant plan-name worktree should not show the column")
+	}
+	m.plans = append(m.plans, PlanListItem{Name: "alternate-plan", Worktree: "shared-worktree"})
+	if !m.hasDistinctWorktree() {
+		t.Fatal("a plan using a differently named worktree should show the column")
+	}
+}
+
+func TestPlanIdentityUsesBoundedRepositoryCount(t *testing.T) {
+	if got := formatPlanIdentity("grovetools", 31); got != "grovetools / 31 repos" {
+		t.Fatalf("identity = %q", got)
+	}
+	if got := formatPlanIdentity("grovetools", 1); got != "grovetools / 1 repo" {
+		t.Fatalf("singular identity = %q", got)
+	}
+}
+
+func TestColumnSelectorDefaultsWorkspaceHiddenAndCanEnableIt(t *testing.T) {
+	m := Model{
+		plans: []PlanListItem{{Name: "plan", Workspace: "grovetools"}},
+		keys:  NewKeyMap(nil), columnVisibility: defaultBrowserColumnVisibility(),
+	}
+	if out := m.renderPlanTable(); strings.Contains(out, "WORKSPACE / REPOS") {
+		t.Fatalf("workspace column should be hidden by default:\n%s", out)
+	}
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
+	m = updated.(Model)
+	updated, _ = m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if out := m.renderPlanTable(); !strings.Contains(out, "WORKSPACE / REPOS") {
+		t.Fatalf("workspace column was not enabled:\n%s", out)
+	}
+}
+
+func TestRollingPlanRendersInMainWorkspace(t *testing.T) {
+	m := Model{
+		plans:            []PlanListItem{{Name: RollingPlanName, WorkspaceRoot: "/workspace"}},
+		columnVisibility: defaultBrowserColumnVisibility(),
+	}
+	if out := m.renderPlanTable(); !strings.Contains(out, "main workspace") || strings.Contains(out, "unbound") {
+		t.Fatalf("rolling binding is misleading:\n%s", out)
+	}
 }
 
 func TestViewportResizeFilterAndReorderKeepsQualifiedSelectionVisible(t *testing.T) {

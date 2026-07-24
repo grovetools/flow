@@ -51,6 +51,7 @@ type PlanListItem struct {
 	MergeStatus           string
 	MergeVerdict          string
 	Notes                 string
+	NoteCount             int
 	EcosystemRepoStatuses []planutil.EcosystemRepoStatus
 	Key                   coreplan.PlanKey
 	Binding               coreplan.PlanBinding
@@ -94,6 +95,10 @@ type Config struct {
 	// default, standalone CLI use) the footer renders inline at the
 	// bottom of the view.
 	EmbedMode bool
+	// Hosted means a workspace-switching host such as treemux owns this
+	// browser. Workspace actions emit embed.SwitchWorkspaceRequestMsg instead
+	// of spawning an external tmux session.
+	Hosted bool
 }
 
 // Model is the browser TUI state. It holds the rendered plan list, the
@@ -113,25 +118,29 @@ type Model struct {
 	// completed at least one load. The "Loading plans..." placeholder is
 	// gated on !initialLoaded so background refreshes (every refreshInterval)
 	// refresh the list in place instead of flickering back to the placeholder.
-	initialLoaded  bool
-	focused        bool
-	plansDirectory string
-	cwdGitRoot     string
-	statusMessage  string
-	help           help.Model
-	keys           KeyMap
-	activePlan     string
-	editingNotes   bool
-	notesInput     textinput.Model
-	editPlanIndex  int
-	showGitLog     bool
-	gitLogContent  string
-	gitLogError    error
-	gitLogLoaded   bool
-	showOnHold     bool
-	showArchived   bool
+	initialLoaded    bool
+	focused          bool
+	plansDirectory   string
+	cwdGitRoot       string
+	statusMessage    string
+	help             help.Model
+	keys             KeyMap
+	activePlan       string
+	editingNotes     bool
+	notesInput       textinput.Model
+	editPlanIndex    int
+	showGitLog       bool
+	gitLogContent    string
+	gitLogError      error
+	gitLogLoaded     bool
+	showOnHold       bool
+	showArchived     bool
+	columnSelectMode bool
+	columnCursor     int
+	columnVisibility map[string]bool
 
 	embedMode bool // suppress inline footer; host uses Footer()
+	hosted    bool // route workspace opens through the embedding host
 
 	// Ecosystem sub-navigation: when the user toggles git log on an
 	// ecosystem plan, we enter a secondary navigation mode that walks
@@ -351,6 +360,7 @@ func New(cfg Config) Model {
 		keys:             km,
 		showGitLog:       false,
 		embedMode:        cfg.EmbedMode,
+		hosted:           cfg.Hosted,
 		dataSource:       "connecting",
 		planSummaries:    make(map[string]models.PlanSummary),
 		streamGeneration: 1,
@@ -358,6 +368,7 @@ func New(cfg Config) Model {
 		loadGeneration:   1,
 		holdPending:      make(map[string]bool),
 		actionPending:    make(map[string]embed.GitOperation),
+		columnVisibility: defaultBrowserColumnVisibility(),
 	}
 }
 
@@ -365,7 +376,7 @@ func New(cfg Config) Model {
 // when the detail pane is first opened.
 func (m Model) Init() tea.Cmd {
 	if factory := m.daemonClientFactory(); factory != nil {
-		return connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold, m.showArchived)
+		return connectPlanIndexCmd(factory, m.streamGeneration, m.plansDirectory, m.showOnHold, m.showArchived)
 	}
 	return tea.Batch(
 		loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration),

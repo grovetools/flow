@@ -19,6 +19,7 @@ import (
 	"github.com/grovetools/core/pkg/models"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/pkg/worktreeregistry"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/util/delegation"
 
@@ -67,7 +68,7 @@ func planIndexReconnectTick() tea.Cmd {
 // so tests can shorten the timeout path.
 var baselineSnapshotWait = 5 * time.Second
 
-func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, showOnHold, showArchived bool) tea.Cmd {
+func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, plansDirectory string, showOnHold, showArchived bool) tea.Cmd {
 	return func() tea.Msg {
 		client := factory()
 		if client == nil {
@@ -122,6 +123,13 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, showOnH
 			}
 		}
 
+		// Attach notebook notes whose tag values mention a plan/worktree. This is
+		// read from the daemon's already-parsed note index, not by scanning the
+		// notebook on the TUI path.
+		if snapshot != nil {
+			attachTaggedPlanNotes(client, plansDirectory, snapshot.Plans)
+		}
+
 		// Hydrate the complete snapshot before reporting a live connection. This
 		// keeps reconnect atomic: the retained stale rows remain visible until
 		// one fresh, revision-qualified projection is ready to replace them.
@@ -132,8 +140,50 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, showOnH
 				summaries[summary.PlanDir] = summary
 			}
 		}
-		plans, projectionErr := loadPortfolio(summaries, showOnHold, showArchived)
+		plans, projectionErr := loadPortfolio(scopedPlanSummaries(summaries, plansDirectory), showOnHold, showArchived)
 		return planIndexConnectedMsg{snapshot: snapshot, plans: plans, err: projectionErr, updates: updates, cancel: cancel, generation: generation}
+	}
+}
+
+func attachTaggedPlanNotes(client daemon.Client, plansDirectory string, summaries []models.PlanSummary) {
+	if client == nil || len(summaries) == 0 {
+		return
+	}
+	workspaceName := filepath.Base(filepath.Dir(filepath.Clean(plansDirectory)))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	// Some test clients embed a nil daemon.Client for methods they do not use.
+	// Keep optional note enrichment optional in that case as well.
+	var notes []*models.NoteIndexEntry
+	func() {
+		defer func() { _ = recover() }()
+		notes, _ = client.GetNoteIndex(ctx, workspaceName)
+	}()
+	for i := range summaries {
+		if summaries[i].PlanName == "" {
+			continue
+		}
+		matchCount := 0
+		for _, note := range notes {
+			if note == nil || note.ContentDir == "plans" {
+				continue
+			}
+			matched := false
+			for _, tag := range note.Tags {
+				if strings.Contains(tag, summaries[i].PlanName) ||
+					(summaries[i].Worktree != "" && strings.Contains(tag, summaries[i].Worktree)) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				matchCount++
+			}
+		}
+		summaries[i].NoteCount = matchCount
+		if summaries[i].Notes != "" {
+			summaries[i].NoteCount++
+		}
 	}
 }
 
@@ -347,6 +397,31 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold, showA
 	}
 }
 
+// scopedPlanSummaries limits a daemon-wide portfolio to the notebook plans
+// directory selected by the host. A global daemon indexes every configured
+// grove; the embedded Plans page must not leak rows from unrelated notebooks.
+// An empty scope retains the all-portfolio behavior used by diagnostics/tests.
+func scopedPlanSummaries(summaries map[string]models.PlanSummary, plansDirectory string) map[string]models.PlanSummary {
+	if plansDirectory == "" {
+		return summaries
+	}
+	scope := filepath.Clean(plansDirectory)
+	filtered := make(map[string]models.PlanSummary)
+	for key, summary := range summaries {
+		plansDir := summary.PlansDir
+		if plansDir == "" && summary.PlanDir != "" {
+			plansDir = filepath.Dir(summary.PlanDir)
+			if filepath.Base(plansDir) == ".archive" {
+				plansDir = filepath.Dir(plansDir)
+			}
+		}
+		if filepath.Clean(plansDir) == scope {
+			filtered[key] = summary
+		}
+	}
+	return filtered
+}
+
 func loadPortfolio(summaries map[string]models.PlanSummary, showOnHold, showArchived bool) ([]PlanListItem, error) {
 	// Daemon mode is a pure in-memory projection. In particular, do not call
 	// LoadPlan, resolve the registry, discover workspaces, stat plan dirs, or run
@@ -387,12 +462,13 @@ func loadPortfolio(summaries map[string]models.PlanSummary, showOnHold, showArch
 		}
 		item := PlanListItem{
 			Plan: plan, Name: summary.PlanName, Key: key, Binding: binding,
-			Workspace: filepath.Base(summary.WorkspaceRoot), WorkspaceRoot: summary.WorkspaceRoot,
+			Workspace: planWorkspaceDisplayName(summary), WorkspaceRoot: summary.WorkspaceRoot,
 			Repositories: append([]string(nil), summary.Repositories...), Selected: summary.Selected,
 			Worktree: summary.Worktree, JobCount: jobCount(summary.JobCounts),
 			StatusParts: normalizedJobCounts(summary.JobCounts), LastUpdated: summary.UpdatedAt,
 			ReviewStatus: formatSummaryLifecycle(summary.Lifecycle, summary.Archived),
-			Notes:        summary.Notes, GitStatus: summary.GitStatus, MergeStatus: "-", Archived: summary.Archived,
+			Notes:        summary.Notes, NoteCount: summary.NoteCount,
+			GitStatus: summary.GitStatus, MergeStatus: "-", Archived: summary.Archived,
 		}
 		item.Status = formatStatusParts(item.StatusParts)
 		if binding.Valid() && binding.RegistryID != "" && binding.ContainerPath != "" {
@@ -412,6 +488,26 @@ func loadPortfolio(summaries map[string]models.PlanSummary, showOnHold, showArch
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].LastUpdated.After(all[j].LastUpdated) })
 	return all, nil
+}
+
+// planWorkspaceDisplayName prefers the notebook workspace encoded by a
+// centralized PlansDir (.../workspaces/<name>/plans). Daemon rows retain their
+// qualified WorkspaceRoot for actions, but display must not inherit a stale or
+// arbitrary worktree representative (for example the synthetic "Users" node).
+func planWorkspaceDisplayName(summary models.PlanSummary) string {
+	plansDir := filepath.Clean(summary.PlansDir)
+	workspaceDir := filepath.Dir(plansDir)
+	if filepath.Base(filepath.Dir(workspaceDir)) == "workspaces" {
+		return filepath.Base(workspaceDir)
+	}
+	return filepath.Base(summary.WorkspaceRoot)
+}
+
+func boolCount(present bool) int {
+	if present {
+		return 1
+	}
+	return 0
 }
 
 func jobCount(counts map[string]int) int {
@@ -663,6 +759,7 @@ func loadPlansList(plansDirectory, cwdGitRoot string, showOnHold, showArchived b
 			LastUpdated:   lastUpdated,
 			Worktree:      worktree,
 			Notes:         notes,
+			NoteCount:     boolCount(notes != ""),
 			MergeStatus:   "-",
 			ReviewStatus:  formatConfigStatus(plan.Config),
 			Archived:      entry.archived,
@@ -798,6 +895,17 @@ func formatConfigStatus(config *orchestration.PlanConfig) string {
 	}
 }
 
+// fixedWorktreePlan returns the registry-bound plan for workspaceDir. A Grove
+// worktree is created for one plan and the registry is its canonical identity;
+// mutable active-plan state must not override that relationship.
+func fixedWorktreePlan(workspaceDir string) (string, bool) {
+	root, ok := workspace.WorktreeRootForPath(workspaceDir)
+	if !ok {
+		return "", false
+	}
+	return worktreeregistry.PlanForPath(root)
+}
+
 // stateDir returns the directory whose ecosystem owns the active-plan state.
 // core/state resolves this to its ecosystem/worktree root, so a process run
 // outside any ecosystem refuses the write rather than touching a home-global
@@ -825,21 +933,14 @@ func executePlanFinish(plan *orchestration.Plan) tea.Cmd {
 	)
 }
 
-// executePlanOpen launches `flow plan open` as a subprocess.
+// executePlanOpen opens the explicitly selected qualified plan. It must not
+// mutate active-plan state first: worktree plan identity is immutable, and a
+// no-argument `flow plan open` would otherwise reopen the current worktree's
+// plan instead of the row under the cursor.
 func executePlanOpen(plan *orchestration.Plan) tea.Cmd {
-	return tea.Sequence(
-		func() tea.Msg {
-			if err := state.Set(stateDir(), coreplan.StateKey, plan.Name); err != nil {
-				return err
-			}
-			return nil
-		},
-		func() tea.Cmd {
-			openCmd := delegation.Command("flow", "plan", "open")
-			openCmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
-			return tea.ExecProcess(openCmd, func(err error) tea.Msg { return nil })
-		}(),
-	)
+	openCmd := delegation.Command("flow", "plan", "open", plan.Directory)
+	openCmd.Env = append(os.Environ(), "GROVE_FLOW_TUI_MODE=true")
+	return tea.ExecProcess(openCmd, func(err error) tea.Msg { return nil })
 }
 
 // executePlanReview shells out to `grove flow plan review` and returns

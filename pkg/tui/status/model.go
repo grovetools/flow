@@ -929,8 +929,12 @@ func (m Model) PlanTitle() string {
 		if m.Plan.Config.Worktree != "" {
 			parts = append(parts, theme.DefaultTheme.Muted.Render("worktree/branch: "+m.Plan.Config.Worktree))
 		}
-		if len(m.Plan.Config.Repos) > 0 {
-			parts = append(parts, theme.DefaultTheme.Muted.Render("repos: "+strings.Join(m.Plan.Config.Repos, ",")))
+		if repoCount := len(m.Plan.Config.Repos); repoCount > 0 {
+			label := "repos"
+			if repoCount == 1 {
+				label = "repo"
+			}
+			parts = append(parts, theme.DefaultTheme.Muted.Render(fmt.Sprintf("%d %s", repoCount, label)))
 		}
 	}
 	return strings.Join(parts, "  •  ")

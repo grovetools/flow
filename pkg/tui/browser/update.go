@@ -260,7 +260,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMessage = ""
 		m.streamConnecting = true
 		m.streamGeneration++
-		return m, connectPlanIndexCmd(factory, m.streamGeneration, m.showOnHold, m.showArchived)
+		return m, connectPlanIndexCmd(factory, m.streamGeneration, m.plansDirectory, m.showOnHold, m.showArchived)
 
 	case planIndexStreamMsg:
 		if msg.generation != m.streamGeneration {
@@ -299,7 +299,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMessage = ""
 				m.streamConnecting = true
 				m.streamGeneration++
-				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration, m.showOnHold, m.showArchived)
+				return m, connectPlanIndexCmd(m.daemonClientFactory(), m.streamGeneration, m.plansDirectory, m.showOnHold, m.showArchived)
 			}
 			m.planIndexRevision = delta.Revision
 			m.latestSnapshotAt = delta.ScannedAt
@@ -307,6 +307,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				delete(m.planSummaries, dir)
 			}
 			for _, summary := range delta.Upserts {
+				// Plan-index deltas do not carry a fresh note-index join. Preserve
+				// the tagged-note count attached during the baseline fetch.
+				if previous, ok := m.planSummaries[summary.PlanDir]; ok && summary.NoteCount == 0 {
+					summary.NoteCount = previous.NoteCount
+				}
 				m.planSummaries[summary.PlanDir] = summary
 			}
 			m.loading = true
@@ -386,8 +391,14 @@ func (m Model) replacePlanRows(plans []PlanListItem, selectedKey string) Model {
 	if selectedKey != "" {
 		m.selectPlanKey(selectedKey)
 	}
-	activePlan, _ := state.GetString(stateDir(), coreplan.StateKey)
-	m.activePlan = activePlan
+	// Resolve against the panel's workspace, never the treemux process CWD.
+	// ActivePlanForPath gives worktree registry identity precedence over mutable
+	// state, so a plan worktree always highlights the plan it was created for.
+	activePath := m.cwdGitRoot
+	if activePath == "" {
+		activePath = stateDir()
+	}
+	m.activePlan = coreplan.ActivePlanForPath(activePath)
 	if m.cursor >= len(m.plans) {
 		m.cursor = len(m.plans) - 1
 	}
@@ -406,12 +417,31 @@ func (m Model) reloadPlansCmd() tea.Cmd {
 		for key, summary := range m.planSummaries {
 			summaries[key] = summary
 		}
-		return loadPortfolioCmd(summaries, m.showOnHold, m.showArchived, m.planIndexRevision, m.streamGeneration)
+		return loadPortfolioCmd(scopedPlanSummaries(summaries, m.plansDirectory), m.showOnHold, m.showArchived, m.planIndexRevision, m.streamGeneration)
 	}
 	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration)
 }
 
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.columnSelectMode {
+		switch msg.String() {
+		case "esc", "T":
+			m.columnSelectMode = false
+		case "up", "k":
+			if m.columnCursor > 0 {
+				m.columnCursor--
+			}
+		case "down", "j":
+			if m.columnCursor < len(browserOptionalColumns)-1 {
+				m.columnCursor++
+			}
+		case "enter", " ":
+			name := browserOptionalColumns[m.columnCursor]
+			m.columnVisibility[name] = !m.columnVisible(name)
+		}
+		return m, nil
+	}
+
 	if m.help.ShowAll {
 		// Any key closes help.
 		m.help.ShowAll = false
@@ -424,6 +454,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.editPlanIndex >= 0 && m.editPlanIndex < len(m.plans) {
 				plan := m.plans[m.editPlanIndex].Plan
 				newNotes := m.notesInput.Value()
+				hadPlanNote := plan.Config != nil && plan.Config.Notes != ""
 
 				if plan.Config == nil {
 					plan.Config = &orchestration.PlanConfig{}
@@ -436,6 +467,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					_ = os.WriteFile(configPath, data, 0o600)
 				}
 				m.plans[m.editPlanIndex].Notes = newNotes
+				hasPlanNote := newNotes != ""
+				if hadPlanNote != hasPlanNote {
+					if hasPlanNote {
+						m.plans[m.editPlanIndex].NoteCount++
+					} else if m.plans[m.editPlanIndex].NoteCount > 0 {
+						m.plans[m.editPlanIndex].NoteCount--
+					}
+				}
 			}
 			m.editingNotes = false
 			return m, nil
@@ -460,6 +499,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Help):
 		m.help.Toggle()
+		return m, nil
+
+	case key.Matches(msg, m.keys.ToggleColumns):
+		m.columnSelectMode = true
+		m.columnCursor = 0
 		return m, nil
 
 	case key.Matches(msg, m.keys.NewPlan):
@@ -557,6 +601,18 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			plan := m.plans[m.cursor]
+			if m.hosted {
+				workspacePath := plan.ActionTarget.ContainerPath
+				if workspacePath == "" {
+					workspacePath = plan.Binding.ContainerPath
+				}
+				if workspacePath == "" && plan.Name == RollingPlanName {
+					workspacePath = plan.WorkspaceRoot
+				}
+				return m, func() tea.Msg {
+					return embed.SwitchWorkspaceRequestMsg{Path: workspacePath, FocusPanel: "shell"}
+				}
+			}
 			return m, executePlanOpen(plan.Plan)
 		}
 		return m, nil
@@ -569,19 +625,19 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.selectedBindingValid("set active") {
 			return m, nil
 		}
+		if fixedPlan, fixed := fixedWorktreePlan(m.cwdGitRoot); fixed {
+			m.activePlan = fixedPlan
+			m.statusMessage = fmt.Sprintf("Active plan is fixed by this worktree: %s", fixedPlan)
+			return m, nil
+		}
 		if m.cursor >= 0 && m.cursor < len(m.plans) {
 			selectedPlan := m.plans[m.cursor]
-			stateRoot := selectedPlan.WorkspaceRoot
+			stateRoot := m.cwdGitRoot
 			if stateRoot == "" {
 				stateRoot = stateDir()
 			}
 			if err := state.Set(stateRoot, coreplan.StateKey, selectedPlan.Name); err == nil {
 				m.activePlan = selectedPlan.Name
-				for i := range m.plans {
-					if m.plans[i].WorkspaceRoot == selectedPlan.WorkspaceRoot {
-						m.plans[i].Selected = i == m.cursor
-					}
-				}
 			}
 		}
 		return m, nil
@@ -780,6 +836,11 @@ func (m *Model) selectedBindingValid(action string) bool {
 	}
 	binding := m.plans[m.cursor].Binding
 	if binding.Valid() {
+		return true
+	}
+	// Rolling is intentionally attached to the primary checkout rather than a
+	// registry worktree, so its qualified workspace root is its valid target.
+	if action == "open" && m.plans[m.cursor].Name == RollingPlanName && m.plans[m.cursor].WorkspaceRoot != "" {
 		return true
 	}
 	health := binding.Health

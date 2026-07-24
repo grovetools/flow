@@ -40,6 +40,10 @@ func (m Model) View() string {
 		return padStyle.Render(m.help.View())
 	}
 
+	if m.columnSelectMode {
+		return padStyle.Render(m.renderColumnSelect())
+	}
+
 	if m.editingNotes {
 		s.WriteString(components.RenderHeader("Edit Plan Notes"))
 		s.WriteString("\n\n")
@@ -253,12 +257,57 @@ func (m Model) renderEcosystemStatusPane() string {
 
 // renderPlanTable renders the main plan list table with the cursor
 // highlighted on the current selection.
+var browserOptionalColumns = []string{"WORKSPACE / REPOS", "WORKTREE", "BINDING", "GIT", "REVIEWED", "NOTES", "UPDATED"}
+
+func defaultBrowserColumnVisibility() map[string]bool {
+	return map[string]bool{
+		"WORKSPACE / REPOS": false, "WORKTREE": true, "BINDING": true,
+		"GIT": true, "REVIEWED": true, "NOTES": true, "UPDATED": true,
+	}
+}
+
+func (m Model) columnVisible(name string) bool {
+	visible, exists := m.columnVisibility[name]
+	return !exists || visible
+}
+
+func (m Model) renderColumnSelect() string {
+	var b strings.Builder
+	b.WriteString(components.RenderHeader("Toggle Plan Columns"))
+	b.WriteString("\n\n")
+	for i, name := range browserOptionalColumns {
+		cursor, mark := "  ", "[ ]"
+		if i == m.columnCursor {
+			cursor = "> "
+		}
+		if m.columnVisible(name) {
+			mark = "[x]"
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, mark, name))
+	}
+	b.WriteString("\n")
+	b.WriteString(theme.DefaultTheme.Muted.Render("↑/↓ move  •  space/enter toggle  •  T/esc close"))
+	return b.String()
+}
+
 func (m Model) renderPlanTable() string {
 	if len(m.plans) == 0 {
 		return ""
 	}
 
-	headers := []string{"PLAN", "WORKSPACE / REPOS", "STATUS", "WORKTREE", "BINDING", "GIT", "MERGE", "REVIEWED", "NOTES", "UPDATED"}
+	showWorktree := m.columnVisible("WORKTREE") && m.hasDistinctWorktree()
+	headers := []string{"PLAN", "STATUS"}
+	if m.columnVisible("WORKSPACE / REPOS") {
+		headers = append(headers, "WORKSPACE / REPOS")
+	}
+	if showWorktree {
+		headers = append(headers, "WORKTREE")
+	}
+	for _, name := range []string{"BINDING", "GIT", "REVIEWED", "NOTES", "UPDATED"} {
+		if m.columnVisible(name) {
+			headers = append(headers, name)
+		}
+	}
 	start := m.scrollOffset
 	if start < 0 {
 		start = 0
@@ -285,7 +334,7 @@ func (m Model) renderPlanTable() string {
 			if plan.Name == RollingPlanName {
 				titleText = theme.DefaultTheme.Muted.Render("(rolling)")
 			}
-			if plan.Selected || plan.Name == m.activePlan {
+			if plan.Name == m.activePlan {
 				titleText = theme.DefaultTheme.Bold.Render(fmt.Sprintf("%s %s", theme.IconSelect, titleText))
 			}
 		}
@@ -298,7 +347,9 @@ func (m Model) renderPlanTable() string {
 		}
 
 		bindingText := string(plan.Binding.Health)
-		if bindingText == "" {
+		if plan.Name == RollingPlanName && !plan.Archived {
+			bindingText = theme.DefaultTheme.Muted.Render("main workspace")
+		} else if bindingText == "" {
 			bindingText = string(coreplan.BindingUnbound)
 		}
 		if plan.Binding.Valid() {
@@ -329,32 +380,9 @@ func (m Model) renderPlanTable() string {
 			gitText = theme.DefaultTheme.Muted.Render("-")
 		}
 
-		notesText := plan.Notes
-		if notesText == "" {
-			notesText = theme.DefaultTheme.Muted.Render("-")
-		} else if len(notesText) > 30 {
-			notesText = notesText[:27] + "..."
-		}
-
-		// The MERGE cell text is plan.MergeStatus — for ecosystem plans this is
-		// the abbreviated count+icon rollup (icons already baked in); for
-		// single-repo plans it is the bare status label. MergeVerdict (the
-		// worst-case status across the group, or the status itself for single
-		// repos) drives the color so the whole cell reads at a glance.
-		var mergeText string
-		switch plan.MergeVerdict {
-		case "Ready":
-			mergeText = theme.DefaultTheme.Success.Render(plan.MergeStatus)
-		case "Needs Rebase", "Diverged":
-			mergeText = theme.DefaultTheme.Warning.Render(plan.MergeStatus)
-		case "Behind":
-			mergeText = theme.DefaultTheme.Info.Render(plan.MergeStatus)
-		case "Conflicts":
-			mergeText = theme.DefaultTheme.Error.Render(plan.MergeStatus)
-		case "Merged", "Synced":
-			mergeText = theme.DefaultTheme.Muted.Render(theme.IconMerge + " Synced")
-		default:
-			mergeText = theme.DefaultTheme.Muted.Render(plan.MergeStatus)
+		notesText := fmt.Sprintf("%d", plan.NoteCount)
+		if plan.NoteCount == 0 {
+			notesText = theme.DefaultTheme.Muted.Render("0")
 		}
 
 		var reviewedText string
@@ -371,10 +399,7 @@ func (m Model) renderPlanTable() string {
 			reviewedText = theme.DefaultTheme.Muted.Render("-")
 		}
 
-		identityText := plan.Workspace
-		if len(plan.Repositories) > 0 {
-			identityText += " / " + strings.Join(plan.Repositories, ",")
-		}
+		identityText := formatPlanIdentity(plan.Workspace, len(plan.Repositories))
 		if identityText == "" {
 			identityText = theme.DefaultTheme.Muted.Render("-")
 		}
@@ -387,23 +412,54 @@ func (m Model) renderPlanTable() string {
 			}
 		}
 
-		rows[i-start] = []string{
-			titleText,
-			identityText,
-			statusText,
-			worktreeText,
-			bindingText,
-			gitText,
-			mergeText,
-			reviewedText,
-			notesText,
-			updatedText,
+		row := []string{titleText, statusText}
+		if m.columnVisible("WORKSPACE / REPOS") {
+			row = append(row, identityText)
 		}
+		if showWorktree {
+			row = append(row, worktreeText)
+		}
+		cells := map[string]string{
+			"BINDING": bindingText, "GIT": gitText,
+			"REVIEWED": reviewedText, "NOTES": notesText, "UPDATED": updatedText,
+		}
+		for _, name := range []string{"BINDING", "GIT", "REVIEWED", "NOTES", "UPDATED"} {
+			if m.columnVisible(name) {
+				row = append(row, cells[name])
+			}
+		}
+		rows[i-start] = row
 	}
 
 	tableView := table.SelectableTable(headers, rows, m.cursor-start)
 	rangeText := theme.DefaultTheme.Muted.Render(fmt.Sprintf("%d–%d of %d", start+1, end, len(m.plans)))
 	return lipgloss.JoinVertical(lipgloss.Left, tableView, rangeText)
+}
+
+// hasDistinctWorktree reports whether the column carries information beyond
+// the PLAN column. Normal plans use the same slug for both and rolling has no
+// worktree, so the column appears only for a shared/reassigned worktree.
+func (m Model) hasDistinctWorktree() bool {
+	for _, plan := range m.plans {
+		if plan.Worktree != "" && plan.Worktree != plan.Name {
+			return true
+		}
+	}
+	return false
+}
+
+func formatPlanIdentity(workspaceName string, repositoryCount int) string {
+	if repositoryCount == 0 {
+		return workspaceName
+	}
+	label := "repos"
+	if repositoryCount == 1 {
+		label = "repo"
+	}
+	if workspaceName == "" {
+		return fmt.Sprintf("%d %s", repositoryCount, label)
+	}
+	return fmt.Sprintf("%s / %d %s", workspaceName, repositoryCount, label)
 }
 
 // formatStatusWithEmoji produces the emoji-decorated status string shown
