@@ -66,18 +66,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		"daemon_running": daemonClient.IsRunning(),
 	}).Info("Registering codex session intent with daemon")
 
-	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
-		JobID:        job.ID,
-		Provider:     "codex",
-		JobFilePath:  job.FilePath,
-		PlanName:     plan.Name,
-		Title:        job.Title,
-		WorkDir:      workDir,
-		Channels:     job.Channels,
-		SignalTarget: job.SignalTarget,
-		Autonomous:   job.Autonomous,
-		Mux:          muxType,
-	}); err != nil {
+	if err := daemonClient.RegisterSessionIntent(ctx, newAgentSessionIntent(job, plan, "codex", workDir, muxType)); err != nil {
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {
 		p.log.Info("Session intent registered successfully")
@@ -328,6 +317,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pla
 
 		metadata := sessions.SessionMetadata{
 			SessionID:        job.ID,
+			ParentJobID:      job.ParentJobID,
 			ClaudeSessionID:  nativeID,
 			Provider:         "codex",
 			PID:              codexPID,

@@ -81,17 +81,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 		"daemon_running": daemonClient.IsRunning(),
 	}).Info("Registering session intent for groveterm native pane")
 
-	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
-		JobID:       job.ID,
-		Provider:    p.spec.Name,
-		JobFilePath: job.FilePath,
-		PlanName:    plan.Name,
-		Title:       job.Title,
-		WorkDir:     workDir,
-		Channels:    job.Channels,
-		Autonomous:  job.Autonomous,
-		Mux:         p.effectiveMux(),
-	}); err != nil {
+	if err := daemonClient.RegisterSessionIntent(ctx, newAgentSessionIntent(job, plan, p.spec.Name, workDir, p.effectiveMux())); err != nil {
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {
 		p.log.Info("Session intent registered successfully")
@@ -278,6 +268,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 
 		metadata := sessions.SessionMetadata{
 			SessionID:        job.ID,
+			ParentJobID:      job.ParentJobID,
 			ClaudeSessionID:  nativeID,
 			Provider:         p.spec.Name,
 			PID:              pid,

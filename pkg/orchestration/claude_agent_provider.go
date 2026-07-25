@@ -76,18 +76,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		muxType = models.MuxTuimux
 	}
 
-	if err := daemonClient.RegisterSessionIntent(ctx, daemon.SessionIntent{
-		JobID:        job.ID,
-		Provider:     "claude",
-		JobFilePath:  job.FilePath,
-		PlanName:     plan.Name,
-		Title:        job.Title,
-		WorkDir:      workDir,
-		Channels:     job.Channels,
-		SignalTarget: job.SignalTarget,
-		Autonomous:   job.Autonomous,
-		Mux:          muxType,
-	}); err != nil {
+	if err := daemonClient.RegisterSessionIntent(ctx, newAgentSessionIntent(job, plan, "claude", workDir, muxType)); err != nil {
 		// Log warning but continue - agent can still run, just tracking may be impaired
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {
@@ -671,6 +660,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 
 		metadata := sessions.SessionMetadata{
 			SessionID:        job.ID,
+			ParentJobID:      job.ParentJobID,
 			ClaudeSessionID:  claudeSessionID,
 			Provider:         "claude",
 			PID:              claudePID,

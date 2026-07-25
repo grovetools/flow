@@ -56,6 +56,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 
 		metadata := sessions.SessionMetadata{
 			SessionID:        job.ID,
+			ParentJobID:      job.ParentJobID,
 			ClaudeSessionID:  "", // Empty - plugin will fill this with native opencode session ID
 			Provider:         "opencode",
 			PID:              0, // Will be updated by plugin

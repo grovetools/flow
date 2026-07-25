@@ -370,6 +370,7 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 	// Create metadata
 	metadata := sessions.SessionMetadata{
 		SessionID:        job.ID,
+		ParentJobID:      job.ParentJobID,
 		ClaudeSessionID:  "", // Will be discovered later if needed
 		Provider:         providerName,
 		PID:              agentPID,
