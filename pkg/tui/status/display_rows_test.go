@@ -23,12 +23,13 @@ func newDisplayTestModel(jobs ...*orchestration.Job) *Model {
 		indents[j.ID] = 0
 	}
 	m := &Model{
-		Jobs:           jobs,
-		JobIndents:     indents,
-		JobParents:     make(map[string]*orchestration.Job),
-		Selected:       make(map[string]bool),
-		FoldState:      make(map[string]bool),
-		WorkflowStates: make(map[string]*workflowPaneState),
+		Jobs:              jobs,
+		JobIndents:        indents,
+		JobParents:        make(map[string]*orchestration.Job),
+		OwnershipChildren: make(map[string][]*orchestration.Job),
+		Selected:          make(map[string]bool),
+		FoldState:         make(map[string]bool),
+		WorkflowStates:    make(map[string]*workflowPaneState),
 	}
 	m.DisplayRows = m.buildDisplayRows()
 	return m
@@ -117,6 +118,137 @@ func TestRebuildDisplayRows_CursorStableAcrossReload(t *testing.T) {
 	m.rebuildDisplayRows()
 	if m.Cursor < 0 || m.Cursor >= len(m.DisplayRows) {
 		t.Errorf("cursor out of bounds after job removal: %d", m.Cursor)
+	}
+}
+
+func TestFlattenJobTree_OwnershipWinsPresentationOnly(t *testing.T) {
+	parent := testJob("parent")
+	dependency := testJob("dependency")
+	child := testJob("child")
+	child.ParentJobID = parent.ID
+	child.Dependencies = []*orchestration.Job{dependency}
+	plan := &orchestration.Plan{Jobs: []*orchestration.Job{parent, dependency, child}}
+
+	jobs, parents, indents := flattenJobTreeWithParents(plan)
+	if got := []string{jobs[0].ID, jobs[1].ID, jobs[2].ID}; fmt.Sprint(got) != "[parent child dependency]" {
+		t.Fatalf("display order = %v, want [parent child dependency]", got)
+	}
+	if parents[child.ID] != parent || indents[child.ID] != 1 {
+		t.Fatalf("child display parent/depth = %v/%d, want parent/1", parents[child.ID], indents[child.ID])
+	}
+	if len(child.Dependencies) != 1 || child.Dependencies[0] != dependency {
+		t.Fatal("presentation flattening changed scheduling dependencies")
+	}
+}
+
+func TestFlattenJobTree_RecursiveOwnershipAndMalformedFallback(t *testing.T) {
+	parent := testJob("parent")
+	child := testJob("child")
+	grandchild := testJob("grandchild")
+	orphan := testJob("orphan")
+	cycleA := testJob("cycle-a")
+	cycleB := testJob("cycle-b")
+	child.ParentJobID = parent.ID
+	grandchild.ParentJobID = child.ID
+	orphan.ParentJobID = "missing"
+	cycleA.ParentJobID = cycleB.ID
+	cycleB.ParentJobID = cycleA.ID
+	plan := &orchestration.Plan{Jobs: []*orchestration.Job{parent, orphan, cycleA, cycleB, child, grandchild}}
+
+	jobs, parents, indents := flattenJobTreeWithParents(plan)
+	if len(jobs) != len(plan.Jobs) {
+		t.Fatalf("flattened jobs = %d, want %d", len(jobs), len(plan.Jobs))
+	}
+	if parents[child.ID] != parent || parents[grandchild.ID] != child || indents[grandchild.ID] != 2 {
+		t.Fatalf("recursive ownership not preserved: parents=%v indents=%v", parents, indents)
+	}
+	for _, id := range []string{orphan.ID, cycleA.ID, cycleB.ID} {
+		if parents[id] != nil || indents[id] != 0 {
+			t.Errorf("malformed lineage %s should fall back to root, parent=%v depth=%d", id, parents[id], indents[id])
+		}
+	}
+}
+
+func newOwnershipDisplayTestModel(jobs ...*orchestration.Job) *Model {
+	plan := &orchestration.Plan{Jobs: jobs}
+	flat, parents, indents := flattenJobTreeWithParents(plan)
+	m := newDisplayTestModel(flat...)
+	m.JobParents = parents
+	m.JobIndents = indents
+	m.OwnershipChildren = indexOwnershipChildren(flat, parents)
+	m.DisplayRows = m.buildDisplayRows()
+	return m
+}
+
+func TestSubjobRows_AreSelectableNestedJobsWithSummary(t *testing.T) {
+	parent := testJob("parent")
+	parent.Status = orchestration.JobStatusCompleted
+	done := testJob("done")
+	done.ParentJobID = parent.ID
+	done.Status = orchestration.JobStatusCompleted
+	running := testJob("running")
+	running.ParentJobID = parent.ID
+	running.Status = orchestration.JobStatusRunning
+	pending := testJob("pending")
+	pending.ParentJobID = parent.ID
+	pending.Status = orchestration.JobStatusPending
+	m := newOwnershipDisplayTestModel(parent, done, running, pending)
+
+	// A live descendant automatically exposes the family even though the
+	// owner itself is terminal.
+	if len(m.DisplayRows) != 4 {
+		t.Fatalf("display rows = %d, want parent plus three children", len(m.DisplayRows))
+	}
+	for i := 1; i < 4; i++ {
+		if m.DisplayRows[i].Type != RowTypeJob || m.JobIndents[m.DisplayRows[i].Job.ID] != 1 {
+			t.Errorf("row %d is not a nested real job: %+v", i, m.DisplayRows[i])
+		}
+	}
+	m.Cursor = 2
+	if got := m.CurrentJob(); got != running {
+		t.Fatalf("CurrentJob on child = %v, want running child", got)
+	}
+	badge := ansi.Strip(m.jobSubjobBadge(parent))
+	if badge != "subjobs 1/3 · 1 running" {
+		t.Errorf("subjob badge = %q", badge)
+	}
+}
+
+func TestSubjobRows_FoldAndCursorFallback(t *testing.T) {
+	parent := testJob("parent")
+	parent.Status = orchestration.JobStatusCompleted
+	child := testJob("child")
+	child.ParentJobID = parent.ID
+	child.Status = orchestration.JobStatusCompleted
+	other := testJob("other")
+	m := newOwnershipDisplayTestModel(parent, child, other)
+
+	if len(m.DisplayRows) != 2 {
+		t.Fatalf("terminal family should default collapsed beside other root, rows=%d", len(m.DisplayRows))
+	}
+	m.Cursor = 0
+	if !m.toggleFoldAtCursor() || len(m.DisplayRows) != 3 {
+		t.Fatalf("expanding owner should reveal selectable child, rows=%d", len(m.DisplayRows))
+	}
+	m.Cursor = m.rowIndexByNodeID(jobNodeID(child.ID))
+	m.FoldState[jobNodeID(parent.ID)] = true
+	m.rebuildDisplayRows()
+	if row := m.currentRow(); row == nil || row.NodeID != jobNodeID(parent.ID) {
+		t.Fatalf("folded child cursor should fall back to owner, got %+v", row)
+	}
+}
+
+func TestSubjobRows_PrecedeLegacyWorkflowRows(t *testing.T) {
+	parent := testJob("parent")
+	parent.Status = orchestration.JobStatusRunning
+	child := testJob("child")
+	child.ParentJobID = parent.ID
+	m := newOwnershipDisplayTestModel(parent, child)
+	addTestRun(m, parent.ID, "wf", 1, 0)
+	m.rebuildDisplayRows()
+
+	if len(m.DisplayRows) < 3 || m.DisplayRows[1].Type != RowTypeJob || m.DisplayRows[1].Job != child || m.DisplayRows[2].Type != RowTypeRun {
+		t.Fatalf("rows should order real child before legacy workflow activity: %+v", m.DisplayRows)
 	}
 }
 

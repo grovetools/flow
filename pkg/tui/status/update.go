@@ -1058,6 +1058,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Jobs = jobs
 		m.JobParents = parents
 		m.JobIndents = indents
+		m.OwnershipChildren = indexOwnershipChildren(jobs, parents)
 
 		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 		if err != nil {

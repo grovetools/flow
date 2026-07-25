@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -79,8 +80,12 @@ type Model struct {
 	Graph        *orchestration.DependencyGraph
 	Orchestrator *orchestration.Orchestrator // Direct orchestrator for job execution
 	Jobs         []*orchestration.Job
-	JobParents   map[string]*orchestration.Job // Track parent in tree structure
-	JobIndents   map[string]int                // Track indentation level
+	// JobParents and JobIndents describe the presentation tree. A valid
+	// ParentJobID ownership edge wins over dependency nesting; scheduling still
+	// uses only the dependency graph.
+	JobParents        map[string]*orchestration.Job
+	JobIndents        map[string]int
+	OwnershipChildren map[string][]*orchestration.Job // Cached direct lineage children by owner ID.
 	// DisplayRows is the view model the jobs table renders: one RowTypeJob
 	// row per job plus virtual workflow child rows. Cursor and ScrollOffset
 	// index DisplayRows, never m.Jobs. Rebuilt by rebuildDisplayRows after
@@ -764,6 +769,7 @@ func New(cfg Config) Model {
 		Jobs:                     jobs,
 		JobParents:               parents,
 		JobIndents:               indents,
+		OwnershipChildren:        indexOwnershipChildren(jobs, parents),
 		FoldState:                make(map[string]bool),
 		Cursor:                   initialCursor,
 		ScrollOffset:             0,
@@ -1360,48 +1366,134 @@ func (m *Model) adjustScrollOffset() {
 	}
 }
 
-// flattenJobTreeWithParents creates a flat list of jobs in tree order with parent tracking
+// flattenJobTreeWithParents creates the presentation tree used by the status
+// table. Valid ParentJobID lineage is the primary presentation edge; the
+// existing dependency tree remains the fallback. ParentJobID never changes
+// scheduling or runnability.
 func flattenJobTreeWithParents(plan *orchestration.Plan) ([]*orchestration.Job, map[string]*orchestration.Job, map[string]int) {
-	var result []*orchestration.Job
+	fallbackOrder := make([]*orchestration.Job, 0, len(plan.Jobs))
+	fallbackParents := make(map[string]*orchestration.Job)
 	visited := make(map[string]bool)
-	parents := make(map[string]*orchestration.Job)
-	indents := make(map[string]int)
-
-	// Find root jobs via the orchestration package.
-	roots := orchestration.FindRootJobs(plan)
-
-	// Add each root and its dependents
-	for _, root := range roots {
-		addJobAndDependentsWithParent(root, plan, &result, visited, parents, indents, nil, 0)
+	for _, root := range orchestration.FindRootJobs(plan) {
+		addJobAndDependentsWithParent(root, plan, &fallbackOrder, visited, fallbackParents, nil)
 	}
-
-	// Add any orphaned jobs
 	for _, job := range plan.Jobs {
 		if !visited[job.ID] {
-			result = append(result, job)
-			parents[job.ID] = nil
-			indents[job.ID] = 0
+			fallbackOrder = append(fallbackOrder, job)
+			fallbackParents[job.ID] = nil
 		}
 	}
 
+	byID := make(map[string]*orchestration.Job, len(plan.Jobs))
+	for _, job := range plan.Jobs {
+		byID[job.ID] = job
+	}
+
+	parents := make(map[string]*orchestration.Job, len(plan.Jobs))
+	for _, job := range plan.Jobs {
+		parents[job.ID] = fallbackParents[job.ID]
+		if ownershipParentIsValid(job, byID) {
+			parents[job.ID] = byID[job.ParentJobID]
+		}
+	}
+
+	children := make(map[string][]*orchestration.Job)
+	var roots []*orchestration.Job
+	// fallbackOrder preserves the status TUI's established dependency tree
+	// while ownership children are relocated beneath their owner.
+	for _, job := range fallbackOrder {
+		if parent := parents[job.ID]; parent != nil {
+			children[parent.ID] = append(children[parent.ID], job)
+		} else {
+			roots = append(roots, job)
+		}
+	}
+	// Ownership siblings must follow plan/file order even when their unrelated
+	// dependency paths placed them differently in fallbackOrder.
+	planOrder := make(map[string]int, len(plan.Jobs))
+	for i, job := range plan.Jobs {
+		planOrder[job.ID] = i
+	}
+	for parentID := range children {
+		sort.SliceStable(children[parentID], func(i, j int) bool {
+			return planOrder[children[parentID][i].ID] < planOrder[children[parentID][j].ID]
+		})
+	}
+
+	result := make([]*orchestration.Job, 0, len(plan.Jobs))
+	indents := make(map[string]int, len(plan.Jobs))
+	visited = make(map[string]bool)
+	var appendTree func(*orchestration.Job, int)
+	appendTree = func(job *orchestration.Job, depth int) {
+		if job == nil || visited[job.ID] {
+			return
+		}
+		visited[job.ID] = true
+		result = append(result, job)
+		indents[job.ID] = depth
+		for _, child := range children[job.ID] {
+			appendTree(child, depth+1)
+		}
+	}
+	for _, root := range roots {
+		appendTree(root, 0)
+	}
+	// Defensive fallback for malformed dependency/lineage cycles.
+	for _, job := range fallbackOrder {
+		if !visited[job.ID] {
+			parents[job.ID] = nil
+			appendTree(job, 0)
+		}
+	}
 	return result, parents, indents
 }
 
-// addJobAndDependentsWithParent recursively adds a job and its dependents with parent tracking
-func addJobAndDependentsWithParent(job *orchestration.Job, plan *orchestration.Plan, result *[]*orchestration.Job, visited map[string]bool, parents map[string]*orchestration.Job, indents map[string]int, parent *orchestration.Job, indent int) {
+// indexOwnershipChildren caches valid direct ownership children for folding,
+// summaries, and attention propagation.
+func indexOwnershipChildren(jobs []*orchestration.Job, parents map[string]*orchestration.Job) map[string][]*orchestration.Job {
+	children := make(map[string][]*orchestration.Job)
+	for _, job := range jobs {
+		parent := parents[job.ID]
+		if job.ParentJobID != "" && parent != nil && parent.ID == job.ParentJobID {
+			children[parent.ID] = append(children[parent.ID], job)
+		}
+	}
+	return children
+}
+
+// ownershipParentIsValid rejects missing parents and any lineage chain that
+// cycles. Invalid lineage falls back to dependency/root presentation instead
+// of making jobs disappear.
+func ownershipParentIsValid(job *orchestration.Job, byID map[string]*orchestration.Job) bool {
+	if job == nil || job.ParentJobID == "" || byID[job.ParentJobID] == nil {
+		return false
+	}
+	seen := map[string]bool{job.ID: true}
+	for id := job.ParentJobID; id != ""; {
+		if seen[id] {
+			return false
+		}
+		seen[id] = true
+		parent := byID[id]
+		if parent == nil {
+			return true
+		}
+		id = parent.ParentJobID
+	}
+	return true
+}
+
+// addJobAndDependentsWithParent records the legacy dependency presentation
+// tree. Ownership lineage is overlaid after this pass.
+func addJobAndDependentsWithParent(job *orchestration.Job, plan *orchestration.Plan, result *[]*orchestration.Job, visited map[string]bool, parents map[string]*orchestration.Job, parent *orchestration.Job) {
 	if visited[job.ID] {
 		return
 	}
 	visited[job.ID] = true
 	*result = append(*result, job)
 	parents[job.ID] = parent
-	indents[job.ID] = indent
-
-	// Find and add dependents using the same logic as vanilla status
-	// This ensures jobs appear under their dependency with maximum height
-	dependents := orchestration.FindAllDependents(job, plan)
-	for _, dep := range dependents {
-		addJobAndDependentsWithParent(dep, plan, result, visited, parents, indents, job, indent+1)
+	for _, dep := range orchestration.FindAllDependents(job, plan) {
+		addJobAndDependentsWithParent(dep, plan, result, visited, parents, job)
 	}
 }
 

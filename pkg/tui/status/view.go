@@ -361,8 +361,8 @@ func (m Model) renderTableView() string {
 					filename = t.Muted.Render(filename)
 				}
 				cell = fmt.Sprintf("%s%s %s", treePrefix, statusIcon, filename)
-				if badge := m.jobWorkflowBadge(job); badge != "" {
-					cell += " " + badge
+				if badges := m.jobBadges(job); badges != "" {
+					cell += " " + badges
 				}
 			case "TITLE":
 				titleText := job.Title

@@ -83,21 +83,66 @@ func moreNodeID(jobID, runID, scope string) string {
 	return "more:" + jobID + "/" + runID + "/" + scope
 }
 
-// buildDisplayRows constructs the display rows from the current jobs slice.
-// Virtual workflow rows are appended under their owning job by the workflow
-// tree builder (see appendWorkflowRows); with no workflow state the result
-// is exactly one row per job, in m.Jobs order.
+// buildDisplayRows constructs selectable real-job rows plus virtual workflow
+// rows. Ownership children render first beneath their parent, then legacy
+// workflow/ad-hoc activity, then dependency-only children. Folding an owner
+// hides its ownership subtree while every visible child remains RowTypeJob.
 func (m *Model) buildDisplayRows() []DisplayRow {
 	rows := make([]DisplayRow, 0, len(m.Jobs))
+	children := make(map[string][]*orchestration.Job)
+	var roots []*orchestration.Job
 	for _, job := range m.Jobs {
-		rows = append(rows, DisplayRow{
-			Type:   RowTypeJob,
-			NodeID: jobNodeID(job.ID),
-			Job:    job,
-		})
+		if parent := m.JobParents[job.ID]; parent != nil {
+			children[parent.ID] = append(children[parent.ID], job)
+		} else {
+			roots = append(roots, job)
+		}
+	}
+
+	visited := make(map[string]bool, len(m.Jobs))
+	var appendJob func(*orchestration.Job)
+	appendJob = func(job *orchestration.Job) {
+		if job == nil || visited[job.ID] {
+			return
+		}
+		visited[job.ID] = true
+		row := DisplayRow{Type: RowTypeJob, NodeID: jobNodeID(job.ID), Job: job}
+		rows = append(rows, row)
+
+		collapsed := m.jobHasChildren(job) && m.isNodeCollapsed(&row)
+		if !collapsed {
+			for _, child := range children[job.ID] {
+				if m.isOwnershipChild(child) {
+					appendJob(child)
+				}
+			}
+		}
 		rows = m.appendWorkflowRows(rows, job)
+		for _, child := range children[job.ID] {
+			if !m.isOwnershipChild(child) {
+				appendJob(child)
+			}
+		}
+	}
+	for _, root := range roots {
+		appendJob(root)
 	}
 	return rows
+}
+
+func (m *Model) isOwnershipChild(job *orchestration.Job) bool {
+	if job == nil || job.ParentJobID == "" {
+		return false
+	}
+	parent := m.JobParents[job.ID]
+	return parent != nil && parent.ID == job.ParentJobID
+}
+
+func (m *Model) ownershipChildren(job *orchestration.Job) []*orchestration.Job {
+	if job == nil {
+		return nil
+	}
+	return m.OwnershipChildren[job.ID]
 }
 
 // rebuildDisplayRows rebuilds DisplayRows and restores the cursor to the
@@ -106,11 +151,17 @@ func (m *Model) buildDisplayRows() []DisplayRow {
 // clamps.
 func (m *Model) rebuildDisplayRows() {
 	var prevNodeID string
-	var prevJobID string
+	var fallbackJobIDs []string
 	if row := m.currentRow(); row != nil {
 		prevNodeID = row.NodeID
 		if row.Job != nil {
-			prevJobID = row.Job.ID
+			// If folding hides a real child, walk toward the nearest visible
+			// presentation owner instead of merely clamping onto an unrelated row.
+			seen := make(map[string]bool)
+			for job := row.Job; job != nil && !seen[job.ID]; job = m.JobParents[job.ID] {
+				seen[job.ID] = true
+				fallbackJobIDs = append(fallbackJobIDs, job.ID)
+			}
 		}
 	}
 
@@ -119,8 +170,13 @@ func (m *Model) rebuildDisplayRows() {
 	if prevNodeID != "" {
 		if idx := m.rowIndexByNodeID(prevNodeID); idx >= 0 {
 			m.Cursor = idx
-		} else if idx := m.rowIndexByNodeID(jobNodeID(prevJobID)); idx >= 0 {
-			m.Cursor = idx
+		} else {
+			for _, jobID := range fallbackJobIDs {
+				if idx := m.rowIndexByNodeID(jobNodeID(jobID)); idx >= 0 {
+					m.Cursor = idx
+					break
+				}
+			}
 		}
 	}
 	m.clampCursor()
@@ -352,6 +408,32 @@ func (m *Model) jobHasWorkflowTree(job *orchestration.Job) bool {
 	return st != nil && len(st.RunOrder) > 0
 }
 
+func (m *Model) jobHasChildren(job *orchestration.Job) bool {
+	return m.jobHasWorkflowTree(job) || len(m.ownershipChildren(job)) > 0
+}
+
+func subjobNeedsAttention(job *orchestration.Job) bool {
+	if job == nil {
+		return false
+	}
+	switch job.Status {
+	case orchestration.JobStatusRunning, orchestration.JobStatusFailed,
+		orchestration.JobStatusNeedsReview, orchestration.JobStatusPendingUser:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Model) hasAttentionOwnershipDescendant(job *orchestration.Job) bool {
+	for _, child := range m.ownershipChildren(job) {
+		if subjobNeedsAttention(child) || m.hasAttentionOwnershipDescendant(child) {
+			return true
+		}
+	}
+	return false
+}
+
 // isNodeCollapsed reports whether a foldable row is currently collapsed:
 // the user's explicit FoldState override when present, else the default
 // policy.
@@ -369,7 +451,10 @@ func (m *Model) isNodeCollapsed(row *DisplayRow) bool {
 func (m *Model) defaultCollapsed(row *DisplayRow) bool {
 	switch row.Type {
 	case RowTypeJob:
-		return row.Job == nil || row.Job.Status != orchestration.JobStatusRunning
+		if row.Job == nil {
+			return true
+		}
+		return row.Job.Status != orchestration.JobStatusRunning && !m.hasAttentionOwnershipDescendant(row.Job)
 	case RowTypeRun:
 		if row.Run == nil || row.Run.Stale {
 			return true
@@ -394,7 +479,7 @@ func (m *Model) toggleFoldAtCursor() bool {
 	}
 	switch row.Type {
 	case RowTypeJob:
-		if !m.jobHasWorkflowTree(row.Job) {
+		if !m.jobHasChildren(row.Job) {
 			return false
 		}
 		m.FoldState[row.NodeID] = !m.isNodeCollapsed(row)
@@ -537,6 +622,36 @@ func (m *Model) virtualRowTypeCell(row *DisplayRow) string {
 	return theme.DefaultTheme.Muted.Render(text)
 }
 
+// jobSubjobBadge summarizes direct first-class ownership children.
+func (m *Model) jobSubjobBadge(job *orchestration.Job) string {
+	children := m.ownershipChildren(job)
+	if len(children) == 0 {
+		return ""
+	}
+	terminal, running := 0, 0
+	attention := false
+	for _, child := range children {
+		switch child.Status {
+		case orchestration.JobStatusCompleted, orchestration.JobStatusAbandoned:
+			terminal++
+		case orchestration.JobStatusRunning:
+			running++
+		}
+		attention = attention || subjobNeedsAttention(child) || m.hasAttentionOwnershipDescendant(child)
+	}
+	label := fmt.Sprintf("subjobs %d/%d", terminal, len(children))
+	if running > 0 {
+		label += fmt.Sprintf(" · %d running", running)
+	}
+	if attention && running == 0 {
+		label += " · attention"
+	}
+	if attention {
+		return theme.DefaultTheme.Warning.Render(label)
+	}
+	return theme.DefaultTheme.Muted.Render(label)
+}
+
 // jobWorkflowBadge renders the "⚙ completed/started" badge appended to a
 // job row's JOB cell, or "" when the job has no workflow runs (live or
 // archived).
@@ -554,15 +669,25 @@ func (m *Model) jobWorkflowBadge(job *orchestration.Job) string {
 	return theme.DefaultTheme.Muted.Render(fmt.Sprintf("%s %d/%d", theme.IconGear, completed, started))
 }
 
-// jobBadgeWidth returns the rendered width of the job's workflow badge
-// including its separating space, 0 when the job has no workflow activity.
-// Used by the width calculators so the vertical split reserves badge space.
+func (m *Model) jobBadges(job *orchestration.Job) string {
+	var badges []string
+	if badge := m.jobSubjobBadge(job); badge != "" {
+		badges = append(badges, badge)
+	}
+	if badge := m.jobWorkflowBadge(job); badge != "" {
+		badges = append(badges, badge)
+	}
+	return strings.Join(badges, " ")
+}
+
+// jobBadgeWidth returns the rendered width of all job badges including the
+// separating space. Used by width calculators so badges do not wrap.
 func (m *Model) jobBadgeWidth(job *orchestration.Job) int {
-	badge := m.jobWorkflowBadge(job)
-	if badge == "" {
+	badges := m.jobBadges(job)
+	if badges == "" {
 		return 0
 	}
-	return lipgloss.Width(badge) + 1 // +1 for the space before the badge
+	return lipgloss.Width(badges) + 1
 }
 
 // virtualRowCellWidth returns the JOB-column cell width of a virtual row
