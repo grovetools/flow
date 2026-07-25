@@ -32,20 +32,23 @@ import (
 
 const (
 	// Heights
-	headerHeight            = 2 // Includes label and bottom margin
 	footerHeight            = 1
 	horizontalDividerHeight = 1
 	logHeaderHeight         = 3 // Header text + two divider lines
+	// tableChrome is what gtable.SelectableTableWithOptions spends on the
+	// table frame itself: top border, header row, header separator, bottom
+	// border. Everything else in the pane is a display row.
+	tableChrome = 4
+	// editDepsChrome is what renderEditDepsView spends around its job list:
+	// the title block as the Header style renders it plus the instructions
+	// line and their blank separators (7), its own inline scroll indicator
+	// behind a blank spacer (2), and the bottom half of the Margin(1, 2) it
+	// wraps the whole dialog in (1).
+	editDepsChrome = 10
 
 	// Widths
 	minLogsWidth           = 50
 	verticalSeparatorWidth = 3 // Separator + margins
-
-	// Margins. Horizontal insets are owned by the host pager
-	// (pager.Config.OuterPadding), not by this model — adding our own
-	// on top double-inset the job table and cost it 4 columns.
-	topMargin    = 1
-	bottomMargin = 0
 )
 
 type ViewFocus int
@@ -947,30 +950,34 @@ func (m Model) PlanTitle() string {
 }
 
 // renderFocusJobs renders the top (or left) pane containing the jobs list.
+// The pane holds nothing but the table: the scroll indicator rides the footer
+// row (see renderFooter) rather than sitting under the table behind a blank
+// spacer, which used to cost the table two of its own rows.
 func (m Model) renderFocusJobs(contentWidth int) string {
-	// 1. Render Main Content (Table view only)
-	mainContent := m.renderTableViewWithWidth(contentWidth)
+	return m.renderTableViewWithWidth(contentWidth)
+}
 
-	// 2. Add scroll indicators
-	scrollIndicator := ""
-	if len(m.DisplayRows) > 0 {
-		visibleLines := m.getVisibleJobCount()
-		hasMore := m.ScrollOffset+visibleLines < len(m.DisplayRows)
-		hasLess := m.ScrollOffset > 0
-		if hasLess || hasMore {
-			indicator := ""
-			if hasLess {
-				indicator += "↑ "
-			}
-			indicator += fmt.Sprintf("[%d/%d]", m.Cursor+1, len(m.DisplayRows))
-			if hasMore {
-				indicator += " ↓"
-			}
-			scrollIndicator = "\n" + theme.DefaultTheme.Muted.Render(indicator)
-		}
+// scrollIndicator returns the styled "↑ [cursor/total] ↓" marker, or "" when
+// every display row already fits on screen.
+func (m Model) scrollIndicator() string {
+	if len(m.DisplayRows) == 0 {
+		return ""
 	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, mainContent, scrollIndicator)
+	visibleLines := m.getVisibleJobCount()
+	hasMore := m.ScrollOffset+visibleLines < len(m.DisplayRows)
+	hasLess := m.ScrollOffset > 0
+	if !hasLess && !hasMore {
+		return ""
+	}
+	indicator := ""
+	if hasLess {
+		indicator += "↑ "
+	}
+	indicator += fmt.Sprintf("[%d/%d]", m.Cursor+1, len(m.DisplayRows))
+	if hasMore {
+		indicator += " ↓"
+	}
+	return theme.DefaultTheme.Muted.Render(indicator)
 }
 
 // renderFocusDetailPrimary renders the bottom (or right) pane containing the detail view.
@@ -1037,7 +1044,34 @@ func (m Model) renderFooter() string {
 	if hint := m.WhichKey.FooterHint(keymap.CommonSequenceBindings(m.KeyMap.Base)...); hint != "" {
 		footer += theme.DefaultTheme.Muted.Render("  " + hint)
 	}
-	return footer
+	return m.alignScrollIndicator(footer)
+}
+
+// alignScrollIndicator pins the job-table scroll indicator to the right edge of
+// the footer row. The footer is mostly empty space and the indicator is one
+// short token, so sharing the row hands the table back the two rows the
+// indicator used to occupy under it (its own row plus the spacer above it).
+//
+// The row must never wrap — a wrapped footer would immediately cost back the
+// row just reclaimed — so when the pane is too narrow to hold both, the help
+// text is truncated to make room, and if even that leaves nothing the
+// indicator is dropped entirely (the table's cursor row still shows position).
+func (m Model) alignScrollIndicator(footer string) string {
+	indicator := m.scrollIndicator()
+	if indicator == "" || m.Width <= 0 {
+		return footer
+	}
+	// One column of separation between the help text and the indicator.
+	helpWidth := m.Width - lipgloss.Width(indicator) - 1
+	if helpWidth < 1 {
+		return footer
+	}
+	if lipgloss.Width(footer) > helpWidth {
+		footer = ansi.Truncate(footer, helpWidth, "…")
+	}
+	// Width() pads the (now guaranteed short enough) help text out so the
+	// indicator lands flush right without a manual space run.
+	return lipgloss.NewStyle().Width(helpWidth).Render(footer) + " " + indicator
 }
 
 // View renders the TUI
@@ -1311,27 +1345,47 @@ func (m *Model) updateLayoutDimensions() {
 	m.syncLayoutFromManager()
 }
 
-// getVisibleJobCount returns how many jobs can be displayed in the viewport
+// getVisibleJobCount returns how many display rows fit in the jobs pane.
+//
+// m.Height is the height the host pager already handed us AFTER subtracting
+// its own chrome (tab bar, spacer, title row, outer padding), so nothing above
+// the pane is ours to reserve. What we actually spend inside that budget,
+// mirroring View() and the pane Manager's distribution:
+//
+//	m.Height
+//	  − footerHeight     the help/scroll-indicator row View() joins below the
+//	                     Manager's layout
+//	  − chat input       the agent chat box, on the jobs that show one
+//	  = the Manager's height — and therefore the jobs pane's height whenever
+//	    the jobs pane spans the whole cross axis: detail hidden, detail
+//	    side-by-side, or jobs zoomed fullscreen
+//	  − detail + divider stacked split only (see below)
+//	  − tableChrome      the table's own frame, the only chrome renderFocusJobs
+//	                     still emits inside the pane
 func (m *Model) getVisibleJobCount() int {
 	if m.Height == 0 {
 		return 10 // default
 	}
 
-	// Calculate available height for job list
-	tableChrome := 4 // table headers and borders
-
-	chromeLines := topMargin + headerHeight + tableChrome + footerHeight + 1 // +1 for scroll indicator
-
-	availableHeight := m.Height - chromeLines
-
-	// Adjust for log viewer in horizontal split
-	if m.ShowLogs && !m.LogSplitVertical {
-		availableHeight -= (m.LogViewerHeight + horizontalDividerHeight)
+	// The Edit Dependencies overlay is not the jobs pane at all — View()
+	// returns it in place of the whole layout — and it shares this counter via
+	// getVisibleJobs, so it gets its own budget against its own chrome.
+	if m.EditingDeps {
+		if h := m.Height - editDepsChrome; h > 1 {
+			return h
+		}
+		return 1
 	}
 
-	// Account for footer spacing in vertical split and no-logs modes
-	if (m.ShowLogs && m.LogSplitVertical) || !m.ShowLogs {
-		availableHeight -= 2 // Newline and spacing before footer
+	availableHeight := m.Height - footerHeight - m.calculateChatInputHeight() - tableChrome
+
+	// Stacked split: the detail pane below and the Manager's separator row
+	// come out of the jobs pane's share. A side-by-side split costs nothing
+	// vertically (both panes span the full height), and while one pane is
+	// zoomed the Manager hands the zoomed pane the whole area — LogViewerHeight
+	// is stale in that state and must not be subtracted.
+	if m.ShowLogs && !m.LogSplitVertical && m.Manager.FullscreenIdx < 0 {
+		availableHeight -= m.LogViewerHeight + horizontalDividerHeight
 	}
 
 	if availableHeight < 1 {

@@ -1229,7 +1229,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Calculate how much space the input area and footer consume
 		chatInputHeight := m.calculateChatInputHeight()
-		contentWidth := msg.Width - 4 // Account for Margin(0, 2)
+		// Full width: horizontal insets belong to the host pager, not to
+		// this model (matches updateLayoutDimensions).
+		contentWidth := msg.Width
 		if contentWidth < 40 {
 			contentWidth = 40
 		}
