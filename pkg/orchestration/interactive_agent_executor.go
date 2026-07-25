@@ -591,25 +591,23 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 		return fmt.Errorf("could not determine working directory: %w", err)
 	}
 
-	// Try daemon API first — works when agent runs in a native groveterm pane.
+	// Try daemon API first. A connected groveterm can relay the input, while a
+	// daemon-recorded out-of-process PTY can receive it directly even when no
+	// terminal is connected.
 	daemonClient := daemon.NewWithAutoStart()
-	connected, _ := daemonClient.IsTerminalConnected(ctx)
-	if connected {
+	payload := buildAgentInputPayload(workDir, job.Provider, input)
+	attempted, daemonErr := sendDaemonAgentInput(ctx, daemonClient, job.ID, payload)
+	daemonClient.Close()
+	if attempted {
 		logger.WithFields(map[string]interface{}{
 			"tier":   "native",
 			"job_id": job.ID,
 		}).Info("Dispatching input")
-		// Build the payload with vim-mode handling and submit key.
-		payload := buildAgentInputPayload(workDir, job.Provider, input)
-		err := daemonClient.SendAgentInput(ctx, job.ID, payload)
-		daemonClient.Close()
-		if err == nil {
+		if daemonErr == nil {
 			logger.Debug("Native send succeeded")
 			return nil
 		}
-		logger.WithError(err).WithField("job_id", job.ID).Warn("Native send failed, falling back to tmux")
-	} else {
-		daemonClient.Close()
+		logger.WithError(daemonErr).WithField("job_id", job.ID).Warn("Native send failed, falling back to tmux")
 	}
 
 	// Fallback: tmux send-keys on the project's tmux session.
@@ -625,7 +623,7 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 
 	inputMode := resolveInputMode(workDir, job.Provider)
 
-	if !connected {
+	if !attempted {
 		logger.WithFields(map[string]interface{}{
 			"tier":        "tmux",
 			"job_id":      job.ID,
@@ -654,6 +652,20 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 
 	logger.WithField("tmux_target", targetPane).Debug("Send succeeded")
 	return nil
+}
+
+// sendDaemonAgentInput sends through the daemon when either a terminal relay is
+// connected or the session has a daemon-owned out-of-process PTY. The boolean
+// reports whether delivery was attempted so callers can preserve tmux fallback.
+func sendDaemonAgentInput(ctx context.Context, client daemon.Client, jobID, payload string) (bool, error) {
+	connected, _ := client.IsTerminalConnected(ctx)
+	if !connected {
+		session, _ := client.GetSession(ctx, jobID)
+		if session == nil || session.PtyID == "" {
+			return false, nil
+		}
+	}
+	return true, client.SendAgentInput(ctx, jobID, payload)
 }
 
 // buildAgentInputPayload constructs the input string with vim-mode handling and trailing CR.
