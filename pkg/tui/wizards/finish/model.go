@@ -38,6 +38,11 @@ type Config struct {
 	DaemonClient daemon.Client
 	// WorkspaceDir is accepted for API consistency. Unused today.
 	WorkspaceDir string
+	// ShowForceToggle offers the in-checklist Force toggle. Only hosts that
+	// actually act on Model.Force() should set it: the standalone CLI wizard
+	// takes force from the --force flag and would render a control that does
+	// nothing.
+	ShowForceToggle bool
 }
 
 // Model is the plan-finish wizard state. It owns the item slice and
@@ -52,6 +57,8 @@ type Model struct {
 	keys           KeyMap
 	helpModel      help.Model
 	width          int
+	showForce      bool
+	force          bool
 }
 
 // New constructs a Model from the given Config. The cursor is placed
@@ -84,7 +91,18 @@ func New(cfg Config) Model {
 		branchExists:   cfg.BranchExists,
 		keys:           keys,
 		helpModel:      help.New(keys),
+		showForce:      cfg.ShowForceToggle,
 	}
+}
+
+// Force reports whether the user asked for destructive git operations to use
+// their --force forms. Hosts read this when the wizard submits; it is
+// deliberately NOT carried on embed.DoneMsg, whose Result stays []*Item so the
+// standalone CLI wizard keeps working unchanged.
+//
+// Always false unless the host offered the toggle (Config.ShowForceToggle).
+func (m Model) Force() bool {
+	return m.showForce && m.force
 }
 
 // Init is a no-op. The wizard is purely synchronous and owns no

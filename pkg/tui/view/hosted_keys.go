@@ -4,7 +4,10 @@ import (
 	"sort"
 
 	"github.com/grovetools/core/tui/keymap"
+	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/status"
+	"github.com/grovetools/flow/pkg/tui/wizards/add"
+	"github.com/grovetools/flow/pkg/tui/wizards/finish"
 )
 
 // HostedKeyReference is the machine-readable key contract exported to hosts
@@ -27,35 +30,125 @@ type HostedKeyBinding struct {
 	CollisionHints []string `json:"collision_hints,omitempty"`
 }
 
+// hostedCollisionHints names the outer-host binding a flow key is known to
+// collide with, keyed by the flow key. Advisory only — Keys is the stable
+// comparison surface a host joins on — but it is what makes `treemux keys`
+// readable, and attaching it here means every scope gets the hint, not just
+// the hand-written rows.
+//
+// treemux resolves both of these itself now (a focused hosted panel wins them
+// back — see treemux/internal/app/hosted_keys.go), so these hints describe a
+// collision that is arbitrated rather than one that is simply lost.
+var hostedCollisionHints = map[string][]string{
+	"ctrl+f": {"treemux.nav_workspaces"},
+	"ctrl+e": {"treemux.jump_editor"},
+}
+
+// hostedKeymaps are the embedded sub-application keymaps whose bindings flow
+// exposes to an outer host, each with the scope prefix it is published under.
+//
+// Deriving these instead of hand-listing them is the point. The declaration
+// used to enumerate status.KeymapInfo() plus three hand-written rows, so it
+// silently omitted every browser-mode and wizard-mode key — including
+// ctrl+x (finish plan from the browser) and ctrl+s (wizard submit) — and a
+// host joining against it under-reported the collision set. Adding a binding
+// to any of these keymaps now publishes it automatically.
+func hostedKeymaps() []struct {
+	scope string
+	info  keymap.TUIInfo
+} {
+	return []struct {
+		scope string
+		info  keymap.TUIInfo
+	}{
+		{"status", status.KeymapInfo()},
+		{"browser", keymap.MakeTUIInfo(
+			"flow-plan-browser", "flow",
+			"Flow plan browser", browser.NewKeyMap(nil),
+		)},
+		{"wizard-add", keymap.MakeTUIInfo(
+			"flow-plan-add", "flow",
+			"Flow add-job wizard", add.NewKeyMap(nil),
+		)},
+		{"wizard-finish", keymap.MakeTUIInfo(
+			"flow-plan-finish", "flow",
+			"Flow finish-plan wizard", finish.NewKeyMap(nil),
+		)},
+	}
+}
+
 // HostedKeys returns Flow's hosted-app key declaration. Outer hosts can join
 // this list with their own key registry by normalized chord; collision hints
 // are advisory names, while Keys is the stable comparison surface.
+//
+// This is a real contract, not documentation: treemux's plan panel filters it
+// against treemux's own key reference to decide which host globals to hand
+// back to flow while the panel holds focus. A key that is not declared here
+// cannot be won back.
 func HostedKeys() HostedKeyReference {
 	ref := HostedKeyReference{SchemaVersion: 1, App: "flow"}
-	for _, section := range status.KeymapInfo().Sections {
-		for _, binding := range section.Bindings {
-			if !binding.Enabled || len(binding.Keys) == 0 {
-				continue
+	for _, source := range hostedKeymaps() {
+		for _, section := range source.info.Sections {
+			for _, binding := range section.Bindings {
+				if !binding.Enabled || len(binding.Keys) == 0 {
+					continue
+				}
+				ref.Bindings = append(ref.Bindings, hostedBinding(source.scope+"/"+section.Name, binding))
 			}
-			ref.Bindings = append(ref.Bindings, hostedStatusBinding(section.Name, binding))
 		}
 	}
 	ref.Bindings = append(ref.Bindings,
-		HostedKeyBinding{Scope: "view-host", Action: "finish_plan", Keys: []string{"ctrl+f"}, Description: "open Finish Plan", HostSwallowed: true, CollisionHints: []string{"treemux.nav_workspaces"}},
-		HostedKeyBinding{Scope: "view-host", Action: "add_plan", Keys: []string{"n"}, Description: "add plan (browser mode)", HostSwallowed: true},
-		HostedKeyBinding{Scope: "view-host", Action: "add_job", Keys: []string{"a"}, Description: "add job (status mode)", HostSwallowed: true},
+		hostedViewHostBinding("finish_plan", []string{"ctrl+f"}, "open Finish Plan"),
+		hostedViewHostBinding("add_plan", []string{"n"}, "add plan (browser mode)"),
+		hostedViewHostBinding("add_job", []string{"a"}, "add job (status mode)"),
 	)
 	return ref
 }
 
-func hostedStatusBinding(section string, binding keymap.BindingInfo) HostedKeyBinding {
+// hostedBinding converts one embedded sub-application binding. HostSwallowed
+// is false: these keys are handled by the embedded model, not intercepted by
+// flow's view host on the way down.
+func hostedBinding(scope string, binding keymap.BindingInfo) HostedKeyBinding {
 	keys := append([]string(nil), binding.Keys...)
 	sort.Strings(keys)
 	return HostedKeyBinding{
-		Scope:       "status/" + section,
-		Action:      binding.Name,
-		Keys:        keys,
-		Description: binding.Description,
-		ConfigKey:   binding.ConfigKey,
+		Scope:          scope,
+		Action:         binding.Name,
+		Keys:           keys,
+		Description:    binding.Description,
+		ConfigKey:      binding.ConfigKey,
+		CollisionHints: collisionHintsFor(keys),
 	}
+}
+
+// hostedViewHostBinding builds a row for a key flow's view host consumes
+// itself, before the embedded model (and therefore before any outer host's
+// panel forwarding can reach the sub-model).
+func hostedViewHostBinding(action string, keys []string, description string) HostedKeyBinding {
+	return HostedKeyBinding{
+		Scope:          "view-host",
+		Action:         action,
+		Keys:           keys,
+		Description:    description,
+		HostSwallowed:  true,
+		CollisionHints: collisionHintsFor(keys),
+	}
+}
+
+// collisionHintsFor returns the union of known host-collision hints for keys,
+// in the order the keys appear. Returns nil when there are none, so the field
+// stays omitted from JSON.
+func collisionHintsFor(keys []string) []string {
+	var hints []string
+	seen := make(map[string]bool)
+	for _, k := range keys {
+		for _, hint := range hostedCollisionHints[k] {
+			if seen[hint] {
+				continue
+			}
+			seen[hint] = true
+			hints = append(hints, hint)
+		}
+	}
+	return hints
 }

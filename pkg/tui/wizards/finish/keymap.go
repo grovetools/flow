@@ -23,8 +23,9 @@ import (
 // wizard-specific toggle and confirm keys.
 type KeyMap struct {
 	keymap.Base
-	Toggle  key.Binding
-	Confirm key.Binding
+	Toggle      key.Binding
+	Confirm     key.Binding
+	ToggleForce key.Binding
 }
 
 // NewKeyMap returns the default plan-finish wizard keymap, with any
@@ -41,21 +42,33 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm and proceed"),
 		),
+		ToggleForce: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "toggle FORCE (discards uncommitted work)"),
+		),
 	}
+	// esc dismisses the wizard exactly like q. The wizard has no text entry and
+	// no sub-screens, so esc is unambiguous here — unlike the add/init wizards,
+	// which bind it to "unfocus this field" / "back one screen". Applied before
+	// ApplyTUIOverrides so a user's own binding still wins.
+	km.Quit = key.NewBinding(
+		key.WithKeys("q", "esc", "ctrl+c"),
+		key.WithHelp("q/esc", "quit"),
+	)
 	keymap.ApplyTUIOverrides(cfg, "flow", "plan-finish", &km)
 	return km
 }
 
 // ShortHelp returns key bindings to show in the mini help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Toggle, k.Confirm, k.Quit}
+	return []key.Binding{k.Toggle, k.Confirm, k.ToggleForce, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Toggle, k.SelectAll, k.SelectNone},
-		{k.Confirm, k.Help, k.Quit},
+		{k.ToggleForce, k.Confirm, k.Help, k.Quit},
 	}
 }
 
@@ -69,6 +82,10 @@ func (k KeyMap) Sections() []keymap.Section {
 		{
 			Name:     "Selection",
 			Bindings: []key.Binding{k.Toggle, k.SelectAll, k.SelectNone},
+		},
+		{
+			Name:     "Danger",
+			Bindings: []key.Binding{k.ToggleForce},
 		},
 		{
 			Name:     "Actions",

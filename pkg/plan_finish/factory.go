@@ -20,11 +20,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/fatih/color"
@@ -53,13 +57,72 @@ import (
 // meta-panel populate an Options and pass it to BuildItems; the
 // factory consults these values inside the Check and Action closures
 // it constructs.
+// RetainedWorktreeError reports per-repo worktrees that were deliberately kept
+// because they still hold uncommitted work.
+//
+// It is a PARTIAL SUCCESS, not a teardown failure. Everything not contingent on
+// those repos already ran, and the plan must still be marked finished, archived
+// and cleared from the active-plan key — a stray dirty file in one repo is not
+// a reason to leave a plan listed forever with no way to retry it. Hosts use
+// IsRetainedWorktree to tell this apart from a genuine failure when deciding
+// whether to skip the terminal items.
+type RetainedWorktreeError struct {
+	// Details holds one "<repo>: <git's own message>" line per retained repo.
+	Details []string
+}
+
+func (e *RetainedWorktreeError) Error() string {
+	return fmt.Sprintf("worktree retained for %d repo(s): %s (enable Force to discard uncommitted work)",
+		len(e.Details), strings.Join(e.Details, "; "))
+}
+
+// IsRetainedWorktree reports whether err (or anything it wraps) is a
+// retained-worktree partial success.
+func IsRetainedWorktree(err error) bool {
+	var target *RetainedWorktreeError
+	return errors.As(err, &target)
+}
+
+// ForceSwitch is a late-bound force toggle. The hosted finish wizard builds
+// its items once (the Check closures are expensive) and only learns whether
+// the user wants --force when the checklist is submitted, so it hands the
+// factory a switch instead of a value and flips it before running the actions.
+//
+// Safe to flip from a different goroutine than the one running the actions.
+type ForceSwitch struct {
+	mu sync.Mutex
+	on bool
+}
+
+// Set records whether destructive git operations may use their --force forms.
+func (f *ForceSwitch) Set(on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.on = on
+}
+
+// Enabled reports the current setting. A nil switch is never enabled.
+func (f *ForceSwitch) Enabled() bool {
+	if f == nil {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.on
+}
+
 type Options struct {
 	// Force causes destructive git operations (worktree remove,
 	// branch delete) to use --force equivalents. When false, the
 	// factory's Action closures refuse to fall back to destructive
 	// commands even if the safe variant fails — callers must re-run
-	// with Force=true (or toggle it in the wizard) to confirm.
+	// with Force=true (or flip the wizard's Force toggle, which the
+	// hosted TUI wires through ForceSwitch) to confirm.
 	Force bool
+	// ForceSwitch, when non-nil, supersedes Force: every Action reads it
+	// at run time. Hosts that build items before the user has chosen
+	// (the hosted wizard) pass one of these and Set it on submit.
+	ForceSwitch *ForceSwitch
 	// KeepEnv skips environment teardown entirely — the env-teardown
 	// item reports "Skipped" and its Action is a no-op.
 	KeepEnv bool
@@ -147,6 +210,56 @@ func ItemsByID(items []*finish.Item, id string) *finish.Item {
 	return nil
 }
 
+// ansiRe matches SGR escape sequences so availability classification never
+// depends on whether the status was built with a color helper (and therefore
+// on whether stdout happened to be a terminal).
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// unavailableStatusPrefixes is the CLOSED vocabulary of "nothing to do here"
+// statuses. Anything an item's Check reports that is not one of these is
+// treated as actionable.
+//
+// This list is deliberately a deny-list. The previous gate was an allow-list of
+// exact equality comparisons against colourised display strings, which meant
+// any copy-edit to any status text silently deleted that item from the product
+// on every host — no test failure, no log line. `60add16` appended
+// " (opt-in)" to one status and killed `--rebuild-binaries` outright; the same
+// mechanism had already killed the env-teardown, kill-bound-agents,
+// prune-orphans and merge-repos items for their non-trivial statuses. With a
+// deny-list the failure direction inverts: editing an actionable status is
+// safe, and only a NEW kind of "nothing to do" status needs registering here —
+// which shows up as an item offering itself with an obviously inert status
+// rather than as a feature disappearing.
+//
+// TestEveryNonNAItemIsReachable pins the agreement between this vocabulary and
+// what the item Checks actually return.
+var unavailableStatusPrefixes = []string{
+	"N/A",
+	"Not found",
+	"None",
+	"Skipped",
+	"Error",
+	"Invalid",
+	"Daemon unavailable",
+	"Already finished",
+	"Conflicts with",
+	"Unknown",
+}
+
+// statusIsAvailable reports whether a Check status means the item can run.
+func statusIsAvailable(status string) bool {
+	plain := strings.TrimSpace(ansiRe.ReplaceAllString(status, ""))
+	if plain == "" {
+		return false
+	}
+	for _, prefix := range unavailableStatusPrefixes {
+		if strings.HasPrefix(plain, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
 // BuildContext bundles the explicit dependencies the cleanup closures
 // need. runPlanFinish used to build these as local variables inside
 // the command function; now callers populate a BuildContext (usually
@@ -175,6 +288,18 @@ type BuildContext struct {
 	Executor gexec.CommandExecutor
 	// WM is used by the prune-worktree item to enumerate worktrees.
 	WM *git.WorktreeManager
+	// Output receives the human-readable chatter the Check and Action
+	// closures produce, and is wired to the Stdout/Stderr of every
+	// subprocess they spawn. nil means os.Stdout (the CLI default).
+	//
+	// A TUI host MUST supply its own writer. The alternative it used
+	// before this field existed was to swap the process-global
+	// os.Stdout/os.Stderr to /dev/null for the duration of the run,
+	// which (a) is an unsynchronized write to a global that the render
+	// loop reads concurrently, and (b) breaks any renderer that
+	// re-resolves its output fd from os.Stdout per frame — frames get
+	// composed into /dev/null while the front buffer is marked painted.
+	Output io.Writer
 }
 
 // Result is what BuildItems returns: the populated item list plus the
@@ -239,7 +364,22 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 	if bctx.WM == nil {
 		bctx.WM = git.NewWorktreeManager()
 	}
+	if bctx.Output == nil {
+		bctx.Output = os.Stdout
+	}
 
+	// forceEnabled is read at Action time, not captured at build time. The
+	// hosted wizard is built ONCE (its Checks are expensive), so a force toggle
+	// the user flips in the checklist has to reach closures that already exist;
+	// re-running BuildItems to apply it would cost a full workspace rescan.
+	forceEnabled := func() bool {
+		if opts.ForceSwitch != nil {
+			return opts.ForceSwitch.Enabled()
+		}
+		return opts.Force
+	}
+
+	out := bctx.Output
 	planPath := bctx.PlanPath
 	plan := bctx.Plan
 	worktreeName := bctx.WorktreeName
@@ -320,14 +460,14 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			}
 			expectedOwner := fmt.Sprintf("plan:%s", planSlug)
 			if stateFile.ManagedBy == "user" {
-				fmt.Println("    Environment is user-managed, skipping teardown")
+				fmt.Fprintln(out, "    Environment is user-managed, skipping teardown")
 				return nil
 			}
 			if stateFile.ManagedBy != "" && stateFile.ManagedBy != expectedOwner {
-				fmt.Printf("    Environment managed by %s, skipping teardown\n", stateFile.ManagedBy)
+				fmt.Fprintf(out, "    Environment managed by %s, skipping teardown\n", stateFile.ManagedBy)
 				return nil
 			}
-			fmt.Printf("    Tearing down %s environment...\n", stateFile.Provider)
+			fmt.Fprintf(out, "    Tearing down %s environment...\n", stateFile.Provider)
 			req := env.EnvRequest{
 				Provider:     stateFile.Provider,
 				PlanDir:      planPath,
@@ -470,7 +610,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if plan.Config == nil || len(plan.Config.Repos) == 0 {
 				return nil
 			}
-			fmt.Printf("    Merging/fast-forwarding ecosystem branches to main...\n")
+			fmt.Fprintf(out, "    Merging/fast-forwarding ecosystem branches to main...\n")
 			if provider == nil {
 				return fmt.Errorf("cannot merge ecosystem repos; workspace discovery failed")
 			}
@@ -479,7 +619,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			for _, repoName := range plan.Config.Repos {
 				repoPath, exists := sources[repoName]
 				if !exists {
-					fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping\n", repoName)
+					fmt.Fprintf(out, "      Warning: repo '%s' not found in local workspaces, skipping\n", repoName)
 					continue
 				}
 				branchCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+worktreeName) //nolint:gosec // worktreeName is internal
@@ -490,25 +630,25 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				mainCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/main")
 				mainCheckCmd.Dir = repoPath
 				if err := mainCheckCmd.Run(); err != nil {
-					fmt.Printf("      Warning: main branch not found in %s, skipping\n", repoName)
+					fmt.Fprintf(out, "      Warning: main branch not found in %s, skipping\n", repoName)
 					continue
 				}
 				aheadCmd := exec.Command("git", "rev-list", "--count", "main.."+worktreeName) //nolint:gosec // worktreeName is internal
 				aheadCmd.Dir = repoPath
 				aheadOutput, err := aheadCmd.Output()
 				if err != nil {
-					fmt.Printf("      Warning: failed to check commits ahead for %s: %v\n", repoName, err)
+					fmt.Fprintf(out, "      Warning: failed to check commits ahead for %s: %v\n", repoName, err)
 					continue
 				}
 				aheadCount := strings.TrimSpace(string(aheadOutput))
 				if aheadCount == "0" || aheadCount == "" {
 					continue
 				}
-				fmt.Printf("      • %s: merging %s commits to main\n", repoName, aheadCount)
+				fmt.Fprintf(out, "      • %s: merging %s commits to main\n", repoName, aheadCount)
 				checkoutCmd := exec.Command("git", "checkout", "main")
 				checkoutCmd.Dir = repoPath
 				if output, err := checkoutCmd.CombinedOutput(); err != nil {
-					fmt.Printf("        Error: failed to checkout main: %s\n", string(output))
+					fmt.Fprintf(out, "        Error: failed to checkout main: %s\n", string(output))
 					hasErrors = true
 					continue
 				}
@@ -517,14 +657,14 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				if output, err := mergeCmd.CombinedOutput(); err != nil {
 					outputStr := string(output)
 					if strings.Contains(outputStr, "Not possible to fast-forward") {
-						fmt.Printf("        Warning: cannot fast-forward %s (needs rebase), skipping\n", repoName)
+						fmt.Fprintf(out, "        Warning: cannot fast-forward %s (needs rebase), skipping\n", repoName)
 					} else {
-						fmt.Printf("        Error: failed to merge: %s\n", outputStr)
+						fmt.Fprintf(out, "        Error: failed to merge: %s\n", outputStr)
 						hasErrors = true
 					}
 					continue
 				}
-				fmt.Printf("        * Merged successfully\n")
+				fmt.Fprintf(out, "        * Merged successfully\n")
 			}
 			if hasErrors {
 				return fmt.Errorf("some ecosystem repos failed to merge")
@@ -612,16 +752,16 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			if opts.PruneCloud {
 				args = append(args, "--include-cloud")
 			}
-			fmt.Printf("    Pruning orphaned resources for %s...\n", worktreeName)
+			fmt.Fprintf(out, "    Pruning orphaned resources for %s...\n", worktreeName)
 			runCmd := exec.Command("grove", args...)
 			runCmd.Dir = gitRoot
-			runCmd.Stdout = os.Stdout
-			runCmd.Stderr = os.Stderr
+			runCmd.Stdout = out
+			runCmd.Stderr = out
 			if err := runCmd.Run(); err != nil {
 				// Best-effort — a prune failure shouldn't block
 				// the rest of plan finish (archive, branch
 				// cleanup). Surface as a warning.
-				fmt.Printf("    Warning: grove env prune failed: %v\n", err)
+				fmt.Fprintf(out, "    Warning: grove env prune failed: %v\n", err)
 			}
 			return nil
 		},
@@ -666,7 +806,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				for _, s := range sessions {
 					if s.PlanName == planBaseName && (s.Status == "running" || s.Status == "idle" || s.Status == "pending_user") {
 						if killErr := client.KillSession(ctx, s.ID); killErr != nil {
-							fmt.Printf("    Note: could not kill session %s (%s): %v\n", s.JobTitle, s.ID, killErr)
+							fmt.Fprintf(out, "    Note: could not kill session %s (%s): %v\n", s.JobTitle, s.ID, killErr)
 						}
 					}
 				}
@@ -754,7 +894,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				if plan.Config != nil {
 					repos = plan.Config.Repos
 				}
-				if err := archiveWorktreeContainer(context.Background(), containerPath, destPath, gitRoot, repos); err != nil {
+				if err := archiveWorktreeContainer(context.Background(), out, containerPath, destPath, gitRoot, repos); err != nil {
 					return err
 				}
 				// Re-key the registry entry onto the archive location
@@ -766,8 +906,8 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// Same defensive reap as prune_worktree: a stray legacy
 				// `<gitRoot>/.grove-worktrees/<name>` stub has no registry
 				// entry and would otherwise survive.
-				reapLegacyStubWorktree(context.Background(), gitRoot, worktreeName, opts.Force)
-				fmt.Printf("    Archived worktree to: %s\n", destPath)
+				reapLegacyStubWorktree(context.Background(), out, gitRoot, worktreeName, forceEnabled())
+				fmt.Fprintf(out, "    Archived worktree to: %s\n", destPath)
 				return nil
 			},
 		},
@@ -794,6 +934,14 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					}
 					if _, err := os.Stat(containerDir); err != nil {
 						return "Not found", nil
+					}
+					// Pre-flight dirty detection, mirroring the non-ecosystem
+					// branch below. Without it exactly the plan shape that hits
+					// the dirty-repo failure got no warning at all: the
+					// checklist said "Exists" and the obstacle only surfaced
+					// after the destructive run had already half-completed.
+					if dirty := dirtyEcosystemRepos(containerDir, plan.Config.Repos); len(dirty) > 0 {
+						return color.RedString("Has changes in %s (needs force)", strings.Join(dirty, ", ")), nil
 					}
 					return color.YellowString("Exists"), nil
 				}
@@ -822,17 +970,20 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					wPath = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
 				}
 				if plan.Config != nil && len(plan.Config.Repos) > 0 {
-					if err := cleanupEcosystemWorktree(context.Background(), gitRoot, worktreeName, plan.Config.Repos, provider, opts.Force); err != nil {
-						return err
-					}
+					// The deregistration steps below are NOT contingent on every
+					// repo coming clean. A registry entry describing a container
+					// that is being torn down must not survive because one repo
+					// inside it was dirty — that is what left plans listed
+					// forever with no way to retry them.
+					cleanupErr := cleanupEcosystemWorktree(context.Background(), out, gitRoot, worktreeName, plan.Config.Repos, provider, forceEnabled())
 					_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
 					// The container above is the registry-tracked (often anchored
 					// XDG) worktree. A stray legacy `<gitRoot>/.grove-worktrees/<name>`
 					// superproject stub — left by an older legacy-only worktree-prep
 					// path — has no registry entry and would survive the prune.
 					// Reap it defensively so orphans don't accumulate.
-					reapLegacyStubWorktree(context.Background(), gitRoot, worktreeName, opts.Force)
-					return nil
+					reapLegacyStubWorktree(context.Background(), out, gitRoot, worktreeName, forceEnabled())
+					return cleanupErr
 				}
 				hasSubmodules := false
 				if _, err := os.Stat(filepath.Join(wPath, ".gitmodules")); err == nil {
@@ -848,7 +999,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// submodules, then retry the parent.
 				runParent := func() error {
 					args := []string{"worktree", "remove"}
-					if opts.Force {
+					if forceEnabled() {
 						args = append(args, "--force")
 					}
 					args = append(args, wPath)
@@ -856,8 +1007,8 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				}
 				err := runParent()
 				if err != nil && hasSubmodules && strings.Contains(err.Error(), "working trees containing submodules") {
-					if subErr := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider, opts.Force); subErr != nil {
-						fmt.Printf("    Warning: failed to remove linked submodule worktrees: %v\n", subErr)
+					if subErr := removeLinkedSubmoduleWorktrees(context.Background(), out, gitRoot, worktreeName, provider, forceEnabled()); subErr != nil {
+						fmt.Fprintf(out, "    Warning: failed to remove linked submodule worktrees: %v\n", subErr)
 					}
 					err = runParent()
 				}
@@ -867,7 +1018,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// the user's intent by nuking the directory directly.
 				// Gated by a strict path check to keep os.RemoveAll
 				// from ever escaping the .grove-worktrees boundary.
-				if err != nil && opts.Force && isDirNotEmptyErr(err) && pathIsUnderGroveWorktrees(wPath, gitRoot, planRepos(plan)) {
+				if err != nil && forceEnabled() && isDirNotEmptyErr(err) && pathIsUnderGroveWorktrees(wPath, gitRoot, planRepos(plan)) {
 					wPathClean := filepath.Clean(wPath)
 					if rmErr := os.RemoveAll(wPathClean); rmErr != nil {
 						return fmt.Errorf("force-remove worktree dir: %w", rmErr)
@@ -876,7 +1027,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					// when `worktree remove` fails with "Directory not
 					// empty"; prune it so `git worktree list` stays clean.
 					if pruneErr := executor.Execute("git", "-C", gitRoot, "worktree", "prune"); pruneErr != nil {
-						fmt.Printf("    Warning: failed to prune worktree metadata: %v\n", pruneErr)
+						fmt.Fprintf(out, "    Warning: failed to prune worktree metadata: %v\n", pruneErr)
 					}
 					err = nil
 				}
@@ -894,8 +1045,8 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// source repos so `git worktree list` in those repos
 				// stays clean.
 				if hasSubmodules {
-					if subErr := removeLinkedSubmoduleWorktrees(context.Background(), gitRoot, worktreeName, provider, opts.Force); subErr != nil {
-						fmt.Printf("    Warning: failed to prune linked submodule worktree metadata: %v\n", subErr)
+					if subErr := removeLinkedSubmoduleWorktrees(context.Background(), out, gitRoot, worktreeName, provider, forceEnabled()); subErr != nil {
+						fmt.Fprintf(out, "    Warning: failed to prune linked submodule worktree metadata: %v\n", subErr)
 					}
 				}
 				_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
@@ -905,7 +1056,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// prune above usually already removed it (wPath == that path), so
 				// this is a no-op then; it matters when a duplicate stub coexists
 				// with a differently-located real worktree.
-				reapLegacyStubWorktree(context.Background(), gitRoot, worktreeName, opts.Force)
+				reapLegacyStubWorktree(context.Background(), out, gitRoot, worktreeName, forceEnabled())
 				return nil
 			},
 		},
@@ -919,9 +1070,9 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return color.YellowString("Available"), nil
 			},
 			Action: func() error {
-				fmt.Printf("    Pruning broken dev links...\n")
+				fmt.Fprintf(out, "    Pruning broken dev links...\n")
 				if err := executor.Execute("grove", "dev", "prune"); err != nil {
-					fmt.Printf("    Note: grove dev prune failed: %v\n", err)
+					fmt.Fprintf(out, "    Note: grove dev prune failed: %v\n", err)
 				}
 				return nil
 			},
@@ -952,7 +1103,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// without opt-in is the same data-loss pattern the
 				// local-branch delete item already guards against.
 				deleteFlag := "-d"
-				if opts.Force {
+				if forceEnabled() {
 					deleteFlag = "-D"
 				}
 				foreachCmd := fmt.Sprintf("git branch %s %s 2>/dev/null || true", deleteFlag, branchName)
@@ -976,41 +1127,41 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						mainSubmodulePath := filepath.Join(gitRoot, submodulePath)
 						if _, err := os.Stat(filepath.Join(mainSubmodulePath, ".git")); err == nil {
 							removeWorktreeArgs := []string{"-C", mainSubmodulePath, "worktree", "remove"}
-							if opts.Force {
+							if forceEnabled() {
 								removeWorktreeArgs = append(removeWorktreeArgs, "--force")
 							}
 							removeWorktreeArgs = append(removeWorktreeArgs, wtPath)
 							removeWorktreeCmd := exec.Command("git", removeWorktreeArgs...)
 							if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
 								if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
-									fmt.Printf("    Note: could not remove worktree for %s from main checkout: %s\n", submoduleName, string(output))
+									fmt.Fprintf(out, "    Note: could not remove worktree for %s from main checkout: %s\n", submoduleName, string(output))
 								}
 							}
 							deleteCmd := exec.Command("git", "-C", mainSubmodulePath, "branch", deleteFlag, branchName)
 							if output, err := deleteCmd.CombinedOutput(); err != nil {
 								outputStr := string(output)
 								if !strings.Contains(outputStr, "not found") {
-									fmt.Printf("    Warning: could not delete branch '%s' from %s main checkout: %v\n", branchName, submoduleName, err)
+									fmt.Fprintf(out, "    Warning: could not delete branch '%s' from %s main checkout: %v\n", branchName, submoduleName, err)
 								}
 							}
 						}
 						if localRepoPath, hasLocal := localWorkspaces[submoduleName]; hasLocal {
 							removeWorktreeArgs := []string{"-C", localRepoPath, "worktree", "remove"}
-							if opts.Force {
+							if forceEnabled() {
 								removeWorktreeArgs = append(removeWorktreeArgs, "--force")
 							}
 							removeWorktreeArgs = append(removeWorktreeArgs, wtPath)
 							removeWorktreeCmd := exec.Command("git", removeWorktreeArgs...)
 							if output, err := removeWorktreeCmd.CombinedOutput(); err != nil {
 								if !strings.Contains(string(output), "not a working tree") && !strings.Contains(string(output), "No such file") {
-									fmt.Printf("    Note: could not remove worktree for %s from local workspace: %s\n", submoduleName, string(output))
+									fmt.Fprintf(out, "    Note: could not remove worktree for %s from local workspace: %s\n", submoduleName, string(output))
 								}
 							}
 							deleteCmd := exec.Command("git", "-C", localRepoPath, "branch", deleteFlag, branchName)
 							if output, err := deleteCmd.CombinedOutput(); err != nil {
 								outputStr := string(output)
 								if !strings.Contains(outputStr, "not found") {
-									fmt.Printf("    Warning: failed to delete branch '%s' from %s local workspace: %v\n", branchName, submoduleName, err)
+									fmt.Fprintf(out, "    Warning: failed to delete branch '%s' from %s local workspace: %v\n", branchName, submoduleName, err)
 								}
 							}
 						}
@@ -1123,15 +1274,15 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						if err := exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", "refs/heads/"+branchName).Run(); err != nil { //nolint:gosec // branchName is internal
 							continue // branch already gone in this repo
 						}
-						if err := deleteLocalBranch(repoPath, branchName, opts.Force); err != nil {
+						if err := deleteLocalBranch(repoPath, branchName, forceEnabled()); err != nil {
 							// Degrade to a warning: the worktree has already been
 							// pruned by this point, so a branch-delete failure must
 							// NOT abort the finish (which would skip mark_finished +
 							// archive_plan and strand the plan in 'review').
-							fmt.Printf("    Warning: failed to delete branch '%s' from %s: %v\n", branchName, repo, err)
+							fmt.Fprintf(out, "    Warning: failed to delete branch '%s' from %s: %v\n", branchName, repo, err)
 							continue
 						}
-						fmt.Printf("    Deleted branch '%s' from %s\n", branchName, repo)
+						fmt.Fprintf(out, "    Deleted branch '%s' from %s\n", branchName, repo)
 					}
 					return nil
 				}
@@ -1140,7 +1291,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				// as "not fully merged" when HEAD is parked elsewhere. Consult
 				// main/master directly and escalate to -D when provably merged.
 				delFlag := "-d"
-				if opts.Force {
+				if forceEnabled() {
 					delFlag = "-D"
 				} else {
 					for _, baseBranch := range []string{"main", "master"} {
@@ -1164,9 +1315,9 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						// sequence; the branch ref just has a stale
 						// worktree pointer, so -D here does not lose
 						// work.
-						fmt.Printf("    Using -D (force) to delete branch that was in worktree...\n")
+						fmt.Fprintf(out, "    Using -D (force) to delete branch that was in worktree...\n")
 						if derr := executor.Execute("git", "-C", gitRoot, "branch", "-D", branchName); derr != nil {
-							fmt.Printf("    Warning: failed to delete branch '%s': %v\n", branchName, derr)
+							fmt.Fprintf(out, "    Warning: failed to delete branch '%s': %v\n", branchName, derr)
 						}
 						return nil
 					}
@@ -1174,7 +1325,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					// without --force) degrades to a warning so archive +
 					// mark_finished still run; the branch is left intact, so no
 					// unmerged work is destroyed.
-					fmt.Printf("    Warning: failed to delete branch '%s': %v\n", branchName, err)
+					fmt.Fprintf(out, "    Warning: failed to delete branch '%s': %v\n", branchName, err)
 				}
 				return nil
 			},
@@ -1209,19 +1360,28 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				if _, err := exec.LookPath("grove"); err != nil {
 					return "N/A (grove not found)", nil
 				}
+				// "(opt-in)" is honest labelling, not a gate: the item is never
+				// auto-enabled (the wizard enables nothing by itself, and the
+				// CLI's --yes loop skips it unless --rebuild-binaries was
+				// passed). Availability only decides whether the user is
+				// ALLOWED to ask for it.
 				return color.YellowString("Available (opt-in)"), nil
 			},
 			Action: func() error {
 				if gitRoot == "" {
 					return nil
 				}
-				fmt.Printf("    Building binaries through grove build...\n")
+				fmt.Fprintf(out, "    Building binaries through grove build...\n")
 				buildCmd := exec.Command("grove", "build")
 				buildCmd.Dir = gitRoot
-				buildCmd.Stdout = os.Stdout
-				buildCmd.Stderr = os.Stderr
+				buildCmd.Stdout = out
+				buildCmd.Stderr = out
+				// A rebuild is not teardown. Returning an error here would make
+				// a red build the run's firstErr, which skips archive_plan and
+				// mark_finished and leaves the plan un-archived — a build
+				// failure must never be able to do that.
 				if err := buildCmd.Run(); err != nil {
-					return fmt.Errorf("grove build failed: %w", err)
+					fmt.Fprintf(out, "    Warning: grove build failed: %v\n", err)
 				}
 				return nil
 			},
@@ -1276,7 +1436,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						return fmt.Errorf("failed to update nav group %q: %w", name, err)
 					}
 				}
-				fmt.Printf("    Cleared %d stale sessionizer keymap entr(ies)\n", removed)
+				fmt.Fprintf(out, "    Cleared %d stale sessionizer keymap entr(ies)\n", removed)
 				return nil
 			},
 		},
@@ -1306,7 +1466,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						return fmt.Errorf("failed to remove original plan directory: %w", err)
 					}
 				}
-				fmt.Printf("    Archived plan to: %s\n", archivePath)
+				fmt.Fprintf(out, "    Archived plan to: %s\n", archivePath)
 				return nil
 			},
 		},
@@ -1319,19 +1479,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		if item == mergeItem && len(sharedRepoDetails) > 0 {
 			item.Details = sharedRepoDetails
 		}
-		if status == color.YellowString("Available") ||
-			status == color.YellowString("Active") ||
-			status == color.YellowString("Exists") ||
-			status == color.YellowString("Exists on origin") ||
-			status == color.YellowString("Running") ||
-			status == color.YellowString("Running containers found") ||
-			status == color.YellowString("Has links") ||
-			status == color.YellowString("Checked out in worktree") ||
-			status == color.RedString("Has changes (needs --force)") ||
-			strings.Contains(status, "commits ahead of") ||
-			strings.Contains(status, "stale key") {
-			item.IsAvailable = true
-		}
+		item.IsAvailable = statusIsAvailable(status)
 	}
 
 	// Check if branch exists and is merged. For ecosystem plans with a
@@ -1384,7 +1532,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 // called by the CLI path after the user has confirmed cleanup
 // selection and before the enabled actions run. Kept here (rather
 // than in cmd) so both CLI and view can opt in to hook execution.
-func RunOnFinishHook(plan *orchestration.Plan, planName string) {
+func RunOnFinishHook(plan *orchestration.Plan, planName string, out io.Writer) {
 	if plan == nil || plan.Config == nil || plan.Config.Hooks == nil {
 		return
 	}
@@ -1399,28 +1547,28 @@ func RunOnFinishHook(plan *orchestration.Plan, planName string) {
 			break
 		}
 	}
-	fmt.Println("▶️  Executing on_finish hook...")
+	fmt.Fprintln(out, "▶️  Executing on_finish hook...")
 	templateData := struct {
 		PlanName string
 		NoteRef  string
 	}{PlanName: planName, NoteRef: noteRef}
 	tmpl, err := template.New("hook").Parse(hookCmdStr)
 	if err != nil {
-		fmt.Printf("Warning: failed to parse on_finish hook template: %v\n", err)
+		fmt.Fprintf(out, "Warning: failed to parse on_finish hook template: %v\n", err)
 		return
 	}
 	var renderedCmd bytes.Buffer
 	if err := tmpl.Execute(&renderedCmd, templateData); err != nil {
-		fmt.Printf("Warning: failed to render on_finish hook command: %v\n", err)
+		fmt.Fprintf(out, "Warning: failed to render on_finish hook command: %v\n", err)
 		return
 	}
 	hookCmd := exec.Command("sh", "-c", renderedCmd.String()) //nolint:gosec // on_finish hook comes from trusted plan config
-	hookCmd.Stdout = os.Stdout
-	hookCmd.Stderr = os.Stderr
+	hookCmd.Stdout = out
+	hookCmd.Stderr = out
 	if err := hookCmd.Run(); err != nil {
-		fmt.Printf("Warning: on_finish hook execution failed: %v\n", err)
+		fmt.Fprintf(out, "Warning: on_finish hook execution failed: %v\n", err)
 	} else {
-		fmt.Println("* on_finish hook executed successfully.")
+		fmt.Fprintln(out, "* on_finish hook executed successfully.")
 	}
 }
 
@@ -1453,7 +1601,7 @@ func parseGitmodules(gitmodulesPath string) (map[string]string, error) {
 // removeLinkedSubmoduleWorktrees removes linked worktrees from submodule source repositories.
 // When force is false, `git worktree remove` is run without --force so that
 // uncommitted submodule work is preserved (the failure surfaces to the caller).
-func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName string, provider *workspace.Provider, force bool) error {
+func removeLinkedSubmoduleWorktrees(ctx context.Context, out io.Writer, gitRoot, worktreeName string, provider *workspace.Provider, force bool) error {
 	// Registry-first resolution so a worktree created with `--anchor <sub-repo>`
 	// (living under the anchor repo's XDG base, not gitRoot's) is found; only
 	// then does the .gitmodules under it resolve correctly.
@@ -1483,7 +1631,7 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 			cmd.Dir = mainSubmodulePath
 			output, err := cmd.Output()
 			if err == nil && strings.Contains(string(output), submoduleWorktreePath) {
-				fmt.Printf("    Removing linked worktree for %s\n", submoduleName)
+				fmt.Fprintf(out, "    Removing linked worktree for %s\n", submoduleName)
 				removeArgs := []string{"worktree", "remove"}
 				if force {
 					removeArgs = append(removeArgs, "--force")
@@ -1492,7 +1640,7 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 				removeCmd := exec.CommandContext(ctx, "git", removeArgs...)
 				removeCmd.Dir = mainSubmodulePath
 				if err := removeCmd.Run(); err != nil {
-					fmt.Printf("      Warning: failed to remove worktree from main checkout: %v\n", err)
+					fmt.Fprintf(out, "      Warning: failed to remove worktree from main checkout: %v\n", err)
 				} else {
 					continue
 				}
@@ -1509,7 +1657,7 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 			continue
 		}
 		if strings.Contains(string(output), submoduleWorktreePath) {
-			fmt.Printf("    Removing linked worktree for %s\n", submoduleName)
+			fmt.Fprintf(out, "    Removing linked worktree for %s\n", submoduleName)
 			removeArgs := []string{"worktree", "remove"}
 			if force {
 				removeArgs = append(removeArgs, "--force")
@@ -1518,7 +1666,7 @@ func removeLinkedSubmoduleWorktrees(ctx context.Context, gitRoot, worktreeName s
 			removeCmd := exec.CommandContext(ctx, "git", removeArgs...)
 			removeCmd.Dir = localRepoPath
 			if err := removeCmd.Run(); err != nil {
-				fmt.Printf("      Warning: failed to remove worktree: %v\n", err)
+				fmt.Fprintf(out, "      Warning: failed to remove worktree: %v\n", err)
 			}
 		}
 	}
@@ -1726,28 +1874,55 @@ func deleteLocalBranch(repoPath, branchName string, force bool) error {
 	}
 }
 
-func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string, repos []string, provider *workspace.Provider, force bool) error {
+// dirtyEcosystemRepos returns the names of the container's per-repo worktrees
+// that hold uncommitted work, in the plan's repo order. Repos whose subdir is
+// absent or whose status cannot be read are reported as clean: this is a
+// pre-flight warning, not a gate, and a false alarm is worse than a miss.
+func dirtyEcosystemRepos(containerDir string, repos []string) []string {
+	var dirty []string
+	for _, repo := range repos {
+		repoDir := filepath.Join(containerDir, repo)
+		if _, err := os.Stat(repoDir); err != nil {
+			continue
+		}
+		statusOutput, err := exec.Command("git", "-C", repoDir, "status", "--porcelain", "--ignore-submodules").Output()
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(statusOutput)) != "" {
+			dirty = append(dirty, repo)
+		}
+	}
+	return dirty
+}
+
+func cleanupEcosystemWorktree(ctx context.Context, out io.Writer, gitRoot, worktreeName string, repos []string, provider *workspace.Provider, force bool) error {
 	ecosystemDir, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
 	if !ok {
 		ecosystemDir = workspace.ResolveNewWorktreePath(gitRoot, worktreeName, false)
 	}
-	fmt.Printf("    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
+	fmt.Fprintf(out, "    Cleaning up ecosystem worktree at %s\n", ecosystemDir)
 	var localWorkspaces map[string]string
 	if provider != nil {
 		localWorkspaces = provider.LocalWorkspacesInEcosystem(gitRoot)
 	} else {
-		fmt.Printf("    Warning: workspace discovery failed, cannot clean up submodule branches\n")
+		fmt.Fprintf(out, "    Warning: workspace discovery failed, cannot clean up submodule branches\n")
 		localWorkspaces = make(map[string]string)
 	}
-	var firstErr error
+	// retained collects one entry per repo whose worktree survived, with the
+	// reason. A repo holding uncommitted work is a fact about THAT repo: it
+	// must not veto the teardown of anything unrelated to it, and the reason
+	// must reach the caller intact (the raw git message is the only thing that
+	// tells the user what to do next).
+	var retained []string
 	recordErr := func(err error) {
-		if firstErr == nil {
-			firstErr = err
+		if err != nil {
+			retained = append(retained, err.Error())
 		}
 	}
 	for _, repo := range repos {
 		repoWorktreePath := filepath.Join(ecosystemDir, repo)
-		fmt.Printf("    • %s: removing worktree\n", repo)
+		fmt.Fprintf(out, "    • %s: removing worktree\n", repo)
 		repoPath, exists := localWorkspaces[repo]
 		// fellBackToGitRoot tracks the case where the provider missed the repo
 		// but we located its source checkout as a direct child of gitRoot. Such
@@ -1813,18 +1988,18 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 			}
 		}
 		if !exists {
-			fmt.Printf("      Warning: repo '%s' not found in local workspaces, skipping branch cleanup\n", repo)
+			fmt.Fprintf(out, "      Warning: repo '%s' not found in local workspaces, skipping branch cleanup\n", repo)
 			if force {
 				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot, repos) {
-					fmt.Printf("      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
+					fmt.Fprintf(out, "      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
 				} else if err := os.RemoveAll(repoWorktreePath); err != nil {
-					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+					fmt.Fprintf(out, "      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
 				}
 			} else if _, err := os.Stat(repoWorktreePath); err == nil {
 				// Without force we don't know if the orphaned
 				// directory holds uncommitted work, so refuse to
 				// blow it away.
-				fmt.Printf("      Refusing to remove %s without --force (repo not in workspaces, cannot verify clean state)\n", repoWorktreePath)
+				fmt.Fprintf(out, "      Refusing to remove %s without --force (repo not in workspaces, cannot verify clean state)\n", repoWorktreePath)
 				recordErr(fmt.Errorf("%s: orphaned worktree directory retained (re-run with --force to discard)", repo))
 			}
 			continue
@@ -1841,15 +2016,19 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 			if strings.Contains(outputStr, "not a working tree") || strings.Contains(outputStr, "No such file") {
 				// Already gone; nothing to do.
 			} else if force {
-				fmt.Printf("      Warning: git worktree remove failed, removing directory manually: %s\n", outputStr)
+				fmt.Fprintf(out, "      Warning: git worktree remove failed, removing directory manually: %s\n", outputStr)
 				if !pathIsUnderGroveWorktrees(repoWorktreePath, gitRoot, repos) {
-					fmt.Printf("      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
+					fmt.Fprintf(out, "      Warning: refusing to remove %s (outside worktree boundary)\n", repoWorktreePath)
 				} else if err := os.RemoveAll(repoWorktreePath); err != nil {
-					fmt.Printf("      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
+					fmt.Fprintf(out, "      Warning: failed to remove directory %s: %v\n", repoWorktreePath, err)
 				}
 			} else {
-				fmt.Printf("      Error: git worktree remove failed for %s: %s\n", repo, outputStr)
-				recordErr(fmt.Errorf("%s: worktree remove failed (re-run with --force to discard uncommitted work): %w", repo, err))
+				fmt.Fprintf(out, "      Error: git worktree remove failed for %s: %s\n", repo, outputStr)
+				// Carry git's own message: "contains modified or untracked
+				// files, use --force to delete it" is the only text that tells
+				// the user what actually blocked the removal, and the TUI has
+				// no other channel to it.
+				recordErr(fmt.Errorf("%s: %s", repo, firstLine(outputStr)))
 				continue
 			}
 		}
@@ -1871,20 +2050,24 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 		if fellBackToGitRoot {
 			prune := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "prune")
 			if output, err := prune.CombinedOutput(); err != nil {
-				fmt.Printf("      Warning: failed to prune stale worktree registration in %s: %s\n", repoPath, string(output))
+				fmt.Fprintf(out, "      Warning: failed to prune stale worktree registration in %s: %s\n", repoPath, string(output))
 			}
 		}
 	}
-	if firstErr != nil {
-		// Leave the ecosystem directory in place so the user can
-		// recover any preserved work.
-		return firstErr
-	}
-	if !pathIsUnderGroveWorktrees(ecosystemDir, gitRoot, repos) {
-		return fmt.Errorf("refusing to remove ecosystem directory outside worktree boundary: %s", ecosystemDir)
-	}
-	if err := os.RemoveAll(ecosystemDir); err != nil {
-		return fmt.Errorf("failed to remove ecosystem directory: %w", err)
+	// A retained repo means the CONTAINER must stay (it still holds work), but
+	// nothing else about the teardown is contingent on it. The ecosystem-level
+	// prune below still runs, and the caller still deletes the registry entry,
+	// marks the plan finished and archives it — a dirty file in one repo is not
+	// a reason to leave the plan listed forever.
+	if len(retained) == 0 {
+		if !pathIsUnderGroveWorktrees(ecosystemDir, gitRoot, repos) {
+			return fmt.Errorf("refusing to remove ecosystem directory outside worktree boundary: %s", ecosystemDir)
+		}
+		if err := os.RemoveAll(ecosystemDir); err != nil {
+			return fmt.Errorf("failed to remove ecosystem directory: %w", err)
+		}
+	} else {
+		fmt.Fprintf(out, "    Keeping %s: %d repo(s) still hold work\n", ecosystemDir, len(retained))
 	}
 	// The ecosystem worktree dir is removed with os.RemoveAll (not `git
 	// worktree remove`), so the ecosystem repo still carries a stale worktree
@@ -1893,10 +2076,25 @@ func cleanupEcosystemWorktree(ctx context.Context, gitRoot, worktreeName string,
 	// refused with "cannot delete branch ... used by worktree".
 	pruneCmd := exec.CommandContext(ctx, "git", "-C", gitRoot, "worktree", "prune")
 	if output, err := pruneCmd.CombinedOutput(); err != nil {
-		fmt.Printf("    Warning: failed to prune stale worktree registration in %s: %s\n", gitRoot, string(output))
+		fmt.Fprintf(out, "    Warning: failed to prune stale worktree registration in %s: %s\n", gitRoot, string(output))
 	}
-	fmt.Printf("    * Ecosystem worktree removed successfully\n")
+	if len(retained) > 0 {
+		return &RetainedWorktreeError{Details: retained}
+	}
+	fmt.Fprintf(out, "    * Ecosystem worktree removed successfully\n")
 	return nil
+}
+
+// firstLine returns the first non-empty line of s, trimmed. git's failure
+// messages are one useful line plus noise; the useful line is what the user
+// needs to see in a status bar.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 // isDirNotEmptyErr reports whether err is git's specific
@@ -1922,7 +2120,7 @@ func isDirNotEmptyErr(err error) bool {
 // actually registers it as a linked worktree, so nothing outside the
 // ecosystem's legacy worktree dir is ever touched. Best-effort: failures are
 // logged, never fatal.
-func reapLegacyStubWorktree(ctx context.Context, gitRoot, worktreeName string, force bool) {
+func reapLegacyStubWorktree(ctx context.Context, out io.Writer, gitRoot, worktreeName string, force bool) {
 	if gitRoot == "" || worktreeName == "" {
 		return
 	}
@@ -1940,18 +2138,18 @@ func reapLegacyStubWorktree(ctx context.Context, gitRoot, worktreeName string, f
 	// paths: `git worktree list` emits realpaths (e.g. /private/var/... on
 	// macOS) which need not match the lexically-joined legacyPath.
 	listCmd := exec.CommandContext(ctx, "git", "-C", gitRoot, "worktree", "list", "--porcelain")
-	out, err := listCmd.Output()
-	if err != nil || !worktreeListContainsPath(string(out), legacyPath) {
+	listOut, err := listCmd.Output()
+	if err != nil || !worktreeListContainsPath(string(listOut), legacyPath) {
 		return
 	}
-	fmt.Printf("    Reaping stray legacy worktree stub at %s\n", legacyPath)
+	fmt.Fprintf(out, "    Reaping stray legacy worktree stub at %s\n", legacyPath)
 	args := []string{"-C", gitRoot, "worktree", "remove"}
 	if force {
 		args = append(args, "--force")
 	}
 	args = append(args, legacyPath)
 	if err := exec.CommandContext(ctx, "git", args...).Run(); err != nil {
-		fmt.Printf("      Warning: failed to remove legacy worktree stub: %v\n", err)
+		fmt.Fprintf(out, "      Warning: failed to remove legacy worktree stub: %v\n", err)
 	}
 }
 
@@ -2153,7 +2351,7 @@ func ownerFromWorktreeGitPointer(worktreeDir string) (string, bool) {
 // Failures on individual repos (not a git checkout, bundle failure) are
 // logged warnings, not fatal: archiving a partially-degraded container is
 // still strictly better than losing it.
-func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitRoot string, repos []string) error {
+func archiveWorktreeContainer(ctx context.Context, out io.Writer, containerPath, destPath, gitRoot string, repos []string) error {
 	type detachTarget struct {
 		dir        string
 		bundleName string
@@ -2193,7 +2391,7 @@ func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitR
 	for _, tgt := range targets {
 		if _, err := os.Stat(tgt.dir); err != nil {
 			if tgt.dir != containerPath {
-				fmt.Printf("    Warning: repo dir %s missing, skipping\n", tgt.dir)
+				fmt.Fprintf(out, "    Warning: repo dir %s missing, skipping\n", tgt.dir)
 			}
 			continue
 		}
@@ -2204,7 +2402,7 @@ func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitR
 			// No .git at all. Expected for a synthetic ecosystem
 			// container; suspicious for a repo subdir.
 			if tgt.dir != containerPath {
-				fmt.Printf("    Warning: %s is not a git checkout, skipping bundle\n", tgt.dir)
+				fmt.Fprintf(out, "    Warning: %s is not a git checkout, skipping bundle\n", tgt.dir)
 			}
 		case fi.Mode().IsRegular():
 			if owner, ok := ownerFromWorktreeGitPointer(tgt.dir); ok {
@@ -2213,7 +2411,7 @@ func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitR
 			bundlePath := filepath.Join(containerPath, tgt.bundleName)
 			bundleCmd := exec.CommandContext(ctx, "git", "-C", tgt.dir, "bundle", "create", bundlePath, "--all")
 			if output, bundleErr := bundleCmd.CombinedOutput(); bundleErr != nil {
-				fmt.Printf("    Warning: git bundle failed for %s: %s\n", tgt.dir, strings.TrimSpace(string(output)))
+				fmt.Fprintf(out, "    Warning: git bundle failed for %s: %s\n", tgt.dir, strings.TrimSpace(string(output)))
 			}
 			// Delete the gitdir pointer FILE — never a directory — so
 			// the archived copy cannot resolve an owner.
@@ -2224,12 +2422,12 @@ func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitR
 			// A full .git DIRECTORY means a standalone clone, not a
 			// linked worktree: it owns its own object store, needs no
 			// bundle for safety and no detaching. Leave it intact.
-			fmt.Printf("    Note: %s has a full .git directory (standalone clone); left intact\n", tgt.dir)
+			fmt.Fprintf(out, "    Note: %s has a full .git directory (standalone clone); left intact\n", tgt.dir)
 		}
 		marker := filepath.Join(tgt.dir, ".grove", "workspace")
 		if mfi, mErr := os.Lstat(marker); mErr == nil && mfi.Mode().IsRegular() {
 			if rmErr := os.Remove(marker); rmErr != nil {
-				fmt.Printf("    Warning: failed to remove workspace marker %s: %v\n", marker, rmErr)
+				fmt.Fprintf(out, "    Warning: failed to remove workspace marker %s: %v\n", marker, rmErr)
 			}
 		}
 	}
@@ -2239,7 +2437,7 @@ func archiveWorktreeContainer(ctx context.Context, containerPath, destPath, gitR
 	for _, owner := range owners {
 		pruneCmd := exec.CommandContext(ctx, "git", "-C", owner, "worktree", "prune")
 		if output, pruneErr := pruneCmd.CombinedOutput(); pruneErr != nil {
-			fmt.Printf("    Warning: failed to prune stale worktree registration in %s: %s\n", owner, string(output))
+			fmt.Fprintf(out, "    Warning: failed to prune stale worktree registration in %s: %s\n", owner, string(output))
 		}
 	}
 

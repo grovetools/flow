@@ -316,15 +316,50 @@ type addPlanPage struct {
 func (p *addPlanPage) Name() string  { return "Add Plan" }
 func (p *addPlanPage) Title() string { return "󰠡 Create New Plan" }
 func (p *addPlanPage) Init() tea.Cmd { return nil }
+
+// clampToPane is a final safety net: no matter what the box sizing above
+// computed, the rendered surface must not exceed the body the pager forced on
+// the page, or the overflow paints over neighbouring BSP panes.
+func clampToPane(content string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return content
+	}
+	return lipgloss.NewStyle().MaxWidth(width).MaxHeight(height).Render(content)
+}
+
 func (p *addPlanPage) View() (out string) {
 	if p.s.initProgress != "" {
 		output := strings.TrimRight(p.s.initOutput, "\n")
 		if output == "" {
 			output = "Waiting for flow plan init output…"
 		}
+		// The bordered surface costs 5 lines of chrome around the output: the
+		// progress line, a blank, the box's two borders and its "Creation
+		// Output" header. A body shorter than that cannot hold the box at all,
+		// so degrade to a compact borderless form rather than overflowing the
+		// pane the pager sized this page into.
+		if p.height > 0 && p.height < 6 {
+			compact := []string{core_theme.DefaultTheme.Info.Render(p.s.initProgress), core_theme.DefaultTheme.Bold.Render("Creation Output")}
+			if room := p.height - len(compact); room > 0 {
+				lines := strings.Split(output, "\n")
+				if len(lines) > room {
+					lines = lines[len(lines)-room:]
+				}
+				compact = append(compact, lines...)
+			}
+			return clampToPane(strings.Join(compact, "\n"), p.width, p.height)
+		}
 		maxLines := p.height - 9
 		if maxLines < 6 {
 			maxLines = 6
+		}
+		// The 6-line floor above is a readability minimum, not a licence to
+		// overflow the body height the pager forced on this page.
+		if fit := p.height - 5; fit < maxLines {
+			maxLines = fit
+		}
+		if maxLines < 1 {
+			maxLines = 1
 		}
 		lines := strings.Split(output, "\n")
 		if len(lines) > maxLines {
@@ -334,13 +369,20 @@ func (p *addPlanPage) View() (out string) {
 		if popupWidth < 40 {
 			popupWidth = 40
 		}
+		// Same reasoning horizontally: the border and padding add 4 columns.
+		if fit := p.width - 4; fit < popupWidth {
+			popupWidth = fit
+		}
+		if popupWidth < 10 {
+			popupWidth = 10
+		}
 		outputBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(core_theme.DefaultColors.Border).
 			Padding(0, 1).
 			Width(popupWidth).
 			Render(core_theme.DefaultTheme.Bold.Render("Creation Output") + "\n" + strings.Join(lines, "\n"))
-		return core_theme.DefaultTheme.Info.Render(p.s.initProgress) + "\n\n" + outputBox
+		return clampToPane(core_theme.DefaultTheme.Info.Render(p.s.initProgress)+"\n\n"+outputBox, p.width, p.height)
 	}
 	if p.s.initWizardModel == nil {
 		return core_theme.DefaultTheme.Info.Render("Loading plan wizard…")
@@ -399,7 +441,16 @@ func (p *addPlanPage) SetSize(w, h int) {
 	p.height = h
 }
 
-func (p *addPlanPage) Ready() (bool, string) { return p.s.initWizardModel != nil, "Loading wizard…" }
+// Ready gates the pager's render. The page has two legitimate surfaces: the
+// init wizard, and the creation-progress view that exists precisely while the
+// wizard model is nil (embed.DoneMsg discards it before launching the
+// subprocess). Gating on the wizard model alone made the progress surface —
+// "Creating plan …", the Creation Output box and the live poller content —
+// unreachable for the entire creation.
+func (p *addPlanPage) Ready() (bool, string) {
+	return p.s.initWizardModel != nil || p.s.initProgress != "", "Loading wizard…"
+}
+
 func (p *addPlanPage) IsTextEntryActive() bool {
 	return p.s.initWizardModel != nil && p.s.initWizardModel.IsTextEntryActive()
 }
@@ -431,6 +482,64 @@ func (p *finishPlanPage) Name() string  { return "Finish Plan" }
 func (p *finishPlanPage) Title() string { return "󰄬 Finish Plan" }
 func (p *finishPlanPage) Init() tea.Cmd { return nil }
 func (p *finishPlanPage) View() (out string) {
+	// The execution surface exists precisely while the wizard model is nil —
+	// embed.DoneMsg discards it before the cleanup starts. Gating on the wizard
+	// model alone left this page falling back to the pager's centred, static
+	// "Loading wizard…" for the whole run (110 s observed), which is what the
+	// user reported as "Finish Plan freezes". Same shape as the Add Plan
+	// creation-progress surface.
+	if p.s.finishExecuting {
+		progress := p.s.finishProgress
+		if progress == "" {
+			progress = "Finishing plan…"
+		}
+		output := strings.TrimRight(p.s.finishOutput, "\n")
+		if output == "" {
+			output = "Waiting for cleanup output…"
+		}
+		if p.height > 0 && p.height < 6 {
+			compact := []string{core_theme.DefaultTheme.Info.Render(progress), core_theme.DefaultTheme.Bold.Render("Cleanup Output")}
+			if room := p.height - len(compact); room > 0 {
+				lines := strings.Split(output, "\n")
+				if len(lines) > room {
+					lines = lines[len(lines)-room:]
+				}
+				compact = append(compact, lines...)
+			}
+			return clampToPane(strings.Join(compact, "\n"), p.width, p.height)
+		}
+		maxLines := p.height - 9
+		if maxLines < 6 {
+			maxLines = 6
+		}
+		if fit := p.height - 5; fit < maxLines {
+			maxLines = fit
+		}
+		if maxLines < 1 {
+			maxLines = 1
+		}
+		lines := strings.Split(output, "\n")
+		if len(lines) > maxLines {
+			lines = lines[len(lines)-maxLines:]
+		}
+		popupWidth := p.width - 6
+		if popupWidth < 40 {
+			popupWidth = 40
+		}
+		if fit := p.width - 4; fit < popupWidth {
+			popupWidth = fit
+		}
+		if popupWidth < 10 {
+			popupWidth = 10
+		}
+		outputBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(core_theme.DefaultColors.Border).
+			Padding(0, 1).
+			Width(popupWidth).
+			Render(core_theme.DefaultTheme.Bold.Render("Cleanup Output") + "\n" + strings.Join(lines, "\n"))
+		return clampToPane(core_theme.DefaultTheme.Info.Render(progress)+"\n\n"+outputBox, p.width, p.height)
+	}
 	if p.s.finishWizardModel == nil {
 		return ""
 	}
@@ -490,10 +599,13 @@ func (p *finishPlanPage) SetSize(w, h int) {
 
 func (p *finishPlanPage) Enabled() bool { return p.s.statusModel != nil }
 func (p *finishPlanPage) Ready() (bool, string) {
-	return p.s.finishWizardModel != nil, "Loading wizard…"
+	return p.s.finishWizardModel != nil || p.s.finishExecuting, "Loading wizard…"
 }
 
 func (p *finishPlanPage) Footer() string {
+	if p.s.finishExecuting {
+		return core_theme.DefaultTheme.Muted.Render("running cleanup — please wait")
+	}
 	if p.s.finishWizardModel == nil {
 		return ""
 	}

@@ -601,9 +601,17 @@ func fetchPlans(plansDirectory string) ([]*orchestration.Plan, error) {
 	return loadPlansFromDisk(plansDirectory)
 }
 
-// daemonPlansAreStale returns true when the plans directory contains plan
-// subdirectories that are not represented in the daemon's snapshot. A plan
-// dir is identified by a `.grove-plan.yml` file or any `*.md` job file —
+// daemonPlansAreStale returns true when the daemon's snapshot disagrees with
+// disk in either direction:
+//
+//   - a plan directory exists that the snapshot does not list (creation lag);
+//   - the snapshot lists a plan whose directory is gone (removal lag).
+//
+// The second check exists because a successful finish archives the plan
+// directory, and a running daemon keeps serving the removed plan until its
+// watcher catches up — leaving the finished plan visible in the Plans view.
+//
+// A plan dir is identified by a `.grove-plan.yml` file or any `*.md` job file,
 // matching loadPlansFromDisk's recognition rule.
 func daemonPlansAreStale(plansDirectory string, plans []*orchestration.Plan) bool {
 	entries, err := os.ReadDir(plansDirectory)
@@ -613,6 +621,15 @@ func daemonPlansAreStale(plansDirectory string, plans []*orchestration.Plan) boo
 	known := make(map[string]struct{}, len(plans))
 	for _, p := range plans {
 		known[p.Name] = struct{}{}
+	}
+	for _, p := range plans {
+		dir := p.Directory
+		if dir == "" {
+			dir = filepath.Join(plansDirectory, p.Name)
+		}
+		if _, statErr := os.Stat(dir); statErr != nil {
+			return true
+		}
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {

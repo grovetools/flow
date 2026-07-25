@@ -97,9 +97,19 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm & next"),
 		),
+		// ctrl+t, not ctrl+g. ctrl+g is treemux's action-chord ARM — the
+		// escape hatch that reaches quit/reload/help/rail — so a host can
+		// never hand it to a hosted app, and this binding was simply dead
+		// whenever the wizard ran inside treemux. Host/hosted arbitration
+		// resolves collisions with ordinary host globals by deferring to the
+		// focused hosted panel, but the leader key, the action key, ctrl+c
+		// and f7-f10 are permanently non-deferrable by design, so this one
+		// can only be fixed here. ctrl+t is free of host globals and, unlike
+		// ctrl+w, is not a readline word-kill the wizard's text fields would
+		// fight over.
 		ToggleClaw: key.NewBinding(
-			key.WithKeys("ctrl+g"),
-			key.WithHelp("ctrl+g", "toggle claw"),
+			key.WithKeys("ctrl+t"),
+			key.WithHelp("ctrl+t", "toggle claw"),
 		),
 	}
 	keymap.ApplyTUIOverrides(cfg, "flow", "plan-add", &km)

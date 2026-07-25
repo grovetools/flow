@@ -16,3 +16,25 @@ func TestAddKeyMapAuditCoverage(t *testing.T) {
 		t.Fatalf("audit gaps: %+v", gaps)
 	}
 }
+
+// TestToggleClawIsNotCtrlG guards the rebind away from treemux's action-chord
+// arm. ctrl+g arms the host chord that reaches quit/reload/help/rail, so it is
+// on the host's permanently-non-deferrable list: host/hosted key arbitration
+// can hand back an ordinary global like ctrl+f, but never this one. The
+// binding was simply dead whenever the wizard ran inside treemux, and it could
+// only be fixed here.
+func TestToggleClawIsNotCtrlG(t *testing.T) {
+	km := NewKeyMap(nil)
+	for _, k := range km.ToggleClaw.Keys() {
+		if k == "ctrl+g" {
+			t.Fatal("ToggleClaw is bound to ctrl+g — treemux's action-chord arm swallows it and always will")
+		}
+	}
+	if len(km.ToggleClaw.Keys()) != 1 || km.ToggleClaw.Keys()[0] != "ctrl+t" {
+		t.Fatalf("ToggleClaw keys = %v, want [ctrl+t]", km.ToggleClaw.Keys())
+	}
+	// The advertised label must move with the binding, or help lies.
+	if km.ToggleClaw.Help().Key != "ctrl+t" {
+		t.Errorf("ToggleClaw help key = %q, want %q", km.ToggleClaw.Help().Key, "ctrl+t")
+	}
+}

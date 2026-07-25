@@ -190,7 +190,10 @@ func (m Model) FooterView() string {
 		} else {
 			clawSuffix = "  " + lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText).Render(" claw: off")
 		}
-		clawSuffix += lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText).Render(" ctrl+g")
+		// Derived, not restated: the toggle-claw key moved off ctrl+g (which
+		// treemux owns as its action-chord arm) and a hardcoded label here
+		// would have kept advertising the dead key.
+		clawSuffix += lipgloss.NewStyle().Foreground(theme.DefaultColors.MutedText).Render(" " + m.keys.ToggleClaw.Help().Key)
 	}
 
 	return theme.DefaultTheme.Muted.Render(helpText + modeIndicator + clawSuffix)

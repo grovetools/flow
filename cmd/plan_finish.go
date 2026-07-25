@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -213,26 +214,44 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 			reportNoteOutcomes(outcomes)
 		}
 	}
-	plan_finish.RunOnFinishHook(plan, planName)
+	plan_finish.RunOnFinishHook(plan, planName, os.Stdout)
+
+	// Resolve the active plan BEFORE the actions run. getActivePlanWithMigration
+	// resolves from the process cwd, which for a finish launched inside the
+	// plan's own worktree is a directory the actions are about to delete: after
+	// the fact the lookup returns "" and the unset below is skipped in silence,
+	// leaving the key set with no warning at all.
+	activePlan, activePlanErr := getActivePlanWithMigration()
+	activeStateDir := stateDir()
 
 	// Execute enabled actions. Returns a non-nil error if any enabled
 	// action failed; when that happens archive_plan and mark_finished
-	// are skipped so the plan stays resolvable by slug for retry.
+	// are skipped so the plan stays resolvable by slug for retry — except
+	// for a retained worktree, which is a partial success and does not
+	// stop the plan being finished.
 	actionErr := executeFinishActions(items)
-	if actionErr != nil {
+	if actionErr != nil && !plan_finish.IsRetainedWorktree(actionErr) {
 		fmt.Fprintf(os.Stderr, "\ncleanup incomplete — plan left in 'review' status, re-run 'flow plan finish %s' after resolving the issue\n", planName)
 		return actionErr
 	}
 
 	// Check if the finished plan was the active plan and unset it.
-	activePlan, err := getActivePlanWithMigration()
-	if err == nil && activePlan == planName {
-		if err := state.Delete(stateDir(), groveplan.StateKey); err != nil {
-			fmt.Printf("Warning: could not unset active plan: %v\n", err)
+	if activePlanErr == nil && activePlan == planName {
+		if err := state.Delete(activeStateDir, groveplan.StateKey); err != nil {
+			if !errors.Is(err, state.ErrNoEcosystemRoot) {
+				fmt.Printf("Warning: could not unset active plan: %v\n", err)
+			}
 		} else {
-			_ = state.Delete(stateDir(), groveplan.LegacyStateKey)
+			_ = state.Delete(activeStateDir, groveplan.LegacyStateKey)
 			fmt.Println("\n* Unset active plan")
 		}
+	}
+
+	if actionErr != nil {
+		// Retained worktree: the plan IS finished and archived, but the
+		// operator still needs to know work survived on disk.
+		fmt.Fprintf(os.Stderr, "\n%v\n", actionErr)
+		return actionErr
 	}
 
 	fmt.Println("\nPlan cleanup finished.")
@@ -270,6 +289,11 @@ func executeFinishActions(items []*finish.Item) error {
 	fmt.Println("\nPerforming selected actions...")
 	executed := false
 	var firstErr error
+	// blocking is what gates the terminal items. A retained worktree (one repo
+	// still holding uncommitted work) is reported and returned, but it is a
+	// partial success: it must not leave the plan un-archived and listed
+	// forever, which is indistinguishable from "Finish Plan is broken".
+	blocking := 0
 	terminalItemIDs := map[string]bool{
 		plan_finish.ItemArchivePlan:  true,
 		plan_finish.ItemMarkFinished: true,
@@ -278,14 +302,19 @@ func executeFinishActions(items []*finish.Item) error {
 		if item == nil || !item.IsEnabled || item.Action == nil {
 			continue
 		}
-		if firstErr != nil && terminalItemIDs[item.ID] {
+		if blocking > 0 && terminalItemIDs[item.ID] {
 			fmt.Printf("  - %-40s... %s\n", item.Name, color.YellowString("Skipped (previous failure)"))
 			continue
 		}
 		executed = true
 		fmt.Printf("  - %-40s... ", item.Name)
 		if err := item.Action(); err != nil {
-			fmt.Println(color.RedString("Failed"))
+			if plan_finish.IsRetainedWorktree(err) {
+				fmt.Println(color.YellowString("Retained"))
+			} else {
+				fmt.Println(color.RedString("Failed"))
+				blocking++
+			}
 			fmt.Printf("    %s\n", err)
 			if firstErr == nil {
 				firstErr = err

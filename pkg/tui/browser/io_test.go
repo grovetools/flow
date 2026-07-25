@@ -649,3 +649,43 @@ func TestConnectAcceptsGenuinelyEmptyPortfolioAfterBaselineWait(t *testing.T) {
 		t.Fatalf("expected an empty portfolio, got %d rows", len(connected.plans))
 	}
 }
+
+// TestDaemonPlansAreStale_DetectsRemovedPlan pins the reverse staleness check.
+// The forward check catches plans on disk that the daemon has not indexed yet
+// (creation lag). It had no counterpart for plans the daemon still lists whose
+// directory is gone, so straight after a successful finish a running daemon
+// kept the archived plan in the list until its watcher caught up — the plan
+// stayed visible in the Plans view.
+func TestDaemonPlansAreStale_DetectsRemovedPlan(t *testing.T) {
+	plansDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(plansDir, "alive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "alive", ".grove-plan.yml"), []byte("name: alive\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := []*orchestration.Plan{
+		{Name: "alive", Directory: filepath.Join(plansDir, "alive")},
+		{Name: "archived", Directory: filepath.Join(plansDir, "archived")},
+	}
+	if !daemonPlansAreStale(plansDir, snapshot) {
+		t.Fatal("a snapshot listing a plan whose directory is gone must be treated as stale")
+	}
+}
+
+// TestDaemonPlansAreStale_FreshSnapshotIsNotStale is the fence: a snapshot that
+// matches disk must not force a full rescan on every refresh.
+func TestDaemonPlansAreStale_FreshSnapshotIsNotStale(t *testing.T) {
+	plansDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(plansDir, "alive"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plansDir, "alive", ".grove-plan.yml"), []byte("name: alive\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := []*orchestration.Plan{{Name: "alive", Directory: filepath.Join(plansDir, "alive")}}
+	if daemonPlansAreStale(plansDir, snapshot) {
+		t.Fatal("a snapshot matching disk must not be reported stale")
+	}
+}

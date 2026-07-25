@@ -51,12 +51,72 @@ type finishActionError struct {
 
 type finishActionsCompletedMsg struct {
 	errs []finishActionError
+	// noteErr is reported separately from errs on purpose: moving the plan's
+	// linked notes to completed/ has nothing to do with git teardown, and
+	// letting it into errs made a note-move failure skip mark_finished and
+	// archive_plan. The CLI has always reported note outcomes separately.
+	noteErr error
 }
 
-// finishOutputMu protects the brief process-global stdout/stderr redirect used
-// by embedded cleanup actions. The terminal renderer retains its own writer;
-// redirecting action chatter prevents it from being painted through the TUI.
-var finishOutputMu sync.Mutex
+// finishProgressTickMsg re-reads the live finish run so the Finish page can
+// repaint while cleanup is running.
+type finishProgressTickMsg struct{}
+
+// finishRun is the live state of one embedded finish run: the sink every item's
+// chatter (and every subprocess it spawns) is written into, plus which item is
+// currently executing.
+//
+// This is what replaced swapping the process-global os.Stdout/os.Stderr to
+// /dev/null for the duration of the run. That swap silenced the chatter, but it
+// also (a) raced the render loop, which reads the same global, and (b) broke
+// any renderer that re-resolves its output fd per frame — composed frames went
+// to /dev/null while the front buffer was committed as painted.
+type finishRun struct {
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	current string
+	index   int
+	total   int
+}
+
+func (r *finishRun) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	const maxCapture = 128 * 1024
+	n, err := r.buf.Write(p)
+	if r.buf.Len() > maxCapture {
+		trimmed := r.buf.Bytes()[r.buf.Len()-maxCapture:]
+		kept := append([]byte("… earlier output omitted …\n"), trimmed...)
+		r.buf.Reset()
+		r.buf.Write(kept)
+	}
+	return n, err
+}
+
+// begin records the item about to run, for the progress surface.
+func (r *finishRun) begin(index, total int, name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.index, r.total, r.current = index, total, name
+}
+
+// snapshot returns the current progress line and the captured output so far.
+func (r *finishRun) snapshot() (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	progress := "Finishing plan…"
+	if r.current != "" {
+		progress = fmt.Sprintf("Finishing plan… (%d/%d: %s)", r.index, r.total, r.current)
+	}
+	return progress, r.buf.String()
+}
+
+// finishPlanNotes is a seam so the note lifecycle can be exercised
+// independently of the `nb` binary in tests.
+var finishPlanNotes = orchestration.FinishPlanNotes
 
 // InitExecutionReport is the durable account of one delegated Add Plan
 // attempt. Command is an unambiguous JSON rendering of Argv (not shell text),
@@ -200,6 +260,20 @@ type viewState struct {
 	statusLoadError   string
 	statusLoadingPlan string
 	statusLoadGen     uint64
+	// finishExecuting is non-zero exactly while the cleanup actions run. The
+	// Finish page keeps rendering during that window (the wizard model is
+	// discarded on submit), so without this the page fell back to its
+	// wizard-loading placeholder and showed a static "Loading wizard…" for the
+	// entire run — the "Finish Plan freezes" the user reported.
+	finishExecuting bool
+	finishProgress  string
+	finishOutput    string
+	// finishRun is the output sink + progress tracker shared by the item
+	// closures (bound at build time) and the execution cmd.
+	finishRun *finishRun
+	// finishForce is flipped from the wizard's Force toggle at submit time.
+	// The items are built once, so the switch has to be late-bound.
+	finishForce *plan_finish.ForceSwitch
 }
 
 // Model is the flow meta-panel. The browser is built eagerly; status
@@ -230,6 +304,11 @@ type Model struct {
 	// One-shot status line shown over the body after a finish-wizard
 	// run; cleared on the next keypress.
 	finishTransient string
+	// finishFailure is the durable counterpart (cf. initFailure): the full
+	// per-item account of a failed finish, including which repos were retained
+	// and git's own reason. The one-shot line alone was erased by the very next
+	// keypress, and the detail behind it used to go to /dev/null.
+	finishFailure string
 	// finishAfterStatusLoad deep-links a browser selection into Finish once its
 	// plan and dependency graph have loaded off the event loop.
 	finishAfterStatusLoad bool
@@ -377,6 +456,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowser
 		if msg.Node != nil {
 			m.s.cfg.WorkspaceDir = msg.Node.Path
+			// Keep the pair in lockstep. Leaving PlansDir at its launch-time
+			// value reintroduces "validated one directory, wrote another" on
+			// every host workspace switch.
+			if plansDir := groveplan.ResolvePlansDir(msg.Node.Path); plansDir != "" {
+				m.s.cfg.PlansDir = plansDir
+			}
 		}
 		updated, c := m.s.browserModel.Update(msg)
 		if bm, ok := updated.(browser.Model); ok {
@@ -556,14 +641,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case finishProgressTickMsg:
+		if !m.s.finishExecuting {
+			return m, nil
+		}
+		m.s.finishProgress, m.s.finishOutput = m.s.finishRun.snapshot()
+		return m, pollFinishProgressCmd()
+
 	case finishActionsCompletedMsg:
+		m.s.finishExecuting = false
+		m.s.finishProgress = ""
 		m.finishTransient = formatFinishErrors(msg.errs)
+		if msg.noteErr != nil {
+			// Reported, never gating: this cannot skip mark_finished /
+			// archive_plan the way it used to.
+			note := "finish: linked notes: " + msg.noteErr.Error()
+			if m.finishTransient == "" {
+				m.finishTransient = note
+			} else {
+				m.finishTransient += " • " + note
+			}
+		}
 		if len(msg.errs) > 0 {
+			// Durable, multi-line, and carrying the captured subprocess output:
+			// the one-shot line was erased by the next keypress and the detail
+			// behind it used to be written to /dev/null.
+			m.finishFailure = formatFinishFailures(msg.errs, m.s.finishOutput)
 			// Keep the plan loaded and resolvable so cleanup can be retried.
 			m.mode = modeStatus
 			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabJobs})
 			return m, nil
 		}
+		m.finishFailure = ""
 		if m.s.statusModel != nil {
 			_ = m.s.statusModel.Close()
 			m.s.statusModel = nil
@@ -618,7 +727,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Subprocess succeeded. Try to locate and load the new plan
 		// directly so we can switch straight to its status view.
 		if pendingName != "" {
-			planPath := filepath.Join(m.s.cfg.PlansDir, pendingName)
+			// Look where the subprocess actually wrote, keeping the host's
+			// configured location as a fallback so a host that already supplies
+			// a correctly-anchored PlansDir is unaffected.
+			planPath := filepath.Join(m.initPlansDir(), pendingName)
+			if _, statErr := os.Stat(planPath); statErr != nil {
+				planPath = filepath.Join(m.s.cfg.PlansDir, pendingName)
+			}
 			if plan, err := orchestration.LoadPlan(planPath); err == nil && plan != nil {
 				if graph, gerr := orchestration.BuildDependencyGraph(plan); gerr == nil {
 					if m.s.statusModel != nil {
@@ -667,6 +782,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeBrowser
 		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
 		m.finishTransient = "plan created, but its workspace could not be loaded"
+		// The live log has already been deleted above, so report.Stdout is the
+		// last surviving copy of what the subprocess did. Keeping a short tail
+		// stops a successful-but-unloadable creation from being a total
+		// information loss.
+		if tail := lastOutputLines(msg.report.Stdout, 3); tail != "" {
+			m.finishTransient += " — " + tail
+		}
 		cmds := []tea.Cmd{m.s.browserModel.Init()}
 		if m.s.cfg.DaemonClient != nil {
 			cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
@@ -701,11 +823,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			requestCopy := *req
 			m.lastInitRequest = &requestCopy
 			m.initFailure = ""
+			// Resolve once and reuse: the live-output log the poller reads and
+			// the plans dir the subprocess reports into must be the same
+			// directory, or the progress surface tails a file nobody writes.
+			plansDir := m.initPlansDir()
 			m.s.initProgress = "Creating plan " + req.Dir + "…"
-			m.s.initOutputPath = initOutputPath(m.s.cfg.PlansDir, req.Dir)
+			m.s.initOutputPath = initOutputPath(plansDir, req.Dir)
 			m.s.initOutput = ""
 			return m, tea.Batch(
-				runInitSubprocess(req, m.s.cfg.PlansDir, planinit.ResolveTargetWorkspace(m.s.cfg.WorkspaceDir), m.s.initOutputPath),
+				runInitSubprocess(req, plansDir, planinit.ResolveTargetWorkspace(m.s.cfg.WorkspaceDir), m.s.initOutputPath),
 				pollInitOutputCmd(m.s.initOutputPath),
 			)
 		case modeAddWizard:
@@ -728,6 +854,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case modeFinishWizard:
+			// Read the force toggle before discarding the wizard. It rides the
+			// model rather than embed.DoneMsg so the DoneMsg Result stays
+			// []*finish.Item for the standalone CLI wizard.
+			force := m.s.finishWizardModel != nil && m.s.finishWizardModel.Force()
 			m.s.finishWizardModel = nil
 			if msg.Result == nil {
 				m.mode = modeStatus
@@ -744,8 +874,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.s.statusModel != nil {
 				plan = m.s.statusModel.Plan
 			}
+			if m.s.finishForce != nil {
+				m.s.finishForce.Set(force)
+			}
+			stateDir := m.finishStateDir()
+			m.finishFailure = ""
 			m.finishTransient = "Finishing plan…"
-			return m, runEmbeddedFinishActions(items, plan, stateDirForView())
+			m.s.finishExecuting = true
+			m.s.finishProgress = "Finishing plan…"
+			m.s.finishOutput = ""
+			return m, tea.Batch(
+				runEmbeddedFinishActions(finishRunRequest{
+					items: items,
+					plan:  plan,
+					// Resolved here, on the event loop: the actions are about
+					// to delete the directory this names.
+					stateDir:   stateDir,
+					activePlan: groveplan.ActivePlanForPath(stateDir),
+					run:        m.s.finishRun,
+				}),
+				pollFinishProgressCmd(),
+			)
 		default:
 			return m, nil
 		}
@@ -806,6 +955,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.s.statusLoadError = ""
 			m.s.statusLoadingPlan = ""
+			m.finishFailure = ""
 			m.mode = modeBrowser
 			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
 			updated, _ := m.s.browserModel.Update(embed.FocusMsg{})
@@ -813,6 +963,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.s.browserModel = bm
 			}
 			return m, m.s.browserModel.Init()
+		}
+
+		// esc in the finish wizard cancels it, the same way `q` does. This arm
+		// sits AFTER the text-entry / chord guards and after the status-mode
+		// handler above so it can neither shadow that handler nor steal the esc
+		// that dismisses a which-key popup.
+		//
+		// Scoped to the finish wizard on purpose: the add and init wizards
+		// already bind esc themselves (unfocus a field, step back from the
+		// review screen), so a host-level cancel would shadow real in-wizard
+		// behaviour there. See the report for that deviation.
+		if m.mode == modeFinishWizard && ks == "esc" && !m.s.finishExecuting {
+			m.s.finishWizardModel = nil
+			m.mode = modeStatus
+			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabJobs})
+			return m, nil
 		}
 
 		// Delegate numeric tab jumps, [/] cycling, and remaining
@@ -948,54 +1114,101 @@ func refreshDaemonCmd(client daemon.Client) tea.Cmd {
 	}
 }
 
-// runEmbeddedFinishActions keeps slow cleanup off the Bubble Tea event loop
-// and silences action subprocess chatter that would otherwise corrupt the
-// alternate-screen render. Errors remain available in the completion message.
-func runEmbeddedFinishActions(items []*finish.Item, plan *orchestration.Plan, stateDir string) tea.Cmd {
-	return func() tea.Msg {
-		finishOutputMu.Lock()
-		defer finishOutputMu.Unlock()
+// finishRunRequest is everything one embedded finish run needs. It is a struct
+// rather than a parameter list because the state-dir/active-plan pair must be
+// resolved on the event loop, BEFORE the actions delete the directory they name.
+type finishRunRequest struct {
+	items []*finish.Item
+	plan  *orchestration.Plan
+	// stateDir owns the active-plan key. It is the host workspace, not the
+	// process cwd: the cwd may be inside the worktree the run is about to
+	// delete, and it is the workspace that plan creation writes the key to.
+	stateDir string
+	// activePlan is stateDir's active plan as read before the run started.
+	// Mirrors the CLI: only unset the key when it names the plan being
+	// finished, so finishing a worktree plan cannot clear the host's own
+	// active plan.
+	activePlan string
+	run        *finishRun
+}
 
-		stdout, stderr := os.Stdout, os.Stderr
-		if sink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0); err == nil {
-			os.Stdout, os.Stderr = sink, sink
-			defer func() {
-				os.Stdout, os.Stderr = stdout, stderr
-				_ = sink.Close()
-			}()
+// runEmbeddedFinishActions keeps slow cleanup off the Bubble Tea event loop.
+// Action chatter is captured into req.run (bound into the item closures at
+// build time) rather than silenced by swapping the process-global stdout, and
+// is surfaced to the user instead of discarded.
+func runEmbeddedFinishActions(req finishRunRequest) tea.Cmd {
+	return func() tea.Msg {
+		sink := io.Writer(io.Discard)
+		if req.run != nil {
+			sink = req.run
 		}
 
 		var errs []finishActionError
-		if plan != nil {
-			if _, err := orchestration.FinishPlanNotes(plan.Name); err != nil {
-				errs = append(errs, finishActionError{itemTitle: "finish linked notes", err: err})
+		var noteErr error
+		if req.plan != nil {
+			// A note-move failure is reported, never gated on: it has nothing
+			// to do with git teardown, and letting it into errs silently
+			// skipped mark_finished and archive_plan.
+			if _, err := finishPlanNotes(req.plan.Name); err != nil {
+				noteErr = err
 			}
-			plan_finish.RunOnFinishHook(plan, plan.Name)
+			plan_finish.RunOnFinishHook(req.plan, req.plan.Name, sink)
 		}
 		terminal := map[string]bool{
 			plan_finish.ItemArchivePlan:  true,
 			plan_finish.ItemMarkFinished: true,
 		}
-		for _, item := range items {
+		total := 0
+		for _, item := range req.items {
+			if item != nil && item.IsEnabled && item.Action != nil {
+				total++
+			}
+		}
+		index := 0
+		blocking := 0
+		for _, item := range req.items {
 			if item == nil || !item.IsEnabled || item.Action == nil {
 				continue
 			}
-			if len(errs) > 0 && terminal[item.ID] {
+			// Only a genuine failure skips the terminal items. A worktree
+			// retained because one repo still holds uncommitted work is a
+			// partial success: the plan is still marked finished and archived,
+			// and the surviving directory is self-describing and recoverable.
+			if blocking > 0 && terminal[item.ID] {
 				continue
+			}
+			index++
+			if req.run != nil {
+				req.run.begin(index, total, item.Name)
 			}
 			if err := item.Action(); err != nil {
 				errs = append(errs, finishActionError{itemTitle: item.Name, err: err})
+				if !plan_finish.IsRetainedWorktree(err) {
+					blocking++
+				}
 			}
 		}
-		if len(errs) == 0 {
-			if err := state.Delete(stateDir, groveplan.StateKey); err != nil {
+		if blocking == 0 && req.activePlan != "" && req.plan != nil && req.activePlan == req.plan.Name {
+			// ErrNoEcosystemRoot is not a failure: when the worktree that owned
+			// the state has been deleted, its .grove/state.yml went with it and
+			// there is nothing left to unset. Escalating it made EVERY
+			// successful finish report an error.
+			if err := state.Delete(req.stateDir, groveplan.StateKey); err != nil && !errors.Is(err, state.ErrNoEcosystemRoot) {
 				errs = append(errs, finishActionError{itemTitle: "unset active plan", err: err})
-			} else {
-				_ = state.Delete(stateDir, groveplan.LegacyStateKey)
+			} else if err == nil {
+				_ = state.Delete(req.stateDir, groveplan.LegacyStateKey)
 			}
 		}
-		return finishActionsCompletedMsg{errs: errs}
+		return finishActionsCompletedMsg{errs: errs, noteErr: noteErr}
 	}
+}
+
+// pollFinishProgressCmd re-arms a tick while cleanup runs so the Finish page
+// repaints. Without it nothing changed on screen between submit and completion.
+func pollFinishProgressCmd() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg {
+		return finishProgressTickMsg{}
+	})
 }
 
 // formatFinishErrors renders a list of action errors as one
@@ -1009,6 +1222,39 @@ func formatFinishErrors(errs []finishActionError) string {
 		return fmt.Sprintf("finish: %s: %v", first.itemTitle, first.err)
 	}
 	return fmt.Sprintf("finish: %s: %v (+%d more)", first.itemTitle, first.err, len(errs)-1)
+}
+
+// formatFinishFailures renders the durable failure account: every failed item
+// with its full error (which now carries git's own message for a retained
+// worktree), plus a tail of the captured action output.
+func formatFinishFailures(errs []finishActionError, output string) string {
+	if len(errs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Finish incomplete:")
+	for _, e := range errs {
+		b.WriteString("\n  • " + e.itemTitle + ": " + e.err.Error())
+	}
+	if tail := lastOutputLines(output, 5); tail != "" {
+		b.WriteString("\n  " + tail)
+	}
+	return b.String()
+}
+
+// finishStateDir is the directory whose ecosystem owns the active-plan key for
+// a finish run: the host workspace, falling back to the process cwd.
+//
+// Deliberately NOT the raw cwd. A TUI launched inside the plan's own worktree
+// has a cwd that the finish run is about to delete, after which core/state
+// cannot resolve an ecosystem root for it at all. The workspace is also where
+// plan creation writes the key (state.Set(cfg.WorkspaceDir, …)), so the set and
+// the delete finally name the same directory.
+func (m Model) finishStateDir() string {
+	if m.s.cfg.WorkspaceDir != "" {
+		return m.s.cfg.WorkspaceDir
+	}
+	return stateDirForView()
 }
 
 // shouldActivateCreatedPlanInHost mirrors the activation rule in
@@ -1287,6 +1533,24 @@ func discoverInitResidue(plansDir, planName, planDir string) []string {
 	return residue
 }
 
+// lastOutputLines returns the final n non-blank lines of output joined into a
+// single line, for embedding in the one-line transient status bar.
+func lastOutputLines(output string, n int) string {
+	var lines []string
+	for _, line := range strings.Split(output, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " · ")
+}
+
 func formatInitFailure(report InitExecutionReport) string {
 	var b strings.Builder
 	b.WriteString("Plan creation failed (edit and submit to retry, or return to Plans):\n")
@@ -1529,6 +1793,35 @@ func (m *Model) addWizardConfig(plan *orchestration.Plan) add.Config {
 	}
 }
 
+// initPlansDir resolves the plans directory belonging to the SAME workspace the
+// init subprocess will run in, so validation, the journal, the live-output log
+// and the post-create load all name one directory. `flow plan init` receives a
+// bare plan name and re-resolves the plans dir from its own cwd
+// (cmd/plan_init.go), which ResolveTargetWorkspace deliberately sets to the root
+// ecosystem; anchoring the parent's bookkeeping on the host-supplied PlansDir
+// instead made the two disagree for any non-root workspace.
+//
+// Falls back to the host's configured PlansDir whenever the ecosystem root
+// cannot be resolved, or is the configured workspace itself. Both guards are
+// load-bearing: ResolveTargetWorkspace("") falls through to os.Getwd(), which
+// would silently retarget unit tests at the developer's real ecosystem.
+//
+// Does disk I/O (workspace discovery + config load); call it from Update
+// handlers only, never from View or a per-tick path.
+func (m Model) initPlansDir() string {
+	if m.s.cfg.WorkspaceDir == "" {
+		return m.s.cfg.PlansDir
+	}
+	ws := planinit.ResolveTargetWorkspace(m.s.cfg.WorkspaceDir)
+	if ws == "" || ws == m.s.cfg.WorkspaceDir {
+		return m.s.cfg.PlansDir
+	}
+	if resolved := groveplan.ResolvePlansDir(ws); resolved != "" {
+		return resolved
+	}
+	return m.s.cfg.PlansDir
+}
+
 // startInitWizardBuild dispatches an async tea.Cmd that constructs
 // a fresh planinit.Model off the bubbletea event loop. planinit.New
 // runs orchestration.ListAllRecipes (a subprocess invocation!) plus
@@ -1541,7 +1834,9 @@ func (m *Model) startInitWizardBuild() tea.Cmd {
 	targetWorkspace := planinit.ResolveTargetWorkspace(m.s.cfg.WorkspaceDir)
 	getRecipeCmd, runInitByDefault, defaultModel := planinit.LoadFlowDefaultsAt(targetWorkspace)
 	cfg := planinit.Config{
-		PlansDir:         m.s.cfg.PlansDir,
+		// Validate the directory that will actually be written: the review
+		// screen's collision/permission checks are built from this value.
+		PlansDir:         m.initPlansDir(),
 		GetRecipeCmd:     getRecipeCmd,
 		RunInitByDefault: runInitByDefault,
 		DefaultModel:     defaultModel,
@@ -1566,9 +1861,19 @@ func (m *Model) startFinishWizardBuild(plan *orchestration.Plan) tea.Cmd {
 	m.wizardBuildGen++
 	gen := m.wizardBuildGen
 	m.finishWizardBuilding = true
+	m.finishFailure = ""
+	// The sink and the force switch are bound into the item closures HERE,
+	// because the items are built once and executed later: the closures must be
+	// able to see a force toggle the user has not flipped yet, and their output
+	// must never reach the process-global stdout the renderer is using.
+	run := &finishRun{}
+	force := &plan_finish.ForceSwitch{}
+	m.s.finishRun = run
+	m.s.finishForce = force
 	return func() tea.Msg {
 		bctx := plan_finish.NewBuildContext(plan, plan.Directory)
-		opts := plan_finish.Options{}
+		bctx.Output = run
+		opts := plan_finish.Options{ForceSwitch: force}
 		result, err := plan_finish.BuildItems(bctx, opts)
 		if err != nil {
 			return finishWizardReadyMsg{err: err, generation: gen}
@@ -1581,6 +1886,9 @@ func (m *Model) startFinishWizardBuild(plan *orchestration.Plan) tea.Cmd {
 			Plan:           plan,
 			DaemonClient:   m.s.cfg.DaemonClient,
 			WorkspaceDir:   m.s.cfg.WorkspaceDir,
+			// This host reads Model.Force() on submit and applies it through
+			// the ForceSwitch above, so the toggle is real here.
+			ShowForceToggle: true,
 		})
 		return finishWizardReadyMsg{model: fm, generation: gen}
 	}
@@ -1592,6 +1900,9 @@ func (m Model) View() string {
 	content := m.pager.View()
 	if m.initFailure != "" && m.mode == modeInitWizard {
 		content = m.initFailure + "\n\n" + content
+	}
+	if m.finishFailure != "" {
+		content = m.finishFailure + "\n\n" + content
 	}
 	if m.finishTransient != "" {
 		content = m.finishTransient + "\n" + content

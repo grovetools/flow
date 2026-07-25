@@ -90,6 +90,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case m.showForce && key.Matches(msg, m.keys.ToggleForce):
+			// Force is a run-scoped modifier, not an item: it changes HOW the
+			// selected destructive items behave. Default off, and rendered
+			// loudly by View when on.
+			m.force = !m.force
+
 		case key.Matches(msg, m.keys.Confirm):
 			return m, doneWithItems(m.items)
 		}

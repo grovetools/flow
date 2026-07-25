@@ -52,12 +52,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cwdGitRoot = msg.Node.Path
-		// Resolve plans directory via the same mechanism the CLI uses
-		// (coreplan.ResolvePlanDir handles workspace-local paths).
-		if planPath := coreplan.ResolvePlanDir(msg.Node.Path, ""); planPath != "" {
-			// ResolvePlanDir returns a specific plan dir; its parent is
-			// the plans directory.
-			m.plansDirectory = filepath.Dir(planPath)
+		// Resolve plans directory via the same mechanism the CLI uses at
+		// launch (cmd/plan_tui.go). Note ResolvePlanDir(dir, "") returns the
+		// plans directory itself — filepath.Join(x, "") == Clean(x) — so
+		// taking its parent landed one directory too high and scoped the
+		// panel at the workspace, matching no plan summary at all.
+		if plansDir := coreplan.ResolvePlansDir(msg.Node.Path); plansDir != "" {
+			m.plansDirectory = plansDir
 		}
 		// Switching workspace changes the entire context; show the
 		// placeholder for the new workspace's first load.

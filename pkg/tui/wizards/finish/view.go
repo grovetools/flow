@@ -43,6 +43,19 @@ func (m Model) View() string {
 		b.WriteString("\n\n")
 	}
 
+	// Force banner. Force turns `git worktree remove` into
+	// `git worktree remove --force`, i.e. it discards uncommitted work — so it
+	// is stated on its own line, in error styling when armed, rather than
+	// hidden behind a help screen.
+	if m.showForce {
+		if m.force {
+			b.WriteString(theme.DefaultTheme.Error.Bold(true).Render("[f] FORCE ON — destructive git operations WILL discard uncommitted work"))
+		} else {
+			b.WriteString(theme.DefaultTheme.Muted.Render("[f] Force: off (safe) — enable to discard uncommitted work in retained repos"))
+		}
+		b.WriteString("\n\n")
+	}
+
 	// Styles.
 	focusedStyle := theme.DefaultTheme.Selected
 	enabledCheckboxStyle := theme.DefaultTheme.Success.Bold(true)
@@ -113,7 +126,14 @@ func (m Model) View() string {
 // FooterView returns the help hint for use by the pager's SetFooter
 // mechanism when the wizard is embedded as a tab.
 func (m Model) FooterView() string {
-	return theme.DefaultTheme.Muted.Render("? help • q quit")
+	hint := "? help • q/esc quit"
+	if m.showForce {
+		if m.force {
+			return theme.DefaultTheme.Error.Render("FORCE ON (f) • ") + theme.DefaultTheme.Muted.Render(hint)
+		}
+		hint = "f force • " + hint
+	}
+	return theme.DefaultTheme.Muted.Render(hint)
 }
 
 // renderInlineDetails shows detailed repository status inline below

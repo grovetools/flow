@@ -2,6 +2,7 @@ package plan_finish
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,7 +66,7 @@ func TestReapLegacyStubWorktree_RemovesStrayStub(t *testing.T) {
 		t.Fatalf("precondition: legacy stub not registered at %s", legacyPath)
 	}
 
-	reapLegacyStubWorktree(context.Background(), gitRoot, name, false)
+	reapLegacyStubWorktree(context.Background(), io.Discard, gitRoot, name, false)
 
 	if worktreeIsRegistered(t, gitRoot, legacyPath) {
 		t.Errorf("legacy stub still registered after reap: %s", legacyPath)
@@ -81,7 +82,7 @@ func TestReapLegacyStubWorktree_RemovesStrayStub(t *testing.T) {
 func TestReapLegacyStubWorktree_NoStubNoOp(t *testing.T) {
 	gitRoot := gitInitForReap(t)
 	// No worktree added; must not error or create anything.
-	reapLegacyStubWorktree(context.Background(), gitRoot, "absent", false)
+	reapLegacyStubWorktree(context.Background(), io.Discard, gitRoot, "absent", false)
 	if _, err := os.Stat(filepath.Join(gitRoot, ".grove-worktrees", "absent")); !os.IsNotExist(err) {
 		t.Errorf("reap should not create the legacy path; stat err=%v", err)
 	}
@@ -103,7 +104,7 @@ func TestReapLegacyStubWorktree_LeavesUnregisteredDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reapLegacyStubWorktree(context.Background(), gitRoot, name, false)
+	reapLegacyStubWorktree(context.Background(), io.Discard, gitRoot, name, false)
 
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("unregistered dir contents must be preserved, but marker is gone: %v", err)
