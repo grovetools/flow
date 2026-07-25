@@ -106,7 +106,7 @@ func TestReconcileRepairsReadyAndJoinedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Kind != "report_ready" || len(client.published) != 1 || client.published[0].Kind != models.SubjobReportReady {
+	if len(out) != 1 || out[0].Kind != "report_ready" || out[0].ChildTitle != "child" || out[0].ReportSummary != "done" || len(client.published) != 1 || client.published[0].Kind != models.SubjobReportReady {
 		t.Fatalf("ready reconciliation: out=%+v published=%+v", out, client.published)
 	}
 
@@ -129,7 +129,7 @@ func TestReconcileReportsTerminalChildWithoutReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) != 1 || out[0].Kind != "terminal_without_report" || out[0].JobStatus != orchestration.JobStatusFailed {
+	if len(out) != 1 || out[0].Kind != "terminal_without_report" || out[0].ChildTitle != "child" || out[0].JobStatus != orchestration.JobStatusFailed {
 		t.Fatalf("terminal reconciliation = %+v", out)
 	}
 }

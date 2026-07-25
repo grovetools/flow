@@ -36,7 +36,9 @@ type Output struct {
 	PlanKey       string                  `json:"plan_key"`
 	ParentJobID   string                  `json:"parent_job_id"`
 	ChildJobID    string                  `json:"child_job_id"`
+	ChildTitle    string                  `json:"child_title"`
 	ReportSHA256  string                  `json:"report_sha256,omitempty"`
+	ReportSummary string                  `json:"report_summary,omitempty"`
 	JobStatus     orchestration.JobStatus `json:"job_status,omitempty"`
 	ObservedAt    time.Time               `json:"observed_at"`
 }
@@ -58,34 +60,34 @@ func CanonicalPlan(dir string) (string, string, error) {
 	return real, hex.EncodeToString(h[:]), nil
 }
 
-func reportBytes(planDir string, child *orchestration.Job) ([]byte, error) {
+func readFinalReport(planDir string, child *orchestration.Job) ([]byte, *finalReport, error) {
 	path := filepath.Join(planDir, ".artifacts", child.ID, "final-report.json")
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, MaxReportBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(data) > MaxReportBytes {
-		return nil, fmt.Errorf("final report exceeds %d bytes", MaxReportBytes)
+		return nil, nil, fmt.Errorf("final report exceeds %d bytes", MaxReportBytes)
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var r finalReport
 	if err := dec.Decode(&r); err != nil {
-		return nil, fmt.Errorf("invalid final report: %w", err)
+		return nil, nil, fmt.Errorf("invalid final report: %w", err)
 	}
 	if r.SchemaVersion != 1 || r.ChildJobID != child.ID || r.ParentJobID != child.ParentJobID || r.Summary == "" || r.CreatedAt == "" || r.Artifacts == nil {
-		return nil, errors.New("final report schema or lineage mismatch")
+		return nil, nil, errors.New("final report schema or lineage mismatch")
 	}
 	var extra any
 	if dec.Decode(&extra) != io.EOF {
-		return nil, errors.New("invalid trailing report data")
+		return nil, nil, errors.New("invalid trailing report data")
 	}
-	return data, nil
+	return data, &r, nil
 }
 
 func BuildEvent(planDir string, child *orchestration.Job, kind models.SubjobEventKind) (*models.SubjobEvent, error) {
@@ -96,7 +98,7 @@ func BuildEvent(planDir string, child *orchestration.Job, kind models.SubjobEven
 	if child == nil || child.ParentJobID == "" {
 		return nil, errors.New("job is not a parent-owned child")
 	}
-	data, err := reportBytes(canonical, child)
+	data, _, err := readFinalReport(canonical, child)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +145,15 @@ func Reconcile(ctx context.Context, client Client, planDir, parentID string) ([]
 			continue
 		}
 		ready, reportErr := BuildEvent(canonical, child, models.SubjobReportReady)
+		var reportSummary string
+		if reportErr == nil {
+			_, report, readErr := readFinalReport(canonical, child)
+			if readErr != nil {
+				reportErr = readErr
+			} else {
+				reportSummary = report.Summary
+			}
+		}
 		state := snap.Reports[child.ID]
 		if child.Status == orchestration.JobStatusCompleted {
 			if reportErr == nil && (state == nil || state.State != models.SubjobJoined || state.ReportSHA256 != ready.ReportSHA256) {
@@ -158,9 +169,9 @@ func Reconcile(ctx context.Context, client Client, planDir, parentID string) ([]
 					return nil, err
 				}
 			}
-			out = append(out, Output{1, "report_ready", key, parentID, child.ID, ready.ReportSHA256, "", time.Now().UTC()})
+			out = append(out, Output{SchemaVersion: 1, Kind: "report_ready", PlanKey: key, ParentJobID: parentID, ChildJobID: child.ID, ChildTitle: child.Title, ReportSHA256: ready.ReportSHA256, ReportSummary: reportSummary, ObservedAt: time.Now().UTC()})
 		} else if terminal(child.Status) {
-			out = append(out, Output{SchemaVersion: 1, Kind: "terminal_without_report", PlanKey: key, ParentJobID: parentID, ChildJobID: child.ID, JobStatus: child.Status, ObservedAt: time.Now().UTC()})
+			out = append(out, Output{SchemaVersion: 1, Kind: "terminal_without_report", PlanKey: key, ParentJobID: parentID, ChildJobID: child.ID, ChildTitle: child.Title, JobStatus: child.Status, ObservedAt: time.Now().UTC()})
 		}
 	}
 	return out, nil
