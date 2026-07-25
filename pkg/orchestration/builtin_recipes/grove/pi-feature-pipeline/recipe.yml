@@ -1,0 +1,2 @@
+description: Bootstrap a Pi coordinator that executes a machine-validated feature pipeline through first-class Flow subjobs.
+default_note_target: 01-coordinate.md
