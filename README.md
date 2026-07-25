@@ -36,6 +36,7 @@ Jobs declare dependencies via the `depends_on` field. The orchestrator ensures j
 *   **`flow status`**: Displays the plan's dependency tree and streams live logs from running agents.
 *   **`flow plan tui`**: A browser for managing multiple plans and merging worktrees.
 *   **`flow plan init`**: An interactive wizard for creating plans.
+*   **`flow keys [--json]`**: Lists hosted-app bindings, including keys swallowed by Flow and outer-host collision hints.
 
 ### Templates & Recipes
 *   **Templates**: Reusable Markdown files defining job structures and prompts.

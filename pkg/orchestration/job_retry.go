@@ -43,6 +43,9 @@ func RetryJob(job *Job, plan *Plan, force bool, autoRun bool) error {
 		return retryRunningJobWithForce(job, plan, autoRun)
 
 	case JobStatusCompleted:
+		if isAgentJobType(job.Type) && !JobHasExecutionEvidence(job, plan) {
+			return resetJobToPending(job, plan, JobStatusCompleted, autoRun)
+		}
 		return fmt.Errorf("job already completed: %s. Use 'flow plan run' to re-run or create a fresh job.", job.Filename)
 
 	case JobStatusPendingUser:
@@ -56,6 +59,13 @@ func RetryJob(job *Job, plan *Plan, force bool, autoRun bool) error {
 
 // retryFailedJob resets a failed job back to pending.
 func retryFailedJob(job *Job, plan *Plan, autoRun bool) error {
+	return resetJobToPending(job, plan, JobStatusFailed, autoRun)
+}
+
+// resetJobToPending is shared by failed jobs and completed agent jobs that have
+// no durable execution evidence. The latter case recovers zero-turn provider
+// failures that older Flow versions incorrectly stamped completed.
+func resetJobToPending(job *Job, plan *Plan, from JobStatus, autoRun bool) error {
 	// Create updates map to clear error fields
 	updates := map[string]interface{}{
 		"status":       string(JobStatusPending),
@@ -91,7 +101,7 @@ func retryFailedJob(job *Job, plan *Plan, autoRun bool) error {
 
 	// Print success message
 	fmt.Printf("%s Job reset to pending: %s\n", color.GreenString("*"), job.Filename)
-	fmt.Printf("Status: %s → %s\n", JobStatusFailed, JobStatusPending)
+	fmt.Printf("Status: %s → %s\n", from, JobStatusPending)
 
 	if autoRun {
 		// Submit to daemon

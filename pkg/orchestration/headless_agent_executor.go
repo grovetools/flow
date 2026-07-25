@@ -100,6 +100,13 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 	}()
 
+	// A .status sidecar is process-exit evidence, not the authoritative job
+	// outcome (frontmatter is). Remove a prior run's sidecar before stamping the
+	// new start so adoption/finalization can never consume a stale exit code.
+	if err := os.Remove(headlessStatusPath(plan, job)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale headless status: %w", err)
+	}
+
 	// Update job status to running
 	job.StartTime = time.Now()
 	if err := job.UpdateStatus(persister, JobStatusRunning); err != nil {

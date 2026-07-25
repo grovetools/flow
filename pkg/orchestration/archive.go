@@ -181,28 +181,20 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 			Log(ctx)
 	}
 
-	registry, err := coresessions.NewFileSystemRegistry()
-	if err != nil {
-		ulog.Error("[ARCHIVE] Failed to create session registry").
-			Field("job_id", job.ID).
-			Err(err).
-			Log(ctx)
-		return fmt.Errorf("failed to create session registry: %w", err)
-	}
-
-	ulog.Debug("[ARCHIVE] Searching for session by job ID").
+	ulog.Debug("[ARCHIVE] Searching for exact current session binding").
 		Field("job_id", job.ID).
 		Log(ctx)
 
-	metadata, err := registry.Find(job.ID)
+	binding, err := findVerifiedJobSession(job)
 	if err != nil {
-		ulog.Error("[ARCHIVE] Failed to find session metadata").
+		ulog.Error("[ARCHIVE] Refusing to archive an unverified session binding").
 			Field("job_id", job.ID).
 			Field("sessions_base_dir", sessionsBaseDir).
 			Err(err).
 			Log(ctx)
-		return fmt.Errorf("failed to find session metadata for job %s: %w", job.ID, err)
+		return err
 	}
+	metadata := binding.Metadata
 
 	ulog.Debug("[ARCHIVE] Found session metadata").
 		Field("job_id", job.ID).
@@ -211,10 +203,12 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 		Field("provider", metadata.Provider).
 		Log(ctx)
 
-	// 2. Construct the source session directory path.
-	// Sessions are stored at $XDG_STATE_HOME/grove/hooks/sessions/{claude-session-id}/
-	sourceSessionDir := filepath.Join(sessionsBaseDir, metadata.ClaudeSessionID)
-	sourceMetadataPath := filepath.Join(sourceSessionDir, "metadata.json")
+	// 2. Use the exact metadata file selected by verified binding discovery.
+	// Do not reconstruct it from a native ID: legacy/provider registries may
+	// name the directory differently, and reconstruction can reintroduce stale
+	// session selection.
+	sourceMetadataPath := binding.MetadataPath
+	sourceSessionDir := filepath.Dir(sourceMetadataPath)
 
 	ulog.Debug("[ARCHIVE] Checking source session directory").
 		Field("source_session_dir", sourceSessionDir).
@@ -249,13 +243,13 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 		Field("dest", destMetadataPath).
 		Log(ctx)
 
-	if err := fs.CopyFile(sourceMetadataPath, destMetadataPath); err != nil {
-		ulog.Error("[ARCHIVE] Failed to copy metadata.json").
+	if err := writeArchivedSessionMetadata(sourceMetadataPath, destMetadataPath, job); err != nil {
+		ulog.Error("[ARCHIVE] Failed to archive metadata.json").
 			Field("source", sourceMetadataPath).
 			Field("dest", destMetadataPath).
 			Err(err).
 			Log(ctx)
-		return fmt.Errorf("failed to copy metadata.json: %w", err)
+		return fmt.Errorf("failed to archive metadata.json: %w", err)
 	}
 
 	// 5. Copy the transcript file.

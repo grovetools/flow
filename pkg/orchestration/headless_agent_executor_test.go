@@ -222,6 +222,23 @@ func writeHeadlessStatusFixture(t *testing.T, plan *Plan, job *Job, exitCode int
 	}
 }
 
+func writeVerifiedHeadlessSessionFixture(t *testing.T, job *Job) {
+	t.Helper()
+	sessionDir := filepath.Join(os.Getenv("GROVE_HOME"), "state", "grove", "hooks", "sessions", "native-hjob")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(sessionDir, "transcript.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte("{\"type\":\"assistant\",\"message\":\"done\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metadata := fmt.Sprintf(`{"session_id":%q,"job_id":%q,"job_file_path":%q,"claude_session_id":"native-hjob","provider":"pi","started_at":%q,"transcript_path":%q}`,
+		job.ID, job.ID, job.FilePath, job.StartTime.Add(time.Second).Format(time.RFC3339Nano), transcriptPath)
+	if err := os.WriteFile(filepath.Join(sessionDir, "metadata.json"), []byte(metadata), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func readFileString(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -243,10 +260,23 @@ func TestFinalizeHeadlessJob(t *testing.T) {
 	t.Run("exit 0 completes", func(t *testing.T) {
 		plan, job := writeHeadlessJobFixture(t, JobStatusRunning)
 		writeHeadlessStatusFixture(t, plan, job, 0)
+		writeVerifiedHeadlessSessionFixture(t, job)
 		if err := FinalizeHeadlessJob(job, plan); err != nil {
 			t.Fatalf("finalize: %v", err)
 		}
 		assertFrontmatterStatus(t, job.FilePath, "completed")
+	})
+
+	t.Run("zero exit without a verified transcript fails", func(t *testing.T) {
+		plan, job := writeHeadlessJobFixture(t, JobStatusRunning)
+		writeHeadlessStatusFixture(t, plan, job, 0)
+		if err := FinalizeHeadlessJob(job, plan); err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		content := readFileString(t, job.FilePath)
+		if !strings.Contains(content, "status: failed") || !strings.Contains(content, "no verified transcript") {
+			t.Errorf("expected zero-turn provider failure, file:\n%s", content)
+		}
 	})
 
 	t.Run("nonzero exit fails with last_error containing code", func(t *testing.T) {
@@ -301,6 +331,7 @@ func TestFinalizeHeadlessJob(t *testing.T) {
 func TestWaitAndWriteStatus(t *testing.T) {
 	t.Run("clean exit writes status 0 and completes", func(t *testing.T) {
 		plan, job := writeHeadlessJobFixture(t, JobStatusRunning)
+		writeVerifiedHeadlessSessionFixture(t, job)
 		e := NewHeadlessAgentExecutor(NewMockLLMClient(), &ExecutorConfig{})
 		cmd := exec.Command("sh", "-c", "exit 0")
 		if err := cmd.Start(); err != nil {

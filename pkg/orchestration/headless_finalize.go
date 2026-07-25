@@ -129,7 +129,13 @@ func FinalizeHeadlessJob(job *Job, plan *Plan) error {
 	}
 
 	if status.ExitCode == 0 {
-		// Clean exit: reuse the unified completion handler.
+		// A provider launcher can exit zero before producing a single turn (for
+		// example after an auth/provider startup failure). Exit status alone is
+		// therefore not success: require a non-empty transcript with verified
+		// job ownership before entering the unified completion path.
+		if _, err := findVerifiedJobSession(job); err != nil {
+			return finalizeHeadlessFailure(ctx, job, "agent exited successfully but produced no verified transcript: "+err.Error())
+		}
 		return CompleteJob(job, plan, true)
 	}
 

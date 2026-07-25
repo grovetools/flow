@@ -157,7 +157,7 @@ func TestRetryJob_FromRunning_WithForce(t *testing.T) {
 	}
 }
 
-func TestRetryJob_FromCompleted_Refuses(t *testing.T) {
+func TestRetryJob_FromCompletedAgentWithoutEvidence_Resets(t *testing.T) {
 	dir := t.TempDir()
 	job := createTestJobFile(t, dir, "test-job.md", string(JobStatusCompleted))
 
@@ -165,18 +165,34 @@ func TestRetryJob_FromCompleted_Refuses(t *testing.T) {
 		Directory: dir,
 	}
 
-	// Try to retry a completed job
+	if err := RetryJob(job, plan, false, false); err != nil {
+		t.Fatalf("expected evidence-free completed agent to reset: %v", err)
+	}
+	if job.Status != JobStatusPending {
+		t.Errorf("expected status %s, got %s", JobStatusPending, job.Status)
+	}
+}
+
+func TestRetryJob_FromCompletedAgentWithEvidence_Refuses(t *testing.T) {
+	dir := t.TempDir()
+	job := createTestJobFile(t, dir, "test-job.md", string(JobStatusCompleted))
+	plan := &Plan{Directory: dir}
+	artifactDir := filepath.Join(dir, ".artifacts", job.ID)
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "transcript.jsonl"), []byte("a real transcript\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metadata := `{"session_id":"test-job-1","job_id":"test-job-1","started_at":"2026-01-02T00:00:01Z"}`
+	if err := os.WriteFile(filepath.Join(artifactDir, "metadata.json"), []byte(metadata), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	err := RetryJob(job, plan, false, false)
-	if err == nil {
-		t.Fatal("expected RetryJob to return error for completed job")
+	if err == nil || !strings.Contains(err.Error(), "already completed") {
+		t.Fatalf("expected completed job with evidence to be refused, got %v", err)
 	}
-
-	// Verify error message is helpful
-	if !strings.Contains(err.Error(), "already completed") {
-		t.Errorf("expected error to mention 'already completed', got: %s", err)
-	}
-
-	// Verify job status was not changed
 	if job.Status != JobStatusCompleted {
 		t.Errorf("expected status to remain %s, got %s", JobStatusCompleted, job.Status)
 	}

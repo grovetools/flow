@@ -204,6 +204,21 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 	}
 
+	// Frontmatter status is the authoritative success state. Before moving an
+	// agent job to completed, require current-attempt execution evidence. This
+	// turns a provider outage that produced zero turns into failed instead of a
+	// false completed result. Already-completed jobs retain the recovery-only
+	// behavior below for compatibility.
+	if !alreadyCompleted && isAgentJobType(job.Type) {
+		if evidenceErr := successfulExecutionEvidence(job, plan); evidenceErr != nil {
+			lastErr := "agent completion rejected: " + evidenceErr.Error()
+			if failErr := finalizeHeadlessFailure(context.Background(), job, lastErr); failErr != nil {
+				return fmt.Errorf("%s; additionally failed to persist failed status: %w", lastErr, failErr)
+			}
+			return fmt.Errorf("%s", lastErr)
+		}
+	}
+
 	// Update status (skip if already completed)
 	oldStatus := job.Status
 	if !alreadyCompleted {

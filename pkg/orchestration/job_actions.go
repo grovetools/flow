@@ -125,32 +125,22 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 		Field("filename", job.Filename).
 		Log(ctx)
 
-	// Resolve the aglogs spec via the hooks session registry. There is NO
-	// unverified fallback: streaming by plan/job name can bind another
-	// agent's transcript to this job (see verifiedTranscriptSpec).
-	var aglogsSpec string
-	var verified bool
-	if registry, regErr := sessions.NewFileSystemRegistry(); regErr == nil {
-		metadata, findErr := registry.Find(job.ID)
-		aglogsSpec, verified = verifiedTranscriptSpec(metadata, findErr)
-		if verified {
-			ulog.Debug("[TRANSCRIPT] Using session ID from registry").
-				Field("job_id", job.ID).
-				Field("claude_session_id", metadata.ClaudeSessionID).
-				Field("provider", metadata.Provider).
-				Log(ctx)
-		} else {
-			ulog.Debug("[TRANSCRIPT] Session not found in registry").
-				Field("job_id", job.ID).
-				Field("find_error", findErr).
-				Log(ctx)
-		}
-	}
-
-	if !verified {
+	// Resolve an exact, current job→session binding. Registry.Find supports
+	// broad legacy aliases and returns the first match, so it can select a stale
+	// transcript after a retry. Completion/archive paths must fail loudly rather
+	// than copy bytes from that ambiguous record.
+	binding, bindErr := findVerifiedJobSession(job)
+	if bindErr != nil {
 		markTranscriptUnverified(ctx, job, plan)
-		return nil // Not an error; transcript intentionally not captured.
+		return bindErr
 	}
+	metadata := binding.Metadata
+	aglogsSpec := metadata.ClaudeSessionID
+	ulog.Debug("[TRANSCRIPT] Using verified session ID from registry").
+		Field("job_id", job.ID).
+		Field("claude_session_id", metadata.ClaudeSessionID).
+		Field("provider", metadata.Provider).
+		Log(ctx)
 
 	// Get formatted transcript for job.log (with ANSI colors)
 	formattedCmd := delegation.Command("aglogs", "read", aglogsSpec)
