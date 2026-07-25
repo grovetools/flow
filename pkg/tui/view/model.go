@@ -1502,16 +1502,30 @@ func (m *Model) startAddWizardBuild(plan *orchestration.Plan) tea.Cmd {
 	m.wizardBuildGen++
 	gen := m.wizardBuildGen
 	m.addWizardBuilding = true
-	cfg := add.Config{
-		Plan:         plan,
-		DaemonClient: m.s.cfg.DaemonClient,
-		WorkspaceDir: m.s.cfg.WorkspaceDir,
-	}
+	cfg := m.addWizardConfig(plan)
 	return func() tea.Msg {
 		return addWizardReadyMsg{
 			model:      add.New(cfg),
 			generation: gen,
 		}
+	}
+}
+
+// addWizardConfig builds the add.Config the wizard tab is constructed
+// from. The status view's space-selection seeds the wizard's dependency
+// picker, so selecting jobs and pressing A still creates a job that
+// depends on them — the behaviour the inline create-job form provided
+// before A started routing to this tab.
+func (m *Model) addWizardConfig(plan *orchestration.Plan) add.Config {
+	var initialDeps []string
+	if m.s.statusModel != nil && m.s.statusModel.Plan == plan {
+		initialDeps = m.s.statusModel.SelectedJobFilenames()
+	}
+	return add.Config{
+		Plan:         plan,
+		InitialDeps:  initialDeps,
+		DaemonClient: m.s.cfg.DaemonClient,
+		WorkspaceDir: m.s.cfg.WorkspaceDir,
 	}
 }
 

@@ -230,6 +230,25 @@ func (m *Model) CurrentJob() *orchestration.Job {
 	return nil
 }
 
+// SelectedJobFilenames returns the filenames of the space-selected jobs in
+// plan order. Hosts read this when they open the add-job wizard so that
+// "space a few jobs, then A" still creates a job that depends on the
+// selection — the behaviour the inline create-job form used to provide
+// before A started routing to the wizard tab.
+func (m *Model) SelectedJobFilenames() []string {
+	if len(m.Selected) == 0 {
+		return nil
+	}
+	var names []string
+	for _, job := range m.Jobs {
+		if job == nil || !m.Selected[job.ID] || job.Filename == "" {
+			continue
+		}
+		names = append(names, job.Filename)
+	}
+	return names
+}
+
 // jobAtRow resolves the owning job for an arbitrary display index (used by
 // dialogs that captured a display index when they opened).
 func (m *Model) jobAtRow(i int) *orchestration.Job {
