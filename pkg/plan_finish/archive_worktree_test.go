@@ -251,30 +251,8 @@ func TestArchiveWorktree_MutuallyExclusiveWithPrune(t *testing.T) {
 	}
 }
 
-// TestArchiveWorktree_DestinationExists asserts the action refuses (before
-// doing anything destructive) when the archive destination already exists.
-func TestArchiveWorktree_DestinationExists(t *testing.T) {
-	setGroveHome(t)
-	gitRoot := gitInitForReap(t)
-	worktreeName := "dup-arch"
-	wPath := filepath.Join(gitRoot, ".grove-worktrees", worktreeName)
-	gitRun(t, gitRoot, "worktree", "add", "-q", "-b", worktreeName, wPath)
-
-	destPath := filepath.Join(paths.WorktreeArchiveDir(), workspace.DirIdentifier(gitRoot), worktreeName)
-	if err := os.MkdirAll(destPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	item := buildArchiveItem(t, gitRoot, worktreeName, nil, Options{ArchiveWorktree: true})
-	err := item.Action()
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("Action should refuse when destination exists, got: %v", err)
-	}
-	// Refusal happened before any mutation: the .git pointer survives.
-	if _, statErr := os.Stat(filepath.Join(wPath, ".git")); statErr != nil {
-		t.Errorf("worktree must be untouched after refusal: %v", statErr)
-	}
-	if worktreeIsRegistered(t, gitRoot, wPath) == false {
-		t.Error("owner registration must survive a refused archive")
-	}
-}
+// A destination collision used to be a hard refusal here. It is now
+// disambiguated with a numeric suffix instead — see
+// TestArchiveWorktree_DestinationCollisionDisambiguates in
+// archive_failure_modes_test.go, which replaces the old
+// TestArchiveWorktree_DestinationExists and pins that neither archive is lost.

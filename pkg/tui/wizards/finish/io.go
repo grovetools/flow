@@ -28,12 +28,29 @@ type Item struct {
 	IsAvailable bool
 	IsEnabled   bool
 	Details     []RepoStatus
+	// ExclusiveGroup, when non-empty, marks this item as one of a set of
+	// mutually exclusive actions: AT MOST ONE item per group may be enabled
+	// at a time, and the wizard enforces that as the user selects.
+	//
+	// The winner within a group is the FIRST such item in list order, which
+	// is why the factory emits archive_worktree ahead of prune_worktree —
+	// "select all" must land on the recoverable retirement, not the
+	// destructive one. Zero items enabled is a valid state: the exclusion is
+	// "at most one", never "exactly one".
+	ExclusiveGroup string
 	// Action and Check are opaque to the wizard. They exist so hosts
 	// can keep all per-item state on a single struct instead of
 	// maintaining parallel slices.
 	Action func() error
 	Check  func() (string, error)
 }
+
+// GroupWorktreeRetirement is the exclusive group shared by the two ways to
+// retire a plan's worktree container: archiving it (moved under the grove
+// worktree archive, with per-repo bundles) and pruning it (deleted). Running
+// both in one finish is never valid — the second acts on a container the first
+// already moved or removed.
+const GroupWorktreeRetirement = "worktree_retirement"
 
 // ansiRegex matches ANSI escape sequences so stripANSI can present
 // plain status text to getStatusStyle regardless of whether the host

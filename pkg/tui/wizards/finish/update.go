@@ -24,6 +24,42 @@ func doneCancelled() tea.Cmd {
 	}
 }
 
+// clearExclusivePeers disables every OTHER item sharing keep's exclusive
+// group, so enabling one member of a group is always a swap rather than an
+// addition. Items with no group are untouched.
+func clearExclusivePeers(items []*Item, keep *Item) {
+	if keep == nil || keep.ExclusiveGroup == "" {
+		return
+	}
+	for _, item := range items {
+		if item == nil || item == keep {
+			continue
+		}
+		if item.ExclusiveGroup == keep.ExclusiveGroup {
+			item.IsEnabled = false
+		}
+	}
+}
+
+// resolveExclusiveGroups reduces every exclusive group to at most one enabled
+// item, keeping the FIRST one in list order and disabling the rest. Hosts order
+// each group best-first for exactly this reason: the finish factory emits
+// archive_worktree ahead of prune_worktree so a bulk selection retires the
+// worktree recoverably instead of deleting it.
+func resolveExclusiveGroups(items []*Item) {
+	claimed := make(map[string]bool)
+	for _, item := range items {
+		if item == nil || item.ExclusiveGroup == "" || !item.IsEnabled {
+			continue
+		}
+		if claimed[item.ExclusiveGroup] {
+			item.IsEnabled = false
+			continue
+		}
+		claimed[item.ExclusiveGroup] = true
+	}
+}
+
 // Update handles user input and lifecycle messages. It does not
 // forward messages to any child component — the wizard owns all its
 // own state.
@@ -73,7 +109,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Toggle):
 			if m.cursor < len(m.items) && m.items[m.cursor] != nil && m.items[m.cursor].IsAvailable {
-				m.items[m.cursor].IsEnabled = !m.items[m.cursor].IsEnabled
+				picked := m.items[m.cursor]
+				picked.IsEnabled = !picked.IsEnabled
+				if picked.IsEnabled {
+					clearExclusivePeers(m.items, picked)
+				}
 			}
 
 		case key.Matches(msg, m.keys.SelectAll):
@@ -82,6 +122,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					item.IsEnabled = true
 				}
 			}
+			// Some items cannot coexist (archive vs prune of the same
+			// worktree container). Without this, one "select all" keystroke
+			// produced a selection the actions can never satisfy.
+			resolveExclusiveGroups(m.items)
 
 		case key.Matches(msg, m.keys.SelectNone):
 			for _, item := range m.items {

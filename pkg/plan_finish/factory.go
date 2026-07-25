@@ -57,8 +57,9 @@ import (
 // meta-panel populate an Options and pass it to BuildItems; the
 // factory consults these values inside the Check and Action closures
 // it constructs.
-// RetainedWorktreeError reports per-repo worktrees that were deliberately kept
-// because they still hold uncommitted work.
+// RetainedWorktreeError reports a worktree that was deliberately kept rather
+// than retired — most often because per-repo checkouts still hold uncommitted
+// work, but also when the retirement itself could not be carried out safely.
 //
 // It is a PARTIAL SUCCESS, not a teardown failure. Everything not contingent on
 // those repos already ran, and the plan must still be marked finished, archived
@@ -69,9 +70,21 @@ import (
 type RetainedWorktreeError struct {
 	// Details holds one "<repo>: <git's own message>" line per retained repo.
 	Details []string
+	// Reason, when non-empty, replaces the per-repo dirty-work explanation.
+	// It exists for retentions that have nothing to do with uncommitted work
+	// — e.g. the archive item finding no grove data dir to archive INTO.
+	// Those still have to be partial successes: archiving is the default
+	// retirement under `flow plan finish --yes`, so a hard failure there
+	// would strand plans in review over an environment problem, and the only
+	// other "recovery" available to the operator would be --prune-worktree,
+	// i.e. deleting the code the archive existed to keep.
+	Reason string
 }
 
 func (e *RetainedWorktreeError) Error() string {
+	if e.Reason != "" {
+		return "worktree retained: " + e.Reason
+	}
 	return fmt.Sprintf("worktree retained for %d repo(s): %s (enable Force to discard uncommitted work)",
 		len(e.Details), strings.Join(e.Details, "; "))
 }
@@ -845,6 +858,14 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			// with prune_worktree: both retire the same container.
 			ID:   ItemArchiveWorktree,
 			Name: "Archive git worktree",
+			// Paired with prune_worktree so hosts that let the user pick
+			// items freely (the wizard's toggle and select-all) can enforce
+			// the exclusion themselves. The factory's own opts-based guard
+			// below only sees CLI flags, which the wizard never sets — it
+			// cannot catch a selection made in the UI. Archive is listed
+			// FIRST, which is how "select all" resolves the group in favour
+			// of the recoverable retirement.
+			ExclusiveGroup: finish.GroupWorktreeRetirement,
 			Check: func() (string, error) {
 				if opts.ArchiveWorktree && opts.PruneWorktree {
 					return color.RedString("Conflicts with prune_worktree"),
@@ -881,11 +902,23 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				}
 				archiveBase := paths.WorktreeArchiveDir()
 				if archiveBase == "" {
-					return fmt.Errorf("cannot resolve worktree archive directory (no grove data dir)")
+					// There is nowhere to archive TO. Since `--yes` now
+					// archives by default, a hard error here would fail a
+					// finish that used to succeed, and the plan would sit in
+					// review forever over an environment problem. Retain the
+					// container where it is and report it: the finish is a
+					// partial success, mark_finished / archive_plan still run,
+					// and — critically — nothing falls back to deleting it.
+					return &RetainedWorktreeError{
+						Reason: fmt.Sprintf("cannot resolve worktree archive directory (no grove data dir); "+
+							"the worktree was left untouched at %s", containerPath),
+					}
 				}
-				destPath := filepath.Join(archiveBase, workspace.DirIdentifier(gitRoot), worktreeName)
-				if _, err := os.Stat(destPath); err == nil {
-					return fmt.Errorf("archive destination already exists: %s", destPath)
+				// A name collision is disambiguated rather than refused; see
+				// uniqueArchiveDest for why.
+				destPath, err := uniqueArchiveDest(filepath.Join(archiveBase, workspace.DirIdentifier(gitRoot), worktreeName))
+				if err != nil {
+					return err
 				}
 				if !pathIsUnderWorktreeArchive(destPath) {
 					return fmt.Errorf("refusing to archive outside the worktree-archive boundary: %s", destPath)
@@ -914,6 +947,8 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		{
 			ID:   ItemPruneWorktree,
 			Name: "Prune git worktree",
+			// See archive_worktree above: same container, one or the other.
+			ExclusiveGroup: finish.GroupWorktreeRetirement,
 			Check: func() (string, error) {
 				if worktreeName == "" || gitRoot == "" {
 					return "N/A", nil
@@ -2282,6 +2317,39 @@ func pathIsUnderWorktreeArchive(destPath string) bool {
 	root := canonicalizePathForBoundary(base)
 	dest := canonicalizePathForBoundary(destPath)
 	return dest != root && strings.HasPrefix(dest, root+string(filepath.Separator))
+}
+
+// archiveDestAttempts bounds the disambiguation search below. A hundred
+// archives of the same worktree name under the same owner is far past the point
+// where an operator should be told to go and tidy up by hand.
+const archiveDestAttempts = 100
+
+// uniqueArchiveDest returns base when nothing occupies it, and otherwise the
+// first free "<base>-<n>" for n in 2..archiveDestAttempts.
+//
+// A destination collision means a worktree of this name was archived before —
+// ordinary when a plan slug is reused. It is a naming accident, not a safety
+// signal, so it must not fail the archive: archiving is now the DEFAULT
+// retirement under `flow plan finish --yes`, and refusing there would break a
+// finish that used to succeed over something only a manual `mv` can fix, while
+// nudging the operator toward `--prune-worktree` — deleting the very code the
+// archive exists to keep. Suffixing keeps BOTH archives; nothing is overwritten
+// and no history is lost.
+//
+// A non-NotExist stat error (permissions, a dangling symlink) counts as
+// occupied: the archive move must never land on a path it cannot inspect.
+func uniqueArchiveDest(base string) (string, error) {
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		return base, nil
+	}
+	for n := 2; n <= archiveDestAttempts; n++ {
+		candidate := fmt.Sprintf("%s-%d", base, n)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("archive destination %s already exists and the first %d disambiguated names are taken too; "+
+		"clear out %s before finishing again", base, archiveDestAttempts-1, filepath.Dir(base))
 }
 
 // ownerFromWorktreeGitPointer parses the `.git` FILE of the linked worktree

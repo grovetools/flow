@@ -66,8 +66,8 @@ func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
 	cmd.Flags().BoolVarP(&opts.Yes, "yes", "y", false, "Automatically confirm all cleanup actions")
 	cmd.Flags().BoolVar(&opts.DeleteBranch, "delete-branch", false, "Delete the local git branch")
 	cmd.Flags().BoolVar(&opts.DeleteRemote, "delete-remote", false, "Delete the remote git branch")
-	cmd.Flags().BoolVar(&opts.PruneWorktree, "prune-worktree", false, "Remove the git worktree directory")
-	cmd.Flags().BoolVar(&opts.ArchiveWorktree, "archive-worktree", false, "Move the worktree to the grove worktree archive (detached backup with git bundles) instead of deleting it; mutually exclusive with --prune-worktree")
+	cmd.Flags().BoolVar(&opts.PruneWorktree, "prune-worktree", false, "DELETE the git worktree directory. Under --yes this is the only way to delete rather than archive; mutually exclusive with --archive-worktree")
+	cmd.Flags().BoolVar(&opts.ArchiveWorktree, "archive-worktree", false, "Move the worktree to the grove worktree archive (detached backup with git bundles) instead of deleting it. This is what --yes does by default; mutually exclusive with --prune-worktree")
 	cmd.Flags().BoolVar(&opts.CloseSession, "close-session", false, "Close the associated tmux session")
 	cmd.Flags().BoolVar(&opts.CleanDevLinks, "clean-dev-links", false, "Clean up development binary links from the worktree")
 	cmd.Flags().BoolVar(&opts.RebuildBinaries, "rebuild-binaries", false, "Rebuild binaries in the main repository")
@@ -80,6 +80,95 @@ func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
 	cmd.Flags().BoolVar(&opts.PreserveCloud, "preserve-cloud", false, "Honor skip_destroy during env teardown (preserve cloud resources across plan finish; default is to destroy)")
 	cmd.Flags().BoolVar(&opts.KeepNotes, "keep-notes", false, "Skip moving the plan's linked notes to completed/ during finish")
 	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
+}
+
+// hasExplicitFinishFlags reports whether the user named any individual
+// cleanup action on the command line. When they did (and --yes was not
+// passed) the finish runs exactly those actions instead of opening the
+// interactive checklist.
+func hasExplicitFinishFlags(opts plan_finish.Options) bool {
+	return opts.DeleteBranch || opts.DeleteRemote || opts.PruneWorktree ||
+		opts.ArchiveWorktree || opts.CloseSession || opts.CleanDevLinks ||
+		opts.RebuildBinaries || opts.Archive || opts.Force
+}
+
+// applyFinishSelection decides which cleanup items run on the two
+// non-interactive paths: --yes (confirm everything) and explicit-flag mode
+// (run only what was named). It is a pure function over the item slice so the
+// policy — in particular which of the two mutually exclusive worktree
+// retirements runs by default — is testable without a plan on disk.
+//
+// The interactive TUI path never comes here: it starts with nothing ticked and
+// the user chooses.
+func applyFinishSelection(items []*finish.Item, opts plan_finish.Options) {
+	// Item lookup is by stable ID so re-ordering in the factory can't
+	// silently rewire CLI flags to the wrong action.
+	enable := func(id string, on bool) {
+		if it := plan_finish.ItemsByID(items, id); it != nil {
+			it.IsEnabled = on && it.IsAvailable
+		}
+	}
+	if opts.Yes {
+		// --yes is the ONLY path that retires a worktree unattended, so
+		// its default retirement is the RECOVERABLE one: archive_worktree
+		// moves the container under the grove worktree archive, detached
+		// from its owner repos and with a per-repo git bundle for any
+		// unpushed history. prune_worktree, which `git worktree remove`s
+		// and then os.RemoveAll's the container, is destruction — and
+		// destruction has to be asked for.
+		//
+		// The two are mutually exclusive (they retire the same container),
+		// so exactly one of them is enabled here, chosen by --prune-worktree.
+		// Note what does NOT happen: when the archive item is unavailable,
+		// prune is NOT promoted to take its place. "Could not archive" must
+		// never silently become "deleted the worktree".
+		pruneRequested := opts.PruneWorktree
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			switch item.ID {
+			case plan_finish.ItemRebuildBinaries:
+				// --yes confirms cleanup actions, but the main-repo binary
+				// rebuild is a slow (~30s), non-teardown concern that must
+				// stay opt-in. Enable it under --yes ONLY when the user
+				// explicitly passed --rebuild-binaries; otherwise plain
+				// `flow plan finish --yes` is fast teardown.
+				if !opts.RebuildBinaries {
+					item.IsEnabled = false
+					continue
+				}
+			case plan_finish.ItemArchiveWorktree:
+				item.IsEnabled = !pruneRequested && item.IsAvailable
+				continue
+			case plan_finish.ItemPruneWorktree:
+				item.IsEnabled = pruneRequested && item.IsAvailable
+				continue
+			}
+			item.IsEnabled = item.IsAvailable
+		}
+		return
+	}
+	// Always enable env teardown, agent cleanup, submodule merge, mark-finished.
+	enable(plan_finish.ItemEnvTeardown, true)
+	enable(plan_finish.ItemKillBoundAgents, true)
+	enable(plan_finish.ItemMergeSubmodules, true)
+	enable(plan_finish.ItemMarkFinished, true)
+	enable(plan_finish.ItemCloseSession, opts.CloseSession)
+	enable(plan_finish.ItemPruneWorktree, opts.PruneWorktree)
+	enable(plan_finish.ItemArchiveWorktree, opts.ArchiveWorktree)
+	// Retiring the worktree leaves its sessionizer keymap entries
+	// dangling, so clear them whenever it is retired — by EITHER route.
+	// Pruning deletes the container; archiving moves it out from under its
+	// owner repos into the worktree archive. Both leave every keymap entry
+	// pointing at a path that no longer exists.
+	enable(plan_finish.ItemClearNavBindings, opts.PruneWorktree || opts.ArchiveWorktree)
+	enable(plan_finish.ItemCleanDevLinks, opts.CleanDevLinks)
+	enable(plan_finish.ItemDeleteSubmoduleBranches, opts.DeleteBranch)
+	enable(plan_finish.ItemDeleteLocalBranch, opts.DeleteBranch)
+	enable(plan_finish.ItemDeleteRemoteBranch, opts.DeleteRemote)
+	enable(plan_finish.ItemRebuildBinaries, opts.RebuildBinaries)
+	enable(plan_finish.ItemArchivePlan, opts.Archive)
 }
 
 func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options) error {
@@ -124,59 +213,9 @@ func runPlanFinish(cmd *cobra.Command, args []string, opts *plan_finish.Options)
 	}
 	items := result.Items
 
-	// Determine which items to enable based on flags. Item lookup
-	// is by stable ID so re-ordering in the factory can't silently
-	// rewire CLI flags to the wrong action.
-	enable := func(id string, on bool) {
-		if it := plan_finish.ItemsByID(items, id); it != nil {
-			it.IsEnabled = on && it.IsAvailable
-		}
-	}
-	anyExplicitFlags := opts.DeleteBranch || opts.DeleteRemote || opts.PruneWorktree || opts.ArchiveWorktree || opts.CloseSession || opts.CleanDevLinks || opts.RebuildBinaries || opts.Archive || opts.Force
-	if opts.Yes {
-		// --yes confirms cleanup actions, but the main-repo binary
-		// rebuild is a slow (~30s), non-teardown concern that must stay
-		// opt-in. Enable it under --yes ONLY when the user explicitly
-		// passed --rebuild-binaries; otherwise plain `flow plan finish
-		// --yes` is fast teardown.
-		for _, item := range items {
-			if item.ID == plan_finish.ItemRebuildBinaries && !opts.RebuildBinaries {
-				item.IsEnabled = false
-				continue
-			}
-			// Archiving the worktree is strictly opt-in (like the
-			// rebuild), and it replaces pruning: when requested, the
-			// prune item must stay off or both would race over the
-			// same container.
-			if item.ID == plan_finish.ItemArchiveWorktree && !opts.ArchiveWorktree {
-				item.IsEnabled = false
-				continue
-			}
-			if item.ID == plan_finish.ItemPruneWorktree && opts.ArchiveWorktree {
-				item.IsEnabled = false
-				continue
-			}
-			item.IsEnabled = item.IsAvailable
-		}
-	} else if anyExplicitFlags {
-		// Always enable env teardown, agent cleanup, submodule merge, mark-finished.
-		enable(plan_finish.ItemEnvTeardown, true)
-		enable(plan_finish.ItemKillBoundAgents, true)
-		enable(plan_finish.ItemMergeSubmodules, true)
-		enable(plan_finish.ItemMarkFinished, true)
-		enable(plan_finish.ItemCloseSession, opts.CloseSession)
-		enable(plan_finish.ItemPruneWorktree, opts.PruneWorktree)
-		enable(plan_finish.ItemArchiveWorktree, opts.ArchiveWorktree)
-		// Pruning the worktree leaves its sessionizer keymap entries
-		// dangling (paths that no longer exist), so clear them whenever
-		// the worktree is pruned.
-		enable(plan_finish.ItemClearNavBindings, opts.PruneWorktree)
-		enable(plan_finish.ItemCleanDevLinks, opts.CleanDevLinks)
-		enable(plan_finish.ItemDeleteSubmoduleBranches, opts.DeleteBranch)
-		enable(plan_finish.ItemDeleteLocalBranch, opts.DeleteBranch)
-		enable(plan_finish.ItemDeleteRemoteBranch, opts.DeleteRemote)
-		enable(plan_finish.ItemRebuildBinaries, opts.RebuildBinaries)
-		enable(plan_finish.ItemArchivePlan, opts.Archive)
+	// Determine which items to enable based on flags.
+	if opts.Yes || hasExplicitFinishFlags(*opts) {
+		applyFinishSelection(items, *opts)
 	} else {
 		// Interactive TUI mode
 		err := runFinishTUI(planName, items, result.BranchIsMerged, result.BranchExists)
