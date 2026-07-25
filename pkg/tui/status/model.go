@@ -41,11 +41,11 @@ const (
 	minLogsWidth           = 50
 	verticalSeparatorWidth = 3 // Separator + margins
 
-	// Margins
+	// Margins. Horizontal insets are owned by the host pager
+	// (pager.Config.OuterPadding), not by this model — adding our own
+	// on top double-inset the job table and cost it 4 columns.
 	topMargin    = 1
 	bottomMargin = 0
-	leftMargin   = 2
-	rightMargin  = 2
 )
 
 type ViewFocus int
@@ -1138,12 +1138,7 @@ func (m Model) View() string {
 	parts = append(parts, footer)
 
 	finalView := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	result := lipgloss.NewStyle().
-		Margin(0, 2).
-		MaxWidth(m.Width).
-		Render(finalView)
-
-	return result
+	return lipgloss.NewStyle().MaxWidth(m.Width).Render(finalView)
 }
 
 // calculateFocusJobsWidth calculates the optimal width for the jobs pane
@@ -1265,22 +1260,21 @@ func (m *Model) calculateFocusJobsWidth() int {
 	return totalWidth
 }
 
-// calculateBSPJobPaneRatio returns the fraction of total width the job table
-// needs, clamped to [0.3, 0.7]. Used as the initial BSP split ratio so the
-// preview pane never overlaps the job table.
+// defaultBSPJobPaneRatio is the fraction of the split the job table keeps
+// when a detail pane (vv preview, vc context, va agent, …) is promoted into
+// a host BSP split. Even 50/50 rather than a content-derived width: the job
+// table drops low-priority columns to fit whatever it gets
+// (withResponsiveColumns), whereas the detail pane — an editor, an agent
+// terminal, a context dump — has real minimum-width content and used to be
+// squeezed into whatever was left over.
+const defaultBSPJobPaneRatio = 0.5
+
+// calculateBSPJobPaneRatio returns the initial BSP split ratio for the job
+// table. Only the *initial* one: tuimux remembers any orientation or ratio
+// the user sets afterwards (leader-| / resize) and replays it on the next
+// open, including after the detail pane is closed and reopened.
 func (m *Model) calculateBSPJobPaneRatio() float64 {
-	if m.Width <= 0 {
-		return 0.35
-	}
-	// +6 accounts for lipgloss margin (4 cols) + BSP gutter/border (2 cols)
-	ratio := float64(m.calculateFocusJobsWidth()+6) / float64(m.Width)
-	if ratio < 0.3 {
-		ratio = 0.3
-	}
-	if ratio > 0.7 {
-		ratio = 0.7
-	}
-	return ratio
+	return defaultBSPJobPaneRatio
 }
 
 // updateLayoutDimensions recalculates pane sizes by redistributing
@@ -1305,7 +1299,7 @@ func (m *Model) updateLayoutDimensions() {
 	// then redistribute dimensions so inner models get accurate sizes.
 	m.syncPaneLayout()
 	chatInputHeight := m.calculateChatInputHeight()
-	contentWidth := m.Width - (leftMargin + rightMargin)
+	contentWidth := m.Width
 	if contentWidth < 40 {
 		contentWidth = 40
 	}

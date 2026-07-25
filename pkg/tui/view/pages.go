@@ -124,13 +124,22 @@ func (p *statusPage) IsTextEntryActive() bool {
 	return p.s.statusModel != nil && p.s.statusModel.IsTextEntryActive()
 }
 
+// FooterHeight opts the Jobs page out of the pager's shared 4-row
+// footer reservation. The status model renders its own help/status
+// footer at the bottom of its body, so those rows were pure blank
+// space below it — visible as a gap under the job table, and worth
+// reclaiming now that the table often shares its pane with a host BSP
+// split.
+func (p *statusPage) FooterHeight() int { return 0 }
+
 // Compile-time checks.
 var (
-	_ pager.Page              = (*statusPage)(nil)
-	_ pager.PageWithTitle     = (*statusPage)(nil)
-	_ pager.PageWithEnabled   = (*statusPage)(nil)
-	_ pager.PageWithReady     = (*statusPage)(nil)
-	_ pager.PageWithTextInput = (*statusPage)(nil)
+	_ pager.Page                 = (*statusPage)(nil)
+	_ pager.PageWithTitle        = (*statusPage)(nil)
+	_ pager.PageWithEnabled      = (*statusPage)(nil)
+	_ pager.PageWithReady        = (*statusPage)(nil)
+	_ pager.PageWithTextInput    = (*statusPage)(nil)
+	_ pager.PageWithFooterHeight = (*statusPage)(nil)
 )
 
 // ---------- addJobPage (tab 1: Add Job) ----------
