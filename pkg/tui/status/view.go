@@ -353,7 +353,7 @@ func (m Model) renderTableView() string {
 						treePrefix += "├─ "
 					}
 				}
-				statusIcon := m.getStatusIcon(job.Status)
+				statusIcon := m.jobStatusIcon(job)
 
 				filename := job.Filename
 
@@ -443,7 +443,9 @@ func (m Model) renderTableView() string {
 					statusStyle = style
 				}
 				statusText := statusStyle.Render(string(job.Status))
-				if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
+				if m.isInitializing(job) {
+					cell = theme.DefaultTheme.Info.Render("initializing")
+				} else if job.Status == orchestration.JobStatusCompleted || job.Status == orchestration.JobStatusAbandoned {
 					cell = t.Muted.Render(string(job.Status))
 				} else {
 					cell = statusText
@@ -527,6 +529,39 @@ func getJobIcon(job *orchestration.Job) string {
 	default:
 		return theme.IconChat // Default fallback
 	}
+}
+
+// initializingGrace bounds how long a job may render as "initializing" after
+// submission. If the store status never catches up (e.g. the daemon held the
+// job), the real status wins again after this window.
+const initializingGrace = 2 * time.Minute
+
+// isInitializing reports whether a job was just submitted from this TUI and
+// its store status hasn't reflected the launch yet. Any status the daemon
+// writes once execution actually starts (running, or a terminal state)
+// supersedes the marker.
+func (m Model) isInitializing(job *orchestration.Job) bool {
+	submittedAt, ok := m.InitializingJobs[job.ID]
+	if !ok || time.Since(submittedAt) > initializingGrace {
+		return false
+	}
+	switch job.Status {
+	case orchestration.JobStatusPending, orchestration.JobStatusBlocked,
+		orchestration.JobStatusFailed, orchestration.JobStatusPendingUser,
+		orchestration.JobStatusTodo:
+		return true
+	}
+	return false
+}
+
+// jobStatusIcon returns the status icon for a job row, rendering a transient
+// "initializing" indicator for jobs submitted from this TUI that haven't
+// visibly started yet.
+func (m Model) jobStatusIcon(job *orchestration.Job) string {
+	if m.isInitializing(job) {
+		return theme.DefaultTheme.Info.Render(theme.IconRunning)
+	}
+	return m.getStatusIcon(job.Status)
 }
 
 // getStatusIcon returns a colored dot indicator for a job status
@@ -818,7 +853,7 @@ func (m Model) renderEditDepsView() string {
 		}
 
 		// Status icon
-		statusIcon := m.getStatusIcon(job.Status)
+		statusIcon := m.jobStatusIcon(job)
 		line.WriteString(" ")
 		line.WriteString(statusIcon)
 

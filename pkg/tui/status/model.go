@@ -259,6 +259,12 @@ type Model struct {
 	IsRunningJob            bool            // Track if a job is currently running
 	isAutorunning           bool            // True when automatically running all stages
 	originalSelection       map[string]bool // Track the original user selection for autorun
+	// InitializingJobs marks jobs submitted for execution from this TUI whose
+	// store status hasn't caught up yet (spawning can take a while). Keyed by
+	// job ID, valued with the submission time so the marker can expire. Rows
+	// render a transient "initializing" state until the real status
+	// (running/terminal) supersedes it or the grace window lapses.
+	InitializingJobs map[string]time.Time
 	RunLogFile              string          // Path to temporary log file for job output
 	// MsgCh is the channel used by background streaming goroutines to deliver
 	// messages into the Update loop. The Model's listenStream tea.Cmd drains it.
@@ -489,7 +495,7 @@ func (m Model) renderDetailHeader() string {
 	if jobTitle == "" {
 		jobTitle = currentJob.Filename
 	}
-	statusIcon := m.getStatusIcon(currentJob.Status)
+	statusIcon := m.jobStatusIcon(currentJob)
 	filenameDisplay := ""
 	if jobTitle != currentJob.Filename {
 		filenameDisplay = fmt.Sprintf(" (%s)", currentJob.Filename)

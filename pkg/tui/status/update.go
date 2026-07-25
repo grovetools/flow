@@ -761,6 +761,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Jobs have been submitted to the daemon
 		if msg.Err != nil {
 			m.IsRunningJob = false
+			// Submission failed — drop the transient "initializing" markers
+			// so rows fall back to their real status.
+			for _, job := range msg.Jobs {
+				delete(m.InitializingJobs, job.ID)
+			}
 			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Failed to submit jobs: %v", msg.Err))
 			return m, refreshPlan(m.PlanDir)
 		}
@@ -1059,6 +1064,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.JobParents = parents
 		m.JobIndents = indents
 		m.OwnershipChildren = indexOwnershipChildren(jobs, parents)
+
+		// Drop "initializing" markers whose job has visibly started (or
+		// disappeared, or sat unstarted past the grace window) so the map
+		// doesn't accumulate stale entries across runs.
+		for id := range m.InitializingJobs {
+			var tracked *orchestration.Job
+			for _, job := range jobs {
+				if job.ID == id {
+					tracked = job
+					break
+				}
+			}
+			if tracked == nil || !m.isInitializing(tracked) {
+				delete(m.InitializingJobs, id)
+			}
+		}
 
 		orch, err := orchestration.NewOrchestrator(plan, orchConfig)
 		if err != nil {
@@ -2464,6 +2485,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Start running the jobs asynchronously
 				m.IsRunningJob = true
 				m.ActiveLogJob = jobsToRun[0]
+
+				// Mark jobs expected to start now as "initializing" so the
+				// table gives immediate feedback — spawning can take a while
+				// and the store status only flips to running once the
+				// executor is up. Jobs the daemon will merely queue (unmet
+				// deps) keep their real status.
+				if m.InitializingJobs == nil {
+					m.InitializingJobs = make(map[string]time.Time)
+				}
+				for _, job := range jobsToRun {
+					if job.IsRunnable() || job.Status == orchestration.JobStatusFailed {
+						m.InitializingJobs[job.ID] = time.Now()
+					}
+				}
 
 				var layoutCmds []tea.Cmd
 
