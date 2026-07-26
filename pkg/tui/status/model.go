@@ -333,7 +333,7 @@ type Model struct {
 // IsTextEntryActive returns true when the user is focused on a text input,
 // signalling that single-letter shortcuts should not be intercepted.
 func (m Model) IsTextEntryActive() bool {
-	return m.IsolatedAgentInputActive || m.Renaming || m.CreatingJob ||
+	return m.Help.IsTextEntryActive() || m.IsolatedAgentInputActive || m.Renaming || m.CreatingJob ||
 		m.ClawDialogActive || m.ClawTargetSelectorActive || m.skillSearchActive || m.fieldEditor != nil ||
 		m.EditingDeps ||
 		m.selectingRecipe || m.columnSelectMode
