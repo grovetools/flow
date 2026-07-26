@@ -27,6 +27,72 @@ func writeSessionBindingFixture(t *testing.T, root, dir string, job *Job, starte
 	return transcriptPath
 }
 
+func TestFindVerifiedJobSessionAcceptsSameFileWithDifferentPath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GROVE_HOME", root)
+	jobPath := filepath.Join(root, "job.md")
+	aliasPath := filepath.Join(root, "job-alias.md")
+	if err := os.WriteFile(jobPath, []byte("job\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(jobPath, aliasPath); err != nil {
+		t.Fatal(err)
+	}
+
+	job := &Job{ID: "job-1", FilePath: jobPath, StartTime: time.Now()}
+	registryJob := *job
+	registryJob.FilePath = aliasPath
+	writeSessionBindingFixture(t, root, "native", &registryJob, job.StartTime, "transcript\n")
+
+	if _, err := findVerifiedJobSession(job); err != nil {
+		t.Fatalf("findVerifiedJobSession rejected paths for the same file: %v", err)
+	}
+}
+
+func TestFindVerifiedJobSessionAcceptsDifferentCaseOnCaseInsensitiveFilesystem(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GROVE_HOME", root)
+	jobPath := filepath.Join(root, "MixedCaseJob.md")
+	if err := os.WriteFile(jobPath, []byte("job\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alternatePath := filepath.Join(root, "mixedcasejob.md")
+	if _, err := os.Stat(alternatePath); err != nil {
+		t.Skip("filesystem is case-sensitive")
+	}
+
+	job := &Job{ID: "job-1", FilePath: jobPath, StartTime: time.Now()}
+	registryJob := *job
+	registryJob.FilePath = alternatePath
+	writeSessionBindingFixture(t, root, "native", &registryJob, job.StartTime, "transcript\n")
+
+	if _, err := findVerifiedJobSession(job); err != nil {
+		t.Fatalf("findVerifiedJobSession rejected differently-cased path for the same file: %v", err)
+	}
+}
+
+func TestFindVerifiedJobSessionRejectsDifferentJobFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GROVE_HOME", root)
+	jobPath := filepath.Join(root, "job.md")
+	otherPath := filepath.Join(root, "other-job.md")
+	for _, path := range []string{jobPath, otherPath} {
+		if err := os.WriteFile(path, []byte(path+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	job := &Job{ID: "job-1", FilePath: jobPath, StartTime: time.Now()}
+	registryJob := *job
+	registryJob.FilePath = otherPath
+	writeSessionBindingFixture(t, root, "native", &registryJob, job.StartTime, "transcript\n")
+
+	_, err := findVerifiedJobSession(job)
+	if err == nil || !strings.Contains(err.Error(), "job path mismatch") {
+		t.Fatalf("expected job path mismatch, got %v", err)
+	}
+}
+
 func TestFindVerifiedJobSessionRejectsStaleRetryBinding(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("GROVE_HOME", root)

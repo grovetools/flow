@@ -23,6 +23,19 @@ type verifiedJobSession struct {
 	MetadataPath string
 }
 
+// sameFilesystemPath prefers file identity over path spelling. This matters on
+// case-insensitive filesystems, where two differently-cased paths can name the
+// same job file. If either path cannot be statted, retain the historical clean
+// string comparison so not-yet-created paths continue to work.
+func sameFilesystemPath(a, b string) bool {
+	aInfo, aErr := os.Stat(a)
+	bInfo, bErr := os.Stat(b)
+	if aErr == nil && bErr == nil {
+		return os.SameFile(aInfo, bInfo)
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
 func findVerifiedJobSession(job *Job) (*verifiedJobSession, error) {
 	if job == nil || job.ID == "" || job.FilePath == "" {
 		return nil, fmt.Errorf("session binding unverified: incomplete Flow job identity")
@@ -55,7 +68,7 @@ func findVerifiedJobSession(job *Job) (*verifiedJobSession, error) {
 			continue
 		}
 		gotPath, absErr := filepath.Abs(metadata.JobFilePath)
-		if absErr != nil || metadata.JobFilePath == "" || filepath.Clean(gotPath) != wantPath {
+		if absErr != nil || metadata.JobFilePath == "" || !sameFilesystemPath(gotPath, wantPath) {
 			rejected = append(rejected, entry.Name()+": job path mismatch")
 			continue
 		}
