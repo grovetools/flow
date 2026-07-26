@@ -1159,9 +1159,22 @@ func blink() tea.Cmd {
 	})
 }
 
+const (
+	// refreshInterval is the cadence of the plan-refresh tick that reloads
+	// job status from disk.
+	refreshInterval = 2 * time.Second
+	// refreshStallThreshold is how long the refresh tick may go silent before
+	// a regained focus treats the loop as dead and re-arms it. The tick
+	// re-arms itself only by handling the message it produced, so a host that
+	// drops that message (a background workspace session in the terminal
+	// host, say) kills the loop permanently. Generous enough that a merely
+	// busy event loop is never mistaken for a dead one.
+	refreshStallThreshold = 3 * refreshInterval
+)
+
 // refreshTick returns a command that sends a refresh message periodically
 func refreshTick() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
 		return RefreshTickMsg(t)
 	})
 }

@@ -50,6 +50,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case embed.FocusMsg:
 		m.HasFocus = true
+		// Regaining focus is the one moment a host reliably talks to a model
+		// it may have been starving. The plan-refresh tick re-arms itself
+		// only by handling the message it produced, so a host that dropped
+		// that message (a terminal-host workspace session sitting in the
+		// background, say) left the loop dead and the job table frozen on
+		// whatever it last read from disk. Revive it — but only once the
+		// tick is overdue by a wide margin, and stamp the revival so a
+		// second focus in quick succession can't stack a duplicate loop.
+		if time.Since(m.lastRefreshTickAt) > refreshStallThreshold {
+			m.lastRefreshTickAt = time.Now()
+			return m, refreshTick()
+		}
 		return m, nil
 
 	case embed.BlurMsg:
@@ -984,6 +996,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshPlan(m.PlanDir)
 
 	case RefreshTickMsg:
+		m.lastRefreshTickAt = time.Now()
 		cmds := []tea.Cmd{
 			refreshPlan(m.PlanDir),
 			refreshTick(),

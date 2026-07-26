@@ -1019,6 +1019,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, bc)
 		}
 	}
+	// And the same for the status model when the Jobs tab is NOT active. It
+	// owns three self-rearming background loops — the 2s plan-refresh tick,
+	// the daemon SSE listener, and the MsgCh stream listener — each of which
+	// re-arms itself ONLY by handling the message it just produced. Starving
+	// it for the duration of a wizard/browser detour kills all three for the
+	// lifetime of the model, so the job table silently stops updating once
+	// the user comes back to Jobs. Guarded on the active index so the pager's
+	// own delivery is never doubled.
+	if m.pager.ActiveIndex() != tabJobs && m.s.statusModel != nil {
+		updated, sc := m.s.statusModel.Update(msg)
+		if sm, ok := updated.(status.Model); ok {
+			*m.s.statusModel = sm
+		}
+		if sc != nil {
+			cmds = append(cmds, sc)
+		}
+	}
 	return m, tea.Batch(cmds...)
 }
 

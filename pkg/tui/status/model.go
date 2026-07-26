@@ -265,7 +265,12 @@ type Model struct {
 	// render a transient "initializing" state until the real status
 	// (running/terminal) supersedes it or the grace window lapses.
 	InitializingJobs map[string]time.Time
-	RunLogFile              string          // Path to temporary log file for job output
+	// lastRefreshTickAt is when the plan-refresh tick last came back around.
+	// Seeded at construction so a model that has not ticked yet is not
+	// mistaken for a stalled one. Read on regaining focus to decide whether
+	// the self-rearming tick loop needs reviving — see refreshStallThreshold.
+	lastRefreshTickAt time.Time
+	RunLogFile        string // Path to temporary log file for job output
 	// MsgCh is the channel used by background streaming goroutines to deliver
 	// messages into the Update loop. The Model's listenStream tea.Cmd drains it.
 	// Close() closes this channel (once) so the listener goroutine unblocks
@@ -803,6 +808,7 @@ func New(cfg Config) Model {
 		IsRunningJob:             false,
 		RunLogFile:               "", // No longer creating TUI-specific log files
 		MsgCh:                    make(chan tea.Msg, 1024),
+		lastRefreshTickAt:        time.Now(),
 		streamWg:                 &sync.WaitGroup{},
 		msgChCloseOnce:           &sync.Once{},
 		frontmatterViewport:      frontmatterVp,
