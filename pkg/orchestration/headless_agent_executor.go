@@ -471,13 +471,9 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		}
 	}
 
-	if spec != nil && spec.PiRuntime != nil {
-		sessionDir, dirErr := preparePiJobSessionDir(plan.Directory, job.ID)
-		if dirErr != nil {
-			return dirErr
-		}
-		// Append after user arguments so Flow's job-scoped directory wins.
-		agentArgs = append(agentArgs, "--session-dir", sessionDir)
+	agentArgs, err = appendPiJobSessionArgs(spec, plan.Directory, job.ID, agentArgs)
+	if err != nil {
+		return err
 	}
 	cmd, err := buildHeadlessCommand(ctx, providerName, prompt, agentArgs)
 	if err != nil {
@@ -660,7 +656,21 @@ func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDi
 
 	var nativeID string
 	if transcriptPath != "" {
-		nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+		if specKnown && spec.PiRuntime != nil {
+			nativeID = piNativeSessionID(transcriptPath)
+		} else {
+			nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+		}
+	}
+
+	if specKnown {
+		if err := requirePiTranscriptPath(spec, plan.Directory, job.ID, transcriptPath); err != nil {
+			ulog.Warn("[HEADLESS] Refusing to confirm Pi session without Flow-owned transcript").
+				Field("job_id", job.ID).
+				Err(err).
+				Log(ctx)
+			return
+		}
 	}
 
 	daemonClient := daemon.NewWithAutoStart()

@@ -334,6 +334,14 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		nativeID = piNativeSessionID(transcriptPath)
 	}
 
+	// Do not turn the pending intent into a live session until its exact
+	// Flow-owned transcript is known. Confirming with an empty path causes
+	// groved's token refresher to fall back to a global transcript scan.
+	spec, _ := LookupAgentProvider(p.providerName)
+	if err := requirePiTranscriptPath(spec, plan.Directory, job.ID, transcriptPath); err != nil {
+		return err
+	}
+
 	// Confirm the session with the daemon using the discovered PID
 	daemonClient := daemon.NewWithAutoStart()
 	defer daemonClient.Close()

@@ -28,6 +28,50 @@ func TestPreparePiJobSessionDirIsJobScoped(t *testing.T) {
 	}
 }
 
+func TestAppendPiJobSessionArgsCoversEveryPiFamilyProvider(t *testing.T) {
+	plan := t.TempDir()
+	for _, provider := range []string{"pi", "grove-agent"} {
+		spec, ok := LookupAgentProvider(provider)
+		if !ok {
+			t.Fatalf("missing provider %q", provider)
+		}
+		configured := make([]string, 1, 4)
+		configured[0] = "--verbose"
+		args, err := appendPiJobSessionArgs(spec, plan, "job-a", configured)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := filepath.Join(plan, ".artifacts", "job-a", "sessions")
+		if len(args) != 3 || args[1] != "--session-dir" || args[2] != want {
+			t.Fatalf("%s args = %#v, want Flow-owned session dir %q", provider, args, want)
+		}
+		if len(configured) != 1 || configured[0] != "--verbose" {
+			t.Fatalf("%s mutated configured args: %#v", provider, configured)
+		}
+	}
+}
+
+func TestRequirePiTranscriptPathPreventsPathlessLiveSession(t *testing.T) {
+	for _, provider := range []string{"pi", "grove-agent"} {
+		spec, _ := LookupAgentProvider(provider)
+		if err := requirePiTranscriptPath(spec, "/flow", "job", ""); err == nil {
+			t.Fatalf("%s accepted empty transcript path", provider)
+		}
+		exact := "/flow/.artifacts/job/sessions/session.jsonl"
+		if err := requirePiTranscriptPath(spec, "/flow", "job", exact); err != nil {
+			t.Fatalf("%s rejected exact transcript path: %v", provider, err)
+		}
+		if err := requirePiTranscriptPath(spec, "/flow", "job", "/tmp/session.jsonl"); err == nil {
+			t.Fatalf("%s accepted transcript outside Flow-owned session directory", provider)
+		}
+	}
+
+	claude, _ := LookupAgentProvider("claude")
+	if err := requirePiTranscriptPath(claude, "/flow", "job", ""); err != nil {
+		t.Fatalf("non-Pi provider should retain existing registration semantics: %v", err)
+	}
+}
+
 func TestArchiveFinalReportBounded(t *testing.T) {
 	planDir := t.TempDir()
 	jobPath := filepath.Join(planDir, "job.md")

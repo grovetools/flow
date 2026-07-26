@@ -51,17 +51,15 @@ func NewGrovetermAgentProvider(spec *AgentProviderSpec, autoSplit bool, agentTar
 // Launch implements InteractiveAgentProvider. It registers a session intent
 // with the daemon and then requests groveterm to spawn a native agent pane.
 func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
-	if p.spec.PiRuntime != nil {
-		if p.spec.PiRuntime.ManagedCodexAuth {
-			if err := requireManagedPiCodexAuth(); err != nil {
-				return err
-			}
-		}
-		sessionDir, err := preparePiJobSessionDir(plan.Directory, job.ID)
-		if err != nil {
+	if p.spec.PiRuntime != nil && p.spec.PiRuntime.ManagedCodexAuth {
+		if err := requireManagedPiCodexAuth(); err != nil {
 			return err
 		}
-		agentArgs = append(agentArgs, "--session-dir", sessionDir)
+	}
+	var err error
+	agentArgs, err = appendPiJobSessionArgs(p.spec, plan.Directory, job.ID, agentArgs)
+	if err != nil {
+		return err
 	}
 
 	rawCommand := p.buildCommand(agentArgs, briefingFilePath)
@@ -257,6 +255,13 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	}
 	if nativeID == "" {
 		nativeID = expectedNativeID
+	}
+
+	// Never promote a Pi-family intent to a live groved session without the
+	// exact Flow-owned transcript. Leaving the intent pending avoids global
+	// resolution while a failed/slow launch is diagnosed.
+	if err := requirePiTranscriptPath(p.spec, plan.Directory, job.ID, transcriptPath); err != nil {
+		return err
 	}
 
 	// Confirm the session with the daemon

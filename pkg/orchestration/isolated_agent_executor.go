@@ -267,8 +267,29 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	}
 
 	// Build the agent command from the provider's spec (same instruction and
-	// command shape as the interactive/groveterm launch paths).
+	// command shape as the interactive/groveterm launch paths). Pi-family
+	// isolated jobs must use the same Flow-owned session directory as every
+	// other launch path.
+	if spec.PiRuntime != nil && spec.PiRuntime.ManagedCodexAuth {
+		if err := requireManagedPiCodexAuth(); err != nil {
+			return err
+		}
+	}
+	agentArgs, err = appendPiJobSessionArgs(spec, plan.Directory, job.ID, agentArgs)
+	if err != nil {
+		return err
+	}
 	agentCommand := spec.BuildShellCommand(agentArgs, buildBriefingInstruction(briefingFilePath))
+
+	// Pre-register Pi-family jobs before launch. The pending status is
+	// intentionally retained until discovery can supply an exact transcript.
+	if spec.PiRuntime != nil {
+		daemonClient := daemon.NewWithAutoStart()
+		defer daemonClient.Close()
+		if err := daemonClient.RegisterSessionIntent(ctx, newAgentSessionIntent(job, plan, spec.Name, workDir, "tmux")); err != nil {
+			e.log.WithError(err).Warn("Failed to register isolated Pi session intent with daemon")
+		}
+	}
 
 	// Inline env vars on the agent command itself — scoped to the agent
 	// process, not exported into the pane's shell, so nothing leaks after
@@ -358,6 +379,46 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 		logger.WithError(err).Warn("Failed to update lock file with agent PID")
 	}
 
+	// Pi-family transcripts live outside the provider's global session roots,
+	// so discover and register the exact custom path before making the session
+	// live in groved.
+	var transcriptPath, nativeID string
+	spec, specKnown := LookupAgentProvider(providerName)
+	if specKnown && spec.PiRuntime != nil {
+		var transcriptErr error
+		for i := 0; i < 10; i++ {
+			transcriptPath, transcriptErr = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+				Provider:   "pi",
+				WorkDir:    workDir,
+				AfterTime:  job.StartTime,
+				SessionDir: piJobSessionDir(plan.Directory, job.ID),
+			})
+			if transcriptErr == nil {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		if err := requirePiTranscriptPath(spec, plan.Directory, job.ID, transcriptPath); err != nil {
+			return err
+		}
+		nativeID = piNativeSessionID(transcriptPath)
+	}
+
+	// Confirm the Pi daemon intent when possible. If the daemon is unavailable,
+	// the filesystem registration below preserves the same exact path. Other
+	// providers retain the isolated executor's existing filesystem semantics.
+	confirmed := false
+	if specKnown && spec.PiRuntime != nil {
+		daemonClient := daemon.NewWithAutoStart()
+		defer daemonClient.Close()
+		confirmed = daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
+			JobID:          job.ID,
+			NativeID:       nativeID,
+			PID:            agentPID,
+			TranscriptPath: transcriptPath,
+		}) == nil
+	}
+
 	// Get user info
 	user := os.Getenv("USER")
 	if user == "" {
@@ -383,6 +444,16 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 		PlanName:         plan.Name,
 		JobFilePath:      job.FilePath,
 		Type:             "isolated_agent",
+		TranscriptPath:   transcriptPath,
+	}
+	if confirmed {
+		logger.WithFields(logrus.Fields{
+			"session_id":      job.ID,
+			"pid":             agentPID,
+			"socket":          socketName,
+			"transcript_path": transcriptPath,
+		}).Info("Confirmed isolated agent session")
+		return nil
 	}
 
 	// Register using the FileSystemRegistry
