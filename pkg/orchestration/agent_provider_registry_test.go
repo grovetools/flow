@@ -145,6 +145,44 @@ func TestBuildShellCommand_Shapes(t *testing.T) {
 	})
 }
 
+func TestBuildAgentResumeShellCommand(t *testing.T) {
+	t.Run("claude", func(t *testing.T) {
+		got, err := BuildAgentResumeShellCommand("claude", []string{"--model", "opus"}, "session-123")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "claude --model opus --resume session-123"; got != want {
+			t.Fatalf("command = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("codex global args precede subcommand", func(t *testing.T) {
+		got, err := BuildAgentResumeShellCommand("codex", []string{"--model", "gpt-5.2"}, "019c6073-cf17-7492")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "codex --model gpt-5.2 resume 019c6073-cf17-7492"; got != want {
+			t.Fatalf("command = %q, want %q", got, want)
+		}
+	})
+
+	for _, tc := range []struct {
+		name, provider, sessionID, wantErr string
+	}{
+		{"unsupported", "pi", "session-123", "does not support"},
+		{"unknown", "missing", "session-123", "unknown agent provider"},
+		{"empty id", "claude", "", "required"},
+		{"unsafe id", "claude", "id;rm", "unsafe"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildAgentResumeShellCommand(tc.provider, nil, tc.sessionID)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestPiHeadlessCommand_StdinPromptAndPrintFlag(t *testing.T) {
 	spec := specForTest(t, "pi")
 	if !spec.SupportsHeadless || spec.NewHeadlessCommand == nil {

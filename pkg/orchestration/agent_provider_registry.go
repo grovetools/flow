@@ -51,6 +51,11 @@ type AgentProviderSpec struct {
 	// (tmux / groveterm PTY) and isolated launch paths. The instruction is
 	// already shell-escaped (see buildBriefingInstruction).
 	BuildShellCommand func(agentArgs []string, instruction string) string
+	// BuildResumeShellCommand builds the provider-specific command that resumes
+	// a native session. nil means the provider does not support resume. Launch
+	// ownership (intent, env, PID capture, and confirmation) remains with the
+	// normal interactive provider lifecycle; callers must not execute this raw.
+	BuildResumeShellCommand func(agentArgs []string, nativeSessionID string) (string, error)
 
 	// ModelFlag is the CLI flag used to pass a per-job model ("" = the
 	// provider takes no per-job model flag and job.Model is rejected).
@@ -162,6 +167,7 @@ var agentProviderRegistry = map[string]*AgentProviderSpec{
 			return cmd
 		},
 		BuildShellCommand:           positionalShellCommand("claude"),
+		BuildResumeShellCommand:     resumeShellCommand("claude", "--resume"),
 		ModelFlag:                   "--model",
 		EffortFlag:                  "--effort",
 		ValidateJobModel:            validateClaudeAgentModel,
@@ -176,11 +182,12 @@ var agentProviderRegistry = map[string]*AgentProviderSpec{
 		},
 	},
 	"codex": {
-		Name:              "codex",
-		Binary:            "codex",
-		SupportsHeadless:  false,
-		BuildShellCommand: positionalShellCommand("codex"),
-		ModelFlag:         "--model",
+		Name:                    "codex",
+		Binary:                  "codex",
+		SupportsHeadless:        false,
+		BuildShellCommand:       positionalShellCommand("codex"),
+		BuildResumeShellCommand: resumeShellCommand("codex", "resume"),
+		ModelFlag:               "--model",
 		// codex has no --effort flag (reasoning effort is a -c config
 		// override, not a per-job CLI flag we pass through today).
 		EffortFlag:          "",
@@ -239,6 +246,40 @@ func positionalShellCommand(binary string) func(agentArgs []string, instruction 
 		cmdParts := append([]string{binary}, agentArgs...)
 		return fmt.Sprintf("%s \"%s\"", strings.Join(cmdParts, " "), instruction)
 	}
+}
+
+// resumeShellCommand returns the common resume command shape used by Claude
+// (`claude <args> --resume <id>`) and Codex (`codex <args> resume <id>`).
+// Provider args precede the resume token because Codex treats them as global
+// options. Native IDs are intentionally restricted to the same shell-safe
+// alphabet used by per-job model values.
+func resumeShellCommand(binary, resumeToken string) func([]string, string) (string, error) {
+	return func(agentArgs []string, nativeSessionID string) (string, error) {
+		if nativeSessionID == "" {
+			return "", fmt.Errorf("native session ID is required")
+		}
+		if !isShellSafeArgValue(nativeSessionID) {
+			return "", fmt.Errorf("native session ID %q contains characters that are unsafe in a shell command", nativeSessionID)
+		}
+		cmdParts := append([]string{binary}, agentArgs...)
+		cmdParts = append(cmdParts, resumeToken, nativeSessionID)
+		return strings.Join(cmdParts, " "), nil
+	}
+}
+
+// BuildAgentResumeShellCommand builds the registered provider's resume command.
+// It only describes command bytes; the command must still be launched through
+// the provider lifecycle so daemon intent, GROVE_FLOW_* env, PID capture,
+// session confirmation, and agent-target routing are preserved.
+func BuildAgentResumeShellCommand(providerName string, agentArgs []string, nativeSessionID string) (string, error) {
+	spec, ok := LookupAgentProvider(providerName)
+	if !ok {
+		return "", unknownAgentProviderError(providerName)
+	}
+	if spec.BuildResumeShellCommand == nil {
+		return "", fmt.Errorf("agent provider %q does not support session resume", providerName)
+	}
+	return spec.BuildResumeShellCommand(agentArgs, nativeSessionID)
 }
 
 // buildBriefingInstruction assembles the standard "read the briefing file"

@@ -38,11 +38,25 @@ func NewCodexAgentProvider() *CodexAgentProvider {
 }
 
 func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
-	// Update job status to running
-	job.Status = JobStatusRunning
-	job.StartTime = time.Now()
-	if err := updateJobFile(job); err != nil {
-		return fmt.Errorf("updating job status: %w", err)
+	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
+	if err != nil {
+		return fmt.Errorf("failed to build agent command: %w", err)
+	}
+	return p.LaunchPrepared(ctx, job, plan, workDir, agentCommand, "")
+}
+
+// LaunchPrepared owns the complete Codex interactive lifecycle for prepared
+// provider command bytes.
+func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, agentCommand, expectedNativeID string) error {
+	// Normal launches enter running here. Resume supplies its known native ID
+	// after an atomic completed-to-running transition and must retain that
+	// attempt time rather than rewriting it through the legacy status path.
+	if expectedNativeID == "" {
+		job.Status = JobStatusRunning
+		job.StartTime = time.Now()
+		if err := updateJobFile(job); err != nil {
+			return fmt.Errorf("updating job status: %w", err)
+		}
 	}
 
 	agentTarget := "tmux"
@@ -58,7 +72,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// mirroring the claude provider: the daemon tracks the session and waits
 	// for confirmation with the discovered PID/transcript. Failure degrades
 	// gracefully — the async confirm falls back to the filesystem registry.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -109,14 +123,6 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 		p.log.WithField("session", sessionName).Info("Using existing session for interactive job")
 	}
 
-	// Build agent command (reuse Claude provider's logic but replace "claude" with "codex")
-	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to build agent command: %w", err)
-	}
-
 	// Create a new window for this specific agent job in the session
 	agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
@@ -144,7 +150,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// the agent exits. GROVE_SCOPE is inherited from the executor's env
 	// (treemux or daemon), not forced from workDir.
 	scopePrefix := ""
-	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+	if scope := resolveJobScope(workDir); scope != "" {
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
@@ -172,7 +178,7 @@ func (p *CodexAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, w
 	// synchronous newest-file scrape, which raced concurrent codex sessions
 	// and blocked the launch path.
 	go func() {
-		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane); err != nil {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
 			p.log.WithError(err).Error("Failed to confirm codex session")
 			// Continue anyway - the agent is running, just tracking may be impaired
 		}
@@ -225,7 +231,7 @@ func (p *CodexAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFil
 // Launch). Designed to run in a goroutine. If the daemon is unreachable it
 // falls back to the filesystem session registry, matching the claude provider's
 // degradation path.
-func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane string) error {
+func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane, expectedNativeID string) error {
 	logger := grovelogging.NewLogger("flow-codex-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
@@ -296,9 +302,12 @@ func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pla
 	if transcriptPath != "" {
 		nativeID = codexNativeSessionID(transcriptPath)
 	}
+	if nativeID == "" {
+		nativeID = expectedNativeID
+	}
 
 	// Confirm the session with the daemon using the discovered PID
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
@@ -331,6 +340,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pla
 			JobFilePath:      job.FilePath,
 			Type:             "interactive_agent",
 			TranscriptPath:   transcriptPath,
+			Scope:            resolveJobScope(workDir),
 		}
 
 		registry, regErr := sessions.NewFileSystemRegistry()

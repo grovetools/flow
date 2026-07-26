@@ -1,17 +1,13 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/util/delegation"
-	"github.com/grovetools/core/util/sanitize"
 	"github.com/spf13/cobra"
 
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -21,9 +17,10 @@ import (
 func NewPlanResumeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resume <job-file>",
-		Short: "Resume a completed interactive agent job",
-		Long: `Resumes a completed interactive agent session by finding its native agent session ID
-and re-launching the agent in a new tmux window.`,
+		Short: "Resume a completed agent job",
+		Long: `Resumes a completed agent session by finding its native agent session ID
+and re-launching it through the plan's configured tmux, native, or tuimux target.
+Claude and Codex sessions are supported.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runPlanResume,
 	}
@@ -48,7 +45,7 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	}
 
 	if job.Type != orchestration.JobTypeInteractiveAgent && job.Type != orchestration.JobTypeAgent {
-		return fmt.Errorf("cannot resume job: only 'interactive_agent' jobs are supported (job type is '%s')", job.Type)
+		return fmt.Errorf("cannot resume job: only 'interactive_agent' and 'agent' jobs are supported (job type is '%s')", job.Type)
 	}
 	if job.Status != orchestration.JobStatusCompleted {
 		return fmt.Errorf("cannot resume job: status is '%s', must be 'completed'", job.Status)
@@ -61,162 +58,61 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get session info from aglogs: %w\nOutput: %s", err, string(output))
 	}
 
-	var sessionInfo struct {
-		AgentSessionID string `json:"agent_session_id"`
-		Provider       string `json:"provider"`
-	}
+	var sessionInfo resumeSessionInfo
 	if err := json.Unmarshal(output, &sessionInfo); err != nil {
 		return fmt.Errorf("failed to parse session info from aglogs: %w", err)
 	}
 
-	if sessionInfo.Provider != "claude" && sessionInfo.Provider != "codex" {
-		return fmt.Errorf("resuming sessions is currently only supported for 'claude' and 'codex' providers, but provider is '%s'", sessionInfo.Provider)
-	}
-
-	// 3. Update Job Status to 'running'
-	persister := orchestration.NewStatePersister()
-	if err := persister.UpdateJobStatus(job, orchestration.JobStatusRunning); err != nil {
-		return fmt.Errorf("failed to update job status to running: %w", err)
-	}
-	fmt.Printf("* Job status updated to 'running'.\n")
-
-	// 4. Re-launch the Agent in Tmux
-	// Load agent config to get provider-specific arguments
-	appCfg, err := loadFullConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load flow configuration: %w", err)
-	}
-
-	// Get agent args for the specific provider
-	var agentArgs []string
-	if appCfg.Flow.Providers != nil {
-		if providerCfg, ok := appCfg.Flow.Providers[sessionInfo.Provider]; ok {
-			agentArgs = providerCfg.Args
-		}
-	}
-
-	var resumeCmdParts []string
-	if sessionInfo.Provider == "codex" {
-		// Codex agent (Anthropic's tool) uses --continue
-		resumeCmdParts = append(resumeCmdParts, "codex", "--continue")
-		resumeCmdParts = append(resumeCmdParts, agentArgs...)
-	} else {
-		// Assume 'claude' provider (grove-claude-agent)
-		// Use --resume to resume a completed session
-		resumeCmdParts = append(resumeCmdParts, "claude", "--resume", sessionInfo.AgentSessionID)
-		resumeCmdParts = append(resumeCmdParts, agentArgs...)
-	}
-
-	// Create a custom resume function that properly names the window
-	err = resumeAgentInTmux(cmd.Context(), plan, job, resumeCmdParts)
-	if err != nil {
-		// If launching fails, revert the status back to completed
-		_ = persister.UpdateJobStatus(job, orchestration.JobStatusCompleted)
-		return fmt.Errorf("failed to re-launch agent session: %w", err)
-	}
-
-	fmt.Printf("* Resumed session for job '%s' in new tmux window.\n", job.Title)
-	return nil
-}
-
-// resumeAgentInTmux creates or switches to a tmux session and launches the resumed agent
-func resumeAgentInTmux(ctx context.Context, plan *orchestration.Plan, job *orchestration.Job, commandToRun []string) error {
-	// Only proceed if we're in a terminal and have tmux
-	if os.Getenv("TERM") == "" {
-		return fmt.Errorf("not in a terminal")
-	}
-
-	// Create mux engine
-	engine, err := mux.DetectMuxEngine(ctx)
-	if err != nil {
-		return fmt.Errorf("mux not available: %w", err)
-	}
-
-	// Determine working directory using the canonical logic
+	// Resolve and validate the complete orchestration launch before changing
+	// durable job state. In particular, unsupported providers and missing or
+	// invalid agent_target values cannot briefly move the job to running.
 	workingDir, err := orchestration.DetermineWorkingDirectory(plan, job)
 	if err != nil {
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
-
-	// Get workspace info for session naming (notebook-aware)
-	projInfo, err := orchestration.ResolveProjectForSessionNaming(workingDir)
+	nativeSessionID := strings.TrimSpace(sessionInfo.AgentSessionID)
+	prepared, err := orchestration.PrepareInteractiveAgentResume(job, plan, workingDir, sessionInfo.Provider, nativeSessionID)
 	if err != nil {
-		return fmt.Errorf("failed to get workspace info for %s: %w", workingDir, err)
+		return fmt.Errorf("cannot prepare agent resume: %w", err)
 	}
 
-	sessionName := projInfo.Identifier("_")
-
-	// Check if session already exists
-	sessionExists, _ := engine.SessionExists(ctx, sessionName)
-
-	// Create window name for the resumed job (same pattern as interactive_agent_executor)
-	windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
-
-	commandStr := strings.Join(commandToRun, " ")
-
-	if !sessionExists {
-		// Create new session with the resume command
-		planName := plan.Name
-		setPlanCmd := fmt.Sprintf("flow plan set %s && %s", planName, commandStr)
-
-		panes := []mux.PaneOptions{
-			{
-				Command: setPlanCmd,
-			},
-		}
-
-		opts := mux.LaunchOptions{
-			SessionName:      sessionName,
-			WorkingDirectory: workingDir,
-			WindowName:       windowName,
-			WindowIndex:      2,
-			Panes:            panes,
-		}
-
-		fmt.Printf(" Creating tmux session '%s' for resumed job...\n", sessionName)
-		if err := engine.Launch(ctx, opts); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
-		}
-
-		fmt.Printf("* Session '%s' created\n", sessionName)
-	} else {
-		// Session exists, create a new window for the resumed job
-		if err := engine.NewWindow(ctx, sessionName, windowName, workingDir, false); err != nil {
-			fmt.Printf("Note: Could not create new window '%s': %v\n", windowName, err)
-		}
-
-		targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
-
-		// Set the active plan in the worktree
-		planName := filepath.Base(plan.Directory)
-		setPlanCmd := fmt.Sprintf("flow plan set %s", planName)
-		if err := engine.SendKeys(ctx, targetPane, setPlanCmd, "C-m"); err != nil {
-			return fmt.Errorf("failed to send set plan command: %w", err)
-		}
-
-		// Small delay to let the set command complete
-		time.Sleep(200 * time.Millisecond)
-
-		// Then run the actual resume command
-		if err := engine.SendKeys(ctx, targetPane, commandStr, "C-m"); err != nil {
-			return fmt.Errorf("failed to send command '%s': %w", commandStr, err)
-		}
+	// Any launch failure after the atomic transition restores the exact
+	// completed state. The prepared launcher reuses the normal provider
+	// lifecycle (intent, env, PID wrapper, mux routing, and confirmation).
+	persister := orchestration.NewStatePersister()
+	err = runResumeWithRollback(job,
+		persister.BeginResumedAttempt,
+		func() error { return prepared.Launch(cmd.Context()) },
+	)
+	if err != nil {
+		return err
 	}
+	fmt.Printf("* Job status updated to 'running'.\n")
 
-	// Switch to the session if we're already in tmux
-	if mux.ActiveMux() != mux.MuxNone {
-		fmt.Printf("* Switching to session '%s'...\n", sessionName)
-		if err := engine.SwitchSession(ctx, sessionName, ""); err != nil {
-			fmt.Printf("Could not switch to session. Attach with: tmux attach -t %s\n", sessionName)
-		}
-		// Also switch to the new window
-		targetPane := fmt.Sprintf("%s:%s", sessionName, windowName)
-		if err := engine.SelectWindow(ctx, targetPane); err != nil {
-			fmt.Printf("Note: Could not switch to window '%s'\n", windowName)
-		}
-	} else {
-		fmt.Printf("Attach with: tmux attach -t %s\n", sessionName)
+	fmt.Printf("* Resumed session for job '%s'.\n", job.Title)
+	return nil
+}
+
+type resumeSessionInfo struct {
+	AgentSessionID string `json:"agent_session_id"`
+	Provider       string `json:"provider"`
+}
+
+func runResumeWithRollback(
+	job *orchestration.Job,
+	begin func(*orchestration.Job) (func() error, error),
+	launch func() error,
+) error {
+	rollback, err := begin(job)
+	if err != nil {
+		return fmt.Errorf("failed to begin resumed job attempt: %w", err)
 	}
-
+	if err := launch(); err != nil {
+		launchErr := fmt.Errorf("failed to re-launch agent session: %w", err)
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return errors.Join(launchErr, fmt.Errorf("failed to restore job after resume failure: %w", rollbackErr))
+		}
+		return launchErr
+	}
 	return nil
 }

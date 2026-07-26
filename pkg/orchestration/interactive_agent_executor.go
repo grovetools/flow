@@ -29,6 +29,13 @@ type InteractiveAgentProvider interface {
 	Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error
 }
 
+// preparedInteractiveAgentProvider launches already-built provider command bytes
+// through the normal interactive lifecycle. Resume uses this seam so it cannot
+// bypass daemon intent, environment, PID capture, mux routing, or confirmation.
+type preparedInteractiveAgentProvider interface {
+	LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, shellCommand, expectedNativeID string) error
+}
+
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.
 type InteractiveAgentExecutor struct {
 	skipInteractive bool

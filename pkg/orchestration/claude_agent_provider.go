@@ -40,13 +40,26 @@ func NewClaudeAgentProvider() *ClaudeAgentProvider {
 }
 
 // Launch implements the InteractiveAgentProvider interface for Claude.
-// This contains the logic previously in executeHostMode.
 func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
-	// Update job status to running
-	job.Status = JobStatusRunning
-	job.StartTime = time.Now()
-	if err := updateJobFile(job); err != nil {
-		return fmt.Errorf("updating job status: %w", err)
+	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
+	if err != nil {
+		return fmt.Errorf("failed to build agent command: %w", err)
+	}
+	return p.LaunchPrepared(ctx, job, plan, workDir, agentCommand, "")
+}
+
+// LaunchPrepared owns the complete Claude interactive lifecycle for a command
+// whose provider-specific bytes have already been constructed.
+func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, agentCommand, expectedNativeID string) error {
+	// Normal launches enter running here. Resume supplies its known native ID
+	// after an atomic completed-to-running transition and must retain that
+	// attempt time rather than rewriting it through the legacy status path.
+	if expectedNativeID == "" {
+		job.Status = JobStatusRunning
+		job.StartTime = time.Now()
+		if err := updateJobFile(job); err != nil {
+			return fmt.Errorf("updating job status: %w", err)
+		}
 	}
 
 	// Register session intent with the daemon BEFORE launching the agent.
@@ -146,14 +159,6 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 			alog.Info("Using existing session").Field("session", sessionName).StructuredOnly().Log(ctx)
 		}
 
-		// Build agent command
-		agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
-		if err != nil {
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("failed to build agent command: %w", err)
-		}
-
 		// Create a new window for this specific agent job in the session
 		agentWindowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
 
@@ -219,7 +224,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		// Asynchronously discover PID and register session in background
 		// This prevents blocking the TUI when launching interactive agents
 		go func() {
-			if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane); err != nil {
+			if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
 				p.log.WithError(err).Error("Failed to register session with valid PID")
 				// Continue anyway - the agent is running, just tracking may be impaired
 			}
@@ -340,14 +345,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 		}
 	}
 
-	// Build and send command
-	agentCommand, err := p.buildAgentCommand(job, plan, briefingFilePath, agentArgs)
-	if err != nil {
-		job.Status = JobStatusFailed
-		job.EndTime = time.Now()
-		return fmt.Errorf("failed to build agent command: %w", err)
-	}
-
+	// Send the prepared command.
 	time.Sleep(300 * time.Millisecond)
 
 	targetPane := windowTarget
@@ -385,7 +383,7 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 	// Asynchronously discover PID and register session in background
 	// This prevents blocking the TUI when launching interactive agents
 	go func() {
-		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane); err != nil {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
 			p.log.WithError(err).Error("Failed to register session with valid PID")
 			// Continue anyway - the agent is running, just tracking may be impaired
 		}
@@ -564,7 +562,7 @@ func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFi
 // This function is designed to be called from a goroutine - it blocks internally but
 // does not block the caller. It uses agentstream for deterministic PID capture via pidfile.
 // The session intent should already be registered via RegisterSessionIntent() before this is called.
-func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane string) error {
+func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane, expectedNativeID string) error {
 	logger := grovelogging.NewLogger("flow-claude-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
@@ -635,6 +633,9 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	var claudeSessionID string
 	if transcriptPath != "" {
 		claudeSessionID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+	}
+	if claudeSessionID == "" {
+		claudeSessionID = expectedNativeID
 	}
 
 	// Confirm the session with the daemon using the discovered PID. Resolve the

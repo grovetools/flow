@@ -64,15 +64,26 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 		agentArgs = append(agentArgs, "--session-dir", sessionDir)
 	}
 
-	// Update job status to running
-	job.Status = JobStatusRunning
-	job.StartTime = time.Now()
-	if err := updateJobFile(job); err != nil {
-		return fmt.Errorf("updating job status: %w", err)
+	rawCommand := p.buildCommand(agentArgs, briefingFilePath)
+	return p.LaunchPrepared(ctx, job, plan, workDir, rawCommand, "")
+}
+
+// LaunchPrepared owns the complete native/tuimux lifecycle for prepared
+// provider command bytes.
+func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, rawCommand, expectedNativeID string) error {
+	// Normal launches enter running here. Resume supplies its known native ID
+	// after an atomic completed-to-running transition and must retain that
+	// attempt time rather than rewriting it through the legacy status path.
+	if expectedNativeID == "" {
+		job.Status = JobStatusRunning
+		job.StartTime = time.Now()
+		if err := updateJobFile(job); err != nil {
+			return fmt.Errorf("updating job status: %w", err)
+		}
 	}
 
 	// Register session intent with the daemon BEFORE spawning the pane.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -86,9 +97,6 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	} else {
 		p.log.Info("Session intent registered successfully")
 	}
-
-	// Build the full agent command string (already shell-quoted).
-	rawCommand := p.buildCommand(agentArgs, briefingFilePath)
 
 	// Wrap with agentstream to capture PID via deterministic pidfile.
 	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
@@ -107,7 +115,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 	envVars["GROVE_FLOW_JOB_PATH"] = job.FilePath
 	envVars["GROVE_FLOW_PLAN_NAME"] = plan.Name
 	envVars["GROVE_FLOW_JOB_TITLE"] = job.Title
-	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
+	if scope := resolveJobScope(workDir); scope != "" {
 		envVars["GROVE_SCOPE"] = scope
 	}
 	if p.spec.ProviderEnv != "" {
@@ -162,7 +170,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 
 	// Asynchronously discover PID and register session in background
 	go func() {
-		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir); err != nil {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, expectedNativeID); err != nil {
 			p.log.WithError(err).Error("Failed to discover and register groveterm session")
 		}
 	}()
@@ -179,7 +187,7 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 // discoverAndRegisterSessionAsync discovers the agent PID and transcript path,
 // then confirms the session with the daemon so log streaming works.
 // Adapted from ClaudeAgentProvider.discoverAndRegisterSessionAsync.
-func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir string) error {
+func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, expectedNativeID string) error {
 	logger := grovelogging.NewLogger("flow-groveterm-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
@@ -247,9 +255,12 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 			nativeID = strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
 		}
 	}
+	if nativeID == "" {
+		nativeID = expectedNativeID
+	}
 
 	// Confirm the session with the daemon
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
@@ -282,6 +293,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 			JobFilePath:      job.FilePath,
 			Type:             "interactive_agent",
 			TranscriptPath:   transcriptPath,
+			Scope:            resolveJobScope(workDir),
 		}
 
 		registry, regErr := sessions.NewFileSystemRegistry()
