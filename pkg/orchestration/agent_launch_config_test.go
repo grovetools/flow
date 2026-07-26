@@ -49,6 +49,30 @@ func TestResolveProviderArgs(t *testing.T) {
 			t.Errorf("expected nil args for opencode, got %v", args)
 		}
 	})
+
+	// Callers append to the returned slice — the Pi providers append a per-job
+	// --session-dir. If the config's own slice came back, two jobs launching
+	// concurrently would append into the same backing array and cross-wire each
+	// other's session dirs.
+	t.Run("returns a copy callers cannot append into the config", func(t *testing.T) {
+		cfg := FlowConfig{Providers: map[string]ProviderConfig{
+			"pi": {Args: make([]string, 1, 8)}, // spare capacity: the aliasing hazard
+		}}
+		cfg.Providers["pi"].Args[0] = "--verbose"
+
+		a := append(resolveProviderArgs(cfg, "pi"), "--session-dir", "/jobs/a")
+		b := append(resolveProviderArgs(cfg, "pi"), "--session-dir", "/jobs/b")
+
+		if got := strings.Join(a, " "); got != "--verbose --session-dir /jobs/a" {
+			t.Errorf("first launch args clobbered by the second: %q", got)
+		}
+		if got := strings.Join(b, " "); got != "--verbose --session-dir /jobs/b" {
+			t.Errorf("second launch args wrong: %q", got)
+		}
+		if got := strings.Join(cfg.Providers["pi"].Args, " "); got != "--verbose" {
+			t.Errorf("config slice mutated by callers: %q", got)
+		}
+	})
 }
 
 // TestBuildHeadlessEnv_InjectsAgentEnv asserts flow.agent_env reaches the

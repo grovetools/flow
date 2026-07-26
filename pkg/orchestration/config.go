@@ -101,7 +101,18 @@ func resolveProviderArgs(cfg FlowConfig, providerName string) []string {
 			args = pc.Args
 		}
 	}
-	return args
+	// Always hand back a copy. Callers append to the result — the Pi providers
+	// append a per-job --session-dir — and appending to the config's own slice
+	// lets two jobs launching concurrently write into the same backing array
+	// and cross-wire each other's arguments. appendProviderJobArgs copies for
+	// the same reason, but only on the path where a model or effort is set, so
+	// the guarantee has to live here to cover every caller.
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]string, len(args))
+	copy(out, args)
+	return out
 }
 
 // shellSingleQuote wraps a value in single quotes for safe inline use in a shell
