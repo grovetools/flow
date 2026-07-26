@@ -1952,7 +1952,10 @@ type clawResultMsg struct {
 func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes int, prompt, signalTarget string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		client := daemon.NewWithAutoStart() // inherit GROVE_SCOPE from treemux host
+		// Session-record mutation: must reach the daemon that HOLDS the
+		// session, which is the interactive host's when one published itself
+		// (daemon.HostSocketEnv), not whatever GROVE_SCOPE happens to say.
+		client := daemon.NewSessionHostClient("")
 		defer client.Close()
 
 		// Enable signal channel
@@ -2028,7 +2031,7 @@ func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes in
 func unclawJobCmd(plan *orchestration.Plan, job *orchestration.Job) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		client := daemon.NewWithAutoStart() // inherit GROVE_SCOPE from treemux host
+		client := daemon.NewSessionHostClient("") // see clawJobCmd
 		defer client.Close()
 
 		_ = client.UpdateSessionChannels(ctx, job.ID, models.SessionChannelsRequest{})

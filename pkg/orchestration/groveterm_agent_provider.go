@@ -81,7 +81,11 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 	}
 
 	// Register session intent with the daemon BEFORE spawning the pane.
-	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
+	// sessionHostClient targets the daemon that owns the interactive host UI
+	// when one published itself, so intent, the spawn relay below, and the
+	// confirmation in discoverAndRegisterSessionAsync all land on the single
+	// daemon whose stream feeds the rail, the Agents drawer, and PTY attach.
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -99,10 +103,13 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 	// Wrap with agentstream to capture PID via deterministic pidfile.
 	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
 
-	// Build environment variables for the agent pane. GROVE_SCOPE is inherited
-	// from the executor's env (treemux exports it at startup; the daemon
-	// process exports its own scope on boot) — we don't force it from workDir.
-	// Agents launched from a context without GROVE_SCOPE go to the global daemon.
+	// Build environment variables for the agent pane. GROVE_SCOPE is the
+	// job's workspace identity (inherited from the executor when it has one,
+	// otherwise resolved from workDir) and is what stamps the session record
+	// with the right ecosystem. GROVE_HOST_DAEMON_SOCKET is the orthogonal
+	// transport answer, carried through so the agent's own hooks talk to the
+	// same daemon this launch registered against instead of following
+	// GROVE_SCOPE off to the worktree's daemon.
 	// Seed flow.agent_env first so the GROVE_* keys below always win on
 	// collision (precedence: os env < agent_env < GROVE_*).
 	envVars := map[string]string{}
@@ -116,6 +123,7 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 	if scope := resolveJobScope(workDir); scope != "" {
 		envVars["GROVE_SCOPE"] = scope
 	}
+	applyHostSocketEnv(envVars, workDir)
 	if p.spec.ProviderEnv != "" {
 		// Let grove hooks/plugins identify the provider (defaults to claude
 		// when unset).
@@ -264,8 +272,10 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		return err
 	}
 
-	// Confirm the session with the daemon
-	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
+	// Confirm the session with the daemon that owns the host UI — the same
+	// endpoint LaunchPrepared registered the intent against, so the pending
+	// record is promoted in place rather than orphaned on another daemon.
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{

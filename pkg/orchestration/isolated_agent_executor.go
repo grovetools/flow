@@ -284,7 +284,7 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	// Pre-register Pi-family jobs before launch. The pending status is
 	// intentionally retained until discovery can supply an exact transcript.
 	if spec.PiRuntime != nil {
-		daemonClient := daemon.NewWithAutoStart()
+		daemonClient := sessionHostClient(workDir)
 		defer daemonClient.Close()
 		if err := daemonClient.RegisterSessionIntent(ctx, newAgentSessionIntent(job, plan, spec.Name, workDir, "tmux")); err != nil {
 			e.log.WithError(err).Warn("Failed to register isolated Pi session intent with daemon")
@@ -409,7 +409,7 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 	// providers retain the isolated executor's existing filesystem semantics.
 	confirmed := false
 	if specKnown && spec.PiRuntime != nil {
-		daemonClient := daemon.NewWithAutoStart()
+		daemonClient := sessionHostClient(workDir)
 		defer daemonClient.Close()
 		confirmed = daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
 			JobID:          job.ID,

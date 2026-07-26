@@ -72,7 +72,7 @@ func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan 
 	// mirroring the claude provider: the daemon tracks the session and waits
 	// for confirmation with the discovered PID/transcript. Failure degrades
 	// gracefully — the async confirm falls back to the filesystem registry.
-	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -154,7 +154,7 @@ func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan 
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='codex' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='codex' " + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
@@ -307,7 +307,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pla
 	}
 
 	// Confirm the session with the daemon using the discovered PID
-	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{

@@ -72,7 +72,10 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 	// scoped agent's intent lands on the global daemon while its hook record
 	// lands on the scoped daemon, leaving a stale pending on one and an orphan
 	// running on the other.
-	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
+	//
+	// When an interactive host published its own daemon endpoint, that wins:
+	// see sessionHostClient. The scope above still stamps identity.
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -202,7 +205,7 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 			scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 		}
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-		envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 			job.ID, job.FilePath, plan.Name, escapedTitle)
 		if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 			logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
@@ -360,7 +363,7 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+	envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
 		job.ID, job.FilePath, plan.Name, escapedTitle)
 	if node, nodeErr := workspace.GetProjectByPath(workDir); nodeErr == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
@@ -642,7 +645,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	// client against the job's working directory (same scope as the intent and
 	// the agent-env GROVE_SCOPE) so confirm updates the pending intent record on
 	// the SAME daemon instead of orphaning a running record on a different one.
-	daemonClient := daemon.NewWithAutoStart(resolveJobScope(workDir))
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
