@@ -76,6 +76,30 @@ func TestFixedWorktreePlanComesFromRegistry(t *testing.T) {
 	}
 }
 
+func TestRegisteredWorktreeBrowserLocksToItsPlan(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
+	root := filepath.Join(t.TempDir(), ".grove-worktrees", "feature-plan")
+	if err := worktreeregistry.Save(&worktreeregistry.Entry{AbsPath: root, Plan: "feature-plan"}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(Config{WorkspaceDir: filepath.Join(root, "repo")})
+	got := m.visiblePlans([]PlanListItem{{Name: "other"}, {Name: "feature-plan"}})
+	if len(got) != 1 || got[0].Name != "feature-plan" {
+		t.Fatalf("worktree-visible plans = %#v, want only its bound plan", got)
+	}
+}
+
+func TestDismissPlanSurvivesStaleReplacement(t *testing.T) {
+	m := New(Config{})
+	plans := viewportPlans(2)
+	m.plans = append([]PlanListItem(nil), plans...)
+	m.DismissPlan(plans[0].Plan.Directory)
+	m = m.replacePlanRows(plans, "") // stale in-flight projection
+	if len(m.plans) != 1 || m.plans[0].Name != plans[1].Name {
+		t.Fatalf("dismissed plan flashed back after stale refresh: %#v", m.plans)
+	}
+}
+
 func TestWorktreeColumnOnlyAppearsForDistinctWorktree(t *testing.T) {
 	m := Model{plans: []PlanListItem{
 		{Name: "feature", Worktree: "feature"},

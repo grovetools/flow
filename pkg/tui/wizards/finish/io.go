@@ -38,6 +38,10 @@ type Item struct {
 	// destructive one. Zero items enabled is a valid state: the exclusion is
 	// "at most one", never "exactly one".
 	ExclusiveGroup string
+	// Advanced places an uncommon/expensive action in the Advanced section.
+	// Advanced actions are deliberately excluded from "select all" and must be
+	// opted into individually.
+	Advanced bool
 	// Action and Check are opaque to the wizard. They exist so hosts
 	// can keep all per-item state on a single struct instead of
 	// maintaining parallel slices.

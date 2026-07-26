@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -173,6 +174,11 @@ type Model struct {
 	holdPending    map[string]bool
 	actionPending  map[string]embed.GitOperation
 	refreshPlanKey string
+
+	// dismissedPlanDirs are plans retired successfully by this TUI session.
+	// Keeping a small tombstone prevents an in-flight stale daemon projection
+	// from flashing an archived plan back into the table.
+	dismissedPlanDirs map[string]bool
 }
 
 type renderLatencyProbe struct {
@@ -206,6 +212,48 @@ func (m *Model) armRenderProbe(snapshotAt time.Time, revision uint64) {
 
 // PlanCount returns the number of plans in the browser list.
 func (m Model) PlanCount() int { return len(m.plans) }
+
+// DismissPlan immediately removes a successfully retired plan from the
+// portfolio and tombstones its old directory for the rest of this TUI session.
+// This avoids waiting for daemon refresh/index propagation after Finish.
+func (m *Model) DismissPlan(planDir string) {
+	if planDir == "" {
+		return
+	}
+	planDir = filepath.Clean(planDir)
+	if m.dismissedPlanDirs == nil {
+		m.dismissedPlanDirs = make(map[string]bool)
+	}
+	m.dismissedPlanDirs[planDir] = true
+	filtered := m.plans[:0]
+	for _, item := range m.plans {
+		if item.Plan != nil && filepath.Clean(item.Plan.Directory) == planDir {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	m.plans = filtered
+	delete(m.planSummaries, planDir)
+	m.ensureCursorVisible()
+}
+
+func (m Model) visiblePlans(plans []PlanListItem) []PlanListItem {
+	fixedPlan, locked := fixedWorktreePlan(m.cwdGitRoot)
+	filtered := make([]PlanListItem, 0, len(plans))
+	for _, item := range plans {
+		if item.Plan != nil && m.dismissedPlanDirs[filepath.Clean(item.Plan.Directory)] {
+			continue
+		}
+		// A registered plan worktree has one immutable plan identity. Showing
+		// unrelated plans here makes it look as if mutable active-plan state can
+		// retarget the worktree, so lock this browser to its bound plan.
+		if locked && item.Name != fixedPlan {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
 
 // SelectedPlanName returns the display identity under the cursor. Hosts use it
 // for the legacy single-workspace navigation contract; portfolio refreshes use
@@ -358,26 +406,27 @@ func New(cfg Config) Model {
 		Build()
 
 	return Model{
-		cfg:              cfg,
-		plans:            []PlanListItem{},
-		cursor:           0,
-		loading:          true,
-		focused:          !cfg.EmbedMode,
-		plansDirectory:   cfg.PlansDir,
-		cwdGitRoot:       cfg.WorkspaceDir,
-		help:             helpModel,
-		keys:             km,
-		showGitLog:       false,
-		embedMode:        cfg.EmbedMode,
-		hosted:           cfg.Hosted,
-		dataSource:       "connecting",
-		planSummaries:    make(map[string]models.PlanSummary),
-		streamGeneration: 1,
-		streamConnecting: true,
-		loadGeneration:   1,
-		holdPending:      make(map[string]bool),
-		actionPending:    make(map[string]embed.GitOperation),
-		columnVisibility: defaultBrowserColumnVisibility(),
+		cfg:               cfg,
+		plans:             []PlanListItem{},
+		cursor:            0,
+		loading:           true,
+		focused:           !cfg.EmbedMode,
+		plansDirectory:    cfg.PlansDir,
+		cwdGitRoot:        cfg.WorkspaceDir,
+		help:              helpModel,
+		keys:              km,
+		showGitLog:        false,
+		embedMode:         cfg.EmbedMode,
+		hosted:            cfg.Hosted,
+		dataSource:        "connecting",
+		planSummaries:     make(map[string]models.PlanSummary),
+		streamGeneration:  1,
+		streamConnecting:  true,
+		loadGeneration:    1,
+		holdPending:       make(map[string]bool),
+		actionPending:     make(map[string]embed.GitOperation),
+		dismissedPlanDirs: make(map[string]bool),
+		columnVisibility:  defaultBrowserColumnVisibility(),
 	}
 }
 

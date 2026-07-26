@@ -1,6 +1,7 @@
 package finish
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -57,6 +58,26 @@ func itemByID(t *testing.T, m Model, id string) *Item {
 	}
 	t.Fatalf("item %q missing", id)
 	return nil
+}
+
+func TestSelectAllSkipsAdvancedItems(t *testing.T) {
+	km := hermeticKeys
+	items := []*Item{
+		{Name: "common", IsAvailable: true},
+		{Name: "rebuild", IsAvailable: true, Advanced: true},
+	}
+	m := New(Config{PlanName: "p", Items: items, KeyMap: &km})
+	updated, _ := m.Update(keySelectAll)
+	m = updated.(Model)
+	if !items[0].IsEnabled {
+		t.Fatal("select all must select common actions")
+	}
+	if items[1].IsEnabled {
+		t.Fatal("select all must leave advanced actions opt-in")
+	}
+	if got := m.View(); !strings.Contains(got, "Advanced (opt in individually)") {
+		t.Fatalf("advanced section heading missing from view: %q", got)
+	}
 }
 
 // TestSelectAllPicksExactlyOneWorktreeRetirement is the regression test for the

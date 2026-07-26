@@ -40,7 +40,6 @@ type HostedKeyBinding struct {
 // back — see treemux/internal/app/hosted_keys.go), so these hints describe a
 // collision that is arbitrated rather than one that is simply lost.
 var hostedCollisionHints = map[string][]string{
-	"ctrl+f": {"treemux.nav_workspaces"},
 	"ctrl+e": {"treemux.jump_editor"},
 }
 
@@ -98,7 +97,6 @@ func HostedKeys() HostedKeyReference {
 		}
 	}
 	ref.Bindings = append(ref.Bindings,
-		hostedViewHostBinding("finish_plan", []string{"ctrl+f"}, "open Finish Plan"),
 		hostedViewHostBinding("add_plan", []string{"n"}, "add plan (browser mode)"),
 		hostedViewHostBinding("add_job", []string{"a"}, "add job (status mode)"),
 	)

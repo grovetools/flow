@@ -60,10 +60,18 @@ func (m Model) View() string {
 	focusedStyle := theme.DefaultTheme.Selected
 	enabledCheckboxStyle := theme.DefaultTheme.Success.Bold(true)
 
-	// List items (only show available items).
+	// List items (only show available items). Advanced actions are visually
+	// separated because select-all intentionally leaves them off.
+	advancedHeadingShown := false
 	for i, item := range m.items {
 		if item == nil || !item.IsAvailable {
 			continue
+		}
+		if item.Advanced && !advancedHeadingShown {
+			b.WriteString("\n")
+			b.WriteString(theme.DefaultTheme.Muted.Bold(true).Render("Advanced (opt in individually)"))
+			b.WriteString("\n")
+			advancedHeadingShown = true
 		}
 
 		var line strings.Builder

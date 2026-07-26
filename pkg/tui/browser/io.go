@@ -916,6 +916,9 @@ func formatConfigStatus(config *orchestration.PlanConfig) string {
 // worktree is created for one plan and the registry is its canonical identity;
 // mutable active-plan state must not override that relationship.
 func fixedWorktreePlan(workspaceDir string) (string, bool) {
+	if strings.TrimSpace(workspaceDir) == "" {
+		return "", false
+	}
 	root, ok := workspace.WorktreeRootForPath(workspaceDir)
 	if !ok {
 		return "", false

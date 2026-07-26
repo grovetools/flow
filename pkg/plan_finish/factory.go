@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	stdfs "io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1386,8 +1387,9 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 			},
 		},
 		{
-			ID:   ItemRebuildBinaries,
-			Name: "Rebuild main repo binaries via grove build",
+			ID:       ItemRebuildBinaries,
+			Name:     "Rebuild main repo binaries via grove build",
+			Advanced: true,
 			Check: func() (string, error) {
 				if gitRoot == "" {
 					return "N/A", nil
@@ -2465,6 +2467,16 @@ func archiveWorktreeContainer(ctx context.Context, out io.Writer, containerPath,
 		}
 		gitPtr := filepath.Join(tgt.dir, ".git")
 		fi, err := os.Lstat(gitPtr)
+		if err == nil {
+			// Archives preserve source, commits, and untracked work, not dependency
+			// caches or generated files. Git's ignored set is the safest generic
+			// definition of disposable content and handles target/dist/.cache in
+			// addition to language-specific dependency trees.
+			cleanCmd := exec.CommandContext(ctx, "git", "-C", tgt.dir, "clean", "-ffdX")
+			if output, cleanErr := cleanCmd.CombinedOutput(); cleanErr != nil {
+				fmt.Fprintf(out, "    Warning: failed to prune ignored files in %s: %s\n", tgt.dir, strings.TrimSpace(string(output)))
+			}
+		}
 		switch {
 		case err != nil:
 			// No .git at all. Expected for a synthetic ecosystem
@@ -2500,6 +2512,13 @@ func archiveWorktreeContainer(ctx context.Context, out io.Writer, containerPath,
 		}
 	}
 
+	// node_modules is always reproducible and is sometimes missing from a
+	// repository's ignore rules. Remove it (and package-manager stores) by
+	// name throughout the container before paying archive copy/storage costs.
+	if err := pruneArchiveDependencyDirs(containerPath); err != nil {
+		fmt.Fprintf(out, "    Warning: failed to prune dependency directories: %v\n", err)
+	}
+
 	// Scrub the now-dangling worktree registrations in each owner repo
 	// (raw exec, matching the pattern in cleanupEcosystemWorktree).
 	for _, owner := range owners {
@@ -2525,4 +2544,29 @@ func archiveWorktreeContainer(ctx context.Context, out io.Writer, containerPath,
 		}
 	}
 	return nil
+}
+
+// pruneArchiveDependencyDirs removes dependency caches that are never source.
+// WalkDir does not follow symlinked directories, and .git is skipped so a
+// standalone clone's object database is never traversed or altered.
+func pruneArchiveDependencyDirs(root string) error {
+	removable := map[string]bool{"node_modules": true, ".pnpm-store": true}
+	return filepath.WalkDir(root, func(path string, entry stdfs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if entry.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if path != root && removable[entry.Name()] {
+			if err := os.RemoveAll(path); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		return nil
+	})
 }

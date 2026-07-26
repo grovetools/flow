@@ -114,9 +114,9 @@ func TestBareAStillOpensAddJob(t *testing.T) {
 	}
 }
 
-// TestBareEscStillEscapesStatusTUI pins the intended behavior: with no chord
-// armed and nothing open, a bare esc still pops back to the plan browser.
-func TestBareEscStillEscapesStatusTUI(t *testing.T) {
+// TestBareEscStaysInStatus pins that esc is a local status key, not surprising
+// navigation back to the plan portfolio.
+func TestBareEscStaysInStatus(t *testing.T) {
 	m := newStatusHostModel(t)
 	if m.s.statusModel.IsChordPending() {
 		t.Fatalf("precondition: no chord should be armed")
@@ -128,7 +128,10 @@ func TestBareEscStillEscapesStatusTUI(t *testing.T) {
 	mdl, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = mdl.(Model)
 
-	if m.mode != modeBrowser {
-		t.Errorf("bare esc with nothing open should return to the browser: mode=%v, want modeBrowser", m.mode)
+	if m.mode != modeStatus {
+		t.Errorf("bare esc should stay in status: mode=%v, want modeStatus", m.mode)
+	}
+	if m.s.statusModel == nil {
+		t.Error("bare esc must not tear down the status model")
 	}
 }

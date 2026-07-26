@@ -50,7 +50,8 @@ type finishActionError struct {
 }
 
 type finishActionsCompletedMsg struct {
-	errs []finishActionError
+	errs           []finishActionError
+	retiredPlanDir string
 	// noteErr is reported separately from errs on purpose: moving the plan's
 	// linked notes to completed/ has nothing to do with git teardown, and
 	// letting it into errs made a note-move failure skip mark_finished and
@@ -673,6 +674,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.finishFailure = ""
+		if msg.retiredPlanDir != "" {
+			m.s.browserModel.DismissPlan(msg.retiredPlanDir)
+		}
 		if m.s.statusModel != nil {
 			_ = m.s.statusModel.Close()
 			m.s.statusModel = nil
@@ -906,9 +910,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.finishTransient = ""
 		}
 
-		// Letter shortcuts (delegate to switchToTab for shared
-		// async-build path). ctrl+f reported as both "ctrl+f" and
-		// "ctrl+F" depending on terminal — accept both.
+		// Letter shortcuts delegate to switchToTab for the shared async-build
+		// path. Ctrl+F is deliberately not a Flow shortcut: treemux owns it as
+		// global navigation and hosted apps must not steal it.
 		ks := msg.String()
 
 		// Check if text entry is active in the status model
@@ -921,9 +925,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		chordPending := m.mode == modeStatus && m.s.statusModel != nil && m.s.statusModel.IsChordPending()
 
 		if !textEntryActive && !chordPending {
-			if m.mode == modeStatus && (ks == "ctrl+f" || ks == "ctrl+F") && m.s.statusModel != nil && m.s.statusModel.Plan != nil {
-				return m.switchToTab(tabFinishPlan)
-			}
 			if m.mode == modeBrowser && ks == "n" {
 				return m.switchToTab(tabAddPlan)
 			}
@@ -932,38 +933,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// esc in status mode: if the status model has an active detail
-		// pane (or text entry), or an armed chord / which-key popup, delegate
-		// esc to it so the detail pane is closed / the chord is cancelled
-		// properly (including BSP splits). Only pop back to the browser when
-		// nothing is open in the status view. The chord check is what keeps an
-		// esc pressed to dismiss the which-key popup from accidentally exiting
-		// the whole status TUI (jobs 43/46 goal) — the status seam consumes it
-		// via SequenceCancel.
-		if m.mode == modeStatus && ks == "esc" {
-			if m.s.statusModel != nil && (m.s.statusModel.ActiveDetailPane != status.NoPane || m.s.statusModel.IsTextEntryActive() || m.s.statusModel.IsChordPending()) {
-				// Let the status model handle esc (close detail pane, cancel chord, etc.)
-				break // fall through to pager delegation below
-			}
-			if m.s.statusModel != nil {
-				_ = m.s.statusModel.Close()
-				m.s.statusModel = nil
-			}
-			if m.s.statusLoading {
-				m.s.statusLoadGen++
-				m.s.statusLoading = false
-			}
-			m.s.statusLoadError = ""
-			m.s.statusLoadingPlan = ""
-			m.finishFailure = ""
-			m.mode = modeBrowser
-			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabPlans})
-			updated, _ := m.s.browserModel.Update(embed.FocusMsg{})
-			if bm, ok := updated.(browser.Model); ok {
-				m.s.browserModel = bm
-			}
-			return m, m.s.browserModel.Init()
-		}
+		// Escape belongs to the Jobs/status model (closing detail panes,
+		// cancelling chords, or interrupting an agent). It must never silently
+		// navigate to the Plans tab; explicit tab navigation remains available.
 
 		// esc in the finish wizard cancels it, the same way `q` does. This arm
 		// sits AFTER the text-entry / chord guards and after the status-mode
@@ -1183,6 +1155,7 @@ func runEmbeddedFinishActions(req finishRunRequest) tea.Cmd {
 		}
 		index := 0
 		blocking := 0
+		retiredPlanDir := ""
 		for _, item := range req.items {
 			if item == nil || !item.IsEnabled || item.Action == nil {
 				continue
@@ -1203,6 +1176,8 @@ func runEmbeddedFinishActions(req finishRunRequest) tea.Cmd {
 				if !plan_finish.IsRetainedWorktree(err) {
 					blocking++
 				}
+			} else if terminal[item.ID] && req.plan != nil {
+				retiredPlanDir = req.plan.Directory
 			}
 		}
 		if blocking == 0 && req.activePlan != "" && req.plan != nil && req.activePlan == req.plan.Name {
@@ -1216,7 +1191,7 @@ func runEmbeddedFinishActions(req finishRunRequest) tea.Cmd {
 				_ = state.Delete(req.stateDir, groveplan.LegacyStateKey)
 			}
 		}
-		return finishActionsCompletedMsg{errs: errs, noteErr: noteErr}
+		return finishActionsCompletedMsg{errs: errs, noteErr: noteErr, retiredPlanDir: retiredPlanDir}
 	}
 }
 

@@ -68,24 +68,18 @@ func TestHostedKeysPublishesFinishWizardBindings(t *testing.T) {
 	}
 }
 
-func TestHostedKeysReportsCtrlFCollision(t *testing.T) {
+func TestHostedKeysLeavesCtrlFToTreemux(t *testing.T) {
 	ref := HostedKeys()
 	if ref.SchemaVersion != 1 || ref.App != "flow" {
 		t.Fatalf("unexpected reference header: %#v", ref)
 	}
 	for _, binding := range ref.Bindings {
-		if binding.Action != "finish_plan" {
-			continue
+		for _, k := range binding.Keys {
+			if k == "ctrl+f" {
+				t.Fatalf("flow must not claim treemux's global ctrl+f navigation: %#v", binding)
+			}
 		}
-		if len(binding.Keys) != 1 || binding.Keys[0] != "ctrl+f" || !binding.HostSwallowed {
-			t.Fatalf("finish_plan binding = %#v", binding)
-		}
-		if len(binding.CollisionHints) != 1 || binding.CollisionHints[0] != "treemux.nav_workspaces" {
-			t.Fatalf("ctrl+f collision hint missing: %#v", binding)
-		}
-		return
 	}
-	t.Fatal("finish_plan hosted binding not exported")
 }
 
 func TestHostedKeysIncludesEmbeddedStatusBindings(t *testing.T) {

@@ -388,7 +388,7 @@ func (m Model) replacePlanRows(plans []PlanListItem, selectedKey string) Model {
 	m.loading = false
 	m.initialLoaded = true
 	m.err = nil
-	m.plans = plans
+	m.plans = m.visiblePlans(plans)
 	if selectedKey != "" {
 		m.selectPlanKey(selectedKey)
 	}

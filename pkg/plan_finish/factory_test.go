@@ -17,6 +17,36 @@ import (
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
+func TestPruneArchiveDependencyDirsKeepsSourceAndGit(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{
+		filepath.Join(root, "repo", "node_modules", "pkg.js"),
+		filepath.Join(root, "repo", ".pnpm-store", "blob"),
+		filepath.Join(root, "repo", "src", "main.ts"),
+		filepath.Join(root, "repo", ".git", "objects", "keep"),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pruneArchiveDependencyDirs(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, removed := range []string{filepath.Join(root, "repo", "node_modules"), filepath.Join(root, "repo", ".pnpm-store")} {
+		if _, err := os.Stat(removed); !os.IsNotExist(err) {
+			t.Errorf("dependency cache survived: %s", removed)
+		}
+	}
+	for _, kept := range []string{filepath.Join(root, "repo", "src", "main.ts"), filepath.Join(root, "repo", ".git", "objects", "keep")} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("source/git content was removed: %s: %v", kept, err)
+		}
+	}
+}
+
 // runGit runs a git command in dir and fails the test on error.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
