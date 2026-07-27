@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -36,171 +37,24 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		// Still need to clean up associated resources (Claude process, tmux window)
 	}
 
-	// For isolated agents, kill the agent FIRST before updating status.
-	// The agent holds a lock on the job file, so we must terminate it first.
-	// Always attempt cleanup even if already completed — the process may still be alive.
-	if job.Type == JobTypeIsolatedAgent {
-		if !silent {
-			fmt.Println("Cleaning up isolated agent tmux server...")
-		}
-
-		if err := KillIsolatedAgentServer(job.ID); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not kill isolated tmux server (it may already be closed): %v\n", err)
-			}
-		} else if !silent {
-			fmt.Println("  * Isolated tmux server terminated.")
-		}
-
-		// Also try to kill the agent process via session metadata
-		if err := killAgentSession(job.ID); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not kill agent session: %v\n", err)
-			}
-		} else if !silent {
-			fmt.Println("  * Agent process killed.")
-		}
-
-		// Give the process a moment to terminate, then remove the stale lock file
-		time.Sleep(200 * time.Millisecond)
-		if err := RemoveLockFile(job.FilePath); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not remove lock file: %v\n", err)
-			}
-		}
-	}
-
-	// For headless agents, kill the agent process before updating status.
-	// Without this, pressing 'c' in the TUI leaves the agent running.
-	if job.Type == JobTypeHeadlessAgent {
-		if !silent {
-			fmt.Println("Cleaning up headless agent process...")
-		}
-
-		if err := killAgentSession(job.ID); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not kill agent session: %v\n", err)
-			}
-		} else if !silent {
-			fmt.Println("  * Agent process killed.")
-		}
-
-		// Give the process a moment to terminate, then remove the stale lock file
-		time.Sleep(200 * time.Millisecond)
-		if err := RemoveLockFile(job.FilePath); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not remove lock file: %v\n", err)
-			}
-		}
-	}
-
-	// For interactive agents, kill the agent and clean up tmux BEFORE updating status.
-	// The agent holds a lock on the job file, so we must terminate it first.
-	if job.Type == JobTypeInteractiveAgent {
-		if !silent {
-			fmt.Println("Cleaning up interactive agent session...")
-		}
-
-		// Kill the agent process by reading the PID from grove-hooks session metadata
-		if err := killAgentSession(job.ID); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not kill agent session: %v\n", err)
-			}
-		} else if !silent {
-			fmt.Println("  * Agent process killed.")
-		}
-
-		// Also kill the tmux window for the interactive_agent job
-		worktreePath, err := getWorktreePathFromSession(job.ID)
-
-		// If we can't find the session (e.g., resumed job), fall back to using the job's worktree
-		if err != nil && job.Worktree != "" {
-			gitRoot, gitErr := GetProjectGitRoot(plan.Directory)
-			if gitErr == nil {
-				if workspace.IsNotebookRepo(gitRoot) {
-					gitRoot = ""
-					gitErr = fmt.Errorf("skipping notebook repo")
-				}
-			}
-			if gitErr == nil {
-				gitRootInfo, gitRootErr := workspace.GetProjectByPath(gitRoot)
-				if gitRootErr == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
-					gitRoot = gitRootInfo.ParentProjectPath
-				}
-				if found, ok := workspace.FindWorktreePath(gitRoot, job.Worktree); ok {
-					worktreePath = found
-				} else {
-					worktreePath = workspace.ResolveNewWorktreePath(gitRoot, job.Worktree, false)
-				}
-				err = nil
-			}
-		}
-
-		if err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not determine working directory: %v\n", err)
-			}
-		} else {
-			projInfo, err := ResolveProjectForSessionNaming(worktreePath)
-			if err != nil {
-				if !silent {
-					fmt.Printf("  Note: could not get project info to determine session name: %v\n", err)
-				}
-			} else {
-				sessionName := projInfo.Identifier("_")
-				windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
-
-				targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
-				if !silent {
-					fmt.Printf("  Closing tmux window: %s\n", targetWindow)
-				}
-				engine, engineErr := mux.DetectMuxEngine(context.Background())
-				var err error
-				if engineErr != nil {
-					err = engineErr
-				} else {
-					err = engine.KillWindow(context.Background(), targetWindow)
-				}
-				if err != nil {
-					if engine != nil {
-						windows, listErr := engine.ListWindows(context.Background(), sessionName)
-						if listErr == nil {
-							for _, win := range windows {
-								if strings.HasPrefix(win.Name, windowName) {
-									targetWindow = fmt.Sprintf("%s:%s", sessionName, win.Name)
-									if !silent {
-										fmt.Printf("  Found window with prefix: %s\n", targetWindow)
-									}
-									if killErr := engine.KillWindow(context.Background(), targetWindow); killErr == nil {
-										if !silent {
-											fmt.Println("  * Window closed.")
-										}
-										err = nil
-										break
-									}
-								}
-							}
-						}
-					}
-				}
-
-				if err != nil {
-					if !silent {
-						fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
-					}
-				} else if !silent {
-					fmt.Println("  * Tmux window closed.")
-				}
-			}
-		}
-
-		// Give the process a moment to terminate, then remove the stale lock file
-		time.Sleep(200 * time.Millisecond)
-		if err := RemoveLockFile(job.FilePath); err != nil {
-			if !silent {
-				fmt.Printf("  Note: could not remove lock file: %v\n", err)
-			}
-		}
+	// Every pre-status cleanup step below is best-effort: it kills agent
+	// processes and closes terminal windows. None of it may prevent the job's
+	// lifecycle state from being persisted, so each runs behind a non-fatal
+	// boundary. Without it a single panic — historically a nil mux engine
+	// reached through DetectMuxEngine's failure path — killed the process
+	// before the status write, stranding a finished job at idle with no way to
+	// recover except a rerun.
+	//
+	// Cleanup still runs before the status update: the agent holds a lock on
+	// the job file, so it must be terminated first. Cleanup is attempted even
+	// for an already-completed job, since the process may still be alive.
+	switch job.Type {
+	case JobTypeIsolatedAgent:
+		runNonFatalCleanup(logger, "isolated agent", silent, func() { cleanupIsolatedAgent(job, silent) })
+	case JobTypeHeadlessAgent:
+		runNonFatalCleanup(logger, "headless agent", silent, func() { cleanupHeadlessAgent(job, silent) })
+	case JobTypeInteractiveAgent:
+		runNonFatalCleanup(logger, "interactive agent", silent, func() { cleanupInteractiveAgent(job, plan, silent) })
 	}
 
 	// Frontmatter status is the authoritative success state. Before moving an
@@ -374,6 +228,205 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 	}
 
 	return nil
+}
+
+// runNonFatalCleanup runs one best-effort resource-cleanup step, converting a
+// panic inside it into a warning. Terminal and process cleanup is never
+// load-bearing for correctness, so it must not be able to abort the caller
+// before durable job state is written.
+func runNonFatalCleanup(logger *logrus.Entry, name string, silent bool, fn func()) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		logger.WithFields(logrus.Fields{
+			"cleanup": name,
+			"panic":   fmt.Sprint(r),
+			"stack":   string(debug.Stack()),
+		}).Warn("job cleanup panicked; continuing with completion")
+		if !silent {
+			fmt.Printf("  Note: %s cleanup failed (%v); continuing with completion\n", name, r)
+		}
+	}()
+	fn()
+}
+
+// removeStaleLockFile gives a just-signalled agent a moment to exit, then drops
+// the lock file it held on the job.
+func removeStaleLockFile(job *Job, silent bool) {
+	time.Sleep(200 * time.Millisecond)
+	if err := RemoveLockFile(job.FilePath); err != nil {
+		if !silent {
+			fmt.Printf("  Note: could not remove lock file: %v\n", err)
+		}
+	}
+}
+
+// cleanupIsolatedAgent tears down an isolated agent's dedicated tmux server and
+// agent process.
+func cleanupIsolatedAgent(job *Job, silent bool) {
+	if !silent {
+		fmt.Println("Cleaning up isolated agent tmux server...")
+	}
+
+	if err := KillIsolatedAgentServer(job.ID); err != nil {
+		if !silent {
+			fmt.Printf("  Note: could not kill isolated tmux server (it may already be closed): %v\n", err)
+		}
+	} else if !silent {
+		fmt.Println("  * Isolated tmux server terminated.")
+	}
+
+	// Also try to kill the agent process via session metadata
+	if err := killAgentSession(job.ID); err != nil {
+		if !silent {
+			fmt.Printf("  Note: could not kill agent session: %v\n", err)
+		}
+	} else if !silent {
+		fmt.Println("  * Agent process killed.")
+	}
+
+	removeStaleLockFile(job, silent)
+}
+
+// cleanupHeadlessAgent kills the headless agent process. Without this, pressing
+// 'c' in the TUI leaves the agent running.
+func cleanupHeadlessAgent(job *Job, silent bool) {
+	if !silent {
+		fmt.Println("Cleaning up headless agent process...")
+	}
+
+	if err := killAgentSession(job.ID); err != nil {
+		if !silent {
+			fmt.Printf("  Note: could not kill agent session: %v\n", err)
+		}
+	} else if !silent {
+		fmt.Println("  * Agent process killed.")
+	}
+
+	removeStaleLockFile(job, silent)
+}
+
+// cleanupInteractiveAgent kills the interactive agent process and closes the
+// terminal window it ran in.
+func cleanupInteractiveAgent(job *Job, plan *Plan, silent bool) {
+	if !silent {
+		fmt.Println("Cleaning up interactive agent session...")
+	}
+
+	// Kill the agent process by reading the PID from grove-hooks session metadata
+	if err := killAgentSession(job.ID); err != nil {
+		if !silent {
+			fmt.Printf("  Note: could not kill agent session: %v\n", err)
+		}
+	} else if !silent {
+		fmt.Println("  * Agent process killed.")
+	}
+
+	// Also kill the tmux window for the interactive_agent job
+	worktreePath, err := getWorktreePathFromSession(job.ID)
+
+	// If we can't find the session (e.g., resumed job), fall back to using the job's worktree
+	if err != nil && job.Worktree != "" {
+		gitRoot, gitErr := GetProjectGitRoot(plan.Directory)
+		if gitErr == nil {
+			if workspace.IsNotebookRepo(gitRoot) {
+				gitRoot = ""
+				gitErr = fmt.Errorf("skipping notebook repo")
+			}
+		}
+		if gitErr == nil {
+			gitRootInfo, gitRootErr := workspace.GetProjectByPath(gitRoot)
+			if gitRootErr == nil && gitRootInfo.IsWorktree() && gitRootInfo.ParentProjectPath != "" {
+				gitRoot = gitRootInfo.ParentProjectPath
+			}
+			if found, ok := workspace.FindWorktreePath(gitRoot, job.Worktree); ok {
+				worktreePath = found
+			} else {
+				worktreePath = workspace.ResolveNewWorktreePath(gitRoot, job.Worktree, false)
+			}
+			err = nil
+		}
+	}
+
+	if err != nil {
+		if !silent {
+			fmt.Printf("  Note: could not determine working directory: %v\n", err)
+		}
+	} else {
+		projInfo, err := ResolveProjectForSessionNaming(worktreePath)
+		if err != nil {
+			if !silent {
+				fmt.Printf("  Note: could not get project info to determine session name: %v\n", err)
+			}
+		} else {
+			sessionName := projInfo.Identifier("_")
+			windowName := "job-" + sanitize.SanitizeForTmuxSession(job.Title)
+			closeAgentWindow(sessionName, windowName, silent)
+		}
+	}
+
+	removeStaleLockFile(job, silent)
+}
+
+// closeAgentWindow closes the terminal window a job ran in, falling back to a
+// prefix match over the session's windows when the exact name misses.
+//
+// Detection failure short-circuits the whole thing: the error path yields no
+// usable engine, and calling into one anyway is what turned a missing tuimux
+// daemon into a nil-receiver panic inside job completion. An engine is only
+// touched when detection succeeded and returned a live one. Detection is also
+// the non-starting variant — closing a window is not a reason to bring up a
+// multiplexer that is not already running.
+func closeAgentWindow(sessionName, windowName string, silent bool) {
+	targetWindow := fmt.Sprintf("%s:%s", sessionName, windowName)
+	if !silent {
+		fmt.Printf("  Closing tmux window: %s\n", targetWindow)
+	}
+
+	engine, engineErr := mux.DetectExistingMuxEngine(context.Background())
+	if engineErr != nil || mux.IsNilEngine(engine) {
+		if !silent {
+			reason := engineErr
+			if reason == nil {
+				reason = fmt.Errorf("no mux engine available")
+			}
+			fmt.Printf("  Note: no terminal multiplexer available to close window: %v\n", reason)
+		}
+		return
+	}
+
+	err := engine.KillWindow(context.Background(), targetWindow)
+	if err != nil {
+		windows, listErr := engine.ListWindows(context.Background(), sessionName)
+		if listErr == nil {
+			for _, win := range windows {
+				if !strings.HasPrefix(win.Name, windowName) {
+					continue
+				}
+				targetWindow = fmt.Sprintf("%s:%s", sessionName, win.Name)
+				if !silent {
+					fmt.Printf("  Found window with prefix: %s\n", targetWindow)
+				}
+				if killErr := engine.KillWindow(context.Background(), targetWindow); killErr == nil {
+					if !silent {
+						fmt.Println("  * Window closed.")
+					}
+					err = nil
+					break
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		if !silent {
+			fmt.Printf("  Note: could not close tmux window (it may already be closed): %v\n", err)
+		}
+	} else if !silent {
+		fmt.Println("  * Tmux window closed.")
+	}
 }
 
 // killAgentSession kills the agent process associated with the given job ID
