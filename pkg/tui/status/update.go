@@ -1017,6 +1017,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Demoted to note: %s", msg.NotePath))
 		return m, refreshPlan(m.PlanDir)
 
+	case PlanResumeMsg:
+		if msg.Err != nil {
+			// The CLI's error text (last output line) names the actual cause —
+			// unsupported provider, missing session, bad target — so show it
+			// rather than the bare exit status.
+			detail := msg.Output
+			if lines := strings.Split(detail, "\n"); len(lines) > 0 {
+				detail = lines[len(lines)-1]
+			}
+			if detail == "" {
+				detail = msg.Err.Error()
+			}
+			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Resume failed: %s", detail))
+			return m, nil
+		}
+		m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Resumed '%s'", msg.JobTitle))
+		return m, refreshPlan(m.PlanDir)
+
 	case RefreshMsg:
 		logger := logging.NewLogger("flow-tui")
 
@@ -2916,6 +2934,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.Resume):
 			if job := m.CurrentJob(); job != nil {
 				if (job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeAgent) && job.Status == orchestration.JobStatusCompleted {
+					m.StatusSummary = fmt.Sprintf("Resuming '%s'...", job.Title)
 					return m, executePlanResume(job)
 				}
 				m.StatusSummary = theme.DefaultTheme.Error.Render("Only completed interactive agent jobs can be resumed.")

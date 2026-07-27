@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/spf13/cobra"
 
@@ -20,7 +22,7 @@ func NewPlanResumeCmd() *cobra.Command {
 		Short: "Resume a completed agent job",
 		Long: `Resumes a completed agent session by finding its native agent session ID
 and re-launching it through the plan's configured tmux, native, or tuimux target.
-Claude and Codex sessions are supported.`,
+Claude, Codex, and Pi-family sessions are supported.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runPlanResume,
 	}
@@ -38,6 +40,18 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
+
+	// LoadPlan never populates plan.Orchestration (only the run path does), so
+	// without this the resume launch always fell back to tmux — invisible to a
+	// user whose plan runs under treemux/tuimux. Resolve agent_target from the
+	// caller's environment exactly like `plan run` does at the CLI perimeter.
+	agentTarget := "tmux" // safe default
+	if mux.ActiveMux() == mux.MuxTuimux {
+		agentTarget = "tuimux"
+	} else if os.Getenv("GROVE_TERMINAL") != "" {
+		agentTarget = "native"
+	}
+	plan.Orchestration = &orchestration.Config{AgentTarget: agentTarget}
 
 	job, found := plan.GetJobByFilename(jobFile)
 	if !found {

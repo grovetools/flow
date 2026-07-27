@@ -48,6 +48,20 @@ func PrepareInteractiveAgentResume(job *Job, plan *Plan, workDir, providerName, 
 	if err != nil {
 		return nil, err
 	}
+	// Pi-family sessions live in the Flow-owned job artifact directory; the
+	// resumed process needs the same --session-dir the original launch used or
+	// the native id will not resolve. For a completed job the directory already
+	// exists, so the helper's MkdirAll is a no-op and preparing stays
+	// effectively side-effect free.
+	if spec.PiRuntime != nil {
+		if plan == nil || plan.Directory == "" {
+			return nil, fmt.Errorf("cannot resume %s job without its plan directory (Flow-owned session dir)", spec.Name)
+		}
+		agentArgs, err = appendPiJobSessionArgs(spec, plan.Directory, job.ID, agentArgs)
+		if err != nil {
+			return nil, err
+		}
+	}
 	shellCommand, err := spec.BuildResumeShellCommand(agentArgs, nativeSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("build %s resume command: %w", providerName, err)

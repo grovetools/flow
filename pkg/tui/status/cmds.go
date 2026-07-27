@@ -1487,14 +1487,28 @@ func editJob(job *orchestration.Job, hosted bool) tea.Cmd {
 	}
 }
 
+// PlanResumeMsg carries the outcome of a background `flow plan resume` run.
+type PlanResumeMsg struct {
+	JobTitle string
+	Output   string
+	Err      error
+}
+
+// executePlanResume runs `flow plan resume` in the background. The command
+// never needs the terminal — it launches the agent into the plan's tmux,
+// native, or tuimux target — so tea.ExecProcess (which suspends the whole TUI
+// and, under treemux, briefly drops to the backing terminal) is wrong here.
+// The outcome comes back as PlanResumeMsg so failures land in StatusSummary
+// instead of vanishing.
 func executePlanResume(job *orchestration.Job) tea.Cmd {
-	return tea.ExecProcess(delegation.Command("flow", "plan", "resume", job.FilePath),
-		func(err error) tea.Msg {
-			if err != nil {
-				return err // Propagate error to be displayed in the TUI
-			}
-			return RefreshMsg{} // Refresh TUI on success
-		})
+	return func() tea.Msg {
+		output, err := delegation.Command("flow", "plan", "resume", job.FilePath).CombinedOutput()
+		return PlanResumeMsg{
+			JobTitle: job.Title,
+			Output:   strings.TrimSpace(string(output)),
+			Err:      err,
+		}
+	}
 }
 
 // JobCompletedMsg is sent when a job completion attempt finishes

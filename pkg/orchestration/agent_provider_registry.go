@@ -121,11 +121,16 @@ func newPiProviderSpec(runtime PiRuntimeDescriptor) *AgentProviderSpec {
 		return cmd
 	}
 	return &AgentProviderSpec{
-		Name:                        runtime.Name,
-		Binary:                      runtime.Binary,
-		SupportsHeadless:            true,
-		NewHeadlessCommand:          headless,
-		BuildShellCommand:           positionalShellCommand(runtime.Binary),
+		Name:               runtime.Name,
+		Binary:             runtime.Binary,
+		SupportsHeadless:   true,
+		NewHeadlessCommand: headless,
+		BuildShellCommand:  positionalShellCommand(runtime.Binary),
+		// Pi resumes in place: `--session <uuid>` reopens the job's existing
+		// transcript (unlike claude, which forks a new session file). The
+		// Flow-owned `--session-dir` is appended by the resume preparer so the
+		// uuid resolves inside the job's artifact directory.
+		BuildResumeShellCommand:     resumeShellCommand(runtime.Binary, "--session"),
 		ModelFlag:                   "--model",
 		EffortFlag:                  "",
 		DefaultInputMode:            "standard",

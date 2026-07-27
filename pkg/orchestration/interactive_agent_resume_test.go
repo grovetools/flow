@@ -71,6 +71,27 @@ func TestPrepareInteractiveAgentResumeUsesArchivedProviderAndPlanTarget(t *testi
 	}
 }
 
+func TestPrepareInteractiveAgentResumePiUsesFlowOwnedSessionDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home+"/config")
+
+	job := &Job{ID: "job-1", Status: JobStatusCompleted}
+	plan := &Plan{Name: "plan-1", Directory: home, Orchestration: &Config{AgentTarget: "native"}}
+	prepared, err := PrepareInteractiveAgentResume(job, plan, home, "pi", "019c6073-cf17-7492")
+	if err != nil {
+		t.Fatalf("PrepareInteractiveAgentResume() error = %v", err)
+	}
+	gp, ok := prepared.provider.(*GrovetermAgentProvider)
+	if !ok || gp.agentTarget != "native" || gp.spec.Name != "pi" {
+		t.Fatalf("provider = %#v, want pi groveterm provider", prepared.provider)
+	}
+	want := "pi --session-dir " + piJobSessionDir(home, "job-1") + " --session 019c6073-cf17-7492"
+	if prepared.shellCommand != want {
+		t.Fatalf("shellCommand = %q, want %q", prepared.shellCommand, want)
+	}
+}
+
 func TestPrepareInteractiveAgentResumeDefaultsMissingTargetToTmux(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -93,13 +114,15 @@ func TestPrepareInteractiveAgentResumeRejectsBeforeLaunch(t *testing.T) {
 	job := &Job{Status: JobStatusCompleted}
 
 	for _, tc := range []struct {
-		name, provider, target, want string
+		name, provider, target, planDir, want string
 	}{
-		{name: "unsupported provider capability", provider: "pi", target: "tmux", want: "does not support session resume"},
-		{name: "unsupported target", provider: "claude", target: "mystery", want: "agent_target not set or unsupported"},
+		{name: "unsupported provider capability", provider: "opencode", target: "tmux", planDir: home, want: "does not support session resume"},
+		{name: "pi requires plan directory", provider: "pi", target: "native", planDir: "", want: "plan directory"},
+		{name: "pi has no prepared tmux launch", provider: "pi", target: "tmux", planDir: home, want: "does not support prepared resume launch on tmux"},
+		{name: "unsupported target", provider: "claude", target: "mystery", planDir: home, want: "agent_target not set or unsupported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			plan := &Plan{Orchestration: &Config{AgentTarget: tc.target}}
+			plan := &Plan{Directory: tc.planDir, Orchestration: &Config{AgentTarget: tc.target}}
 			_, err := PrepareInteractiveAgentResume(job, plan, home, tc.provider, "native-1")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want containing %q", err, tc.want)

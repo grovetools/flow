@@ -166,10 +166,20 @@ func TestBuildAgentResumeShellCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("pi", func(t *testing.T) {
+		got, err := BuildAgentResumeShellCommand("pi", []string{"--session-dir", "/plans/p/.artifacts/j/sessions"}, "019c6073-cf17-7492")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "pi --session-dir /plans/p/.artifacts/j/sessions --session 019c6073-cf17-7492"; got != want {
+			t.Fatalf("command = %q, want %q", got, want)
+		}
+	})
+
 	for _, tc := range []struct {
 		name, provider, sessionID, wantErr string
 	}{
-		{"unsupported", "pi", "session-123", "does not support"},
+		{"unsupported", "opencode", "session-123", "does not support"},
 		{"unknown", "missing", "session-123", "unknown agent provider"},
 		{"empty id", "claude", "", "required"},
 		{"unsafe id", "claude", "id;rm", "unsafe"},
