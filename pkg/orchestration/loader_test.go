@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -636,5 +637,84 @@ func TestLoadPlanLenientKeepsPlanWithInvalidJob(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("duplicate job ID not reported: %v", problems)
+	}
+}
+
+// TestLoadJobMetaSkipsBody is the regression for the groved GC storm: job
+// files accumulate agent transcripts (hundreds of KB each), and the daemon's
+// plan index held every one of them in memory and re-read them on every plan
+// file event. Index/browse loads must carry frontmatter only; execution loads
+// must still carry the body.
+func TestLoadJobMetaSkipsBody(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Repeat("transcript line\n", 40000) // ~640 KB, well past the head budget
+	path := filepath.Join(dir, "01-big.md")
+	content := "---\nid: big\ntitle: Big Job\nstatus: completed\ntype: oneshot\n---\n" + body
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := LoadJobMeta(path)
+	if err != nil {
+		t.Fatalf("LoadJobMeta: %v", err)
+	}
+	if meta.PromptBody != "" {
+		t.Fatalf("metadata load materialized a %d-byte body", len(meta.PromptBody))
+	}
+	if meta.ID != "big" || meta.Title != "Big Job" || meta.Status != JobStatusCompleted {
+		t.Fatalf("frontmatter lost in metadata load: %+v", meta)
+	}
+
+	full, err := LoadJob(path)
+	if err != nil {
+		t.Fatalf("LoadJob: %v", err)
+	}
+	if full.PromptBody != body {
+		t.Fatalf("execution load lost the body: got %d bytes, want %d", len(full.PromptBody), len(body))
+	}
+
+	// The index path goes through LoadPlanLenient.
+	plan, problems := LoadPlanLenient(dir)
+	if plan == nil || len(plan.Jobs) != 1 {
+		t.Fatalf("lenient load: plan=%v jobs=%d problems=%v", plan != nil, len(plan.Jobs), problems)
+	}
+	if plan.Jobs[0].PromptBody != "" {
+		t.Fatalf("index load retained a %d-byte body", len(plan.Jobs[0].PromptBody))
+	}
+}
+
+// TestLoadJobMetaOversizedFrontmatter covers the fallback: frontmatter longer
+// than the head budget must still load rather than being reported as broken.
+func TestLoadJobMetaOversizedFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "01-wide.md")
+	notes := strings.Repeat("x", frontmatterHeadBudget)
+	content := "---\nid: wide\ntitle: Wide Job\nstatus: pending\ntype: oneshot\nworktree: " +
+		notes + "\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := LoadJobMeta(path)
+	if err != nil {
+		t.Fatalf("LoadJobMeta with oversized frontmatter: %v", err)
+	}
+	if job.ID != "wide" || len(job.Worktree) != len(notes) {
+		t.Fatalf("oversized frontmatter truncated: id=%q worktree=%d", job.ID, len(job.Worktree))
+	}
+}
+
+// TestLoadJobMetaRejectsNonJob keeps the metadata path's not-a-job signal
+// identical to the full loader's, since the index relies on it to skip
+// ordinary markdown sitting in a plan directory.
+func TestLoadJobMetaRejectsNonJob(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(path, []byte("# just notes\n\nno frontmatter here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var notAJob ErrNotAJob
+	if _, err := LoadJobMeta(path); err == nil || !errors.As(err, &notAJob) {
+		t.Fatalf("metadata load of a bodyless markdown file: got %v, want ErrNotAJob", err)
 	}
 }

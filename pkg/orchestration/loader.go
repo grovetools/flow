@@ -3,6 +3,7 @@ package orchestration
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -118,6 +119,11 @@ func LoadPlan(dir string) (*Plan, error) {
 // broken frontmatter, including the half-written window while a plan is being
 // created. Here such files are skipped and reported; the plan row survives
 // with the jobs that did load.
+//
+// Jobs load WITHOUT their prompt bodies (see LoadJobMeta): browse and index
+// consumers render frontmatter only, and retaining every transcript body was
+// the daemon's largest live-heap and allocation-churn site. Execution paths
+// that need PromptBody must use LoadPlan or LoadJob.
 func LoadPlanLenient(dir string) (*Plan, []error) {
 	if _, err := os.Stat(dir); err != nil {
 		return nil, []error{fmt.Errorf("plan directory not found: %w", err)}
@@ -157,7 +163,7 @@ func LoadPlanLenient(dir string) (*Plan, []error) {
 			continue
 		}
 		filename := entry.Name()
-		job, err := LoadJob(filepath.Join(dir, filename))
+		job, err := LoadJobMeta(filepath.Join(dir, filename))
 		if err != nil {
 			var notAJob ErrNotAJob
 			if !errors.As(err, &notAJob) {
@@ -208,19 +214,113 @@ func (e ErrNotAJob) Error() string {
 	return e.Reason
 }
 
-// LoadJob loads a single job from a markdown file.
+// LoadJob loads a single job from a markdown file, including its prompt body.
 func LoadJob(filepath string) (*Job, error) {
-	content, err := os.ReadFile(filepath)
+	return loadJob(filepath, true)
+}
+
+// LoadJobMeta loads a job's frontmatter without materializing its prompt body.
+//
+// Index consumers (the daemon's plan watcher, the flow TUI lists) hold every
+// job of every plan in memory and re-read them on every plan file event, but
+// PromptBody is `json:"-"` — it never reaches a daemon client, and no list view
+// renders it. Job files accumulate agent transcripts, so a single .md routinely
+// reaches hundreds of KB; reading the whole file, copying it into a string,
+// re-copying the body and then UTF-8-sanitizing it costs ~6x the file size in
+// allocations per job per refresh. That was the dominant live-heap and
+// allocation-churn site in groved (a 260 MB plan portfolio → ~1.5 GB of garbage
+// per full index refresh, hundreds of refreshes a day), which is what pinned
+// the GC at multiple cores against the 2 GiB GOMEMLIMIT.
+func LoadJobMeta(filepath string) (*Job, error) {
+	return loadJob(filepath, false)
+}
+
+// Head-read sizing for the metadata-only loader. Job frontmatter is typically
+// a few hundred bytes, so the first chunk almost always contains all of it;
+// the buffer only grows for the rare wide job, and only up to the budget,
+// past which the file is re-read in full. The starting size matters: this runs
+// once per job file per index refresh over thousands of files, so a buffer
+// sized for the worst case would itself be a bulk allocator.
+const (
+	frontmatterChunkSize  = 4 << 10
+	frontmatterHeadBudget = 64 << 10
+)
+
+// readFrontmatterHead returns the raw YAML frontmatter of a job file, reading
+// only its head where possible. An empty string with a nil error means the file
+// has no frontmatter (the caller reports it as ErrNotAJob), matching what
+// ExtractFrontmatterString returns for the same input.
+func readFrontmatterHead(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading job file: %w", err)
+		return "", fmt.Errorf("reading job file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	head := make([]byte, 0, frontmatterChunkSize)
+	for {
+		if len(head) == cap(head) {
+			grown := make([]byte, len(head), cap(head)*2)
+			copy(grown, head)
+			head = grown
+		}
+		n, readErr := io.ReadFull(f, head[len(head):cap(head)])
+		head = head[:len(head)+n]
+		atEOF := errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF)
+		if readErr != nil && !atEOF {
+			return "", fmt.Errorf("reading job file: %w", readErr)
+		}
+
+		yamlStr, _, extractErr := ExtractFrontmatterString(head)
+		if extractErr == nil {
+			return yamlStr, nil
+		}
+		// A truncated head can hide the closing delimiter; keep reading.
+		// Only end-of-file proves the frontmatter really is malformed.
+		if atEOF {
+			return "", fmt.Errorf("extracting frontmatter: %w", extractErr)
+		}
+		if len(head) >= frontmatterHeadBudget {
+			break
+		}
 	}
 
-	// Extract the raw YAML string without allocating a
-	// map[string]interface{} or doing a yaml.Marshal round-trip — the
-	// old path showed up as ~50% of the browser refresh CPU profile.
-	yamlStr, body, err := ExtractFrontmatterString(content)
+	// Frontmatter wider than the budget: fall back to reading the whole file.
+	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("extracting frontmatter: %w", err)
+		return "", fmt.Errorf("reading job file: %w", err)
+	}
+	yamlStr, _, err := ExtractFrontmatterString(content)
+	if err != nil {
+		return "", fmt.Errorf("extracting frontmatter: %w", err)
+	}
+	return yamlStr, nil
+}
+
+func loadJob(filepath string, withBody bool) (*Job, error) {
+	var yamlStr string
+	var promptBody string
+
+	if withBody {
+		content, err := os.ReadFile(filepath)
+		if err != nil {
+			return nil, fmt.Errorf("reading job file: %w", err)
+		}
+
+		// Extract the raw YAML string without allocating a
+		// map[string]interface{} or doing a yaml.Marshal round-trip — the
+		// old path showed up as ~50% of the browser refresh CPU profile.
+		var body []byte
+		yamlStr, body, err = ExtractFrontmatterString(content)
+		if err != nil {
+			return nil, fmt.Errorf("extracting frontmatter: %w", err)
+		}
+		promptBody = sanitize.UTF8(body)
+	} else {
+		var err error
+		if yamlStr, err = readFrontmatterHead(filepath); err != nil {
+			return nil, err
+		}
 	}
 
 	if strings.TrimSpace(yamlStr) == "" {
@@ -228,7 +328,7 @@ func LoadJob(filepath string) (*Job, error) {
 	}
 
 	job := &Job{
-		PromptBody: sanitize.UTF8(body),
+		PromptBody: promptBody,
 	}
 
 	if err := yaml.Unmarshal([]byte(yamlStr), job); err != nil {
