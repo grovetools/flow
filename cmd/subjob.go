@@ -76,7 +76,14 @@ func runSubjobPublish(cmd *cobra.Command, target, state string) error {
 	if err != nil {
 		return err
 	}
-	client := daemon.NewWithAutoStart(canonical)
+	// Subjob events are session-lifecycle-adjacent: they must land on the
+	// daemon the UI/parent coordinator streams, unconditionally — a stale
+	// scoped groved capturing them makes reports invisible to the watch.
+	// Host routing (env → registry → canonical scope) keeps publish (child
+	// agent's shell) and watch (coordinator's shell) on the SAME daemon in
+	// all three tiers: both inherit the same GROVE_HOST_DAEMON_SOCKET, fall
+	// back to the same registry file, then to the same canonical plan dir.
+	client := daemon.NewSessionHostClient(canonical)
 	defer client.Close()
 	if err := client.PublishSubjobEvent(cmd.Context(), *ev); err != nil {
 		return err
@@ -93,7 +100,11 @@ func runSubjobWatch(cmd *cobra.Command, parentID string) error {
 	if err != nil {
 		return err
 	}
-	client := daemon.NewWithAutoStart(canonical)
+	// Must resolve to the SAME daemon as `subjob publish` (see
+	// runSubjobPublish): host routing (env → registry → canonical scope)
+	// holds that invariant in all three tiers, and keeps watch streaming the
+	// daemon the UI/parent streams rather than a stray scoped groved.
+	client := daemon.NewSessionHostClient(canonical)
 	defer client.Close()
 	delivered := map[string]bool{}
 	backoff := time.Second
