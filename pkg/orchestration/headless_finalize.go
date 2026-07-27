@@ -131,7 +131,11 @@ func FinalizeHeadlessJob(job *Job, plan *Plan) error {
 		// example after an auth/provider startup failure). Exit status alone is
 		// therefore not success: require a non-empty transcript with verified
 		// job ownership before entering the unified completion path.
-		if _, err := findVerifiedJobSession(job); err != nil {
+		// Evidence, not just the registry record: a long run whose registry
+		// entry was reaped mid-flight still has its own transcript in the job's
+		// artifact directory, and that is the agent's own output rather than an
+		// index a liveness sweep can delete.
+		if err := successfulExecutionEvidence(job, plan); err != nil {
 			return finalizeHeadlessFailure(ctx, job, "agent exited successfully but produced no verified transcript: "+err.Error())
 		}
 		return CompleteJob(job, plan, true)

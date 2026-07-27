@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -12,6 +13,7 @@ import (
 	"github.com/fatih/color"
 	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/mux"
+	"github.com/grovetools/core/pkg/paths"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/sanitize"
 	"github.com/sirupsen/logrus"
@@ -64,11 +66,13 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 	// behavior below for compatibility.
 	if !alreadyCompleted && isAgentJobType(job.Type) {
 		if evidenceErr := successfulExecutionEvidence(job, plan); evidenceErr != nil {
-			lastErr := "agent completion rejected: " + evidenceErr.Error()
-			if failErr := finalizeHeadlessFailure(context.Background(), job, lastErr); failErr != nil {
-				return fmt.Errorf("%s; additionally failed to persist failed status: %w", lastErr, failErr)
-			}
-			return fmt.Errorf("%s", lastErr)
+			// Rejection means "this completion cannot be verified", which is
+			// not "the work failed". Marking the job failed here made merely
+			// attempting to complete an unverifiable job destructive: the
+			// attempt itself stamped status: failed and completed_at on a job
+			// whose agent had run to the end. The job's status is left exactly
+			// as it was; only the error is returned.
+			return unverifiableCompletionError(job, plan, evidenceErr)
 		}
 	}
 
@@ -228,6 +232,29 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 	}
 
 	return nil
+}
+
+// unverifiableCompletionError explains a rejected completion in terms of what
+// is missing and what to do about it. A bare "session binding unverified"
+// names an internal record the user has never heard of and offers no way
+// forward, so the message states which index was consulted, whether the job's
+// own transcript is on disk, and the command that recovers it.
+func unverifiableCompletionError(job *Job, plan *Plan, evidenceErr error) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "agent completion rejected: %v", evidenceErr)
+	b.WriteString("\n  job status left unchanged (this is a verification failure, not a failed run)")
+	fmt.Fprintf(&b, "\n  session registry: %s", filepath.Join(paths.StateDir(), "hooks", "sessions"))
+
+	if plan != nil && job != nil {
+		artifactDir := filepath.Join(plan.Directory, ".artifacts", job.ID)
+		if transcript := ArtifactTranscriptForAttempt(job, plan); transcript != "" {
+			fmt.Fprintf(&b, "\n  transcript on disk: %s", transcript)
+		} else {
+			fmt.Fprintf(&b, "\n  no transcript for this attempt under %s", filepath.Join(artifactDir, "sessions"))
+		}
+		fmt.Fprintf(&b, "\n  inspect it with: aglogs read %s/%s", plan.Name, job.Filename)
+	}
+	return fmt.Errorf("%s", b.String())
 }
 
 // runNonFatalCleanup runs one best-effort resource-cleanup step, converting a

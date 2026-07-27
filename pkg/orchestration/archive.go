@@ -185,7 +185,11 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 		Field("job_id", job.ID).
 		Log(ctx)
 
-	binding, err := findVerifiedJobSession(job)
+	// Registry binding first, the job's own artifact transcript second. The
+	// artifact path is keyed by the job ID, so it identifies the session as
+	// exactly as the registry does — and it survives the liveness sweeps that
+	// can delete the registry record out from under a still-running agent.
+	source, err := resolveJobTranscript(job, plan)
 	if err != nil {
 		ulog.Error("[ARCHIVE] Refusing to archive an unverified session binding").
 			Field("job_id", job.ID).
@@ -194,7 +198,7 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 			Log(ctx)
 		return err
 	}
-	metadata := binding.Metadata
+	metadata := source.Metadata
 
 	ulog.Debug("[ARCHIVE] Found session metadata").
 		Field("job_id", job.ID).
@@ -206,19 +210,28 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 	// 2. Use the exact metadata file selected by verified binding discovery.
 	// Do not reconstruct it from a native ID: legacy/provider registries may
 	// name the directory differently, and reconstruction can reintroduce stale
-	// session selection.
-	sourceMetadataPath := binding.MetadataPath
-	sourceSessionDir := filepath.Dir(sourceMetadataPath)
+	// session selection. When the binding came from the artifact transcript
+	// instead, there is no source file — the metadata is derived from the job
+	// and that transcript, and is written out below.
+	sourceMetadataPath := source.MetadataPath
+	if sourceMetadataPath != "" {
+		sourceSessionDir := filepath.Dir(sourceMetadataPath)
 
-	ulog.Debug("[ARCHIVE] Checking source session directory").
-		Field("source_session_dir", sourceSessionDir).
-		Field("source_metadata_path", sourceMetadataPath).
-		Log(ctx)
-
-	if _, statErr := os.Stat(sourceMetadataPath); statErr != nil {
-		ulog.Error("[ARCHIVE] Source metadata.json not found").
+		ulog.Debug("[ARCHIVE] Checking source session directory").
+			Field("source_session_dir", sourceSessionDir).
 			Field("source_metadata_path", sourceMetadataPath).
-			Err(statErr).
+			Log(ctx)
+
+		if _, statErr := os.Stat(sourceMetadataPath); statErr != nil {
+			ulog.Error("[ARCHIVE] Source metadata.json not found").
+				Field("source_metadata_path", sourceMetadataPath).
+				Err(statErr).
+				Log(ctx)
+		}
+	} else {
+		ulog.Info("[ARCHIVE] No registry record; archiving from the job's artifact transcript").
+			Field("job_id", job.ID).
+			Field("transcript_path", source.TranscriptPath).
 			Log(ctx)
 	}
 
@@ -243,7 +256,7 @@ func ArchiveInteractiveSession(job *Job, plan *Plan) error {
 		Field("dest", destMetadataPath).
 		Log(ctx)
 
-	if err := writeArchivedSessionMetadata(sourceMetadataPath, destMetadataPath, job); err != nil {
+	if err := writeSessionMetadataArtifact(sourceMetadataPath, destMetadataPath, metadata, job); err != nil {
 		ulog.Error("[ARCHIVE] Failed to archive metadata.json").
 			Field("source", sourceMetadataPath).
 			Field("dest", destMetadataPath).

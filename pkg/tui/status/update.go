@@ -809,7 +809,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			"status": msg.Status,
 		}).Debug("Received daemon job status update")
 
-		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" || msg.Status == "pending_user" || msg.Status == "idle" {
+		// "orphaned" is included deliberately: the daemon lost track of the
+		// job's process, so it will never report a terminal status for it and
+		// the viewer would otherwise follow a log forever. It is reported as
+		// uncertainty, not as failure — the agent may well still be running.
+		if msg.Status == "completed" || msg.Status == "failed" || msg.Status == "cancelled" || msg.Status == "pending_user" || msg.Status == "idle" || msg.Status == "orphaned" {
 			m.IsRunningJob = false
 
 			if msg.Status == "completed" {
@@ -824,6 +828,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.StatusSummary = theme.DefaultTheme.Info.Render("Job awaiting user input.")
 			} else if msg.Status == "idle" {
 				m.StatusSummary = theme.DefaultTheme.Info.Render("Agent is idle.")
+			} else if msg.Status == "orphaned" {
+				m.StatusSummary = theme.DefaultTheme.Warning.Render("Daemon lost track of this job — the agent may still be running.")
 			} else {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Job cancelled.")
 			}

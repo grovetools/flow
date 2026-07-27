@@ -129,17 +129,22 @@ func AppendAgentTranscript(job *Job, plan *Plan) error {
 	// broad legacy aliases and returns the first match, so it can select a stale
 	// transcript after a retry. Completion/archive paths must fail loudly rather
 	// than copy bytes from that ambiguous record.
-	binding, bindErr := findVerifiedJobSession(job)
+	// The job's own artifact transcript is an equally exact binding — the path
+	// is keyed by the job ID — so a reaped registry record no longer costs the
+	// job its transcript.
+	source, bindErr := resolveJobTranscript(job, plan)
 	if bindErr != nil {
 		markTranscriptUnverified(ctx, job, plan)
 		return bindErr
 	}
-	metadata := binding.Metadata
-	aglogsSpec := metadata.ClaudeSessionID
-	ulog.Debug("[TRANSCRIPT] Using verified session ID from registry").
+	metadata := source.Metadata
+	aglogsSpec := source.Spec
+	ulog.Debug("[TRANSCRIPT] Using verified transcript binding").
 		Field("job_id", job.ID).
 		Field("claude_session_id", metadata.ClaudeSessionID).
 		Field("provider", metadata.Provider).
+		Field("from_registry", source.MetadataPath != "").
+		Field("aglogs_spec", aglogsSpec).
 		Log(ctx)
 
 	// Get formatted transcript for job.log (with ANSI colors)
