@@ -246,6 +246,21 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		}
 	}
 
+	if p.spec.PiRuntime != nil && transcriptPath == "" {
+		var paneOutput string
+		hostClient := sessionHostClient(workDir)
+		paneOutput, _ = hostClient.CaptureAgentPane(ctx, job.ID)
+		hostClient.Close()
+		handled, failureErr := handlePiStartupFailure(job, plan, pid, paneOutput, err)
+		if failureErr != nil {
+			return failureErr
+		}
+		if handled {
+			logger.WithField("job_id", job.ID).Warn("Pi failed before creating a transcript; job marked failed")
+			return nil
+		}
+	}
+
 	// Extract native session ID from transcript path. Codex rollout filenames
 	// embed the conversation UUID (rollout-<ts>-<uuid>.jsonl) and pi session
 	// filenames embed the session uuidv7 (<ts>_<uuid>.jsonl) — store just the

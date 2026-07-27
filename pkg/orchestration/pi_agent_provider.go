@@ -329,6 +329,25 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		}
 	}
 
+	if transcriptPath == "" {
+		agentTarget := "tmux"
+		if plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
+			agentTarget = plan.Orchestration.AgentTarget
+		}
+		var paneOutput string
+		if engine, captureErr := mux.GetEngine(agentTarget); captureErr == nil {
+			paneOutput, _ = engine.CapturePane(ctx, targetPane)
+		}
+		handled, failureErr := handlePiStartupFailure(job, plan, piPID, paneOutput, err)
+		if failureErr != nil {
+			return failureErr
+		}
+		if handled {
+			logger.WithField("job_id", job.ID).Warn("Pi failed before creating a transcript; job marked failed")
+			return nil
+		}
+	}
+
 	var nativeID string
 	if transcriptPath != "" {
 		nativeID = piNativeSessionID(transcriptPath)
