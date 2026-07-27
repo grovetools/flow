@@ -209,6 +209,22 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 
 	ctx := context.Background()
 
+	// Start watching the pane before the PID wait (up to 30s) and the
+	// transcript retry loop (another 10s). A Pi that fails to load an
+	// extension prints the reason and exits about a second after spawn, taking
+	// its PTY with it, so a single capture after those waits sees nothing at
+	// all. The watcher keeps the last useful snapshot and is stopped the moment
+	// discovery settles, so a healthy launch pays only a couple of captures.
+	var paneWatcher *piPaneWatcher
+	if p.spec.PiRuntime != nil {
+		captureClient := sessionHostClient(workDir)
+		defer captureClient.Close()
+		paneWatcher = startPiPaneWatcher(ctx, func(captureCtx context.Context) (string, error) {
+			return captureClient.CaptureAgentPane(captureCtx, job.ID)
+		})
+		defer func() { _, _ = paneWatcher.stop() }()
+	}
+
 	// Wait for PID via deterministic pidfile (written by BuildAgentCommand wrapper)
 	pid, err := agentstream.WaitForPID(ctx, job.ID)
 	if err != nil {
@@ -218,6 +234,9 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		logger.WithField("pid", pid).Debug("Discovered agent PID via pidfile")
 		_ = agentstream.CleanupPIDFile(job.ID)
 	}
+	// Hand the PID to the watcher so it captures the instant Pi dies rather
+	// than on the next backoff tick, while the pane still has contents.
+	paneWatcher.observePID(pid)
 
 	// Discover transcript path using the product descriptor. Rebranded Pi
 	// providers emit Pi v3 files but keep their provider identity in records.
@@ -246,12 +265,21 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		}
 	}
 
+	// Discovery is settled either way now: release the watcher so a healthy
+	// launch stops paying for captures.
+	paneOutput, captureErr := paneWatcher.stop()
+
 	if p.spec.PiRuntime != nil && transcriptPath == "" {
-		var paneOutput string
-		hostClient := sessionHostClient(workDir)
-		paneOutput, _ = hostClient.CaptureAgentPane(ctx, job.ID)
-		hostClient.Close()
-		handled, failureErr := handlePiStartupFailure(job, plan, pid, paneOutput, err)
+		if paneOutput == "" {
+			logger.WithError(captureErr).WithField("job_id", job.ID).
+				Warn("No Pi terminal output captured; startup diagnosis limited to the capture error")
+		}
+		handled, failureErr := handlePiStartupFailure(job, plan, piStartupEvidence{
+			pid:          pid,
+			paneOutput:   paneOutput,
+			captureErr:   captureErr,
+			discoveryErr: err,
+		})
 		if failureErr != nil {
 			return failureErr
 		}
@@ -259,6 +287,12 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 			logger.WithField("job_id", job.ID).Warn("Pi failed before creating a transcript; job marked failed")
 			return nil
 		}
+		// No proof of death: an unknown PID alone must not fail a Pi that is
+		// merely slow to write its first transcript.
+		logger.WithFields(map[string]interface{}{
+			"job_id": job.ID,
+			"pid":    pid,
+		}).Warn("Pi produced no transcript but shows no evidence of failure; leaving job status unchanged")
 	}
 
 	// Extract native session ID from transcript path. Codex rollout filenames

@@ -66,12 +66,14 @@ func (f *fakeClient) PublishSubjobEvent(_ context.Context, event models.SubjobEv
 	f.published = append(f.published, event)
 	return nil
 }
+
 func (f *fakeClient) GetSubjobSnapshot(context.Context, string, string) (*models.SubjobSnapshot, error) {
 	if f.snapshot == nil {
 		return &models.SubjobSnapshot{Reports: map[string]*models.SubjobState{}}, nil
 	}
 	return f.snapshot, nil
 }
+
 func (f *fakeClient) StreamState(context.Context) (<-chan daemon.StateUpdate, error) {
 	return make(chan daemon.StateUpdate), nil
 }

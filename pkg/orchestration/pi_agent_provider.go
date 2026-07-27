@@ -274,6 +274,32 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 
 	ctx := context.Background()
 
+	agentTarget := "tmux"
+	if plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
+		agentTarget = plan.Orchestration.AgentTarget
+	}
+
+	// Watch the pane from here, before the PID discovery (up to 30s of pidfile
+	// wait plus 30s of process-tree fallback) and the transcript retry loop.
+	// pi can print a startup error and exit within a second; CapturePane fails
+	// as soon as the pane closes, so a single capture at the end of discovery
+	// is always too late to see why. The watcher retains the last useful
+	// snapshot and stops as soon as discovery settles.
+	var (
+		paneWatcher    *piPaneWatcher
+		paneCaptureErr error
+	)
+	if engine, engineErr := mux.GetEngine(agentTarget); engineErr != nil {
+		paneCaptureErr = fmt.Errorf("resolving %s engine for pane capture: %w", agentTarget, engineErr)
+		logger.WithError(engineErr).WithField("agent_target", agentTarget).
+			Warn("Pane capture unavailable; pi startup failures will be diagnosed without terminal output")
+	} else {
+		paneWatcher = startPiPaneWatcher(ctx, func(captureCtx context.Context) (string, error) {
+			return engine.CapturePane(captureCtx, targetPane)
+		})
+		defer func() { _, _ = paneWatcher.stop() }()
+	}
+
 	// Wait for PID via deterministic pidfile (written by BuildAgentCommand).
 	piPID, err := agentstream.WaitForPID(ctx, job.ID)
 	if err != nil {
@@ -300,6 +326,9 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
 		}
 	}
+	// Once the PID is known the watcher can capture the instant pi dies,
+	// instead of waiting for the next backoff tick to find an empty pane.
+	paneWatcher.observePID(piPID)
 
 	// Discover the transcript via agentstream. The AfterTime filter scopes the
 	// match to sessions started after this launch, so concurrent pi sessions
@@ -329,16 +358,24 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		}
 	}
 
+	// Discovery is settled either way now: release the watcher so a healthy
+	// launch stops paying for captures.
+	var paneOutput string
+	if paneWatcher != nil {
+		paneOutput, paneCaptureErr = paneWatcher.stop()
+	}
+
 	if transcriptPath == "" {
-		agentTarget := "tmux"
-		if plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
-			agentTarget = plan.Orchestration.AgentTarget
+		if paneOutput == "" {
+			logger.WithError(paneCaptureErr).WithField("job_id", job.ID).
+				Warn("No pi terminal output captured; startup diagnosis limited to the capture error")
 		}
-		var paneOutput string
-		if engine, captureErr := mux.GetEngine(agentTarget); captureErr == nil {
-			paneOutput, _ = engine.CapturePane(ctx, targetPane)
-		}
-		handled, failureErr := handlePiStartupFailure(job, plan, piPID, paneOutput, err)
+		handled, failureErr := handlePiStartupFailure(job, plan, piStartupEvidence{
+			pid:          piPID,
+			paneOutput:   paneOutput,
+			captureErr:   paneCaptureErr,
+			discoveryErr: err,
+		})
 		if failureErr != nil {
 			return failureErr
 		}
@@ -346,6 +383,12 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 			logger.WithField("job_id", job.ID).Warn("Pi failed before creating a transcript; job marked failed")
 			return nil
 		}
+		// No proof of death: an unknown PID alone must not fail a pi that is
+		// merely slow to write its first transcript.
+		logger.WithFields(map[string]interface{}{
+			"job_id": job.ID,
+			"pid":    piPID,
+		}).Warn("pi produced no transcript but shows no evidence of failure; leaving job status unchanged")
 	}
 
 	var nativeID string
