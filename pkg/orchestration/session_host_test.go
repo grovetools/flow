@@ -30,6 +30,14 @@ type stubDaemon struct {
 	intents  []daemon.SessionIntent
 	spawns   []daemon.SpawnAgentRequest
 	confirms []daemon.SessionConfirmation
+	ends     []sessionEndCall
+}
+
+// sessionEndCall records a POST /api/sessions/{id}/end — the terminal half of
+// the lifecycle, which must come home to the same daemon as intent/confirm.
+type sessionEndCall struct {
+	JobID   string
+	Outcome string
 }
 
 // serveStubDaemon binds a stub groved at socketPath. Both stubs answer the
@@ -71,10 +79,35 @@ func serveStubDaemon(t *testing.T, socketPath string) *stubDaemon {
 		d.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})
+	// Catch-all for the per-session routes (…/{id}, …/{id}/end). The exact
+	// patterns registered above still win for intent/confirm.
+	mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+		if id, ok := strings.CutSuffix(rest, "/end"); ok {
+			var v struct {
+				Outcome string `json:"outcome"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&v)
+			d.mu.Lock()
+			d.ends = append(d.ends, sessionEndCall{JobID: id, Outcome: v.Outcome})
+			d.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// GET /api/sessions/{id}: unknown to a stub that was never told about
+		// this session.
+		w.WriteHeader(http.StatusNotFound)
+	})
 	srv := &http.Server{Handler: mux}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close(); ln.Close() })
 	return d
+}
+
+func (d *stubDaemon) endCalls() []sessionEndCall {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]sessionEndCall(nil), d.ends...)
 }
 
 func (d *stubDaemon) counts() (intents, spawns, confirms int) {
@@ -364,5 +397,67 @@ func TestNativeLaunchRoutesThroughRegisteredHostDaemon(t *testing.T) {
 	}
 	if got := spawn.Env[daemon.HostSocketEnv]; got != f.host.socketPath {
 		t.Fatalf("spawn env %s = %q, want the registered host socket %q", daemon.HostSocketEnv, got, f.host.socketPath)
+	}
+}
+
+// TestCompleteJobEndsSessionOnHostDaemon is the "Pi subjobs never turn into
+// checkmarks in the rail" regression.
+//
+// The completing process is almost never the launching one: a parent
+// coordinator's `flow_subjob join` shells out to `flow plan complete` from
+// inside its own worktree, so its GROVE_SCOPE names the WORKTREE while the
+// session it is closing was registered on the HOST daemon (that is what every
+// interactive provider does). CompleteJob used to build its client by scope,
+// so "completed" went to the worktree's groved. The host's record stayed
+// non-terminal forever, and since nothing revisits a rail row afterwards, a
+// finished subjob kept rendering as a live agent even though flow's own status
+// view showed it complete.
+func TestCompleteJobEndsSessionOnHostDaemon(t *testing.T) {
+	f := newHostedLaunchFixture(t)
+	// The completing shell's ambient state: scoped to its worktree, but
+	// launched under a host that published its endpoint.
+	t.Setenv("GROVE_SCOPE", resolveJobScope(f.workDir))
+	t.Setenv(daemon.HostSocketEnv, f.host.socketPath)
+
+	// A chat job keeps the assertion on routing: no agent process to kill, no
+	// tmux window, no transcript archival.
+	f.job.Type = JobTypeChat
+	f.job.Status = JobStatusRunning
+
+	if err := CompleteJob(f.job, f.plan, true); err != nil {
+		t.Fatalf("CompleteJob: %v", err)
+	}
+
+	hostEnds := f.host.endCalls()
+	if len(hostEnds) != 1 {
+		t.Fatalf("host daemon received %d session-end calls, want 1 (scoped got %d)", len(hostEnds), len(f.scoped.endCalls()))
+	}
+	if hostEnds[0].JobID != f.job.ID || hostEnds[0].Outcome != "completed" {
+		t.Fatalf("host end call = %+v, want {JobID:%s Outcome:completed}", hostEnds[0], f.job.ID)
+	}
+	if scopedEnds := f.scoped.endCalls(); len(scopedEnds) != 0 {
+		t.Fatalf("worktree-scoped daemon received %d session-end calls, want 0: %+v", len(scopedEnds), scopedEnds)
+	}
+}
+
+// TestCompleteJobEndsSessionOnScopedDaemonWithoutHost pins the unhosted
+// contract: with nothing published (bare `flow plan complete` in CI), the
+// terminal status still follows ordinary scope resolution.
+func TestCompleteJobEndsSessionOnScopedDaemonWithoutHost(t *testing.T) {
+	f := newHostedLaunchFixture(t)
+	t.Setenv("GROVE_SCOPE", resolveJobScope(f.workDir))
+
+	f.job.Type = JobTypeChat
+	f.job.Status = JobStatusRunning
+
+	if err := CompleteJob(f.job, f.plan, true); err != nil {
+		t.Fatalf("CompleteJob: %v", err)
+	}
+
+	if scopedEnds := f.scoped.endCalls(); len(scopedEnds) != 1 {
+		t.Fatalf("worktree-scoped daemon received %d session-end calls, want 1", len(scopedEnds))
+	}
+	if hostEnds := f.host.endCalls(); len(hostEnds) != 0 {
+		t.Fatalf("global daemon saw a session end with no host published: %+v", hostEnds)
 	}
 }

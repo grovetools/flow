@@ -33,6 +33,49 @@ func sessionHostClient(workDir string) daemon.Client {
 	return daemon.NewSessionHostClient(resolveJobScope(workDir))
 }
 
+// sessionHostClientConnectOnly is sessionHostClient for the terminal-state
+// writers that must never spawn a daemon (headless failure finalization): same
+// host-first routing, connect-only fallback. See
+// daemon.NewSessionHostClientConnectOnly.
+//
+// workDir may be empty when the caller failed before resolving one; the
+// env/registry tiers still apply and the fallback degrades to plain scope
+// resolution.
+func sessionHostClientConnectOnly(workDir string) daemon.Client {
+	if workDir == "" {
+		// Do NOT route an empty workDir through resolveJobScope: with no
+		// GROVE_SCOPE it would resolve the scope from the process CWD, which for
+		// a failure path is arbitrary. Empty means "no scope intended".
+		return daemon.NewSessionHostClientConnectOnly("")
+	}
+	return daemon.NewSessionHostClientConnectOnly(resolveJobScope(workDir))
+}
+
+// sessionHostClientForJob returns the session-lifecycle client for a job whose
+// working directory can be derived from the plan. Completion runs long after
+// launch — often from a different process than the one that registered the
+// session (the parent coordinator's `flow plan complete`, the status TUI, a
+// `flow_subjob join`) — so it must re-derive the SAME host routing the
+// provider used at launch. Resolving the daemon by scope instead would send
+// the terminal status to the worktree's scoped groved while the live record
+// sits on the host daemon, leaving the host's rail and Agents drawer showing a
+// finished agent as still running forever.
+//
+// A workDir that cannot be determined falls back to the plan directory, and
+// then to no scope at all — both strictly better than guessing from CWD.
+func sessionHostClientForJob(job *Job, plan *Plan) daemon.Client {
+	workDir, err := DetermineWorkingDirectory(plan, job)
+	if err != nil || workDir == "" {
+		if plan != nil {
+			workDir = plan.Directory
+		}
+	}
+	if workDir == "" {
+		return daemon.NewSessionHostClient("")
+	}
+	return sessionHostClient(workDir)
+}
+
 // hostTransportSocket returns the socket of the daemon owning the interactive
 // host UI that will display workDir's session, or "" when no host is
 // declared. It resolves exactly like sessionHostClient (env, then registry),

@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
-
-	"github.com/grovetools/core/pkg/daemon"
 )
 
 // headlessStatusFile is the JSON schema of the .status file written by
@@ -168,10 +166,13 @@ func finalizeHeadlessFailure(ctx context.Context, job *Job, lastError string) er
 	}
 
 	// End the daemon session so the monitor stops showing a live session for a
-	// process that has exited. Use connect-only daemon.New() (never autostart) —
-	// mirroring the setup-failure defer in HeadlessAgentExecutor.Execute: if no
-	// daemon is running this is a best-effort no-op, never a reason to spawn one.
-	daemonClient := daemon.New()
+	// process that has exited. Connect-only (never autostart) — mirroring the
+	// setup-failure defer in HeadlessAgentExecutor.Execute: if no daemon is
+	// running this is a best-effort no-op, never a reason to spawn one. Routed
+	// to the session host, because that is where the session was registered;
+	// scope resolution alone would close out a record on the wrong daemon and
+	// leave the host's showing a dead agent as live.
+	daemonClient := sessionHostClientConnectOnly("")
 	endCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if err := daemonClient.EndSession(endCtx, job.ID, string(JobStatusFailed)); err != nil {

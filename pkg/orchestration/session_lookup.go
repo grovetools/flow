@@ -24,8 +24,15 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 	log.WithField("job_id", jobID).Debug("Starting session lookup for job")
 
 	// First try daemon - it has the correct PID from ConfirmSession
-	// The filesystem pid.lock can have stale PIDs due to process forking
-	daemonClient := daemon.NewWithAutoStart()
+	// The filesystem pid.lock can have stale PIDs due to process forking.
+	//
+	// Host-routed, because ConfirmSession is: the providers register against
+	// the daemon owning the interactive host UI, so a scope-resolved lookup
+	// here queries a daemon that never saw this session and silently falls
+	// through to the filesystem scan (or finds nothing, and the agent is never
+	// killed on completion). With no host published this resolves exactly as
+	// NewWithAutoStart() did.
+	daemonClient := daemon.NewSessionHostClient("")
 	if daemonClient != nil {
 		daemonRunning := daemonClient.IsRunning()
 		log.WithFields(logrus.Fields{

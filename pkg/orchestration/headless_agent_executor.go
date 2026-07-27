@@ -119,6 +119,12 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 
 	var execErr error
 
+	// Declared before the failure defer below so that defer can route its
+	// EndSession by the job's working directory. It stays empty until the
+	// resolution block further down, which is exactly the "failed before we
+	// knew where this job runs" case the client handles.
+	var workDir string
+
 	// Defer terminal-status handling for the SETUP phase only.
 	//
 	// Headless agents detach: runAgentInWorktree starts the process and
@@ -146,7 +152,10 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		}
 
 		// Clean up the daemon session record for the failed-to-launch agent.
-		if client := daemon.New(); client != nil {
+		// Connect-only (never spawn a daemon just to report a dead process) but
+		// still host-routed, so a live host's record is actually closed out.
+		// workDir may be unset — the launch can fail before it is resolved.
+		if client := sessionHostClientConnectOnly(workDir); client != nil {
 			endCtx, endCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer endCancel()
 			if err := client.EndSession(endCtx, job.ID, string(JobStatusFailed)); err != nil {
@@ -159,7 +168,6 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 	}()
 
 	// Determine the working directory for the job
-	var workDir string
 	if job.Worktree != "" {
 		var err error
 		workDir, err = e.prepareWorktree(ctx, job, plan)
@@ -354,7 +362,11 @@ func (e *HeadlessAgentExecutor) runAgentInWorktree(ctx context.Context, worktree
 // (see issue: wrong-session-logs-bound-to-headless-tuimux-jobs).
 // Failure to register is logged as a warning and is never fatal.
 func (e *HeadlessAgentExecutor) registerSessionIntent(ctx context.Context, job *Job, plan *Plan, workDir, providerName string) {
-	daemonClient := daemon.NewWithAutoStart()
+	// Host-routed like the interactive providers: a headless session still
+	// shows in the host's Agents drawer, and its terminal status is written by
+	// CompleteJob, which is host-routed too. Registering by scope instead would
+	// split the two across daemons.
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	ulog.Debug("[HEADLESS] Registering session intent with daemon").
@@ -673,7 +685,8 @@ func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDi
 		}
 	}
 
-	daemonClient := daemon.NewWithAutoStart()
+	// Same host routing as the intent registration above.
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{

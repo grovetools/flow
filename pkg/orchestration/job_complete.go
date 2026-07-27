@@ -10,7 +10,6 @@ import (
 
 	"github.com/fatih/color"
 	grovelogging "github.com/grovetools/core/logging"
-	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/util/sanitize"
@@ -231,8 +230,15 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 			return fmt.Errorf("update job status: %w", err)
 		}
 
-		// Notify the daemon that the session has ended
-		daemonClient := daemon.NewWithAutoStart()
+		// Notify the daemon that the session has ended. This MUST target the
+		// same daemon the provider registered the session with — the host UI's
+		// — not whatever GROVE_SCOPE resolves to in the completing process.
+		// `flow plan complete` usually runs somewhere else entirely (a parent
+		// coordinator's flow_subjob join, the status TUI), and a scope-resolved
+		// client sends "completed" to the worktree's groved while the live
+		// record sits on the host's, so the rail keeps rendering a finished
+		// agent as running.
+		daemonClient := sessionHostClientForJob(job, plan)
 		if err := daemonClient.EndSession(context.Background(), job.ID, "completed"); err != nil {
 			logger.WithError(err).Debug("Failed to notify daemon of session end")
 		}

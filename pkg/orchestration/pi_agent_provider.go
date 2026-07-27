@@ -84,7 +84,11 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 	// waits for confirmation with the discovered PID/transcript. Failure
 	// degrades gracefully — the async confirm falls back to the filesystem
 	// registry.
-	daemonClient := daemon.NewWithAutoStart()
+	//
+	// sessionHostClient, like every other interactive provider: the intent, the
+	// confirmation below, and the eventual EndSession must all land on the one
+	// daemon whose stream feeds the host's rail and Agents drawer.
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	p.log.WithFields(logrus.Fields{
@@ -177,14 +181,18 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 	// Inline env vars on the agent command itself so they're scoped to the
 	// pi process and don't leak into the user's interactive shell after the
 	// agent exits. GROVE_SCOPE is inherited from the executor's env (treemux
-	// or daemon), not forced from workDir.
+	// or daemon), not forced from workDir. GROVE_HOST_DAEMON_SOCKET is the
+	// orthogonal transport answer (claude/codex carry it the same way): pi's
+	// own hooks open their own daemon client, and the Stop hook's terminal
+	// status must reach the daemon this launch registered against instead of
+	// following GROVE_SCOPE off to the worktree's daemon.
 	scopePrefix := ""
 	if scope := os.Getenv("GROVE_SCOPE"); scope != "" {
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	configPath := strings.ReplaceAll(AgentConfigArtifactPath(plan.Directory, job.ID), "'", "'\\''")
-	envPrefix := agentEnvInline(p.agentEnv) + fmt.Sprintf("GROVE_AGENT_PROVIDER='%s' ", p.providerName) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_CONFIG_FILE='%s' ",
+	envPrefix := agentEnvInline(p.agentEnv) + fmt.Sprintf("GROVE_AGENT_PROVIDER='%s' ", p.providerName) + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_CONFIG_FILE='%s' ",
 		job.ID, job.FilePath, plan.Name, escapedTitle, configPath)
 	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
@@ -404,8 +412,9 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		return err
 	}
 
-	// Confirm the session with the daemon using the discovered PID
-	daemonClient := daemon.NewWithAutoStart()
+	// Confirm the session with the daemon using the discovered PID. Must be the
+	// same host-routed daemon the intent was registered against above.
+	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
