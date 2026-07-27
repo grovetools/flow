@@ -155,12 +155,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("cn"),
 			key.WithHelp("cn", "rename job"),
 		),
-		// Rebound from "ctrl+R": bubbletea lowercases ctrl chords, so
-		// "ctrl+R" never matched. "ctrl+e" is a FreeKeys entry (canonical.go)
-		// and unused elsewhere in this TUI. Not "ctrl+r" (reserved: refresh).
+		// U is a directly reachable mnemonic for unpause/resume and avoids
+		// ctrl+e, which treemux reserves for jumping to the Editor pane. Unlike
+		// uppercase R, U is also a canonical FreeKeys entry rather than rename.
 		Resume: key.NewBinding(
-			key.WithKeys("ctrl+e"),
-			key.WithHelp("ctrl+e", "resume job"),
+			key.WithKeys("U"),
+			key.WithHelp("U", "resume job"),
 		),
 		// Migrated into the c… Change namespace (chord-only; the flat "ctrl+o"
 		// is retired and returns to FreeKeys). cd opens the existing multi-select

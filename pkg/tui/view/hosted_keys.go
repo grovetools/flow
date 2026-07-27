@@ -30,18 +30,11 @@ type HostedKeyBinding struct {
 	CollisionHints []string `json:"collision_hints,omitempty"`
 }
 
-// hostedCollisionHints names the outer-host binding a flow key is known to
+// hostedCollisionHints names outer-host bindings that flow keys are known to
 // collide with, keyed by the flow key. Advisory only — Keys is the stable
-// comparison surface a host joins on — but it is what makes `treemux keys`
-// readable, and attaching it here means every scope gets the hint, not just
-// the hand-written rows.
-//
-// treemux resolves both of these itself now (a focused hosted panel wins them
-// back — see treemux/internal/app/hosted_keys.go), so these hints describe a
-// collision that is arbitrated rather than one that is simply lost.
-var hostedCollisionHints = map[string][]string{
-	"ctrl+e": {"treemux.jump_editor"},
-}
+// comparison surface a host joins on — but hints make `treemux keys` readable.
+// Keep the mechanism even when the current keymap has no known collisions.
+var hostedCollisionHints = map[string][]string{}
 
 // hostedKeymaps are the embedded sub-application keymaps whose bindings flow
 // exposes to an outer host, each with the scope prefix it is published under.

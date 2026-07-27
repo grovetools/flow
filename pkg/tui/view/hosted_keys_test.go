@@ -151,28 +151,27 @@ func TestHostedKeysDoesNotDeclareCtrlG(t *testing.T) {
 	}
 }
 
-// TestHostedKeysAttachesResumeCollisionHint pins the ctrl+e hint. Resume was
-// declared (via status.KeymapInfo) but carried no hint, unlike ctrl+f, so the
-// second real collision was invisible in `treemux keys`.
-func TestHostedKeysAttachesResumeCollisionHint(t *testing.T) {
-	found := false
+// TestHostedKeysResumeAvoidsEditorShortcut pins resume to U (unpause). ctrl+e
+// belongs to treemux's jump-to-editor action and must remain available while
+// flow is hosted there.
+func TestHostedKeysResumeAvoidsEditorShortcut(t *testing.T) {
+	foundResume := false
 	for _, binding := range HostedKeys().Bindings {
-		hasCtrlE := false
 		for _, k := range binding.Keys {
 			if k == "ctrl+e" {
-				hasCtrlE = true
+				t.Fatalf("flow still binds ctrl+e (%s/%s), shadowing treemux.jump_editor", binding.Scope, binding.Action)
 			}
 		}
-		if !hasCtrlE {
+		if binding.Action != "Resume" {
 			continue
 		}
-		found = true
-		if len(binding.CollisionHints) == 0 || binding.CollisionHints[0] != "treemux.jump_editor" {
-			t.Errorf("ctrl+e binding %s/%s hints = %v, want [treemux.jump_editor]", binding.Scope, binding.Action, binding.CollisionHints)
+		foundResume = true
+		if len(binding.Keys) != 1 || binding.Keys[0] != "U" {
+			t.Errorf("resume keys = %v, want [U]", binding.Keys)
 		}
 	}
-	if !found {
-		t.Fatal("no ctrl+e binding declared")
+	if !foundResume {
+		t.Fatal("no resume binding declared")
 	}
 }
 
