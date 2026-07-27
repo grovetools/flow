@@ -687,11 +687,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if bm, ok := updated.(browser.Model); ok {
 			m.s.browserModel = bm
 		}
-		cmds := []tea.Cmd{m.s.browserModel.Init()}
-		if m.s.cfg.DaemonClient != nil {
-			cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
-		}
-		return m, tea.Batch(cmds...)
+		return m, m.s.browserModel.Init()
 
 	case initOutputTickMsg:
 		if msg.path != m.s.initOutputPath || m.s.initProgress == "" {
@@ -717,11 +713,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// page usable instead of leaving a nil model behind its loading gate.
 			m.mode = modeInitWizard
 			m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabAddPlan})
-			cmds := []tea.Cmd{m.startInitWizardBuild(), m.s.browserModel.Init()}
-			if m.s.cfg.DaemonClient != nil {
-				cmds = append(cmds, refreshDaemonCmd(m.s.cfg.DaemonClient))
-			}
-			return m, tea.Batch(cmds...)
+			return m, tea.Batch(m.startInitWizardBuild(), m.s.browserModel.Init())
 		}
 		m.initFailure = ""
 		m.lastInitRequest = nil

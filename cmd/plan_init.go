@@ -186,6 +186,10 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	}
 
 	// Create the actual worktree if requested (but skip if it's inherited)
+	// createdWorktreePath records the worktree root actually created by this
+	// init so the daemon refresh at the end can be scoped to just the affected
+	// paths instead of a full workspace sweep.
+	var createdWorktreePath string
 	if worktreeToSet != "" && !isInheritedWorktree {
 		// Resolve the anchor path: --anchor flag > auto-infer from sub-project > fallback to ecosystem root.
 		anchorPath, err := resolveAnchorPath(cmd.Anchor, currentNode, provider)
@@ -196,6 +200,7 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		createdWorktreePath = worktreePath
 
 		// After creating the worktree(s), apply default context rules.
 		if err := applyDefaultContextRulesToWorktree(worktreePath, cmd.SiblingWorkspaces); err != nil {
@@ -460,14 +465,22 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		result.WriteString("2. Check status: flow plan status\n")
 	}
 
-	// Notify daemon to re-scan workspaces so it picks up the new plan immediately
-	client := daemon.NewWithAutoStart()
-	if client.IsRunning() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = client.Refresh(ctx)
-		cancel()
+	// Notify the daemon to re-scan just the workspace paths this init touched
+	// so its store reflects the new worktree(s) promptly. The scoped refresh is
+	// bounded to a few hundred ms; the previous bodyless Refresh forced a
+	// synchronous full git sweep of every workspace (tens of seconds on large
+	// setups). Best-effort: a failure never fails plan init, and when no
+	// worktree was created there is nothing worth a sweep — the daemon's
+	// periodic discovery picks the plan up on its own.
+	if refreshPaths := planInitRefreshPaths(createdWorktreePath, cmd.SiblingWorkspaces); len(refreshPaths) > 0 {
+		client := daemon.NewWithAutoStart()
+		if client.IsRunning() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _ = client.RefreshPaths(ctx, refreshPaths)
+			cancel()
+		}
+		client.Close()
 	}
-	client.Close()
 
 	if envProvisionErr != nil {
 		return result.String(), fmt.Errorf("environment provisioning failed: %w", envProvisionErr)
@@ -1642,6 +1655,25 @@ func currentEcosystemRoot(currentNode *workspace.WorkspaceNode) string {
 		return currentNode.RootEcosystemPath
 	}
 	return currentNode.ParentEcosystemPath
+}
+
+// planInitRefreshPaths returns the workspace paths a plan init actually
+// created or affected, for a scoped daemon refresh: the new worktree root plus
+// any per-repo sub-worktrees that exist under it (ecosystem layout). Returns
+// nil when no worktree was created, in which case the refresh is skipped
+// entirely rather than falling back to a full sweep.
+func planInitRefreshPaths(worktreeRoot string, siblingRepos []string) []string {
+	if worktreeRoot == "" {
+		return nil
+	}
+	refreshPaths := []string{worktreeRoot}
+	for _, repo := range siblingRepos {
+		p := filepath.Join(worktreeRoot, filepath.Base(repo))
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			refreshPaths = append(refreshPaths, p)
+		}
+	}
+	return refreshPaths
 }
 
 // createWorktreeIfRequested creates a git worktree with the given name and
