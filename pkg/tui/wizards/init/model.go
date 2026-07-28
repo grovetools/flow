@@ -97,6 +97,13 @@ type Config struct {
 	DaemonClient daemon.Client
 	// WorkspaceDir is accepted for API consistency. Unused today.
 	WorkspaceDir string
+	// InvocationDir is the directory the user was actually browsing when the
+	// wizard was opened, BEFORE any hoisting to the ecosystem root. It decides
+	// anchor behavior: the Anchor Repository picker is shown only when this is
+	// an ecosystem node itself, and a member repo of a directory ecosystem
+	// (grove.toml workspaces, no git root) becomes the implicit anchor.
+	// Empty falls back to WorkspaceDir / cwd.
+	InvocationDir string
 }
 
 // Model is the plan-init wizard state. It owns all form fields and
@@ -117,6 +124,12 @@ type Model struct {
 	recipeList list.Model
 	modelList  list.Model
 	anchorList list.Model
+	// showAnchor gates the Anchor Repository picker: it is only offered when
+	// the wizard was invoked at an ecosystem node (root or worktree
+	// container). autoAnchor carries the implicit anchor used instead when
+	// the wizard was opened from a member repo of a directory ecosystem.
+	showAnchor bool
+	autoAnchor string
 	// openSession is retained only to preserve an explicit CLI
 	// --open-session value through the standalone --tui round trip. The
 	// embedded wizard no longer offers it: its host already enters the created
@@ -201,8 +214,26 @@ func New(cfg Config) Model {
 	m.modelList = newList(modelItems, 35, 6)
 	m.modelList.Select(0)
 
+	// Anchor context is decided by where the wizard was actually invoked,
+	// before any hoisting to the ecosystem root: the picker is only shown at
+	// an ecosystem node, and a member repo of a directory ecosystem (no git
+	// root to check a full-ecosystem worktree out from) anchors implicitly
+	// to itself.
+	invocationDir := cfg.InvocationDir
+	if invocationDir == "" {
+		invocationDir = cfg.WorkspaceDir
+	}
+	if invocationDir == "" {
+		invocationDir, _ = os.Getwd()
+	}
+	m.showAnchor, m.autoAnchor = anchorContext(invocationDir)
+	if cfg.AnchorRepositories != nil {
+		// An explicitly supplied roster always shows the picker.
+		m.showAnchor = true
+	}
+
 	anchorRepos := cfg.AnchorRepositories
-	if anchorRepos == nil {
+	if anchorRepos == nil && m.showAnchor {
 		anchorRepos = discoverAnchorRepositories(workspaceDir)
 	}
 	anchorRepos = sortedUnique(anchorRepos)
@@ -308,6 +339,11 @@ func (m *Model) prePopulate(initial *Request, exact bool) {
 		m.noteTargetFileInput.SetValue(initial.NoteTargetFile)
 	}
 	if initial.Anchor != "" {
+		if !m.showAnchor {
+			// The picker is hidden; honor the explicit anchor verbatim so a
+			// rebuilt/CLI-seeded request survives the round trip.
+			m.autoAnchor = initial.Anchor
+		}
 		for i, listItem := range m.anchorList.Items() {
 			if anchorItem, ok := listItem.(item); ok && string(anchorItem) == initial.Anchor {
 				m.anchorList.Select(i)
@@ -357,10 +393,14 @@ func (m Model) toRequest() *Request {
 			req.Model = mi.ID
 		}
 	}
-	if selected := m.anchorList.SelectedItem(); selected != nil {
-		if anchor, ok := selected.(item); ok && string(anchor) != "(auto-infer)" {
-			req.Anchor = string(anchor)
+	if m.showAnchor {
+		if selected := m.anchorList.SelectedItem(); selected != nil {
+			if anchor, ok := selected.(item); ok && string(anchor) != "(auto-infer)" {
+				req.Anchor = string(anchor)
+			}
 		}
+	} else if m.autoAnchor != "" {
+		req.Anchor = m.autoAnchor
 	}
 	if m.withWorktree {
 		req.Worktree = "__AUTO__"
@@ -368,6 +408,29 @@ func (m Model) toRequest() *Request {
 		req.Worktree = m.worktreeInput.Value()
 	}
 	return req
+}
+
+// stepFocus moves focus by delta with wrap-around, skipping fields that are
+// not rendered (the anchor picker at main-screen index 3 when showAnchor is
+// false), and maintains highestFocusIndex bookkeeping.
+func (m Model) stepFocus(delta int) Model {
+	maxIndex := m.getMaxFocusIndex()
+	for {
+		m.focusIndex += delta
+		if m.focusIndex > maxIndex {
+			m.focusIndex = 0
+		} else if m.focusIndex < 0 {
+			m.focusIndex = maxIndex
+		}
+		if m.currentScreen == MainScreen && m.focusIndex == 3 && !m.showAnchor {
+			continue
+		}
+		break
+	}
+	if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
+		m.highestFocusIndex = m.focusIndex
+	}
+	return m
 }
 
 // getMaxFocusIndex returns the maximum focus index for the current screen.
@@ -483,6 +546,27 @@ func ResolveTargetWorkspace(dir string) string {
 		return node.Path
 	}
 	return dir
+}
+
+// anchorContext decides anchor behavior from the directory the wizard was
+// actually invoked in (before hoisting to the ecosystem root): the Anchor
+// Repository picker is offered only at an ecosystem node itself, and a member
+// repo of a directory ecosystem — one whose root has no git repo to check a
+// full-ecosystem worktree out from — anchors implicitly to itself.
+func anchorContext(invocationDir string) (showPicker bool, autoAnchor string) {
+	node, err := workspace.GetProjectByPath(invocationDir)
+	if err != nil || node == nil {
+		return false, ""
+	}
+	if node.IsEcosystem() {
+		return true, ""
+	}
+	if node.RootEcosystemPath != "" {
+		if _, statErr := os.Stat(filepath.Join(node.RootEcosystemPath, ".git")); statErr != nil {
+			return false, filepath.Base(node.Path)
+		}
+	}
+	return false, ""
 }
 
 func discoverAnchorRepositories(ecosystemRoot string) []string {

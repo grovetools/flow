@@ -1826,8 +1826,12 @@ func (m *Model) startInitWizardBuild() tea.Cmd {
 		DefaultModel:     defaultModel,
 		DaemonClient:     m.s.cfg.DaemonClient,
 		WorkspaceDir:     targetWorkspace,
-		Initial:          m.lastInitRequest,
-		InitialExact:     m.lastInitRequest != nil,
+		// The un-hoisted browsing dir decides anchor behavior: picker at
+		// ecosystem nodes, implicit self-anchor from a directory-ecosystem
+		// member repo.
+		InvocationDir: m.s.cfg.WorkspaceDir,
+		Initial:       m.lastInitRequest,
+		InitialExact:  m.lastInitRequest != nil,
 	}
 	return func() tea.Msg {
 		return initWizardReadyMsg{

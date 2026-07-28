@@ -42,6 +42,15 @@ func Validate(req Request) (ValidationReport, MutationManifest) {
 	workspaceOK := workspaceErr == nil && workspaceInfo.IsDir()
 	add("target.workspace", SeverityError, workspaceOK, ternary(workspaceOK, "workspace: "+req.TargetWorkspace, fmt.Sprintf("workspace unavailable: %v", workspaceErr)))
 
+	// A worktree needs a git repo to be created from. A directory ecosystem
+	// root (grove.toml `workspaces`, no .git) can host plans but not worktrees
+	// — those must be anchored to a member repo.
+	if req.WorktreeName != "" && workspaceOK && req.Anchor == "" {
+		if _, err := os.Stat(filepath.Join(req.TargetWorkspace, ".git")); err != nil {
+			add("git.worktree_source", SeverityError, false, "target workspace is not a git repository; select an anchor repository for the worktree")
+		}
+	}
+
 	plansInfo, plansErr := os.Stat(req.PlansDir)
 	plansOK := plansErr == nil && plansInfo.IsDir() && plansInfo.Mode().Perm()&0o200 != 0
 	add("permissions.plans_dir", SeverityError, plansOK, ternary(plansOK, "plans directory is writable", "plans directory is missing or not writable"))

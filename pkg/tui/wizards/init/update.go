@@ -81,7 +81,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				inTextInput = true
 			}
 		}
-		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2 || m.focusIndex == 3)
+		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2 || (m.focusIndex == 3 && m.showAnchor))
 		if m.validating {
 			return m, nil
 		}
@@ -147,47 +147,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "tab":
-			m.focusIndex++
-			maxIndex := m.getMaxFocusIndex()
-			if m.focusIndex > maxIndex {
-				m.focusIndex = 0
-			}
-			if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
-				m.highestFocusIndex = m.focusIndex
-			}
+			m = m.stepFocus(1)
 			return m.updateFocus(), nil
 
 		case "shift+tab":
-			m.focusIndex--
-			if m.focusIndex < 0 {
-				m.focusIndex = m.getMaxFocusIndex()
-			}
-			if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
-				m.highestFocusIndex = m.focusIndex
-			}
+			m = m.stepFocus(-1)
 			return m.updateFocus(), nil
 
 		case "h":
 			if m.unfocused && !inTextInput {
-				m.focusIndex--
-				if m.focusIndex < 0 {
-					m.focusIndex = m.getMaxFocusIndex()
-				}
-				if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
-					m.highestFocusIndex = m.focusIndex
-				}
+				m = m.stepFocus(-1)
 				return m.updateFocus(), nil
 			}
 
 		case "l":
 			if m.unfocused && !inTextInput {
-				m.focusIndex++
-				if m.focusIndex > m.getMaxFocusIndex() {
-					m.focusIndex = 0
-				}
-				if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
-					m.highestFocusIndex = m.focusIndex
-				}
+				m = m.stepFocus(1)
 				return m.updateFocus(), nil
 			}
 
@@ -218,13 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if inList {
 				m.unfocused = false
-				m.focusIndex++
-				if m.focusIndex > m.getMaxFocusIndex() {
-					m.focusIndex = 0
-				}
-				if m.currentScreen == MainScreen && m.focusIndex > m.highestFocusIndex {
-					m.highestFocusIndex = m.focusIndex
-				}
+				m = m.stepFocus(1)
 				return m.updateFocus(), nil
 			} else if m.unfocused {
 				m.unfocused = false

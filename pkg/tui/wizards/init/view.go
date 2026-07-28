@@ -126,9 +126,11 @@ func (m Model) renderMainScreen() string {
 	b.WriteString(row2)
 	b.WriteString("\n")
 
-	anchorField := renderField(3, "Anchor Repository (press / to search)", m.anchorList.View(), true)
-	b.WriteString(anchorField)
-	b.WriteString("\n")
+	if m.showAnchor {
+		anchorField := renderField(3, "Anchor Repository (press / to search)", m.anchorList.View(), true)
+		b.WriteString(anchorField)
+		b.WriteString("\n")
+	}
 
 	autoWorktreeDisplay := "[ ]"
 	if m.withWorktree {

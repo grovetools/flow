@@ -108,8 +108,21 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	// Resolve the full path for the new plan directory.
 	// Use resolvePlanPathInWorkspace (not resolvePlanPath) because the plan
 	// doesn't exist yet — resolvePlanPath requires the directory to already exist.
+	//
+	// Worktree-backed plans created from inside an ecosystem member repo are
+	// rooted at the origin ecosystem's workspace: the created container's plan
+	// resolution (notebook_locator getContextNodeForPath) renders the origin
+	// ecosystem's plans dir for every checkout inside the container, so the
+	// plan must be created there for the worktree to find it. Plans without a
+	// worktree stay scoped to the repo's own workspace.
+	planContextDir := "."
+	if cmd.Worktree != "" && currentNode != nil &&
+		!currentNode.IsEcosystem() && !currentNode.IsWorktree() &&
+		currentNode.RootEcosystemPath != "" {
+		planContextDir = currentNode.RootEcosystemPath
+	}
 	planDirArg := cmd.Dir
-	planPath, err := resolvePlanPathInWorkspace(planDirArg, ".")
+	planPath, err := resolvePlanPathInWorkspace(planDirArg, planContextDir)
 	if err != nil {
 		return "", fmt.Errorf("could not resolve plan path: %w", err)
 	}
@@ -135,19 +148,11 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		provider = workspace.NewProvider(discoveryResult)
 	}
 
-	// Default an empty sibling list to ALL repos when running from an
-	// ecosystem root, so a plain `--worktree` (no --sibling-workspaces) gets a
-	// full-ecosystem XDG worktree with every repo linked. The bare-flag
+	// Default an empty sibling list from the workspace context. The bare-flag
 	// sentinel (["__ALL__"]) is then expanded on disk by
-	// resolveSiblingWorkspacesAll below. For a standalone (non-ecosystem)
-	// project, seed the list with the project's own name so the worktree is
-	// always built as a unified container holding that one repo.
-	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil {
-		if currentNode.IsEcosystem() {
-			cmd.SiblingWorkspaces = []string{"__ALL__"}
-		} else {
-			cmd.SiblingWorkspaces = []string{filepath.Base(currentNode.Path)}
-		}
+	// resolveSiblingWorkspacesAll below.
+	if err := seedSiblingWorkspaces(cmd, currentNode); err != nil {
+		return "", err
 	}
 
 	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
@@ -537,17 +542,10 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 		provider = workspace.NewProvider(discoveryResult)
 	}
 
-	// Default an empty sibling list to ALL repos when running from an
-	// ecosystem root, so a plain `--worktree` (no --sibling-workspaces) gets a
-	// full-ecosystem XDG worktree with every repo linked. For a standalone
-	// (non-ecosystem) project, seed the list with the project's own name so the
-	// worktree is always built as a unified container holding that one repo.
-	if len(cmd.SiblingWorkspaces) == 0 && currentNode != nil {
-		if currentNode.IsEcosystem() {
-			cmd.SiblingWorkspaces = []string{"__ALL__"}
-		} else {
-			cmd.SiblingWorkspaces = []string{filepath.Base(currentNode.Path)}
-		}
+	// Default an empty sibling list from the workspace context (see
+	// seedSiblingWorkspaces).
+	if err := seedSiblingWorkspaces(cmd, currentNode); err != nil {
+		return err
 	}
 
 	// Resolve the bare `--sibling-workspaces` sentinel to a concrete repo list
@@ -1044,6 +1042,38 @@ func runPlanInitFromRecipe(cmd *PlanInitCmd, planPath, planName string) error {
 // yield zero do we fall back to legacy single-repo behavior (clear the
 // sentinel). Direct-child comparison is case-insensitive to match the rest of
 // the codebase on macOS.
+// seedSiblingWorkspaces defaults an empty --sibling-workspaces list from the
+// current workspace context, so a plain `--worktree` gets a unified XDG
+// container without extra flags:
+//
+//   - git ecosystem root: the __ALL__ sentinel (every member repo linked).
+//   - directory ecosystem root (grove.toml `workspaces` but no .git — its
+//     members are unrelated repos): the anchor repo alone. There is no git
+//     root to check a full-ecosystem worktree out from, so a worktree here
+//     requires --anchor; without one this is a hard error instead of the
+//     opaque "failed to find git root" the worktree creation would hit later.
+//   - anything else (standalone project, ecosystem member repo): the
+//     project's own name, yielding a single-repo container.
+func seedSiblingWorkspaces(cmd *PlanInitCmd, currentNode *workspace.WorkspaceNode) error {
+	if len(cmd.SiblingWorkspaces) != 0 || currentNode == nil {
+		return nil
+	}
+	if !currentNode.IsEcosystem() {
+		cmd.SiblingWorkspaces = []string{filepath.Base(currentNode.Path)}
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(currentNode.Path, ".git")); err != nil {
+		if cmd.Anchor != "" {
+			cmd.SiblingWorkspaces = []string{cmd.Anchor}
+		} else if cmd.Worktree != "" {
+			return fmt.Errorf("ecosystem root %s is not a git repository; pass --anchor <repo> to choose which member repo the worktree is created from, or run plan init from inside that repo", currentNode.Path)
+		}
+		return nil
+	}
+	cmd.SiblingWorkspaces = []string{"__ALL__"}
+	return nil
+}
+
 func resolveSiblingWorkspacesAll(cmd *PlanInitCmd, provider *workspace.Provider, searchPath string) {
 	if !(len(cmd.SiblingWorkspaces) == 1 && cmd.SiblingWorkspaces[0] == "__ALL__") {
 		return
@@ -1630,6 +1660,15 @@ func resolveAnchorPath(anchor string, currentNode *workspace.WorkspaceNode, prov
 				if node := provider.FindByName(anchor); node != nil && !node.IsWorktree() {
 					return node.Path, nil
 				}
+			}
+		}
+		// On-disk fallback: `workspaces = ["*"]` ecosystem members without a
+		// grove.toml are not promoted by discovery, so accept a direct child
+		// of the ecosystem root that is itself a git repo.
+		if ecosystemRoot != "" {
+			candidate := filepath.Join(ecosystemRoot, anchor)
+			if _, err := os.Stat(filepath.Join(candidate, ".git")); err == nil {
+				return candidate, nil
 			}
 		}
 		return "", fmt.Errorf("anchor repo %q not found as a sub-project of the current ecosystem", anchor)
