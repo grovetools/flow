@@ -175,6 +175,16 @@ type Model struct {
 	actionPending  map[string]embed.GitOperation
 	refreshPlanKey string
 
+	// Bulk fast-forward ("F") state. bulkGeneration invalidates the results of
+	// a sweep the user has already cancelled or superseded; bulkPending covers
+	// both the preflight and the confirmed rebase pass so a second F cannot
+	// start a concurrent sweep over the same repositories.
+	bulkGeneration uint64
+	bulkPending    bool
+	bulkConfirming bool
+	bulkCandidates []bulkCandidate
+	bulkSkipped    []bulkSkip
+
 	// dismissedPlanDirs are plans retired successfully by this TUI session.
 	// Keeping a small tombstone prevents an in-flight stale daemon projection
 	// from flashing an archived plan back into the table.

@@ -65,6 +65,33 @@ type OperationPreview struct {
 	Fingerprint string                    `json:"fingerprint"`
 }
 
+// Blocked returns the repositories whose preflight must be resolved before
+// Execute will mutate anything. Execute is all-or-nothing per target, so a
+// single blocked repository disqualifies the whole preview; callers that
+// choose between targets (for example a bulk fast-forward) gate on this.
+func (p OperationPreview) Blocked() []RepoPreview {
+	var blocked []RepoPreview
+	for _, repo := range p.Repos {
+		if repo.Disposition == DispositionBlocked {
+			blocked = append(blocked, repo)
+		}
+	}
+	return blocked
+}
+
+// ReadyCount reports how many repositories this preview would actually mutate.
+// A preview with no blocked repos and a zero ready count is already in the
+// requested state and needs no execution at all.
+func (p OperationPreview) ReadyCount() int {
+	count := 0
+	for _, repo := range p.Repos {
+		if repo.Disposition == DispositionReady {
+			count++
+		}
+	}
+	return count
+}
+
 // Outcome is an execution disposition.
 type Outcome string
 

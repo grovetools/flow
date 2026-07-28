@@ -31,6 +31,7 @@ type KeyMap struct {
 	EditNotes         key.Binding
 	FastForwardMain   key.Binding
 	FastForwardUpdate key.Binding
+	FastForwardAll    key.Binding
 	ToggleGitLog      key.Binding
 	ToggleHold        key.Binding
 	ToggleArchived    key.Binding
@@ -68,6 +69,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			k.SetHoldStatus,
 			k.FastForwardUpdate,
 			k.FastForwardMain,
+			k.FastForwardAll,
 			k.ToggleGitLog,
 			k.ToggleHold,
 			k.ToggleArchived,
@@ -90,7 +92,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			Name: "Actions",
 			Bindings: []key.Binding{
 				k.NewPlan, k.SetActive, k.EditNotes, k.ReviewPlan, k.FinishPlan,
-				k.SetHoldStatus, k.FastForwardUpdate, k.FastForwardMain,
+				k.SetHoldStatus, k.FastForwardUpdate, k.FastForwardMain, k.FastForwardAll,
 			},
 		},
 		{
@@ -172,6 +174,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		FastForwardUpdate: key.NewBinding(
 			key.WithKeys("U"),
 			key.WithHelp("U", "update from main"),
+		),
+		FastForwardAll: key.NewBinding(
+			key.WithKeys("F"),
+			key.WithHelp("F", "update all conflict-free plans from main"),
 		),
 		ToggleGitLog: key.NewBinding(
 			key.WithKeys("g"),

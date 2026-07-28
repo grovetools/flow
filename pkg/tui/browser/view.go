@@ -44,6 +44,10 @@ func (m Model) View() string {
 		return padStyle.Render(m.renderColumnSelect())
 	}
 
+	if m.bulkConfirming {
+		return padStyle.Render(m.renderBulkConfirm())
+	}
+
 	if m.editingNotes {
 		s.WriteString(components.RenderHeader("Edit Plan Notes"))
 		s.WriteString("\n\n")
@@ -287,6 +291,57 @@ func (m Model) renderColumnSelect() string {
 	}
 	b.WriteString("\n")
 	b.WriteString(theme.DefaultTheme.Muted.Render("↑/↓ move  •  space/enter toggle  •  T/esc close"))
+	return b.String()
+}
+
+// bulkSkipDisplayLimit caps the skipped section so a large portfolio cannot
+// push the confirmation prompt itself off the screen.
+const bulkSkipDisplayLimit = 10
+
+// renderBulkConfirm renders the fast-forward-all confirmation: what will be
+// rebased, and — equally important — what will not be, with the preflight
+// reason for every refusal.
+func (m Model) renderBulkConfirm() string {
+	var b strings.Builder
+	b.WriteString(components.RenderHeader("Fast-forward Plans from main"))
+	b.WriteString("\n\n")
+
+	if len(m.bulkCandidates) == 0 {
+		b.WriteString(theme.DefaultTheme.Warning.Render("No plan is eligible: every plan is dirty, conflicting, unbound, or already up to date."))
+	} else {
+		b.WriteString(theme.DefaultTheme.Bold.Render(fmt.Sprintf("Rebase %s onto main across %s:",
+			pluralize(len(m.bulkCandidates), "plan"), pluralize(bulkCandidateRepoTotal(m.bulkCandidates), "repo"))))
+		b.WriteString("\n")
+		for _, candidate := range m.bulkCandidates {
+			b.WriteString(fmt.Sprintf("  %s %s %s\n",
+				theme.DefaultTheme.Success.Render(theme.IconArrowDown),
+				candidate.name,
+				theme.DefaultTheme.Muted.Render("("+pluralize(candidate.repos, "repo")+")")))
+		}
+	}
+
+	if len(m.bulkSkipped) > 0 {
+		b.WriteString("\n")
+		b.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Skipping %s:", pluralize(len(m.bulkSkipped), "plan"))))
+		b.WriteString("\n")
+		shown := m.bulkSkipped
+		if len(shown) > bulkSkipDisplayLimit {
+			shown = shown[:bulkSkipDisplayLimit]
+		}
+		for _, skip := range shown {
+			b.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("  · %s — %s\n", skip.name, skip.reason)))
+		}
+		if remaining := len(m.bulkSkipped) - len(shown); remaining > 0 {
+			b.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("  · +%d more\n", remaining)))
+		}
+	}
+
+	b.WriteString("\n")
+	if len(m.bulkCandidates) == 0 {
+		b.WriteString(theme.DefaultTheme.Muted.Render("esc close"))
+		return b.String()
+	}
+	b.WriteString(theme.DefaultTheme.Muted.Render("y/enter fast-forward  •  n/esc cancel"))
 	return b.String()
 }
 

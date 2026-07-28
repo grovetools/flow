@@ -120,6 +120,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.reloadPlansCmd()
 
+	case bulkPreviewMsg:
+		if msg.generation != m.bulkGeneration {
+			return m, nil
+		}
+		m.bulkPending = false
+		m.bulkCandidates = msg.candidates
+		m.bulkSkipped = msg.skipped
+		if len(msg.candidates) == 0 {
+			m.bulkConfirming = len(msg.skipped) > 0
+			m.statusMessage = theme.DefaultTheme.Warning.Render("No plan can be fast-forwarded")
+			return m, nil
+		}
+		m.bulkConfirming = true
+		m.statusMessage = ""
+		return m, nil
+
+	case bulkResultMsg:
+		if msg.generation != m.bulkGeneration {
+			return m, nil
+		}
+		m.bulkPending = false
+		m.bulkConfirming = false
+		m.bulkCandidates = nil
+		m.bulkSkipped = nil
+		m.statusMessage = bulkResultSummary(msg)
+		m.loading = true
+		m.loadGeneration++
+		return m, m.reloadPlansCmd()
+
 	case repoGitLogMsg:
 		m.repoGitLogContent = msg.content
 		m.repoGitLogError = msg.err
@@ -449,6 +478,32 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.bulkConfirming {
+		// A confirmed sweep rebases every listed plan, so only an explicit
+		// accept starts it; unrecognized keys are swallowed rather than
+		// guessed at in either direction.
+		switch msg.String() {
+		case "y", "Y", "enter":
+			if len(m.bulkCandidates) == 0 {
+				m.bulkConfirming = false
+				m.statusMessage = ""
+				return m, nil
+			}
+			candidates := m.bulkCandidates
+			m.bulkConfirming = false
+			m.bulkPending = true
+			m.statusMessage = fmt.Sprintf("Fast-forwarding %s…", pluralize(len(candidates), "plan"))
+			return m, executeBulkFastForwardCmd(candidates, m.bulkGeneration)
+		case "esc", "n", "N", "q":
+			m.bulkConfirming = false
+			m.bulkCandidates = nil
+			m.bulkSkipped = nil
+			m.statusMessage = "Fast-forward cancelled"
+			return m, nil
+		}
+		return m, nil
+	}
+
 	if m.editingNotes {
 		switch msg.String() {
 		case "enter":
@@ -743,6 +798,27 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			return embed.OpenGitRequest{Target: target, Operation: operation}
 		}
+
+	case key.Matches(msg, m.keys.FastForwardAll):
+		if m.bulkPending {
+			m.statusMessage = theme.DefaultTheme.Warning.Render("Bulk fast-forward already in flight")
+			return m, nil
+		}
+		targets, skipped := m.collectBulkTargets()
+		if len(targets) == 0 {
+			m.bulkCandidates = nil
+			m.bulkSkipped = skipped
+			m.bulkConfirming = len(skipped) > 0
+			m.statusMessage = theme.DefaultTheme.Warning.Render("No plan can be fast-forwarded")
+			return m, nil
+		}
+		m.bulkGeneration++
+		m.bulkPending = true
+		m.bulkConfirming = false
+		m.bulkCandidates = nil
+		m.bulkSkipped = nil
+		m.statusMessage = fmt.Sprintf("Preflighting %s for fast-forward…", pluralize(len(targets), "plan"))
+		return m, previewBulkFastForwardCmd(targets, skipped, m.bulkGeneration)
 
 	case key.Matches(msg, m.keys.ToggleGitLog):
 		if m.inRepoNavigationMode {
