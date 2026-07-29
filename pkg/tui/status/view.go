@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	markdown "github.com/grovetools/core/tui/components/markdown"
 	gtable "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
@@ -103,39 +104,66 @@ func formatDuration(d time.Duration) string {
 	}
 }
 
-// renderTableViewWithWidth renders the jobs as a table, responsively dropping
-// low-priority columns when maxWidth is too narrow to fit them all.
+// renderTableViewWithWidth renders the jobs as a table that fits inside
+// maxWidth: low-priority columns drop out first, and if the JOB column alone
+// still overflows, its cells are truncated. The table's right-hand border
+// always lands inside the pane.
 func (m Model) renderTableViewWithWidth(maxWidth int) string {
 	if maxWidth > 0 {
-		m = m.withResponsiveColumns(maxWidth)
+		m = m.fitToWidth(maxWidth)
 	}
 	tableStr := m.renderTableView()
-	// Final safety net: clip any remaining overflow (e.g. long filenames).
+	// Final safety net: clip anything that still got through.
 	if maxWidth > 0 {
 		return lipgloss.NewStyle().MaxWidth(maxWidth).Render(tableStr)
 	}
 	return tableStr
 }
 
-// columnDropPriority returns columns in the order they should be removed when
-// space is constrained. Last element is dropped first.
-func columnDropPriority() []string {
-	return []string{
-		"DURATION", "COMPLETED", "UPDATED", "INLINE",
-		"WORKTREE", "SESSION", "MODEL", "SKILL", "TEMPLATE", "TITLE", "STATUS", "TYPE",
+// minJobCellWidth floors the truncated JOB column: narrower than this a
+// filename identifies nothing, and clipping would be no worse.
+const minJobCellWidth = 12
+
+// columnDropOrder returns the columns in the order they are dropped when the
+// table doesn't fit, most expendable first. JOB is never dropped — it carries
+// the row's identity, status icon and tree position. Columns missing from the
+// priority list go first, so a column added to availableColumns without being
+// ranked here can never silently become undroppable — which is how TOKENS, the
+// second-widest column, used to survive every drop pass and leave the table
+// overflowing no matter how many other columns went.
+//
+// TITLE goes first despite being one of the widest: it mostly restates the
+// filename already in the JOB column, so it is the cheapest ~50 columns in the
+// table to give back.
+func (m Model) columnDropOrder() []string {
+	priority := []string{
+		"TITLE", "DURATION", "COMPLETED", "UPDATED", "INLINE",
+		"WORKTREE", "SESSION", "MODEL", "SKILL", "TEMPLATE", "TOKENS", "STATUS", "TYPE",
 	}
+	ranked := make(map[string]bool, len(priority))
+	for _, col := range priority {
+		ranked[col] = true
+	}
+	var order []string
+	for _, col := range m.availableColumns {
+		if col != "JOB" && !ranked[col] {
+			order = append(order, col)
+		}
+	}
+	return append(order, priority...)
 }
 
-// withResponsiveColumns returns a copy of the model with column visibility
-// adjusted so the table fits within maxWidth. JOB is always kept.
-func (m Model) withResponsiveColumns(maxWidth int) Model {
-	if maxWidth <= 0 {
+// fitToWidth returns a copy of the model whose table renders no wider than
+// maxWidth.
+func (m Model) fitToWidth(maxWidth int) Model {
+	headers := m.tableHeaders()
+	if len(headers) == 0 {
 		return m
 	}
-
-	// Estimate the table width for the current visible columns.
-	estWidth := m.estimateTableWidth()
-	if estWidth <= maxWidth {
+	// A column's width doesn't depend on which other columns are visible, so
+	// one measuring pass serves the whole drop loop.
+	widths := m.measureTableColumns(headers)
+	if tableRenderedWidth(headers, widths) <= maxWidth {
 		return m // Everything fits.
 	}
 
@@ -146,174 +174,140 @@ func (m Model) withResponsiveColumns(maxWidth int) Model {
 	}
 	m.columnVisibility = vis
 
-	// Drop columns in priority order until the table fits.
-	for _, col := range columnDropPriority() {
+	for _, col := range m.columnDropOrder() {
 		if !vis[col] {
 			continue
 		}
 		vis[col] = false
-		estWidth = m.estimateTableWidth()
-		if estWidth <= maxWidth {
-			break
+		headers = m.tableHeaders()
+		if tableRenderedWidth(headers, widths) <= maxWidth {
+			return m
 		}
 	}
+
+	// Every droppable column is gone and JOB alone still overflows (long
+	// filenames in a narrow pane). Truncate its cells: an elided filename
+	// beats a table whose right-hand border falls off the pane.
+	over := tableRenderedWidth(headers, widths) - maxWidth
+	m.jobCellCap = max(widths["JOB"]-over, minJobCellWidth)
 	return m
 }
 
-// estimateTableWidth returns the approximate rendered width of the table
-// based on currently visible columns and job content, mirroring the logic
-// in calculateFocusJobsWidth.
-func (m Model) estimateTableWidth() int {
-	columnWidths := make(map[string]int)
+// tableHeaders returns the header row: the SEL column when a selection is
+// active, then every visible column in display order.
+func (m Model) tableHeaders() []string {
+	var headers []string
+	if len(m.Selected) > 0 {
+		headers = append(headers, "SEL")
+	}
 	for _, colName := range m.availableColumns {
 		if m.columnVisibility[colName] {
-			columnWidths[colName] = lipgloss.Width(colName)
+			headers = append(headers, colName)
 		}
 	}
+	return headers
+}
 
+// measureTableColumns returns each column's rendered width: the wider of its
+// header and the cells the visible rows put under it. Measured from the very
+// cells renderTableView emits, so the fit decision cannot disagree with what
+// lands on screen — the old estimator sized most columns by their header text
+// alone, which is why a 25-column TOKENS cell read as 6.
+func (m Model) measureTableColumns(headers []string) map[string]int {
+	widths := make(map[string]int, len(headers))
+	for _, h := range headers {
+		widths[h] = lipgloss.Width(h)
+	}
 	visibleRows := m.getVisibleRows()
 	for i := range visibleRows {
-		row := &visibleRows[i]
-		if row.Type != RowTypeJob {
-			// Virtual workflow rows occupy the JOB column only.
-			if m.columnVisibility["JOB"] {
-				w := m.virtualRowCellWidth(row)
-				if w > 40 {
-					w = 40
-				}
-				if w > columnWidths["JOB"] {
-					columnWidths["JOB"] = w
-				}
-			}
-			continue
-		}
-		job := row.Job
-		if m.columnVisibility["JOB"] {
-			indent := m.JobIndents[job.ID]
-			treePrefixWidth := 0
-			if indent > 0 {
-				treePrefixWidth = ((indent - 1) * 2) + 3
-			}
-			w := treePrefixWidth + 2 + lipgloss.Width(job.Filename) + m.jobBadgeWidth(job)
-			if w > 40 {
-				w = 40
-			}
-			if w > columnWidths["JOB"] {
-				columnWidths["JOB"] = w
-			}
-		}
-		if m.columnVisibility["TITLE"] {
-			w := lipgloss.Width(job.Title)
-			if w > 50 {
-				w = 50
-			}
-			if w > columnWidths["TITLE"] {
-				columnWidths["TITLE"] = w
-			}
-		}
-		if m.columnVisibility["TYPE"] {
-			typeLabel := string(job.Type)
-			if job.IsAgentResponded() {
-				// Rendered as "agent chat" in the TYPE cell below.
-				typeLabel = "agent chat"
-			}
-			w := 2 + lipgloss.Width(typeLabel)
-			if w > columnWidths["TYPE"] {
-				columnWidths["TYPE"] = w
-			}
-		}
-		if m.columnVisibility["MODEL"] {
-			// The folded "provider · model" cell exceeds the bare header.
-			w := lipgloss.Width(m.renderModelColumnCell(job))
-			if w > 24 {
-				w = 24
-			}
-			if w > columnWidths["MODEL"] {
-				columnWidths["MODEL"] = w
+		for j, cell := range m.renderRowCells(headers, m.ScrollOffset+i, &visibleRows[i]) {
+			if w := lipgloss.Width(cell); w > widths[headers[j]] {
+				widths[headers[j]] = w
 			}
 		}
 	}
+	return widths
+}
 
-	totalWidth := 0
-	visibleColCount := 0
-	if len(m.Selected) > 0 {
-		visibleColCount++
-		totalWidth += 3
+// tableRenderedWidth returns the width gtable.SelectableTableWithOptions
+// renders for these columns: the cells, a space of padding either side of
+// each, the │ separators between them, the rounded border, and the two-column
+// "▶ " selection gutter the table prepends.
+func tableRenderedWidth(headers []string, widths map[string]int) int {
+	if len(headers) == 0 {
+		return 0
 	}
-	for _, colName := range m.availableColumns {
-		if m.columnVisibility[colName] {
-			visibleColCount++
-			totalWidth += columnWidths[colName]
-		}
+	total := 0
+	for _, h := range headers {
+		total += widths[h]
 	}
-	if visibleColCount > 0 {
-		totalWidth += 2                         // left + right borders (1 char each)
-		totalWidth += (visibleColCount - 1) * 1 // separators: │ (1 char, padding already counted)
-		totalWidth += visibleColCount * 2       // cell padding: 1 space each side per column
-		totalWidth += 2                         // external selection indicator (▶ or spaces)
-		totalWidth += 2                         // safety buffer
-	}
-	return totalWidth
+	total += len(headers) * 2 // cell padding, one space each side
+	total += len(headers) - 1 // │ separators
+	total += 2                // left + right border
+	total += 2                // selection gutter
+	return total
 }
 
 // renderTableView renders the jobs as a table with configurable columns
 func (m Model) renderTableView() string {
 	t := theme.DefaultTheme
 
-	// Check if any jobs are selected
-	hasSelection := len(m.Selected) > 0
-
-	// Dynamically build headers from visible columns
-	var headers []string
-
-	// Always add SEL column first if there are selections
-	if hasSelection {
-		headers = append(headers, "SEL")
-	}
-
-	// Add other visible columns
-	for _, colName := range m.availableColumns {
-		if m.columnVisibility[colName] {
-			headers = append(headers, colName)
-		}
-	}
+	headers := m.tableHeaders()
 
 	var rows [][]string
-
 	visibleRows := m.getVisibleRows()
-	statusStyles := getStatusStyles()
-
 	for i := range visibleRows {
-		dr := &visibleRows[i]
-		job := dr.Job
-		var row []string
+		rows = append(rows, m.renderRowCells(headers, m.ScrollOffset+i, &visibleRows[i]))
+	}
 
-		// Virtual workflow rows render their tree label into the JOB
-		// column and a muted kind label into TYPE (these nodes are not
-		// grove-managed jobs); every other cell stays empty.
-		if dr.Type != RowTypeJob {
-			for _, colName := range headers {
-				switch strings.ToUpper(colName) {
-				case "JOB":
-					row = append(row, m.renderVirtualRowCell(m.ScrollOffset+i, dr))
-				case "TYPE":
-					row = append(row, m.virtualRowTypeCell(dr))
-				case "TOKENS":
-					// Subagent rows surface their own cost/total; other
-					// virtual rows (runs, phases, "… +K more") stay blank.
-					if dr.Type == RowTypeAgent {
-						row = append(row, m.renderAgentTokenCell(dr))
-					} else {
-						row = append(row, "")
-					}
-				default:
+	if len(rows) == 0 {
+		return "\n" + t.Muted.Render("No jobs to display.") + "\n\n" + t.Muted.Render("Press 'A' to add a job.")
+	}
+
+	opts := gtable.SelectableTableOptions{}
+	if m.Focus == FocusJobs {
+		opts.BorderColor = theme.DefaultColors.Blue
+	}
+	return gtable.SelectableTableWithOptions(headers, rows, m.Cursor-m.ScrollOffset, opts)
+}
+
+// renderRowCells renders one display row's cells, one per header, in header
+// order. globalIndex is the row's index in DisplayRows (the tree connectors
+// scan its siblings). Both the renderer and the width measurer go through
+// here, so a column can never be measured as something other than what it
+// draws.
+func (m Model) renderRowCells(headers []string, globalIndex int, dr *DisplayRow) []string {
+	t := theme.DefaultTheme
+	statusStyles := getStatusStyles()
+	job := dr.Job
+	row := make([]string, 0, len(headers))
+
+	// Virtual workflow rows render their tree label into the JOB
+	// column and a muted kind label into TYPE (these nodes are not
+	// grove-managed jobs); every other cell stays empty.
+	if dr.Type != RowTypeJob {
+		for _, colName := range headers {
+			switch strings.ToUpper(colName) {
+			case "JOB":
+				row = append(row, m.renderVirtualRowCell(globalIndex, dr))
+			case "TYPE":
+				row = append(row, m.virtualRowTypeCell(dr))
+			case "TOKENS":
+				// Subagent rows surface their own cost/total; other
+				// virtual rows (runs, phases, "… +K more") stay blank.
+				if dr.Type == RowTypeAgent {
+					row = append(row, m.renderAgentTokenCell(dr))
+				} else {
 					row = append(row, "")
 				}
+			default:
+				row = append(row, "")
 			}
-			rows = append(rows, row)
-			continue
 		}
+		return row
+	}
 
+	{
 		for _, colName := range headers {
 			var cell string
 			switch strings.ToUpper(colName) {
@@ -330,7 +324,6 @@ func (m Model) renderTableView() string {
 				var treePrefix string
 				if indent > 0 {
 					treePrefix = strings.Repeat("  ", indent-1)
-					globalIndex := m.ScrollOffset + i
 					isLast := true
 					for j := globalIndex + 1; j < len(m.DisplayRows); j++ {
 						// Sibling scan over job rows only — virtual
@@ -363,6 +356,9 @@ func (m Model) renderTableView() string {
 				cell = fmt.Sprintf("%s%s %s", treePrefix, statusIcon, filename)
 				if badges := m.jobBadges(job); badges != "" {
 					cell += " " + badges
+				}
+				if m.jobCellCap > 0 {
+					cell = ansi.Truncate(cell, m.jobCellCap, "…")
 				}
 			case "TITLE":
 				titleText := job.Title
@@ -490,19 +486,8 @@ func (m Model) renderTableView() string {
 			}
 			row = append(row, cell)
 		}
-		rows = append(rows, row)
 	}
-
-	if len(rows) == 0 {
-		return "\n" + t.Muted.Render("No jobs to display.") + "\n\n" + t.Muted.Render("Press 'A' to add a job.")
-	}
-
-	opts := gtable.SelectableTableOptions{}
-	if m.Focus == FocusJobs {
-		opts.BorderColor = theme.DefaultColors.Blue
-	}
-	tableStr := gtable.SelectableTableWithOptions(headers, rows, m.Cursor-m.ScrollOffset, opts)
-	return tableStr
+	return row
 }
 
 // getJobIcon returns the icon for a job type

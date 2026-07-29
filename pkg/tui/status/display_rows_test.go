@@ -514,12 +514,16 @@ func TestBadge_CountsAndWidthAccounting(t *testing.T) {
 	m.availableColumns = []string{"JOB"}
 	m.columnVisibility = map[string]bool{"JOB": true}
 	m.Height = 40 // ensure rows are visible to the estimators
-	withBadge := m.estimateTableWidth()
+	measure := func() int {
+		headers := m.tableHeaders()
+		return tableRenderedWidth(headers, m.measureTableColumns(headers))
+	}
+	withBadge := measure()
 	delete(m.WorkflowStates, "j")
 	m.rebuildDisplayRows()
-	withoutBadge := m.estimateTableWidth()
+	withoutBadge := measure()
 	if withBadge <= withoutBadge {
-		t.Errorf("estimateTableWidth must grow with the badge: with=%d without=%d", withBadge, withoutBadge)
+		t.Errorf("measured table width must grow with the badge: with=%d without=%d", withBadge, withoutBadge)
 	}
 }
 

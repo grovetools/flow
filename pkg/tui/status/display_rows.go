@@ -148,8 +148,12 @@ func (m *Model) ownershipChildren(job *orchestration.Job) []*orchestration.Job {
 // rebuildDisplayRows rebuilds DisplayRows and restores the cursor to the
 // row it was on, by stable NodeID. If that node disappeared (job removed,
 // parent folded), the cursor falls back to the owning job's row, then
-// clamps.
+// clamps. A viewport that was showing the last row keeps showing it, so rows
+// that arrive at the end of the list (a new job, a running job's workflow
+// rows) come into view instead of hiding one line below the bottom edge.
 func (m *Model) rebuildDisplayRows() {
+	atBottom := m.viewportAtBottom()
+
 	var prevNodeID string
 	var fallbackJobIDs []string
 	if row := m.currentRow(); row != nil {
@@ -180,6 +184,13 @@ func (m *Model) rebuildDisplayRows() {
 		}
 	}
 	m.clampCursor()
+
+	if atBottom {
+		// adjustScrollOffset clamps this back inside bounds, and still gives
+		// the cursor the final say if the restore moved it above the last page.
+		m.ScrollOffset = len(m.DisplayRows) - m.getVisibleJobCount()
+		m.adjustScrollOffset()
+	}
 }
 
 // clampCursor keeps the cursor inside DisplayRows bounds.
@@ -524,7 +535,11 @@ func (m *Model) toggleFoldAtCursor() bool {
 // ANSI-truncated so deep trees can never wrap the table.
 func (m *Model) renderVirtualRowCell(globalIndex int, row *DisplayRow) string {
 	cell := m.virtualTreePrefix(globalIndex, row) + m.virtualRowLabel(row, true)
-	return ansi.Truncate(cell, maxVirtualCellWidth, "…")
+	limit := maxVirtualCellWidth
+	if m.jobCellCap > 0 && m.jobCellCap < limit {
+		limit = m.jobCellCap
+	}
+	return ansi.Truncate(cell, limit, "…")
 }
 
 // virtualTreePrefix draws the tree connectors for a virtual row at the

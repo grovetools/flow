@@ -109,36 +109,40 @@ type Model struct {
 	// fieldEditor is the single schema-driven config-field editor (the c…
 	// Change namespace). Non-nil while open; it replaced the three bespoke
 	// ShowStatusPicker/ShowTypePicker/ShowTemplatePicker bool+cursor pairs.
-	fieldEditor           *fieldEditorState
-	PlanDir               string // Store plan directory for refresh
-	KeyMap                KeyMap
-	Help                  help.Model
-	WhichKey              keymap.WhichKeyHost // Chord/which-key mixin: shared Sequence engine + namespaces + show-delay
-	CursorVisible         bool                // Track cursor visibility for blinking animation
-	Renaming              bool
-	RenameInput           textinput.Model
-	RenameJobIndex        int
-	selectingRecipe       bool
-	recipeList            list.Model
-	EditingDeps           bool
-	EditDepsJobIndex      int
-	EditDepsSelected      map[string]bool // Track which jobs are selected as dependencies
-	CreatingJob           bool
-	CreateJobInput        textinput.Model
-	CreateJobType         string // "xml" or "impl"
-	CreateJobBaseJob      *orchestration.Job
-	CreateJobDeps         []*orchestration.Job // For multi-select case
-	ShowLogs              bool
-	LogViewer             logviewer.Model
-	ActiveLogJob          *orchestration.Job
-	StreamingJobID        string             // Track which job is currently streaming to prevent duplicates
-	StreamCancel          context.CancelFunc // Function to cancel the active agent log stream
-	ActiveDetailPane      DetailPane
-	HasFocus              bool // True when the host has given this panel focus
-	columnSelectMode      bool
-	columnList            list.Model
-	availableColumns      []string
-	columnVisibility      map[string]bool
+	fieldEditor      *fieldEditorState
+	PlanDir          string // Store plan directory for refresh
+	KeyMap           KeyMap
+	Help             help.Model
+	WhichKey         keymap.WhichKeyHost // Chord/which-key mixin: shared Sequence engine + namespaces + show-delay
+	CursorVisible    bool                // Track cursor visibility for blinking animation
+	Renaming         bool
+	RenameInput      textinput.Model
+	RenameJobIndex   int
+	selectingRecipe  bool
+	recipeList       list.Model
+	EditingDeps      bool
+	EditDepsJobIndex int
+	EditDepsSelected map[string]bool // Track which jobs are selected as dependencies
+	CreatingJob      bool
+	CreateJobInput   textinput.Model
+	CreateJobType    string // "xml" or "impl"
+	CreateJobBaseJob *orchestration.Job
+	CreateJobDeps    []*orchestration.Job // For multi-select case
+	ShowLogs         bool
+	LogViewer        logviewer.Model
+	ActiveLogJob     *orchestration.Job
+	StreamingJobID   string             // Track which job is currently streaming to prevent duplicates
+	StreamCancel     context.CancelFunc // Function to cancel the active agent log stream
+	ActiveDetailPane DetailPane
+	HasFocus         bool // True when the host has given this panel focus
+	columnSelectMode bool
+	columnList       list.Model
+	availableColumns []string
+	columnVisibility map[string]bool
+	// jobCellCap truncates JOB-column cells when even a JOB-only table is
+	// wider than its pane. Set per render by fitToWidth on its own copy of
+	// the model; 0 means no cap.
+	jobCellCap            int
 	frontmatterViewport   viewport.Model
 	briefingViewport      viewport.Model
 	tokenViewport         viewport.Model
@@ -722,11 +726,9 @@ func New(cfg Config) Model {
 	columnList.SetShowStatusBar(false)
 	columnList.SetShowPagination(false)
 
-	// Start cursor at the bottom-most row
-	initialCursor := 0
-	if len(jobs) > 0 {
-		initialCursor = len(jobs) - 1
-	}
+	// The cursor starts on the bottom-most row. It indexes DisplayRows — which
+	// len(jobs) bounds in neither direction, since folding hides job rows and
+	// workflows add virtual ones — so it is set below, once the rows exist.
 
 	// Initialize text input for isolated agent input
 	isolatedInput := textinput.New()
@@ -785,7 +787,7 @@ func New(cfg Config) Model {
 		JobIndents:               indents,
 		OwnershipChildren:        indexOwnershipChildren(jobs, parents),
 		FoldState:                make(map[string]bool),
-		Cursor:                   initialCursor,
+		Cursor:                   0,
 		ScrollOffset:             0,
 		Selected:                 make(map[string]bool),
 		StatusSummary:            formatStatusSummaryHelper(plan),
@@ -841,6 +843,7 @@ func New(cfg Config) Model {
 		Manager:                  mgr,
 	}
 	m.DisplayRows = m.buildDisplayRows()
+	m.Cursor = len(m.DisplayRows) - 1
 	m.clampCursor()
 	return m
 }
@@ -1407,7 +1410,8 @@ func (m *Model) getVisibleJobCount() int {
 	return availableHeight
 }
 
-// adjustScrollOffset ensures the cursor is visible within the viewport
+// adjustScrollOffset ensures the cursor is visible within the viewport, and
+// that the viewport is showing as much of the list as it can.
 func (m *Model) adjustScrollOffset() {
 	visibleLines := m.getVisibleJobCount()
 
@@ -1420,10 +1424,25 @@ func (m *Model) adjustScrollOffset() {
 		m.ScrollOffset = m.Cursor - visibleLines + 1
 	}
 
+	// The offset may never sit past the last full page: rows above the
+	// viewport with blank space below the table is never the right picture.
+	// Without this, a pane that grows (terminal resize, a split closing) kept
+	// the offset it was scrolled to while short — leaving the reclaimed rows
+	// as dead space under the table. Pulling the offset back can only move
+	// the cursor further inside the viewport, never out of it.
+	if maxOffset := len(m.DisplayRows) - visibleLines; m.ScrollOffset > maxOffset {
+		m.ScrollOffset = maxOffset
+	}
+
 	// Ensure scrollOffset doesn't go negative
 	if m.ScrollOffset < 0 {
 		m.ScrollOffset = 0
 	}
+}
+
+// viewportAtBottom reports whether the last display row is on screen.
+func (m *Model) viewportAtBottom() bool {
+	return m.ScrollOffset+m.getVisibleJobCount() >= len(m.DisplayRows)
 }
 
 // flattenJobTreeWithParents creates the presentation tree used by the status
