@@ -9,6 +9,7 @@ import (
 
 	"github.com/grovetools/core/cli"
 	"github.com/grovetools/core/git"
+	grovelogging "github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -32,6 +33,16 @@ func InitPlanStatusFlags() {
 
 // RunPlanStatus implements the status command.
 func RunPlanStatus(cmd *cobra.Command, args []string) error {
+	opts := cli.GetOptions(cmd)
+	if opts.JSONOutput {
+		// Machine output owns stdout. Status verification may emit lifecycle logs
+		// (for example when a stale running job is marked interrupted), so route
+		// those logs to stderr for the full command, including plan loading and
+		// verification—not only while encoding the final envelope.
+		previousOutput := grovelogging.SwapGlobalOutput(os.Stderr)
+		defer grovelogging.SetGlobalOutput(previousOutput)
+	}
+
 	var planName string
 	if len(args) > 0 {
 		planName = args[0]
@@ -78,7 +89,6 @@ func RunPlanStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if JSON output is requested via --json flag
-	opts := cli.GetOptions(cmd)
 	if opts.JSONOutput {
 		// Output JSON and exit (no TUI)
 		output, err := formatStatusJSON(plan)

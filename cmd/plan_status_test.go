@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -316,6 +317,52 @@ func TestJSONOutputSuppressesHumanReadableText(t *testing.T) {
 	require.NoError(t, err)
 	// SavePlan overrides plan.Name with the directory basename
 	assert.Equal(t, filepath.Base(tmpDir), result["plan"])
+}
+
+func TestJSONOutputRoutesVerificationLogsToStderr(t *testing.T) {
+	t.Setenv("GROVE_LOG_LEVEL", "info")
+	t.Setenv("GROVE_SKIP_PID_CHECK", "false")
+
+	tmpDir := t.TempDir()
+	plan := &orchestration.Plan{
+		Name:      "json-log-routing",
+		Directory: tmpDir,
+		Jobs: []*orchestration.Job{{
+			ID:        "stale-json-log-routing-test",
+			Filename:  "01-stale.md",
+			Title:     "Stale agent",
+			Type:      orchestration.JobTypeInteractiveAgent,
+			Status:    orchestration.JobStatusRunning,
+			UpdatedAt: time.Now().Add(-time.Hour),
+		}},
+	}
+	require.NoError(t, orchestration.SavePlan(tmpDir, plan))
+
+	cmd := newTestStatusCmd()
+	require.NoError(t, cmd.Flags().Set("json", "true"))
+
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	stdoutR, stdoutW, err := os.Pipe()
+	require.NoError(t, err)
+	stderrR, stderrW, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout, os.Stderr = stdoutW, stderrW
+	defer func() { os.Stdout, os.Stderr = oldStdout, oldStderr }()
+
+	runErr := RunPlanStatus(cmd, []string{tmpDir})
+	require.NoError(t, stdoutW.Close())
+	require.NoError(t, stderrW.Close())
+	require.NoError(t, runErr)
+
+	stdout, err := io.ReadAll(stdoutR)
+	require.NoError(t, err)
+	stderr, err := io.ReadAll(stderrR)
+	require.NoError(t, err)
+
+	var envelope map[string]interface{}
+	require.NoError(t, json.Unmarshal(stdout, &envelope), "stdout must remain pure JSON: %s", stdout)
+	assert.Contains(t, string(stderr), "Marking job as interrupted")
+	assert.NotContains(t, string(stdout), "Marking job as interrupted")
 }
 
 func TestJSONFlagOverridesFormatFlag(t *testing.T) {
