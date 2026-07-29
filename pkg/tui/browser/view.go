@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	fit "github.com/grovetools/core/panelkit/table"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components"
 	"github.com/grovetools/core/tui/components/table"
@@ -423,33 +424,53 @@ func (m Model) visibleRowRange() (int, int) {
 // slug identifies nothing, and clipping would be no worse.
 const minPlanCellWidth = 12
 
-// browserColumnDropOrder returns the columns in the order they are dropped
-// when the table doesn't fit a narrow pane, most expendable first. PLAN is
-// never dropped — it is the row's identity. Columns missing from the priority
-// list go first, so a column added to browserColumns without being ranked here
-// can never silently become undroppable.
+// browserColumnDropPriority ranks the columns for the fitting pass: the lowest
+// rank is dropped first when the table doesn't fit a narrow pane. PLAN is
+// absent because it is the identity column — never dropped, truncated instead.
+//
+// A column missing from this map gets priority 0 and goes first, so a column
+// added to browserColumns without being ranked here can never silently become
+// undroppable.
 //
 // WORKSPACE / REPOS leads because it is both the widest and off by default;
 // STATUS goes last because it is the reason most people open this table.
-func browserColumnDropOrder() []string {
-	priority := []string{"WORKSPACE / REPOS", "UPDATED", "NOTES", "REVIEWED", "WORKTREE", "BINDING", "GIT", "STATUS"}
-	ranked := make(map[string]bool, len(priority))
-	for _, col := range priority {
-		ranked[col] = true
-	}
-	var order []string
-	for _, col := range browserColumns {
-		if col != "PLAN" && !ranked[col] {
-			order = append(order, col)
+var browserColumnDropPriority = map[string]int{
+	"WORKSPACE / REPOS": 1, "UPDATED": 2, "NOTES": 3, "REVIEWED": 4,
+	"WORKTREE": 5, "BINDING": 6, "GIT": 7, "STATUS": 8,
+}
+
+// browserFitColumns describes the given headers to the shared fitting widget,
+// in display order.
+func browserFitColumns(headers []string) []fit.Column {
+	cols := make([]fit.Column, 0, len(headers))
+	for _, name := range headers {
+		col := fit.Column{Name: name, Priority: browserColumnDropPriority[name]}
+		if name == "PLAN" {
+			col.Identity = true
+			col.MinWidth = minPlanCellWidth
 		}
+		cols = append(cols, col)
 	}
-	return append(order, priority...)
+	return cols
+}
+
+// browserColumnDropOrder returns every browser column in the order the fitting
+// pass gives it up, most expendable first.
+func browserColumnDropOrder() []string {
+	return fit.DropOrder(browserFitColumns(browserColumns))
 }
 
 // fitToWidth returns a copy of the model whose plan table renders no wider
 // than maxWidth: low-priority columns drop out first, and if PLAN alone still
 // overflows, its cells are truncated. The table's right-hand border always
-// lands inside the pane. Mirrors the Jobs tab's fitting pass.
+// lands inside the pane.
+//
+// The drop-and-truncate pass is core/panelkit/table, shared with the Jobs tab
+// which used to hold a near-verbatim copy of it. Measuring stays here: a
+// plan's cells share per-row work, so measuring them one column at a time
+// would redo it once per column. The invariant that matters — measure from the
+// cells the renderer actually emits — is preserved by measureTableColumns
+// going through renderRowCells.
 func (m Model) fitToWidth(maxWidth int) Model {
 	headers := m.planTableHeaders()
 	if maxWidth <= 0 || len(headers) == 0 {
@@ -458,33 +479,25 @@ func (m Model) fitToWidth(maxWidth int) Model {
 	// A column's width doesn't depend on which other columns are visible, so
 	// one measuring pass serves the whole drop loop.
 	widths := m.measureTableColumns(headers)
-	if table.RenderedWidth(headers, widths) <= maxWidth {
+	layout := fit.Fit(browserFitColumns(headers), widths, maxWidth, fit.SelectableChrome)
+	if len(layout.Dropped) == 0 && layout.IdentityCap == 0 {
 		return m // Everything fits.
 	}
 
-	// Copy the visibility map: a column dropped to fit the pane is a rendering
-	// decision, and must never be written back to the user's preferences.
-	vis := make(map[string]bool, len(m.columnVisibility))
-	for k, v := range m.columnVisibility {
-		vis[k] = v
-	}
-	m.columnVisibility = vis
-
-	for _, col := range browserColumnDropOrder() {
-		if !m.columnVisible(col) {
-			continue
+	if len(layout.Dropped) > 0 {
+		// Copy the visibility map: a column dropped to fit the pane is a
+		// rendering decision, and must never be written back to the user's
+		// preferences.
+		vis := make(map[string]bool, len(m.columnVisibility))
+		for k, v := range m.columnVisibility {
+			vis[k] = v
 		}
-		vis[col] = false
-		headers = m.planTableHeaders()
-		if table.RenderedWidth(headers, widths) <= maxWidth {
-			return m
+		for _, col := range layout.Dropped {
+			vis[col] = false
 		}
+		m.columnVisibility = vis
 	}
-
-	// Every droppable column is gone and PLAN alone still overflows. Truncate
-	// its cells: an elided slug beats a border that falls off the pane.
-	over := table.RenderedWidth(headers, widths) - maxWidth
-	m.planCellCap = max(widths["PLAN"]-over, minPlanCellWidth)
+	m.planCellCap = layout.IdentityCap
 	return m
 }
 

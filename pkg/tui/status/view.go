@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	fit "github.com/grovetools/core/panelkit/table"
 	markdown "github.com/grovetools/core/tui/components/markdown"
 	gtable "github.com/grovetools/core/tui/components/table"
 	"github.com/grovetools/core/tui/theme"
@@ -127,37 +128,63 @@ func (m Model) renderTableViewWithWidth(maxWidth int) string {
 // filename identifies nothing, and clipping would be no worse.
 const minJobCellWidth = 12
 
-// columnDropOrder returns the columns in the order they are dropped when the
-// table doesn't fit, most expendable first. JOB is never dropped — it carries
-// the row's identity, status icon and tree position. Columns missing from the
-// priority list go first, so a column added to availableColumns without being
-// ranked here can never silently become undroppable — which is how TOKENS, the
-// second-widest column, used to survive every drop pass and leave the table
-// overflowing no matter how many other columns went.
+// columnDropPriority ranks the columns for the fitting pass: the lowest rank
+// is dropped first when the table doesn't fit. JOB is absent because it is the
+// identity column — never dropped, truncated instead, since it carries the
+// row's identity, status icon and tree position.
+//
+// A column missing from this map gets priority 0 and goes first, so a column
+// added to availableColumns without being ranked here can never silently
+// become undroppable — which is how TOKENS, the second-widest column, used to
+// survive every drop pass and leave the table overflowing no matter how many
+// other columns went.
 //
 // TITLE goes first despite being one of the widest: it mostly restates the
 // filename already in the JOB column, so it is the cheapest ~50 columns in the
 // table to give back.
-func (m Model) columnDropOrder() []string {
-	priority := []string{
-		"TITLE", "DURATION", "COMPLETED", "UPDATED", "INLINE",
-		"WORKTREE", "SESSION", "MODEL", "SKILL", "TEMPLATE", "TOKENS", "STATUS", "TYPE",
-	}
-	ranked := make(map[string]bool, len(priority))
-	for _, col := range priority {
-		ranked[col] = true
-	}
-	var order []string
-	for _, col := range m.availableColumns {
-		if col != "JOB" && !ranked[col] {
-			order = append(order, col)
+var columnDropPriority = map[string]int{
+	"TITLE": 1, "DURATION": 2, "COMPLETED": 3, "UPDATED": 4, "INLINE": 5,
+	"WORKTREE": 6, "SESSION": 7, "MODEL": 8, "SKILL": 9, "TEMPLATE": 10,
+	"TOKENS": 11, "STATUS": 12, "TYPE": 13,
+}
+
+// fitColumns describes the currently visible headers to the shared fitting
+// widget, in display order.
+func (m Model) fitColumns(headers []string) []fit.Column {
+	cols := make([]fit.Column, 0, len(headers))
+	for _, name := range headers {
+		col := fit.Column{Name: name, Priority: columnDropPriority[name]}
+		switch name {
+		case "JOB":
+			col.Identity = true
+			col.MinWidth = minJobCellWidth
+		case "SEL":
+			// The selection checkbox is two columns wide and only present
+			// while a selection is active. Dropping it would hide which rows
+			// the next bulk action applies to, which is never worth the width.
+			col.Pinned = true
 		}
+		cols = append(cols, col)
 	}
-	return append(order, priority...)
+	return cols
+}
+
+// columnDropOrder returns every available column in the order the fitting pass
+// gives it up, most expendable first. JOB is absent: it is the identity column
+// and gets truncated instead of dropped.
+func (m Model) columnDropOrder() []string {
+	return fit.DropOrder(m.fitColumns(m.availableColumns))
 }
 
 // fitToWidth returns a copy of the model whose table renders no wider than
-// maxWidth.
+// maxWidth: low-priority columns drop out first, and if JOB alone still
+// overflows, its cells are truncated.
+//
+// The drop-and-truncate pass itself is core/panelkit/table. The measuring
+// stays here because a row's cells share per-row work, so measuring them one
+// column at a time would redo it once per column — the invariant that matters
+// (measure from the cells the renderer actually emits) is preserved by
+// measureTableColumns going through renderRowCells.
 func (m Model) fitToWidth(maxWidth int) Model {
 	headers := m.tableHeaders()
 	if len(headers) == 0 {
@@ -166,33 +193,25 @@ func (m Model) fitToWidth(maxWidth int) Model {
 	// A column's width doesn't depend on which other columns are visible, so
 	// one measuring pass serves the whole drop loop.
 	widths := m.measureTableColumns(headers)
-	if tableRenderedWidth(headers, widths) <= maxWidth {
+	layout := fit.Fit(m.fitColumns(headers), widths, maxWidth, fit.SelectableChrome)
+	if len(layout.Dropped) == 0 && layout.IdentityCap == 0 {
 		return m // Everything fits.
 	}
 
-	// Copy visibility map so we don't mutate the original.
-	vis := make(map[string]bool, len(m.columnVisibility))
-	for k, v := range m.columnVisibility {
-		vis[k] = v
-	}
-	m.columnVisibility = vis
-
-	for _, col := range m.columnDropOrder() {
-		if !vis[col] {
-			continue
+	if len(layout.Dropped) > 0 {
+		// Copy the visibility map: a column dropped to fit the pane is a
+		// rendering decision, and must never be written back to the user's
+		// preferences.
+		vis := make(map[string]bool, len(m.columnVisibility))
+		for k, v := range m.columnVisibility {
+			vis[k] = v
 		}
-		vis[col] = false
-		headers = m.tableHeaders()
-		if tableRenderedWidth(headers, widths) <= maxWidth {
-			return m
+		for _, col := range layout.Dropped {
+			vis[col] = false
 		}
+		m.columnVisibility = vis
 	}
-
-	// Every droppable column is gone and JOB alone still overflows (long
-	// filenames in a narrow pane). Truncate its cells: an elided filename
-	// beats a table whose right-hand border falls off the pane.
-	over := tableRenderedWidth(headers, widths) - maxWidth
-	m.jobCellCap = max(widths["JOB"]-over, minJobCellWidth)
+	m.jobCellCap = layout.IdentityCap
 	return m
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/grovetools/agentlogs/pkg/usage"
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/panelkit/layout"
 	"github.com/grovetools/core/pkg/daemon"
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
@@ -1195,21 +1196,7 @@ func (m Model) renderFooter() string {
 // text is truncated to make room, and if even that leaves nothing the
 // indicator is dropped entirely (the table's cursor row still shows position).
 func (m Model) alignScrollIndicator(footer string) string {
-	indicator := m.scrollIndicator()
-	if indicator == "" || m.Width <= 0 {
-		return footer
-	}
-	// One column of separation between the help text and the indicator.
-	helpWidth := m.Width - lipgloss.Width(indicator) - 1
-	if helpWidth < 1 {
-		return footer
-	}
-	if lipgloss.Width(footer) > helpWidth {
-		footer = ansi.Truncate(footer, helpWidth, "…")
-	}
-	// Width() pads the (now guaranteed short enough) help text out so the
-	// indicator lands flush right without a manual space run.
-	return lipgloss.NewStyle().Width(helpWidth).Render(footer) + " " + indicator
+	return layout.RightPin(footer, m.scrollIndicator(), m.Width)
 }
 
 // View renders the TUI
