@@ -58,3 +58,33 @@ func TestValidateAcceptsCleanTarget(t *testing.T) {
 		t.Fatalf("valid target rejected: %+v", report.Checks)
 	}
 }
+
+// TestValidateRejectsPathAsWorktreeName pins the pre-flight guard for the
+// phantom-worktree bug: an absolute path in the worktree field is Join'd onto
+// the container base (Join concatenates rather than replacing), synthesizing a
+// deep tree instead of failing. Catch it on the review screen.
+func TestValidateRejectsPathAsWorktreeName(t *testing.T) {
+	ws := initRepo(t)
+
+	for _, name := range []string{
+		"/Users/solair/.local/share/grove/worktrees/grove-cd22fef3/agent-testing-environments",
+		"../escape",
+	} {
+		report, _ := Validate(Request{
+			TargetWorkspace: ws, PlansDir: t.TempDir(),
+			PlanName: "new-plan", WorktreeName: name,
+		})
+		if report.Valid() {
+			t.Errorf("worktree name %q accepted, want rejected", name)
+		}
+	}
+
+	// A branch-style name still passes — nesting is legitimate.
+	report, _ := Validate(Request{
+		TargetWorkspace: ws, PlansDir: t.TempDir(),
+		PlanName: "new-plan", WorktreeName: "feature/foo",
+	})
+	if !report.Valid() {
+		t.Fatalf("branch-style worktree name rejected: %+v", report.Checks)
+	}
+}

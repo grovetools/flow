@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/pkg/worktreeregistry"
 )
 
@@ -21,6 +22,17 @@ func Validate(req Request) (ValidationReport, MutationManifest) {
 
 	nameOK := req.PlanName != "" && filepath.Base(req.PlanName) == req.PlanName && req.PlanName != "." && req.PlanName != ".."
 	add("identity.plan_name", SeverityError, nameOK, map[bool]string{true: "plan name is valid", false: "plan name must be one path segment"}[nameOK])
+
+	// The worktree name is joined onto a container base, and filepath.Join
+	// CONCATENATES an absolute second element instead of replacing the base —
+	// so a path pasted into the wizard's worktree field would synthesize a deep
+	// tree inside the container rather than being rejected. Check it here so
+	// the review screen says so before anything is created.
+	if req.WorktreeName != "" {
+		wtErr := workspace.ValidateWorktreeName(req.WorktreeName)
+		add("identity.worktree_name", SeverityError, wtErr == nil,
+			ternary(wtErr == nil, "worktree name is valid: "+req.WorktreeName, fmt.Sprintf("%v", wtErr)))
+	}
 
 	planDir := filepath.Join(req.PlansDir, req.PlanName)
 	_, statErr := os.Stat(planDir)

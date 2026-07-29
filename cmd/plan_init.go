@@ -59,6 +59,19 @@ var provisionEnvironmentFn = provisionEnvironment
 
 // executePlanInit contains the core logic for initializing a plan and returns a result string.
 func executePlanInit(cmd *PlanInitCmd) (string, error) {
+	// Validate the worktree name at the boundary. --worktree accepts free text
+	// from the CLI and from the init wizard's text input, and the value is
+	// carried verbatim into the plan config and every job's worktree: key. An
+	// absolute path here does not get rejected downstream — filepath.Join
+	// concatenates it onto the container base — so catch it while there is
+	// still a caller to show the error to, rather than after a half-created
+	// container has been synthesized on disk.
+	if cmd.Worktree != "" && cmd.Worktree != "__AUTO__" {
+		if err := workspace.ValidateWorktreeName(cmd.Worktree); err != nil {
+			return "", fmt.Errorf("invalid --worktree: %w", err)
+		}
+	}
+
 	// Derive ExtractAllFrom and NoteRef from the FIRST --from-note if provided.
 	// --from-note takes precedence over --extract-all-from and --note-ref.
 	// Additional --from-note entries become their own jobs later (see roster
