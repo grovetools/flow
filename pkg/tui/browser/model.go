@@ -139,6 +139,9 @@ type Model struct {
 	columnSelectMode bool
 	columnCursor     int
 	columnVisibility map[string]bool
+	// planCellCap truncates PLAN-column cells when even a PLAN-only table is
+	// wider than the pane. Zero means no cap.
+	planCellCap int
 
 	embedMode bool // suppress inline footer; host uses Footer()
 	hosted    bool // route workspace opens through the embedding host
@@ -436,7 +439,7 @@ func New(cfg Config) Model {
 		holdPending:       make(map[string]bool),
 		actionPending:     make(map[string]embed.GitOperation),
 		dismissedPlanDirs: make(map[string]bool),
-		columnVisibility:  defaultBrowserColumnVisibility(),
+		columnVisibility:  loadColumnVisibility(),
 	}
 }
 

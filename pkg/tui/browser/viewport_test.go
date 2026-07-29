@@ -124,6 +124,7 @@ func TestPlanIdentityUsesBoundedRepositoryCount(t *testing.T) {
 }
 
 func TestColumnSelectorDefaultsWorkspaceHiddenAndCanEnableIt(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir()) // never touch the developer's saved columns
 	m := Model{
 		plans: []PlanListItem{{Name: "plan", Workspace: "grovetools"}},
 		keys:  NewKeyMap(nil), columnVisibility: defaultBrowserColumnVisibility(),
@@ -133,6 +134,13 @@ func TestColumnSelectorDefaultsWorkspaceHiddenAndCanEnableIt(t *testing.T) {
 	}
 	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
 	m = updated.(Model)
+	for _, name := range browserOptionalColumns {
+		if name == "WORKSPACE / REPOS" {
+			break
+		}
+		updated, _ = m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m = updated.(Model)
+	}
 	updated, _ = m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(Model)
 	if out := m.renderPlanTable(); !strings.Contains(out, "WORKSPACE / REPOS") {

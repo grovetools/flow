@@ -468,6 +468,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter", " ":
 			name := browserOptionalColumns[m.columnCursor]
 			m.columnVisibility[name] = !m.columnVisible(name)
+			_ = saveColumnVisibility(m.columnVisibility)
 		}
 		return m, nil
 	}

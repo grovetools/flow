@@ -230,22 +230,11 @@ func (m Model) measureTableColumns(headers []string) map[string]int {
 }
 
 // tableRenderedWidth returns the width gtable.SelectableTableWithOptions
-// renders for these columns: the cells, a space of padding either side of
-// each, the │ separators between them, the rounded border, and the two-column
-// "▶ " selection gutter the table prepends.
+// renders for these columns. The arithmetic lives beside the renderer in core
+// so every table that fits itself to a pane — this one and the plan browser —
+// measures with the same formula.
 func tableRenderedWidth(headers []string, widths map[string]int) int {
-	if len(headers) == 0 {
-		return 0
-	}
-	total := 0
-	for _, h := range headers {
-		total += widths[h]
-	}
-	total += len(headers) * 2 // cell padding, one space each side
-	total += len(headers) - 1 // │ separators
-	total += 2                // left + right border
-	total += 2                // selection gutter
-	return total
+	return gtable.RenderedWidth(headers, widths)
 }
 
 // renderTableView renders the jobs as a table with configurable columns
