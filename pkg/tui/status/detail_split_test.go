@@ -1,6 +1,7 @@
 package status
 
 import (
+	"slices"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -190,5 +191,166 @@ func TestEscOnLogPaneStillArmsAgentInterrupt(t *testing.T) {
 	}
 	if m.LastEscPress.IsZero() {
 		t.Errorf("first esc on the log pane did not arm the double-esc interrupt")
+	}
+}
+
+// skillJobModel builds a model over a job with a skill sequence, so the skill
+// pane has nodes to navigate.
+func skillJobModel(t *testing.T, hosted bool) Model {
+	t.Helper()
+	job := &orchestration.Job{
+		ID:            "j1",
+		Filename:      "j1.md",
+		Title:         "job one",
+		Type:          orchestration.JobTypeInteractiveAgent,
+		Status:        orchestration.JobStatusCompleted,
+		SkillSequence: []string{"alpha", "beta", "gamma"},
+	}
+	plan := &orchestration.Plan{
+		Name:      "t",
+		Directory: t.TempDir(),
+		Jobs:      []*orchestration.Job{job},
+		JobsByID:  map[string]*orchestration.Job{job.ID: job},
+	}
+	graph, err := orchestration.BuildDependencyGraph(plan)
+	if err != nil {
+		t.Fatalf("BuildDependencyGraph: %v", err)
+	}
+	m := New(Config{Plan: plan, Graph: graph, Hosted: hosted})
+	mdl, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	return mdl.(Model)
+}
+
+// TestSkillPanePromotesWithForwardedKeys: the skill pane opens as a BSP split
+// like every other detail pane. It can only do that because it claims its
+// cursor keys — an unclaimed pane would have no way to move a selection that
+// lives in this model, not in the panel.
+func TestSkillPanePromotesWithForwardedKeys(t *testing.T) {
+	m := skillJobModel(t, true)
+	m, cmd := press(t, m, "vs")
+
+	if m.ActiveDetailPane != SkillPane {
+		t.Fatalf("ActiveDetailPane = %d, want SkillPane", m.ActiveDetailPane)
+	}
+	if !m.Manager.IsPromoted("detail") {
+		t.Error("skill pane should be promoted into a BSP split")
+	}
+
+	var req *embed.SplitViewportRequestMsg
+	for _, msg := range collectMsgs(cmd) {
+		if r, ok := msg.(embed.SplitViewportRequestMsg); ok {
+			req = &r
+		}
+	}
+	if req == nil {
+		t.Fatal("no SplitViewportRequestMsg emitted")
+	}
+	if len(req.ForwardKeys) == 0 {
+		t.Error("the skill pane must claim its cursor keys")
+	}
+	for _, k := range []string{"j", "k", "enter"} {
+		if !slices.Contains(req.ForwardKeys, k) {
+			t.Errorf("claimed keys missing %q: %v", k, req.ForwardKeys)
+		}
+	}
+	// Scrolling stays with the panel — it owns the offset.
+	for _, k := range []string{"ctrl+d", "ctrl+u", "g", "G"} {
+		if slices.Contains(req.ForwardKeys, k) {
+			t.Errorf("%q must stay with the panel so the body can be scrolled", k)
+		}
+	}
+	if !req.Focus {
+		t.Error("the skill pane must open focused; an unfocused pane is sent no keys to forward")
+	}
+	if req.Content == "" {
+		t.Error("the body is rendered synchronously and should travel with the request")
+	}
+}
+
+// TestSkillPaneForwardedKeyMovesCursor: a forwarded key drives the tree and
+// answers with a re-rendered body that tells the panel to follow the cursor.
+func TestSkillPaneForwardedKeyMovesCursor(t *testing.T) {
+	m := skillJobModel(t, true)
+	m, _ = press(t, m, "vs")
+	if len(m.skillPaneNodes) < 2 {
+		t.Skipf("need at least 2 skill nodes, got %d", len(m.skillPaneNodes))
+	}
+	before := m.skillPaneCursor
+
+	mdl, cmd := m.Update(embed.ViewportKeyMsg{Key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}})
+	m = mdl.(Model)
+
+	if m.skillPaneCursor != before+1 {
+		t.Errorf("forwarded j should move the tree cursor; %d -> %d", before, m.skillPaneCursor)
+	}
+	var push *embed.UpdateViewportContentMsg
+	for _, msg := range collectMsgs(cmd) {
+		if p, ok := msg.(embed.UpdateViewportContentMsg); ok {
+			push = &p
+		}
+	}
+	if push == nil {
+		t.Fatal("moving the cursor must push a re-rendered body")
+	}
+	if push.EnsureVisible <= 0 {
+		t.Errorf("the push must ask the panel to follow the cursor; EnsureVisible = %d", push.EnsureVisible)
+	}
+	if push.EnsureVisible != m.skillPaneCursorLine {
+		t.Errorf("EnsureVisible = %d, want the cursor's line %d", push.EnsureVisible, m.skillPaneCursorLine)
+	}
+}
+
+// TestSkillPaneForwardedEscCloses: the split holds focus, so esc only reaches
+// this model as a forwarded key — and it still has to mean "close the pane".
+func TestSkillPaneForwardedEscCloses(t *testing.T) {
+	m := skillJobModel(t, true)
+	m, _ = press(t, m, "vs")
+
+	mdl, _ := m.Update(embed.ViewportKeyMsg{Key: tea.KeyMsg{Type: tea.KeyEsc}})
+	m = mdl.(Model)
+
+	if m.ActiveDetailPane != NoPane {
+		t.Errorf("forwarded esc should close the skill pane; ActiveDetailPane = %d", m.ActiveDetailPane)
+	}
+	if m.Manager.IsPromoted("detail") {
+		t.Error("closing must demote the split")
+	}
+}
+
+// TestForwardedKeyIgnoredForOtherPanes: only the skill pane claims keys, so a
+// forward arriving after the slot changed hands must not drive anything.
+func TestForwardedKeyIgnoredForOtherPanes(t *testing.T) {
+	m := skillJobModel(t, true)
+	m, _ = press(t, m, "vt")
+	if m.ActiveDetailPane != TokenPaneDetail {
+		t.Fatalf("precondition: ActiveDetailPane = %d", m.ActiveDetailPane)
+	}
+	before := m.skillPaneCursor
+
+	mdl, cmd := m.Update(embed.ViewportKeyMsg{Key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}})
+	m = mdl.(Model)
+
+	if m.skillPaneCursor != before {
+		t.Error("a stale forward must not move the skill cursor")
+	}
+	if cmd != nil {
+		t.Error("a stale forward should produce no command")
+	}
+}
+
+// TestSkillPaneUnhostedStaysInline: with no host there is no split to claim
+// keys from, so the internal two-viewport pane must still work.
+func TestSkillPaneUnhostedStaysInline(t *testing.T) {
+	m := skillJobModel(t, false)
+	m, _ = press(t, m, "vs")
+
+	if m.ActiveDetailPane != SkillPane {
+		t.Fatalf("ActiveDetailPane = %d, want SkillPane", m.ActiveDetailPane)
+	}
+	if m.Manager.IsPromoted("detail") {
+		t.Error("nothing to promote into when unhosted")
+	}
+	if !m.ShowLogs {
+		t.Error("the internal skill pane should be visible")
 	}
 }

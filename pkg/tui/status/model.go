@@ -207,20 +207,26 @@ type Model struct {
 	ClawDialogJobIndex       int
 	ClawIdleInput            textinput.Model
 	ClawPromptInput          textinput.Model
-	ClawDialogFocus          int             // 0=idle, 1=prompt
-	ClawDisabling            bool            // true when disabling (unclaw)
-	ClawTargetSelectorActive bool            // true when showing target picker before claw dialog
-	ClawSelectedTarget       string          // selected signal target name (empty = broadcast)
-	ClawTargetCursor         int             // cursor position in target list
-	ClawTargetOptions        []string        // available target options
-	skillSearchActive        bool            // Whether search mode is active in skill pane
-	skillSearchInput         textinput.Model // Text input for skill pane search
-	frontmatterRawContent    string
-	briefingRawContent       string
-	tokenRawContent          string
-	editRawContent           string
-	skillPaneRawContent      string
-	accessedFilesRawContent  string
+	ClawDialogFocus          int      // 0=idle, 1=prompt
+	ClawDisabling            bool     // true when disabling (unclaw)
+	ClawTargetSelectorActive bool     // true when showing target picker before claw dialog
+	ClawSelectedTarget       string   // selected signal target name (empty = broadcast)
+	ClawTargetCursor         int      // cursor position in target list
+	ClawTargetOptions        []string // available target options
+	// skillPaneBody is the tree and artifact detail joined into the single
+	// scroll body the promoted (BSP split) skill pane shows;
+	// skillPaneCursorLine is the selected node's 1-based line within it, sent
+	// as EnsureVisible so the host viewport follows the cursor.
+	skillPaneBody           string
+	skillPaneCursorLine     int
+	skillSearchActive       bool            // Whether search mode is active in skill pane
+	skillSearchInput        textinput.Model // Text input for skill pane search
+	frontmatterRawContent   string
+	briefingRawContent      string
+	tokenRawContent         string
+	editRawContent          string
+	skillPaneRawContent     string
+	accessedFilesRawContent string
 	// tokenColumnCache memoizes the rendered TOKENS column cell per job ID
 	// so the table render doesn't re-read the artifact (or re-summarize) on
 	// every frame. Invalidated by refreshes via clearTokenColumnCache.

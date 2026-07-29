@@ -937,6 +937,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Added: %s", rule))
 		return m, refreshPlan(m.PlanDir)
 
+	case embed.ViewportKeyMsg:
+		// A key the promoted split forwarded back because we claimed it.
+		// Only the skill pane does; ignore anything else so a stale forward
+		// cannot drive a pane that no longer owns the slot.
+		if m.ActiveDetailPane != SkillPane {
+			return m, nil
+		}
+		return m.handleSkillViewportKey(msg.Key)
+
 	case embed.SplitViewportClosedMsg:
 		// Viewport closed (user pressed q or host closed the split).
 		// Demote to sync internal state — the host already tore down the BSP split.
@@ -2237,7 +2246,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.closeCurrentDetail()
 				return m, cmd
 			}
-			return m.openDetailPane(SkillPane)
+			return m.openHostedViewportPane(SkillPane)
 
 		case key.Matches(msg, m.KeyMap.ViewAccessedFiles):
 			if m.ActiveDetailPane == AccessedFilesPaneDetail {
@@ -3116,12 +3125,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		}
 	case SkillPane:
 		m.skillPaneCursor = 0
-		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight, m.PlanDir)
-		m.skillPaneNodes = result.nodes
-		m.skillPaneStateMap = result.stateMap
-		m.skillPaneRawContent = result.treeContent
-		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
-		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
+		m.refreshSkillPane()
+		loadCmd = m.skillViewportPushCmd()
 	}
 
 	if retitleCmd == nil {
@@ -3352,6 +3357,13 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 				m.accessedFiles = nil
 				m.accessedFilesDisplay = nil
 				cmds = append(cmds, loadAccessedFilesCmd(m.Plan, job))
+			case SkillPane:
+				// Rendered synchronously rather than by a loader. No push
+				// here: the caller hands the body to the split request, so
+				// the pane is never briefly empty and the ordering of a
+				// batched create-then-push cannot matter.
+				m.skillPaneCursor = 0
+				m.refreshSkillPane()
 			}
 		}
 
@@ -3448,46 +3460,80 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// hostedViewportPaneLabels names every read-only detail pane that renders as
-// a host BSP ViewportPanel when hosted. They are pure scrollable text, so the
-// host's viewport panel can own them wholesale — unlike the skill tree, whose
-// in-pane cursor needs key routing the embed viewport contract doesn't carry.
-// The label is the viewport title's prefix ("<label>: <job title>").
-var hostedViewportPaneLabels = map[DetailPane]string{
-	LogsPaneDetail:          "Logs",
-	FrontmatterPane:         "Frontmatter",
-	BriefingPane:            "Briefing",
-	TokenPaneDetail:         "Token Usage",
-	AccessedFilesPaneDetail: "Accessed Files",
+// skillPaneForwardedKeys are the keys the skill tree claims from the host's
+// viewport panel when promoted. Deliberately narrow: the tree's own cursor
+// motion and actions, and nothing else. ctrl+d/ctrl+u/g/G stay with the panel
+// because the scroll offset lives there — claiming them would leave a body
+// taller than the split unreachable. See SplitViewportRequestMsg.ForwardKeys.
+var skillPaneForwardedKeys = []string{
+	"j", "k", "down", "up", "enter", "e", "esc",
+}
+
+// hostedViewportPane describes a detail pane that renders as a host BSP
+// ViewportPanel when hosted. Label is the viewport title's prefix
+// ("<label>: <job title>"); forwardKeys is empty for the read-only panes,
+// whose bodies the panel can navigate by itself.
+type hostedViewportPane struct {
+	label       string
+	forwardKeys []string
+	focus       bool
+}
+
+// hostedViewportPanes is the set of detail panes promoted into the host's
+// single detail slot. The read-only four are pure scrollable text. The skill
+// tree earns its place through ForwardKeys: it keeps its cursor by claiming
+// the motion keys and following the selection with EnsureVisible, which is
+// also why it opens focused — an unfocused pane is sent no keys to forward.
+var hostedViewportPanes = map[DetailPane]hostedViewportPane{
+	LogsPaneDetail:          {label: "Logs"},
+	FrontmatterPane:         {label: "Frontmatter"},
+	BriefingPane:            {label: "Briefing"},
+	TokenPaneDetail:         {label: "Token Usage"},
+	AccessedFilesPaneDetail: {label: "Accessed Files"},
+	SkillPane:               {label: "Skills", forwardKeys: skillPaneForwardedKeys, focus: true},
 }
 
 // isHostedViewportPane reports whether pane renders into the host's BSP
 // viewport split when hosted (and internally otherwise).
 func isHostedViewportPane(pane DetailPane) bool {
-	_, ok := hostedViewportPaneLabels[pane]
+	_, ok := hostedViewportPanes[pane]
 	return ok
 }
 
 // hostedViewportTitle builds the split's title for a pane/job pair.
 func hostedViewportTitle(pane DetailPane, job *orchestration.Job) string {
-	label, ok := hostedViewportPaneLabels[pane]
+	spec, ok := hostedViewportPanes[pane]
 	if !ok || job == nil {
-		return label
+		return spec.label
 	}
-	return label + ": " + job.Title
+	return spec.label + ": " + job.Title
+}
+
+// hostedViewportRequest builds the split request for a promoted pane. It is
+// re-emitted rather than diffed on every pane switch: the host retargets an
+// open viewport in place from this one message (title, key claim, body), so
+// switching detail panes cannot strand the previous pane's key mode.
+func (m Model) hostedViewportRequest(pane DetailPane, job *orchestration.Job, content string) embed.SplitViewportRequestMsg {
+	spec := hostedViewportPanes[pane]
+	return embed.SplitViewportRequestMsg{
+		PanelID:     "detail",
+		Title:       hostedViewportTitle(pane, job),
+		Content:     content,
+		AutoScroll:  false,
+		Ratio:       m.calculateBSPJobPaneRatio(),
+		Focus:       spec.focus,
+		ForwardKeys: spec.forwardKeys,
+	}
 }
 
 // openHostedViewportPane opens a detail pane that uses the BSP ViewportPanel
-// when Hosted. If a viewport is already active, it swaps title + content
-// without creating a new BSP split. Falls back to internal rendering when
-// not hosted.
+// when Hosted. If a viewport is already active it is retargeted in place
+// rather than rebuilt. Falls back to internal rendering when not hosted.
 func (m Model) openHostedViewportPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	job := m.CurrentJob()
 	if !m.Hosted || job == nil {
 		return m.openDetailPane(pane)
 	}
-
-	title := hostedViewportTitle(pane, job)
 
 	// Cancel any active log stream when switching away from logs.
 	if m.ActiveDetailPane == LogsPaneDetail {
@@ -3506,28 +3552,24 @@ func (m Model) openHostedViewportPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	// Loader-backed panes fill in when their *LoadedMsg lands; the skill
+	// pane is rendered synchronously above, so it travels with the request.
+	body := "Loading..."
+	if pane == SkillPane {
+		body = m.skillPaneBody
+	}
+	req := m.hostedViewportRequest(pane, job, body)
+
 	if m.viewportActive {
-		// Viewport already open — swap title + clear content (loader will push real content).
-		cmds = append(cmds, func() tea.Msg {
-			return embed.UpdateViewportTitleMsg{Title: title}
-		})
-		cmds = append(cmds, func() tea.Msg {
-			return embed.UpdateViewportContentMsg{Content: "Loading...", Append: false}
-		})
+		// Viewport already open — re-request rather than pushing title and
+		// content separately, so the host also retargets the key claim. The
+		// loader replaces the placeholder body when it lands.
+		cmds = append(cmds, func() tea.Msg { return req })
 		return m, tea.Batch(cmds...)
 	}
 
 	// No viewport yet — create the BSP split.
-	ratio := m.calculateBSPJobPaneRatio()
-	openCmd := func() tea.Msg {
-		return embed.SplitViewportRequestMsg{
-			PanelID:    "detail",
-			Title:      title,
-			AutoScroll: false,
-			Ratio:      ratio,
-			Focus:      false,
-		}
-	}
+	openCmd := func() tea.Msg { return req }
 	closeCmd := func() tea.Msg { return embed.SplitViewportCloseRequestMsg{} }
 	var promoteCmd tea.Cmd
 	m.Manager, promoteCmd = m.Manager.Promote("detail", openCmd, closeCmd)
@@ -3568,14 +3610,63 @@ func (m *Model) refreshSkillPane() {
 	if m.ActiveLogJob == nil {
 		return
 	}
-	result := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight, m.PlanDir)
+	// The artifact preview scales with the pane it lands in. A promoted pane
+	// has no internal geometry (LogViewerHeight is only maintained for the
+	// internal layout), so fall back to the panel's own height — the detail
+	// split is its sibling and gets a comparable share.
+	height := m.LogViewerHeight
+	// Hosted, the skill pane always lives in the split — openDetailPane
+	// promotes every hosted viewport pane — so this does not wait on
+	// viewportActive, which is still false while the first split is built.
+	promoted := m.Hosted && m.ActiveDetailPane == SkillPane
+	if promoted {
+		height = m.Height
+	}
+	result := renderInteractiveSkillPane(m.Plan, m.ActiveLogJob, m.skillPaneCursor, m.LogViewerWidth, height, m.PlanDir)
 	m.skillPaneNodes = result.nodes
 	m.skillPaneStateMap = result.stateMap
-	// Tree goes into the main skill pane viewport
 	m.skillPaneRawContent = result.treeContent
+
+	if promoted {
+		// One scrollable body in the split, rather than the two stacked
+		// viewports the internal pane uses.
+		m.skillPaneBody = result.treeContent + "\n" + result.detailContent
+		m.skillPaneCursorLine = result.cursorLine
+		return
+	}
+
+	// Tree goes into the main skill pane viewport
 	m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 	// Detail goes into the artifact viewport
 	m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
+}
+
+// skillViewportPushCmd pushes the freshly rendered skill body to the promoted
+// split, asking it to keep the tree cursor on screen. Nil unless the skill
+// pane actually owns a host viewport right now.
+func (m Model) skillViewportPushCmd() tea.Cmd {
+	if !m.Hosted || !m.viewportActive || m.ActiveDetailPane != SkillPane {
+		return nil
+	}
+	content, line := m.skillPaneBody, m.skillPaneCursorLine
+	return func() tea.Msg {
+		return embed.UpdateViewportContentMsg{Content: content, EnsureVisible: line}
+	}
+}
+
+// handleSkillViewportKey drives the skill tree from a key the promoted split
+// forwarded back. The split renders a body whose cursor only this model
+// knows, so navigation happens here and returns as a content push.
+func (m Model) handleSkillViewportKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// esc closes the pane, matching what esc means for every other detail
+	// pane — the split has focus, so flow never sees the keystroke otherwise.
+	if key.Type == tea.KeyEsc {
+		cmd := m.closeCurrentDetail()
+		return m, cmd
+	}
+	mdl, cmd := m.handleSkillTreeKey(key)
+	m = mdl.(Model)
+	return m, tea.Batch(cmd, m.skillViewportPushCmd())
 }
 
 // handleDetailPrimaryKey dispatches key messages for the primary detail pane.

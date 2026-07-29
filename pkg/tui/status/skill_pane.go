@@ -183,11 +183,20 @@ func contains(slice []string, s string) bool {
 }
 
 // skillPaneResult holds the output of renderInteractiveSkillPane.
+// skillTreeHeaderLines is what renderInteractiveSkillPane writes above the
+// first node line: the "Skill Sequence" heading plus a blank line.
+const skillTreeHeaderLines = 2
+
 type skillPaneResult struct {
 	treeContent   string                                      // Tree view (top half)
 	detailContent string                                      // Detail view (bottom half)
 	nodes         []*SkillPaneNode                            // Flat node list
 	stateMap      map[string]orchestration.SkillFidelityState // Cached state
+	// cursorLine is the 1-based line of the selected node within
+	// treeContent. The promoted (BSP split) pane cannot scroll itself — the
+	// offset lives in the host's viewport panel — so it ships this line as
+	// UpdateViewportContentMsg.EnsureVisible to keep the cursor on screen.
+	cursorLine int
 }
 
 // renderInteractiveSkillPane builds the skill pane tree view and detail content separately.
@@ -226,7 +235,9 @@ func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job
 	tree.WriteString(theme.DefaultTheme.Info.Bold(true).Render("Skill Sequence"))
 	tree.WriteString("\n\n")
 
-	// Render tree with cursor
+	// Render tree with cursor. Each node is exactly one line, and the header
+	// above cost two, so the selected node sits on line 3+cursor (1-based).
+	cursorLine := skillTreeHeaderLines + 1 + cursor
 	for i, node := range paneNodes {
 		isLastChild := isLastArtifactChild(paneNodes, i)
 		renderPaneNodeLine(&tree, node, stateMap, i == cursor, isLastChild)
@@ -254,6 +265,7 @@ func renderInteractiveSkillPane(plan *orchestration.Plan, job *orchestration.Job
 		detailContent: detail.String(),
 		nodes:         paneNodes,
 		stateMap:      stateMap,
+		cursorLine:    cursorLine,
 	}
 }
 
