@@ -3,6 +3,7 @@ package view
 import (
 	"sort"
 
+	"github.com/grovetools/core/tui/hostedkeys"
 	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/flow/pkg/tui/browser"
 	"github.com/grovetools/flow/pkg/tui/status"
@@ -11,24 +12,19 @@ import (
 )
 
 // HostedKeyReference is the machine-readable key contract exported to hosts
-// such as treemux. SchemaVersion changes only for incompatible shape changes.
-type HostedKeyReference struct {
-	SchemaVersion int                `json:"schema_version"`
-	App           string             `json:"app"`
-	Bindings      []HostedKeyBinding `json:"bindings"`
-}
-
-// HostedKeyBinding describes either an embedded status binding or a key
-// intercepted by flow's view host before the embedded model/outer host sees it.
-type HostedKeyBinding struct {
-	Scope          string   `json:"scope"`
-	Action         string   `json:"action"`
-	Keys           []string `json:"keys"`
-	Description    string   `json:"description"`
-	ConfigKey      string   `json:"config_key,omitempty"`
-	HostSwallowed  bool     `json:"host_swallowed"`
-	CollisionHints []string `json:"collision_hints,omitempty"`
-}
+// such as treemux, and HostedKeyBinding is one row of it.
+//
+// Both are aliases of the shared shapes in core/tui/hostedkeys. They used to
+// be declared here, which made flow's struct the de-facto contract every other
+// publisher had to mirror by hand — treemux's sidecar protocol carried a
+// field-for-field copy so the JSON would line up. One declaration now backs all
+// of them, and a host filters flow's claims and a sidecar's through the same
+// code path. The names stay for flow's own callers; the shape is no longer
+// flow's to change alone.
+type (
+	HostedKeyReference = hostedkeys.Reference
+	HostedKeyBinding   = hostedkeys.Binding
+)
 
 // hostedCollisionHints names outer-host bindings that flow keys are known to
 // collide with, keyed by the flow key. Advisory only — Keys is the stable
@@ -78,7 +74,7 @@ func hostedKeymaps() []struct {
 // back to flow while the panel holds focus. A key that is not declared here
 // cannot be won back.
 func HostedKeys() HostedKeyReference {
-	ref := HostedKeyReference{SchemaVersion: 1, App: "flow"}
+	ref := HostedKeyReference{SchemaVersion: hostedkeys.SchemaVersion, App: "flow"}
 	for _, source := range hostedKeymaps() {
 		for _, section := range source.info.Sections {
 			for _, binding := range section.Bindings {
