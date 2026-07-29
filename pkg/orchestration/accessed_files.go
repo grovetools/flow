@@ -11,7 +11,6 @@ import (
 
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
-	"github.com/grovetools/core/util/pathutil"
 	"github.com/sirupsen/logrus"
 )
 
@@ -194,36 +193,12 @@ func ReadJobAccessedFiles(plan *Plan, job *Job) ([]AccessedFile, error) {
 // form (<repo>/rel/path), naming a worktree file by its parent repo so the
 // result is worktree-unrooted. Falls back to the input path when the file is
 // not under any known workspace.
+//
+// The rooting itself lives on the provider so treemux's accessed-files drawer
+// renders paths identically to `flow plan files --workspace-rooted`; this stays
+// as the name flow's own callers already use.
 func WorkspaceRootedPath(provider *workspace.Provider, absPath string) string {
-	if provider == nil {
-		return absPath
-	}
-	canonical, err := pathutil.NormalizeForLookup(absPath)
-	if err != nil {
-		return absPath
-	}
-	node := provider.FindByPath(canonical)
-	if node == nil {
-		return absPath
-	}
-	name := node.Name
-	if node.IsProjectWorktreeChild() {
-		if parent := provider.FindByPath(node.ParentProjectPath); parent != nil {
-			name = parent.Name
-		}
-	}
-	nodePath, err := pathutil.NormalizeForLookup(node.Path)
-	if err != nil {
-		nodePath = node.Path
-	}
-	rel, err := filepath.Rel(nodePath, canonical)
-	if err != nil {
-		return absPath
-	}
-	if rel == "." {
-		return name
-	}
-	return filepath.Join(name, rel)
+	return provider.RootedPath(absPath)
 }
 
 // NewDisplayWorkspaceProvider builds a workspace provider for workspace-rooted
