@@ -47,6 +47,7 @@ type KeyMap struct {
 	ViewTokens        key.Binding
 	ViewSkillPane     key.Binding
 	ViewAccessedFiles key.Binding
+	ViewArtifacts     key.Binding
 	CloseDetailPane   key.Binding
 	SwitchFocus       key.Binding
 	FocusLeft         key.Binding // Spatial navigation: focus left pane (jobs)
@@ -224,6 +225,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("vy"),
 			key.WithHelp("vy", "accessed files"),
 		),
+		// "vj" — job artifacts. Mirrors nb's "tj" (toggle job artifacts): the
+		// same scratch directory, browsed from the other end.
+		ViewArtifacts: key.NewBinding(
+			key.WithKeys("vj"),
+			key.WithHelp("vj", "job artifacts"),
+		),
 		CloseDetailPane: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "close detail pane"),
@@ -321,7 +328,7 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 		{Prefix: "v", Label: "View", Bindings: []key.Binding{
 			k.ViewLogs, k.ViewFrontmatter, k.ViewBriefing, k.ViewEdit,
 			k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane,
-			k.ViewAccessedFiles,
+			k.ViewAccessedFiles, k.ViewArtifacts,
 		}},
 		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
 			k.SetStatus, k.SetType, k.SetTemplate, k.SetCompleted,

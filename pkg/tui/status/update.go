@@ -941,10 +941,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A key the promoted split forwarded back because we claimed it.
 		// Only the skill pane does; ignore anything else so a stale forward
 		// cannot drive a pane that no longer owns the slot.
-		if m.ActiveDetailPane != SkillPane {
+		switch m.ActiveDetailPane {
+		case SkillPane:
+			return m.handleSkillViewportKey(msg.Key)
+		case ArtifactsPaneDetail:
+			return m.handleArtifactsViewportKey(msg.Key)
+		default:
 			return m, nil
 		}
-		return m.handleSkillViewportKey(msg.Key)
 
 	case embed.SplitViewportClosedMsg:
 		// Viewport closed (user pressed q or host closed the split).
@@ -1186,6 +1190,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ActiveDetailPane == SkillPane && m.ActiveLogJob != nil {
 			m.refreshSkillPane()
 		}
+		// Same for the artifacts tree — a running job writes files as we watch.
+		if m.ActiveDetailPane == ArtifactsPaneDetail && m.ActiveLogJob != nil {
+			m.refreshArtifactsPane()
+		}
 
 		// Rebuild the display rows from the reloaded jobs. The old rows
 		// held pointers into the previous plan load; rebuildDisplayRows
@@ -1344,6 +1352,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editViewport.Width = m.LogViewerWidth
 		m.editViewport.Height = logHeight
 		m.updateSkillViewportSizes()
+		m.updateArtifactViewportSizes()
+		if m.ActiveDetailPane == ArtifactsPaneDetail {
+			m.refreshArtifactsPane()
+		}
 
 		// Re-wrap content for all detail viewports to adapt to the new size
 		if m.frontmatterRawContent != "" {
@@ -1854,7 +1866,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.SwitchFocus):
 			if m.ShowLogs && !m.LogPaneFullscreen {
-				if m.ActiveDetailPane == SkillPane {
+				if isTreeDetailPane(m.ActiveDetailPane) {
 					// 3-way cycle: Jobs <-> Tree <-> DetailViewport
 					// The Manager only knows "jobs" and "detail", so we handle
 					// the sub-focus (tree ↔ detail viewport) manually.
@@ -1866,7 +1878,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								// tree → detail viewport
 								m.SkillSubFocus = 1
 								m.Focus = FocusDetailSecondary
-								m.refreshSkillPane()
+								m.refreshTreeDetailPane()
 								return m, nil
 							}
 							// detail viewport → jobs (let Manager cycle)
@@ -1876,7 +1888,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								// detail viewport → tree
 								m.SkillSubFocus = 0
 								m.Focus = FocusDetailPrimary
-								m.refreshSkillPane()
+								m.refreshTreeDetailPane()
 								return m, nil
 							}
 							// tree → jobs (let Manager cycle backward)
@@ -1893,9 +1905,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Let the Manager handle the actual focus cycle between jobs ↔ detail
 				m.Manager, cmd = m.Manager.Update(msg)
 				m.syncFocusFromManager()
-				if m.ActiveDetailPane == SkillPane {
-					m.refreshSkillPane()
-				}
+				m.refreshTreeDetailPane()
 				return m, cmd
 			}
 
@@ -1905,9 +1915,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.Focus != FocusJobs {
 					m.Manager.ActivePaneIdx = 0
 					m.syncFocusFromManager()
-					if m.ActiveDetailPane == SkillPane {
-						m.refreshSkillPane()
-					}
+					m.refreshTreeDetailPane()
 				}
 			}
 			return m, nil
@@ -1918,9 +1926,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.Focus == FocusJobs {
 					m.Manager.ActivePaneIdx = 1
 					m.syncFocusFromManager()
-					if m.ActiveDetailPane == SkillPane {
-						m.refreshSkillPane()
-					}
+					m.refreshTreeDetailPane()
 				}
 			} else if m.ActiveDetailPane == NoPane {
 				// No detail pane open — open logs (mimics old `l` behavior)
@@ -2254,6 +2260,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			return m.openHostedViewportPane(AccessedFilesPaneDetail)
+
+		case key.Matches(msg, m.KeyMap.ViewArtifacts):
+			if m.ActiveDetailPane == ArtifactsPaneDetail {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			return m.openHostedViewportPane(ArtifactsPaneDetail)
 
 		case key.Matches(msg, m.KeyMap.ViewContext):
 			if !m.Hosted {
@@ -3077,6 +3090,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.editViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading file content for %s...", job.Title)))
 	case SkillPane:
 		m.skillPaneViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading skills for %s...", job.Title)))
+	case ArtifactsPaneDetail:
+		m.artifactPaneViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading artifacts for %s...", job.Title)))
 	}
 
 	// Trigger the actual content loading
@@ -3127,6 +3142,10 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.skillPaneCursor = 0
 		m.refreshSkillPane()
 		loadCmd = m.skillViewportPushCmd()
+	case ArtifactsPaneDetail:
+		m.artifactPaneCursor = 0
+		m.refreshArtifactsPane()
+		loadCmd = m.artifactsViewportPushCmd()
 	}
 
 	if retitleCmd == nil {
@@ -3364,6 +3383,10 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 				// batched create-then-push cannot matter.
 				m.skillPaneCursor = 0
 				m.refreshSkillPane()
+			case ArtifactsPaneDetail:
+				// Rendered synchronously, same as the skill pane.
+				m.artifactPaneCursor = 0
+				m.refreshArtifactsPane()
 			}
 		}
 
@@ -3414,6 +3437,7 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
+	m.updateArtifactViewportSizes()
 
 	// Trigger content loading for the active pane
 	switch pane {
@@ -3455,6 +3479,10 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.skillPaneRawContent = result.treeContent
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
+	case ArtifactsPaneDetail:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading artifacts for %s...", job.Title))
+		m.artifactPaneCursor = 0
+		m.refreshArtifactsPane()
 	}
 
 	return m, tea.Batch(cmds...)
@@ -3491,6 +3519,7 @@ var hostedViewportPanes = map[DetailPane]hostedViewportPane{
 	TokenPaneDetail:         {label: "Token Usage"},
 	AccessedFilesPaneDetail: {label: "Accessed Files"},
 	SkillPane:               {label: "Skills", forwardKeys: skillPaneForwardedKeys, focus: true},
+	ArtifactsPaneDetail:     {label: "Artifacts", forwardKeys: skillPaneForwardedKeys, focus: true},
 }
 
 // isHostedViewportPane reports whether pane renders into the host's BSP
@@ -3555,8 +3584,11 @@ func (m Model) openHostedViewportPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// Loader-backed panes fill in when their *LoadedMsg lands; the skill
 	// pane is rendered synchronously above, so it travels with the request.
 	body := "Loading..."
-	if pane == SkillPane {
+	switch pane {
+	case SkillPane:
 		body = m.skillPaneBody
+	case ArtifactsPaneDetail:
+		body = m.artifactPaneBody
 	}
 	req := m.hostedViewportRequest(pane, job, body)
 
@@ -3675,6 +3707,9 @@ func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ActiveDetailPane == SkillPane {
 		return m.handleSkillTreeKey(msg)
 	}
+	if m.ActiveDetailPane == ArtifactsPaneDetail {
+		return m.handleArtifactsTreeKey(msg)
+	}
 	if m.ActiveDetailPane == AccessedFilesPaneDetail {
 		switch msg.String() {
 		case "y":
@@ -3690,6 +3725,9 @@ func (m Model) handleDetailPrimaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleDetailSecondaryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.ActiveDetailPane == SkillPane {
 		return m.handleArtifactViewportKey(msg)
+	}
+	if m.ActiveDetailPane == ArtifactsPaneDetail {
+		return m.handleArtifactPreviewViewportKey(msg)
 	}
 	return m, nil
 }
@@ -3744,6 +3782,12 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 			} else {
 				m.skillPaneViewport.GotoBottom()
 			}
+		case ArtifactsPaneDetail:
+			if idx == 0 {
+				m.artifactPaneViewport.GotoTop()
+			} else {
+				m.artifactPaneViewport.GotoBottom()
+			}
 		}
 		return m, nil
 	case keymap.SequencePending:
@@ -3772,6 +3816,8 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 		m.editViewport, cmd = m.editViewport.Update(msg)
 	case SkillPane:
 		m.skillPaneViewport, cmd = m.skillPaneViewport.Update(msg)
+	case ArtifactsPaneDetail:
+		m.artifactPaneViewport, cmd = m.artifactPaneViewport.Update(msg)
 	}
 	return m, cmd
 }
@@ -3884,6 +3930,199 @@ func (m Model) handleArtifactViewportKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.skillArtifactViewport, cmd = m.skillArtifactViewport.Update(msg)
+	return m, cmd
+}
+
+// ── Artifacts pane ─────────────────────────────────────────────────────────
+
+// isTreeDetailPane reports whether a detail pane renders a cursor-driven tree
+// over a detail half — the two-viewport panes that own a secondary focus.
+func isTreeDetailPane(pane DetailPane) bool {
+	return pane == SkillPane || pane == ArtifactsPaneDetail
+}
+
+// refreshTreeDetailPane re-renders whichever tree+detail pane is active, so
+// focus changes (which restyle the halves) repaint the right one. No-op for
+// every other pane.
+func (m *Model) refreshTreeDetailPane() {
+	switch m.ActiveDetailPane {
+	case SkillPane:
+		m.refreshSkillPane()
+	case ArtifactsPaneDetail:
+		m.refreshArtifactsPane()
+	}
+}
+
+// updateArtifactViewportSizes sets the dimensions for both artifacts pane
+// viewports (tree + preview), splitting the detail height evenly like the
+// skill pane does.
+func (m *Model) updateArtifactViewportSizes() {
+	vpWidth := m.LogViewerWidth
+	if vpWidth < 10 {
+		vpWidth = 10
+	}
+	m.artifactPaneViewport.Width = vpWidth
+	m.artifactPreviewViewport.Width = vpWidth
+	// 1 separator line + 2 newlines between the two viewports
+	totalHeight := m.LogViewerHeight - logHeaderHeight - 3
+	if totalHeight < 4 {
+		totalHeight = 4
+	}
+	m.artifactPaneViewport.Height = totalHeight / 2
+	m.artifactPreviewViewport.Height = totalHeight - totalHeight/2
+}
+
+// refreshArtifactsPane re-reads the job's artifact directory and re-renders the
+// tree at the current cursor. Cheap enough to run per keystroke: one ReadDir per
+// directory, and only the selected file is read.
+func (m *Model) refreshArtifactsPane() {
+	if m.ActiveLogJob == nil {
+		return
+	}
+	result := renderInteractiveArtifactsPane(m.Plan, m.ActiveLogJob, m.artifactPaneCursor)
+	m.artifactPaneNodes = result.nodes
+	m.artifactPaneRawContent = result.treeContent
+	// The directory can shrink between refreshes (a job archiving its scratch
+	// files); keep the cursor inside the list.
+	if m.artifactPaneCursor >= len(result.nodes) {
+		m.artifactPaneCursor = len(result.nodes) - 1
+	}
+	if m.artifactPaneCursor < 0 {
+		m.artifactPaneCursor = 0
+	}
+
+	// Hosted, this pane always lives in the host's split (openDetailPane
+	// promotes every hosted viewport pane), so don't wait on viewportActive —
+	// it's still false while the first split is being built.
+	if m.Hosted && m.ActiveDetailPane == ArtifactsPaneDetail {
+		m.artifactPaneBody = result.treeContent + "\n" + result.detailContent
+		m.artifactPaneCursorLine = result.cursorLine
+		return
+	}
+
+	m.artifactPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.artifactPaneViewport.Width-1))
+	m.artifactPreviewViewport.SetContent(wrapContentForViewport(result.detailContent, m.artifactPreviewViewport.Width-1))
+}
+
+// artifactsViewportPushCmd pushes the freshly rendered body to the promoted
+// split, asking it to keep the tree cursor on screen. Nil unless the artifacts
+// pane actually owns a host viewport right now.
+func (m Model) artifactsViewportPushCmd() tea.Cmd {
+	if !m.Hosted || !m.viewportActive || m.ActiveDetailPane != ArtifactsPaneDetail {
+		return nil
+	}
+	content, line := m.artifactPaneBody, m.artifactPaneCursorLine
+	return func() tea.Msg {
+		return embed.UpdateViewportContentMsg{Content: content, EnsureVisible: line}
+	}
+}
+
+// handleArtifactsViewportKey drives the artifacts tree from a key the promoted
+// split forwarded back, mirroring handleSkillViewportKey.
+func (m Model) handleArtifactsViewportKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Type == tea.KeyEsc {
+		cmd := m.closeCurrentDetail()
+		return m, cmd
+	}
+	mdl, cmd := m.handleArtifactsTreeKey(key)
+	m = mdl.(Model)
+	return m, tea.Batch(cmd, m.artifactsViewportPushCmd())
+}
+
+// handleArtifactsTreeKey handles cursor motion and actions for the artifacts
+// tree. `e`/`enter` opens the selected file in $EDITOR via the host.
+func (m Model) handleArtifactsTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	result, idx := m.WhichKey.Sequence.Process(msg, m.KeyMap.Top, m.KeyMap.Bottom)
+	switch result {
+	case keymap.SequenceMatch:
+		m.WhichKey.Sequence.Clear()
+		if idx == 0 {
+			m.artifactPaneCursor = 0
+		} else {
+			m.artifactPaneCursor = len(m.artifactPaneNodes) - 1
+		}
+		m.refreshArtifactsPane()
+		return m, nil
+	case keymap.SequencePending:
+		return m, nil
+	case keymap.SequenceCancel:
+		return m, nil
+	}
+
+	m.WhichKey.Sequence.Clear()
+
+	if len(m.artifactPaneNodes) == 0 {
+		return m, nil
+	}
+
+	halfPage := len(m.artifactPaneNodes) / 4
+	if halfPage < 1 {
+		halfPage = 1
+	}
+
+	switch msg.String() {
+	case "j", "down":
+		if m.artifactPaneCursor < len(m.artifactPaneNodes)-1 {
+			m.artifactPaneCursor++
+			m.refreshArtifactsPane()
+		}
+		return m, nil
+	case "k", "up":
+		if m.artifactPaneCursor > 0 {
+			m.artifactPaneCursor--
+			m.refreshArtifactsPane()
+		}
+		return m, nil
+	case "ctrl+d":
+		m.artifactPaneCursor += halfPage
+		if m.artifactPaneCursor >= len(m.artifactPaneNodes) {
+			m.artifactPaneCursor = len(m.artifactPaneNodes) - 1
+		}
+		m.refreshArtifactsPane()
+		return m, nil
+	case "ctrl+u":
+		m.artifactPaneCursor -= halfPage
+		if m.artifactPaneCursor < 0 {
+			m.artifactPaneCursor = 0
+		}
+		m.refreshArtifactsPane()
+		return m, nil
+	case "e", "enter":
+		node := m.artifactPaneNodes[m.artifactPaneCursor]
+		if node.IsDir {
+			m.StatusSummary = theme.DefaultTheme.Muted.Render(node.Name + "/ is a directory")
+			return m, nil
+		}
+		return m, editArtifactCmd(jobArtifactDir(m.Plan, m.ActiveLogJob), node)
+	}
+
+	var cmd tea.Cmd
+	m.artifactPaneViewport, cmd = m.artifactPaneViewport.Update(msg)
+	return m, cmd
+}
+
+// handleArtifactPreviewViewportKey scrolls the artifacts pane's preview half.
+func (m Model) handleArtifactPreviewViewportKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	result, idx := m.WhichKey.Sequence.Process(msg, m.KeyMap.Top, m.KeyMap.Bottom)
+	switch result {
+	case keymap.SequenceMatch:
+		m.WhichKey.Sequence.Clear()
+		if idx == 0 {
+			m.artifactPreviewViewport.GotoTop()
+		} else {
+			m.artifactPreviewViewport.GotoBottom()
+		}
+		return m, nil
+	case keymap.SequencePending:
+		return m, nil
+	case keymap.SequenceCancel:
+		return m, nil
+	}
+
+	m.WhichKey.Sequence.Clear()
+
+	var cmd tea.Cmd
+	m.artifactPreviewViewport, cmd = m.artifactPreviewViewport.Update(msg)
 	return m, cmd
 }
 

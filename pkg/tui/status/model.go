@@ -75,6 +75,7 @@ const (
 	EditorPaneDetail        // BSP split editor (hosted mode only)
 	TokenPaneDetail         // Per-job token usage + cost breakdown
 	AccessedFilesPaneDetail // Per-job accessed-files trace (context transfer)
+	ArtifactsPaneDetail     // Per-job artifact directory browser (tree + preview)
 )
 
 // Model represents the state of the TUI
@@ -155,6 +156,21 @@ type Model struct {
 	skillPaneCursor       int                                         // Cursor position in the skill pane tree
 	skillPaneNodes        []*SkillPaneNode                            // Flattened skill/artifact nodes for cursor navigation
 	skillPaneStateMap     map[string]orchestration.SkillFidelityState // Cached state map
+
+	// Artifacts pane: a cursor-driven tree of the job's artifact directory
+	// (`<planDir>/.artifacts/<jobID>`) over a preview of the selected file.
+	// Structurally the skill pane's twin — tree viewport, detail viewport, a
+	// cursor into a flat node slice — but sourced from the filesystem rather
+	// than from skill status records.
+	artifactPaneViewport    viewport.Model
+	artifactPreviewViewport viewport.Model
+	artifactPaneCursor      int
+	artifactPaneNodes       []*ArtifactPaneNode
+	artifactPaneRawContent  string
+	// artifactPaneBody/artifactPaneCursorLine are the promoted (BSP split)
+	// equivalents: one joined scroll body plus the selected row's 1-based line.
+	artifactPaneBody       string
+	artifactPaneCursorLine int
 
 	// Workflow inline-tree state. Per-agent transcript line buffers are
 	// fed by the transcript collector via MsgCh; the inline tree itself is
@@ -432,7 +448,7 @@ func (m *Model) syncFocusFromManager() {
 	case "jobs":
 		m.Focus = FocusJobs
 	case "detail":
-		if m.ActiveDetailPane == SkillPane && m.SkillSubFocus == 1 {
+		if isTreeDetailPane(m.ActiveDetailPane) && m.SkillSubFocus == 1 {
 			m.Focus = FocusDetailSecondary
 		} else {
 			m.Focus = FocusDetailPrimary
@@ -503,6 +519,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Token Usage"
 	case AccessedFilesPaneDetail:
 		paneTitle = "Accessed Files"
+	case ArtifactsPaneDetail:
+		paneTitle = "Artifacts"
 	}
 
 	jobIcon := getJobIcon(currentJob)
@@ -560,6 +578,11 @@ func (m Model) renderDetailContent() string {
 		artifactView := addScrollbarToViewport(&m.skillArtifactViewport)
 		sepLine := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", m.LogViewerWidth))
 		return treeView + "\n" + sepLine + "\n" + artifactView
+	case ArtifactsPaneDetail:
+		treeView := addScrollbarToViewport(&m.artifactPaneViewport)
+		previewView := addScrollbarToViewport(&m.artifactPreviewViewport)
+		sepLine := lipgloss.NewStyle().Foreground(theme.DefaultColors.Border).Render(strings.Repeat("─", m.LogViewerWidth))
+		return treeView + "\n" + sepLine + "\n" + previewView
 	default:
 		return ""
 	}
@@ -602,6 +625,12 @@ func (m *Model) resizeAllDetailViewports() {
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.updateSkillViewportSizes()
+	m.updateArtifactViewportSizes()
+	if m.ActiveDetailPane == ArtifactsPaneDetail {
+		// Re-render rather than re-wrap: the tree is cheap and its rows are
+		// width-sensitive.
+		m.refreshArtifactsPane()
+	}
 
 	if m.frontmatterRawContent != "" {
 		styledContent := renderStyledFrontmatter(m.frontmatterRawContent)
@@ -683,6 +712,8 @@ func New(cfg Config) Model {
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
 	skillArtifactVp := viewport.New(80, 10)
+	artifactPaneVp := viewport.New(80, 20)
+	artifactPreviewVp := viewport.New(80, 10)
 
 	// Initialize search input for skill pane
 	skillSearch := textinput.New()
@@ -833,6 +864,8 @@ func New(cfg Config) Model {
 		runningTokenCell:         make(map[string]usage.Summary),
 		skillPaneViewport:        skillPaneVp,
 		skillArtifactViewport:    skillArtifactVp,
+		artifactPaneViewport:     artifactPaneVp,
+		artifactPreviewViewport:  artifactPreviewVp,
 		workflowAgentLines:       make(map[string][]string),
 		WorkflowStates:           make(map[string]*workflowPaneState),
 		workflowMonitorCancels:   make(map[string]context.CancelFunc),
