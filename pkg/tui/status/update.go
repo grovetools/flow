@@ -342,6 +342,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tokenViewport.Height = m.LogViewerHeight - logHeaderHeight
 			content := renderTokenPaneContent(msg.Summary, msg.Found, msg.Err, m.tokenViewport.Width, msg.LatestHealth)
 			m.tokenRawContent = content
+
+			// Forward to BSP viewport if hosted + viewport active.
+			if m.Hosted && m.viewportActive {
+				return m, func() tea.Msg {
+					return embed.UpdateViewportContentMsg{Content: content, Append: false}
+				}
+			}
+
 			m.tokenViewport.SetContent(wrapContentForViewport(content, m.tokenViewport.Width-1))
 		}
 		return m, nil
@@ -355,6 +363,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.accessedFilesViewport.Height = m.LogViewerHeight - logHeaderHeight
 			content := renderAccessedFilesPaneContent(msg.Files, msg.Display, msg.Err)
 			m.accessedFilesRawContent = content
+
+			// Forward to BSP viewport if hosted + viewport active.
+			if m.Hosted && m.viewportActive {
+				return m, func() tea.Msg {
+					return embed.UpdateViewportContentMsg{Content: content, Append: false}
+				}
+			}
+
 			m.accessedFilesViewport.SetContent(wrapContentForViewport(content, m.accessedFilesViewport.Width-1))
 		}
 		return m, nil
@@ -2109,7 +2125,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				mdl, cmd := m.openDetailPane(LogsPaneDetail)
 				m = mdl.(Model)
-				title := "Logs: " + job.Title
+				title := hostedViewportTitle(LogsPaneDetail, job)
 				if m.viewportActive {
 					// Viewport already open — swap title + content, no new BSP split.
 					titleCmd := func() tea.Msg {
@@ -2145,14 +2161,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.closeCurrentDetail()
 				return m, cmd
 			}
-			return m.openHostedViewportPane(FrontmatterPane, "Frontmatter")
+			return m.openHostedViewportPane(FrontmatterPane)
 
 		case key.Matches(msg, m.KeyMap.ViewBriefing):
 			if m.ActiveDetailPane == BriefingPane {
 				cmd := m.closeCurrentDetail()
 				return m, cmd
 			}
-			return m.openHostedViewportPane(BriefingPane, "Briefing")
+			return m.openHostedViewportPane(BriefingPane)
 
 		case key.Matches(msg, m.KeyMap.ViewEdit):
 			if job := m.CurrentJob(); m.Hosted && job != nil {
@@ -2182,7 +2198,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.closeCurrentDetail()
 				return m, cmd
 			}
-			return m.openDetailPane(TokenPaneDetail)
+			return m.openHostedViewportPane(TokenPaneDetail)
 
 		case key.Matches(msg, m.KeyMap.ViewNativeAgent):
 			if !m.Hosted {
@@ -2228,7 +2244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd := m.closeCurrentDetail()
 				return m, cmd
 			}
-			return m.openDetailPane(AccessedFilesPaneDetail)
+			return m.openHostedViewportPane(AccessedFilesPaneDetail)
 
 		case key.Matches(msg, m.KeyMap.ViewContext):
 			if !m.Hosted {
@@ -2349,7 +2365,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// For agent jobs (isolated_agent, interactive_agent), Esc should only blur
 			// the input (handled above), not close the detail pane.
 			// However, double-Esc (two Esc presses within 500ms) will interrupt the agent.
-			isAgentJob := m.ActiveLogJob != nil &&
+			//
+			// This belongs to the LOG pane alone — the one that shows the agent
+			// transcript and owns the chat input. Every other detail pane
+			// (tokens, accessed files, skills, edit preview) is inert content,
+			// and swallowing esc there left those panes unclosable on any agent
+			// job: the first esc only armed the interrupt hint, and the second
+			// interrupted the agent instead of dismissing the pane.
+			isAgentJob := m.ActiveDetailPane == LogsPaneDetail && m.ActiveLogJob != nil &&
 				(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 					m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
 			if isAgentJob {
@@ -3020,6 +3043,15 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	// Recalculate layout dimensions since chat input visibility depends on job type
 	m.updateLayoutDimensions()
 
+	// A promoted viewport carries the job title in its header, so retitle it
+	// as the cursor moves — otherwise the split names the job it was opened
+	// on while showing the one under the cursor.
+	var retitleCmd tea.Cmd
+	if m.Hosted && m.viewportActive && isHostedViewportPane(m.ActiveDetailPane) {
+		title := hostedViewportTitle(m.ActiveDetailPane, job)
+		retitleCmd = func() tea.Msg { return embed.UpdateViewportTitleMsg{Title: title} }
+	}
+
 	// Clear the current content immediately to avoid showing stale data
 	switch m.ActiveDetailPane {
 	case LogsPaneDetail:
@@ -3039,6 +3071,7 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 	}
 
 	// Trigger the actual content loading
+	var loadCmd tea.Cmd
 	switch m.ActiveDetailPane {
 	case LogsPaneDetail:
 		isAgentJob := job.Type == orchestration.JobTypeInteractiveAgent || job.Type == orchestration.JobTypeHeadlessAgent || job.Type == orchestration.JobTypeIsolatedAgent
@@ -3049,29 +3082,31 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 			isRunningOrIdle := job.Status == orchestration.JobStatusRunning || job.Status == orchestration.JobStatusIdle
 			isPollingType := job.Type == orchestration.JobTypeIsolatedAgent || job.Type == orchestration.JobTypeInteractiveAgent
 			if isRunningOrIdle && isPollingType {
-				return m, tea.Batch(loadAndStreamAgentLogsCmd(m.Plan, job), pollAgentStatusAfterDelay())
+				loadCmd = tea.Batch(loadAndStreamAgentLogsCmd(m.Plan, job), pollAgentStatusAfterDelay())
+			} else {
+				loadCmd = loadAndStreamAgentLogsCmd(m.Plan, job)
 			}
-			return m, loadAndStreamAgentLogsCmd(m.Plan, job)
+		} else {
+			loadCmd = loadLogContentCmd(m.Plan, job)
 		}
-		return m, loadLogContentCmd(m.Plan, job)
 	case FrontmatterPane:
-		return m, loadFrontmatterCmd(job)
+		loadCmd = loadFrontmatterCmd(job)
 	case BriefingPane:
-		return m, loadBriefingCmd(m.Plan, job)
+		loadCmd = loadBriefingCmd(m.Plan, job)
 	case TokenPaneDetail:
-		return m, loadTokenUsageCmd(m.Plan, job)
+		loadCmd = loadTokenUsageCmd(m.Plan, job)
 	case AccessedFilesPaneDetail:
 		m.accessedFiles = nil
 		m.accessedFilesDisplay = nil
-		return m, loadAccessedFilesCmd(m.Plan, job)
+		loadCmd = loadAccessedFilesCmd(m.Plan, job)
 	case EditPane:
-		return m, loadJobFileContentCmd(job)
+		loadCmd = loadJobFileContentCmd(job)
 	case EditorPaneDetail:
 		if m.Hosted {
 			// Sticky navigation: re-emit SplitEditorRequestMsg so the host
 			// swaps the buffer in the existing editor split.
 			path := job.FilePath
-			return m, func() tea.Msg {
+			loadCmd = func() tea.Msg {
 				return embed.SplitEditorRequestMsg{
 					Path:  path,
 					Ratio: 0, // zero = preserve existing ratio
@@ -3079,7 +3114,6 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, nil
 	case SkillPane:
 		m.skillPaneCursor = 0
 		result := renderInteractiveSkillPane(m.Plan, job, m.skillPaneCursor, m.LogViewerWidth, m.LogViewerHeight, m.PlanDir)
@@ -3088,10 +3122,12 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.skillPaneRawContent = result.treeContent
 		m.skillPaneViewport.SetContent(wrapContentForViewport(result.treeContent, m.skillPaneViewport.Width-1))
 		m.skillArtifactViewport.SetContent(wrapContentForViewport(result.detailContent, m.skillArtifactViewport.Width-1))
-		return m, nil
 	}
 
-	return m, nil
+	if retitleCmd == nil {
+		return m, loadCmd
+	}
+	return m, tea.Batch(retitleCmd, loadCmd)
 }
 
 // routeWorkflowAgentDetail shows the selected workflow agent's buffered
@@ -3255,9 +3291,10 @@ func closeViewportSplitCmd() tea.Cmd {
 func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// A pane is "promoted" (BSP split) when it's a native agent/editor, or
 	// when it uses the ViewportPanel in hosted mode. All viewport panes
-	// (logs, frontmatter, briefing) are promoted in hosted mode — the caller
-	// (key handler or openHostedViewportPane) handles the actual Promote call.
-	isViewportPane := pane == LogsPaneDetail || pane == FrontmatterPane || pane == BriefingPane
+	// (logs, frontmatter, briefing, tokens, accessed files) are promoted in
+	// hosted mode — the caller (key handler or openHostedViewportPane)
+	// handles the actual Promote call.
+	isViewportPane := isHostedViewportPane(pane)
 	isTargetPromoted := (pane == NativeAgentPaneDetail || pane == EditorPaneDetail ||
 		pane == ContextPaneDetail || pane == MemoryPaneDetail ||
 		(isViewportPane && m.Hosted))
@@ -3297,7 +3334,9 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// For viewport-promoted frontmatter/briefing, trigger content loading.
+		// For the other viewport-promoted panes, trigger content loading.
+		// Each loader's *LoadedMsg handler forwards the rendered body to the
+		// split via UpdateViewportContentMsg.
 		if job := m.CurrentJob(); job != nil {
 			m.ActiveLogJob = job
 			switch pane {
@@ -3305,6 +3344,14 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, loadFrontmatterCmd(job))
 			case BriefingPane:
 				cmds = append(cmds, loadBriefingCmd(m.Plan, job))
+			case TokenPaneDetail:
+				m.tokenRawContent = ""
+				cmds = append(cmds, loadTokenUsageCmd(m.Plan, job))
+			case AccessedFilesPaneDetail:
+				m.accessedFilesRawContent = ""
+				m.accessedFiles = nil
+				m.accessedFilesDisplay = nil
+				cmds = append(cmds, loadAccessedFilesCmd(m.Plan, job))
 			}
 		}
 
@@ -3401,17 +3448,46 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// hostedViewportPaneLabels names every read-only detail pane that renders as
+// a host BSP ViewportPanel when hosted. They are pure scrollable text, so the
+// host's viewport panel can own them wholesale — unlike the skill tree, whose
+// in-pane cursor needs key routing the embed viewport contract doesn't carry.
+// The label is the viewport title's prefix ("<label>: <job title>").
+var hostedViewportPaneLabels = map[DetailPane]string{
+	LogsPaneDetail:          "Logs",
+	FrontmatterPane:         "Frontmatter",
+	BriefingPane:            "Briefing",
+	TokenPaneDetail:         "Token Usage",
+	AccessedFilesPaneDetail: "Accessed Files",
+}
+
+// isHostedViewportPane reports whether pane renders into the host's BSP
+// viewport split when hosted (and internally otherwise).
+func isHostedViewportPane(pane DetailPane) bool {
+	_, ok := hostedViewportPaneLabels[pane]
+	return ok
+}
+
+// hostedViewportTitle builds the split's title for a pane/job pair.
+func hostedViewportTitle(pane DetailPane, job *orchestration.Job) string {
+	label, ok := hostedViewportPaneLabels[pane]
+	if !ok || job == nil {
+		return label
+	}
+	return label + ": " + job.Title
+}
+
 // openHostedViewportPane opens a detail pane that uses the BSP ViewportPanel
 // when Hosted. If a viewport is already active, it swaps title + content
 // without creating a new BSP split. Falls back to internal rendering when
 // not hosted.
-func (m Model) openHostedViewportPane(pane DetailPane, label string) (tea.Model, tea.Cmd) {
+func (m Model) openHostedViewportPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	job := m.CurrentJob()
 	if !m.Hosted || job == nil {
 		return m.openDetailPane(pane)
 	}
 
-	title := label + ": " + job.Title
+	title := hostedViewportTitle(pane, job)
 
 	// Cancel any active log stream when switching away from logs.
 	if m.ActiveDetailPane == LogsPaneDetail {
