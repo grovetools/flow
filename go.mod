@@ -13,10 +13,10 @@ require (
 	github.com/grovetools/compositor v0.0.1
 	github.com/grovetools/core v0.6.4-0.20260521140340-5660efd35db0
 	github.com/grovetools/cx v0.6.0
-	github.com/grovetools/eval v0.0.0-00010101000000-000000000000
+	github.com/grovetools/eval v0.0.0-20260724205137-f2ccb7b82b04
 	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/grove-gemini v0.6.1
-	github.com/grovetools/grove-openrouter v0.0.0-00010101000000-000000000000
+	github.com/grovetools/grove-openrouter v0.0.0-20260718141608-3bd491b0b10a
 	github.com/grovetools/memory v0.6.3
 	github.com/grovetools/notify v0.6.0
 	github.com/grovetools/skills v0.6.0
@@ -103,14 +103,10 @@ require (
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 )
 
-// grove-openrouter has no published release yet; the require above carries the
-// null pseudo-version and this replace resolves it from the local worktree so
-// builds work with GOWORK off too. Land-time: publish grove-openrouter, bump the
-// require to the tagged version, and drop this replace (go.work already `use`s it).
-replace github.com/grovetools/grove-openrouter => ../grove-openrouter
-
-// eval has no published release yet; the require above carries the null
-// pseudo-version and this replace resolves it from the local worktree so
-// builds work with GOWORK off too. Land-time: publish eval, bump the require
-// to the tagged version, and drop this replace (go.work already `use`s it).
-replace github.com/grovetools/eval => ../eval
+// eval and grove-openrouter carry commit pseudo-versions rather than tags: neither
+// module has a release yet. The pseudo-versions above pin the exact origin/main
+// commits this module builds against, so the published go.mod resolves through the
+// module graph (a `replace` would not — consumers ignore a dependency's replaces).
+// In-workspace development still resolves both from the local worktrees via go.work.
+// Release-time: tag both modules and bump the requires to the tags — see
+// grove/docs/11-release-runbook-modules.md.
