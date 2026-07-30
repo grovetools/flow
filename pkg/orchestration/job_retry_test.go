@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/grovetools/core/pkg/mux"
 )
 
 func createTestJobFile(t *testing.T, dir, filename, status string) *Job {
@@ -195,6 +197,40 @@ func TestRetryJob_FromCompletedAgentWithEvidence_Refuses(t *testing.T) {
 	}
 	if job.Status != JobStatusCompleted {
 		t.Errorf("expected status to remain %s, got %s", JobStatusCompleted, job.Status)
+	}
+}
+
+// `flow plan retry --run` is a full submission: the daemon builds a fresh
+// JobInfo from the request, so a request without AgentTarget queues a job the
+// executor can only fail with "agent_target not set". The retry paths used to
+// send exactly that, which killed retried agent jobs seconds after the CLI
+// reported "Job submitted to daemon."
+func TestRetrySubmitRequest_CarriesAgentTarget(t *testing.T) {
+	t.Setenv(mux.EnvTuimuxPTY, "1")
+
+	dir := t.TempDir()
+	job := createTestJobFile(t, dir, "test-job.md", string(JobStatusFailed))
+
+	// A plan straight out of LoadPlan — no Orchestration — is what both retry
+	// paths hand to the submitter.
+	req := retrySubmitRequest(job, &Plan{Directory: dir})
+	if req.AgentTarget != AgentTargetTuimux {
+		t.Errorf("AgentTarget = %q, want %q derived from the caller's environment", req.AgentTarget, AgentTargetTuimux)
+	}
+	if req.PlanDir != dir || req.JobFile != "test-job.md" {
+		t.Errorf("request identifies the wrong job: %+v", req)
+	}
+}
+
+func TestRetrySubmitRequest_PlanTargetWins(t *testing.T) {
+	t.Setenv(mux.EnvTuimuxPTY, "1")
+
+	dir := t.TempDir()
+	job := createTestJobFile(t, dir, "test-job.md", string(JobStatusFailed))
+
+	plan := &Plan{Directory: dir, Orchestration: &Config{AgentTarget: AgentTargetNative}}
+	if got := retrySubmitRequest(job, plan).AgentTarget; got != AgentTargetNative {
+		t.Errorf("AgentTarget = %q, want the plan's %q", got, AgentTargetNative)
 	}
 }
 

@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/grovetools/core/pkg/mux"
 	"github.com/grovetools/core/util/delegation"
 	"github.com/spf13/cobra"
 
@@ -45,13 +43,7 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	// without this the resume launch always fell back to tmux — invisible to a
 	// user whose plan runs under treemux/tuimux. Resolve agent_target from the
 	// caller's environment exactly like `plan run` does at the CLI perimeter.
-	agentTarget := "tmux" // safe default
-	if mux.ActiveMux() == mux.MuxTuimux {
-		agentTarget = "tuimux"
-	} else if os.Getenv("GROVE_TERMINAL") != "" {
-		agentTarget = "native"
-	}
-	plan.Orchestration = &orchestration.Config{AgentTarget: agentTarget}
+	plan.Orchestration = &orchestration.Config{AgentTarget: orchestration.ResolveAgentTarget()}
 
 	job, found := plan.GetJobByFilename(jobFile)
 	if !found {

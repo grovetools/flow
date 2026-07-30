@@ -372,14 +372,9 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve agent_target from the caller's environment. The executor
-	// requires a concrete value ("native" or "tmux") — "auto" must be
-	// resolved here at the CLI perimeter, not inside the executor.
-	agentTarget := "tmux" // safe default
-	if mux.ActiveMux() == mux.MuxTuimux {
-		agentTarget = "tuimux"
-	} else if os.Getenv("GROVE_TERMINAL") != "" {
-		agentTarget = "native"
-	}
+	// requires a concrete value — "auto" must be resolved here at the CLI
+	// perimeter, not inside the executor.
+	agentTarget := orchestration.ResolveAgentTarget()
 
 	ulog.Info("Resolved agent target for CLI run").
 		Field("agent_target", agentTarget).

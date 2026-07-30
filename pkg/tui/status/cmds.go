@@ -1031,15 +1031,11 @@ type JobSubmittedMsg struct {
 func submitJobsViaDaemonCmd(client daemon.Client, plan *orchestration.Plan, jobs []*orchestration.Job, hosted bool) tea.Cmd {
 	return func() tea.Msg {
 		var jobIDs []string
-		// The caller (TUI) knows whether it's hosted in groveterm.
-		// No env var sniffing — the Hosted flag is set by the terminal
-		// panel wrapper at construction time.
-		agentTarget := "tmux"
-		if hosted {
-			agentTarget = "native"
-		} else if mux.ActiveMux() == mux.MuxTuimux {
-			agentTarget = "tuimux"
-		}
+		// The caller (TUI) knows whether it's hosted in groveterm, so the
+		// hosted-aware variant of the shared derivation applies: the Hosted
+		// flag set by the terminal panel wrapper at construction time beats
+		// any env var sniffing.
+		agentTarget := orchestration.ResolveAgentTargetHosted(hosted)
 
 		logging.NewUnifiedLogger("flow.submit").Info("Resolved agent target for TUI submission").
 			Field("agent_target", agentTarget).

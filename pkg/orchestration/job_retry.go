@@ -104,22 +104,7 @@ func resetJobToPending(job *Job, plan *Plan, from JobStatus, autoRun bool) error
 	fmt.Printf("Status: %s → %s\n", from, JobStatusPending)
 
 	if autoRun {
-		// Submit to daemon
-		daemonClient := daemon.NewWithAutoStart()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		_, err := daemonClient.SubmitJob(ctx, models.JobSubmitRequest{
-			PlanDir: plan.Directory,
-			JobFile: job.Filename,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not submit job: %v\n", err)
-			fmt.Printf("Run manually with: flow plan run --dir %s %s\n", plan.Directory, job.Filename)
-		} else {
-			fmt.Printf("Job submitted to daemon.\n")
-		}
-		daemonClient.Close()
+		submitRetriedJob(job, plan)
 	} else {
 		fmt.Printf("Run with: flow plan run --dir %s %s\n", plan.Directory, job.Filename)
 	}
@@ -174,27 +159,50 @@ func retryRunningJobWithForce(job *Job, plan *Plan, autoRun bool) error {
 	fmt.Println("Warning: agent process may still be running. Monitor with 'flow agent list'.")
 
 	if autoRun {
-		// Submit to daemon
-		daemonClient := daemon.NewWithAutoStart()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		_, err := daemonClient.SubmitJob(ctx, models.JobSubmitRequest{
-			PlanDir: plan.Directory,
-			JobFile: job.Filename,
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not submit job: %v\n", err)
-			fmt.Printf("Run manually with: flow plan run --dir %s %s\n", plan.Directory, job.Filename)
-		} else {
-			fmt.Printf("Job submitted to daemon.\n")
-		}
-		daemonClient.Close()
+		submitRetriedJob(job, plan)
 	} else {
 		fmt.Printf("Run with: flow plan run --dir %s %s\n", plan.Directory, job.Filename)
 	}
 
 	return nil
+}
+
+// retrySubmitRequest builds the daemon submission for a retried job. It is split
+// out from submitRetriedJob so the request's contents — above all its routing —
+// are unit-testable without a live daemon.
+//
+// A retry is a full submission, not an amendment of the previous one: the daemon
+// builds a fresh JobInfo from this request, so anything it omits is simply gone.
+// Both retry paths used to omit AgentTarget, which meant `flow plan retry --run`
+// queued the job with no routing and the executor failed it immediately
+// ("agent_target not set: job submitted without routing context"), seconds after
+// the CLI had printed "Job submitted to daemon."
+func retrySubmitRequest(job *Job, plan *Plan) models.JobSubmitRequest {
+	return models.JobSubmitRequest{
+		PlanDir:     plan.Directory,
+		JobFile:     job.Filename,
+		AgentTarget: AgentTargetForSubmission(plan),
+	}
+}
+
+// submitRetriedJob submits a job that was just reset to pending, shared by the
+// failed-job and forced-running-job paths. A submission failure is a warning,
+// not an error: the reset itself already succeeded and is the durable part, so
+// the user is told how to run the job by hand instead of being told the retry
+// failed.
+func submitRetriedJob(job *Job, plan *Plan) {
+	daemonClient := daemon.NewWithAutoStart()
+	defer func() { _ = daemonClient.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if _, err := daemonClient.SubmitJob(ctx, retrySubmitRequest(job, plan)); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not submit job: %v\n", err)
+		fmt.Printf("Run manually with: flow plan run --dir %s %s\n", plan.Directory, job.Filename)
+		return
+	}
+	fmt.Printf("Job submitted to daemon.\n")
 }
 
 // checkAgentLiveness checks if an agent process is still alive.
