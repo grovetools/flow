@@ -21,6 +21,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"github.com/sirupsen/logrus"
 
@@ -152,6 +153,9 @@ type Model struct {
 
 	keys KeyMap
 	help help.Model
+	// whichKey is the shared chord/which-key mixin: it arms the single-member
+	// t… namespace declared by KeyMap.Namespaces() and renders its popup.
+	whichKey keymap.WhichKeyHost
 }
 
 // IsTextEntryActive reports whether one of the wizard's text input
@@ -274,12 +278,13 @@ func New(cfg Config) Model {
 	m.currentScreen = MainScreen
 
 	// Keymap + help.
+	coreCfg, _ := config.LoadDefault()
 	if cfg.KeyMap != nil {
 		m.keys = *cfg.KeyMap
 	} else {
-		coreCfg, _ := config.LoadDefault()
 		m.keys = NewKeyMap(coreCfg)
 	}
+	m.whichKey = keymap.NewWhichKeyHost(coreCfg, m.keys.Namespaces()...)
 	m.help = help.NewBuilder().
 		WithKeys(m.keys).
 		WithTitle("󰠡 Create New Plan - Help").

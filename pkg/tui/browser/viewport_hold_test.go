@@ -109,8 +109,7 @@ func TestInvalidBindingDisablesHoldMutation(t *testing.T) {
 	rows[0].Binding = coreplan.PlanBinding{Health: coreplan.BindingMismatch}
 	m := Model{plans: rows, keys: NewKeyMap(nil), holdPending: map[string]bool{}}
 
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	m = updated.(Model)
+	m, cmd := pressChord(t, m, "ch")
 	if cmd != nil || len(m.holdPending) != 0 || !strings.Contains(m.statusMessage, "binding mismatch") {
 		t.Fatalf("invalid binding allowed Hold: cmd=%v pending=%v status=%q", cmd, m.holdPending, m.statusMessage)
 	}
@@ -133,14 +132,13 @@ func TestGitLogIsLazyAndInvalidBindingDisablesAction(t *testing.T) {
 	if m.gitLogLoaded || m.showGitLog {
 		t.Fatal("git log was eager")
 	}
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	m = updated.(Model)
+	m, cmd := pressChord(t, m, "tg")
 	if !m.showGitLog || cmd == nil {
 		t.Fatal("opening git detail did not lazily request git log")
 	}
 
 	m.showGitLog = false
-	updated, cmd = m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
 	m = updated.(Model)
 	if cmd != nil || !strings.Contains(m.statusMessage, "unbound") {
 		t.Fatalf("invalid binding action was not disabled: cmd=%v status=%q", cmd, m.statusMessage)

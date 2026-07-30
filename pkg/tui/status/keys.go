@@ -272,23 +272,32 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("i"),
 			key.WithHelp("i", "input to agent"),
 		),
+		// Change (c…) namespace member (canon 60 §4.3; was flat `C`). Uppercase
+		// inside a chord is established house style here — cM/cA already ship.
+		// Chord-only, no flat alias (sign-off E4); `C` is Ring-1 git-commit
+		// fleet-wide (§3.2), so vacating it is the point.
 		ToggleClaw: key.NewBinding(
-			key.WithKeys("C"),
-			key.WithHelp("C", "toggle claw"),
+			key.WithKeys("cC"),
+			key.WithHelp("cC", "toggle claw"),
 		),
 	}
 
 	// Open-mode split (hosted in treemux): enter opens the job file in its
 	// own pinned per-file pane; e quick-opens it in the host's singleton
-	// Editor pane. Keys are unchanged (Confirm keeps its enter,y pair) —
-	// only Base's generic help text is overridden so the help menu reflects
-	// the split.
+	// Editor pane. Only Base's generic help text is overridden so the help
+	// menu reflects the split.
+	//
+	// Confirm is enter-only: the flat `y` alias is dropped (canon 60 §5.6,
+	// sign-off E4). Core's Base.Confirm already dropped it at source, but this
+	// override re-declared the keys verbatim and would have re-introduced it.
+	// `yy` is the canonical yank and a flat `y` fires first, so no list TUI may
+	// hold one; enter covers every confirm path here.
 	km.Base.Edit = key.NewBinding(
 		key.WithKeys("e"),
 		key.WithHelp("e", "quick edit in Editor pane"),
 	)
 	km.Base.Confirm = key.NewBinding(
-		key.WithKeys("enter", "y"),
+		key.WithKeys("enter"),
 		key.WithHelp("enter", "open in own pane / confirm"),
 	)
 
@@ -363,7 +372,7 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 			k.SetStatus, k.SetType, k.SetTemplate, k.SetCompleted,
 			k.SetModel, k.SetProvider, k.SetEffort, k.SetResponder,
 			k.SetCacheTTL, k.SetCacheLayout, k.ToggleMemory, k.ToggleAutoComplete,
-			k.Rename, k.EditDeps,
+			k.Rename, k.EditDeps, k.ToggleClaw,
 		}},
 	}
 }
@@ -395,7 +404,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.ActionsSection(
 			k.Run, k.Edit, k.Confirm,
 			k.AddJob, k.AddFromRecipe, k.AddXmlPlan, k.Implement, k.AgentFromChat,
-			k.Resume, k.DemoteToNote, k.Archive, k.SendInput, k.ToggleClaw, k.CopyPath,
+			k.Resume, k.DemoteToNote, k.Archive, k.SendInput, k.CopyPath,
 		),
 		k.Base.SystemSection(),
 	}

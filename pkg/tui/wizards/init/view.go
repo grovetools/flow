@@ -37,7 +37,12 @@ func (m Model) View() string {
 	if m.width > 0 {
 		container = container.MaxWidth(m.width)
 	}
-	return container.Render(b.String())
+	// Composite the bottom-anchored which-key popup onto the finished frame.
+	// The wizard's frame is a content block rather than the whole viewport (it
+	// is embedded as a tab), so the vertical budget is passed explicitly —
+	// clamping to the frame height alone would truncate the popup.
+	frame := container.Render(b.String())
+	return m.whichKey.RenderOverlayAvail(frame, lipgloss.Width(frame), m.height, *theme.DefaultTheme)
 }
 
 // FooterView returns the mode indicator + help text for use by the

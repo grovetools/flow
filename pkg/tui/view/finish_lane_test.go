@@ -175,9 +175,15 @@ func TestFinishWizardForceReachesTheFactory(t *testing.T) {
 	m := newFinishHostModel(t, items)
 	m.s.finishForce = &plan_finish.ForceSwitch{}
 
-	// Flip the toggle the way the user does.
-	updated, _ := m.s.finishWizardModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
-	fm := updated.(finish.Model)
+	// Flip the toggle the way the user does — the tf chord (canon 60 §4.2).
+	// The chord's two presses must thread through the returned model: the
+	// which-key host's *SequenceState is shared by every copy, so re-pressing
+	// "t" on a stale value would append to the same buffer and match nothing.
+	fm := *m.s.finishWizardModel
+	for _, r := range "tf" {
+		updated, _ := fm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		fm = updated.(finish.Model)
+	}
 	*m.s.finishWizardModel = fm
 	if !fm.Force() {
 		t.Fatal("precondition: wizard force toggle did not flip")

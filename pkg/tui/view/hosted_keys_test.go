@@ -44,15 +44,19 @@ func TestHostedKeysPublishesFinishWizardBindings(t *testing.T) {
 	force, ok := byAction["Toggle Force"]
 	if !ok {
 		for action, keys := range byAction {
-			if len(keys) == 1 && keys[0] == "f" {
+			if len(keys) == 1 && keys[0] == "tf" {
 				force, ok = keys, true
 				t.Logf("force toggle published under action %q", action)
 				break
 			}
 		}
 	}
-	if !ok || len(force) != 1 || force[0] != "f" {
-		t.Fatalf("finish force toggle not published as \"f\"; wizard-finish actions = %#v", byAction)
+	// Canon 60 §4.2 moved the force toggle off flat `f` into the wizard's
+	// single-member t… namespace. The contract must publish the chord, not the
+	// retired flat key: a key that is not declared here cannot be won back from
+	// the host.
+	if !ok || len(force) != 1 || force[0] != "tf" {
+		t.Fatalf("finish force toggle not published as \"tf\"; wizard-finish actions = %#v", byAction)
 	}
 
 	var quit []string
@@ -122,13 +126,15 @@ func TestHostedKeysCoversEveryEmbeddedKeymap(t *testing.T) {
 
 // TestHostedKeysDeclaresPreviouslyMissingKeys names the three keys the
 // declaration was actually missing, so a regression reads as the concrete gap
-// rather than as a coverage-loop failure.
+// rather than as a coverage-loop failure. The add wizard's claw toggle moved
+// again under canon 60 (ctrl+t -> the ta chord); the point of the row is that
+// the toggle is published at all, whatever it is currently bound to.
 func TestHostedKeysDeclaresPreviouslyMissingKeys(t *testing.T) {
 	published := hostedKeySet()
 	for key, why := range map[string]string{
 		"ctrl+x": "browser finish-plan",
 		"ctrl+s": "add-wizard submit",
-		"ctrl+t": "add-wizard toggle claw",
+		"ta":     "add-wizard toggle claw",
 	} {
 		if !published[key] {
 			t.Errorf("HostedKeys() omits %q (%s)", key, why)

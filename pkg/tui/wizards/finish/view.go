@@ -49,9 +49,9 @@ func (m Model) View() string {
 	// hidden behind a help screen.
 	if m.showForce {
 		if m.force {
-			b.WriteString(theme.DefaultTheme.Error.Bold(true).Render("[f] FORCE ON — destructive git operations WILL discard uncommitted work"))
+			b.WriteString(theme.DefaultTheme.Error.Bold(true).Render("[tf] FORCE ON — destructive git operations WILL discard uncommitted work"))
 		} else {
-			b.WriteString(theme.DefaultTheme.Muted.Render("[f] Force: off (safe) — enable to discard uncommitted work in retained repos"))
+			b.WriteString(theme.DefaultTheme.Muted.Render("[tf] Force: off (safe) — enable to discard uncommitted work in retained repos"))
 		}
 		b.WriteString("\n\n")
 	}
@@ -128,7 +128,11 @@ func (m Model) View() string {
 	if m.width > 0 {
 		out = lipgloss.NewStyle().MaxWidth(m.width).Render(out)
 	}
-	return out
+	// Composite the bottom-anchored which-key popup onto the finished frame.
+	// The wizard's frame is a content block rather than the whole viewport (it
+	// is embedded as a tab), so the vertical budget is passed explicitly —
+	// clamping to the frame height alone would truncate the popup.
+	return m.whichKey.RenderOverlayAvail(out, lipgloss.Width(out), m.height, *theme.DefaultTheme)
 }
 
 // FooterView returns the help hint for use by the pager's SetFooter
@@ -137,9 +141,9 @@ func (m Model) FooterView() string {
 	hint := "? help • q/esc quit"
 	if m.showForce {
 		if m.force {
-			return theme.DefaultTheme.Error.Render("FORCE ON (f) • ") + theme.DefaultTheme.Muted.Render(hint)
+			return theme.DefaultTheme.Error.Render("FORCE ON (tf) • ") + theme.DefaultTheme.Muted.Render(hint)
 		}
-		hint = "f force • " + hint
+		hint = "tf force • " + hint
 	}
 	return theme.DefaultTheme.Muted.Render(hint)
 }

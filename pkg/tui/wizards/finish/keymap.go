@@ -42,9 +42,15 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm and proceed"),
 		),
+		// Toggle (t…) namespace member (canon 60 RULE T; was flat `f`). This is
+		// a deliberately SINGLE-member namespace: FORCE turns
+		// `git worktree remove` into its --force form, i.e. it discards
+		// uncommitted work, so putting it behind a which-key popup is the
+		// destructive-action safety win contract 31 §5.1 asks for, not merely
+		// consistency. Chord-only — no flat `f` alias (sign-off E4).
 		ToggleForce: key.NewBinding(
-			key.WithKeys("f"),
-			key.WithHelp("f", "toggle FORCE (discards uncommitted work)"),
+			key.WithKeys("tf"),
+			key.WithHelp("tf", "toggle FORCE (discards uncommitted work)"),
 		),
 	}
 	// esc dismisses the wizard exactly like q. The wizard has no text entry and
@@ -56,6 +62,31 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		key.WithHelp("q/esc", "quit"),
 	)
 	keymap.ApplyTUIOverrides(cfg, "flow", "plan-finish", &km)
+
+	// Disable every promoted Base binding this wizard does not dispatch
+	// (verified against every key.Matches arm in update.go). Kept enabled:
+	// Up, Down, SelectAll, SelectNone, Help, Quit — plus the outer
+	// Toggle/Confirm/ToggleForce fields, which shadow Base.Select/Base.Confirm
+	// with distinct signatures. Without this the wizard advertised — and the
+	// audit saw — a full vim keymap it never handles, including Base.TogglePreview
+	// squatting on flat `v` (the reserved view prefix) and Base.Left/Right on
+	// h/l. Behaviourally inert: key.Matches never consults these fields.
+	for _, b := range []*key.Binding{
+		&km.Base.Left, &km.Base.Right, &km.Base.PageUp, &km.Base.PageDown,
+		&km.Base.Home, &km.Base.End, &km.Base.Top, &km.Base.Bottom,
+		&km.Base.Confirm, &km.Base.Cancel, &km.Base.Back, &km.Base.Edit,
+		&km.Base.Delete, &km.Base.Yank, &km.Base.Rename, &km.Base.Refresh, &km.Base.CopyPath,
+		&km.Base.Search, &km.Base.SearchNext, &km.Base.SearchPrev, &km.Base.ClearSearch, &km.Base.Grep,
+		&km.Base.SwitchView, &km.Base.NextTab, &km.Base.PrevTab,
+		&km.Base.FocusNext, &km.Base.FocusPrev, &km.Base.TogglePreview,
+		&km.Base.Tab1, &km.Base.Tab2, &km.Base.Tab3, &km.Base.Tab4, &km.Base.Tab5,
+		&km.Base.Tab6, &km.Base.Tab7, &km.Base.Tab8, &km.Base.Tab9,
+		&km.Base.Select,
+		&km.Base.FoldOpen, &km.Base.FoldClose, &km.Base.FoldToggle,
+		&km.Base.FoldOpenAll, &km.Base.FoldCloseAll,
+	} {
+		b.SetEnabled(false)
+	}
 	return km
 }
 
@@ -72,8 +103,20 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
+// Namespaces returns the which-key chord namespaces for the plan-finish wizard,
+// built from the named KeyMap fields (so a user override applied by
+// ApplyTUIOverrides is reflected — namespace.go's ConfigKey-stability rule;
+// never construct members inline). One namespace with one member: see the
+// ToggleForce comment in NewKeyMap for why that is deliberate.
+func (k KeyMap) Namespaces() []keymap.Namespace {
+	return []keymap.Namespace{
+		{Prefix: "t", Label: "Toggle", Bindings: []key.Binding{k.ToggleForce}},
+	}
+}
+
 // Sections returns all keybinding sections for the plan finish TUI.
 func (k KeyMap) Sections() []keymap.Section {
+	ns := k.Namespaces()
 	return []keymap.Section{
 		{
 			Name:     "Navigation",
@@ -83,10 +126,7 @@ func (k KeyMap) Sections() []keymap.Section {
 			Name:     "Selection",
 			Bindings: []key.Binding{k.Toggle, k.SelectAll, k.SelectNone},
 		},
-		{
-			Name:     "Danger",
-			Bindings: []key.Binding{k.ToggleForce},
-		},
+		ns[0].Section(),
 		{
 			Name:     "Actions",
 			Bindings: []key.Binding{k.Confirm},

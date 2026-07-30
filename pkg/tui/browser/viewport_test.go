@@ -132,8 +132,8 @@ func TestColumnSelectorDefaultsWorkspaceHiddenAndCanEnableIt(t *testing.T) {
 	if out := m.renderPlanTable(); strings.Contains(out, "WORKSPACE / REPOS") {
 		t.Fatalf("workspace column should be hidden by default:\n%s", out)
 	}
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'T'}})
-	m = updated.(Model)
+	m, _ = pressChord(t, m, "tc")
+	var updated tea.Model
 	for _, name := range browserOptionalColumns {
 		if name == "WORKSPACE / REPOS" {
 			break
@@ -220,8 +220,7 @@ func TestGitLogIsLazyUntilToggle(t *testing.T) {
 		t.Fatal("git log loaded eagerly")
 	}
 	m.plans = viewportPlans(1)
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
-	m = updated.(Model)
+	m, cmd := pressChord(t, m, "tg")
 	if !m.showGitLog || cmd == nil {
 		t.Fatal("opening git log did not start lazy fetch")
 	}
@@ -238,8 +237,7 @@ func TestInvalidBindingDisablesPathSensitiveAction(t *testing.T) {
 	}
 
 	m.statusMessage = ""
-	updated, cmd = m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	m = updated.(Model)
+	m, cmd = pressChord(t, m, "ch")
 	if cmd != nil || !strings.Contains(m.statusMessage, "binding mismatch") || len(m.holdPending) != 0 {
 		t.Fatalf("invalid binding hold was not refused: cmd=%v status=%q pending=%v", cmd, m.statusMessage, m.holdPending)
 	}

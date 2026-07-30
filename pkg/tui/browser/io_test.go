@@ -534,9 +534,8 @@ func TestArchivedRowRefusesMutatingActions(t *testing.T) {
 		t.Errorf("expected no command for refused mutating action")
 	}
 
-	// SetHoldStatus (h) must also be refused.
-	updated, cmd = m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
-	got = updated.(Model)
+	// SetHoldStatus (the ch chord) must also be refused.
+	got, cmd = pressChord(t, m, "ch")
 	if got.statusMessage != archivedReadOnlyMessage {
 		t.Errorf("hold statusMessage = %q, want %q", got.statusMessage, archivedReadOnlyMessage)
 	}

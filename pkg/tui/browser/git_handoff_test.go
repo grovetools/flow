@@ -28,14 +28,13 @@ func TestViewGitEmitsQualifiedReadOnlyTarget(t *testing.T) {
 		ActionTarget: target,
 	}}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'V'}})
-	m = updated.(Model)
+	m, cmd := pressChord(t, m, "vg")
 	if cmd == nil {
-		t.Fatal("V did not emit a host request")
+		t.Fatal("vg did not emit a host request")
 	}
 	req, ok := cmd().(embed.OpenGitRequest)
 	if !ok {
-		t.Fatalf("V emitted %T", cmd())
+		t.Fatalf("vg emitted %T", cmd())
 	}
 	if req.Operation != embed.GitOperationInspect || req.Target.PlanDir != planDir || req.Target.ContainerPath != container {
 		t.Fatalf("wrong request: %+v", req)
@@ -48,7 +47,7 @@ func TestViewGitEmitsQualifiedReadOnlyTarget(t *testing.T) {
 // TestDaemonLiveRowAssemblyResolvesQualifiedActionTarget reproduces the pilot
 // F1 shape end-to-end: a plan generated for a STANDALONE repo (legacy layout)
 // arrives as a daemon plan-index summary, and daemon-live row assembly must
-// yield a bound row with a COMPLETE qualified action target so V hands off to
+// yield a bound row with a COMPLETE qualified action target so vg hands off to
 // Git Viewer at that row's exact container — with canonical workspace
 // discovery blind to the sandbox repos and without consulting process CWD.
 func TestDaemonLiveRowAssemblyResolvesQualifiedActionTarget(t *testing.T) {
@@ -139,14 +138,13 @@ func TestDaemonLiveRowAssemblyResolvesQualifiedActionTarget(t *testing.T) {
 
 	m := New(Config{})
 	m.plans = items
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'V'}})
-	m = updated.(Model)
+	m, cmd := pressChord(t, m, "vg")
 	if cmd == nil {
-		t.Fatalf("V refused a bound daemon-live row: %s", m.statusMessage)
+		t.Fatalf("vg refused a bound daemon-live row: %s", m.statusMessage)
 	}
 	req, ok := cmd().(embed.OpenGitRequest)
 	if !ok {
-		t.Fatalf("V emitted %T", cmd())
+		t.Fatalf("vg emitted %T", cmd())
 	}
 	if req.Operation != embed.GitOperationInspect || req.Target.ContainerPath != container {
 		t.Fatalf("wrong handoff request: %+v", req)
@@ -155,7 +153,7 @@ func TestDaemonLiveRowAssemblyResolvesQualifiedActionTarget(t *testing.T) {
 
 // TestViewGitRefusesMissingContainerDistinctly pins the F2 refusal surface: a
 // deleted container with retained registry metadata reaches the row as the
-// distinct "missing container" health, and V's refusal message says so instead
+// distinct "missing container" health, and vg's refusal message says so instead
 // of collapsing into unbound/mismatch.
 func TestViewGitRefusesMissingContainerDistinctly(t *testing.T) {
 	planDir := filepath.Join(t.TempDir(), "plans", "missing-view")
@@ -165,10 +163,9 @@ func TestViewGitRefusesMissingContainerDistinctly(t *testing.T) {
 		Binding: coreplan.PlanBinding{Key: coreplan.NewPlanKey(planDir), Health: coreplan.BindingMissing},
 	}}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'V'}})
-	m = updated.(Model)
+	m, cmd := pressChord(t, m, "vg")
 	if cmd != nil {
-		t.Fatalf("V must refuse a missing container, emitted %T", cmd())
+		t.Fatalf("vg must refuse a missing container, emitted %T", cmd())
 	}
 	if !strings.Contains(m.statusMessage, "Cannot inspect git: missing container") {
 		t.Fatalf("refusal not distinct: %q", m.statusMessage)

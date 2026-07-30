@@ -5,6 +5,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -57,8 +58,12 @@ type Model struct {
 	keys           KeyMap
 	helpModel      help.Model
 	width          int
+	height         int
 	showForce      bool
 	force          bool
+	// whichKey is the shared chord/which-key mixin: it arms the single-member
+	// t… namespace declared by KeyMap.Namespaces() and renders its popup.
+	whichKey keymap.WhichKeyHost
 }
 
 // New constructs a Model from the given Config. The cursor is placed
@@ -67,10 +72,10 @@ type Model struct {
 // sync.
 func New(cfg Config) Model {
 	var keys KeyMap
+	coreCfg, _ := config.LoadDefault()
 	if cfg.KeyMap != nil {
 		keys = *cfg.KeyMap
 	} else {
-		coreCfg, _ := config.LoadDefault()
 		keys = NewKeyMap(coreCfg)
 	}
 
@@ -92,6 +97,7 @@ func New(cfg Config) Model {
 		keys:           keys,
 		helpModel:      help.New(keys),
 		showForce:      cfg.ShowForceToggle,
+		whichKey:       keymap.NewWhichKeyHost(coreCfg, keys.Namespaces()...),
 	}
 }
 

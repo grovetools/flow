@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 
 	"github.com/grovetools/flow/pkg/plancreate"
 )
@@ -84,6 +85,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		inList := !m.unfocused && m.currentScreen == MainScreen && (m.focusIndex == 1 || m.focusIndex == 2 || (m.focusIndex == 3 && m.showAnchor))
 		if m.validating {
 			return m, nil
+		}
+
+		// A Model built as a bare struct literal has a zero-value host, and
+		// ProcessChord is NOT nil-safe the way IsPending/Armed are — it
+		// dereferences Sequence. Build the default host on first use.
+		if m.whichKey.Sequence == nil {
+			m.whichKey = keymap.NewWhichKeyHost(nil, m.keys.Namespaces()...)
+		}
+
+		// ── Mode guard + chord seam ──────────────────────────────────────
+		// The guard runs BEFORE ProcessChord (sign-off E3): the t… namespace
+		// arms only outside a focused text field, so typing "t" into the plan
+		// name still inserts the character. An already-armed chord keeps its
+		// continuation key (Armed()), so a chord started in navigation mode
+		// always completes. The gate mirrors ToggleAdvanced's own historical
+		// gate below, which is what flat `a` used.
+		if !inTextInput || m.unfocused || m.whichKey.Armed() {
+			res, matched, chordCmd := m.whichKey.ProcessChord(msg)
+			switch res {
+			case keymap.ChordMatched:
+				// Re-synthesize the resolved chord's canonical key so the
+				// ToggleAdvanced check below resolves it via key.Matches — but
+				// only when the pressed key is not already one of the binding's
+				// keys, or a binding that keeps a flat alternate alongside its
+				// chord would have the flat press rewritten and lost.
+				if len(matched.Keys()) > 0 && !key.Matches(msg, matched) {
+					msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
+				}
+			case keymap.ChordPending:
+				return m, chordCmd
+			case keymap.ChordConsumed:
+				return m, nil
+			case keymap.ChordNone:
+				// Not a chord — fall through unchanged.
+			}
 		}
 
 		// Navigate to advanced screen (only from main screen; and

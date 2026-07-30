@@ -4,6 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 )
 
 // doneWithItems returns a tea.Cmd that emits embed.DoneMsg carrying
@@ -66,7 +67,7 @@ func resolveExclusiveGroups(items []*Item) {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
+		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 
 	case embed.SetWorkspaceMsg:
@@ -82,6 +83,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// A Model built as a bare struct literal (the package's tests do that)
+		// has a zero-value host, and ProcessChord is NOT nil-safe the way
+		// IsPending/Armed are — it dereferences Sequence. Build the default host
+		// on first use so the seam behaves identically however the Model was
+		// constructed.
+		if m.whichKey.Sequence == nil {
+			m.whichKey = keymap.NewWhichKeyHost(nil, m.keys.Namespaces()...)
+		}
+
+		// ── Chord seam ───────────────────────────────────────────────────
+		// The wizard is a single flat checklist with no text entry and no
+		// sub-screens, so there is no mode guard to run first: the t… prefix
+		// can only ever arm at top level (sign-off E3). esc-cancel is consumed
+		// here rather than falling through to Quit, which is why the seam runs
+		// ahead of the switch below.
+		{
+			res, matched, chordCmd := m.whichKey.ProcessChord(msg)
+			switch res {
+			case keymap.ChordMatched:
+				// Re-synthesize the resolved chord's canonical key so the switch
+				// below resolves it via key.Matches — but only when the pressed
+				// key is not already one of the binding's keys, or a binding
+				// that keeps a flat alternate alongside its chord would have the
+				// flat press rewritten into the chord and lost.
+				if len(matched.Keys()) > 0 && !key.Matches(msg, matched) {
+					msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
+				}
+			case keymap.ChordPending:
+				return m, chordCmd
+			case keymap.ChordConsumed:
+				return m, nil
+			case keymap.ChordNone:
+				// Not a chord — fall through unchanged.
+			}
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, doneCancelled()

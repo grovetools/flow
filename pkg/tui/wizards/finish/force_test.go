@@ -29,18 +29,42 @@ func TestForceToggleDefaultsOff(t *testing.T) {
 	}
 }
 
-// TestForceToggleFlipsOnF pins the binding.
-func TestForceToggleFlipsOnF(t *testing.T) {
+// pressChord feeds each rune of a chord through Update in order, threading the
+// returned Model forward. Threading matters: WhichKeyHost carries a
+// *SequenceState, so the arm buffer lives behind a pointer shared by every copy
+// of the Model — re-pressing a prefix on a stale value silently appends to the
+// same buffer and matches nothing.
+func pressChord(t *testing.T, m Model, chord string) Model {
+	t.Helper()
+	for _, r := range chord {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(Model)
+	}
+	return m
+}
+
+// TestForceToggleFlipsOnTF pins the binding. Canon 60 §4.2 moved FORCE off flat
+// `f` into a deliberately single-member t… namespace: it discards uncommitted
+// work, so a which-key popup in front of it is a safety win, not just RULE T.
+func TestForceToggleFlipsOnTF(t *testing.T) {
+	m := newForceWizard(t, true)
+	m = pressChord(t, m, "tf")
+	if !m.Force() {
+		t.Fatal("tf should enable force")
+	}
+	m = pressChord(t, m, "tf")
+	if m.Force() {
+		t.Fatal("tf should toggle force back off")
+	}
+}
+
+// TestFlatFIsNoLongerBound pins the chord-only rule (sign-off E4): the retired
+// flat key must not survive as an alias.
+func TestFlatFIsNoLongerBound(t *testing.T) {
 	m := newForceWizard(t, true)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
-	m = updated.(Model)
-	if !m.Force() {
-		t.Fatal("f should enable force")
-	}
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
-	m = updated.(Model)
-	if m.Force() {
-		t.Fatal("f should toggle force back off")
+	if updated.(Model).Force() {
+		t.Fatal("flat f must no longer toggle force")
 	}
 }
 
@@ -51,8 +75,7 @@ func TestForceToggleIsVisible(t *testing.T) {
 	if !strings.Contains(m.View(), "Force") {
 		t.Fatalf("wizard body must advertise the force toggle:\n%s", m.View())
 	}
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
-	m = updated.(Model)
+	m = pressChord(t, m, "tf")
 	body := m.View()
 	if !strings.Contains(body, "FORCE ON") {
 		t.Fatalf("enabled force must be loudly visible:\n%s", body)
@@ -67,10 +90,9 @@ func TestForceToggleHiddenWhenHostCannotHonourIt(t *testing.T) {
 	if strings.Contains(m.View(), "Force") {
 		t.Fatalf("force toggle must not be advertised when the host cannot honour it:\n%s", m.View())
 	}
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
-	m = updated.(Model)
+	m = pressChord(t, m, "tf")
 	if m.Force() {
-		t.Fatal("f must be inert when the toggle is not offered")
+		t.Fatal("tf must be inert when the toggle is not offered")
 	}
 }
 
