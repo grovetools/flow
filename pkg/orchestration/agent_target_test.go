@@ -6,57 +6,27 @@ import (
 	"github.com/grovetools/core/pkg/mux"
 )
 
-func TestAgentTargetFor(t *testing.T) {
-	tests := []struct {
-		name          string
-		active        mux.MuxType
-		groveTerminal bool
-		want          string
-	}{
-		{"tuimux pane", mux.MuxTuimux, false, AgentTargetTuimux},
-		{"tuimux pane also exporting GROVE_TERMINAL", mux.MuxTuimux, true, AgentTargetTuimux},
-		{"grove terminal pane", mux.MuxNone, true, AgentTargetNative},
-		{"tmux session", mux.MuxTmux, false, AgentTargetTmux},
-		{"bare shell", mux.MuxNone, false, AgentTargetTmux},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := agentTargetFor(tt.active, tt.groveTerminal); got != tt.want {
-				t.Errorf("agentTargetFor(%q, %v) = %q, want %q", tt.active, tt.groveTerminal, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestResolveAgentTarget_FromEnvironment(t *testing.T) {
+// The precedence table and its cases live in core/pkg/mux's tests now. What is
+// still worth asserting here is that flow's spelling of each entry point reaches
+// core's — a wrapper pointed at the wrong function, or a constant re-exported
+// with the wrong value, would otherwise only surface as misrouted agent jobs.
+func TestAgentTargetReExportsDelegate(t *testing.T) {
 	t.Setenv(mux.EnvTuimuxPTY, "1")
-	if got := ResolveAgentTarget(); got != AgentTargetTuimux {
-		t.Errorf("ResolveAgentTarget() under tuimux = %q, want %q", got, AgentTargetTuimux)
+	if got := ResolveAgentTarget(); got != mux.AgentTargetTuimux {
+		t.Errorf("ResolveAgentTarget() under tuimux = %q, want %q", got, mux.AgentTargetTuimux)
+	}
+	if got := ResolveAgentTargetHosted(true); got != mux.AgentTargetNative {
+		t.Errorf("ResolveAgentTargetHosted(true) = %q, want %q", got, mux.AgentTargetNative)
 	}
 
-	t.Setenv(mux.EnvTuimuxPTY, "")
-	t.Setenv("GROVE_TERMINAL", "1")
-	if got := ResolveAgentTarget(); got != AgentTargetNative {
-		t.Errorf("ResolveAgentTarget() under a grove terminal = %q, want %q", got, AgentTargetNative)
-	}
-}
-
-// The TUI's hosted flag comes from the panel wrapper that constructed it and is
-// trusted over the environment, which cannot distinguish a hosted pane from any
-// other process a grove terminal spawned.
-func TestResolveAgentTargetHosted(t *testing.T) {
-	t.Setenv(mux.EnvTuimuxPTY, "1")
-	if got := ResolveAgentTargetHosted(true); got != AgentTargetNative {
-		t.Errorf("ResolveAgentTargetHosted(true) = %q, want %q", got, AgentTargetNative)
-	}
-	if got := ResolveAgentTargetHosted(false); got != AgentTargetTuimux {
-		t.Errorf("ResolveAgentTargetHosted(false) under tuimux = %q, want %q", got, AgentTargetTuimux)
-	}
-
-	t.Setenv(mux.EnvTuimuxPTY, "")
-	t.Setenv("GROVE_TERMINAL", "1")
-	if got := ResolveAgentTargetHosted(false); got != AgentTargetTmux {
-		t.Errorf("ResolveAgentTargetHosted(false) = %q, want %q: an unhosted TUI must not claim a native pane", got, AgentTargetTmux)
+	for _, tt := range []struct{ flow, core string }{
+		{AgentTargetTmux, mux.AgentTargetTmux},
+		{AgentTargetNative, mux.AgentTargetNative},
+		{AgentTargetTuimux, mux.AgentTargetTuimux},
+	} {
+		if tt.flow != tt.core {
+			t.Errorf("re-exported target %q != core's %q", tt.flow, tt.core)
+		}
 	}
 }
 

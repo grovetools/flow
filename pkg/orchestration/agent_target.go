@@ -1,21 +1,22 @@
 package orchestration
 
 import (
-	"os"
-
 	"github.com/grovetools/core/pkg/mux"
 )
 
-// The concrete agent routing targets. "auto" is not one of them: by the time an
-// agent job is launched it may be running inside groved, which inherited none of
-// the submitting terminal's environment and therefore cannot answer "auto".
-// Every executor refuses an empty target rather than guess (see
-// interactive_agent_executor.go / isolated_agent_executor.go), so resolution has
-// to happen at the submitting process's perimeter — that is what this file is.
+// The rule itself now lives in core/pkg/mux, next to ActiveMux and to the
+// models.JobSubmitRequest field it fills, because flow is not the only submitter
+// — grove.nvim's `chat` builds the same request and must reach the same answer,
+// and it cannot import flow. What remains here is the flow-facing spelling, kept
+// so that no caller in this repo has to know where the rule moved.
+
+// These stay constants rather than vars: they are compared and assigned as
+// untyped string constants throughout flow, and a var would both lose that and
+// make the ecosystem's routing vocabulary writable at runtime.
 const (
-	AgentTargetTmux   = "tmux"
-	AgentTargetNative = "native"
-	AgentTargetTuimux = "tuimux"
+	AgentTargetTmux   = mux.AgentTargetTmux
+	AgentTargetNative = mux.AgentTargetNative
+	AgentTargetTuimux = mux.AgentTargetTuimux
 )
 
 // ResolveAgentTarget derives the routing target for jobs submitted from this
@@ -23,8 +24,10 @@ const (
 // through it: `plan run`, `plan resume` and `plan retry --run` all launch the
 // same agents into the same mux, and a path that skips the derivation submits a
 // job the executor can only fail.
+//
+// See mux.ResolveAgentTarget for the precedence and its reasoning.
 func ResolveAgentTarget() string {
-	return agentTargetFor(mux.ActiveMux(), os.Getenv("GROVE_TERMINAL") != "")
+	return mux.ResolveAgentTarget()
 }
 
 // ResolveAgentTargetHosted is the TUI's front door to the same derivation.
@@ -34,26 +37,7 @@ func ResolveAgentTarget() string {
 // that are not hosted panes, so sniffing it would claim native routing for TUIs
 // that have no pane to launch into.
 func ResolveAgentTargetHosted(hosted bool) string {
-	if hosted {
-		return AgentTargetNative
-	}
-	return agentTargetFor(mux.ActiveMux(), false)
-}
-
-// agentTargetFor is the precedence table itself, kept pure so it is testable
-// without mutating process environment. tuimux outranks a grove terminal because
-// a tuimux pane sets both markers (tuimux exports GROVE_TERMINAL for the editors
-// it hosts) and the tuimux daemon is the one that actually owns the PTY. tmux is
-// the fallback because it is the only target that works from a bare shell.
-func agentTargetFor(active mux.MuxType, groveTerminal bool) string {
-	switch {
-	case active == mux.MuxTuimux:
-		return AgentTargetTuimux
-	case groveTerminal:
-		return AgentTargetNative
-	default:
-		return AgentTargetTmux
-	}
+	return mux.ResolveAgentTargetHosted(hosted)
 }
 
 // AgentTargetForSubmission returns the target a daemon submission for this plan
@@ -61,6 +45,9 @@ func agentTargetFor(active mux.MuxType, groveTerminal bool) string {
 // resolved routing more precisely than the environment can (the TUI's hosted
 // flag, or the daemon replaying a submission's target into the plan it loads)
 // has already recorded it there — otherwise it is derived from the environment.
+//
+// This is the part of the derivation that stays in flow: it reads a *Plan, a
+// flow type that core has no business knowing about.
 func AgentTargetForSubmission(plan *Plan) string {
 	if plan != nil && plan.Orchestration != nil && plan.Orchestration.AgentTarget != "" {
 		return plan.Orchestration.AgentTarget
