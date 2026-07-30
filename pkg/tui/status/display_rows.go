@@ -497,36 +497,145 @@ func (m *Model) defaultCollapsed(row *DisplayRow) bool {
 	return true
 }
 
-// toggleFoldAtCursor toggles the fold state of the row under the cursor.
-// It returns true when the key was consumed: fold toggled, or the cursor
-// is on a non-foldable virtual row (Enter must never edit/execute from a
-// virtual row). Returns false on a job row without workflow children so
-// the caller falls through to the default Enter action (edit).
-func (m *Model) toggleFoldAtCursor() bool {
-	row := m.currentRow()
+// rowFoldable reports whether a row owns a fold node: a job row with an
+// ownership or workflow subtree, a run or phase row, or a "… +K more" cap row
+// (whose "collapsed" state IS the cap). Agent rows are leaves.
+func (m *Model) rowFoldable(row *DisplayRow) bool {
 	if row == nil {
 		return false
 	}
 	switch row.Type {
 	case RowTypeJob:
-		if !m.jobHasChildren(row.Job) {
-			return false
-		}
-		m.FoldState[row.NodeID] = !m.isNodeCollapsed(row)
+		return m.jobHasChildren(row.Job)
 	case RowTypeRun, RowTypePhase, RowTypeMore:
-		// For RowTypeMore, "collapsed" means capped at maxWorkflowAgentRows;
-		// toggling reveals (or re-caps) the scope's full agent list.
-		m.FoldState[row.NodeID] = !m.isNodeCollapsed(row)
-	case RowTypeAgent:
-		// Not foldable; consume the key so Enter on a virtual row never
-		// falls through to job-file editing.
 		return true
 	default:
 		return false
 	}
+}
+
+// applyFold writes an explicit fold override for row and refreshes the view.
+// The override is written even when it already matches the effective state, so
+// a fold operator pins the node against later flips of the default policy (a
+// running job that completes, a run that goes stale).
+func (m *Model) applyFold(row *DisplayRow, collapsed bool) {
+	m.FoldState[row.NodeID] = collapsed
 	m.rebuildDisplayRows()
 	m.adjustScrollOffset()
+}
+
+// rowDepth is a row's absolute indent depth in the tree: the owning job's
+// ownership indent plus the virtual depth below its job row.
+func (m *Model) rowDepth(row *DisplayRow) int {
+	if row == nil {
+		return 0
+	}
+	depth := row.Depth
+	if row.Job != nil {
+		depth += m.JobIndents[row.Job.ID]
+	}
+	return depth
+}
+
+// parentRowIndex returns the display index of the row enclosing index i — the
+// nearest preceding row at a shallower depth — or -1 at the top level.
+func (m *Model) parentRowIndex(i int) int {
+	row := m.rowAt(i)
+	if row == nil {
+		return -1
+	}
+	depth := m.rowDepth(row)
+	for j := i - 1; j >= 0; j-- {
+		if m.rowDepth(&m.DisplayRows[j]) < depth {
+			return j
+		}
+	}
+	return -1
+}
+
+// toggleFoldAtCursor toggles the fold of the row under the cursor (za).
+// Returns false when the cursor row owns no fold.
+func (m *Model) toggleFoldAtCursor() bool {
+	row := m.currentRow()
+	if !m.rowFoldable(row) {
+		return false
+	}
+	m.applyFold(row, !m.isNodeCollapsed(row))
 	return true
+}
+
+// openFoldAtCursor opens the fold under the cursor (zo / l). Opening an
+// already-open fold is a no-op that still pins it open. Returns false when the
+// cursor row owns no fold.
+func (m *Model) openFoldAtCursor() bool {
+	row := m.currentRow()
+	if !m.rowFoldable(row) {
+		return false
+	}
+	m.applyFold(row, false)
+	return true
+}
+
+// closeFoldAtCursor closes the fold under the cursor (zc / h). On a leaf row,
+// or one whose fold is already closed, it walks outward instead: the cursor
+// moves to the enclosing row and closes that fold. That is vim's
+// zc-on-a-closed-fold semantics, and it doubles as "h steps out of the
+// subtree" for the single-stroke alias.
+func (m *Model) closeFoldAtCursor() bool {
+	row := m.currentRow()
+	if row == nil {
+		return false
+	}
+	if m.rowFoldable(row) && !m.isNodeCollapsed(row) {
+		m.applyFold(row, true)
+		return true
+	}
+	parent := m.parentRowIndex(m.Cursor)
+	if parent < 0 {
+		return false
+	}
+	m.Cursor = parent
+	if prow := m.currentRow(); m.rowFoldable(prow) {
+		m.applyFold(prow, true)
+	} else {
+		m.adjustScrollOffset()
+	}
+	return true
+}
+
+// setAllFolds opens (zR) or closes (zM) every fold in the tree.
+//
+// Opening reveals foldable descendants one level deeper, and a single pass can
+// only see the rows already visible — so it sweeps to a fixpoint with
+// everything forced open. The node IDs collected on the way are the tree's
+// complete fold set, which is exactly what a close-all must write (closing only
+// the visible top level would leave descendants at their policy default, so
+// re-opening a job would not show the tree the user just closed).
+func (m *Model) setAllFolds(collapsed bool) {
+	seen := make(map[string]bool)
+	for {
+		fresh := false
+		for i := range m.DisplayRows {
+			row := &m.DisplayRows[i]
+			if !m.rowFoldable(row) || seen[row.NodeID] {
+				continue
+			}
+			seen[row.NodeID] = true
+			m.FoldState[row.NodeID] = false
+			fresh = true
+		}
+		if !fresh {
+			break
+		}
+		m.DisplayRows = m.buildDisplayRows()
+	}
+	if collapsed {
+		for nodeID := range seen {
+			m.FoldState[nodeID] = true
+		}
+	}
+	m.rebuildDisplayRows()
+	m.adjustScrollOffset()
 }
 
 // renderVirtualRowCell renders the JOB-column cell of a virtual workflow

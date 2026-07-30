@@ -282,6 +282,22 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		key.WithHelp("enter", "open in own pane / confirm"),
 	)
 
+	// Folding is the vim operator family, never enter: the jobs table is a
+	// tree (subjob families, workflow runs/phases, the "… +K more" agent cap)
+	// and enter belongs to opening the job note, exactly as it does elsewhere
+	// in the fleet. zo/zc carry single-stroke h/l aliases — the file-tree
+	// idiom — which are free here because Base.Left/Right are disabled and
+	// pane focus lives on the arrow keys. The "/"-bearing help labels are
+	// exempt from the label-lie audit, so keys and label stay truthful.
+	km.Base.FoldOpen = key.NewBinding(
+		key.WithKeys("zo", "l"),
+		key.WithHelp("zo/l", "open fold"),
+	)
+	km.Base.FoldClose = key.NewBinding(
+		key.WithKeys("zc", "h"),
+		key.WithHelp("zc/h", "close fold"),
+	)
+
 	// Apply TUI-specific overrides from config
 	keymap.ApplyTUIOverrides(cfg, "flow", "status", &km)
 
@@ -289,17 +305,17 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 	// against every key.Matches(msg, m.KeyMap.*) case in update.go). Handled
 	// Base bindings that stay enabled: Up, Down, Top (via the Sequence engine),
 	// Bottom, PageUp, PageDown, Select, SelectAll, SelectNone, Edit, Confirm,
-	// CopyPath, Help, Quit. Notable disables: SwitchView (tab is consumed by
-	// SwitchFocus), TogglePreview (v is consumed by ViewEdit), Base.Rename
-	// (shadowed by the outer "rename job" field with a distinct signature),
-	// Base.Back/Cancel (esc is handled by CloseDetailPane; ctrl+g unused here).
+	// the five fold operators (also via the Sequence engine), CopyPath, Help,
+	// Quit. Notable disables: SwitchView (tab is consumed by SwitchFocus),
+	// TogglePreview (v is consumed by ViewEdit), Base.Rename (shadowed by the
+	// outer "rename job" field with a distinct signature), Base.Back/Cancel
+	// (esc is handled by CloseDetailPane; ctrl+g unused here).
 	for _, b := range []*key.Binding{
 		&km.Base.Left, &km.Base.Right, &km.Base.Home, &km.Base.End,
 		&km.Base.Back, &km.Base.Cancel, &km.Base.Delete, &km.Base.Yank, &km.Base.Rename, &km.Base.Refresh,
 		&km.Base.Search, &km.Base.SearchNext, &km.Base.SearchPrev, &km.Base.ClearSearch, &km.Base.Grep,
 		&km.Base.SwitchView, &km.Base.NextTab, &km.Base.PrevTab, &km.Base.FocusNext, &km.Base.FocusPrev, &km.Base.TogglePreview,
 		&km.Base.Tab1, &km.Base.Tab2, &km.Base.Tab3, &km.Base.Tab4, &km.Base.Tab5, &km.Base.Tab6, &km.Base.Tab7, &km.Base.Tab8, &km.Base.Tab9,
-		&km.Base.FoldOpen, &km.Base.FoldClose, &km.Base.FoldToggle, &km.Base.FoldOpenAll, &km.Base.FoldCloseAll,
 	} {
 		b.SetEnabled(false)
 	}
@@ -343,8 +359,9 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 // It includes the base sections plus flow-specific sections. The View (v…) and
 // Change (c…) namespaces surface as their own sections so the ? overlay and the
 // generated registry list the chord members (vl, vf, cs, …) as ordinary
-// bindings; the residual Panes section keeps the pane-management controls, and
-// the set-family bindings are no longer duplicated into Actions.
+// bindings; the Fold section lists the z… operators that drive the job tree; the
+// residual Panes section keeps the pane-management controls, and the set-family
+// bindings are no longer duplicated into Actions.
 func (k KeyMap) Sections() []keymap.Section {
 	ns := k.Namespaces()
 	return []keymap.Section{
@@ -352,6 +369,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		ns[0].Section(),
 		ns[1].Section(),
+		keymap.FoldSection(k.FoldOpen, k.FoldClose, k.FoldToggle, k.FoldOpenAll, k.FoldCloseAll),
 		keymap.NewSectionWithIcon(
 			"Panes", theme.IconViewDashboard,
 			k.ToggleColumns, k.CloseDetailPane, k.SwitchFocus,

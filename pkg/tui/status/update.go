@@ -1825,10 +1825,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// clears the buffer and falls through unchanged.
 		{
 			// The chord seam, folded into the reusable host. It resolves the gg
-			// motion (passed as the flat extra) plus the v…/c… namespace chords,
-			// arms the which-key popup on a pending prefix, and consumes esc-cancel
-			// / stray-while-armed. See keymap.WhichKeyHost.ProcessChord.
-			res, b, cmd := m.WhichKey.ProcessChord(msg, m.KeyMap.Top)
+			// motion and the z… fold operators (passed as the flat extras) plus
+			// the v…/c… namespace chords, arms the which-key popup on a pending
+			// prefix, and consumes esc-cancel / stray-while-armed. See
+			// keymap.WhichKeyHost.ProcessChord.
+			res, b, cmd := m.WhichKey.ProcessChord(msg, m.KeyMap.Top,
+				m.KeyMap.FoldOpen, m.KeyMap.FoldClose, m.KeyMap.FoldToggle,
+				m.KeyMap.FoldOpenAll, m.KeyMap.FoldCloseAll)
 			switch res {
 			case keymap.ChordMatched:
 				// Re-synthesize the resolved chord's canonical key. gg jumps to the
@@ -1910,7 +1913,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.FocusLeft):
-			// h / left → focus the jobs pane (left)
+			// left → focus the jobs pane (h belongs to the fold operators)
 			if m.ShowLogs && !m.LogPaneFullscreen {
 				if m.Focus != FocusJobs {
 					m.Manager.ActivePaneIdx = 0
@@ -1921,7 +1924,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.KeyMap.FocusRight):
-			// l / right → focus the detail pane (right), or open logs if no detail pane
+			// right → focus the detail pane, or open logs if there is none
+			// (l belongs to the fold operators)
 			if m.ShowLogs && !m.LogPaneFullscreen {
 				if m.Focus == FocusJobs {
 					m.Manager.ActivePaneIdx = 1
@@ -1929,7 +1933,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshTreeDetailPane()
 				}
 			} else if m.ActiveDetailPane == NoPane {
-				// No detail pane open — open logs (mimics old `l` behavior)
+				// No detail pane open — open logs
 				return m.openDetailPane(LogsPaneDetail)
 			}
 			return m, nil
@@ -2086,6 +2090,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.KeyMap.SelectNone):
 			m.Selected = make(map[string]bool)
 
+		// The vim fold operators drive the job tree. They arrive here already
+		// resolved by the chord seam above, so msg carries the canonical z…
+		// key even when the user pressed the single-stroke h/l alias. Each is
+		// a no-op on a row that owns no fold — enter is no longer overloaded
+		// for folding, so nothing falls through.
+		case key.Matches(msg, m.KeyMap.FoldOpen):
+			m.openFoldAtCursor()
+			return m, nil
+
+		case key.Matches(msg, m.KeyMap.FoldClose):
+			m.closeFoldAtCursor()
+			return m, nil
+
+		case key.Matches(msg, m.KeyMap.FoldToggle):
+			m.toggleFoldAtCursor()
+			return m, nil
+
+		case key.Matches(msg, m.KeyMap.FoldOpenAll):
+			m.setAllFolds(false)
+			return m, nil
+
+		case key.Matches(msg, m.KeyMap.FoldCloseAll):
+			m.setAllFolds(true)
+			return m, nil
+
 		case key.Matches(msg, m.KeyMap.Archive):
 			// Archive selected jobs or current job if none selected
 			if len(m.Selected) > 0 || m.CurrentJob() != nil {
@@ -2094,12 +2123,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.Edit), key.Matches(msg, m.KeyMap.Confirm):
 			if row := m.currentRow(); row != nil {
-				// Enter toggles the fold on virtual workflow rows and on
-				// job rows that have workflow children; otherwise it falls
-				// through to editing the job file.
-				if key.Matches(msg, m.KeyMap.Confirm) && m.toggleFoldAtCursor() {
-					return m, nil
-				}
+				// Enter always opens the job note — folding lives on the z…
+				// operators (and h/l), never on enter. From a virtual workflow
+				// row that means the owning job's note, which is what the row
+				// is describing anyway.
 				job := row.Job
 				if m.Hosted {
 					// Emit EditRequestMsg so the host opens the job file.

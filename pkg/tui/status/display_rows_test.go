@@ -255,8 +255,8 @@ func TestSubjobRows_PrecedeLegacyWorkflowRows(t *testing.T) {
 func TestToggleFold_NoOpOnPlainJobRow(t *testing.T) {
 	m := newDisplayTestModel(testJob("a"))
 	m.Cursor = 0
-	// A job row without workflow children is not foldable — Enter must
-	// fall through to the default action (edit).
+	// A job row without children owns no fold, so the fold operators report
+	// unhandled and leave the state alone.
 	if m.toggleFoldAtCursor() {
 		t.Error("toggleFoldAtCursor should return false on a job row without workflow children")
 	}
@@ -387,10 +387,10 @@ func TestAgentCap_MoreRowAndExpansion(t *testing.T) {
 		}
 	}
 
-	// Enter on the more row reveals the full agent list.
+	// Toggling the more row reveals the full agent list.
 	m.Cursor = moreIdx
 	if !m.toggleFoldAtCursor() {
-		t.Fatal("Enter on the more row must be consumed")
+		t.Fatal("the more row must be foldable")
 	}
 	if got := countRowType(m, RowTypeAgent); got != maxWorkflowAgentRows+3 {
 		t.Errorf("agent rows after expand = %d, want %d", got, maxWorkflowAgentRows+3)
@@ -448,15 +448,14 @@ func TestVirtualRows_NeverEnterJobsAndNotSelectable(t *testing.T) {
 		t.Fatalf("m.Jobs mutated: %d entries", len(m.Jobs))
 	}
 
-	// Enter on an agent row is consumed without touching FoldState — it
-	// must never fall through to job-file editing or execution.
+	// Agent rows are leaves: za on one owns no fold and touches nothing.
 	agentIdx := m.rowIndexByNodeID(agentNodeID("j", "wf_1", "ag0"))
 	if agentIdx < 0 {
 		t.Fatal("agent row not found")
 	}
 	m.Cursor = agentIdx
-	if !m.toggleFoldAtCursor() {
-		t.Error("Enter on an agent row must be consumed")
+	if m.toggleFoldAtCursor() {
+		t.Error("agent rows own no fold; za must report unhandled")
 	}
 	if len(m.FoldState) != 0 {
 		t.Errorf("agent rows are not foldable, FoldState = %v", m.FoldState)
