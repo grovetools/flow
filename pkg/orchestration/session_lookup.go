@@ -225,7 +225,9 @@ func findSessionDirByJobID(jobID string) string {
 
 // findProcessByJobID uses pgrep to find a process with the job ID in its command line.
 // This handles cases where Claude's node process forks/respawns with a new PID.
-// Returns 0 if no process found.
+// Returns 0 if no process found. The calling flow process is excluded: its own
+// argv can contain the job ID (e.g. `flow plan retry <job-id>`), and matching
+// ourselves would report a live agent that isn't there.
 func findProcessByJobID(jobID string) int {
 	cmd := exec.Command("pgrep", "-f", jobID)
 	output, err := cmd.Output()
@@ -233,13 +235,16 @@ func findProcessByJobID(jobID string) int {
 		return 0
 	}
 
-	// pgrep may return multiple PIDs, take the first one
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) > 0 && lines[0] != "" {
-		pid, err := strconv.Atoi(lines[0])
-		if err == nil {
-			return pid
+	self := os.Getpid()
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
 		}
+		pid, err := strconv.Atoi(line)
+		if err != nil || pid == self {
+			continue
+		}
+		return pid
 	}
 	return 0
 }

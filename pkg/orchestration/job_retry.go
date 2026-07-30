@@ -57,8 +57,18 @@ func RetryJob(job *Job, plan *Plan, force bool, autoRun bool) error {
 	}
 }
 
-// retryFailedJob resets a failed job back to pending.
+// retryFailedJob resets a failed job back to pending. For agent jobs the
+// frontmatter status is not trusted on its own: terminal states have been
+// mislabeled while the agent was still running (daemon session bookkeeping
+// lost mid-flight), and re-running such a job would spawn a second agent onto
+// the same files. A live agent process vetoes the retry regardless of what
+// the markdown says.
 func retryFailedJob(job *Job, plan *Plan, autoRun bool) error {
+	if isAgentJobType(job.Type) {
+		if alive, pid := checkAgentLiveness(job.ID); alive {
+			return fmt.Errorf("refusing to retry %s: job is marked failed but its agent process is still alive (pid %d). The status is likely stale — wait for the agent to exit, or kill it with 'flow agent kill' first.", job.Filename, pid)
+		}
+	}
 	return resetJobToPending(job, plan, JobStatusFailed, autoRun)
 }
 
@@ -125,8 +135,16 @@ func refuseRunningJobWithoutForce(job *Job) error {
 	return fmt.Errorf("cannot reset running job: %s (no live agent process found). Use --force to override.", job.Filename)
 }
 
-// retryRunningJobWithForce resets a running job with --force.
+// retryRunningJobWithForce resets a running job with --force. --force exists
+// to clear STALE running state (a launcher that died and left the frontmatter
+// behind) — it is not a license to double-spawn onto a live agent's files, so
+// a demonstrably alive agent process still refuses the reset. Kill the agent
+// first if that is really what you want.
 func retryRunningJobWithForce(job *Job, plan *Plan, autoRun bool) error {
+	if alive, pid := checkAgentLiveness(job.ID); alive {
+		return fmt.Errorf("refusing to force-retry %s: its agent process is alive (pid %d). Retrying would spawn a second agent onto the same files. Kill it with 'flow agent kill' first if the agent is truly stuck.", job.Filename, pid)
+	}
+
 	// Create updates map to reset to pending
 	updates := map[string]interface{}{
 		"status":     string(JobStatusPending),
@@ -209,6 +227,13 @@ func submitRetriedJob(job *Job, plan *Plan) {
 // Returns (alive, pid). Both values should be interpreted together:
 // - (true, pid) means the process is alive with the given PID
 // - (false, 0) means no live process was found
+// AgentProcessAlive reports whether a live agent process can be found for the
+// job, checking the daemon session registry, the runtime pidfile, the
+// grove-hooks session record, and finally the process table by job ID.
+func AgentProcessAlive(jobID string) (bool, int) {
+	return checkAgentLiveness(jobID)
+}
+
 func checkAgentLiveness(jobID string) (bool, int) {
 	// Try daemon session lookup first (most reliable)
 	daemonClient := daemon.New()
@@ -245,6 +270,20 @@ func checkAgentLiveness(jobID string) (bool, int) {
 				}
 			}
 		}
+	}
+
+	// Fallback to the grove-hooks session record (daemon bookkeeping can be
+	// lost while the agent and its hook-registered session survive).
+	if pid, _, err := findAgentSessionInfo(jobID); err == nil && pid > 0 {
+		if proc, err := os.FindProcess(pid); err == nil && proc.Signal(nil) == nil {
+			return true, pid
+		}
+	}
+
+	// Last resort: a live process carrying the job ID on its command line
+	// (Claude's node process can fork away from every recorded PID).
+	if pid := findProcessByJobID(jobID); pid > 0 {
+		return true, pid
 	}
 
 	return false, 0

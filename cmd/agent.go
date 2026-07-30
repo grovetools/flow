@@ -635,6 +635,18 @@ whether the agent is idle (waiting for input), working (processing), or disconne
 				// Agent is blocked waiting on the user; the pane scrape can't
 				// see this, so trust the daemon and skip it.
 				status.Status = "pending_user"
+			} else if job != nil && job.Type == orchestration.JobTypeHeadlessAgent {
+				// Headless agents have no pane to scrape — a capture attempt
+				// always fails and used to surface as "unknown" for perfectly
+				// live agents. Judge from process liveness and the daemon
+				// session instead.
+				if alive, _ := orchestration.AgentProcessAlive(job.ID); !alive {
+					status.Status = "disconnected"
+				} else if sess != nil && sess.Status == "idle" {
+					status.Status = "idle"
+				} else {
+					status.Status = "working"
+				}
 			} else {
 				output, capErr := captureAgentOutput(plan, job, targetPane, 30)
 				if capErr != nil {
