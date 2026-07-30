@@ -87,6 +87,12 @@ func moreNodeID(jobID, runID, scope string) string {
 // rows. Ownership children render first beneath their parent, then legacy
 // workflow/ad-hoc activity, then dependency-only children. Folding an owner
 // hides its ownership subtree while every visible child remains RowTypeJob.
+//
+// While the "/" job filter is applied the rows narrow to the matches plus the
+// ancestors retained to reach them: the fold state is ignored (a match is never
+// hidden behind a collapsed parent — nav's filter does the same) and the
+// virtual workflow rows drop out, since the filter searches jobs and a matching
+// job's run/phase/agent subtree is not part of the result set.
 func (m *Model) buildDisplayRows() []DisplayRow {
 	rows := make([]DisplayRow, 0, len(m.Jobs))
 	children := make(map[string][]*orchestration.Job)
@@ -99,17 +105,23 @@ func (m *Model) buildDisplayRows() []DisplayRow {
 		}
 	}
 
+	filterVisible := m.jobFilterVisibleIDs()
+	filtering := filterVisible != nil
+
 	visited := make(map[string]bool, len(m.Jobs))
 	var appendJob func(*orchestration.Job)
 	appendJob = func(job *orchestration.Job) {
 		if job == nil || visited[job.ID] {
 			return
 		}
+		if filtering && !filterVisible[job.ID] {
+			return
+		}
 		visited[job.ID] = true
 		row := DisplayRow{Type: RowTypeJob, NodeID: jobNodeID(job.ID), Job: job}
 		rows = append(rows, row)
 
-		collapsed := m.jobHasChildren(job) && m.isNodeCollapsed(&row)
+		collapsed := !filtering && m.jobHasChildren(job) && m.isNodeCollapsed(&row)
 		if !collapsed {
 			for _, child := range children[job.ID] {
 				if m.isOwnershipChild(child) {
@@ -117,7 +129,9 @@ func (m *Model) buildDisplayRows() []DisplayRow {
 				}
 			}
 		}
-		rows = m.appendWorkflowRows(rows, job)
+		if !filtering {
+			rows = m.appendWorkflowRows(rows, job)
+		}
 		for _, child := range children[job.ID] {
 			if !m.isOwnershipChild(child) {
 				appendJob(child)

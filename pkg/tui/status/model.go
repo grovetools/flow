@@ -233,10 +233,15 @@ type Model struct {
 	// scroll body the promoted (BSP split) skill pane shows;
 	// skillPaneCursorLine is the selected node's 1-based line within it, sent
 	// as EnsureVisible so the host viewport follows the cursor.
-	skillPaneBody           string
-	skillPaneCursorLine     int
-	skillSearchActive       bool            // Whether search mode is active in skill pane
-	skillSearchInput        textinput.Model // Text input for skill pane search
+	skillPaneBody       string
+	skillPaneCursorLine int
+	skillSearchActive   bool            // Whether search mode is active in skill pane
+	skillSearchInput    textinput.Model // Text input for skill pane search
+	// jobFilterInput holds the "/"-activated job search over the jobs table
+	// (filename + title). Its value survives blur — Esc keeps the query, a
+	// second Esc clears it — and it renders in place of the JOB column header.
+	// See job_filter.go for the ergonomics contract.
+	jobFilterInput          textinput.Model
 	frontmatterRawContent   string
 	briefingRawContent      string
 	tokenRawContent         string
@@ -360,7 +365,8 @@ type Model struct {
 // signalling that single-letter shortcuts should not be intercepted.
 func (m Model) IsTextEntryActive() bool {
 	return m.Help.IsTextEntryActive() || m.IsolatedAgentInputActive || m.Renaming || m.CreatingJob ||
-		m.ClawDialogActive || m.ClawTargetSelectorActive || m.skillSearchActive || m.fieldEditor != nil ||
+		m.ClawDialogActive || m.ClawTargetSelectorActive || m.skillSearchActive || m.JobFilterFocused() ||
+		m.fieldEditor != nil ||
 		m.EditingDeps ||
 		m.selectingRecipe || m.columnSelectMode
 }
@@ -720,6 +726,9 @@ func New(cfg Config) Model {
 	skillSearch.Placeholder = "Search skills..."
 	skillSearch.CharLimit = 256
 
+	// Initialize the "/" job filter input (see job_filter.go)
+	jobFilter := newJobFilterInput()
+
 	// Create orchestrator for direct job execution
 	orchConfig := &orchestration.OrchestratorConfig{
 		MaxParallelJobs:     1, // TUI runs one job or selection at a time
@@ -875,6 +884,7 @@ func New(cfg Config) Model {
 		workflowAgentMarkdown:    make(map[string]string),
 		workflowAgentLoading:     make(map[string]bool),
 		skillSearchInput:         skillSearch,
+		jobFilterInput:           jobFilter,
 		IsolatedAgentInput:       isolatedInput,
 		IsolatedAgentInputActive: false,
 		DaemonClient:             daemonClient,

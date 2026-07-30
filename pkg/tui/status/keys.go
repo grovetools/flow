@@ -32,12 +32,16 @@ type KeyMap struct {
 	ToggleAutoComplete key.Binding
 	AddJob             key.Binding
 	AddFromRecipe      key.Binding
-	Implement          key.Binding
-	AgentFromChat      key.Binding
-	Rename             key.Binding
-	Resume             key.Binding
-	EditDeps           key.Binding
-	DemoteToNote       key.Binding
+	// ReEnterSearch re-focuses a preserved "/" job filter (vim insert). Shares
+	// "i" with SendInput, which wins whenever the pane in view is an agent job
+	// that takes chat input — see the SendInput handler in update.go.
+	ReEnterSearch key.Binding
+	Implement     key.Binding
+	AgentFromChat key.Binding
+	Rename        key.Binding
+	Resume        key.Binding
+	EditDeps      key.Binding
+	DemoteToNote  key.Binding
 	// View operations (TUI-specific)
 	ToggleColumns     key.Binding
 	ViewLogs          key.Binding
@@ -140,6 +144,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		AddFromRecipe: key.NewBinding(
 			key.WithKeys("P"),
 			key.WithHelp("P", "add from recipe"),
+		),
+		// "i" re-enters a blurred-but-active job filter, the same vim-insert
+		// gesture nav's sessionizer and nb's browser use.
+		ReEnterSearch: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", "re-enter search (vim insert)"),
 		),
 		Implement: key.NewBinding(
 			key.WithKeys("n"),
@@ -306,14 +316,17 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 	// Base bindings that stay enabled: Up, Down, Top (via the Sequence engine),
 	// Bottom, PageUp, PageDown, Select, SelectAll, SelectNone, Edit, Confirm,
 	// the five fold operators (also via the Sequence engine), CopyPath, Help,
-	// Quit. Notable disables: SwitchView (tab is consumed by SwitchFocus),
-	// TogglePreview (v is consumed by ViewEdit), Base.Rename (shadowed by the
-	// outer "rename job" field with a distinct signature), Base.Back/Cancel
-	// (esc is handled by CloseDetailPane; ctrl+g unused here).
+	// Quit, and Search ("/" opens the job filter). Notable disables: SwitchView
+	// (tab is consumed by SwitchFocus), TogglePreview (v is consumed by
+	// ViewEdit), Base.Rename (shadowed by the outer "rename job" field with a
+	// distinct signature), Base.Back/Cancel (esc is handled by
+	// CloseDetailPane; ctrl+g unused here). The n/N/ctrl+l/* search family
+	// stays disabled: the filter narrows rows rather than stepping matches, so
+	// there is no next/prev to bind (and "n" is new-implementation here).
 	for _, b := range []*key.Binding{
 		&km.Base.Left, &km.Base.Right, &km.Base.Home, &km.Base.End,
 		&km.Base.Back, &km.Base.Cancel, &km.Base.Delete, &km.Base.Yank, &km.Base.Rename, &km.Base.Refresh,
-		&km.Base.Search, &km.Base.SearchNext, &km.Base.SearchPrev, &km.Base.ClearSearch, &km.Base.Grep,
+		&km.Base.SearchNext, &km.Base.SearchPrev, &km.Base.ClearSearch, &km.Base.Grep,
 		&km.Base.SwitchView, &km.Base.NextTab, &km.Base.PrevTab, &km.Base.FocusNext, &km.Base.FocusPrev, &km.Base.TogglePreview,
 		&km.Base.Tab1, &km.Base.Tab2, &km.Base.Tab3, &km.Base.Tab4, &km.Base.Tab5, &km.Base.Tab6, &km.Base.Tab7, &km.Base.Tab8, &km.Base.Tab9,
 	} {
@@ -366,6 +379,10 @@ func (k KeyMap) Sections() []keymap.Section {
 	ns := k.Namespaces()
 	return []keymap.Section{
 		keymap.NavigationSection(k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown),
+		// Only the two search bindings this TUI implements: "/" opens the job
+		// filter, "i" re-enters a preserved one. The n/N/ctrl+l/* members of
+		// Base.SearchSection() are disabled here (see NewKeyMap).
+		keymap.SearchSection(k.Search, k.ReEnterSearch),
 		keymap.SelectionSection(k.Select, k.SelectAll, k.SelectNone),
 		ns[0].Section(),
 		ns[1].Section(),

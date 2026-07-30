@@ -215,8 +215,12 @@ func (m Model) tableHeaders() []string {
 // alone, which is why a 25-column TOKENS cell read as 6.
 func (m Model) measureTableColumns(headers []string) map[string]int {
 	widths := make(map[string]int, len(headers))
-	for _, h := range headers {
-		widths[h] = lipgloss.Width(h)
+	// Measure the header as it DRAWS, not as it is keyed: the "/" filter
+	// substitutes a search field into one slot, and a long query widens that
+	// column exactly like a long cell would.
+	display := m.displayHeaders(headers)
+	for i, h := range headers {
+		widths[h] = lipgloss.Width(display[i])
 	}
 	visibleRows := m.getVisibleRows()
 	for i := range visibleRows {
@@ -249,15 +253,32 @@ func (m Model) renderTableView() string {
 		rows = append(rows, m.renderRowCells(headers, m.ScrollOffset+i, &visibleRows[i]))
 	}
 
-	if len(rows) == 0 {
-		return "\n" + t.Muted.Render("No jobs to display.") + "\n\n" + t.Muted.Render("Press 'A' to add a job.")
-	}
-
 	opts := gtable.SelectableTableOptions{}
 	if m.Focus == FocusJobs {
 		opts.BorderColor = theme.DefaultColors.Blue
 	}
-	return gtable.SelectableTableWithOptions(headers, rows, m.Cursor-m.ScrollOffset, opts)
+
+	if len(rows) == 0 {
+		// A filter that matches nothing still renders the table frame: the
+		// header row is where the query lives, and dropping it would hide what
+		// the user is typing (and that they are in search mode at all).
+		if m.jobFilterVisible() && len(headers) > 0 {
+			empty := make([]string, len(headers))
+			// The message belongs under JOB, not in the SEL gutter column.
+			msgIdx := 0
+			for i, h := range headers {
+				if h == "JOB" {
+					msgIdx = i
+					break
+				}
+			}
+			empty[msgIdx] = t.Muted.Render("No matching jobs")
+			return gtable.SelectableTableWithOptions(m.displayHeaders(headers), [][]string{empty}, -1, opts)
+		}
+		return "\n" + t.Muted.Render("No jobs to display.") + "\n\n" + t.Muted.Render("Press 'A' to add a job.")
+	}
+
+	return gtable.SelectableTableWithOptions(m.displayHeaders(headers), rows, m.Cursor-m.ScrollOffset, opts)
 }
 
 // renderRowCells renders one display row's cells, one per header, in header

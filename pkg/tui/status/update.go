@@ -1787,6 +1787,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// The focused "/" job filter consumes every key BEFORE the chord seam —
+		// otherwise letters like c, v, z and g arm a namespace/motion instead of
+		// being typed into the query. Same reason nav's sessionizer puts its
+		// filter branch ahead of vim sequence processing.
+		if m.jobFilterInput.Focused() {
+			switch msg.Type {
+			case tea.KeyEsc:
+				// Vim-style: Esc leaves filter mode but PRESERVES the query and
+				// the narrowed rows. A second Esc clears it (CloseDetailPane).
+				m.jobFilterInput.Blur()
+				return m, nil
+			case tea.KeyEnter:
+				// Enter accepts the filter: blur keeping the value, and reveal
+				// the first match so the cursor is on something useful.
+				m.jobFilterInput.Blur()
+				m.revealFirstJobFilterMatch()
+				mdl, navCmd := m.filterNavCmd()
+				return mdl, navCmd
+			case tea.KeyUp:
+				if m.Cursor > 0 {
+					m.Cursor--
+					m.adjustScrollOffset()
+					mdl, navCmd := m.filterNavCmd()
+					return mdl, navCmd
+				}
+				return m, nil
+			case tea.KeyDown:
+				if m.Cursor < len(m.DisplayRows)-1 {
+					m.Cursor++
+					m.adjustScrollOffset()
+					mdl, navCmd := m.filterNavCmd()
+					return mdl, navCmd
+				}
+				return m, nil
+			case tea.KeyCtrlC:
+				// ctrl+c always quits: it can never be part of a query, and the
+				// filter must not be able to trap the TUI.
+				_ = m.Close()
+				return m, tea.Quit
+			default:
+				prev := m.jobFilterInput.Value()
+				m.jobFilterInput, cmd = m.jobFilterInput.Update(msg)
+				if m.jobFilterInput.Value() != prev {
+					m.applyJobFilter()
+				}
+				return m, cmd
+			}
+		}
+
 		// Dispatch to focused pane handlers for detail and secondary panes.
 		// A pending top-level namespace chord (v…/c…) owns its continuation keys,
 		// so when one is armed we skip this whitelist entirely and let the chord's
@@ -1866,6 +1915,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.KeyMap.Help):
 			m.Help.Toggle()
+
+		case key.Matches(msg, m.KeyMap.Search):
+			// "/" opens the job filter over filename + title. A query left over
+			// from a previous search is kept, so "/" resumes it rather than
+			// starting from empty.
+			m.ensureJobFilterInput()
+			m.jobFilterInput.Focus()
+			m.jobFilterInput.CursorEnd()
+			return m, textinput.Blink
 
 		case key.Matches(msg, m.KeyMap.SwitchFocus):
 			if m.ShowLogs && !m.LogPaneFullscreen {
@@ -2406,6 +2464,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(loadCmd, promoteCmd)
 
 		case key.Matches(msg, m.KeyMap.CloseDetailPane):
+			// Second Esc clears a preserved job filter. The first Esc only
+			// blurred the input (keeping the query), so this is the "cancel"
+			// half of the vim-style pair — and the filter is the innermost
+			// dismissable state, ahead of any detail pane.
+			if m.jobFilterApplied() {
+				m.clearJobFilter()
+				return m, nil
+			}
 			// BSP splits (agent or editor) — close via unified helper.
 			if m.Manager.IsPromoted("detail") {
 				cmd := m.closeCurrentDetail()
@@ -2458,12 +2524,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.LogPaneFullscreen = false
 			return m, cmd
 
-		case key.Matches(msg, m.KeyMap.SendInput):
+		case key.Matches(msg, m.KeyMap.SendInput), key.Matches(msg, m.KeyMap.ReEnterSearch):
 			// Focus the chat input when viewing an agent job that supports input
 			// The 'i' key focuses the input - it doesn't toggle visibility since chat is always shown for these agent types
 			isAgentWithInput := m.ActiveLogJob != nil &&
 				(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 					m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
+			// "i" is shared: it re-enters a preserved job filter (vim insert, as
+			// in nav/nb) EXCEPT while an agent job that takes chat input is in
+			// view — there it stays the chat key, so a live filter can never
+			// swallow a message meant for the agent.
+			if !isAgentWithInput && m.jobFilterApplied() {
+				m.ensureJobFilterInput()
+				m.jobFilterInput.Focus()
+				m.jobFilterInput.CursorEnd()
+				return m, textinput.Blink
+			}
 			if isAgentWithInput {
 				// Ensure logs pane is open and focused
 				if m.ActiveDetailPane != LogsPaneDetail {
