@@ -91,6 +91,23 @@ const (
 	JobStatusTodo        JobStatus = "todo"
 	JobStatusAbandoned   JobStatus = "abandoned"
 	JobStatusIdle        JobStatus = "idle" // Agent finished responding, waiting for next input
+
+	// The two reconciled statuses. Both are written to job frontmatter by
+	// the session-health engine (core/pkg/sessions/health) when a job's
+	// process is lost — see ReconciledStatusFor and ReconcileJobFile.
+	// They must therefore be loadable: a status flow itself persists but
+	// its own loader rejects makes the whole plan unreadable.
+	//
+	// JobStatusInterrupted marks a turn-based job (chat/oneshot/note)
+	// whose process died. Those are safely re-runnable, so this is the
+	// terminal "it stopped" record.
+	//
+	// JobStatusOrphaned marks an agent job we lost track of — "we lost
+	// it", not "it failed". Non-terminal: the agent may well still be
+	// alive somewhere, which is why retry re-checks liveness before
+	// resetting it.
+	JobStatusInterrupted JobStatus = "interrupted"
+	JobStatusOrphaned    JobStatus = "orphaned"
 )
 
 // JobType represents the type of job execution.

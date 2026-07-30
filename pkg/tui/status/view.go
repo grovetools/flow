@@ -40,7 +40,10 @@ func getStatusStyles() map[orchestration.JobStatus]lipgloss.Style {
 		orchestration.JobStatusHold:      theme.DefaultTheme.Warning,
 		orchestration.JobStatusAbandoned: theme.DefaultTheme.Muted,     // Very subtle for abandoned jobs
 		orchestration.JobStatusIdle:      theme.DefaultTheme.Highlight, // Agent waiting for next input
-		"interrupted":                    theme.DefaultTheme.Magenta,   // Magenta for interrupted jobs
+		// Reconciled statuses: the process is gone, but nothing recorded
+		// how it ended.
+		orchestration.JobStatusInterrupted: theme.DefaultTheme.Magenta,
+		orchestration.JobStatusOrphaned:    theme.DefaultTheme.Magenta,
 	}
 }
 
@@ -585,7 +588,8 @@ func (m Model) getStatusIcon(status orchestration.JobStatus) string {
 		icon = theme.IconStatusNeedsReview
 	case orchestration.JobStatusIdle:
 		icon = theme.IconStatusPendingUser // Pause icon - waiting for user input
-	case "interrupted": // Jobs that were running but process is dead
+	case orchestration.JobStatusInterrupted, orchestration.JobStatusOrphaned:
+		// Jobs that were running but whose process is gone.
 		icon = theme.IconStatusInterrupted
 	default:
 		// Pending, PendingUser, PendingLLM

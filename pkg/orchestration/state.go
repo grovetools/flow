@@ -888,7 +888,8 @@ func isValidStatus(status JobStatus) bool {
 	case JobStatusPending, JobStatusRunning, JobStatusCompleted,
 		JobStatusFailed, JobStatusBlocked, JobStatusNeedsReview,
 		JobStatusPendingUser, JobStatusPendingLLM, JobStatusAbandoned,
-		JobStatusHold, JobStatusTodo, JobStatusIdle:
+		JobStatusHold, JobStatusTodo, JobStatusIdle,
+		JobStatusInterrupted, JobStatusOrphaned:
 		return true
 	}
 	return false

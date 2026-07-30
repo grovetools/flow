@@ -57,6 +57,8 @@ var jobFields = []fieldDescriptor{
 			string(orchestration.JobStatusBlocked),
 			string(orchestration.JobStatusNeedsReview),
 			string(orchestration.JobStatusAbandoned),
+			string(orchestration.JobStatusInterrupted),
+			string(orchestration.JobStatusOrphaned),
 		},
 		Current: func(j *orchestration.Job) string { return string(j.Status) },
 	},

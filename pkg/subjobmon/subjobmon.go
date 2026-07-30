@@ -118,8 +118,13 @@ type Client interface {
 	StreamState(context.Context) (<-chan daemon.StateUpdate, error)
 }
 
+// terminal reports whether a child job has stopped moving. The reconciled
+// statuses (orphaned/interrupted) count: their process is gone, so a monitor
+// that kept treating them as in-flight would never settle.
 func terminal(s orchestration.JobStatus) bool {
-	return s == orchestration.JobStatusCompleted || s == orchestration.JobStatusFailed || s == orchestration.JobStatusAbandoned
+	return s == orchestration.JobStatusCompleted || s == orchestration.JobStatusFailed ||
+		s == orchestration.JobStatusAbandoned || s == orchestration.JobStatusInterrupted ||
+		s == orchestration.JobStatusOrphaned
 }
 
 // Reconcile re-reads disk truth, repairs daemon state, and returns actionable records.

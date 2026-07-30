@@ -36,6 +36,14 @@ func RetryJob(job *Job, plan *Plan, force bool, autoRun bool) error {
 	case JobStatusFailed:
 		return retryFailedJob(job, plan, autoRun)
 
+	case JobStatusOrphaned, JobStatusInterrupted:
+		// The session-health engine reconciled this job: its process is
+		// gone but nothing recorded how it ended. Resetting is exactly
+		// what retry is for, so these need no --force — but they get the
+		// same liveness veto as a failed job, because "orphaned" means
+		// we lost track of the agent, not that we watched it die.
+		return retryLostJob(job, plan, autoRun)
+
 	case JobStatusRunning:
 		if !force {
 			return refuseRunningJobWithoutForce(job)
@@ -70,6 +78,21 @@ func retryFailedJob(job *Job, plan *Plan, autoRun bool) error {
 		}
 	}
 	return resetJobToPending(job, plan, JobStatusFailed, autoRun)
+}
+
+// retryLostJob resets a reconciled job (orphaned/interrupted) back to pending.
+// Same shape as retryFailedJob, and for the same reason: the frontmatter says
+// the process is gone, but the reconciler only ever had negative evidence. If
+// the agent is in fact alive, re-running would put a second one on the same
+// files.
+func retryLostJob(job *Job, plan *Plan, autoRun bool) error {
+	from := job.Status
+	if isAgentJobType(job.Type) {
+		if alive, pid := checkAgentLiveness(job.ID); alive {
+			return fmt.Errorf("refusing to retry %s: job is marked %s but its agent process is still alive (pid %d). The status is likely stale — wait for the agent to exit, or kill it with 'flow agent kill' first.", job.Filename, from, pid)
+		}
+	}
+	return resetJobToPending(job, plan, from, autoRun)
 }
 
 // resetJobToPending is shared by failed jobs and completed agent jobs that have

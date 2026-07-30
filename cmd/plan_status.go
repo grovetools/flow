@@ -222,12 +222,14 @@ func formatStatusJSON(plan *orchestration.Plan) (string, error) {
 	for _, job := range plan.Jobs {
 		jo := JobOutput{Job: job}
 
-		if job.Status == orchestration.JobStatusFailed || job.Status == "interrupted" {
+		if job.Status == orchestration.JobStatusFailed || job.Status == orchestration.JobStatusInterrupted || job.Status == orchestration.JobStatusOrphaned {
 			// Set error message
 			if job.Metadata.LastError != "" {
 				jo.LastError = job.Metadata.LastError
-			} else if job.Status == "interrupted" {
+			} else if job.Status == orchestration.JobStatusInterrupted {
 				jo.LastError = "Job was interrupted (process died or session ended unexpectedly)"
+			} else if job.Status == orchestration.JobStatusOrphaned {
+				jo.LastError = "Job was orphaned (its agent could not be found; it may have exited without recording an outcome)"
 			} else {
 				jo.LastError = "Job execution failed without recording a specific error"
 			}

@@ -143,9 +143,7 @@ func waitForJobs(ctx context.Context, jobPaths []string, waitAll bool) error {
 			if err != nil {
 				return false, "", ""
 			}
-			isTerminal := status == orchestration.JobStatusCompleted ||
-				status == orchestration.JobStatusFailed ||
-				status == orchestration.JobStatusAbandoned
+			isTerminal := isWaitTerminal(status)
 			return isTerminal, status, jobPaths[0]
 		} else {
 			// Multiple jobs: return on first terminal
@@ -212,12 +210,28 @@ func waitForJobs(ctx context.Context, jobPaths []string, waitAll bool) error {
 	}
 }
 
-// exitWithStatus returns nil (exit 0) for completed, error (exit 1) for failed/abandoned.
+// isWaitTerminal reports whether a status means the wait is over. The
+// reconciled statuses count: a job the session-health engine gave up on has
+// no process left to produce a further transition, so waiting on it would
+// block until the timeout with nothing to show for it.
+func isWaitTerminal(status orchestration.JobStatus) bool {
+	switch status {
+	case orchestration.JobStatusCompleted, orchestration.JobStatusFailed,
+		orchestration.JobStatusAbandoned, orchestration.JobStatusInterrupted,
+		orchestration.JobStatusOrphaned:
+		return true
+	}
+	return false
+}
+
+// exitWithStatus returns nil (exit 0) for completed, error (exit 1) for
+// failed/abandoned and for the reconciled statuses.
 func exitWithStatus(status orchestration.JobStatus) error {
 	switch status {
 	case orchestration.JobStatusCompleted:
 		return nil
-	case orchestration.JobStatusFailed, orchestration.JobStatusAbandoned:
+	case orchestration.JobStatusFailed, orchestration.JobStatusAbandoned,
+		orchestration.JobStatusInterrupted, orchestration.JobStatusOrphaned:
 		return fmt.Errorf("job %s", status)
 	default:
 		return fmt.Errorf("unexpected status: %s", status)

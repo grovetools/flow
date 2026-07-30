@@ -11,10 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// JobStatusInterrupted is a display-only status used to mark jobs whose process
-// has died unexpectedly. It is not persisted to disk.
-const JobStatusInterrupted = JobStatus("interrupted")
-
 // VerifyRunningJobStatus checks the PID liveness for jobs marked as running.
 // If a job's process is dead, its status is updated in-memory to "interrupted".
 // Headless agent jobs are handled separately: they detach from their launcher,

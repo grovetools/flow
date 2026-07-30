@@ -240,7 +240,21 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 					}
 				}
 
-				if job.Status == orchestration.JobStatusFailed || job.Status == orchestration.JobStatusAbandoned {
+				// Explicitly naming a job is a request to run it, so the
+				// non-progressing statuses auto-reset rather than being
+				// rejected as "not runnable". The reconciled statuses
+				// (orphaned/interrupted) are included: they mean the process
+				// was lost, which is exactly the state a re-run fixes.
+				if job.Status == orchestration.JobStatusFailed || job.Status == orchestration.JobStatusAbandoned ||
+					job.Status == orchestration.JobStatusOrphaned || job.Status == orchestration.JobStatusInterrupted {
+					// "Orphaned" is a lost-track verdict, not a witnessed
+					// death. If the agent is in fact still alive, resetting
+					// and re-running would put a second one on the same files.
+					if job.Status == orchestration.JobStatusOrphaned {
+						if alive, pid := orchestration.AgentProcessAlive(job.ID); alive {
+							return fmt.Errorf("refusing to run %s: it is marked orphaned but its agent process is still alive (pid %d). Wait for it to exit, or kill it with 'flow agent kill' first", jobFile, pid)
+						}
+					}
 					fmt.Printf("%s Auto-resetting job '%s' from %s to %s\n",
 						color.CyanString("↺"),
 						job.Title,
