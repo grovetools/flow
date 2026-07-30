@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -92,6 +93,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// instead of firing navigation/quit actions.
 		if !inTextInput && inList {
 			inTextInput = m.isListFiltering()
+		}
+
+		// ── Mode guard + chord seam ──────────────────────────────────────
+		// The guard runs BEFORE ProcessChord (sign-off E3): the c…/t…
+		// namespaces arm only outside a text field, so typing "c" or "t"
+		// into the title/prompt still inserts the character. An already-armed
+		// chord keeps its continuation key (Armed()), so a chord started in
+		// nav mode always completes. The hand-rolled "gg" timer below is left
+		// alone — no namespace begins with "g", so the two never interact.
+		if !inTextInput || m.whichKey.Armed() {
+			res, matched, chordCmd := m.whichKey.ProcessChord(msg)
+			switch res {
+			case keymap.ChordMatched:
+				// Re-synthesize the resolved chord's canonical key so the
+				// switch below resolves it via key.Matches — but only when the
+				// pressed key is not already one of the binding's keys, or a
+				// binding that retains a flat alternate alongside its chord
+				// would have the flat press rewritten to the chord and lost.
+				if len(matched.Keys()) > 0 && !key.Matches(msg, matched) {
+					msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
+				}
+			case keymap.ChordPending:
+				return m, chordCmd
+			case keymap.ChordConsumed:
+				return m, nil
+			case keymap.ChordNone:
+				// Not a chord — fall through unchanged.
+			}
 		}
 
 		// Handle configurable keybindings using key.Matches (these take precedence)

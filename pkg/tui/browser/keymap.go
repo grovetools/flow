@@ -19,8 +19,8 @@ type KeyMap struct {
 	Down              key.Binding
 	PageUp            key.Binding
 	PageDown          key.Binding
-	Home              key.Binding
-	End               key.Binding
+	Top               key.Binding
+	Bottom            key.Binding
 	ViewPlan          key.Binding
 	OpenPlan          key.Binding
 	ViewGit           key.Binding
@@ -53,8 +53,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 			k.Down,
 			k.PageUp,
 			k.PageDown,
-			k.Home,
-			k.End,
+			k.Top,
+			k.Bottom,
 			k.ViewPlan,
 			k.OpenPlan,
 			k.ViewGit,
@@ -80,25 +80,44 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
+// Namespaces returns the which-key chord namespaces for the plan browser TUI,
+// built from the named KeyMap fields (so a user override applied by
+// ApplyTUIOverrides is reflected — namespace.go's ConfigKey-stability rule;
+// never construct members inline). Order here is the wire order ProcessChord
+// relies on.
+func (k KeyMap) Namespaces() []keymap.Namespace {
+	return []keymap.Namespace{
+		{Prefix: "t", Label: "Toggle", Bindings: []key.Binding{
+			k.ToggleGitLog, k.ToggleHold, k.ToggleArchived, k.ToggleColumns,
+		}},
+		{Prefix: "v", Label: "View", Bindings: []key.Binding{
+			k.ViewGit,
+		}},
+		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
+			k.SetHoldStatus,
+		}},
+	}
+}
+
 // Sections returns all keybinding sections for the plan browser TUI,
 // used by the shared help builder to render grouped help screens.
 func (k KeyMap) Sections() []keymap.Section {
+	ns := k.Namespaces()
 	return []keymap.Section{
 		{
 			Name:     "Navigation",
-			Bindings: []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Home, k.End, k.ViewPlan, k.OpenPlan, k.ViewGit},
+			Bindings: []key.Binding{k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom, k.ViewPlan, k.OpenPlan},
 		},
 		{
 			Name: "Actions",
 			Bindings: []key.Binding{
 				k.NewPlan, k.SetActive, k.EditNotes, k.ReviewPlan, k.FinishPlan,
-				k.SetHoldStatus, k.FastForwardUpdate, k.FastForwardMain, k.FastForwardAll,
+				k.FastForwardUpdate, k.FastForwardMain, k.FastForwardAll,
 			},
 		},
-		{
-			Name:     "View",
-			Bindings: []key.Binding{k.ToggleGitLog, k.ToggleHold, k.ToggleArchived, k.ToggleColumns},
-		},
+		ns[0].Section(),
+		ns[1].Section(),
+		ns[2].Section(),
 		{
 			Name:     "System",
 			Bindings: []key.Binding{k.Help, k.Quit},
@@ -127,13 +146,20 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("pgdown", "ctrl+d"),
 			key.WithHelp("pgdn", "page down"),
 		),
-		Home: key.NewBinding(
-			key.WithKeys("home"),
-			key.WithHelp("home", "first plan"),
+		// Canon 60 §7.1: these are the canonical top/bottom motions, and the
+		// FIELD names carry the registry action (ConfigKey). They were spelled
+		// Home/End, which read as two extra actions instead of the canonical
+		// pair — that is reserved-key violation #10. The keys are unchanged
+		// apart from adding the fleet-standard gg to Top; do NOT "fix" this
+		// with an "end"->"bottom" NormalizeAction alias, which breaks the
+		// currently-clean bottom consistency check (see the warning in §7.1).
+		Top: key.NewBinding(
+			key.WithKeys("gg", "home"),
+			key.WithHelp("gg/home", "first plan"),
 		),
-		End: key.NewBinding(
+		Bottom: key.NewBinding(
 			key.WithKeys("end", "G"),
-			key.WithHelp("end", "last plan"),
+			key.WithHelp("end/G", "last plan"),
 		),
 		ViewPlan: key.NewBinding(
 			key.WithKeys("enter"),
@@ -143,9 +169,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("o"),
 			key.WithHelp("o", "open plan workspace"),
 		),
+		// View (v…) namespace member (canon 60 §4.1; was flat `V`).
 		ViewGit: key.NewBinding(
-			key.WithKeys("V"),
-			key.WithHelp("V", "inspect in Git Viewer"),
+			key.WithKeys("vg"),
+			key.WithHelp("vg", "inspect in Git Viewer"),
 		),
 		FinishPlan: key.NewBinding(
 			key.WithKeys("ctrl+x"),
@@ -179,27 +206,57 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("F"),
 			key.WithHelp("F", "update all conflict-free plans from main"),
 		),
+		// Toggle (t…) namespace members (canon 60 RULE T). ToggleGitLog also
+		// vacates flat `g`, the reserved goto prefix it was squatting on —
+		// after this the fleet's flat `g` is fully free for the gg motion.
+		// The letters converge with nb-browser and nav (ta/tc/tg/th).
 		ToggleGitLog: key.NewBinding(
-			key.WithKeys("g"),
-			key.WithHelp("g", "toggle git log"),
+			key.WithKeys("tg"),
+			key.WithHelp("tg", "toggle git log"),
 		),
 		ToggleHold: key.NewBinding(
-			key.WithKeys("H"),
-			key.WithHelp("H", "toggle on-hold"),
+			key.WithKeys("th"),
+			key.WithHelp("th", "toggle on-hold"),
 		),
 		ToggleArchived: key.NewBinding(
-			key.WithKeys("A"),
-			key.WithHelp("A", "toggle archived"),
+			key.WithKeys("ta"),
+			key.WithHelp("ta", "toggle archived"),
 		),
 		ToggleColumns: key.NewBinding(
-			key.WithKeys("T"),
-			key.WithHelp("T", "toggle columns"),
+			key.WithKeys("tc"),
+			key.WithHelp("tc", "toggle columns"),
 		),
+		// Change (c…) namespace member (canon 60 §4.3; was flat `h`, which
+		// means "left" in nine other TUIs).
 		SetHoldStatus: key.NewBinding(
-			key.WithKeys("h"),
-			key.WithHelp("h", "hold/unhold plan"),
+			key.WithKeys("ch"),
+			key.WithHelp("ch", "hold/unhold plan"),
 		),
 	}
 	keymap.ApplyTUIOverrides(cfg, "flow", "plan-list", &km)
+
+	// Disable every promoted Base binding this table browser does not
+	// dispatch, including the ones shadowed by the outer
+	// Up/Down/PageUp/PageDown/Top/Bottom fields (distinct signatures).
+	// Notably Base.TogglePreview squatted on flat `v` and Base.Left/Right on
+	// h/l — both of which the v… namespace and the ch chord now need free.
+	// Kept enabled: Help and Quit, the only Base keys handled here.
+	for _, b := range []*key.Binding{
+		&km.Base.Up, &km.Base.Down, &km.Base.Left, &km.Base.Right,
+		&km.Base.PageUp, &km.Base.PageDown,
+		&km.Base.Home, &km.Base.End, &km.Base.Top, &km.Base.Bottom,
+		&km.Base.Confirm, &km.Base.Cancel, &km.Base.Back, &km.Base.Edit,
+		&km.Base.Delete, &km.Base.Yank, &km.Base.Rename, &km.Base.Refresh, &km.Base.CopyPath,
+		&km.Base.Search, &km.Base.SearchNext, &km.Base.SearchPrev, &km.Base.ClearSearch, &km.Base.Grep,
+		&km.Base.SwitchView, &km.Base.NextTab, &km.Base.PrevTab,
+		&km.Base.FocusNext, &km.Base.FocusPrev, &km.Base.TogglePreview,
+		&km.Base.Tab1, &km.Base.Tab2, &km.Base.Tab3, &km.Base.Tab4, &km.Base.Tab5,
+		&km.Base.Tab6, &km.Base.Tab7, &km.Base.Tab8, &km.Base.Tab9,
+		&km.Base.Select, &km.Base.SelectAll, &km.Base.SelectNone,
+		&km.Base.FoldOpen, &km.Base.FoldClose, &km.Base.FoldToggle,
+		&km.Base.FoldOpenAll, &km.Base.FoldCloseAll,
+	} {
+		b.SetEnabled(false)
+	}
 	return km
 }

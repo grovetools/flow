@@ -167,7 +167,11 @@ func (m Model) View() string {
 		out = lipgloss.NewStyle().MaxWidth(m.width).Render(out)
 	}
 
-	return out
+	// Composite the bottom-anchored which-key popup onto the finished frame.
+	// The wizard's frame is a content block rather than the full viewport, so
+	// the vertical budget is passed explicitly (RenderOverlayAvail) — clamping
+	// to the frame height alone would truncate a namespace that has room.
+	return m.whichKey.RenderOverlayAvail(out, lipgloss.Width(out), m.height, *theme.DefaultTheme)
 }
 
 // FooterView returns the mode indicator + help text for use by the

@@ -11,6 +11,7 @@ import (
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/core/tui/components/help"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	skillservice "github.com/grovetools/skills/pkg/service"
 
@@ -56,6 +57,10 @@ type Model struct {
 	helpModel  help.Model
 	focusIndex int
 	unfocused  bool // Track if we're in unfocused state
+
+	// whichKey is the shared chord/which-key mixin: it arms the c…/t…
+	// namespaces declared by KeyMap.Namespaces() and renders their popup.
+	whichKey keymap.WhichKeyHost
 
 	// Form inputs
 	titleInput   textinput.Model
@@ -438,16 +443,17 @@ func New(cfg Config) Model {
 
 	// Keymap (with overrides)
 	var keys KeyMap
+	coreCfg, _ := config.LoadDefault()
 	if cfg.KeyMap != nil {
 		keys = *cfg.KeyMap
 	} else {
-		coreCfg, _ := config.LoadDefault()
 		keys = NewKeyMap(coreCfg)
 	}
 
 	m := Model{
-		plan: cfg.Plan,
-		keys: keys,
+		plan:     cfg.Plan,
+		keys:     keys,
+		whichKey: keymap.NewWhichKeyHost(coreCfg, keys.Namespaces()...),
 		// Start in unfocused (navigation) mode so switching to the
 		// Add Job tab doesn't drop the user straight into text input
 		// — they press "i" to enter insert mode when ready.

@@ -83,13 +83,16 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("ctrl+d", "pgdown"),
 			key.WithHelp("ctrl+d/pgdown", "page down"),
 		),
+		// Change (c…) namespace members. Chord-only (E4) — the flat `c` was
+		// squatting on the reserved change prefix, and `a` is Ring-1 create
+		// (canon 60 §4.3 / §5.1), so both migrate into c… together.
 		QuickChat: key.NewBinding(
-			key.WithKeys("c"),
-			key.WithHelp("c", "quick chat setup"),
+			key.WithKeys("cc"),
+			key.WithHelp("cc", "quick chat setup"),
 		),
 		QuickAgent: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", "quick agent setup"),
+			key.WithKeys("ca"),
+			key.WithHelp("ca", "quick agent setup"),
 		),
 		// "enter" only (not Base's enter/y): "y" must remain typeable in text
 		// fields.
@@ -97,19 +100,15 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "confirm & next"),
 		),
-		// ctrl+t, not ctrl+g. ctrl+g is treemux's action-chord ARM — the
-		// escape hatch that reaches quit/reload/help/rail — so a host can
-		// never hand it to a hosted app, and this binding was simply dead
-		// whenever the wizard ran inside treemux. Host/hosted arbitration
-		// resolves collisions with ordinary host globals by deferring to the
-		// focused hosted panel, but the leader key, the action key, ctrl+c
-		// and f7-f10 are permanently non-deferrable by design, so this one
-		// can only be fixed here. ctrl+t is free of host globals and, unlike
-		// ctrl+w, is not a readline word-kill the wizard's text fields would
-		// fight over.
+		// Toggle (t…) namespace member (canon 60 RULE T; was ctrl+t). The
+		// chord is also host-safe for the reason the old binding existed:
+		// ctrl+g is treemux's non-deferrable action-chord ARM, so the claw
+		// toggle could never live there; a plain t… chord is not a host
+		// global at all. The mode guard in update.go keeps it from arming
+		// inside a text field.
 		ToggleClaw: key.NewBinding(
-			key.WithKeys("ctrl+t"),
-			key.WithHelp("ctrl+t", "toggle claw"),
+			key.WithKeys("ta"),
+			key.WithHelp("ta", "toggle claw"),
 		),
 	}
 	keymap.ApplyTUIOverrides(cfg, "flow", "plan-add", &km)
@@ -137,16 +136,35 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 	return km
 }
 
+// Namespaces returns the which-key chord namespaces for the add-job wizard,
+// built from the named KeyMap fields (so a user override applied by
+// ApplyTUIOverrides is reflected — namespace.go's ConfigKey-stability rule;
+// never construct members inline). Order here is the wire order ProcessChord
+// relies on.
+func (k KeyMap) Namespaces() []keymap.Namespace {
+	return []keymap.Namespace{
+		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
+			k.QuickChat, k.QuickAgent,
+		}},
+		{Prefix: "t", Label: "Toggle", Bindings: []key.Binding{
+			k.ToggleClaw,
+		}},
+	}
+}
+
 // Sections returns the keybinding sections for the add-job wizard, scoped to
-// only the keys the wizard actually handles. QuickChat/QuickAgent/Confirm live
-// in a "Navigation Mode" section whose name signals that they fire only in
-// navigation mode (unfocused, off the title/prompt text fields) — see the
-// guards in update.go.
+// only the keys the wizard actually handles. The Change (c…) namespace fires
+// only in navigation mode (unfocused, off the title/prompt text fields) and
+// the Toggle (t…) namespace only outside a text field — see the mode guard in
+// update.go.
 func (k KeyMap) Sections() []keymap.Section {
+	ns := k.Namespaces()
 	return []keymap.Section{
 		keymap.NavigationSection(k.Up, k.Down, k.Next, k.Prev, k.GoTop, k.GoBottom, k.PageUp, k.PageDown),
-		keymap.ActionsSection(k.Toggle, k.Submit, k.ToggleClaw),
-		keymap.NewSection("Navigation Mode", k.QuickChat, k.QuickAgent, k.Confirm),
+		keymap.ActionsSection(k.Toggle, k.Submit),
+		ns[0].Section(),
+		ns[1].Section(),
+		keymap.NewSection("Navigation Mode", k.Confirm),
 		k.Base.SystemSection(),
 	}
 }

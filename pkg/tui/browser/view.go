@@ -148,7 +148,12 @@ func (m Model) View() string {
 		s.WriteString(m.footerLine())
 	}
 
-	return padStyle.Render(s.String())
+	// Composite the bottom-anchored which-key popup onto the finished frame.
+	// When embedded the frame is a content block rather than the whole
+	// viewport, so the vertical budget is passed explicitly — clamping to the
+	// frame height alone would truncate a namespace that has room on screen.
+	frame := padStyle.Render(s.String())
+	return m.whichKey.RenderOverlayAvail(frame, lipgloss.Width(frame), m.height, *theme.DefaultTheme)
 }
 
 // footerLine builds the help + status-message line rendered at the

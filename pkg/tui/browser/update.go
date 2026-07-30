@@ -13,6 +13,7 @@ import (
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/state"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 	"github.com/grovetools/core/tui/theme"
 	"gopkg.in/yaml.v3"
 
@@ -455,7 +456,10 @@ func (m Model) reloadPlansCmd() tea.Cmd {
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.columnSelectMode {
 		switch msg.String() {
-		case "esc", "T":
+		// esc closes the column selector. The old flat "T" second exit was
+		// dropped with the T -> tc rebind (chord-only, sign-off E4); a chord
+		// cannot arm inside this modal anyway.
+		case "esc":
 			m.columnSelectMode = false
 		case "up", "k":
 			if m.columnCursor > 0 {
@@ -547,6 +551,47 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// A Model built as a bare struct literal (this package's tests do that
+	// extensively) has a zero-value host, and ProcessChord is NOT nil-safe the
+	// way IsPending/Armed are — it dereferences Sequence. Build the default
+	// host on first use so the seam behaves identically however the Model was
+	// constructed.
+	if m.whichKey.Sequence == nil {
+		m.whichKey = keymap.NewWhichKeyHost(nil, m.keys.Namespaces()...)
+	}
+
+	// ── Chord seam ───────────────────────────────────────────────────────
+	// The reusable which-key host resolves the gg motion (passed as the flat
+	// extra) plus the t…/v…/c… namespace chords, arms the popup on a pending
+	// prefix, and consumes esc-cancel / stray-while-armed. Top-level-only
+	// arming (sign-off E3) comes free: every modal early-return above
+	// (column-select, help, bulk-confirm, notes editor) runs first, so a chord
+	// can never arm inside one.
+	{
+		res, matched, chordCmd := m.whichKey.ProcessChord(msg, m.keys.Top)
+		switch res {
+		case keymap.ChordMatched:
+			// Re-synthesize the resolved chord's canonical key so the switch
+			// below resolves it via key.Matches — but only when the pressed key
+			// is not already one of the binding's keys. Top carries both "gg"
+			// and the retained flat "home"; rewriting a "home" press to "gg"
+			// would be harmless here but is wrong in general.
+			if len(matched.Keys()) > 0 && !key.Matches(msg, matched) {
+				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(matched.Keys()[0])}
+			}
+		case keymap.ChordPending:
+			// Armed; chordCmd is the delayed popup re-render tick for a
+			// namespace prefix (nil for the flat gg motion).
+			return m, chordCmd
+		case keymap.ChordConsumed:
+			// esc dismissed the popup, or a stray key closed an armed namespace
+			// menu — swallow it.
+			return m, nil
+		case keymap.ChordNone:
+			// Not a chord — fall through unchanged.
+		}
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Quit), msg.String() == "ctrl+c":
 		if m.embedMode {
@@ -613,12 +658,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ensureCursorVisible()
 		return m, nil
 
-	case key.Matches(msg, m.keys.Home):
+	case key.Matches(msg, m.keys.Top):
 		m.cursor = 0
 		m.ensureCursorVisible()
 		return m, nil
 
-	case key.Matches(msg, m.keys.End):
+	case key.Matches(msg, m.keys.Bottom):
 		m.cursor = len(m.plans) - 1
 		m.ensureCursorVisible()
 		return m, nil

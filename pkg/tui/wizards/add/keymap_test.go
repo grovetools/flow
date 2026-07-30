@@ -30,11 +30,14 @@ func TestToggleClawIsNotCtrlG(t *testing.T) {
 			t.Fatal("ToggleClaw is bound to ctrl+g — treemux's action-chord arm swallows it and always will")
 		}
 	}
-	if len(km.ToggleClaw.Keys()) != 1 || km.ToggleClaw.Keys()[0] != "ctrl+t" {
-		t.Fatalf("ToggleClaw keys = %v, want [ctrl+t]", km.ToggleClaw.Keys())
+	// Chord canon 60 §10: RULE T moved the claw toggle into the t… namespace.
+	// A plain chord is not a host global at all, so the ctrl+g hazard above
+	// stays fixed by construction.
+	if len(km.ToggleClaw.Keys()) != 1 || km.ToggleClaw.Keys()[0] != "ta" {
+		t.Fatalf("ToggleClaw keys = %v, want [ta]", km.ToggleClaw.Keys())
 	}
 	// The advertised label must move with the binding, or help lies.
-	if km.ToggleClaw.Help().Key != "ctrl+t" {
-		t.Errorf("ToggleClaw help key = %q, want %q", km.ToggleClaw.Help().Key, "ctrl+t")
+	if km.ToggleClaw.Help().Key != "ta" {
+		t.Errorf("ToggleClaw help key = %q, want %q", km.ToggleClaw.Help().Key, "ta")
 	}
 }

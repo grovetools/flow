@@ -16,6 +16,7 @@ import (
 	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/tui/components/help"
 	"github.com/grovetools/core/tui/embed"
+	"github.com/grovetools/core/tui/keymap"
 
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/grovetools/flow/pkg/planutil"
@@ -126,6 +127,9 @@ type Model struct {
 	statusMessage    string
 	help             help.Model
 	keys             KeyMap
+	// whichKey is the shared chord/which-key mixin: the gg motion plus the
+	// t…/v…/c… namespaces declared by KeyMap.Namespaces(), and the popup.
+	whichKey keymap.WhichKeyHost
 	activePlan       string
 	editingNotes     bool
 	notesInput       textinput.Model
@@ -406,10 +410,10 @@ type BrowserPlanFinishRequestedMsg struct {
 // zero values; real data is fetched in Init via async tea.Cmds.
 func New(cfg Config) Model {
 	var km KeyMap
+	cliCfg, _ := config.LoadDefault()
 	if cfg.KeyMap != nil {
 		km = *cfg.KeyMap
 	} else {
-		cliCfg, _ := config.LoadDefault()
 		km = NewKeyMap(cliCfg)
 	}
 
@@ -428,6 +432,7 @@ func New(cfg Config) Model {
 		cwdGitRoot:        cfg.WorkspaceDir,
 		help:              helpModel,
 		keys:              km,
+		whichKey:          keymap.NewWhichKeyHost(cliCfg, km.Namespaces()...),
 		showGitLog:        false,
 		embedMode:         cfg.EmbedMode,
 		hosted:            cfg.Hosted,
