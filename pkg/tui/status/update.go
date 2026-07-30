@@ -473,10 +473,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Job events (job_submitted, job_started, job_completed, job_failed,
 		// job_cancelled, job_pending_user) must trigger a plan refresh so the
 		// TUI's dependency graph stays in sync with the daemon.
-		switch msg.update.UpdateType {
-		case "session",
-			"job_submitted", "job_started", "job_completed",
-			"job_failed", "job_cancelled", "job_pending_user":
+		//
+		// Anything else was already discarded by the listener and never gets
+		// here; daemonUpdateActionable is the authority on which is which.
+		if daemonUpdateActionable[msg.update.UpdateType] {
 			return m, tea.Batch(
 				refreshPlan(m.PlanDir),
 				m.listenToDaemon(),
@@ -1021,20 +1021,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the chord already resolved, it reads false and no popup renders.
 		return m, nil
 
-	case TickMsg:
-		// Toggle cursor visibility for blinking effect
-		m.CursorVisible = !m.CursorVisible
-		return m, blink() // Schedule next tick
-
 	case StatusUpdateMsg:
 		m.StatusSummary = string(msg)
 		return m, refreshPlan(m.PlanDir)
 
 	case RefreshTickMsg:
 		m.lastRefreshTickAt = time.Now()
-		cmds := []tea.Cmd{
-			refreshPlan(m.PlanDir),
-			refreshTick(),
+		cmds := []tea.Cmd{refreshTick()}
+		// Only dispatch the reload when the plan directory actually moved.
+		// Skipping here rather than inside the RefreshMsg handler saves the
+		// message too, and a message is never free: it wakes the event loop
+		// and costs a full re-render of the job table.
+		if _, redundant := m.planReloadRedundant(); !redundant {
+			cmds = append(cmds, refreshPlan(m.PlanDir))
 		}
 		// Background-summarize in-progress agent jobs so the TOKENS column
 		// shows a live ctx (and running subagent costs), throttled so large
@@ -1073,6 +1072,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case RefreshMsg:
 		logger := logging.NewLogger("flow-tui")
 
+		// Nothing LoadPlan reads has changed since the last refresh? Then the
+		// reload would rebuild identical state out of tens of megabytes of
+		// markdown — on this goroutine, on a 2s tick, forever.
+		fingerprint, unchanged := m.planReloadRedundant()
+		if unchanged {
+			return m, nil
+		}
+
 		// Token column cells memoize artifact reads; a completing job may
 		// have just written its token-usage.json, so invalidate on refresh.
 		m.clearTokenColumnCache()
@@ -1086,6 +1093,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Err = err
 			return m, nil
 		}
+		// Record what this load covered. Taken before the load, so a write
+		// that raced it is still seen as a change on the next tick.
+		m.planFingerprint = fingerprint
 
 		// Verify running jobs (check PIDs, clear stale "running" statuses)
 		// Skip when daemon is connected — the daemon handles session liveness

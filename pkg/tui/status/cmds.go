@@ -58,7 +58,6 @@ type (
 	ArchiveConfirmedMsg   struct{ Job *orchestration.Job }
 	EditFileAndQuitMsg    struct{ FilePath string }
 	EditFileInTmuxMsg     struct{ Err error }
-	TickMsg               time.Time
 	StatusUpdateMsg       string
 	RefreshTickMsg        time.Time
 	RenameCompleteMsg     struct{ Err error }
@@ -1148,12 +1147,12 @@ func updateDepsCmd(job *orchestration.Job, newDeps []string) tea.Cmd {
 	}
 }
 
-// blink returns a command that sends a tick message every 500ms for cursor blinking
-func blink() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-		return TickMsg(t)
-	})
-}
+// There is deliberately no cursor-blink tick here. The 500ms loop that used
+// to live at this spot toggled a CursorVisible flag no View ever read, so it
+// bought nothing and cost a wake-up plus a full table re-render twice a
+// second — the second-largest idle cost after the compositor's old
+// unconditional 60fps composite. Text inputs animate their own cursors
+// (textinput.Model owns that tick, and only while focused).
 
 const (
 	// refreshInterval is the cadence of the plan-refresh tick that reloads

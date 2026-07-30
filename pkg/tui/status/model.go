@@ -115,7 +115,6 @@ type Model struct {
 	KeyMap           KeyMap
 	Help             help.Model
 	WhichKey         keymap.WhichKeyHost // Chord/which-key mixin: shared Sequence engine + namespaces + show-delay
-	CursorVisible    bool                // Track cursor visibility for blinking animation
 	Renaming         bool
 	RenameInput      textinput.Model
 	RenameJobIndex   int
@@ -193,6 +192,12 @@ type Model struct {
 	// transcript is routed into the already-open log viewport while the
 	// cursor rests on its row. Empty when the cursor is not on an agent
 	// row (the viewport shows the job log as usual).
+	// planFingerprint is orchestration.PlanFingerprint as of the last plan
+	// reload. The refresh handler compares against it so a poll that finds
+	// the plan directory untouched costs a stat sweep instead of re-reading
+	// and re-parsing every job file.
+	planFingerprint string
+
 	workflowSelectedAgentID string
 	// workflowDirtyJobs marks jobs whose workflow state changed since the
 	// last display-row rebuild. Rebuilds are coalesced on a ~100ms tick
@@ -842,7 +847,6 @@ func New(cfg Config) Model {
 		KeyMap:                   keyMap,
 		Help:                     helpModel,
 		WhichKey:                 keymap.NewWhichKeyHost(cliCfg, keyMap.Namespaces()...),
-		CursorVisible:            true,
 		LogViewer:                logViewerModel,
 		ShowLogs:                 false, // Start with logs hidden by default
 		ActiveLogJob:             nil,
@@ -927,10 +931,61 @@ func (m Model) listenStream() tea.Cmd {
 	}
 }
 
+// daemonUpdateActionable lists the daemon state-update types the status view
+// derives anything from. The SSE subscription is host-wide and carries the
+// whole daemon's state traffic — workspace deltas, git status, note and plan
+// indexes, skill syncs, focus changes — at hundreds of events a minute on a
+// busy host. Every one of them used to become a tea.Msg, and every tea.Msg
+// costs an Update pass plus a full re-render of the job table, for updates
+// this model has never read. They are dropped in the listener instead.
+//
+// Keep in sync with the daemonStateUpdateMsg case in Update: an update type
+// that is acted on there but missing here would never arrive.
+var daemonUpdateActionable = map[string]bool{
+	"session":          true,
+	"job_submitted":    true,
+	"job_started":      true,
+	"job_completed":    true,
+	"job_failed":       true,
+	"job_cancelled":    true,
+	"job_pending_user": true,
+}
+
+// planReloadRedundant reports whether reloading the plan from disk would
+// rebuild byte-identical state, and returns the plan directory fingerprint it
+// judged that by (which the caller stores once a reload does happen).
+//
+// The fingerprint is one stat per job file; the reload it guards is a read
+// plus a UTF-8 validation plus a YAML parse of every job file, which on a
+// mature plan is tens of megabytes on a 2s tick.
+//
+// Three things the refresh pass does are NOT derived from the job files, so a
+// reload is never called redundant while any of them is in play:
+//   - VerifyRunningJobStatus reaps dead PIDs, and a process dying leaves no
+//     trace on disk. Only the daemon-connected case may skip it, and only
+//     because the daemon owns session liveness there — the same condition the
+//     call itself is already guarded by.
+//   - the skill and artifacts panes re-read .artifacts/, which a running agent
+//     writes without touching any job file.
+func (m Model) planReloadRedundant() (fingerprint string, redundant bool) {
+	fingerprint, err := orchestration.PlanFingerprint(m.PlanDir)
+	if err != nil || fingerprint == "" || fingerprint != m.planFingerprint {
+		return fingerprint, false
+	}
+	if !m.DaemonConnected {
+		return fingerprint, false
+	}
+	if m.ActiveDetailPane == SkillPane || m.ActiveDetailPane == ArtifactsPaneDetail {
+		return fingerprint, false
+	}
+	return fingerprint, true
+}
+
 // listenToDaemon returns a tea.Cmd that blocks on the Model's daemon SSE
-// stream channel for the next state update. The listener goroutine is
-// tracked by streamWg so Close() can wait for it to exit after the stream
-// context is cancelled.
+// stream channel for the next actionable state update, discarding the rest
+// (see daemonUpdateActionable) without waking the Update loop. The listener
+// goroutine is tracked by streamWg so Close() can wait for it to exit after
+// the stream context is cancelled.
 func (m Model) listenToDaemon() tea.Cmd {
 	ch := m.streamCh
 	if ch == nil {
@@ -944,11 +999,15 @@ func (m Model) listenToDaemon() tea.Cmd {
 		if wg != nil {
 			defer wg.Done()
 		}
-		update, ok := <-ch
-		if !ok {
-			return daemonStreamErrorMsg{err: nil}
+		for {
+			update, ok := <-ch
+			if !ok {
+				return daemonStreamErrorMsg{err: nil}
+			}
+			if daemonUpdateActionable[update.UpdateType] {
+				return daemonStateUpdateMsg{update: update}
+			}
 		}
-		return daemonStateUpdateMsg{update: update}
 	}
 }
 
@@ -982,7 +1041,6 @@ func (m *Model) Close() error {
 // Init initializes the TUI
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		blink(),
 		refreshTick(),
 		subscribeToDaemonCmd(),
 		m.listenStream(),

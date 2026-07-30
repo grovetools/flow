@@ -3,6 +3,7 @@ package orchestration
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,49 @@ import (
 	"github.com/grovetools/core/util/sanitize"
 	"gopkg.in/yaml.v3"
 )
+
+// PlanFingerprint returns a cheap signature of everything LoadPlan reads: the
+// name, size and modification time of each top-level file it opens (the job
+// markdown files and .grove-plan.yml). An unchanged fingerprint means an
+// identical LoadPlan result, so a poller can skip the reload — which matters
+// because a mature plan directory is tens of megabytes of markdown and the
+// status TUI re-reads it on a 2s tick.
+//
+// The signature is one stat per candidate file; the load it replaces is a
+// read plus a UTF-8 validation plus a YAML parse per file.
+//
+// Compute it BEFORE loading, never after: a file written between the load and
+// the fingerprint would otherwise be recorded as already-seen and its change
+// missed until something else touched the directory.
+func PlanFingerprint(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("reading plan directory: %w", err)
+	}
+	h := fnv.New64a()
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".md") && name != planConfigFilename {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			// A file that vanished mid-scan: fold the error in rather than
+			// bailing, so the next scan differs and forces a reload.
+			fmt.Fprintf(h, "%s\x00err\n", name)
+			continue
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00%d\n", name, info.Size(), info.ModTime().UnixNano())
+	}
+	return strconv.FormatUint(h.Sum64(), 16), nil
+}
+
+// planConfigFilename is the optional per-plan config LoadPlan reads alongside
+// the job files.
+const planConfigFilename = ".grove-plan.yml"
 
 // LoadPlan loads all jobs from a plan directory.
 func LoadPlan(dir string) (*Plan, error) {
@@ -36,7 +80,7 @@ func LoadPlan(dir string) (*Plan, error) {
 	}
 
 	// Load .grove-plan.yml if it exists
-	planConfigPath := filepath.Join(dir, ".grove-plan.yml")
+	planConfigPath := filepath.Join(dir, planConfigFilename)
 	if _, err := os.Stat(planConfigPath); err == nil {
 		yamlFile, err := os.ReadFile(planConfigPath)
 		if err == nil {
@@ -142,7 +186,7 @@ func LoadPlanLenient(dir string) (*Plan, []error) {
 		plan.SpecFile = specPath
 	}
 
-	planConfigPath := filepath.Join(dir, ".grove-plan.yml")
+	planConfigPath := filepath.Join(dir, planConfigFilename)
 	if _, err := os.Stat(planConfigPath); err == nil {
 		yamlFile, err := os.ReadFile(planConfigPath)
 		if err == nil {
