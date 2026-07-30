@@ -1827,6 +1827,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.Close()
 				return m, tea.Quit
 			default:
+				// Everything else goes to the input, which brings its own
+				// readline keymap with it: ctrl+u clears the query in place
+				// (the one-key clear), ctrl+w drops a word, ctrl+a/ctrl+e jump
+				// to the ends. Adding a case above for any of those keys would
+				// take them away — check the textinput KeyMap first.
 				prev := m.jobFilterInput.Value()
 				m.jobFilterInput, cmd = m.jobFilterInput.Update(msg)
 				if m.jobFilterInput.Value() != prev {

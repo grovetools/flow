@@ -219,6 +219,32 @@ func TestJobFilter_SlashConsumesChordPrefixes(t *testing.T) {
 	}
 }
 
+// ctrl+u is the one-key clear while typing: it empties the query and restores
+// every row WITHOUT leaving search mode. It is inherited from the textinput's
+// own KeyMap (DeleteBeforeCursor) rather than bound here, so a new case in the
+// focused branch of Update would silently take it away — hence this test.
+func TestJobFilter_CtrlUClearsQueryInPlace(t *testing.T) {
+	m := newFilterKeyModel(newDisplayTestModel(testJob("alpha"), testJob("beta")))
+
+	m, _ = pressKeys(m, "/", "b", "e", "t")
+	if len(m.DisplayRows) != 1 {
+		t.Fatalf("typing should narrow to beta, rows = %v", filterRowIDs(&m))
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = updated.(Model)
+
+	if got := m.jobFilterInput.Value(); got != "" {
+		t.Errorf("ctrl+u should empty the query, got %q", got)
+	}
+	if len(m.DisplayRows) != 2 {
+		t.Errorf("ctrl+u should restore every row, rows = %v", filterRowIDs(&m))
+	}
+	if !m.jobFilterInput.Focused() {
+		t.Error("ctrl+u must not leave search mode — the next keystroke belongs to a new query")
+	}
+}
+
 // Esc blurs while PRESERVING the query; a second Esc clears it; "i" re-enters.
 func TestJobFilter_EscPreservesThenClearsAndReEnters(t *testing.T) {
 	alpha := testJob("alpha")

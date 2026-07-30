@@ -21,6 +21,12 @@ import (
 //   - Esc blurs but PRESERVES the query and the narrowed rows; a second Esc
 //     clears it. Enter also blurs-while-keeping-value and reveals the first
 //     match.
+//   - While focused, the readline editing keys come free from the textinput's
+//     own KeyMap because the update loop forwards every unhandled key to it:
+//     ctrl+u wipes the query without leaving search (the one-key clear),
+//     ctrl+w drops a word, ctrl+a/ctrl+e jump to the ends. Nothing here binds
+//     them — a new case in the focused branch would shadow them, so
+//     TestJobFilter_CtrlUClearsQueryInPlace pins ctrl+u.
 //   - "i" re-enters a preserved (non-empty, blurred) query — vim insert.
 //   - The query renders IN PLACE of the JOB column header behind
 //     theme.IconSearch, with a thin cursor while focused and a fat block while
