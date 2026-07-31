@@ -43,6 +43,11 @@ type PlanAddStepCmd struct {
 	SourceFile          string   `flag:"" help:"Origin file path for tracking job provenance (e.g., Claude plan file)"`
 	RulesFile           string   `flag:"" help:"Path to a custom rules file for this job"`
 	GitChanges          bool     `flag:"" help:"Include git changes as context for this job"`
+	CoordMode           string   `flag:"" help:"Coordinator autonomy for agent jobs: manual (default) or autonomous (hand off to a successor job when context nears the threshold)"`
+	HandoffFrom         string   `flag:"" help:"Predecessor Flow job ID this job continues from (coordinator handoff lineage)"`
+	HandoffDepth        int      `flag:"" help:"Position of this job in its handoff chain (0 = original coordinator)"`
+	HandoffMax          int      `flag:"" help:"Upper bound on chained coordinator handoffs (0 = flow.handoff_max, default 3)"`
+	HandoffThreshold    int      `flag:"" help:"Context-window usage percent that arms an autonomous handoff (0 = flow.handoff_threshold, default 80)"`
 	Skill               string   `flag:"" help:"Skill name to inject into the agent context"`
 	SkillSequence       []string `flag:"" sep:"," help:"List of skills to execute in sequence"`
 	Channels            []string `flag:"" sep:"," help:"External channels to enable (e.g., signal)"`
@@ -270,6 +275,13 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 			return fmt.Errorf("parent job ID not found in this plan: %s", cmd.ParentJobID)
 		}
 		job.ParentJobID = cmd.ParentJobID
+	}
+
+	// Coordinator handoff frontmatter. Stamped after template/flag merging for
+	// the same reason parent_job_id is, and validated against the loaded plan
+	// so a successor can never point at a job outside it.
+	if err := applyHandoffFields(cmd, plan, job); err != nil {
+		return err
 	}
 
 	// Add-time lint warnings for agent-responded chats (warn, never error):

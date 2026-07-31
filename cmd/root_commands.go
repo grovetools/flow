@@ -92,6 +92,7 @@ func NewAddCmd() *cobra.Command {
 	addCmd.Flags().StringVar(&planAddResponder, "responder", "", "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API). Requires --type chat when set to agent")
 	addCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
 	addCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
+	registerHandoffAddFlags(addCmd.Flags())
 	addCmd.Flags().StringVar(&planAddSkill, "skill", "", "Skill name to inject into the agent context")
 	addCmd.Flags().StringSliceVar(&planAddSkillSequence, "skill-sequence", nil, "Comma-separated list of skills to execute in sequence")
 	return addCmd
@@ -216,6 +217,7 @@ func NewJobCmd() *cobra.Command {
 	jobAddCmd.Flags().StringVar(&planAddResponder, "responder", "", "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API). Requires --type chat when set to agent")
 	jobAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
 	jobAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
+	registerHandoffAddFlags(jobAddCmd.Flags())
 	jobAddCmd.Flags().StringVar(&planAddSkill, "skill", "", "Skill name to inject into the agent context")
 	jobAddCmd.Flags().StringSliceVar(&planAddSkillSequence, "skill-sequence", nil, "Comma-separated list of skills to execute in sequence")
 

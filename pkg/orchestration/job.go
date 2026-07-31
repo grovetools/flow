@@ -245,6 +245,18 @@ type Job struct {
 	UsedRulesFile      string `yaml:"used_rules_file,omitempty" json:"used_rules_file,omitempty" jsonschema:"description=Archived rules file used during last execution"`
 	NoteRef            string `yaml:"note_ref,omitempty" json:"note_ref,omitempty" jsonschema:"description=Reference to a notebook entry for context"`
 
+	// Coordinator handoff (see job_handoff.go). A long-running coordinator
+	// agent cannot outlive its context window; these fields let it end its own
+	// job and continue as a fresh successor job in the same plan instead of
+	// silently degrading. coord_mode is the operator's opt-in — nothing hands
+	// off on its own without it — and handoff_depth/handoff_max bound the
+	// chain so a runaway coordinator cannot spawn successors forever.
+	CoordMode        string `yaml:"coord_mode,omitempty" json:"coord_mode,omitempty" jsonschema:"enum=manual,enum=autonomous,description=Coordinator autonomy for agent jobs: manual (default; handoff only on explicit operator request) or autonomous (the agent hands off to a successor job when its context window nears handoff_threshold)"`
+	HandoffFrom      string `yaml:"handoff_from,omitempty" json:"handoff_from,omitempty" jsonschema:"description=Predecessor Flow job ID this job continues from; set automatically on a job created by a coordinator handoff"`
+	HandoffDepth     int    `yaml:"handoff_depth,omitempty" json:"handoff_depth,omitempty" jsonschema:"description=Position of this job in its handoff chain (0 for the original coordinator, incremented for every successor)"`
+	HandoffMax       int    `yaml:"handoff_max,omitempty" json:"handoff_max,omitempty" jsonschema:"description=Upper bound on chained coordinator handoffs (0 = flow.handoff_max, default 3). A successor is refused once handoff_depth reaches it"`
+	HandoffThreshold int    `yaml:"handoff_threshold,omitempty" json:"handoff_threshold,omitempty" jsonschema:"description=Context-window usage percent that arms an autonomous handoff (0 = flow.handoff_threshold, default 80)"`
+
 	// Channel & Autonomous support (for interactive_agent jobs)
 	Channels     []string                 `yaml:"channels,omitempty" json:"channels,omitempty" jsonschema:"description=External channels to enable (e.g. signal)"`
 	SignalTarget string                   `yaml:"signal_target,omitempty" json:"signal_target,omitempty" jsonschema:"description=Named signal target (contact or group) for outbound messages"`

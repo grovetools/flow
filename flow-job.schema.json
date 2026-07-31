@@ -291,6 +291,30 @@
       "type": "string",
       "description": "Reference to a notebook entry for context"
     },
+    "coord_mode": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "autonomous"
+      ],
+      "description": "Coordinator autonomy for agent jobs: manual (default; handoff only on explicit operator request) or autonomous (the agent hands off to a successor job when its context window nears handoff_threshold)"
+    },
+    "handoff_from": {
+      "type": "string",
+      "description": "Predecessor Flow job ID this job continues from; set automatically on a job created by a coordinator handoff"
+    },
+    "handoff_depth": {
+      "type": "integer",
+      "description": "Position of this job in its handoff chain (0 for the original coordinator"
+    },
+    "handoff_max": {
+      "type": "integer",
+      "description": "Upper bound on chained coordinator handoffs (0 = flow.handoff_max"
+    },
+    "handoff_threshold": {
+      "type": "integer",
+      "description": "Context-window usage percent that arms an autonomous handoff (0 = flow.handoff_threshold"
+    },
     "channels": {
       "items": {
         "type": "string"

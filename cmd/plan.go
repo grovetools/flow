@@ -175,6 +175,11 @@ var (
 	planAddGitChanges          bool
 	planAddSkill               string
 	planAddSkillSequence       []string
+	planAddCoordMode           string
+	planAddHandoffFrom         string
+	planAddHandoffDepth        int
+	planAddHandoffMax          int
+	planAddHandoffThreshold    int
 	planAddJSON                bool
 	planAddRun                 bool
 
@@ -263,6 +268,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringVar(&planAddProvider, "provider", "", "Agent CLI provider for agent jobs (claude/codex/opencode; defaults to flow.interactive_provider)")
 	planAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
 	planAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
+	registerHandoffAddFlags(planAddCmd.Flags())
 	planAddCmd.Flags().StringVar(&planAddSkill, "skill", "", "Skill name to inject into the agent context")
 	planAddCmd.Flags().StringSliceVar(&planAddSkillSequence, "skill-sequence", nil, "Comma-separated list of skills to execute in sequence")
 	planAddCmd.Flags().BoolVar(&planAddJSON, "json", false, "Output as JSON (machine-readable {path, id, number, title})")
@@ -412,6 +418,11 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		GitChanges:          planAddGitChanges,
 		Skill:               planAddSkill,
 		SkillSequence:       planAddSkillSequence,
+		CoordMode:           planAddCoordMode,
+		HandoffFrom:         planAddHandoffFrom,
+		HandoffDepth:        planAddHandoffDepth,
+		HandoffMax:          planAddHandoffMax,
+		HandoffThreshold:    planAddHandoffThreshold,
 		JSON:                planAddJSON,
 		RunAfterCreate:      planAddRun,
 		Ctx:                 cmd.Context(),

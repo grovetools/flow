@@ -57,6 +57,18 @@
       "description": "Agent launch target: auto/native/tmux",
       "type": "string"
     },
+    "handoff_max": {
+      "description": "Default upper bound on chained coordinator handoffs (0 = built-in default 3)",
+      "type": "integer",
+      "x-layer": "global",
+      "x-priority": "54"
+    },
+    "handoff_threshold": {
+      "description": "Default context-window usage percent that arms an autonomous coordinator handoff (0 = built-in default 80)",
+      "type": "integer",
+      "x-layer": "global",
+      "x-priority": "53"
+    },
     "interactive_provider": {
       "description": "Provider for interactive sessions: claude/codex/opencode",
       "enum": [

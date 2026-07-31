@@ -39,6 +39,13 @@ type FlowConfig struct {
 	// always take precedence over these.
 	AgentEnv map[string]string `yaml:"agent_env" jsonschema:"description=Environment variables injected into all agent subprocesses" jsonschema_extras:"x-layer=global,x-priority=64"`
 
+	// Coordinator handoff defaults (see job_handoff.go). Per-job frontmatter
+	// always wins; these only set the fallback for jobs that do not pin their
+	// own bound. HandoffMax is the safety valve for unattended chains, so it is
+	// deliberately configurable without touching every job file.
+	HandoffMax       int `yaml:"handoff_max,omitempty" jsonschema:"description=Default upper bound on chained coordinator handoffs (0 = built-in default 3)" jsonschema_extras:"x-layer=global,x-priority=54"`
+	HandoffThreshold int `yaml:"handoff_threshold,omitempty" jsonschema:"description=Default context-window usage percent that arms an autonomous coordinator handoff (0 = built-in default 80)" jsonschema_extras:"x-layer=global,x-priority=53"`
+
 	// Recipe settings
 	Recipes map[string]RecipeConfig `yaml:"recipes" jsonschema:"description=Recipe-specific variable overrides" jsonschema_extras:"x-layer=project,x-priority=90"`
 }
