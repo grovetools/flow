@@ -74,7 +74,7 @@ func (f *fakeClient) GetSubjobSnapshot(context.Context, string, string) (*models
 	return f.snapshot, nil
 }
 
-func (f *fakeClient) StreamState(context.Context) (<-chan daemon.StateUpdate, error) {
+func (f *fakeClient) StreamState(context.Context, ...daemon.StreamFilter) (<-chan daemon.StateUpdate, error) {
 	return make(chan daemon.StateUpdate), nil
 }
 

@@ -27,7 +27,7 @@ const (
 // daemon.Client satisfies it; tests substitute a fake.
 type DaemonWorkflowClient interface {
 	GetWorkflowSnapshot(ctx context.Context) (*models.WorkflowSnapshot, error)
-	StreamState(ctx context.Context) (<-chan daemon.StateUpdate, error)
+	StreamState(ctx context.Context, filter ...daemon.StreamFilter) (<-chan daemon.StateUpdate, error)
 }
 
 // DaemonSourceOptions configures a DaemonSource.

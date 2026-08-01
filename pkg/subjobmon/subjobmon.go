@@ -115,7 +115,7 @@ func BuildEvent(planDir string, child *orchestration.Job, kind models.SubjobEven
 type Client interface {
 	PublishSubjobEvent(context.Context, models.SubjobEvent) error
 	GetSubjobSnapshot(context.Context, string, string) (*models.SubjobSnapshot, error)
-	StreamState(context.Context) (<-chan daemon.StateUpdate, error)
+	StreamState(context.Context, ...daemon.StreamFilter) (<-chan daemon.StateUpdate, error)
 }
 
 // terminal reports whether a child job has stopped moving. The reconciled

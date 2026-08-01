@@ -34,7 +34,7 @@ func (f *fakeDaemonClient) GetWorkflowSnapshot(ctx context.Context) (*models.Wor
 	return f.snapshot, f.snapErr
 }
 
-func (f *fakeDaemonClient) StreamState(ctx context.Context) (<-chan daemon.StateUpdate, error) {
+func (f *fakeDaemonClient) StreamState(ctx context.Context, _ ...daemon.StreamFilter) (<-chan daemon.StateUpdate, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.streams) == 0 {

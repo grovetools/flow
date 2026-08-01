@@ -207,8 +207,10 @@ func TestDaemonListenerDropsUpdatesTheViewNeverReads(t *testing.T) {
 	ch := make(chan daemon.StateUpdate, 16)
 	m := Model{streamCh: ch}
 
-	for _, noise := range []string{"workspaces", "workspaces_delta", "git_status",
-		"focus", "note_index", "plan_index", "skill_sync", "watcher_status"} {
+	for _, noise := range []string{
+		"workspaces", "workspaces_delta", "git_status",
+		"focus", "note_index", "plan_index", "skill_sync", "watcher_status",
+	} {
 		ch <- daemon.StateUpdate{UpdateType: noise}
 	}
 	ch <- daemon.StateUpdate{UpdateType: "job_completed"}
@@ -225,8 +227,10 @@ func TestDaemonListenerDropsUpdatesTheViewNeverReads(t *testing.T) {
 
 	// Every type the Update loop acts on must survive the filter, or it would
 	// never arrive at all.
-	for _, actionable := range []string{"session", "job_submitted", "job_started",
-		"job_completed", "job_failed", "job_cancelled", "job_pending_user"} {
+	for _, actionable := range []string{
+		"session", "job_submitted", "job_started",
+		"job_completed", "job_failed", "job_cancelled", "job_pending_user",
+	} {
 		if !daemonUpdateActionable[actionable] {
 			t.Errorf("update type %q is acted on in Update but dropped by the listener", actionable)
 		}
@@ -237,5 +241,45 @@ func TestDaemonListenerDropsUpdatesTheViewNeverReads(t *testing.T) {
 	close(closed)
 	if _, ok := (Model{streamCh: closed}).listenToDaemon()().(daemonStreamErrorMsg); !ok {
 		t.Error("a closed daemon stream did not surface as a stream error")
+	}
+}
+
+// TestDaemonStreamFilterMatchesTheActionableSet pins the server-side half. The
+// filter is what the daemon is told at subscribe time, so a type that is
+// actionable here but missing from the declaration would be dropped in the
+// daemon and never reach the listener that would have accepted it — a silent
+// failure the client-side guard cannot catch.
+func TestDaemonStreamFilterMatchesTheActionableSet(t *testing.T) {
+	f := daemonStreamFilter()
+
+	for typ, want := range daemonUpdateActionable {
+		if want && !f.AllowsType(typ) {
+			t.Errorf("actionable type %q is not declared to the daemon", typ)
+		}
+	}
+	if len(f.Types) != len(daemonUpdateActionable) {
+		t.Errorf("declared %d types, actionable set has %d — they must not drift",
+			len(f.Types), len(daemonUpdateActionable))
+	}
+
+	// The subscribe-time snapshot is the largest frame on the wire and this
+	// view reads nothing out of it. Declaring it would give back most of the
+	// saving this filter exists for.
+	if f.AllowsType(daemon.StreamTypeInitial) {
+		t.Error("the status view declared the initial snapshot it never reads")
+	}
+	for _, noise := range []string{
+		"workspaces", "workspaces_delta", "note_index",
+		"plan_index", "skill_sync", "focus", "watcher_status", "memory_index",
+	} {
+		if f.AllowsType(noise) {
+			t.Errorf("filter admits %q, which the Update loop discards", noise)
+		}
+	}
+
+	// No path allow-list: job and session frames carry no workspace path, so
+	// one would narrow nothing and risk starving the view.
+	if len(f.Paths) != 0 {
+		t.Errorf("filter declared paths %v; job/session frames carry none", f.Paths)
 	}
 }

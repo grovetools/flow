@@ -119,7 +119,7 @@ func subscribeToDaemonCmd() tea.Cmd {
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
-		ch, err := client.StreamState(ctx)
+		ch, err := client.StreamState(ctx, daemonStreamFilter())
 		if err != nil {
 			cancel()
 			client.Close()

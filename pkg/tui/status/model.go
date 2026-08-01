@@ -932,12 +932,18 @@ func (m Model) listenStream() tea.Cmd {
 }
 
 // daemonUpdateActionable lists the daemon state-update types the status view
-// derives anything from. The SSE subscription is host-wide and carries the
-// whole daemon's state traffic — workspace deltas, git status, note and plan
-// indexes, skill syncs, focus changes — at hundreds of events a minute on a
-// busy host. Every one of them used to become a tea.Msg, and every tea.Msg
-// costs an Update pass plus a full re-render of the job table, for updates
-// this model has never read. They are dropped in the listener instead.
+// derives anything from. The daemon's stream is host-wide and carries the whole
+// daemon's state traffic — workspace deltas, git status, note and plan indexes,
+// skill syncs, focus changes — plus a subscribe-time snapshot of every enriched
+// workspace, which is the largest thing on the wire by a wide margin. None of
+// it is read here.
+//
+// This set is now declared to the daemon at subscribe time (see
+// subscribeToDaemonCmd), so non-matching events are dropped server-side and
+// never serialized, written, or decoded. listenToDaemon still checks it as a
+// thin guard: the daemon may be an older binary that ignores the filter, and a
+// client that trusts a server-side filter it cannot verify is one rollback away
+// from re-rendering on every git sweep.
 //
 // Keep in sync with the daemonStateUpdateMsg case in Update: an update type
 // that is acted on there but missing here would never arrive.
@@ -949,6 +955,16 @@ var daemonUpdateActionable = map[string]bool{
 	"job_failed":       true,
 	"job_cancelled":    true,
 	"job_pending_user": true,
+}
+
+// daemonStreamFilter is the subscribe-time declaration derived from
+// daemonUpdateActionable. It deliberately does NOT list daemon.StreamTypeInitial:
+// the status view reads nothing out of the workspace snapshot, and that frame is
+// the bulk of the bytes this subscription would otherwise cost. It also declares
+// no path allow-list — job and session events carry no workspace path, so one
+// would filter nothing this model cares about.
+func daemonStreamFilter() daemon.StreamFilter {
+	return daemon.StreamFilter{Types: daemon.StreamFilterTypes(daemonUpdateActionable)}
 }
 
 // planReloadRedundant reports whether reloading the plan from disk would

@@ -494,7 +494,7 @@ type fakePlanIndexClient struct {
 	snapshot *models.PlanIndexSnapshot
 }
 
-func (f *fakePlanIndexClient) StreamState(context.Context) (<-chan daemon.StateUpdate, error) {
+func (f *fakePlanIndexClient) StreamState(context.Context, ...daemon.StreamFilter) (<-chan daemon.StateUpdate, error) {
 	return f.updates, nil
 }
 
@@ -573,7 +573,7 @@ type baselineFakeClient struct {
 	calls    int
 }
 
-func (f *baselineFakeClient) StreamState(context.Context) (<-chan daemon.StateUpdate, error) {
+func (f *baselineFakeClient) StreamState(context.Context, ...daemon.StreamFilter) (<-chan daemon.StateUpdate, error) {
 	return f.updates, nil
 }
 
