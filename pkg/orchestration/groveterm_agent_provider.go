@@ -30,6 +30,10 @@ type GrovetermAgentProvider struct {
 	agentTarget string             // "native" or "tuimux" — selects Mux type
 	agentEnv    map[string]string  // flow.agent_env injected into the agent process (before GROVE_* keys)
 	extraEnv    map[string]string  // additional env vars (e.g., GROVE_FLOW_ISOLATED for isolated agents)
+
+	// confirmation is the handle for the post-launch discovery goroutine the
+	// most recent LaunchPrepared started. See awaitSessionConfirmation.
+	confirmation *sessionConfirmation
 }
 
 // NewGrovetermAgentProvider creates a new GrovetermAgentProvider.
@@ -174,12 +178,17 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 		p.log.WithError(err).Warn("Failed to create lock file")
 	}
 
-	// Asynchronously discover PID and register session in background
-	go func() {
+	// Discover the PID and confirm the session in the background so a TUI or
+	// groved's jobrunner is not held for the tens of seconds discovery can take.
+	// The handle is what makes that safe for a caller that is about to exit —
+	// see awaitSessionConfirmation.
+	p.confirmation = startSessionConfirmation(func() error {
 		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, expectedNativeID); err != nil {
 			p.log.WithError(err).Error("Failed to discover and register groveterm session")
+			return err
 		}
-	}()
+		return nil
+	})
 
 	p.ulog.Success("Native agent pane spawned").
 		Field("job_id", job.ID).
@@ -188,6 +197,14 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 		Log(ctx)
 
 	return nil
+}
+
+// awaitSessionConfirmation implements preparedInteractiveAgentProvider: it
+// blocks until the goroutine started by LaunchPrepared has finished discovering
+// the session and confirming it with the daemon. Only callers that are about to
+// exit need it; the daemon jobrunner outlives the goroutine and skips it.
+func (p *GrovetermAgentProvider) awaitSessionConfirmation(ctx context.Context) error {
+	return p.confirmation.wait(ctx)
 }
 
 // discoverAndRegisterSessionAsync discovers the agent PID and transcript path,

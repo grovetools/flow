@@ -102,15 +102,45 @@ func PrepareInteractiveAgentResume(job *Job, plan *Plan, workDir, providerName, 
 }
 
 // Launch starts the prepared resume through the provider's normal lifecycle.
+// It returns as soon as the agent pane exists; the session is not yet confirmed
+// with the daemon. Callers must follow a successful Launch with
+// AwaitSessionConfirmation before exiting.
 func (p *PreparedInteractiveAgentResume) Launch(ctx context.Context) error {
 	return p.provider.LaunchPrepared(ctx, p.job, p.plan, p.workDir, p.shellCommand, p.expectedNativeID)
 }
 
-// ResumeInteractiveAgent is the orchestration-level convenience entry point.
+// AwaitSessionConfirmation blocks until the post-launch work Launch started in
+// the background has settled: PID capture, transcript discovery, Pi
+// startup-failure diagnosis, and the daemon ConfirmSession that turns the
+// pending intent into an attachable session.
+//
+// It is separate from Launch, not folded into it, for two reasons. The wait can
+// legitimately run for tens of seconds, so the bound and the progress reporting
+// belong to the caller that owns the terminal. And a confirmation failure must
+// NOT be treated like a launch failure: the agent process is already live by
+// then, so rolling the job back to `completed` (which is what
+// runResumeWithRollback does with a Launch error) would lie about a running
+// agent and, worse, undo the `failed` status handlePiStartupFailure just wrote.
+//
+// Every caller of this package that resumes and then exits must call this. The
+// process exiting first is exactly how job steward-66dd4eb3 ended up wedged at
+// status=pending in the daemon store on 2026-08-01, with a dead PTY treemux
+// could not attach to and a pi startup failure nobody was left to record.
+func (p *PreparedInteractiveAgentResume) AwaitSessionConfirmation(ctx context.Context) error {
+	return p.provider.awaitSessionConfirmation(ctx)
+}
+
+// ResumeInteractiveAgent is the orchestration-level convenience entry point. It
+// blocks through confirmation, so it is safe for a caller that exits right
+// after; use PrepareInteractiveAgentResume directly to bound the wait or report
+// progress while it runs.
 func ResumeInteractiveAgent(ctx context.Context, job *Job, plan *Plan, workDir, providerName, nativeSessionID string) error {
 	prepared, err := PrepareInteractiveAgentResume(job, plan, workDir, providerName, nativeSessionID)
 	if err != nil {
 		return err
 	}
-	return prepared.Launch(ctx)
+	if err := prepared.Launch(ctx); err != nil {
+		return err
+	}
+	return prepared.AwaitSessionConfirmation(ctx)
 }

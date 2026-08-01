@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/grovetools/core/util/delegation"
 	"github.com/spf13/cobra"
@@ -103,10 +106,73 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("* Job status updated to 'running'.\n")
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "* Job status updated to 'running'.\n")
 
-	fmt.Printf("* Resumed session for job '%s'.\n", job.Title)
+	// The provider finishes the launch in a background goroutine: PID capture,
+	// transcript discovery, provider startup-failure diagnosis, and the daemon
+	// ConfirmSession that promotes the pending intent into an attachable
+	// session. This process is about to exit, which kills that goroutine — often
+	// before the Go runtime has even scheduled it. That is how a resumed session
+	// ends up stuck at status=pending in the daemon store with a dead PTY, and
+	// how a pi that dies a second after spawn takes its own error message with
+	// it while the job file still claims `running`.
+	//
+	// A confirmation failure is reported, never fatal: the agent is already live
+	// and must not be rolled back to `completed` behind its own back.
+	fmt.Fprintf(out, "* Waiting for the session to register with the daemon...\n")
+	if err := awaitResumeConfirmation(cmd.Context(), out, resumeConfirmationTimeout, resumeConfirmationProgressEvery, prepared.AwaitSessionConfirmation); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "! Session confirmation did not complete: %v\n", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "  The agent is running, but the daemon may still show it as pending.\n")
+	}
+
+	fmt.Fprintf(out, "* Resumed session for job '%s'.\n", job.Title)
 	return nil
+}
+
+// resumeConfirmationTimeout bounds how long `flow plan resume` holds the
+// terminal waiting for session confirmation.
+//
+// The work being waited on is legitimately slow in the worst case:
+// agentstream.WaitForPID polls for the pidfile for up to 30s, and transcript
+// discovery then retries ten times at one-second intervals, so a ceiling much
+// under a minute would routinely abandon a healthy-but-slow launch and
+// reintroduce the orphaning. A live agent settles in well under a second — this
+// bounds pathology, not the expected cost. It also stays comfortably inside the
+// assistant supervisor's 3-minute per-invocation budget
+// (daemon assistant.DefaultFlowTimeout), which shells out to this command.
+const resumeConfirmationTimeout = 60 * time.Second
+
+// resumeConfirmationProgressEvery keeps a slow confirmation from reading as a
+// hung terminal. Without it the command can print nothing for a full minute,
+// which invites the Ctrl-C that recreates the very orphaning this wait prevents.
+const resumeConfirmationProgressEvery = 5 * time.Second
+
+// awaitResumeConfirmation blocks on await until it settles, the bound expires,
+// or the command's context is cancelled, emitting a progress line every tick.
+func awaitResumeConfirmation(ctx context.Context, out io.Writer, timeout, tick time.Duration, await func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// await is run on its own goroutine so the ticker can keep printing even for
+	// a provider whose wait ignores context cancellation.
+	done := make(chan error, 1)
+	go func() { done <- await(ctx) }()
+
+	started := time.Now()
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ticker.C:
+			fmt.Fprintf(out, "  ... still waiting (%ds elapsed, giving up at %ds)\n",
+				int(time.Since(started).Seconds()), int(timeout.Seconds()))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 type resumeSessionInfo struct {

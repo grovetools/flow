@@ -28,6 +28,10 @@ type CodexAgentProvider struct {
 	log      *logrus.Entry
 	ulog     *grovelogging.UnifiedLogger
 	agentEnv map[string]string // flow.agent_env injected into the agent process
+
+	// confirmation is the handle for the post-launch discovery goroutine the
+	// most recent LaunchPrepared started. See awaitSessionConfirmation.
+	confirmation *sessionConfirmation
 }
 
 func NewCodexAgentProvider() *CodexAgentProvider {
@@ -177,12 +181,16 @@ func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan 
 	// the daemon (intent was registered above). This replaces the old
 	// synchronous newest-file scrape, which raced concurrent codex sessions
 	// and blocked the launch path.
-	go func() {
+	// The handle lets a caller that is about to exit wait for this goroutine
+	// instead of killing it mid-discovery — see awaitSessionConfirmation.
+	p.confirmation = startSessionConfirmation(func() error {
 		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
 			p.log.WithError(err).Error("Failed to confirm codex session")
 			// Continue anyway - the agent is running, just tracking may be impaired
+			return err
 		}
-	}()
+		return nil
+	})
 
 	if !isTUIMode {
 		if mux.ActiveMux() != mux.MuxNone {
@@ -214,6 +222,14 @@ func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan 
 
 	// Return immediately. The lock file indicates the running state.
 	return nil
+}
+
+// awaitSessionConfirmation implements preparedInteractiveAgentProvider: it
+// blocks until the goroutine started by LaunchPrepared has finished discovering
+// the session and confirming it with the daemon. Only callers that are about to
+// exit need it; the daemon jobrunner outlives the goroutine and skips it.
+func (p *CodexAgentProvider) awaitSessionConfirmation(ctx context.Context) error {
+	return p.confirmation.wait(ctx)
 }
 
 // buildAgentCommand constructs the codex command for the interactive session.

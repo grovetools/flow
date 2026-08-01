@@ -34,6 +34,15 @@ type InteractiveAgentProvider interface {
 // bypass daemon intent, environment, PID capture, mux routing, or confirmation.
 type preparedInteractiveAgentProvider interface {
 	LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, shellCommand, expectedNativeID string) error
+
+	// awaitSessionConfirmation blocks until the post-launch session discovery
+	// LaunchPrepared started in the background has settled. It is a method on
+	// this interface rather than an optional type assertion because every
+	// prepared launch finishes its session registration in a goroutine, and the
+	// caller that forgets to wait is precisely the bug this seam exists to make
+	// unrepresentable: `flow plan resume` exiting the instant LaunchPrepared
+	// returns, taking confirmation and Pi startup-failure detection with it.
+	awaitSessionConfirmation(ctx context.Context) error
 }
 
 // InteractiveAgentExecutor executes interactive agent jobs in tmux sessions.

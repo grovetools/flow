@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 type recordingPreparedProvider struct {
@@ -12,6 +13,11 @@ type recordingPreparedProvider struct {
 	workDir          string
 	command          string
 	expectedNativeID string
+
+	// confirmation models a real provider: LaunchPrepared kicks off session
+	// discovery in the background and returns before it finishes.
+	confirmation *sessionConfirmation
+	confirmed    bool
 }
 
 func (p *recordingPreparedProvider) LaunchPrepared(_ context.Context, job *Job, plan *Plan, workDir, command, expectedNativeID string) error {
@@ -20,7 +26,16 @@ func (p *recordingPreparedProvider) LaunchPrepared(_ context.Context, job *Job, 
 	p.workDir = workDir
 	p.command = command
 	p.expectedNativeID = expectedNativeID
+	p.confirmation = startSessionConfirmation(func() error {
+		time.Sleep(20 * time.Millisecond)
+		p.confirmed = true
+		return nil
+	})
 	return nil
+}
+
+func (p *recordingPreparedProvider) awaitSessionConfirmation(ctx context.Context) error {
+	return p.confirmation.wait(ctx)
 }
 
 func TestPreparedInteractiveAgentResumeLaunchForwardsPreparedLifecycleInputs(t *testing.T) {
@@ -39,6 +54,27 @@ func TestPreparedInteractiveAgentResumeLaunchForwardsPreparedLifecycleInputs(t *
 	}
 	if provider.command != "claude --resume native-1" || provider.expectedNativeID != "native-1" {
 		t.Fatalf("Launch() did not forward prepared command/native ID: %#v", provider)
+	}
+}
+
+// TestPreparedInteractiveAgentResumeAwaitsBackgroundConfirmation covers the
+// seam itself: Launch is allowed to return with discovery still in flight, but
+// AwaitSessionConfirmation must not return until it has finished. `flow plan
+// resume` exits between those two calls' worth of time, so a wait that does not
+// actually wait leaves the daemon holding a pending session forever.
+func TestPreparedInteractiveAgentResumeAwaitsBackgroundConfirmation(t *testing.T) {
+	provider := &recordingPreparedProvider{}
+	prepared := &PreparedInteractiveAgentResume{
+		provider: provider, job: &Job{ID: "job-1"}, plan: &Plan{Name: "plan-1"}, workDir: "/work",
+	}
+	if err := prepared.Launch(context.Background()); err != nil {
+		t.Fatalf("Launch() error = %v", err)
+	}
+	if err := prepared.AwaitSessionConfirmation(context.Background()); err != nil {
+		t.Fatalf("AwaitSessionConfirmation() error = %v", err)
+	}
+	if !provider.confirmed {
+		t.Fatal("AwaitSessionConfirmation() returned before the provider's background confirmation ran")
 	}
 }
 

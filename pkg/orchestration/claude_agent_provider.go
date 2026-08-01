@@ -30,6 +30,10 @@ type ClaudeAgentProvider struct {
 	log      *logrus.Entry
 	ulog     *grovelogging.UnifiedLogger
 	agentEnv map[string]string // flow.agent_env injected into the agent process
+
+	// confirmation is the handle for the post-launch discovery goroutine the
+	// most recent LaunchPrepared started. See awaitSessionConfirmation.
+	confirmation *sessionConfirmation
 }
 
 func NewClaudeAgentProvider() *ClaudeAgentProvider {
@@ -224,14 +228,17 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 			return fmt.Errorf("failed to send agent command: %w", err)
 		}
 
-		// Asynchronously discover PID and register session in background
-		// This prevents blocking the TUI when launching interactive agents
-		go func() {
+		// Discover the PID and confirm the session in the background so the TUI
+		// is not blocked while an interactive agent launches. The handle lets a
+		// caller that is about to exit wait for it — see awaitSessionConfirmation.
+		p.confirmation = startSessionConfirmation(func() error {
 			if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
 				p.log.WithError(err).Error("Failed to register session with valid PID")
 				// Continue anyway - the agent is running, just tracking may be impaired
+				return err
 			}
-		}()
+			return nil
+		})
 
 		// Print instructions for how to view the agent (don't auto-switch windows)
 		if !isTUIMode {
@@ -383,14 +390,17 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
 	}
 
-	// Asynchronously discover PID and register session in background
-	// This prevents blocking the TUI when launching interactive agents
-	go func() {
+	// Discover the PID and confirm the session in the background so the TUI is
+	// not blocked while an interactive agent launches. The handle lets a caller
+	// that is about to exit wait for it — see awaitSessionConfirmation.
+	p.confirmation = startSessionConfirmation(func() error {
 		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
 			p.log.WithError(err).Error("Failed to register session with valid PID")
 			// Continue anyway - the agent is running, just tracking may be impaired
+			return err
 		}
-	}()
+		return nil
+	})
 
 	p.ulog.Success("Interactive session launched").
 		Field("window", windowName).
@@ -416,6 +426,14 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 	}
 
 	return nil
+}
+
+// awaitSessionConfirmation implements preparedInteractiveAgentProvider: it
+// blocks until the goroutine started by LaunchPrepared has finished discovering
+// the session and confirming it with the daemon. Only callers that are about to
+// exit need it; the daemon jobrunner outlives the goroutine and skips it.
+func (p *ClaudeAgentProvider) awaitSessionConfirmation(ctx context.Context) error {
+	return p.confirmation.wait(ctx)
 }
 
 // resolveJobScope resolves the owning daemon scope for a job launched into
