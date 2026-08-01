@@ -380,7 +380,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case refreshTickMsg:
+	case RefreshTickMsg:
 		// Skip heavy I/O if a load is already in-flight or the panel
 		// isn't focused. Keep the tick heartbeat running so resuming
 		// after focus/idle happens on the next period.

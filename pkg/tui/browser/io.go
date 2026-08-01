@@ -27,8 +27,18 @@ import (
 	"github.com/grovetools/flow/pkg/planutil"
 )
 
-// refreshTickMsg is emitted only for the deliberately slow local fallback.
-type refreshTickMsg time.Time
+// RefreshTickMsg is emitted only for the deliberately slow local fallback.
+//
+// Exported, like status.RefreshTickMsg, so a render gate can classify it: the
+// handler in update.go either lets the tick die (a live daemon snapshot),
+// re-arms it alone (loading, or unfocused), or dispatches loadPlansListCmd —
+// whose typed reply dirties when it lands. None of those is a user-visible
+// consequence the tick itself carries, so a host may skip the frame. Not
+// unconditionally, though: the UPDATED column renders relative times
+// (formatRelativeTime, view.go), which is why the instant travels on the
+// message and why view.RenderNeutral still owes one dirtying tick per clock
+// granule.
+type RefreshTickMsg time.Time
 
 type planIndexConnectedMsg struct {
 	snapshot   *models.PlanIndexSnapshot
@@ -54,7 +64,7 @@ type (
 )
 
 func fallbackRefreshTick() tea.Cmd {
-	return tea.Tick(fallbackRefreshInterval, func(t time.Time) tea.Msg { return refreshTickMsg(t) })
+	return tea.Tick(fallbackRefreshInterval, func(t time.Time) tea.Msg { return RefreshTickMsg(t) })
 }
 
 func planIndexReconnectTick() tea.Cmd {

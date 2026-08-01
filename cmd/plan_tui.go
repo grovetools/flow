@@ -98,7 +98,7 @@ func runPlanTUI(cmd *cobra.Command, args []string) error {
 	// opens the highlighted row in-process, independent of selected-plan state,
 	// and Esc returns to the preserved portfolio cursor.
 	host := newStatusTUIHost(model)
-	compModel := compositor.NewModel(host)
+	compModel := compositor.NewModel(host, compositor.WithRenderNeutral(view.RenderNeutral()))
 	program := tea.NewProgram(compModel, tea.WithAltScreen())
 	finalModel, err := program.Run()
 	if err != nil {

@@ -100,13 +100,28 @@ func (m *Model) maybeRefreshRunningTokenCells(now time.Time) tea.Cmd {
 	// plan with many finished jobs re-reads nothing per tick. Agent live cells
 	// refresh via runningTokenCell (below), not the artifact, so they're left
 	// alone.
+	evicted := false
 	for _, j := range m.Jobs {
 		if isLiveAPIDirectJob(j) {
 			m.evictJobRenderCaches(j.ID)
+			evicted = true
 		}
 	}
 
-	return refreshRunningTokenCellsCmd(m.Jobs)
+	if cmd := refreshRunningTokenCellsCmd(m.Jobs); cmd != nil {
+		return cmd
+	}
+	if evicted {
+		// A plan with live chat/oneshot jobs but no live agent job evicts
+		// cells and dispatches nothing. The eviction has a visible
+		// consequence — the next render re-reads those cells — and the tick
+		// that caused it is render-neutral to the compositor (see
+		// view.RenderNeutral), so without a typed follow-up nothing would
+		// repaint them. This is that follow-up; its handler is a no-op for an
+		// empty summary map.
+		return func() tea.Msg { return runningTokenUsageMsg{} }
+	}
+	return nil
 }
 
 // isLiveAPIDirectJob reports whether a job is an in-progress chat/oneshot job

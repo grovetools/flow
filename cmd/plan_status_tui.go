@@ -67,7 +67,7 @@ func runStatusTUI(plan *orchestration.Plan, graph *orchestration.DependencyGraph
 	}
 	opts = append(opts, tea.WithOutput(os.Stderr))
 
-	compModel := compositor.NewModel(host)
+	compModel := compositor.NewModel(host, compositor.WithRenderNeutral(view.RenderNeutral()))
 	program := tea.NewProgram(compModel, opts...)
 
 	streamWriter := logviewer.NewStreamWriter(program, "System")
