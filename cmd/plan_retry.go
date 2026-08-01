@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -47,6 +48,7 @@ func init() {
 	planRetryCmd.Flags().StringP("plan", "p", "", "Specify the plan slug or directory")
 	planRetryCmd.Flags().BoolP("run", "r", false, "Immediately submit the job after resetting")
 	planRetryCmd.Flags().BoolP("force", "f", false, "Force reset of running jobs")
+	planRetryCmd.Flags().String("agent-target", "", "With --run, the launch target for agent jobs: tmux, native, or tuimux (default: derived from this process's mux)")
 }
 
 // NewRetryCmd creates the top-level `retry` command.
@@ -84,6 +86,7 @@ Examples:
 	cmd.Flags().StringP("plan", "p", "", "Specify the plan slug or directory")
 	cmd.Flags().BoolP("run", "r", false, "Immediately submit the job after resetting")
 	cmd.Flags().BoolP("force", "f", false, "Force reset of running jobs")
+	cmd.Flags().String("agent-target", "", "With --run, the launch target for agent jobs: tmux, native, or tuimux (default: derived from this process's mux)")
 	return cmd
 }
 
@@ -150,6 +153,19 @@ func runPlanRetry(cmd *cobra.Command, args []string) error {
 	job, found := plan.GetJobByFilename(jobFile)
 	if !found {
 		return fmt.Errorf("job not found: %s", jobFile)
+	}
+
+	// --run submits the job, so it needs the same routing decision `plan run`
+	// makes. AgentTargetForSubmission reads plan.Orchestration first, so an
+	// explicit target only has to be injected there; leaving it nil keeps the
+	// existing environment derivation.
+	agentTargetFlag, _ := cmd.Flags().GetString("agent-target")
+	if strings.TrimSpace(agentTargetFlag) != "" {
+		agentTarget, err := orchestration.ResolveAgentTargetExplicit(agentTargetFlag)
+		if err != nil {
+			return err
+		}
+		plan.Orchestration = &orchestration.Config{AgentTarget: agentTarget}
 	}
 
 	// Call RetryJob with the flags

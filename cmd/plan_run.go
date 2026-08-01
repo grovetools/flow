@@ -388,10 +388,13 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Resolve agent_target from the caller's environment. The executor
-	// requires a concrete value — "auto" must be resolved here at the CLI
-	// perimeter, not inside the executor.
-	agentTarget := orchestration.ResolveAgentTarget()
+	// Resolve agent_target from --agent-target, else from the caller's
+	// environment. The executor requires a concrete value — "auto" must be
+	// resolved here at the CLI perimeter, not inside the executor.
+	agentTarget, err := orchestration.ResolveAgentTargetExplicit(planRunAgentTarget)
+	if err != nil {
+		return err
+	}
 
 	ulog.Info("Resolved agent target for CLI run").
 		Field("agent_target", agentTarget).
@@ -917,6 +920,10 @@ var (
 	planRunWatch           bool
 	planRunYes             bool
 	planRunSkipInteractive bool
+	// planRunAgentTarget overrides the environment derivation for callers
+	// whose own environment is not the mux the agent will live in. See
+	// orchestration.ResolveAgentTargetExplicit.
+	planRunAgentTarget string
 )
 
 // claudeSandboxLikely reports whether this process looks like it is running

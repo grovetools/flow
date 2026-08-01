@@ -140,6 +140,7 @@ Examples:
 	runCmd.Flags().BoolVar(&planRunLocal, "local", false, "Force local execution (bypass daemon)")
 	runCmd.Flags().BoolVar(&planRunBackground, "background", false, "Submit to daemon and exit without waiting")
 	runCmd.Flags().BoolVar(&planRunForce, "force", false, "Override an advisory satellite dispatch lease (.grove-lease.yml) on the plan dir")
+	runCmd.Flags().StringVar(&planRunAgentTarget, "agent-target", "", "Launch target for agent jobs: tmux, native, or tuimux (default: derived from this process's mux)")
 	return runCmd
 }
 

@@ -1,6 +1,9 @@
 package orchestration
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/grovetools/core/pkg/mux"
 )
 
@@ -38,6 +41,41 @@ func ResolveAgentTarget() string {
 // that have no pane to launch into.
 func ResolveAgentTargetHosted(hosted bool) string {
 	return mux.ResolveAgentTargetHosted(hosted)
+}
+
+// ResolveAgentTargetExplicit is the CLI perimeter's derivation for callers that
+// may name the target outright. An empty explicit falls back to
+// ResolveAgentTarget, so every existing invocation keeps deriving from its own
+// environment; a named one wins and is validated here rather than deep in a
+// provider, where an unsupported value surfaces as a launch failure after the
+// job has already moved to running.
+//
+// The override exists because the environment derivation assumes the submitting
+// process lives in the mux the agent will live in, and one caller structurally
+// cannot: the daemon-side assistant supervisor runs `flow` from inside groved,
+// which has no TMUX, no TUIMUX_PTY and no GROVE_TERMINAL, so the derivation can
+// only ever answer "tmux". That answer is wrong twice over — the pi family has
+// no prepared tmux resume, and a tmux-hosted session records no daemon PTY,
+// which is the only thing the treemux assistant pane can attach — so the
+// supervisor could never restart the chain it exists to keep alive.
+//
+// Deliberately a flag rather than an environment variable: an exported
+// GROVE_AGENT_TARGET would be inherited by the agent the launch creates, and
+// every `flow plan run` that agent itself issues for OTHER plans would silently
+// adopt the supervisor's routing. GROVE_TERMINAL already taught this lesson
+// (see ResolveAgentTargetHosted).
+func ResolveAgentTargetExplicit(explicit string) (string, error) {
+	target := strings.ToLower(strings.TrimSpace(explicit))
+	if target == "" {
+		return ResolveAgentTarget(), nil
+	}
+	switch target {
+	case AgentTargetTmux, AgentTargetNative, AgentTargetTuimux:
+		return target, nil
+	default:
+		return "", fmt.Errorf("unsupported agent target %q: expected one of %s, %s, %s",
+			explicit, AgentTargetTmux, AgentTargetNative, AgentTargetTuimux)
+	}
 }
 
 // AgentTargetForSubmission returns the target a daemon submission for this plan

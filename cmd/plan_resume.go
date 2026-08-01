@@ -24,8 +24,13 @@ Claude, Codex, and Pi-family sessions are supported.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runPlanResume,
 	}
+	cmd.Flags().StringVar(&planResumeAgentTarget, "agent-target", "", "Launch target for the resumed session: tmux, native, or tuimux (default: derived from this process's mux)")
 	return cmd
 }
+
+// planResumeAgentTarget overrides the environment derivation. See
+// orchestration.ResolveAgentTargetExplicit.
+var planResumeAgentTarget string
 
 func runPlanResume(cmd *cobra.Command, args []string) error {
 	jobPath := args[0]
@@ -41,9 +46,14 @@ func runPlanResume(cmd *cobra.Command, args []string) error {
 
 	// LoadPlan never populates plan.Orchestration (only the run path does), so
 	// without this the resume launch always fell back to tmux — invisible to a
-	// user whose plan runs under treemux/tuimux. Resolve agent_target from the
-	// caller's environment exactly like `plan run` does at the CLI perimeter.
-	plan.Orchestration = &orchestration.Config{AgentTarget: orchestration.ResolveAgentTarget()}
+	// user whose plan runs under treemux/tuimux. Resolve agent_target the same
+	// way `plan run` does at the CLI perimeter: --agent-target if given, else
+	// the caller's environment.
+	agentTarget, err := orchestration.ResolveAgentTargetExplicit(planResumeAgentTarget)
+	if err != nil {
+		return err
+	}
+	plan.Orchestration = &orchestration.Config{AgentTarget: agentTarget}
 
 	job, found := plan.GetJobByFilename(jobFile)
 	if !found {

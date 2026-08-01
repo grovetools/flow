@@ -30,6 +30,44 @@ func TestAgentTargetReExportsDelegate(t *testing.T) {
 	}
 }
 
+// TestResolveAgentTargetExplicit: the override exists for submitters whose own
+// environment is not the mux the agent will live in — the daemon-side assistant
+// supervisor, which runs flow from inside groved. An empty value must still
+// derive, or every existing invocation would change meaning.
+func TestResolveAgentTargetExplicit(t *testing.T) {
+	// A tuimux environment, so a bug that ignored the override would return
+	// tuimux and be visibly wrong for every explicit case below.
+	t.Setenv(mux.EnvTuimuxPTY, "1")
+
+	for _, tt := range []struct {
+		name     string
+		explicit string
+		want     string
+	}{
+		{name: "empty derives from the environment", explicit: "", want: AgentTargetTuimux},
+		{name: "blank derives too", explicit: "   ", want: AgentTargetTuimux},
+		{name: "explicit native wins", explicit: AgentTargetNative, want: AgentTargetNative},
+		{name: "explicit tmux wins", explicit: AgentTargetTmux, want: AgentTargetTmux},
+		{name: "case and padding are forgiven", explicit: "  Native ", want: AgentTargetNative},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveAgentTargetExplicit(tt.explicit)
+			if err != nil {
+				t.Fatalf("ResolveAgentTargetExplicit(%q): %v", tt.explicit, err)
+			}
+			if got != tt.want {
+				t.Errorf("ResolveAgentTargetExplicit(%q) = %q, want %q", tt.explicit, got, tt.want)
+			}
+		})
+	}
+
+	// An unsupported value must be refused HERE, at the CLI perimeter. Deeper
+	// down it only surfaces after the job has already moved to running.
+	if _, err := ResolveAgentTargetExplicit("screen"); err == nil {
+		t.Error("an unsupported target must be refused at the perimeter")
+	}
+}
+
 func TestAgentTargetForSubmission_PlanTargetWins(t *testing.T) {
 	t.Setenv(mux.EnvTuimuxPTY, "1")
 
