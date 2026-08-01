@@ -63,22 +63,28 @@ This turns a standard interactive agent into a "claw" agent that can:
 				return fmt.Errorf("failed to enable autonomous: %w", err)
 			}
 
-			// Resolve tmux target and notify the agent about its new capabilities
-			targetPane, err := orchestration.ResolveInteractiveAgentPane(plan, job)
-			if err == nil && targetPane != "" {
-				// Update daemon with tmux target — harmless fallback; job 42's Mux
-				// dispatch handles the primary routing via Session.Mux.
-				_ = client.UpdateSessionTmuxTarget(ctx, job.ID, targetPane)
+			// Record a tmux delivery target only if this agent genuinely lives in
+			// a tmux pane. The resolved name is synthesized from the project and
+			// job title, so recording it for a treemux/tuimux-hosted agent gives
+			// the daemon a route that leads nowhere — and it outranks nothing,
+			// because it becomes the session's persisted delivery state.
+			session, _ := client.GetSession(ctx, job.ID)
+			if targetPane, paneErr := orchestration.ResolveInteractiveAgentPane(plan, job); paneErr == nil {
+				orchestration.RecordTmuxTargetIfTmuxHostedLogged(ctx, client, job.ID, targetPane, session)
+			}
 
-				notifyCfg := notifyconfig.Load()
-				instructions := notifications.AgentInstructions(notifyCfg, channels, signalTarget)
-				if instructions != "" {
-					msg := fmt.Sprintf("System: %s messaging and autonomous mode have been enabled for this session.\n\n%s", channel, instructions)
-					grovelogging.NewLogger("flow.cmd.claw").WithFields(map[string]interface{}{
-						"job_id":  job.ID,
-						"msg_len": len(msg),
-					}).Info("Injecting claw bootstrap instructions")
-					_ = orchestration.SendInputToInteractiveAgent(plan, job, msg)
+			// The bootstrap instructions go to the agent regardless of how it is
+			// hosted — SendInputToInteractiveAgent routes through the daemon,
+			// which knows the session's real mux.
+			notifyCfg := notifyconfig.Load()
+			if instructions := notifications.AgentInstructions(notifyCfg, channels, signalTarget); instructions != "" {
+				msg := fmt.Sprintf("System: %s messaging and autonomous mode have been enabled for this session.\n\n%s", channel, instructions)
+				grovelogging.NewLogger("flow.cmd.claw").WithFields(map[string]interface{}{
+					"job_id":  job.ID,
+					"msg_len": len(msg),
+				}).Info("Injecting claw bootstrap instructions")
+				if sendErr := orchestration.SendInputToInteractiveAgent(plan, job, msg); sendErr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not deliver claw instructions to the agent: %v\n", sendErr)
 				}
 			}
 

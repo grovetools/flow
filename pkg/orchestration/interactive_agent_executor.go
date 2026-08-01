@@ -602,6 +602,7 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	// daemon-recorded out-of-process PTY can receive it directly even when no
 	// terminal is connected.
 	daemonClient := agentRelayClient(workDir)
+	session, _ := daemonClient.GetSession(ctx, job.ID)
 	payload := buildAgentInputPayload(workDir, job.Provider, input)
 	attempted, daemonErr := sendDaemonAgentInput(ctx, daemonClient, job.ID, payload)
 	daemonClient.Close()
@@ -614,10 +615,16 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 			logger.Debug("Native send succeeded")
 			return nil
 		}
+		// An out-of-process agent has no tmux pane, so the fallback below would
+		// only type into a synthesized name — or, worse, into whatever pane
+		// happens to answer to it. Report the real failure instead.
+		if verdict, reason := ClassifyTmuxStamp(session); verdict == TmuxStampSkip {
+			return fmt.Errorf("daemon input delivery failed for job %s (%s): %w", job.ID, reason, daemonErr)
+		}
 		logger.WithError(daemonErr).WithField("job_id", job.ID).Warn("Native send failed, falling back to tmux")
 	}
 
-	// Fallback: tmux send-keys on the project's tmux session.
+	// Fallback: send-keys on the project's mux session.
 
 	projInfo, err := ResolveProjectForSessionNaming(workDir)
 	if err != nil {
@@ -641,6 +648,13 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	engine, err := mux.DetectMuxEngine(ctx)
 	if err != nil {
 		return fmt.Errorf("mux engine not available: %w", err)
+	}
+
+	// The target is synthesized, never looked up. Confirm it names something
+	// real before typing into it, so an agent the daemon could not reach fails
+	// with its own name rather than an opaque send-keys error.
+	if exists, existsErr := engine.PaneExists(ctx, targetPane); existsErr == nil && !exists {
+		return fmt.Errorf("no pane %q for job %s: the agent is not reachable through the daemon and has no pane of that name (is it still running?)", targetPane, job.ID)
 	}
 
 	if inputMode == "vim" {

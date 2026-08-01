@@ -2025,19 +2025,22 @@ func clawJobCmd(plan *orchestration.Plan, job *orchestration.Job, idleMinutes in
 			return clawResultMsg{JobID: job.ID, Err: fmt.Errorf("enable autonomous: %w", err)}
 		}
 
-		// Resolve tmux target and notify the agent
-		targetPane, err := orchestration.ResolveInteractiveAgentPane(plan, job)
-		if err == nil && targetPane != "" {
-			_ = client.UpdateSessionTmuxTarget(ctx, job.ID, targetPane)
+		// Record a tmux delivery target only for a genuinely tmux-hosted agent:
+		// the resolved pane name is synthesized, and recording it for an
+		// out-of-process agent becomes the session's persisted — and wrong —
+		// delivery route. See orchestration.ClassifyTmuxStamp.
+		session, _ := client.GetSession(ctx, job.ID)
+		if targetPane, paneErr := orchestration.ResolveInteractiveAgentPane(plan, job); paneErr == nil {
+			orchestration.RecordTmuxTargetIfTmuxHostedLogged(ctx, client, job.ID, targetPane, session)
+		}
 
-			notifyCfg := notifyconfig.Load()
-			instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"}, signalTarget)
-			if instructions != "" {
-				msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
-				if engine, err := mux.DetectMuxEngine(ctx); err == nil {
-					_ = engine.SendKeys(ctx, targetPane, msg, "C-m")
-				}
-			}
+		// Deliver the bootstrap instructions through the daemon rather than
+		// send-keys on the ambient mux: the daemon knows the session's real mux,
+		// and an out-of-process agent has no pane to type into.
+		notifyCfg := notifyconfig.Load()
+		if instructions := notifications.AgentInstructions(notifyCfg, []string{"signal"}, signalTarget); instructions != "" {
+			msg := fmt.Sprintf("System: Signal messaging and autonomous mode have been enabled for this session.\n\n%s", instructions)
+			_ = orchestration.SendInputToInteractiveAgent(plan, job, msg)
 		}
 
 		// Update job frontmatter so TUI indicator shows correctly
