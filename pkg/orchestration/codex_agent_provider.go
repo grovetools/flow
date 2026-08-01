@@ -283,7 +283,7 @@ func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pla
 		}
 	} else {
 		logger.WithField("pid", codexPID).Debug("Discovered codex PID via pidfile")
-		if err := agentstream.CleanupPIDFile(job.ID); err != nil {
+		if err := agentstream.CleanupPIDFile(job.ID, codexPID); err != nil {
 			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
 		}
 	}

@@ -371,7 +371,7 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 		}
 	} else {
 		logger.WithField("pid", agentPID).Debug("Discovered agent PID via pidfile")
-		_ = agentstream.CleanupPIDFile(job.ID)
+		_ = agentstream.CleanupPIDFile(job.ID, agentPID)
 	}
 
 	// Update lock file with actual PID

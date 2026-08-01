@@ -249,7 +249,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		pid = 0
 	} else {
 		logger.WithField("pid", pid).Debug("Discovered agent PID via pidfile")
-		_ = agentstream.CleanupPIDFile(job.ID)
+		_ = agentstream.CleanupPIDFile(job.ID, pid)
 	}
 	// Hand the PID to the watcher so it captures the instant Pi dies rather
 	// than on the next backoff tick, while the pane still has contents.

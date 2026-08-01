@@ -620,7 +620,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		}
 	} else {
 		logger.WithField("pid", claudePID).Debug("Discovered Claude Code PID via pidfile")
-		if err := agentstream.CleanupPIDFile(job.ID); err != nil {
+		if err := agentstream.CleanupPIDFile(job.ID, claudePID); err != nil {
 			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
 		}
 	}
