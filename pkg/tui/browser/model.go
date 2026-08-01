@@ -120,16 +120,16 @@ type Model struct {
 	// completed at least one load. The "Loading plans..." placeholder is
 	// gated on !initialLoaded so background refreshes (every refreshInterval)
 	// refresh the list in place instead of flickering back to the placeholder.
-	initialLoaded    bool
-	focused          bool
-	plansDirectory   string
-	cwdGitRoot       string
-	statusMessage    string
-	help             help.Model
-	keys             KeyMap
+	initialLoaded  bool
+	focused        bool
+	plansDirectory string
+	cwdGitRoot     string
+	statusMessage  string
+	help           help.Model
+	keys           KeyMap
 	// whichKey is the shared chord/which-key mixin: the gg motion plus the
 	// t…/v…/c… namespaces declared by KeyMap.Namespaces(), and the popup.
-	whichKey keymap.WhichKeyHost
+	whichKey         keymap.WhichKeyHost
 	activePlan       string
 	editingNotes     bool
 	notesInput       textinput.Model
