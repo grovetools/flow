@@ -559,14 +559,16 @@ func SendInputToIsolatedAgent(jobID, input string) error {
 	// job actually launched with; resolve the input mode from it. An
 	// unresolvable session keeps the historical vim default (Claude).
 	inputMode := "vim"
+	workDir := ""
 	if registry, err := sessions.NewFileSystemRegistry(); err == nil {
 		if metadata, err := registry.Find(jobID); err == nil && metadata != nil {
+			workDir = metadata.WorkingDirectory
 			inputMode = resolveInputMode(metadata.WorkingDirectory, metadata.Provider)
 		}
 	}
 
 	// Try daemon API first.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := agentRelayClient(workDir)
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		payload := input + "\r"
 		if inputMode == "vim" {
@@ -618,7 +620,7 @@ func KillIsolatedAgentServer(jobID string) error {
 func SendInterruptToIsolatedAgent(jobID string) error {
 	// Try daemon API first.
 	ctx := context.Background()
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := agentRelayClientForSession(jobID)
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		err := daemonClient.SendAgentInput(ctx, jobID, "\x03")
 		daemonClient.Close()
@@ -645,7 +647,7 @@ func SendInterruptToIsolatedAgent(jobID string) error {
 func CaptureIsolatedAgentOutput(jobID string) (string, error) {
 	// Try daemon API first.
 	ctx := context.Background()
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := agentRelayClientForSession(jobID)
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		result, err := daemonClient.CaptureAgentPane(ctx, jobID)
 		daemonClient.Close()
@@ -672,7 +674,7 @@ func CaptureIsolatedAgentOutput(jobID string) (string, error) {
 func IsIsolatedAgentRunning(jobID string) bool {
 	// Try daemon API first — check if a running session exists for this job.
 	ctx := context.Background()
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := agentRelayClientForSession(jobID)
 	if connected, _ := daemonClient.IsTerminalConnected(ctx); connected {
 		sessions, err := daemonClient.GetSessions(ctx)
 		daemonClient.Close()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/grovetools/core/pkg/daemon"
+	"github.com/grovetools/core/pkg/sessions"
 )
 
 // sessionHostClient returns the daemon client every session-lifecycle call in
@@ -49,6 +50,37 @@ func sessionHostClientConnectOnly(workDir string) daemon.Client {
 		return daemon.NewSessionHostClientConnectOnly("")
 	}
 	return daemon.NewSessionHostClientConnectOnly(resolveJobScope(workDir))
+}
+
+// agentRelayClient returns the client for the PTY RELAY calls a running agent
+// answers: capture its pane, send it input, interrupt it, ask whether its
+// session is still alive. Same host-first routing as the rest of the
+// session-lifecycle traffic — the daemon that owns the PTY is the only one that
+// can answer — and connect-only, because none of these calls can be satisfied
+// by a daemon that has to be started first. A freshly spawned groved knows
+// nothing about an agent that is already running; every caller here already has
+// a tmux fallback for exactly that case, and starting a worktree daemon to be
+// told "no session" is how the fleet grew a scoped groved per active worktree.
+//
+// workDir is the agent's working directory (it identifies the host, not the
+// daemon); "" is allowed and degrades to the env/registry tiers alone.
+func agentRelayClient(workDir string) daemon.Client {
+	return sessionHostClientConnectOnly(workDir)
+}
+
+// agentRelayClientForSession is agentRelayClient for the isolated-agent calls
+// that only carry a job id. The session registry records the working directory
+// the job launched with, which is what host resolution needs; an unresolvable
+// session degrades to the env/registry tiers with no scope, never to a
+// CWD-derived guess.
+func agentRelayClientForSession(jobID string) daemon.Client {
+	workDir := ""
+	if registry, err := sessions.NewFileSystemRegistry(); err == nil && registry != nil {
+		if metadata, err := registry.Find(jobID); err == nil && metadata != nil {
+			workDir = metadata.WorkingDirectory
+		}
+	}
+	return agentRelayClient(workDir)
 }
 
 // sessionHostClientForJob returns the session-lifecycle client for a job whose

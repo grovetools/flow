@@ -534,7 +534,7 @@ func CaptureInteractiveAgentOutput(plan *Plan, job *Job) (string, error) {
 	// OR when the agent runs as an out-of-process tuimux PTY — the daemon now has
 	// a native PtyID capture tier, so a connected terminal is no longer required.
 	ctx := context.Background()
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := agentRelayClient(workDir)
 	connected, _ := daemonClient.IsTerminalConnected(ctx)
 	session, _ := daemonClient.GetSession(ctx, job.ID)
 	hasPty := session != nil && session.PtyID != ""
@@ -601,7 +601,7 @@ func SendInputToInteractiveAgent(plan *Plan, job *Job, input string) error {
 	// Try daemon API first. A connected groveterm can relay the input, while a
 	// daemon-recorded out-of-process PTY can receive it directly even when no
 	// terminal is connected.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := agentRelayClient(workDir)
 	payload := buildAgentInputPayload(workDir, job.Provider, input)
 	attempted, daemonErr := sendDaemonAgentInput(ctx, daemonClient, job.ID, payload)
 	daemonClient.Close()
@@ -734,7 +734,7 @@ func SendInterruptToInteractiveAgent(plan *Plan, job *Job) error {
 	}
 
 	// Try daemon API first — send Ctrl+C via native pane.
-	daemonClient := daemon.NewWithAutoStart()
+	daemonClient := agentRelayClient(workDir)
 	connected, _ := daemonClient.IsTerminalConnected(ctx)
 	if connected {
 		logger.WithFields(map[string]interface{}{
