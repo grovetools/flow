@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/grovetools/core/fs"
@@ -191,6 +192,11 @@ type Options struct {
 	// linked notes are NOT moved to completed/. Default is false:
 	// every finish moves all of the plan's notes to completed.
 	KeepNotes bool
+	// NoLedger skips the plan-ledger note — the ledger item reports
+	// "Skipped" and its Action is a no-op. Default is false: every finish
+	// promotes the plan's commit ranges, landing receipts and final
+	// worktree state into a notebook note before the teardown items run.
+	NoLedger bool
 }
 
 // Stable item identifiers. Hosts look items up by these constants
@@ -201,6 +207,8 @@ const (
 	ItemMarkFinished            = "mark_finished"
 	ItemKillBoundAgents         = "kill_bound_agents"
 	ItemCloseSession            = "close_session"
+	ItemLedgerNote              = "ledger_note"
+	ItemTombstoneRegistry       = "tombstone_registry"
 	ItemArchiveWorktree         = "archive_worktree"
 	ItemPruneWorktree           = "prune_worktree"
 	ItemCleanDevLinks           = "clean_dev_links"
@@ -314,6 +322,10 @@ type BuildContext struct {
 	// re-resolves its output fd from os.Stdout per frame — frames get
 	// composed into /dev/null while the front buffer is marked painted.
 	Output io.Writer
+	// LedgerWriter creates the plan-ledger note. nil means the real nb
+	// shell-out (writeLedgerNoteViaNb); tests substitute their own so no
+	// test can ever write into the owner's notebook.
+	LedgerWriter LedgerNoteWriter
 }
 
 // Result is what BuildItems returns: the populated item list plus the
@@ -781,6 +793,105 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		},
 	}
 
+	// The two provenance items below share ONE snapshot of the plan's
+	// commit ranges, receipts and final git state. Collecting it is a git
+	// read over every repo in the worktree, and — more importantly — both
+	// items must describe the SAME moment: a ledger that disagrees with the
+	// tombstone's final SHAs is worse than either alone. Collection is lazy
+	// (Action time, not Check time) so building the checklist stays cheap,
+	// and happens before any teardown item has removed anything.
+	var (
+		ledgerOnce sync.Once
+		ledgerSnap Ledger
+	)
+	sharedLedger := func() Ledger {
+		ledgerOnce.Do(func() {
+			ledgerSnap = CollectLedger(plan, planPath, worktreePath, time.Now())
+		})
+		return ledgerSnap
+	}
+
+	ledgerNoteItem := &finish.Item{
+		ID:   ItemLedgerNote,
+		Name: "Write plan ledger note to notebook",
+		Check: func() (string, error) {
+			if opts.NoLedger {
+				return "Skipped (--no-ledger)", nil
+			}
+			if _, err := exec.LookPath("nb"); err != nil {
+				return "N/A (nb not found)", nil
+			}
+			return color.YellowString("Available"), nil
+		},
+		Action: func() error {
+			if opts.NoLedger {
+				return nil
+			}
+			planName := filepath.Base(planPath)
+			body := RenderLedger(sharedLedger())
+			write := bctx.LedgerWriter
+			if write == nil {
+				write = writeLedgerNoteViaNb
+			}
+			// A failure here fails the item, which skips mark_finished /
+			// archive_plan and leaves the plan re-runnable. That is
+			// deliberate: this item exists to stop finish destroying the
+			// plan's story, so it must not be the step that shrugs. The
+			// cost of a retry is a second ledger note (nb never overwrites
+			// a note), which is an accurate extra snapshot, not corruption.
+			result, err := write(planPath, planName, LedgerTitle(planName), body)
+			if err != nil {
+				return fmt.Errorf("write plan ledger note: %w", err)
+			}
+			for _, warning := range result.Warnings {
+				fmt.Fprintf(out, "    Warning: %s\n", warning)
+			}
+			if result.Path != "" {
+				fmt.Fprintf(out, "    Wrote plan ledger: %s\n", result.Path)
+			}
+			return nil
+		},
+	}
+
+	tombstoneItem := &finish.Item{
+		ID:   ItemTombstoneRegistry,
+		Name: "Tombstone worktree registry entry",
+		Check: func() (string, error) {
+			if worktreePath == "" {
+				return "N/A", nil
+			}
+			entry, err := worktreeregistry.Load(pathutil.WorktreeID(worktreePath))
+			if err != nil {
+				return "Not found", nil
+			}
+			if entry.IsFinished() {
+				return color.GreenString("Already finished"), nil
+			}
+			return color.YellowString("Available"), nil
+		},
+		Action: func() error {
+			if worktreePath == "" {
+				return nil
+			}
+			id := pathutil.WorktreeID(worktreePath)
+			entry, err := worktreeregistry.Tombstone(id, sharedLedger().FinalStates())
+			if err != nil {
+				if os.IsNotExist(err) {
+					// Nothing was ever registered for this worktree, so
+					// there is no record to lose. Not a failure.
+					fmt.Fprintf(out, "    No registry entry for %s; nothing to tombstone\n", worktreePath)
+					return nil
+				}
+				// Everything after this point retires the worktree. A lost
+				// record is precisely what this item exists to prevent, so
+				// teardown must not proceed past a failed write.
+				return fmt.Errorf("tombstone registry entry %s: %w", id, err)
+			}
+			fmt.Fprintf(out, "    Recorded %d repo final SHA(s) on the registry tombstone\n", len(entry.FinalSHAs))
+			return nil
+		},
+	}
+
 	items := []*finish.Item{
 		envTeardownItem,
 		pruneItem,
@@ -852,6 +963,12 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return engine.KillSession(context.Background(), sessionName)
 			},
 		},
+		// Both provenance items run BEFORE every retirement item (archive,
+		// prune, branch deletes). They read the branches, checkouts and
+		// commit ranges those items are about to remove, so promoting the
+		// worktree's story has to happen while the story still exists.
+		ledgerNoteItem,
+		tombstoneItem,
 		{
 			// Archive runs BEFORE prune_worktree (and before the
 			// branch-deletion items) so the per-repo git bundles it
@@ -1012,7 +1129,11 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 					// inside it was dirty — that is what left plans listed
 					// forever with no way to retry them.
 					cleanupErr := cleanupEcosystemWorktree(context.Background(), out, gitRoot, worktreeName, plan.Config.Repos, provider, forceEnabled())
-					_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
+					// DeleteUnlessFinished, not Delete: when the tombstone item
+					// has already recorded this worktree's story, pruning the
+					// container must not then erase the record of it. An entry
+					// that was never tombstoned is deleted exactly as before.
+					_, _ = worktreeregistry.DeleteUnlessFinished(pathutil.WorktreeID(wPath))
 					// The container above is the registry-tracked (often anchored
 					// XDG) worktree. A stray legacy `<gitRoot>/.grove-worktrees/<name>`
 					// superproject stub — left by an older legacy-only worktree-prep
@@ -1085,7 +1206,10 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 						fmt.Fprintf(out, "    Warning: failed to prune linked submodule worktree metadata: %v\n", subErr)
 					}
 				}
-				_ = worktreeregistry.Delete(pathutil.WorktreeID(wPath))
+				// DeleteUnlessFinished, not Delete: see the ecosystem branch
+				// above — a tombstone recorded by the provenance item must
+				// survive the prune that follows it.
+				_, _ = worktreeregistry.DeleteUnlessFinished(pathutil.WorktreeID(wPath))
 				// Reap any stray legacy superproject stub left at the in-repo
 				// `<gitRoot>/.grove-worktrees/<name>` location by an older
 				// legacy-only worktree-prep path. In the single-repo case the

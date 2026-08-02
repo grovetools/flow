@@ -79,6 +79,7 @@ func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
 	cmd.Flags().BoolVar(&opts.PruneCloud, "prune-cloud", false, "Additionally pass --include-cloud to the orphan-prune step (requires --prune-orphans)")
 	cmd.Flags().BoolVar(&opts.PreserveCloud, "preserve-cloud", false, "Honor skip_destroy during env teardown (preserve cloud resources across plan finish; default is to destroy)")
 	cmd.Flags().BoolVar(&opts.KeepNotes, "keep-notes", false, "Skip moving the plan's linked notes to completed/ during finish")
+	cmd.Flags().BoolVar(&opts.NoLedger, "no-ledger", false, "Skip writing the plan ledger note (commit ranges, landing receipts, final worktree state) to the notebook")
 	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 }
 
@@ -154,6 +155,14 @@ func applyFinishSelection(items []*finish.Item, opts plan_finish.Options) {
 	enable(plan_finish.ItemKillBoundAgents, true)
 	enable(plan_finish.ItemMergeSubmodules, true)
 	enable(plan_finish.ItemMarkFinished, true)
+	// Provenance promotion is always on for the same reason mark_finished is:
+	// it is not one of the destructive actions the explicit flags select
+	// between, it is the record of what the finish is about to retire. Both
+	// items are self-gating (the ledger reports Skipped under --no-ledger, the
+	// tombstone reports Already finished / Not found), so "always enable"
+	// means "never silently omitted", not "always writes".
+	enable(plan_finish.ItemLedgerNote, true)
+	enable(plan_finish.ItemTombstoneRegistry, true)
 	enable(plan_finish.ItemCloseSession, opts.CloseSession)
 	enable(plan_finish.ItemPruneWorktree, opts.PruneWorktree)
 	enable(plan_finish.ItemArchiveWorktree, opts.ArchiveWorktree)
