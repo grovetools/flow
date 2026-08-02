@@ -197,6 +197,11 @@ type Options struct {
 	// promotes the plan's commit ranges, landing receipts and final
 	// worktree state into a notebook note before the teardown items run.
 	NoLedger bool
+	// NoReviewCheckpoint skips the review-state checkpoint — the item
+	// reports "Skipped" and its Action is a no-op. Default is false: every
+	// finish checkpoints the worktree's review marks and checklists into the
+	// plan's review packet BEFORE the tombstone strips SessionState.
+	NoReviewCheckpoint bool
 }
 
 // Stable item identifiers. Hosts look items up by these constants
@@ -208,6 +213,7 @@ const (
 	ItemKillBoundAgents         = "kill_bound_agents"
 	ItemCloseSession            = "close_session"
 	ItemLedgerNote              = "ledger_note"
+	ItemReviewCheckpoint        = "review_checkpoint"
 	ItemTombstoneRegistry       = "tombstone_registry"
 	ItemArchiveWorktree         = "archive_worktree"
 	ItemPruneWorktree           = "prune_worktree"
@@ -326,7 +332,16 @@ type BuildContext struct {
 	// shell-out (writeLedgerNoteViaNb); tests substitute their own so no
 	// test can ever write into the owner's notebook.
 	LedgerWriter LedgerNoteWriter
+	// ReviewPacketWriter checkpoints the worktree's review state into the
+	// plan's review packet note. nil means the real
+	// orchestration.WriteReviewPacket; tests substitute their own for the
+	// same reason LedgerWriter exists.
+	ReviewPacketWriter ReviewPacketWriter
 }
+
+// ReviewPacketWriter is the finish-side seam over
+// orchestration.WriteReviewPacket.
+type ReviewPacketWriter func(orchestration.ReviewPacketRequest) (orchestration.ReviewPacketResult, error)
 
 // Result is what BuildItems returns: the populated item list plus the
 // branch-merge metadata the wizard header uses.
@@ -853,6 +868,70 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		},
 	}
 
+	// checkpointFailed is set by the review-checkpoint item when its write
+	// fails, and read by the tombstone item. The two are coupled on purpose:
+	// the tombstone STRIPS SessionState, which is where the live review marks
+	// and checklists live, so retiring the record before the checkpoint
+	// succeeded would destroy exactly what the checkpoint exists to preserve.
+	// A closure variable (rather than host-side ordering policy) makes the gate
+	// hold for every host — the CLI runner only skips archive_plan and
+	// mark_finished after a failure, so the tombstone has to refuse for itself.
+	var checkpointFailed error
+
+	reviewCheckpointItem := &finish.Item{
+		ID:   ItemReviewCheckpoint,
+		Name: "Checkpoint review state into the review packet",
+		Check: func() (string, error) {
+			if opts.NoReviewCheckpoint {
+				return "Skipped (--no-review-checkpoint)", nil
+			}
+			if _, err := exec.LookPath("nb"); err != nil {
+				return "N/A (nb not found)", nil
+			}
+			files, checklists, err := orchestration.LiveReviewStateCounts(worktreePath)
+			if err != nil {
+				// Read failure is actionable, not inert: the item runs and
+				// reports the real error rather than quietly claiming there
+				// was nothing to save.
+				return color.YellowString("Available (review state unreadable)"), nil
+			}
+			if files == 0 && checklists == 0 {
+				// Nothing live to checkpoint. The plan's existing packet (if
+				// any) is durable and is left exactly as it is — see
+				// WriteReviewPacket's never-replace-evidence-with-absence rule.
+				return "None (no live review state)", nil
+			}
+			return color.YellowString("Available (%d file mark(s), %d checklist(s))", files, checklists), nil
+		},
+		Action: func() error {
+			if opts.NoReviewCheckpoint {
+				return nil
+			}
+			write := bctx.ReviewPacketWriter
+			if write == nil {
+				write = orchestration.WriteReviewPacket
+			}
+			result, err := write(orchestration.ReviewPacketRequest{
+				PlanDir:       planPath,
+				Plan:          plan,
+				ContainerPath: worktreePath,
+				Trigger:       orchestration.ReviewTriggerFinish,
+			})
+			for _, warning := range result.Warnings {
+				fmt.Fprintf(out, "    Warning: %s\n", warning)
+			}
+			if err != nil {
+				// Record the failure for the tombstone item, then fail. Losing
+				// the review is the one outcome this item exists to prevent, so
+				// it must not shrug.
+				checkpointFailed = err
+				return fmt.Errorf("checkpoint review state: %w", err)
+			}
+			fmt.Fprintf(out, "    %s\n", result.Summary())
+			return nil
+		},
+	}
+
 	tombstoneItem := &finish.Item{
 		ID:   ItemTombstoneRegistry,
 		Name: "Tombstone worktree registry entry",
@@ -872,6 +951,12 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		Action: func() error {
 			if worktreePath == "" {
 				return nil
+			}
+			if checkpointFailed != nil {
+				// The tombstone strips SessionState. With the checkpoint
+				// failed, that would delete review marks and checklists that
+				// exist nowhere else.
+				return fmt.Errorf("refusing to tombstone: the review-state checkpoint failed (%w), and tombstoning would strip the SessionState it did not save", checkpointFailed)
 			}
 			id := pathutil.WorktreeID(worktreePath)
 			entry, err := worktreeregistry.Tombstone(id, sharedLedger().FinalStates())
@@ -963,11 +1048,15 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				return engine.KillSession(context.Background(), sessionName)
 			},
 		},
-		// Both provenance items run BEFORE every retirement item (archive,
+		// The provenance items run BEFORE every retirement item (archive,
 		// prune, branch deletes). They read the branches, checkouts and
 		// commit ranges those items are about to remove, so promoting the
 		// worktree's story has to happen while the story still exists.
+		//
+		// Within the group, the review checkpoint precedes the tombstone
+		// because the tombstone strips the SessionState the checkpoint reads.
 		ledgerNoteItem,
+		reviewCheckpointItem,
 		tombstoneItem,
 		{
 			// Archive runs BEFORE prune_worktree (and before the

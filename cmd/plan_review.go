@@ -64,20 +64,46 @@ func runPlanReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load plan: %w", err)
 	}
 
-	if plan.Config != nil && (plan.Config.Status == "review" || plan.Config.Status == "finished") {
-		fmt.Printf("* Plan '%s' is already marked as '%s'. No action taken.\n", plan.Name, plan.Config.Status)
-		fmt.Println("You can now proceed with final cleanup using 'flow plan finish'.")
-		return nil
-	}
+	alreadyReview := plan.Config != nil && (plan.Config.Status == "review" || plan.Config.Status == "finished")
 
-	// Mark for review: runs the on_review hook, flips status to "review", and
-	// persists .grove-plan.yml. Shared with non-CLI callers (e.g. git-viewer).
-	if err := orchestration.MarkPlanReview(planPath); err != nil {
+	// Mark for review: runs the on_review hook, flips status to "review",
+	// persists .grove-plan.yml, and creates/refreshes the durable review packet
+	// note. The flip is idempotent (shared with non-CLI callers such as the
+	// git-viewer roll-up); the packet refresh is NOT skipped on a plan that is
+	// already in review, because re-running this verb after marking more files
+	// reviewed is exactly how a user asks for a fresh checkpoint.
+	outcome, err := orchestration.MarkPlanReviewWithPacket(planPath)
+	if err != nil {
 		return err
 	}
 
-	fmt.Printf("* Plan '%s' marked for review.\n", plan.Name)
-	fmt.Println("  You can now verify the results and then run 'flow plan finish' to clean up the worktree and branches.")
+	if alreadyReview {
+		fmt.Printf("* Plan '%s' is already marked as '%s'.\n", plan.Name, plan.Config.Status)
+	} else {
+		fmt.Printf("* Plan '%s' marked for review.\n", plan.Name)
+	}
+	reportReviewPacket(outcome)
+	if alreadyReview {
+		fmt.Println("You can now proceed with final cleanup using 'flow plan finish'.")
+	} else {
+		fmt.Println("  You can now verify the results and then run 'flow plan finish' to clean up the worktree and branches.")
+	}
 
-	return nil
+	// A packet failure is reported loudly (non-zero exit) but never un-flips
+	// the plan — the status change already persisted above.
+	return outcome.PacketErr
+}
+
+// reportReviewPacket prints where the review packet landed, plus any non-fatal
+// warnings. A failure is printed here too so the message is adjacent to the
+// plan's status line, then returned by the caller as the command's error.
+func reportReviewPacket(outcome orchestration.PlanReviewOutcome) {
+	for _, warning := range outcome.Packet.Warnings {
+		fmt.Printf("  Warning: %s\n", warning)
+	}
+	if outcome.PacketErr != nil {
+		fmt.Printf("  %v\n", outcome.PacketErr)
+		return
+	}
+	fmt.Printf("  %s\n", outcome.Packet.Summary())
 }

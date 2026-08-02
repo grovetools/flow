@@ -80,6 +80,7 @@ func registerFinishFlags(cmd *cobra.Command, opts *plan_finish.Options) {
 	cmd.Flags().BoolVar(&opts.PreserveCloud, "preserve-cloud", false, "Honor skip_destroy during env teardown (preserve cloud resources across plan finish; default is to destroy)")
 	cmd.Flags().BoolVar(&opts.KeepNotes, "keep-notes", false, "Skip moving the plan's linked notes to completed/ during finish")
 	cmd.Flags().BoolVar(&opts.NoLedger, "no-ledger", false, "Skip writing the plan ledger note (commit ranges, landing receipts, final worktree state) to the notebook")
+	cmd.Flags().BoolVar(&opts.NoReviewCheckpoint, "no-review-checkpoint", false, "Skip checkpointing the worktree's review marks and checklists into the plan's review packet note")
 	cmd.Flags().StringVarP(&planContextDir, "dir", "d", "", "Workspace or plan directory context (defaults to current directory)")
 }
 
@@ -162,6 +163,7 @@ func applyFinishSelection(items []*finish.Item, opts plan_finish.Options) {
 	// tombstone reports Already finished / Not found), so "always enable"
 	// means "never silently omitted", not "always writes".
 	enable(plan_finish.ItemLedgerNote, true)
+	enable(plan_finish.ItemReviewCheckpoint, true)
 	enable(plan_finish.ItemTombstoneRegistry, true)
 	enable(plan_finish.ItemCloseSession, opts.CloseSession)
 	enable(plan_finish.ItemPruneWorktree, opts.PruneWorktree)

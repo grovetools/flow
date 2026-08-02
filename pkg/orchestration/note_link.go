@@ -23,8 +23,17 @@ type PlanNote struct {
 	PlanRef   string `json:"plan_ref"`
 	PlanJob   string `json:"plan_job"`
 	Workspace string `json:"workspace"`
-	Title     string `json:"title"`
-	Type      string `json:"type"`
+	// Title is the note's FILENAME, not its frontmatter title — that is what
+	// nb's Note model puts in `title`. Callers identifying a note by the name
+	// it was created under want FrontmatterTitle.
+	Title string `json:"title"`
+	// FrontmatterTitle is the `title:` from the note's frontmatter. It is the
+	// stable identity of a GENERATED note: the filename carries a date prefix
+	// and a slug, but the frontmatter title is exactly the string the
+	// generator passed to `nb new`, so a generator can find its own note again
+	// without guessing at slugging rules.
+	FrontmatterTitle string `json:"frontmatter_title"`
+	Type             string `json:"type"`
 }
 
 // NoteMoveState is the result of attempting to move a single note through the

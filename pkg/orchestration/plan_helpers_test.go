@@ -1,8 +1,10 @@
 package orchestration
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +31,7 @@ Do the thing.`
 }
 
 func TestMarkPlanReview_FlipsStatusAndPersists(t *testing.T) {
+	stubDefaultNotebook(t)
 	dir := writeReviewPlan(t, "model: gemini-3.1-pro-preview\n")
 
 	if err := MarkPlanReview(dir); err != nil {
@@ -53,6 +56,7 @@ func TestMarkPlanReview_FlipsStatusAndPersists(t *testing.T) {
 }
 
 func TestMarkPlanReview_FiresOnReviewHook(t *testing.T) {
+	stubDefaultNotebook(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "hook-fired.txt")
 
@@ -94,6 +98,7 @@ Do the thing.`
 }
 
 func TestMarkPlanReview_IdempotentWhenAlreadyReview(t *testing.T) {
+	nb := stubDefaultNotebook(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "hook-fired.txt")
 
@@ -119,6 +124,83 @@ Do the thing.`
 
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("on_review hook fired on an already-review plan; expected no-op")
+	}
+	// The no-op path must stay side-effect free: the git-viewer roll-up
+	// re-fires MarkPlanReview on every changes refresh once every file is
+	// reviewed, and each one would otherwise shell out to nb.
+	if nb.creates != 0 || nb.writes != 0 {
+		t.Errorf("already-review no-op touched the notebook: creates=%d writes=%d", nb.creates, nb.writes)
+	}
+}
+
+func TestMarkPlanReview_WritesTheReviewPacketOnFlip(t *testing.T) {
+	nb := stubDefaultNotebook(t)
+	dir := writeReviewPlan(t, "model: gemini-3.1-pro-preview\n")
+
+	if err := MarkPlanReview(dir); err != nil {
+		t.Fatalf("MarkPlanReview() error = %v", err)
+	}
+
+	if nb.creates != 1 {
+		t.Fatalf("packet CreateNote called %d times, want 1", nb.creates)
+	}
+	if len(nb.notes) != 1 {
+		t.Fatalf("notebook holds %d notes, want 1", len(nb.notes))
+	}
+	if got := readPacketFile(t, nb.notes[0].Path); !strings.Contains(got, reviewPacketMarker) {
+		t.Errorf("created note is not a review packet:\n%s", got)
+	}
+}
+
+func TestMarkPlanReviewWithPacket_RefreshesWhenAlreadyReview(t *testing.T) {
+	nb := stubDefaultNotebook(t)
+	dir := writeReviewPlan(t, "status: review\n")
+
+	outcome, err := MarkPlanReviewWithPacket(dir)
+	if err != nil {
+		t.Fatalf("MarkPlanReviewWithPacket() error = %v", err)
+	}
+	if outcome.Flipped {
+		t.Error("an already-review plan reported a flip")
+	}
+	if outcome.PacketErr != nil {
+		t.Fatalf("packet error = %v", outcome.PacketErr)
+	}
+	// The explicit CLI verb refreshes even when the status does not move —
+	// this is how re-running `flow plan review` re-checkpoints the snapshot.
+	if !outcome.Packet.Created || nb.creates != 1 {
+		t.Errorf("packet not written on the already-review path: created=%v creates=%d", outcome.Packet.Created, nb.creates)
+	}
+
+	// And again: the second run must be the idempotent no-write refresh.
+	second, err := MarkPlanReviewWithPacket(dir)
+	if err != nil {
+		t.Fatalf("second MarkPlanReviewWithPacket() error = %v", err)
+	}
+	if second.Packet.Changed || nb.creates != 1 {
+		t.Errorf("second refresh changed=%v creates=%d, want false/1", second.Packet.Changed, nb.creates)
+	}
+}
+
+func TestMarkPlanReview_PacketFailureDoesNotUnflipThePlan(t *testing.T) {
+	nb := stubDefaultNotebook(t)
+	nb.listErr = errors.New("notebook unavailable")
+	dir := writeReviewPlan(t, "model: gemini-3.1-pro-preview\n")
+
+	err := MarkPlanReview(dir)
+	if err == nil {
+		t.Fatal("a packet failure must be reported loudly")
+	}
+	if !strings.Contains(err.Error(), "marked for review") {
+		t.Errorf("error = %v, want it to say the plan IS marked for review", err)
+	}
+
+	reloaded, loadErr := LoadPlan(dir)
+	if loadErr != nil {
+		t.Fatalf("LoadPlan() error = %v", loadErr)
+	}
+	if reloaded.Config.Status != "review" {
+		t.Errorf("status = %q after a packet failure, want review (the flip must stand)", reloaded.Config.Status)
 	}
 }
 
