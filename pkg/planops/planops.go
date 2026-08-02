@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/grovetools/core/git"
 	coreplan "github.com/grovetools/core/pkg/plan"
@@ -109,14 +110,17 @@ type RepoResult struct {
 	Detail  string  `json:"detail,omitempty"`
 }
 
-// OperationResult always contains one result for every preview repo.
+// OperationResult always contains one result for every preview repo. Receipt
+// reports the landing receipt for a land that actually advanced main; it is
+// always nil for update-only, which lands nothing.
 type OperationResult struct {
-	Operation          Operation    `json:"operation"`
-	PreviewFingerprint string       `json:"previewFingerprint"`
-	FreshFingerprint   string       `json:"freshFingerprint,omitempty"`
-	Stale              bool         `json:"stale"`
-	Results            []RepoResult `json:"results"`
-	Error              string       `json:"error,omitempty"`
+	Operation          Operation       `json:"operation"`
+	PreviewFingerprint string          `json:"previewFingerprint"`
+	FreshFingerprint   string          `json:"freshFingerprint,omitempty"`
+	Stale              bool            `json:"stale"`
+	Results            []RepoResult    `json:"results"`
+	Error              string          `json:"error,omitempty"`
+	Receipt            *ReceiptOutcome `json:"receipt,omitempty"`
 }
 
 func (r OperationResult) Failed() bool {
@@ -321,6 +325,8 @@ func Execute(ctx context.Context, preview OperationPreview) OperationResult {
 	}
 
 	failed := false
+	var landings []RepoLanding
+	var receiptWarnings []string
 	for _, repo := range fresh.Repos {
 		rr := RepoResult{Name: repo.Name, Path: repo.Path}
 		switch {
@@ -332,7 +338,9 @@ func Execute(ctx context.Context, preview OperationPreview) OperationResult {
 		case repo.Disposition == DispositionSkipped:
 			rr.Outcome, rr.Detail = OutcomeSucceeded, repo.Reason
 		default:
-			if execErr := executeRepo(repo, preview.Operation); execErr != nil {
+			landing, warnings, execErr := executeRepo(repo, preview.Operation)
+			receiptWarnings = append(receiptWarnings, warnings...)
+			if execErr != nil {
 				failed = true
 				rr.Outcome, rr.Detail = OutcomeFailed, execErr.Error()
 			} else {
@@ -342,6 +350,9 @@ func Execute(ctx context.Context, preview OperationPreview) OperationResult {
 				} else {
 					rr.Detail = "rebased " + repo.Branch + " onto " + repo.Onto
 				}
+				if landing != nil {
+					landings = append(landings, *landing)
+				}
 			}
 		}
 		result.Results = append(result.Results, rr)
@@ -349,7 +360,51 @@ func Execute(ctx context.Context, preview OperationPreview) OperationResult {
 	if failed {
 		result.Error = "operation stopped after a repository failed"
 	}
+	// The receipt is written last, after every advance this operation is going
+	// to make has already happened — including a run that failed partway, whose
+	// earlier repos really did land and must not go unrecorded. Nothing here can
+	// change the outcome above: recordLandingReceipt only reports.
+	if preview.Operation == OperationLand {
+		result.Receipt = recordLandingReceipt(fresh, landings, receiptWarnings)
+	}
 	return result
+}
+
+// recordLandingReceipt writes the receipt for a completed land. It never
+// returns an error: main has already moved, so a receipt problem is something
+// to report loudly, never something to fail or unwind the land over.
+func recordLandingReceipt(preview OperationPreview, landings []RepoLanding, warnings []string) *ReceiptOutcome {
+	outcome := &ReceiptOutcome{Warnings: warnings}
+	if len(landings) == 0 {
+		outcome.Skipped = "no repository landed"
+		return outcome
+	}
+	planDir := strings.TrimSpace(preview.Target.PlanDir)
+	if planDir == "" {
+		// git-viewer lands an explicit directory scope that need not be a plan.
+		// There is no plan to file a receipt under; that is a property of the
+		// target, not a failure of this land.
+		outcome.Skipped = "target is not plan-scoped"
+		return outcome
+	}
+	receipt := LandingReceipt{
+		SchemaVersion: ReceiptSchemaVersion,
+		Plan:          filepath.Base(filepath.Clean(planDir)),
+		PlanDir:       filepath.Clean(planDir),
+		WorktreePath:  preview.Target.ContainerPath,
+		RegistryID:    preview.Target.RegistryID,
+		Operation:     preview.Operation,
+		Fingerprint:   preview.Fingerprint,
+		Timestamp:     time.Now().UTC(),
+		Repos:         landings,
+	}
+	path, err := WriteReceipt(planDir, receipt)
+	if err != nil {
+		outcome.Error = err.Error()
+		return outcome
+	}
+	outcome.Path = path
+	return outcome
 }
 
 func notAttempted(result OperationResult, repos []RepoPreview, detail string) OperationResult {
@@ -359,20 +414,59 @@ func notAttempted(result OperationResult, repos []RepoPreview, detail string) Op
 	return result
 }
 
-func executeRepo(repo RepoPreview, operation Operation) error {
+// executeRepo mutates one repository and, for a land, reports what it landed.
+// The returned landing is nil for update-only (which lands nothing) and for any
+// failure. Warnings describe receipt fields that could not be observed; they
+// never affect the operation's outcome.
+func executeRepo(repo RepoPreview, operation Operation) (*RepoLanding, []string, error) {
+	var warnings []string
+	observe := func(dir, ref, what string) string {
+		// An empty dir would resolve the ref against process CWD — some other
+		// repository entirely. planops never discovers from CWD, so an absent
+		// checkout path is an unobservable field, not a silent wrong answer.
+		if strings.TrimSpace(dir) == "" {
+			warnings = append(warnings, fmt.Sprintf("%s: could not read %s: no checkout path", repo.Name, what))
+			return ""
+		}
+		sha, err := git.ResolveRef(dir, ref)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: could not read %s: %v", repo.Name, what, err))
+			return ""
+		}
+		return sha
+	}
+
+	// Observed before any mutation: the branch head as reviewed (the rebase
+	// below rewrites it) and the main tip this land will move.
+	var reviewedHead, mainBefore string
+	if operation == OperationLand {
+		reviewedHead = observe(repo.Path, "HEAD", "reviewed branch head")
+		mainBefore = observe(repo.MainCheckoutPath, repo.Onto, "main before advance")
+	}
+
 	if repo.Behind > 0 {
 		if err := git.Rebase(repo.Path, repo.Onto); err != nil {
 			_ = git.AbortRebase(repo.Path)
-			return fmt.Errorf("catch-up rebase failed (aborted): %w", err)
+			return nil, warnings, fmt.Errorf("catch-up rebase failed (aborted): %w", err)
 		}
 	}
 	if operation == OperationUpdateOnly {
-		return nil
+		return nil, warnings, nil
 	}
 	// AdvanceMainToBranch performs an ff-only update and resynchronizes the
 	// linked worktree. MainCheckoutPath was freshness-checked in Preview.
 	if err := git.AdvanceMainToBranch(repo.MainCheckoutPath, repo.Branch, repo.Onto, repo.Path); err != nil {
-		return err
+		return nil, warnings, err
 	}
-	return nil
+	return &RepoLanding{
+		Repo:            repo.Name,
+		Branch:          repo.Branch,
+		Onto:            repo.Onto,
+		Path:            repo.Path,
+		ReviewedHeadSHA: reviewedHead,
+		LandedRange: LandedRange{
+			Start: mainBefore,
+			End:   observe(repo.MainCheckoutPath, repo.Onto, "main after advance"),
+		},
+	}, warnings, nil
 }

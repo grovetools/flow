@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	coreplan "github.com/grovetools/core/pkg/plan"
@@ -40,8 +41,27 @@ func executePlanOperation(ctx context.Context, plan *orchestration.Plan, operati
 	for _, repo := range result.Results {
 		fmt.Printf("[%s] %s: %s\n", strings.ToUpper(string(repo.Outcome)), repo.Name, repo.Detail)
 	}
+	printReceiptOutcome(result.Receipt)
 	if result.Failed() {
 		return fmt.Errorf("%s", result.Error)
 	}
 	return nil
+}
+
+// printReceiptOutcome reports the landing receipt. A failed receipt is printed
+// loudly on stderr: the land itself already succeeded, so the only thing left to
+// do about it is make sure nobody believes the provenance was recorded.
+func printReceiptOutcome(receipt *planops.ReceiptOutcome) {
+	if receipt == nil {
+		return
+	}
+	for _, warning := range receipt.Warnings {
+		fmt.Fprintf(os.Stderr, "WARNING: landing receipt incomplete: %s\n", warning)
+	}
+	switch {
+	case receipt.Error != "":
+		fmt.Fprintf(os.Stderr, "WARNING: the land succeeded but its landing receipt was NOT written: %s\n", receipt.Error)
+	case receipt.Path != "":
+		fmt.Printf("[RECEIPT] %s\n", receipt.Path)
+	}
 }
