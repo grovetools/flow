@@ -40,6 +40,36 @@ func TestIsPiSessionResponded(t *testing.T) {
 	}
 }
 
+// TestAcceptsAgentIdleStatus pins the status-ownership half of the responder
+// contract: an agent-lifecycle idle event (turn ended, host process alive) is
+// news about every ordinary job, and about no pi-session chat — whose statuses
+// come only from the explicit flow verbs (contract §7).
+func TestAcceptsAgentIdleStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		job  Job
+		want bool
+	}{
+		{"chat pi-session", Job{Type: JobTypeChat, Responder: ResponderPiSession}, false},
+		{"chat agent", Job{Type: JobTypeChat, Responder: ResponderAgent}, true},
+		{"chat oracle", Job{Type: JobTypeChat, Responder: ResponderOracle}, true},
+		{"chat default", Job{Type: JobTypeChat}, true},
+		{"interactive_agent", Job{Type: JobTypeInteractiveAgent}, true},
+		// A pi-session responder on a non-chat job is not the pi-session
+		// responder flavor at all, so it keeps the ordinary behavior.
+		{"interactive_agent pi-session", Job{Type: JobTypeInteractiveAgent, Responder: ResponderPiSession}, true},
+		{"agent", Job{Type: JobTypeAgent}, true},
+		{"oneshot", Job{Type: JobTypeOneshot}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.job.AcceptsAgentIdleStatus(); got != tt.want {
+				t.Errorf("AcceptsAgentIdleStatus() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestExecuteChatJob_PiSessionNeverDispatches is the veto proper: a pi-session
 // chat ending in a content-bearing user turn — the exact shape that WOULD
 // dispatch on the oracle path — must never touch the LLM client. It fails on

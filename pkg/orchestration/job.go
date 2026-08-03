@@ -346,6 +346,27 @@ func (j *Job) IsPiSessionResponded() bool {
 	return j.Type == JobTypeChat && j.Responder == ResponderPiSession
 }
 
+// AcceptsAgentIdleStatus reports whether an agent-lifecycle idle event — the
+// host agent process reaching the end of a turn while staying alive — may be
+// stamped onto this job's status.
+//
+// It is true for every job whose process going idle IS news about the job: an
+// interactive claude or opencode session at rest between turns has nothing else
+// to say about itself, so `idle` is the truthful frontmatter.
+//
+// It is false for a `responder: pi-session` chat. There the persistent Pi
+// process resting between turns is the steady state rather than a transition:
+// the job's status is owned end to end by the explicit Flow verbs (run →
+// running, respond → pending_user, say → running, complete → completed, launch
+// or preflight failure → failed) plus the daemon reaper's death reconciliation.
+// `idle` appears nowhere in that set, so an idle lifecycle event carries no
+// information about the job — and stamping it anyway destroys `pending_user`,
+// the signal that the conversation is back on the human, which the TUI and
+// every coordinator loop key on.
+func (j *Job) AcceptsAgentIdleStatus() bool {
+	return !j.IsPiSessionResponded()
+}
+
 // IsAPIDispatchVetoed reports whether this chat's response turns are authored
 // by an agent rather than by a Flow-issued LLM API call — the union of
 // responder: agent and responder: pi-session. It is the predicate for every
