@@ -217,7 +217,10 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 				// hard error naming the problem. Batch runs (RunAll/RunNext)
 				// intentionally skip this check: a chat legitimately awaiting
 				// input has the same shape and must not fail the whole plan.
-				if job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() {
+				// pi-session chats are excluded for a second reason: their
+				// `flow plan run` is the LAUNCH verb, not a turn dispatch, so a
+				// chat with no pending user turn is the normal first-run shape.
+				if job.Type == orchestration.JobTypeChat && !job.IsAPIDispatchVetoed() {
 					if content, rerr := os.ReadFile(job.FilePath); rerr == nil {
 						trailing := orchestration.InspectTrailingChatTurn(content)
 						if !trailing.HasUserTurn {
@@ -295,7 +298,7 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 						// uninvited on every worktree edit — exactly the silent
 						// refresh the frozen layer-0 semantics forbid (spec 19
 						// e2e scenario 5 vs 18).
-						if wasCompleted && job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() {
+						if wasCompleted && job.Type == orchestration.JobTypeChat && !job.IsAPIDispatchVetoed() {
 							if _, serr := orchestration.StampTrailingChatDirective(job.FilePath, map[string]interface{}{"append_delta": true}); serr != nil {
 								fmt.Printf("%s Warning: could not stamp append_delta on reopened chat '%s': %v\n",
 									color.YellowString(theme.IconWarning),
@@ -369,8 +372,8 @@ func runPlanRun(cmd *cobra.Command, args []string) error {
 			verb = "rebase_context"
 		}
 		for _, job := range jobsToRun {
-			if job.Type != orchestration.JobTypeChat || job.IsAgentResponded() {
-				fmt.Printf("%s Skipping --%s for '%s' (only oracle chat jobs have a context layer store)\n",
+			if job.Type != orchestration.JobTypeChat || job.IsAPIDispatchVetoed() {
+				fmt.Printf("%s Skipping --%s for '%s' (only oracle chat jobs have a refreshable context layer store)\n",
 					color.YellowString(theme.IconWarning), strings.ReplaceAll(verb, "_", "-"), job.Title)
 				continue
 			}

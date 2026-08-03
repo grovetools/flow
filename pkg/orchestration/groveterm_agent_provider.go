@@ -248,13 +248,13 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	if p.spec.PiRuntime != nil {
 		discovery.Provider = "pi"
 		discovery.SessionDir = piJobSessionDir(plan.Directory, job.ID)
-		if expectedNativeID != "" {
-			// Resume continues the job's existing transcript in place, so its
-			// first timestamp predates this attempt and an AfterTime filter
-			// would never match it. The session dir is job-scoped, so the
-			// newest transcript there is the right one.
-			discovery.AfterTime = time.Time{}
-		}
+		// Resume continues the job's existing transcript in place, and a
+		// seeded `responder: pi-session` chat opens a transcript Flow
+		// synthesized moments earlier; either way the header timestamp predates
+		// this attempt and an AfterTime filter would never match it. The
+		// session dir is job-scoped, so the newest transcript there is the
+		// right one. See piDiscoveryAfterTime.
+		discovery.AfterTime = piDiscoveryAfterTime(p.spec, plan.Directory, job.ID, expectedNativeID != "", jobStartTime)
 	}
 	var transcriptPath string
 	transcriptPath, err = agentstream.DiscoverTranscript(discovery)

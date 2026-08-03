@@ -33,7 +33,7 @@ type PlanAddStepCmd struct {
 	Interactive         bool     `flag:"i" help:"Interactive mode"`
 	Worktree            string   `flag:"" help:"Explicitly set the worktree name (overrides automatic inference)"`
 	Model               string   `flag:"" help:"LLM model to use for this job"`
-	Responder           string   `flag:"" help:"Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session per turn; never dispatched to an LLM API)"`
+	Responder           string   `flag:"" help:"Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context), agent (fresh agent session per turn), or pi-session (one persistent seeded Pi process owns the chat). Neither agent nor pi-session is dispatched to an LLM API"`
 	Effort              string   `flag:"" help:"Effort level for claude agent jobs (passed to the claude CLI as --effort)"`
 	Provider            string   `flag:"" help:"Agent CLI provider for agent jobs (claude/codex/opencode; defaults to flow.interactive_provider)"`
 	Inline              []string `flag:"" sep:"," help:"File types to inline in prompt: dependencies, include, context, all, files, none (comma-separated)"`
@@ -108,22 +108,29 @@ func parseInlineFlag(values []string) orchestration.InlineConfig {
 }
 
 // validateResponderFlag checks the --responder flag value against the job
-// type. Accepted values are empty (default), "oracle", and "agent". "oracle"
-// is explicitly valid and treated identically to an absent field (a stateless
-// LLM API call over inlined context); "agent" marks an agent-responded chat
-// whose response turns are authored by a fresh agent session per turn and is
-// never dispatched to an LLM API, so it only makes sense on chat jobs.
+// type. Accepted values are empty (default), "oracle", "agent", and
+// "pi-session". "oracle" is explicitly valid and treated identically to an
+// absent field (a stateless LLM API call over inlined context); "agent" marks
+// an agent-responded chat whose response turns are authored by a fresh agent
+// session per turn; "pi-session" marks a chat owned by one persistent,
+// context-seeded Pi process. Neither of the latter two is ever dispatched to an
+// LLM API, and both only make sense on chat jobs.
 func validateResponderFlag(responder, jobType string) error {
 	switch responder {
-	case "", "oracle":
+	case "", orchestration.ResponderOracle:
 		return nil
-	case "agent":
+	case orchestration.ResponderAgent:
 		if jobType != "chat" {
 			return fmt.Errorf("--responder agent requires --type chat (agent-responded chats are turn-based dialogues answered by a fresh agent session per turn); got --type %s", jobType)
 		}
 		return nil
+	case orchestration.ResponderPiSession:
+		if jobType != "chat" {
+			return fmt.Errorf("--responder pi-session requires --type chat (a pi-session chat is a turn-based dialogue answered by one persistent seeded Pi process); got --type %s", jobType)
+		}
+		return nil
 	default:
-		return fmt.Errorf("invalid --responder value %q: must be oracle or agent", responder)
+		return fmt.Errorf("invalid --responder value %q: must be oracle, agent, or pi-session", responder)
 	}
 }
 
@@ -296,14 +303,33 @@ func RunPlanAddStep(cmd *PlanAddStepCmd) error {
 		}
 	}
 
+	// pi-session chats are the opposite case on both knobs: strip_comments DOES
+	// apply (it selects the bytes frozen into the layers the seed embeds), while
+	// a rules file is not optional — the whole point of the responder is that
+	// the session wakes up already holding the curated bundle.
+	if job.IsPiSessionResponded() {
+		if len(cmd.Inline) > 0 {
+			fmt.Fprintln(os.Stderr, "Warning: --inline with --responder pi-session: the seeded session reads dependencies from disk; inlining content into the prompt only wastes tokens")
+		}
+		if job.RulesFile == "" {
+			fmt.Fprintln(os.Stderr, "Warning: responder: pi-session without a rules_file — the session would launch with no seeded context. Add one with --rules-file before running it (the launch preflight refuses an empty resolution).")
+		}
+		// The Pi CLI is the engine for this responder; any other agent provider
+		// cannot open the synthesized session file.
+		if job.Provider == "" {
+			job.Provider = orchestration.DefaultPiSessionProvider
+		}
+	}
+
 	// Oracle chats (responder oracle/absent) with dependencies need those
 	// dependencies inlined into the prompt: the stateless, tool-less LLM can't
 	// read a "<dep>.md" file off disk, so an un-inlined dep silently never
 	// reaches the model. Default inline: dependencies ON for them unless the
 	// user gave an explicit --inline value (which always wins) or a template
-	// already set inline. responder: agent chats are the opposite case — they
-	// read files from disk and keep the lint warning above.
-	if job.Type == orchestration.JobTypeChat && !job.IsAgentResponded() &&
+	// already set inline. responder: agent and responder: pi-session chats are
+	// the opposite case — they read files from disk and keep the lint warnings
+	// above.
+	if job.Type == orchestration.JobTypeChat && !job.IsAPIDispatchVetoed() &&
 		len(job.DependsOn) > 0 && len(cmd.Inline) == 0 && len(job.Inline.Categories) == 0 {
 		job.Inline = orchestration.InlineConfig{
 			Categories: []orchestration.InlineCategory{orchestration.InlineDependencies},

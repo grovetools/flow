@@ -1159,77 +1159,14 @@ func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, workt
 		ctxMgr = grovecontext.NewManager(contextDir)
 	}
 
-	// Check if job has a custom rules file specified
+	// Check if job has a custom rules file specified. Resolution (plan dir →
+	// cwd → git root → absolute → named preset, empty file treated as a miss)
+	// lives in ResolveJobRulesFilePath so the pi-session launch path resolves
+	// the same frontmatter to the same file.
 	if job != nil && job.RulesFile != "" {
-		// Try multiple locations for the rules file:
-		// 1. Relative to plan directory (original behavior)
-		// 2. Relative to current working directory
-		// 3. Relative to git root
-
-		var rulesFilePath string
-		var foundPath bool
-
-		// 1. Try relative to plan directory (original/primary location)
-		candidatePath := filepath.Join(plan.Directory, job.RulesFile)
-		if _, err := os.Stat(candidatePath); err == nil {
-			rulesFilePath = candidatePath
-			foundPath = true
-		}
-
-		// 2. Try relative to current working directory
-		if !foundPath {
-			cwd, err := os.Getwd()
-			if err == nil {
-				candidatePath = filepath.Join(cwd, job.RulesFile)
-				if _, err := os.Stat(candidatePath); err == nil {
-					rulesFilePath = candidatePath
-					foundPath = true
-				}
-			}
-		}
-
-		// 3. Try relative to project git root (notebook-aware)
-		if !foundPath {
-			gitRoot, err := GetProjectGitRoot(plan.Directory)
-			if err == nil {
-				candidatePath = filepath.Join(gitRoot, job.RulesFile)
-				if _, err := os.Stat(candidatePath); err == nil {
-					rulesFilePath = candidatePath
-					foundPath = true
-				}
-			}
-		}
-
-		// 4. Try as an absolute path
-		if !foundPath {
-			if filepath.IsAbs(job.RulesFile) {
-				if _, err := os.Stat(job.RulesFile); err == nil {
-					rulesFilePath = job.RulesFile
-					foundPath = true
-				}
-			}
-		}
-
-		// 5. Try as a named preset (resolves via notebook presets, .cx/, .cx.work/)
-		if !foundPath {
-			// Strip .rules extension if present to get the preset name
-			presetName := job.RulesFile
-			presetName = strings.TrimSuffix(presetName, ".rules")
-			ctxMgrForLookup := grovecontext.NewManager(contextDir)
-			if resolved, err := ctxMgrForLookup.FindRulesetFile(contextDir, presetName); err == nil {
-				rulesFilePath = resolved
-				foundPath = true
-			}
-		}
-
-		if !foundPath {
-			return "", jobCtx, fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
-		}
-		// Treat an empty rules file as not yet authored, matching the absent-file
-		// path used for newly created jobs. Do this before context generation so
-		// both cases fail through the same pre-provider error funnel.
-		if info, err := os.Stat(rulesFilePath); err != nil || info.Size() == 0 {
-			return "", jobCtx, fmt.Errorf("rules file '%s' not found in plan directory, current directory, git root, or named presets", job.RulesFile)
+		rulesFilePath, err := ResolveJobRulesFilePath(plan, job, contextDir)
+		if err != nil {
+			return "", jobCtx, err
 		}
 
 		log.WithField("rules_file", rulesFilePath).Info("Using job-specific context")
@@ -1617,10 +1554,25 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		return fmt.Errorf("parsing chat file: %w", err)
 	}
 
-	// Agent-responded chats (responder: agent) have their response turns
-	// written directly into the artifact by a fresh agent session per turn;
-	// they must NEVER be dispatched to an LLM provider, regardless of the
-	// last turn's speaker. Running one is an explicit no-op.
+	// --- API-dispatch veto (responder: agent / pi-session) ---
+	// Both responders author their response turns into the artifact themselves;
+	// neither may EVER be dispatched to an LLM provider, regardless of the last
+	// turn's speaker. They diverge in what running them means, so the veto
+	// branches before any provider work.
+
+	// responder: pi-session — one persistent, seeded Pi process owns the chat.
+	// `flow plan run` is the LAUNCH verb (first run seeds + starts it; later
+	// runs re-attach or resume the same session file). Turn delivery is
+	// `flow plan say`, not this path.
+	if job.IsPiSessionResponded() {
+		ulog.Info("pi-session chat (responder: pi-session) — launching/attaching the seeded Pi session instead of dispatching to an LLM API").
+			Field("job", job.Title).
+			Log(ctx)
+		return RunPiSessionChat(ctx, job, plan)
+	}
+
+	// responder: agent — a fresh agent session authors each turn out of band.
+	// Running one is an explicit no-op.
 	if job.IsAgentResponded() {
 		ulog.Info("agent-responded chat (responder: agent) — skipping LLM dispatch").
 			Field("job", job.Title).

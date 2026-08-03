@@ -19,9 +19,11 @@ func ApplyPlanDefaults(plan *Plan, job *Job) {
 
 	// Model: only oneshot/chat jobs inherit the plan default (typically a
 	// gemini-* chat model). Agent jobs select their own model at launch.
-	// Agent-responded chats (responder: agent) never call an LLM API, so
-	// stamping the plan default would advertise a model that never runs.
-	if job.Model == "" && job.Type.InheritsPlanModel() && !job.IsAgentResponded() && cfg.Model != "" {
+	// Agent-responded and pi-session chats never call an LLM API from Flow, so
+	// stamping the plan default (typically gemini-*) would advertise a model
+	// that never runs. A pi-session chat's model: is the Pi CLI's --model and is
+	// set explicitly, never inherited from the plan's chat default.
+	if job.Model == "" && job.Type.InheritsPlanModel() && !job.IsAPIDispatchVetoed() && cfg.Model != "" {
 		job.Model = cfg.Model
 	}
 	if job.Worktree == "" && cfg.Worktree != "" {

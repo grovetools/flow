@@ -404,6 +404,11 @@ func (m Model) renderRowCells(headers []string, globalIndex int, dr *DisplayRow)
 					jobTypeSymbol = theme.IconClaw
 					typeLabel = "claw"
 					isClaw = true
+				} else if job.IsPiSessionResponded() {
+					// pi-session chat: one persistent seeded Pi process owns
+					// the whole dialogue; turns arrive via `flow plan say`.
+					jobTypeSymbol = theme.IconRobot
+					typeLabel = "pi chat"
 				} else if job.IsAgentResponded() {
 					// Agent-responded chat (responder: agent): response turns
 					// authored by a fresh agent session per turn, never
@@ -505,8 +510,9 @@ func (m Model) renderRowCells(headers []string, globalIndex int, dr *DisplayRow)
 
 // getJobIcon returns the icon for a job type
 func getJobIcon(job *orchestration.Job) string {
-	// Agent-responded chat (responder: agent) gets its own icon.
-	if job.IsAgentResponded() {
+	// Agent-authored chats (responder: agent / pi-session) get their own icon:
+	// neither is an oracle API call, and the rail should not read as one.
+	if job.IsAPIDispatchVetoed() {
 		return theme.IconRobot
 	}
 	switch job.Type {

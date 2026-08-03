@@ -57,6 +57,19 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		runNonFatalCleanup(logger, "headless agent", silent, func() { cleanupHeadlessAgent(job, silent) })
 	case JobTypeInteractiveAgent:
 		runNonFatalCleanup(logger, "interactive agent", silent, func() { cleanupInteractiveAgent(job, plan, silent) })
+	case JobTypeChat:
+		// A pi-session chat owns a live Pi process and a pane, launched through
+		// the interactive provider lifecycle — so completing it must tear those
+		// down through the same path an interactive agent uses. Without this the
+		// `flow complete` gate marks the record finished while the session keeps
+		// running, holding the job's lock file and answering into a chat nobody
+		// is reading. Every other chat responder has no process and skips this.
+		if job.IsPiSessionResponded() {
+			runNonFatalCleanup(logger, "pi session", silent, func() {
+				cleanupInteractiveAgent(job, plan, silent)
+				finalizePiSessionArtifacts(job, plan, silent)
+			})
+		}
 	}
 
 	// Frontmatter status is the authoritative success state. Before moving an

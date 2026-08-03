@@ -145,7 +145,7 @@ type Job struct {
 	Title         string    `yaml:"title" json:"title" jsonschema:"description=Human-readable title for the job"`
 	Status        JobStatus `yaml:"status" json:"status" jsonschema:"description=Current execution status (pending/running/completed/failed)"`
 	Type          JobType   `yaml:"type" json:"type" jsonschema:"description=Job type determining execution behavior (oneshot/chat/interactive_agent/headless_agent/shell/file)"`
-	Responder     string    `yaml:"responder,omitempty" json:"responder,omitempty" jsonschema:"enum=oracle,enum=agent,description=Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API)"`
+	Responder     string    `yaml:"responder,omitempty" json:"responder,omitempty" jsonschema:"enum=oracle,enum=agent,enum=pi-session,description=Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context), agent (fresh agent session with file access per turn), or pi-session (one persistent seeded Pi process owns the whole chat). Neither agent nor pi-session is ever dispatched to an LLM API"`
 	Model         string    `yaml:"model,omitempty" json:"model,omitempty" jsonschema:"description=LLM model to use for this job"`
 	Effort        string    `yaml:"effort,omitempty" json:"effort,omitempty" jsonschema:"description=Effort level for claude agent jobs; passed to the claude CLI as --effort (claude owns the accepted levels)"`
 	Provider      string    `yaml:"provider,omitempty" json:"provider,omitempty" jsonschema:"description=Agent CLI provider for agent jobs; falls back to flow.interactive_provider (default claude),enum=claude,enum=codex,enum=opencode,enum=pi"`
@@ -305,15 +305,56 @@ func (j *Job) IsMemoryEnabled() bool {
 	return j.Memory == nil || *j.Memory
 }
 
+// Responder values for chat jobs. An absent responder and ResponderOracle are
+// equivalent: today's oracle behavior (stateless API model over inlined,
+// comment-stripped context).
+const (
+	// ResponderOracle is the default: each turn is one stateless LLM API call
+	// over the inlined, frozen layer context.
+	ResponderOracle = "oracle"
+	// ResponderAgent means each response turn is authored into the artifact by
+	// a FRESH agent session with file access; nothing is dispatched to an API.
+	ResponderAgent = "agent"
+	// ResponderPiSession means ONE persistent, context-seeded Pi process owns
+	// the whole chat: Flow launches it on the first `flow plan run`, user turns
+	// reach it through `flow plan say` (append + wake nudge), and it appends its
+	// responses back into the same chat .md through `flow plan respond`. Nothing
+	// is ever dispatched to an LLM API by Flow.
+	ResponderPiSession = "pi-session"
+)
+
 // IsAgentResponded reports whether this chat job's response turns are authored
 // directly into the artifact by a fresh agent session per turn rather than
 // produced by dispatching to an LLM API. Agent-responded chats (responder:
 // agent) must NEVER be sent to an LLM provider and never inherit the plan's
-// default chat model. An absent responder field and responder: oracle are
-// equivalent: today's oracle behavior (stateless API model over inlined,
-// comment-stripped context).
+// default chat model.
+//
+// This predicate is deliberately narrow — it means "fresh agent session per
+// turn", NOT "never hits an API". Sites that mean the latter must use
+// IsAPIDispatchVetoed, which also covers responder: pi-session.
 func (j *Job) IsAgentResponded() bool {
-	return j.Type == JobTypeChat && j.Responder == "agent"
+	return j.Type == JobTypeChat && j.Responder == ResponderAgent
+}
+
+// IsPiSessionResponded reports whether this chat job is answered by one
+// persistent, context-seeded Pi process that Flow owns for the job's lifetime
+// (responder: pi-session). Unlike responder: agent, the session is stateful:
+// the seed is synthesized once, the layer store is frozen once, and every
+// subsequent turn is delivered into the SAME live process rather than starting
+// a new one.
+func (j *Job) IsPiSessionResponded() bool {
+	return j.Type == JobTypeChat && j.Responder == ResponderPiSession
+}
+
+// IsAPIDispatchVetoed reports whether this chat's response turns are authored
+// by an agent rather than by a Flow-issued LLM API call — the union of
+// responder: agent and responder: pi-session. It is the predicate for every
+// site whose real question is "may Flow dispatch this chat to an LLM
+// provider?": the executor's dispatch veto, the plan-default model stamp, the
+// cache-warm guard, and the context refresh verbs (which exist only to manage
+// an Anthropic cached prefix that these chats never build).
+func (j *Job) IsAPIDispatchVetoed() bool {
+	return j.IsAgentResponded() || j.IsPiSessionResponded()
 }
 
 // IsStripCommentsEnabled reports whether code comments should be stripped from

@@ -340,23 +340,23 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 
 	// Discover the transcript via agentstream. The AfterTime filter scopes the
 	// match to sessions started after this launch, so concurrent pi sessions
-	// don't race each other for "newest file".
-	transcriptPath, err := agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
+	// don't race each other for "newest file" — except when this launch OPENS a
+	// pre-existing transcript (a resume, or a seeded `responder: pi-session`
+	// chat), whose header timestamp necessarily predates the launch. See
+	// piDiscoveryAfterTime.
+	launchSpec, _ := LookupAgentProvider(p.providerName)
+	discovery := agentstream.DiscoverOptions{
 		Provider:   "pi",
 		WorkDir:    workDir,
-		AfterTime:  jobStartTime,
+		AfterTime:  piDiscoveryAfterTime(launchSpec, plan.Directory, job.ID, false, jobStartTime),
 		SessionDir: piJobSessionDir(plan.Directory, job.ID),
-	})
+	}
+	transcriptPath, err := agentstream.DiscoverTranscript(discovery)
 	if err != nil {
 		logger.WithError(err).Warn("Failed to discover pi transcript, retrying...")
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
-			transcriptPath, err = agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
-				Provider:   "pi",
-				WorkDir:    workDir,
-				AfterTime:  jobStartTime,
-				SessionDir: piJobSessionDir(plan.Directory, job.ID),
-			})
+			transcriptPath, err = agentstream.DiscoverTranscript(discovery)
 			if err == nil {
 				break
 			}

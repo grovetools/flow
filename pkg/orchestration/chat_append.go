@@ -137,14 +137,25 @@ func (sp *StatePersister) AppendChatUserTurn(job *Job, text string, force bool) 
 
 	// Refuse loudly when the job is executing: a live turn may append an LLM
 	// response concurrently. Status guard first (cheap), then the lock file.
-	if job.Status == JobStatusRunning {
-		return fmt.Errorf("job %s is running — refusing to append a turn while it executes", chatJobRef(job))
-	}
-	// Read-only liveness probe. Never CreateLockFile here: writing the lock is
-	// the executor's ownership assertion (§3-am). A dead PID / absent lock is
-	// fine to proceed over; sp.lockFile below will steal or create as needed.
-	if pid, err := ReadLockFile(job.FilePath); err == nil && pid > 0 && process.IsProcessAlive(pid) {
-		return fmt.Errorf("job %s has a turn in flight (locked by live pid %d) — wait for it to finish before appending", chatJobRef(job), pid)
+	//
+	// Both guards are skipped for a pi-session chat, because for that responder
+	// they mean something else entirely. `running` there means "the seeded
+	// session process is alive" — its NORMAL resting state, not "a turn is being
+	// written" — and the lock file holds the session host's pid for the whole
+	// life of the session. Applying these guards would refuse every single turn
+	// of a working chat. The real mutual exclusion (sp.lockFile below plus the
+	// atomic whole-file write) still applies, and delivering a turn to a busy
+	// session is explicitly supported: it queues behind the turn in flight.
+	if !job.IsPiSessionResponded() {
+		if job.Status == JobStatusRunning {
+			return fmt.Errorf("job %s is running — refusing to append a turn while it executes", chatJobRef(job))
+		}
+		// Read-only liveness probe. Never CreateLockFile here: writing the lock is
+		// the executor's ownership assertion (§3-am). A dead PID / absent lock is
+		// fine to proceed over; sp.lockFile below will steal or create as needed.
+		if pid, err := ReadLockFile(job.FilePath); err == nil && pid > 0 && process.IsProcessAlive(pid) {
+			return fmt.Errorf("job %s has a turn in flight (locked by live pid %d) — wait for it to finish before appending", chatJobRef(job), pid)
+		}
 	}
 
 	sp.mu.Lock()

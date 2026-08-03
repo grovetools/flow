@@ -109,7 +109,7 @@ var jobFields = []fieldDescriptor{
 		Key:     "responder",
 		Label:   "Responder",
 		Kind:    fieldEnum,
-		Options: []string{"oracle", "agent"},
+		Options: []string{"oracle", "agent", "pi-session"},
 		Current: func(j *orchestration.Job) string { return j.Responder },
 	},
 	{

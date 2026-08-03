@@ -131,6 +131,106 @@ func TestRunPlanAddStep(t *testing.T) {
 			},
 		},
 		{
+			// flow_subjob may hand a child any allowlisted provider plus an
+			// optional model. Ownership lineage is provider-agnostic: a claude
+			// child records provider/model and parent_job_id exactly like a Pi
+			// one, without gaining a dependency.
+			name: "claude subjob child persists provider, model, and lineage",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan", Jobs: []*orchestration.Job{{
+					ID: "parent-id", Title: "Parent", Filename: "01-parent.md", Type: "interactive_agent", Status: "running",
+				}}}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type: "interactive_agent", Title: "Claude Child", ParentJobID: "parent-id",
+				Provider: "claude", Model: "claude-opus-4-8",
+				PromptFile: createTempFile(t, "Do child work"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Claude Child")
+				if job.Provider != "claude" {
+					t.Errorf("Provider = %q, want claude", job.Provider)
+				}
+				if job.Model != "claude-opus-4-8" {
+					t.Errorf("Model = %q, want claude-opus-4-8", job.Model)
+				}
+				if job.ParentJobID != "parent-id" {
+					t.Errorf("ParentJobID = %q, want parent-id", job.ParentJobID)
+				}
+				if len(job.DependsOn) != 0 {
+					t.Errorf("parent lineage changed dependencies: %v", job.DependsOn)
+				}
+				if !job.IsRunnable() {
+					t.Error("child with a running parent must remain runnable")
+				}
+			},
+		},
+		{
+			// The pi provider takes any model its CLI accepts (no
+			// ValidateJobModel hook), so a non-claude model must survive.
+			name: "pi subjob child accepts a provider-native model",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan", Jobs: []*orchestration.Job{{
+					ID: "parent-id", Title: "Parent", Filename: "01-parent.md", Type: "interactive_agent", Status: "running",
+				}}}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type: "interactive_agent", Title: "Pi Child", ParentJobID: "parent-id",
+				Provider: "pi", Model: "gpt-5.6-sol",
+				PromptFile: createTempFile(t, "Do child work"),
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Pi Child")
+				if job.Provider != "pi" || job.Model != "gpt-5.6-sol" {
+					t.Errorf("provider/model = %q/%q, want pi/gpt-5.6-sol", job.Provider, job.Model)
+				}
+			},
+		},
+		{
+			// Submit-time model validation is provider-aware: the claude CLI
+			// cannot run a Pi-family model, so the mismatch must fail at add.
+			name: "provider/model mismatch on a subjob child errors",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan", Jobs: []*orchestration.Job{{
+					ID: "parent-id", Title: "Parent", Filename: "01-parent.md", Type: "interactive_agent", Status: "running",
+				}}}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type: "interactive_agent", Title: "Mismatched Child", ParentJobID: "parent-id",
+				Provider: "claude", Model: "gpt-5.6-sol",
+				PromptFile: createTempFile(t, "Do child work"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "unknown provider on a subjob child errors",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan", Jobs: []*orchestration.Job{{
+					ID: "parent-id", Title: "Parent", Filename: "01-parent.md", Type: "interactive_agent", Status: "running",
+				}}}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type: "interactive_agent", Title: "Unknown Provider Child", ParentJobID: "parent-id",
+				Provider: "not-a-provider",
+				PromptFile: createTempFile(t, "Do child work"),
+			},
+			wantErr: true,
+		},
+		{
 			name: "invalid parent job ID",
 			setupPlan: func(t *testing.T, dir string) {
 				if err := orchestration.SavePlan(dir, &orchestration.Plan{Name: "test-plan"}); err != nil {

@@ -62,8 +62,8 @@ func WarmChatCache(ctx context.Context, job *Job, plan *Plan) (*WarmResult, erro
 	if job.Type != JobTypeChat {
 		return nil, fmt.Errorf("flow plan warm only applies to chat jobs (%s is type %s)", job.Filename, job.Type)
 	}
-	if job.IsAgentResponded() {
-		return nil, fmt.Errorf("flow plan warm does not apply to responder: agent chats (they never dispatch to an LLM API, so there is no cached prefix to keep warm)")
+	if job.IsAPIDispatchVetoed() {
+		return nil, fmt.Errorf("flow plan warm does not apply to responder: %s chats (they never dispatch to an LLM API, so there is no cached prefix to keep warm)", job.Responder)
 	}
 
 	// --- Cache identity from the latest manifest header (addendum A1/A4) ---

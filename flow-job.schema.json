@@ -94,9 +94,10 @@
       "type": "string",
       "enum": [
         "oracle",
-        "agent"
+        "agent",
+        "pi-session"
       ],
-      "description": "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context) or agent (fresh agent session with file access per turn; never dispatched to an LLM API)"
+      "description": "Who authors the response turns of a chat job: oracle (default; stateless LLM API call over inlined context)"
     },
     "model": {
       "type": "string",

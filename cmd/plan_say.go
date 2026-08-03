@@ -66,8 +66,43 @@ func RunPlanSay(c *PlanSayCmd) error {
 	}
 
 	fmt.Println(theme.DefaultTheme.Success.Render("*") + " Appended turn to " + jobFile)
+
+	// A pi-session chat has a live process waiting on this file, so `say` is
+	// the whole delivery verb rather than half of one: nudge the session's
+	// watcher and hand the job back to `running`, since the turn is now in
+	// flight rather than waiting on the user. Both steps are no-ops for every
+	// other responder, so this stays one code path for all chats.
+	if job.IsPiSessionResponded() {
+		return deliverPiSessionTurn(plan, job, jobFile)
+	}
+
 	fmt.Println("\nNext step:")
 	fmt.Printf("- Run with: flow plan run %s\n", jobFile)
+	return nil
+}
+
+// deliverPiSessionTurn completes a `say` against a pi-session chat: wake the
+// session, then move the job out of pending_user.
+//
+// Neither step may fail the command. The append already succeeded and IS the
+// durable truth — the session reconciles from the chat file on its next wake or
+// poll regardless — so turning a nudge failure into a non-zero exit would
+// invite callers to retry an append that already landed.
+func deliverPiSessionTurn(plan *orchestration.Plan, job *orchestration.Job, jobFile string) error {
+	if err := orchestration.NudgePiSessionWake(plan.Directory, job, orchestration.WakeReasonSay); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not nudge the pi session's watcher: %v (the turn is in the chat file; the session will pick it up on its next reconcile)\n", err)
+	}
+	if job.Status == orchestration.JobStatusPendingUser || job.Status == orchestration.JobStatusCompleted {
+		if err := orchestration.NewStatePersister().UpdateJobStatus(job, orchestration.JobStatusRunning); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not move %s back to running: %v\n", jobFile, err)
+		}
+	}
+
+	fmt.Println("\nDelivered to the seeded pi session.")
+	if alive, _ := orchestration.AgentProcessAlive(job.ID); !alive {
+		fmt.Printf("%s The session for %s is not running — start it with: flow plan run %s\n",
+			theme.DefaultTheme.Warning.Render("!"), jobFile, jobFile)
+	}
 	return nil
 }
 
