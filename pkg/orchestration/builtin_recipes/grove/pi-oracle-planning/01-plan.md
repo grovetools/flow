@@ -4,12 +4,12 @@ title: "Plan {{ .PlanName }} with a seeded Pi oracle"
 status: pending
 type: interactive_agent
 provider: pi
-skill: grove-pi-oracle-planner
+skill: grove-pi-oracle
 coord_mode: autonomous
 depends_on: []
 ---
 
-Run the `grove-pi-oracle-planner` coordinator for this plan.
+Run the planner seat of `grove-pi-oracle` for this plan: read the skill's `references/planner.md` in full before acting.
 
 {{- if .Vars.feature }}
 Design target: {{ .Vars.feature }}
@@ -28,6 +28,6 @@ You are the PLANNING half of a two-coordinator arc, and both halves are one line
 2. You drive the chat with `flow plan say` and read the responses back out of the same chat file. The chat `.md` is the record; the Pi session is only the engine.
 3. Before any gate you spawn an adversarial verifier as a real `flow_subjob` child — a fresh agent that reads the code and hunts for what is WRONG — and join its report. **No verifier report means the design is not gateable**, however convincing it reads.
 4. After the gate you materialize the phased plan the oracle emitted: plain `flow plan add` calls with `depends_on` DAGs, batch-created **pending and unlaunched** so the operator reviews the roster before anything runs.
-5. You then call `flow_handoff` with `action: handoff` and `skill: grove-pi-oracle-executor`, which creates the executor coordinator (horizontal lineage) and ends this session. The executor dispatches the impl children; you never do.
+5. You then call `flow_handoff` with `action: handoff`, `skill: grove-pi-oracle`, and a spec whose OPENING LINE declares the seat ("You are the EXECUTOR seat of grove-pi-oracle — read references/executor.md"), which creates the executor coordinator (horizontal lineage) and ends this session. The executor dispatches the impl children; you never do.
 
 `coord_mode: autonomous` is set because the handoff in step 5 is a planned workflow step, not a context-exhaustion escape. It also lets you hand off early if your own window fills first — the chain is bounded by `handoff_max`. Set `coord_mode: manual` in this job's frontmatter instead if the operator wants to authorize each handoff with `/handoff`.

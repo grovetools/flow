@@ -42,8 +42,8 @@ func TestPiOraclePlanningRecipeBootstrapsPlanningCoordinator(t *testing.T) {
 	if got := frontmatter["provider"]; got != "pi" {
 		t.Fatalf("provider = %#v, want pi", got)
 	}
-	if got := frontmatter["skill"]; got != "grove-pi-oracle-planner" {
-		t.Fatalf("skill = %#v, want grove-pi-oracle-planner", got)
+	if got := frontmatter["skill"]; got != "grove-pi-oracle" {
+		t.Fatalf("skill = %#v, want grove-pi-oracle", got)
 	}
 	// Step 5 of the SOP is a planned handoff, so the job must not need an
 	// operator /handoff to reach its own last step.
@@ -68,7 +68,7 @@ func TestPiOraclePlanningRecipeBootstrapsPlanningCoordinator(t *testing.T) {
 		"flow_subjob",              // the verifier really is a subjob child
 		"not gateable",             // the verification pass is mandatory
 		"pending and unlaunched",   // decomposition is reviewed before it runs
-		"grove-pi-oracle-executor", // the successor carries the executor skill
+		"references/executor.md", // the successor seat is declared in the handoff spec
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered body is missing %q:\n%s", want, body)
