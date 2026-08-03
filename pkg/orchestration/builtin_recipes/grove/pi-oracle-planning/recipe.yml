@@ -1,0 +1,2 @@
+description: Bootstrap a planning coordinator that designs a feature through a seeded Pi oracle chat, verifies it adversarially, decomposes it into jobs, and hands off to a fresh executor coordinator.
+default_note_target: 01-plan.md
