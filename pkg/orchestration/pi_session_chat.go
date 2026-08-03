@@ -59,6 +59,66 @@ var piSessionLauncher = func(ctx context.Context, provider InteractiveAgentProvi
 	return provider.Launch(ctx, job, plan, workDir, agentArgs, briefingFilePath)
 }
 
+// RunPiSessionChatJob is executeChatJob's entry point for a `responder:
+// pi-session` chat: RunPiSessionChat plus the terminal-failure funnel, so a
+// refused launch lands where the driving coordinator actually looks (contract
+// §7: `running ──launch/preflight failure──► failed`, last_error stamped).
+//
+// Why the wrapper exists rather than relying on the funnel already in the
+// tree: the pi-session branch of executeChatJob returns BEFORE the running flip
+// that installs that function's deferred terminal-failure guard, and the
+// LocalRuntime chat error path that stamps last_error is a no-op in the daemon
+// (groved builds its LocalRuntime with a noopStatusUpdater, so the frontmatter
+// write goes nowhere). A window-gate refusal therefore reached only the daemon
+// system log: the job kept its old status, its frontmatter got no last_error,
+// and its job.log stopped after the preflight line. The stamp is written
+// through the StatePersister directly — the same thing finalizeHeadlessFailure
+// does for a headless agent that dies inside the daemon — so it does not depend
+// on which updater the runtime was handed.
+func RunPiSessionChatJob(ctx context.Context, job *Job, plan *Plan) (retErr error) {
+	defer func() {
+		if retErr != nil && job != nil {
+			stampPiSessionLaunchFailure(ctx, job, retErr)
+		}
+	}()
+	return RunPiSessionChat(ctx, job, plan)
+}
+
+// stampPiSessionLaunchFailure records a refused launch in all three places the
+// contract promises: the job's job.log (the ctx writer is the runtime's
+// MultiWriter onto it), the structured/system log, and the job frontmatter
+// (status: failed + last_error). It never rewrites the cause — a gate error's
+// text IS the user-facing last_error, and every one of them already names its
+// own fix.
+func stampPiSessionLaunchFailure(ctx context.Context, job *Job, cause error) {
+	// The ulog writer renders only the message line, not .Err, so the full
+	// actionable text is written to job.log explicitly — the same split the
+	// chat terminal-failure guard uses.
+	fmt.Fprintf(grovelogging.GetWriter(ctx), "pi-session launch failed: %v\n", cause)
+	ulog.Error("pi-session launch failed").
+		Err(cause).
+		Field("job_id", job.ID).
+		Log(ctx)
+
+	if job.FilePath == "" {
+		return
+	}
+	persister := NewStatePersister()
+	job.Metadata.LastError = cause.Error()
+	if err := persister.UpdateJobMetadata(job, job.Metadata); err != nil {
+		ulog.Warn("Failed to write pi-session last_error metadata").
+			Err(err).
+			Field("job_id", job.ID).
+			Log(ctx)
+	}
+	if err := persister.UpdateJobStatus(job, JobStatusFailed); err != nil {
+		ulog.Warn("Failed to stamp a refused pi-session launch as failed").
+			Err(err).
+			Field("job_id", job.ID).
+			Log(ctx)
+	}
+}
+
 // RunPiSessionChat is the `flow plan run` behavior for a pi-session chat. It is
 // idempotent by design — a coordinator may run it on every pass:
 //

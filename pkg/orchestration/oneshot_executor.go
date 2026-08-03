@@ -1564,11 +1564,16 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 	// `flow plan run` is the LAUNCH verb (first run seeds + starts it; later
 	// runs re-attach or resume the same session file). Turn delivery is
 	// `flow plan say`, not this path.
+	//
+	// This branch returns before the running flip below, so the deferred
+	// terminal-failure guard installed there never covers it —
+	// RunPiSessionChatJob carries its own equivalent, which is why the launch is
+	// dispatched through the wrapper rather than through RunPiSessionChat.
 	if job.IsPiSessionResponded() {
 		ulog.Info("pi-session chat (responder: pi-session) — launching/attaching the seeded Pi session instead of dispatching to an LLM API").
 			Field("job", job.Title).
 			Log(ctx)
-		return RunPiSessionChat(ctx, job, plan)
+		return RunPiSessionChatJob(ctx, job, plan)
 	}
 
 	// responder: agent — a fresh agent session authors each turn out of band.

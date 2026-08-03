@@ -1,12 +1,15 @@
 package orchestration
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	grovelogging "github.com/grovetools/core/logging"
 )
 
 // initPiSessionTestRepo makes dir a git repository.
@@ -257,5 +260,98 @@ func TestLaunchPiSessionChat_WindowGateBlocksLaunch(t *testing.T) {
 	}
 	if _, statErr := os.Stat(ContextLayersDir(planDir, job.ID)); statErr == nil {
 		t.Error("context layers were frozen despite the window gate refusing; the gate must run first")
+	}
+}
+
+// TestExecuteChatJob_PiSessionLaunchFailureIsStamped is the regression guard for
+// the silent-launch-failure defect (2026-08-03): a window-gate refusal reached
+// only the daemon system log, so the driving coordinator saw a job that had
+// simply stopped moving and burned three sibling chats retrying variations of a
+// refusal that named its own fix. Contract §7 requires the opposite — `running
+// ──launch/preflight failure──► failed`, last_error stamped — so the launch must
+// leave all three surfaces populated: the frontmatter status, the frontmatter
+// last_error, and the job's own log.
+func TestExecuteChatJob_PiSessionLaunchFailureIsStamped(t *testing.T) {
+	planDir := t.TempDir()
+	initPiSessionTestRepo(t, planDir)
+	// Same oversized bundle as the gate test above: ~600K cx tokens against the
+	// 132K budget of a 200K-window Claude.
+	big := strings.Repeat("package big\n\nfunc F() int { return 1 }\n", 30_000)
+	if err := os.WriteFile(filepath.Join(planDir, "big.go"), []byte(big), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rulesDir := filepath.Join(planDir, "rules")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rulesDir, "big.rules"), []byte("big.go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	jobPath := filepath.Join(planDir, "04-pi.md")
+	content := "---\nid: j1\ntitle: pi chat\nstatus: running\ntype: chat\nresponder: pi-session\n" +
+		"provider: pi\nmodel: claude-sonnet-4-5\nrules_file: rules/big.rules\ntemplate: chat\n---\n\n" +
+		"<!-- grove: {\"template\": \"chat\"} -->\n\nDesign the thing.\n"
+	if err := os.WriteFile(jobPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job, err := LoadJob(jobPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Filename = "04-pi.md"
+	job.FilePath = jobPath
+
+	plan := &Plan{Name: "p", Directory: planDir, JobsByID: map[string]*Job{job.ID: job}, Orchestration: &Config{AgentTarget: "tmux"}}
+	plan.Jobs = append(plan.Jobs, job)
+
+	restore := swapPiSessionLauncher(func(context.Context, InteractiveAgentProvider, *Job, *Plan, string, []string, string) error {
+		t.Error("the session was launched despite the window gate refusing")
+		return nil
+	})
+	defer restore()
+
+	// The runtime hands executeChatJob a writer that fans out to the job's
+	// job.log; a buffer stands in for it here.
+	var jobLog bytes.Buffer
+	ctx := grovelogging.WithWriter(context.Background(), &jobLog)
+
+	client := &dispatchRecordingLLMClient{}
+	err = NewOneShotExecutor(client, nil).Execute(ctx, job, plan)
+	if err == nil || !strings.Contains(err.Error(), "seed window gate") {
+		t.Fatalf("Execute() = %v, want the window gate to refuse", err)
+	}
+	if client.called {
+		t.Error("LLM client was invoked for a pi-session chat")
+	}
+
+	// --- The frontmatter is where the coordinator looks. ---
+	if status := frontmatterStatus(t, jobPath); status != string(JobStatusFailed) {
+		t.Errorf("frontmatter status = %q, want %q", status, JobStatusFailed)
+	}
+	fmBytes, readErr := os.ReadFile(jobPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	fm, _, parseErr := ParseFrontmatter(fmBytes)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	lastError, _ := fm["last_error"].(string)
+	if !strings.Contains(lastError, "seed window gate") {
+		t.Errorf("frontmatter last_error = %q, want the window-gate refusal", lastError)
+	}
+	// The message must arrive whole, not truncated to a category: it is the
+	// error text itself that names the fix.
+	if lastError != err.Error() {
+		t.Errorf("frontmatter last_error = %q, want the verbatim launch error %q", lastError, err.Error())
+	}
+	if job.Metadata.LastError != lastError {
+		t.Errorf("in-memory LastError = %q, want it consistent with the frontmatter %q", job.Metadata.LastError, lastError)
+	}
+
+	// --- And so is the job's own log. ---
+	if !strings.Contains(jobLog.String(), "seed window gate") {
+		t.Errorf("job.log did not receive the refusal:\n%s", jobLog.String())
 	}
 }
