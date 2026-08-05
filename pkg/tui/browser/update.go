@@ -132,14 +132,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMessage = "Rolling plan already exists"
 		}
-		// The plan index has not seen the new directory yet. In daemon mode a
-		// local load would be discarded as a stale non-portfolio projection, so
-		// nudge the daemon to re-scan instead and let the stream deliver it.
-		if m.hasDaemonSnapshot {
-			return m, refreshPlanIndexCmd(m.daemonClientFactory())
-		}
-		m.loadGeneration++
-		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration)
+		// Open the new plan rather than dropping the user back on a list that
+		// still looks empty. The host loads it into the Jobs page; the
+		// standalone CLI launches `flow plan status --tui` for it.
+		//
+		// The reload rides alongside so the Plans tab has the row when the user
+		// comes back to it — it cannot be left to the daemon, whose flow
+		// watcher never saw a plans directory that did not exist when its watch
+		// paths were computed.
+		return m, tea.Batch(
+			reloadAfterLocalWriteCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived),
+			func() tea.Msg {
+				return BrowserPlanSelectedMsg{PlanName: RollingPlanName, PlanPath: msg.dir}
+			},
+		)
 
 	case bulkPreviewMsg:
 		if msg.generation != m.bulkGeneration {
@@ -372,11 +378,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case planListLoadCompleteMsg:
 		// A local load started before daemon recovery, or a projection from an
-		// older index revision, must not replace the qualified portfolio.
-		if m.hasDaemonSnapshot && !msg.portfolio {
+		// older index revision, must not replace the qualified portfolio — the
+		// exception being a scan taken after this process wrote a plan, where
+		// disk is the fresher of the two by construction.
+		if m.hasDaemonSnapshot && !msg.portfolio && !msg.authoritative {
 			return m, nil
 		}
-		if !msg.portfolio && msg.loadGeneration != 0 && msg.loadGeneration != m.loadGeneration {
+		if !msg.portfolio && !msg.authoritative && msg.loadGeneration != 0 && msg.loadGeneration != m.loadGeneration {
 			return m, nil
 		}
 		if msg.portfolio && msg.portfolioGeneration != 0 && msg.portfolioGeneration != m.streamGeneration {

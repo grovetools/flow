@@ -275,6 +275,13 @@ type planListLoadCompleteMsg struct {
 	planIndexRevision   uint64
 	portfolioGeneration uint64
 	loadGeneration      uint64
+	// authoritative marks a disk scan that must be applied even while a daemon
+	// snapshot is otherwise in charge. It is set only after THIS process wrote
+	// the plan directory, so disk is known to be ahead of the index — the
+	// daemon's flow watcher cannot see a plans directory that did not exist
+	// when its watch paths were computed, so waiting for it means waiting for
+	// a restart.
+	authoritative bool
 }
 
 // gitLogMsg carries the result of fetching the top-level workspace git log.
@@ -367,20 +374,15 @@ func createRollingPlanCmd(plansDir string) tea.Cmd {
 	}
 }
 
-// refreshPlanIndexCmd asks the daemon to re-scan so a plan directory this
-// process just created reaches the portfolio projection. The browser's own
-// local loads are discarded while a daemon snapshot is authoritative, so this
-// is the only way a locally-created plan appears without waiting for the
-// daemon's own sweep.
-func refreshPlanIndexCmd(factory DaemonClientFactory) tea.Cmd {
-	if factory == nil {
-		return nil
-	}
+// reloadAfterLocalWriteCmd re-scans the plans directory and marks the result
+// authoritative, so the row for a plan this process just wrote appears without
+// waiting for the daemon's index to catch up. loadPlansList already prefers
+// disk over a stale daemon snapshot; the marker is what gets the result past
+// the portfolio guard in the update loop.
+func reloadAfterLocalWriteCmd(plansDirectory, cwdGitRoot string, showOnHold, showArchived bool) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = factory().Refresh(ctx)
-		return nil
+		plans, err := loadPlansList(plansDirectory, cwdGitRoot, showOnHold, showArchived)
+		return planListLoadCompleteMsg{plans: plans, error: err, authoritative: true}
 	}
 }
 
