@@ -146,6 +146,9 @@ type Model struct {
 	// planCellCap truncates PLAN-column cells when even a PLAN-only table is
 	// wider than the pane. Zero means no cap.
 	planCellCap int
+	// rollingPending guards the empty-state rolling-plan offer so a repeated
+	// keypress cannot start a second materialization.
+	rollingPending bool
 
 	embedMode bool // suppress inline footer; host uses Footer()
 	hosted    bool // route workspace opens through the embedding host

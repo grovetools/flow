@@ -26,6 +26,7 @@ type KeyMap struct {
 	ViewGit           key.Binding
 	FinishPlan        key.Binding
 	NewPlan           key.Binding
+	NewRollingPlan    key.Binding
 	SetActive         key.Binding
 	ReviewPlan        key.Binding
 	EditNotes         key.Binding
@@ -62,6 +63,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{
 			key.NewBinding(key.WithKeys(""), key.WithHelp("", "Actions")),
 			k.NewPlan,
+			k.NewRollingPlan,
 			k.SetActive,
 			k.EditNotes,
 			k.ReviewPlan,
@@ -111,7 +113,7 @@ func (k KeyMap) Sections() []keymap.Section {
 		{
 			Name: "Actions",
 			Bindings: []key.Binding{
-				k.NewPlan, k.SetActive, k.EditNotes, k.ReviewPlan, k.FinishPlan,
+				k.NewPlan, k.NewRollingPlan, k.SetActive, k.EditNotes, k.ReviewPlan, k.FinishPlan,
 				k.FastForwardUpdate, k.FastForwardMain, k.FastForwardAll,
 			},
 		},
@@ -181,6 +183,14 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		NewPlan: key.NewBinding(
 			key.WithKeys("n"),
 			key.WithHelp("n", "create new plan"),
+		),
+		// The rolling plan is the shared home for quick tasks and needs no
+		// wizard — a workspace whose plans directory does not exist yet is one
+		// keystroke away from having one. The empty-state prompt also accepts
+		// enter, which otherwise does nothing with no row under the cursor.
+		NewRollingPlan: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", "create rolling plan"),
 		),
 		SetActive: key.NewBinding(
 			key.WithKeys("s"),

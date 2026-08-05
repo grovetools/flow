@@ -63,9 +63,8 @@ func Validate(req Request) (ValidationReport, MutationManifest) {
 		}
 	}
 
-	plansInfo, plansErr := os.Stat(req.PlansDir)
-	plansOK := plansErr == nil && plansInfo.IsDir() && plansInfo.Mode().Perm()&0o200 != 0
-	add("permissions.plans_dir", SeverityError, plansOK, ternary(plansOK, "plans directory is writable", "plans directory is missing or not writable"))
+	plansOK, plansMissing, plansDetail := checkPlansDir(req.PlansDir)
+	add("permissions.plans_dir", SeverityError, plansOK, plansDetail)
 
 	if req.BaseBranch != "" && workspaceOK {
 		cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+req.BaseBranch)
@@ -94,11 +93,17 @@ func Validate(req Request) (ValidationReport, MutationManifest) {
 	}
 	add("registry.worktree_ownership", SeverityError, registryFree, ternary(registryFree, "worktree identity is unowned", "worktree identity is already registered"))
 
-	manifest := MutationManifest{Steps: []MutationStep{
-		{ID: "journal", Kind: "write_init_journal", Target: filepath.Join(req.PlansDir, ".init-"+filepath.Base(req.PlanName)+".journal.json"), Reversible: true},
-		{ID: "plan-dir", Kind: "create_plan_dir", Target: planDir, Reversible: true},
-		{ID: "plan-files", Kind: "write_plan_and_job_files", Target: planDir, Reversible: true},
-	}}
+	manifest := MutationManifest{}
+	// The first plan in a workspace materializes the plans directory itself.
+	// Listing it keeps the review screen honest about what appears on disk.
+	if plansMissing {
+		manifest.Steps = append(manifest.Steps,
+			MutationStep{ID: "plans-dir", Kind: "create_plans_dir", Target: req.PlansDir, Reversible: true})
+	}
+	manifest.Steps = append(manifest.Steps,
+		MutationStep{ID: "journal", Kind: "write_init_journal", Target: filepath.Join(req.PlansDir, ".init-"+filepath.Base(req.PlanName)+".journal.json"), Reversible: true},
+		MutationStep{ID: "plan-dir", Kind: "create_plan_dir", Target: planDir, Reversible: true},
+		MutationStep{ID: "plan-files", Kind: "write_plan_and_job_files", Target: planDir, Reversible: true})
 	if req.WorktreeName != "" {
 		manifest.Steps = append(manifest.Steps,
 			MutationStep{ID: "branch", Kind: "create_branch", Target: req.WorktreeName, Reversible: true},
@@ -109,6 +114,54 @@ func Validate(req Request) (ValidationReport, MutationManifest) {
 		manifest.Steps = append(manifest.Steps, MutationStep{ID: "hooks", Kind: "run_init_hooks", Target: req.TargetWorkspace, Reversible: false})
 	}
 	return report, manifest
+}
+
+// checkPlansDir reports whether the plans directory can be written to, and
+// whether creation has to make it first.
+//
+// A workspace that has never held a plan has no plans directory yet — and
+// every writer downstream (the journal writer, `flow plan init`) MkdirAll's it.
+// Failing the pre-flight on "missing" therefore blocked the one case it should
+// have waved through: the first plan in a brand-new repo. Missing is fine as
+// long as the nearest existing ancestor is a writable directory; only an
+// unresolvable path, a non-directory, or a read-only ancestor is a real block.
+func checkPlansDir(plansDir string) (ok, missing bool, detail string) {
+	if plansDir == "" {
+		return false, false, "plans directory could not be resolved for this workspace"
+	}
+
+	info, err := os.Stat(plansDir)
+	switch {
+	case err == nil && !info.IsDir():
+		return false, false, "plans path exists but is not a directory: " + plansDir
+	case err == nil && info.Mode().Perm()&0o200 == 0:
+		return false, false, "plans directory is not writable: " + plansDir
+	case err == nil:
+		return true, false, "plans directory is writable"
+	case !os.IsNotExist(err):
+		return false, false, fmt.Sprintf("plans directory is unreadable: %v", err)
+	}
+
+	// Missing: walk up to the nearest existing ancestor and judge that instead.
+	dir := plansDir
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false, true, "no existing parent directory for " + plansDir
+		}
+		dir = parent
+		parentInfo, parentErr := os.Stat(dir)
+		if os.IsNotExist(parentErr) {
+			continue
+		}
+		if parentErr != nil {
+			return false, true, fmt.Sprintf("plans directory is unreadable: %v", parentErr)
+		}
+		if !parentInfo.IsDir() || parentInfo.Mode().Perm()&0o200 == 0 {
+			return false, true, "plans directory cannot be created under " + dir
+		}
+		return true, true, "plans directory will be created: " + plansDir
+	}
 }
 
 func ternary(ok bool, yes, no string) string {

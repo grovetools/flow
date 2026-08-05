@@ -59,6 +59,57 @@ func TestValidateAcceptsCleanTarget(t *testing.T) {
 	}
 }
 
+// TestValidateAcceptsMissingPlansDir pins the first-plan-in-a-new-repo case: a
+// workspace that has never held a plan has no plans directory, and every writer
+// downstream creates it. Blocking on "missing" made the rolling plan of a fresh
+// repo impossible to create from the wizard.
+func TestValidateAcceptsMissingPlansDir(t *testing.T) {
+	ws := initRepo(t)
+	plans := filepath.Join(t.TempDir(), "workspaces", "fresh-repo", "plans")
+
+	report, manifest := Validate(Request{TargetWorkspace: ws, PlansDir: plans, PlanName: "rolling"})
+	if !report.Valid() {
+		t.Fatalf("missing plans directory blocked creation: %+v", report.Checks)
+	}
+	if !hasStepKind(manifest, "create_plans_dir") {
+		t.Errorf("manifest does not disclose that the plans directory gets created: %+v", manifest.Steps)
+	}
+
+	// An existing plans directory needs no such step.
+	_, manifest = Validate(Request{TargetWorkspace: ws, PlansDir: t.TempDir(), PlanName: "rolling"})
+	if hasStepKind(manifest, "create_plans_dir") {
+		t.Errorf("existing plans directory listed as a mutation: %+v", manifest.Steps)
+	}
+}
+
+// TestValidateRejectsUnwritablePlansDirAncestor keeps the relaxation honest: a
+// plans directory that genuinely cannot be created still blocks.
+func TestValidateRejectsUnwritablePlansDirAncestor(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	ws := initRepo(t)
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	report, _ := Validate(Request{TargetWorkspace: ws, PlansDir: filepath.Join(locked, "plans"), PlanName: "rolling"})
+	if report.Valid() {
+		t.Fatal("plans directory under a read-only parent accepted")
+	}
+}
+
+func hasStepKind(manifest MutationManifest, kind string) bool {
+	for _, step := range manifest.Steps {
+		if step.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // TestValidateRejectsPathAsWorktreeName pins the pre-flight guard for the
 // phantom-worktree bug: an absolute path in the worktree field is Join'd onto
 // the container base (Join concatenates rather than replacing), synthesizing a

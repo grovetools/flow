@@ -121,6 +121,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.reloadPlansCmd()
 
+	case rollingPlanCreatedMsg:
+		m.rollingPending = false
+		if msg.err != nil {
+			m.statusMessage = theme.DefaultTheme.Error.Render(fmt.Sprintf("Could not create the rolling plan: %v", msg.err))
+			return m, nil
+		}
+		if msg.created {
+			m.statusMessage = "Created the rolling plan"
+		} else {
+			m.statusMessage = "Rolling plan already exists"
+		}
+		// The plan index has not seen the new directory yet. In daemon mode a
+		// local load would be discarded as a stale non-portfolio projection, so
+		// nudge the daemon to re-scan instead and let the stream deliver it.
+		if m.hasDaemonSnapshot {
+			return m, refreshPlanIndexCmd(m.daemonClientFactory())
+		}
+		m.loadGeneration++
+		return m, loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration)
+
 	case bulkPreviewMsg:
 		if msg.generation != m.bulkGeneration {
 			return m, nil
@@ -610,6 +630,18 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.NewPlan):
 		return m, executeNewPlan()
+
+	// The empty state offers the rolling plan directly, so enter — which has no
+	// row to act on there — takes the offer. With rows present enter falls
+	// through to ViewPlan below, unchanged.
+	case key.Matches(msg, m.keys.NewRollingPlan),
+		len(m.plans) == 0 && key.Matches(msg, m.keys.ViewPlan):
+		if m.rollingPending {
+			return m, nil
+		}
+		m.rollingPending = true
+		m.statusMessage = "Creating rolling plan…"
+		return m, createRollingPlanCmd(m.plansDirectory)
 
 	case key.Matches(msg, m.keys.Up):
 		m.statusMessage = ""

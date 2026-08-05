@@ -347,6 +347,43 @@ type holdCompleteMsg struct {
 	err  error
 }
 
+// rollingPlanCreatedMsg carries the result of materializing the rolling plan
+// from the empty-state prompt.
+type rollingPlanCreatedMsg struct {
+	dir     string
+	created bool
+	err     error
+}
+
+// createRollingPlanCmd materializes the rolling plan in THIS browser's plans
+// directory. It deliberately does not go through coreplan.EnsureRollingPlan,
+// which re-resolves the directory from a working directory: the browser is
+// already scoped to a plans dir, and creating the plan anywhere else would
+// leave the list as empty as it was.
+func createRollingPlanCmd(plansDir string) tea.Cmd {
+	return func() tea.Msg {
+		dir, created, err := coreplan.EnsureRollingPlanIn(plansDir)
+		return rollingPlanCreatedMsg{dir: dir, created: created, err: err}
+	}
+}
+
+// refreshPlanIndexCmd asks the daemon to re-scan so a plan directory this
+// process just created reaches the portfolio projection. The browser's own
+// local loads are discarded while a daemon snapshot is authoritative, so this
+// is the only way a locally-created plan appears without waiting for the
+// daemon's own sweep.
+func refreshPlanIndexCmd(factory DaemonClientFactory) tea.Cmd {
+	if factory == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = factory().Refresh(ctx)
+		return nil
+	}
+}
+
 func setHoldCmd(key, planDir string, hold bool) tea.Cmd {
 	return func() tea.Msg {
 		return holdCompleteMsg{key: key, hold: hold, err: orchestration.SetHold(planDir, hold)}

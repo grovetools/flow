@@ -67,7 +67,7 @@ func (m Model) View() string {
 	}
 
 	if len(m.plans) == 0 {
-		s.WriteString("No plans found in directory.\n")
+		s.WriteString(m.renderEmptyState())
 		if !m.embedMode {
 			s.WriteString("\n")
 			s.WriteString(m.help.View())
@@ -155,6 +155,29 @@ func (m Model) View() string {
 	// frame height alone would truncate a namespace that has room on screen.
 	frame := padStyle.Render(s.String())
 	return m.whichKey.RenderOverlayAvail(frame, lipgloss.Width(frame), m.height, *theme.DefaultTheme)
+}
+
+// renderEmptyState replaces the old bare "No plans found in directory." dead
+// end. A workspace with no plans is the normal state of a repo that was just
+// created, and the rolling plan is exactly what it wants — so offer it here
+// rather than leaving the user to guess that the answer is the Add Plan wizard.
+func (m Model) renderEmptyState() string {
+	t := theme.DefaultTheme
+	var b strings.Builder
+	b.WriteString("No plans found in directory.\n\n")
+	if m.rollingPending {
+		b.WriteString(t.Muted.Render("Creating the rolling plan…") + "\n")
+		return b.String()
+	}
+	b.WriteString(t.Muted.Render("The rolling plan is the shared home for quick tasks in this workspace.") + "\n\n")
+	b.WriteString(fmt.Sprintf("  %s  %s\n",
+		t.Success.Render(theme.IconSelect+" enter"), "create the "+RollingPlanName+" plan here"))
+	b.WriteString(fmt.Sprintf("  %s  %s\n",
+		t.Muted.Render("  "+m.keys.NewPlan.Help().Key+"    "), "open the full plan wizard"))
+	if m.statusMessage != "" {
+		b.WriteString("\n" + m.statusMessage + "\n")
+	}
+	return b.String()
 }
 
 // footerLine builds the help + status-message line rendered at the
