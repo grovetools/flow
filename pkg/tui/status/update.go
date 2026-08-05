@@ -2578,8 +2578,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger := logging.NewLogger("flow-tui")
 			logger.Info("'r' key pressed - checking if jobs can run")
 
-			// Check if a job is already running from the TUI
-			if m.IsRunningJob {
+			// Determine if we're using the daemon (which has a blocked queue
+			// and handles DAG traversal itself).
+			usingDaemon := m.DaemonClient != nil && m.DaemonClient.IsRunning()
+
+			// A job already running only blocks a new run on the in-process
+			// paths, where the TUI itself owns the executor and can drive one
+			// run at a time. The daemon has its own queue and runs jobs
+			// concurrently, so submitting there must never be gated on
+			// IsRunningJob: a long-lived interactive agent stays "running"
+			// indefinitely, which would otherwise lock 'r' for the rest of the
+			// session (only reopening the TUI cleared it).
+			if m.IsRunningJob && !usingDaemon {
 				logger.Warn("Job already running in TUI - blocking new run")
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("A job is already running. Please wait for it to complete.")
 				return m, nil
@@ -2603,10 +2613,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			logger.WithFields(map[string]interface{}{
 				"num_candidates": len(candidateJobs),
 			}).Info("Filtering candidate jobs by status")
-
-			// Determine if we're using the daemon (which has a blocked queue
-			// and handles DAG traversal itself).
-			usingDaemon := m.DaemonClient != nil && m.DaemonClient.IsRunning()
 
 			// Filter out jobs that are not submittable.
 			// When using the daemon, accept any pending/blocked/failed job — the
