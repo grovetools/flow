@@ -1,0 +1,2 @@
+description: Bootstrap an interactive agent that builds or refreshes a LikeC4 architecture map stored in the notebook as a concept, guided by the grove-concept-mapper skill.
+default_note_target: 01-map.md
