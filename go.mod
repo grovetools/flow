@@ -13,10 +13,10 @@ require (
 	github.com/grovetools/compositor v0.0.1
 	github.com/grovetools/core v0.6.4-0.20260521140340-5660efd35db0
 	github.com/grovetools/cx v0.6.0
-	github.com/grovetools/eval v0.0.0-20260724205137-f2ccb7b82b04
+	github.com/grovetools/eval v0.0.0-20260724205137-3ed3f9bb75b1
 	github.com/grovetools/grove-anthropic v0.6.1
 	github.com/grovetools/grove-gemini v0.6.1
-	github.com/grovetools/grove-openrouter v0.0.0-20260718141608-3bd491b0b10a
+	github.com/grovetools/grove-openrouter v0.0.0-20260718141608-724adcda0762
 	github.com/grovetools/memory v0.6.3
 	github.com/grovetools/notify v0.6.0
 	github.com/grovetools/skills v0.6.0
