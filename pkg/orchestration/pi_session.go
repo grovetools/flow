@@ -27,9 +27,10 @@ func preparePiJobSessionDir(planDir, jobID string) (string, error) {
 }
 
 // appendPiJobSessionArgs gives every Pi-family launch path the same Flow-owned
-// transcript directory. Keeping this in one helper prevents less-common paths
-// (notably isolated tmux) from silently falling back to Pi's global session
-// directory, where groved would have to resolve the transcript by scanning.
+// transcript directory and the same startup-network policy. Keeping this in one
+// helper prevents less-common paths (notably isolated tmux) from silently
+// falling back to Pi's global session directory, where groved would have to
+// resolve the transcript by scanning.
 func appendPiJobSessionArgs(spec *AgentProviderSpec, planDir, jobID string, args []string) ([]string, error) {
 	if spec == nil || spec.PiRuntime == nil {
 		return args, nil
@@ -39,7 +40,71 @@ func appendPiJobSessionArgs(spec *AgentProviderSpec, planDir, jobID string, args
 		return nil, err
 	}
 	out := append([]string{}, args...)
-	return append(out, "--session-dir", dir), nil
+	out = append(out, "--session-dir", dir)
+	return appendPiOfflineStartupArg(out), nil
+}
+
+// piOfflineStartupArg is Pi's documented switch for "disable startup network
+// operations" (the CLI equivalent of PI_OFFLINE=1).
+const piOfflineStartupArg = "--offline"
+
+// piOnlineStartupEnv restores Pi's online startup for Flow-launched agents.
+// Set it to 1/true/yes to opt a machine back out of the mitigation below.
+const piOnlineStartupEnv = "GROVE_FLOW_PI_ONLINE_STARTUP"
+
+// appendPiOfflineStartupArg makes Flow-launched Pi skip its startup network
+// operations.
+//
+// Pi's interactive startup awaits network I/O BEFORE it submits the job's first
+// prompt: ModelRuntime.create refreshes the pi.dev model catalog (bounded at
+// 15s), and InteractiveMode.init then awaits updateAvailableProviderCount()
+// twice, each of which re-refreshes the catalog and re-resolves every provider's
+// auth with NO timeout of its own. The only bound left is undici's global idle
+// timeout, which Pi configures at 300s. So when a fetch hangs rather than fails
+// — a laptop that changed networks, a VPN coming up, DNS blackholing — each of
+// those two awaits costs a full 5 minutes with the agent already painted on
+// screen, unresponsive, before the briefing prompt is ever sent.
+//
+// Measured on this ecosystem's own transcripts: 11 of 250 Pi job launches
+// stalled between the session header and the first prompt, six of them at ~617s
+// = 15s + 2x300s, two at ~316s = 15s + 300s. Reproduced by pointing HTTPS_PROXY
+// at a socket that accepts and never answers; the proxy log shows exactly the
+// pi.dev connections the arithmetic predicts — t=2.7s (create, aborted at 15s),
+// t=17.8s, t=318.8s, and init clearing at ~620s. With --offline not one of them
+// is attempted. What --offline does NOT gate is the active provider's own auth
+// host, which can hang the same way for one more idle timeout; that half is
+// upstream-only and Flow cannot reach it from the launch side.
+//
+// This does not make the mitigation complete — the real fix belongs upstream,
+// where the startup refresh should carry a timeout or not gate the first prompt
+// — but it removes the pi.dev half of the stall on every Flow launch path, and
+// nothing a Flow job needs depends on it: the job's model comes from --model,
+// built-in models resolve without the catalog, and the remote overlay stays
+// fresh through ordinary interactive `pi` use.
+//
+// Skipped when the operator already configured --offline via
+// [flow.providers.<pi>] args (no duplicate flag) or opted out via
+// GROVE_FLOW_PI_ONLINE_STARTUP.
+func appendPiOfflineStartupArg(args []string) []string {
+	if isTruthyEnv(os.Getenv(piOnlineStartupEnv)) {
+		return args
+	}
+	for _, arg := range args {
+		if arg == piOfflineStartupArg {
+			return args
+		}
+	}
+	return append(args, piOfflineStartupArg)
+}
+
+// isTruthyEnv reads an opt-in environment flag the way Pi itself does: only
+// 1/true/yes count, so an exported-but-empty variable is not an opt-in.
+func isTruthyEnv(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 // piDiscoveryAfterTime resolves the AfterTime filter for a Pi-family launch's

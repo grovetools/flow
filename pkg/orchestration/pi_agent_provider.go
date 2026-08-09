@@ -141,12 +141,18 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 
 	// Pi sessions are owned by Flow and scoped to this guest job's artifact
 	// directory. --session-dir is appended after user args so callers cannot
-	// redirect transcripts into HOME or another job.
-	sessionDir, err := preparePiJobSessionDir(plan.Directory, job.ID)
+	// redirect transcripts into HOME or another job. Routed through the shared
+	// helper so the tmux path inherits the startup-network policy too — a stall
+	// that only the native path is immune to is a stall that comes back the
+	// moment agent_target flips.
+	spec, ok := LookupAgentProvider(p.providerName)
+	if !ok || spec.PiRuntime == nil {
+		return fmt.Errorf("provider %q is not a Pi-family provider", p.providerName)
+	}
+	agentArgs, err = appendPiJobSessionArgs(spec, plan.Directory, job.ID, agentArgs)
 	if err != nil {
 		return err
 	}
-	agentArgs = append(agentArgs, "--session-dir", sessionDir)
 
 	// Build agent command via the provider registry so the pane command bytes
 	// stay identical with the groveterm/isolated launch paths.

@@ -3,6 +3,7 @@ package orchestration
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -42,11 +43,83 @@ func TestAppendPiJobSessionArgsCoversEveryPiFamilyProvider(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := filepath.Join(plan, ".artifacts", "job-a", "sessions")
-		if len(args) != 3 || args[1] != "--session-dir" || args[2] != want {
-			t.Fatalf("%s args = %#v, want Flow-owned session dir %q", provider, args, want)
+		if len(args) != 4 || args[1] != "--session-dir" || args[2] != want || args[3] != piOfflineStartupArg {
+			t.Fatalf("%s args = %#v, want Flow-owned session dir %q then %s", provider, args, want, piOfflineStartupArg)
 		}
 		if len(configured) != 1 || configured[0] != "--verbose" {
 			t.Fatalf("%s mutated configured args: %#v", provider, configured)
+		}
+	}
+}
+
+// Pi's interactive startup awaits two unbounded model/auth refreshes before it
+// submits the job's first prompt, so a hung fetch parks a painted-but-dead agent
+// for a full undici idle timeout per await. Every Pi-family launch path has to
+// carry the offline switch, not just the ones that happened to be audited.
+func TestAppendPiJobSessionArgsDisablesPiStartupNetwork(t *testing.T) {
+	plan := t.TempDir()
+	spec, _ := LookupAgentProvider("pi")
+
+	args, err := appendPiJobSessionArgs(spec, plan, "job-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(args, piOfflineStartupArg) {
+		t.Fatalf("args = %#v, want %s", args, piOfflineStartupArg)
+	}
+
+	// An operator who already configured --offline must not get it twice.
+	args, err = appendPiJobSessionArgs(spec, plan, "job-a", []string{piOfflineStartupArg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := 0
+	for _, arg := range args {
+		if arg == piOfflineStartupArg {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Fatalf("args = %#v, want exactly one %s, got %d", args, piOfflineStartupArg, got)
+	}
+
+	// Non-Pi providers keep their own launch contract.
+	claude, _ := LookupAgentProvider("claude")
+	args, err = appendPiJobSessionArgs(claude, plan, "job-a", []string{"--verbose"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(args, piOfflineStartupArg) {
+		t.Fatalf("claude args = %#v, want no Pi startup flag", args)
+	}
+}
+
+func TestAppendPiJobSessionArgsHonorsOnlineStartupOptOut(t *testing.T) {
+	plan := t.TempDir()
+	spec, _ := LookupAgentProvider("pi")
+
+	// Exported-but-empty is not an opt-in, the same rule Pi applies to
+	// PI_OFFLINE — otherwise `export X=$UNSET` in a wrapper silently restores
+	// the stall.
+	for _, value := range []string{"", " ", "0", "no"} {
+		t.Setenv(piOnlineStartupEnv, value)
+		args, err := appendPiJobSessionArgs(spec, plan, "job-a", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(args, piOfflineStartupArg) {
+			t.Fatalf("%s=%q dropped %s: %#v", piOnlineStartupEnv, value, piOfflineStartupArg, args)
+		}
+	}
+
+	for _, value := range []string{"1", "true", "YES"} {
+		t.Setenv(piOnlineStartupEnv, value)
+		args, err := appendPiJobSessionArgs(spec, plan, "job-a", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(args, piOfflineStartupArg) {
+			t.Fatalf("%s=%q did not restore online startup: %#v", piOnlineStartupEnv, value, args)
 		}
 	}
 }
