@@ -99,26 +99,42 @@ type Model struct {
 	// FoldState records explicit user fold overrides keyed by NodeID
 	// (true = collapsed). Nodes absent from the map follow the default
 	// policy (running jobs auto-expand, everything else collapsed).
-	FoldState      map[string]bool
-	Cursor         int
-	ScrollOffset   int             // Track scroll position for viewport
-	Selected       map[string]bool // For multi-select
-	StatusSummary  string
-	Err            error
-	Width          int
-	Height         int
-	ConfirmArchive bool // Show archive confirmation
+	FoldState    map[string]bool
+	Cursor       int
+	ScrollOffset int             // Track scroll position for viewport
+	Selected     map[string]bool // For multi-select
+	// StatusSummary is the transient one-line result of the last action
+	// ("Demoted to note: …", "Job renamed successfully."). It is rendered in
+	// the footer and expires after statusSummaryTTL — before that it was set
+	// in forty places and displayed in none, which is why actions like demote
+	// looked like they had done nothing at all.
+	StatusSummary string
+	// StatusSummaryAt stamps when StatusSummary was set, for expiry. A zero
+	// value on a non-empty summary means "just set" — the tick handler stamps
+	// it — so direct assignments (the forty existing ones) get the same
+	// transient behavior without every call site learning about the clock.
+	StatusSummaryAt time.Time
+	Err             error
+	Width           int
+	Height          int
+	ConfirmArchive  bool // Show archive confirmation
 	// fieldEditor is the single schema-driven config-field editor (the c…
 	// Change namespace). Non-nil while open; it replaced the three bespoke
 	// ShowStatusPicker/ShowTypePicker/ShowTemplatePicker bool+cursor pairs.
-	fieldEditor      *fieldEditorState
-	PlanDir          string // Store plan directory for refresh
-	KeyMap           KeyMap
-	Help             help.Model
-	WhichKey         keymap.WhichKeyHost // Chord/which-key mixin: shared Sequence engine + namespaces + show-delay
-	Renaming         bool
-	RenameInput      textinput.Model
-	RenameJobIndex   int
+	fieldEditor    *fieldEditorState
+	PlanDir        string // Store plan directory for refresh
+	KeyMap         KeyMap
+	Help           help.Model
+	WhichKey       keymap.WhichKeyHost // Chord/which-key mixin: shared Sequence engine + namespaces + show-delay
+	Renaming       bool
+	RenameInput    textinput.Model
+	RenameJobIndex int
+	// Demoting is the demote-to-note confirmation: it names the jobs about to
+	// be parked and takes an optional reason, so a demote is both previewable
+	// and explainable rather than an instant, silent status flip.
+	Demoting         bool
+	DemoteInput      textinput.Model
+	DemoteTargets    []*orchestration.Job
 	selectingRecipe  bool
 	recipeList       list.Model
 	EditingDeps      bool
@@ -370,7 +386,7 @@ type Model struct {
 // IsTextEntryActive returns true when the user is focused on a text input,
 // signalling that single-letter shortcuts should not be intercepted.
 func (m Model) IsTextEntryActive() bool {
-	return m.Help.IsTextEntryActive() || m.IsolatedAgentInputActive || m.Renaming || m.CreatingJob ||
+	return m.Help.IsTextEntryActive() || m.IsolatedAgentInputActive || m.Renaming || m.Demoting || m.CreatingJob ||
 		m.ClawDialogActive || m.ClawTargetSelectorActive || m.skillSearchActive || m.JobFilterFocused() ||
 		m.fieldEditor != nil ||
 		m.EditingDeps ||
@@ -1165,7 +1181,36 @@ func (m Model) renderAgentInputBox(rightAligned bool) string {
 }
 
 // renderFooter renders the help and status message footer.
+// statusSummaryTTL is how long a transient action result stays in the footer
+// before the tick handler clears it. Long enough to read a note path, short
+// enough that it never masquerades as live state.
+const statusSummaryTTL = 12 * time.Second
+
+// statusSummaryExpired reports whether the current summary has outlived its
+// TTL. A zero timestamp is treated as fresh: the tick handler stamps it on the
+// first tick after the assignment.
+func (m Model) statusSummaryExpired(now time.Time) bool {
+	if m.StatusSummary == "" || m.StatusSummaryAt.IsZero() {
+		return false
+	}
+	return now.Sub(m.StatusSummaryAt) > statusSummaryTTL
+}
+
+// setStatusSummary records a transient footer message and restarts its TTL.
+// Assigning m.StatusSummary directly still works (the tick handler stamps an
+// unstamped message), but callers that want the clock reset — a second demote
+// after a first, say — should use this.
+func (m *Model) setStatusSummary(msg string) {
+	m.StatusSummary = msg
+	m.StatusSummaryAt = time.Now()
+}
+
 func (m Model) renderFooter() string {
+	// A pending action result outranks the help line: it is the only feedback
+	// the user gets that the keypress did anything.
+	if m.StatusSummary != "" {
+		return m.alignScrollIndicator(m.StatusSummary)
+	}
 	helpView := m.Help.View()
 	followStatus := ""
 	if m.ShowLogs {
@@ -1211,6 +1256,9 @@ func (m Model) View() string {
 	}
 	if m.Renaming {
 		return m.renderRenameDialog()
+	}
+	if m.Demoting {
+		return m.renderDemoteDialog()
 	}
 	if m.CreatingJob {
 		return m.renderJobCreationDialog()

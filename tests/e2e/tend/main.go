@@ -199,6 +199,7 @@ func main() {
 		scenarios.DemoteToNoteScenario,
 		scenarios.DemoteWithWorkspaceFlagScenario,
 		scenarios.PromoteDemoteRoundTripScenario,
+		scenarios.DemoteBulkPlanScenario,
 
 		// Claude folder-trust pre-seeding (~/.claude.json hasTrustDialogAccepted)
 		scenarios.ClaudeTrustSeedScenario,

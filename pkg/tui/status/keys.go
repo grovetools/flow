@@ -184,7 +184,7 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 		),
 		DemoteToNote: key.NewBinding(
 			key.WithKeys("D"),
-			key.WithHelp("D", "demote to note"),
+			key.WithHelp("D", "demote to note (selection or row)"),
 		),
 		// View operations
 		ToggleColumns: key.NewBinding(

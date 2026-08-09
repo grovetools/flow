@@ -410,9 +410,18 @@ See linked note: %s
 			// that the flow demote path now resolves and clears the link via the
 			// nb CLI (nb move + nb internal update-frontmatter), so this scenario
 			// requires a NEW nb binary on PATH to execute end-to-end.
+			// The link is replaced by provenance: a note that comes back to the
+			// inbox says which plan and job it was parked from, in frontmatter
+			// and in a body trailer.
+			demotedFrom, _ := fm.ExtraString("demoted_from")
+			demotedJob, _ := fm.ExtraString("demoted_job")
+
 			return ctx.Verify(func(v *verify.Collector) {
 				v.Equal("note plan_ref cleared after demote", "", fm.PlanRef)
 				v.Equal("note plan_job cleared after demote", "", fm.PlanJob)
+				v.Equal("note records the plan it was demoted from", "plans/round-trip-plan", demotedFrom)
+				v.Equal("note records the job it was demoted from", "02-round-trip-job.md", demotedJob)
+				v.Contains("note body carries the demote trailer", content, "Demoted from plan")
 			})
 		}),
 
@@ -426,6 +435,155 @@ See linked note: %s
 
 			return ctx.Verify(func(v *verify.Collector) {
 				v.Equal("job status is abandoned", string(orchestration.JobStatusAbandoned), string(job.Status))
+			})
+		}),
+	},
+)
+
+// DemoteBulkPlanScenario covers the "park this plan's pending jobs for later"
+// pass: one `flow plan demote <plan-dir>` invocation demotes every pending job in
+// a plan, records a shared reason on each note, and leaves completed work
+// alone. It is the agent-facing half of the demote UX — the CLI a sweep runs.
+var DemoteBulkPlanScenario = harness.NewScenario(
+	"flow-demote-bulk-plan",
+	"Verifies flow plan demote <plan-dir> parks every pending job's note with a reason, skipping completed jobs.",
+	[]string{"plan", "demote", "bulk"},
+	[]harness.Step{
+		harness.SetupMocks(harness.Mock{CommandName: "nb"}),
+
+		harness.NewStep("Setup a plan with two pending jobs and one completed", func(ctx *harness.Context) error {
+			wsDir := filepath.Join(ctx.HomeDir(), "notebooks", "test-notebook", "workspaces", "ws")
+			inbox := filepath.Join(wsDir, "inbox")
+			inProgress := filepath.Join(wsDir, "in_progress")
+			for _, dir := range []string{inbox, inProgress} {
+				if err := fs.CreateDir(dir); err != nil {
+					return fmt.Errorf("creating %s: %w", dir, err)
+				}
+			}
+			ctx.Set("inbox_dir", inbox)
+			ctx.Set("in_progress_dir", inProgress)
+
+			planDir := filepath.Join(wsDir, "plans", "bulk-plan")
+			if err := fs.CreateDir(planDir); err != nil {
+				return fmt.Errorf("creating plan dir: %w", err)
+			}
+			if err := fs.WriteString(filepath.Join(planDir, ".grove-plan.yml"), "name: bulk-plan\nworktree: \"\"\n"); err != nil {
+				return fmt.Errorf("writing plan config: %w", err)
+			}
+			ctx.Set("plan_dir", planDir)
+
+			jobs := []struct {
+				file, status, note string
+			}{
+				{"01-done.md", "completed", ""},
+				{"02-pending.md", "pending", "pending-note.md"},
+				{"03-later.md", "pending_user", "later-note.md"},
+			}
+			for _, j := range jobs {
+				jobContent := fmt.Sprintf(`---
+id: %s
+title: %s
+type: chat
+status: %s
+---
+
+<!-- grove: {"template": "chat"} -->
+
+Work for %s
+`, strings.TrimSuffix(j.file, ".md"), j.file, j.status, j.file)
+				if err := fs.WriteString(filepath.Join(planDir, j.file), jobContent); err != nil {
+					return fmt.Errorf("writing job %s: %w", j.file, err)
+				}
+				if j.note == "" {
+					continue
+				}
+				noteContent := fmt.Sprintf(`---
+title: Note for %s
+type: in_progress
+plan_ref: plans/bulk-plan
+plan_job: %s
+---
+
+Body for %s
+`, j.file, j.file, j.file)
+				if err := fs.WriteString(filepath.Join(inProgress, j.note), noteContent); err != nil {
+					return fmt.Errorf("writing note %s: %w", j.note, err)
+				}
+			}
+			return nil
+		}),
+
+		harness.NewStep("Demote every pending job in the plan", func(ctx *harness.Context) error {
+			cmd := ctx.Bin("plan", "demote", ctx.GetString("plan_dir"), "--reason", "parking until Q3")
+			result := cmd.Run()
+			ctx.ShowCommandOutput(cmd.String(), result.Stdout, result.Stderr)
+			if err := result.AssertSuccess(); err != nil {
+				return fmt.Errorf("bulk demote failed: %w", err)
+			}
+			ctx.Set("demote_stdout", result.Stdout)
+			return nil
+		}),
+
+		harness.NewStep("Verify both notes are back in the inbox with provenance", func(ctx *harness.Context) error {
+			inbox := ctx.GetString("inbox_dir")
+			inProgress := ctx.GetString("in_progress_dir")
+			stdout := ctx.GetString("demote_stdout")
+
+			var paths []string
+			for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					paths = append(paths, line)
+				}
+			}
+
+			for _, note := range []string{"pending-note.md", "later-note.md"} {
+				if err := fs.AssertNotExists(filepath.Join(inProgress, note)); err != nil {
+					return fmt.Errorf("%s should have left in_progress: %w", note, err)
+				}
+				if err := fs.AssertExists(filepath.Join(inbox, note)); err != nil {
+					return fmt.Errorf("%s not found in inbox: %w", note, err)
+				}
+				content, err := fs.ReadString(filepath.Join(inbox, note))
+				if err != nil {
+					return fmt.Errorf("reading %s: %w", note, err)
+				}
+				fm, _, err := frontmatter.Parse(content)
+				if err != nil {
+					return fmt.Errorf("parsing %s: %w", note, err)
+				}
+				demotedFrom, _ := fm.ExtraString("demoted_from")
+				reason, _ := fm.ExtraString("demote_reason")
+				if err := ctx.Verify(func(v *verify.Collector) {
+					v.Equal(note+" records its plan", "plans/bulk-plan", demotedFrom)
+					v.Equal(note+" records the demote reason", "parking until Q3", reason)
+					v.Equal(note+" is unlinked from the plan", "", fm.PlanRef)
+					v.Contains(note+" carries the demote trailer", content, "Demoted from plan")
+				}); err != nil {
+					return err
+				}
+			}
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Equal("stdout lists one note path per demoted job", 2, len(paths))
+			})
+		}),
+
+		harness.NewStep("Verify only the pending jobs were abandoned", func(ctx *harness.Context) error {
+			planDir := ctx.GetString("plan_dir")
+
+			statuses := map[string]string{}
+			for _, file := range []string{"01-done.md", "02-pending.md", "03-later.md"} {
+				job, err := orchestration.LoadJob(filepath.Join(planDir, file))
+				if err != nil {
+					return fmt.Errorf("loading %s: %w", file, err)
+				}
+				statuses[file] = string(job.Status)
+			}
+
+			return ctx.Verify(func(v *verify.Collector) {
+				v.Equal("completed job untouched", string(orchestration.JobStatusCompleted), statuses["01-done.md"])
+				v.Equal("pending job abandoned", string(orchestration.JobStatusAbandoned), statuses["02-pending.md"])
+				v.Equal("pending_user job abandoned", string(orchestration.JobStatusAbandoned), statuses["03-later.md"])
 			})
 		}),
 	},

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeNbStub installs a fake `nb` executable first on PATH for the duration of
@@ -186,5 +187,51 @@ func TestJobComplete_MoveNoteToGroupOutcomes(t *testing.T) {
 	}
 	if got := countContaining(lines, "gamma"); got != 0 {
 		t.Fatalf("already-completed note must not be moved, record: %v", lines)
+	}
+}
+
+// TestDemotionTrailer verifies the human-readable provenance block a demoted
+// note carries: which plan and job it came from, and the reason when one was
+// given. This block is the answer to "where did this note come from?" when the
+// note surfaces in the inbox weeks later.
+func TestDemotionTrailer(t *testing.T) {
+	at := time.Date(2026, 8, 9, 14, 30, 0, 0, time.UTC)
+	trailer := Demotion{PlanName: "misc-fixes", JobFile: "140-test.md", At: at, Reason: "waiting on upstream"}.Trailer()
+
+	for _, want := range []string{"misc-fixes", "140-test.md", "2026-08-09 14:30", "waiting on upstream"} {
+		if !strings.Contains(trailer, want) {
+			t.Errorf("trailer missing %q:\n%s", want, trailer)
+		}
+	}
+
+	// No reason given: no empty "Reason:" line.
+	bare := Demotion{PlanName: "misc-fixes", JobFile: "140-test.md", At: at}.Trailer()
+	if strings.Contains(bare, "Reason") {
+		t.Errorf("reasonless demote should not render a reason line:\n%s", bare)
+	}
+}
+
+// TestClearNoteLinkWithProvenance pins the single-invocation contract: the
+// link fields are cleared and provenance stamped in ONE nb call, and a demote
+// with no reason clears any reason a previous demote left behind.
+func TestClearNoteLinkWithProvenance(t *testing.T) {
+	recordPath, _ := writeNbStub(t)
+
+	if err := ClearNoteLinkWithProvenance("/nb/ws/inbox/a.md", Demotion{PlanName: "p", JobFile: "01-a.md"}); err != nil {
+		t.Fatalf("ClearNoteLinkWithProvenance: %v", err)
+	}
+
+	lines := readRecordLines(t, recordPath)
+	if got := countContaining(lines, "update-frontmatter"); got != 1 {
+		t.Fatalf("expected exactly one update-frontmatter call, record: %v", lines)
+	}
+	call := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"--set plan_ref=", "--set plan_job=", "--set demoted_from=plans/p",
+		"--set demoted_job=01-a.md", "--set demoted_at=", "--set demote_reason=",
+	} {
+		if !strings.Contains(call, want) {
+			t.Errorf("missing %q in: %s", want, call)
+		}
 	}
 }

@@ -1028,6 +1028,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case RefreshTickMsg:
 		m.lastRefreshTickAt = time.Now()
 		cmds := []tea.Cmd{refreshTick()}
+		// Age out the footer message. An unstamped one (any of the many direct
+		// StatusSummary assignments) is stamped on this first tick, so every
+		// call site gets the same transient behavior for free.
+		if m.StatusSummary != "" {
+			switch {
+			case m.StatusSummaryAt.IsZero():
+				m.StatusSummaryAt = m.lastRefreshTickAt
+			case m.statusSummaryExpired(m.lastRefreshTickAt):
+				m.StatusSummary = ""
+				m.StatusSummaryAt = time.Time{}
+			}
+		}
 		// Only dispatch the reload when the plan directory actually moved.
 		// Skipping here rather than inside the RefreshMsg handler saves the
 		// message too, and a message is never free: it wakes the event loop
@@ -1045,10 +1057,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case DemoteJobMsg:
 		if msg.Err != nil {
-			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Demote failed: %v", msg.Err))
+			m.setStatusSummary(theme.DefaultTheme.Error.Render(fmt.Sprintf("Demote failed: %v", msg.Err)))
 			return m, nil
 		}
-		m.StatusSummary = theme.DefaultTheme.Success.Render(fmt.Sprintf("Demoted to note: %s", msg.NotePath))
+		// Name the landing path: "it went somewhere, figure out where" was the
+		// original complaint. A batch names the first note plus the count.
+		if msg.Count > 1 {
+			m.setStatusSummary(theme.DefaultTheme.Success.Render(
+				fmt.Sprintf("Demoted %d jobs to notes: %s (+%d more)", msg.Count, msg.NotePath, msg.Count-1)))
+		} else {
+			m.setStatusSummary(theme.DefaultTheme.Success.Render(fmt.Sprintf("Demoted to note: %s", msg.NotePath)))
+		}
+		// The demoted jobs are abandoned now; drop the selection so the next
+		// keypress doesn't act on rows the user just parked.
+		m.Selected = make(map[string]bool)
 		return m, refreshPlan(m.PlanDir)
 
 	case PlanResumeMsg:
@@ -1190,11 +1212,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Only update status summary if not running a job
-		// (preserve the "Running..." message)
-		if !m.IsRunningJob {
-			m.StatusSummary = formatStatusSummaryHelper(plan)
-		}
+		// The footer message is NOT cleared here. A refresh fires on a 2s tick
+		// and immediately after every action that changes the plan — including
+		// demote — so blanking it here is what made action results vanish
+		// before they could be read. Expiry is the TTL sweep in the tick
+		// handler instead.
 
 		// Auto-refresh skill pane if it's active
 		if m.ActiveDetailPane == SkillPane && m.ActiveLogJob != nil {
@@ -1567,6 +1589,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.RenameInput, cmd = m.RenameInput.Update(msg)
+			return m, cmd
+		}
+
+		// Handle demote-to-note mode
+		if m.Demoting {
+			switch msg.String() {
+			case "enter":
+				targets := m.DemoteTargets
+				reason := strings.TrimSpace(m.DemoteInput.Value())
+				m.Demoting = false
+				m.DemoteTargets = nil
+				if len(targets) == 0 {
+					return m, nil
+				}
+				if len(targets) == 1 {
+					m.setStatusSummary(fmt.Sprintf("Demoting '%s' to note…", targets[0].Title))
+				} else {
+					m.setStatusSummary(fmt.Sprintf("Demoting %d jobs to notes…", len(targets)))
+				}
+				return m, demoteJobsCmd(targets, reason)
+			case "esc":
+				m.Demoting = false
+				m.DemoteTargets = nil
+				m.setStatusSummary("")
+				return m, nil
+			}
+			m.DemoteInput, cmd = m.DemoteInput.Update(msg)
 			return m, cmd
 		}
 
@@ -3137,9 +3186,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.KeyMap.DemoteToNote):
-			if job := m.CurrentJob(); job != nil {
-				m.StatusSummary = fmt.Sprintf("Demoting '%s' to note...", job.Title)
-				return m, demoteJobCmd(job)
+			// Space-selected jobs demote as a batch — the "park the pending
+			// jobs of this plan for later" pass — falling back to the row
+			// under the cursor when nothing is selected.
+			if targets := m.demoteTargets(); len(targets) > 0 {
+				m.Demoting = true
+				m.DemoteTargets = targets
+
+				ti := textinput.New()
+				ti.Placeholder = "why are you parking this? (optional)"
+				ti.PlaceholderStyle = theme.DefaultTheme.Muted
+				ti.Focus()
+				ti.CharLimit = 200
+				ti.Width = 50
+				m.DemoteInput = ti
+				return m, textinput.Blink
 			}
 
 		case key.Matches(msg, m.KeyMap.ToggleColumns):

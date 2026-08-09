@@ -195,12 +195,36 @@ func TestPlanDemote_ClearsLinkViaQuery(t *testing.T) {
 	if got := countLines(lines, "move /nb/ws/in_progress/task.md inbox --force"); got != 1 {
 		t.Fatalf("expected inbox move, record:\n%s", strings.Join(lines, "\n"))
 	}
-	// The moved note (To: /nb/ws/inbox/task.md) must have BOTH link fields cleared.
-	if got := countLines(lines, "update-frontmatter --path /nb/ws/inbox/task.md --field plan_ref --value"); got != 1 {
-		t.Fatalf("expected plan_ref clear, record:\n%s", strings.Join(lines, "\n"))
+	// The moved note (To: /nb/ws/inbox/task.md) must have BOTH link fields
+	// cleared and its demote provenance stamped — in ONE update-frontmatter
+	// invocation, not one per field.
+	record := strings.Join(lines, "\n")
+	provenance := ""
+	for _, line := range lines {
+		if strings.Contains(line, "update-frontmatter --path /nb/ws/inbox/task.md") {
+			if provenance != "" {
+				t.Fatalf("expected a single update-frontmatter call, record:\n%s", record)
+			}
+			provenance = line
+		}
 	}
-	if got := countLines(lines, "update-frontmatter --path /nb/ws/inbox/task.md --field plan_job --value"); got != 1 {
-		t.Fatalf("expected plan_job clear, record:\n%s", strings.Join(lines, "\n"))
+	if provenance == "" {
+		t.Fatalf("expected an update-frontmatter call, record:\n%s", record)
+	}
+	for _, want := range []string{
+		"--set plan_ref=",
+		"--set plan_job=",
+		"--set demoted_from=plans/demo-plan",
+		"--set demoted_job=01-task.md",
+		"--set demoted_at=",
+	} {
+		if !strings.Contains(provenance, want) {
+			t.Errorf("expected %q in provenance call, got:\n%s", want, provenance)
+		}
+	}
+	// The human-readable trailer goes through nb's own append seam.
+	if got := countLines(lines, "update-note --path /nb/ws/inbox/task.md --append-content"); got != 1 {
+		t.Errorf("expected the demote trailer to be appended via nb, record:\n%s", record)
 	}
 
 	job, err := orchestration.LoadJob(jobPath)

@@ -274,6 +274,29 @@ func (m *Model) SelectedJobFilenames() []string {
 	return names
 }
 
+// demoteTargets returns the jobs a demote keypress applies to: every
+// space-selected job in plan order, or — when nothing is selected — the single
+// job under the cursor. Selection-first is what turns "park this plan's
+// pending jobs for later" into one keypress instead of a dozen.
+func (m *Model) demoteTargets() []*orchestration.Job {
+	if len(m.Selected) > 0 {
+		var jobs []*orchestration.Job
+		for _, job := range m.Jobs {
+			if job == nil || !m.Selected[job.ID] || job.Filename == "" {
+				continue
+			}
+			jobs = append(jobs, job)
+		}
+		if len(jobs) > 0 {
+			return jobs
+		}
+	}
+	if job := m.CurrentJob(); job != nil {
+		return []*orchestration.Job{job}
+	}
+	return nil
+}
+
 // jobAtRow resolves the owning job for an arbitrary display index (used by
 // dialogs that captured a display index when they opened).
 func (m *Model) jobAtRow(i int) *orchestration.Job {

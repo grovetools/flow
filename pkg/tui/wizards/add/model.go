@@ -28,6 +28,16 @@ type Config struct {
 	// InitialDeps is a list of job filenames to pre-select in the
 	// dependency picker (used by the CLI `-d` flag).
 	InitialDeps []string
+	// InitialTitle and InitialPrompt pre-fill the title field and the
+	// prompt textarea. Hosts that already know what the job is about
+	// seed them — nb's promote-a-note-to-a-job flow passes the note's
+	// title and body — so the wizard opens on an editable draft rather
+	// than an empty form the user has to retype from the note.
+	InitialTitle  string
+	InitialPrompt string
+	// InitialJobType pre-selects a job type (e.g. "chat"). Empty leaves
+	// the default (interactive_agent) selected.
+	InitialJobType string
 	// KeyMap, if non-nil, overrides the default wizard keymap.
 	// Leave nil to use NewKeyMap(config.LoadDefault()).
 	KeyMap *KeyMap
@@ -566,7 +576,41 @@ func New(cfg Config) Model {
 	m.modelList = newModelList()
 	m.modelInput = newModelInput()
 
+	// 7. Seeds. Applied last so the job-type seed can re-derive the slot-2
+	// mode and provider axis over the defaults just installed above.
+	m.titleInput.SetValue(cfg.InitialTitle)
+	m.promptInput.SetValue(cfg.InitialPrompt)
+	if cfg.InitialJobType != "" {
+		m.selectJobType(cfg.InitialJobType)
+	}
+
 	return m
+}
+
+// selectJobType moves the job-type picker to jobType and re-derives everything
+// downstream of it (slot-2 skills-vs-templates mode, the provider axis, the
+// model widget), so a seeded type lands the wizard in exactly the state the
+// user would reach by picking that type by hand. Unknown types are ignored.
+func (m *Model) selectJobType(jobType string) {
+	found := false
+	for i, listItem := range m.jobTypeList.Items() {
+		if string(listItem.(item)) == jobType {
+			m.jobTypeList.Select(i)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return
+	}
+	if isAgentJobType(jobType) {
+		m.slot2IsSkills = true
+	} else {
+		m.slot2IsSkills = false
+		m.templateList = m.buildTemplateList(jobType)
+	}
+	m.providerList = buildProviderList(jobType)
+	m.resetModelWidget()
 }
 
 // Init returns the initial tea.Cmd for the wizard. It used to call

@@ -1567,24 +1567,68 @@ func setJobFieldCmd(jobs []*orchestration.Job, fieldName string, value any) tea.
 	}
 }
 
-// DemoteJobMsg is returned after demoting a job to an nb note.
+// DemoteJobMsg is returned after demoting one or more jobs to nb notes.
+// NotePath carries the first demoted note's path (the whole point of the
+// message: telling the user WHERE the note went), and Count how many jobs the
+// batch covered.
 type DemoteJobMsg struct {
 	NotePath string
+	Count    int
 	Err      error
 }
 
-// demoteJobCmd shells out to `flow plan demote <job-path>` to create an nb
-// note from the job and mark it as abandoned.
-func demoteJobCmd(job *orchestration.Job) tea.Cmd {
+// demoteJobsCmd shells out to `flow plan demote <job-path>...` to move the
+// jobs' notes back to the nb inbox — stamped with this plan and the optional
+// reason — and mark the jobs abandoned. One invocation covers the whole batch
+// so the cross-workspace nb note query is paid once, not once per job.
+func demoteJobsCmd(jobs []*orchestration.Job, reason string) tea.Cmd {
+	paths := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		if job != nil && job.FilePath != "" {
+			paths = append(paths, job.FilePath)
+		}
+	}
 	return func() tea.Msg {
-		cmd := exec.Command("flow", "plan", "demote", job.FilePath) //nolint:gosec // job.FilePath is internal
+		if len(paths) == 0 {
+			return DemoteJobMsg{Err: fmt.Errorf("no job files to demote")}
+		}
+		args := append([]string{"plan", "demote"}, paths...)
+		if reason != "" {
+			args = append(args, "--reason", reason)
+		}
+		cmd := exec.Command("flow", args...) //nolint:gosec // job paths are internal
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		output, err := cmd.Output()
 		if err != nil {
+			detail := strings.TrimSpace(lastNonEmptyLine(stderr.String()))
+			if detail != "" {
+				return DemoteJobMsg{Err: fmt.Errorf("%s", detail)}
+			}
 			return DemoteJobMsg{Err: fmt.Errorf("demote failed: %w", err)}
 		}
-		notePath := strings.TrimSpace(string(output))
-		return DemoteJobMsg{NotePath: notePath}
+		// stdout is one note path per line; report the first (and the count).
+		notePath := ""
+		for _, line := range strings.Split(string(output), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				notePath = line
+				break
+			}
+		}
+		return DemoteJobMsg{NotePath: notePath, Count: len(paths)}
 	}
+}
+
+// lastNonEmptyLine returns the final non-blank line of s — the line a CLI's
+// error text lands on.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // createGenericJobWithTitle creates a new job with the given title and optional dependencies.

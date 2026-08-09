@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // This file is flow's single seam for the inverted note↔plan linkage. NOTE
@@ -248,6 +249,82 @@ func ClearNoteLink(path string) error {
 		return err
 	}
 	return nil
+}
+
+// Demotion is the provenance a demoted note carries away from its plan: which
+// plan and job it came from, when it was parked, and (optionally) why. A note
+// that comes back to the inbox with no trace of where it was is exactly the
+// complaint this record answers — "which plan was this from again?".
+type Demotion struct {
+	PlanName string
+	JobFile  string
+	At       time.Time
+	Reason   string
+}
+
+// Trailer renders the human-readable provenance block appended to the note
+// body. It is deliberately plain markdown: the note is read in an editor and
+// in nb's preview far more often than it is parsed.
+func (d Demotion) Trailer() string {
+	var sb strings.Builder
+	sb.WriteString("\n---\n\n")
+	fmt.Fprintf(&sb, "_Demoted from plan `%s`", d.PlanName)
+	if d.JobFile != "" {
+		fmt.Fprintf(&sb, " (job `%s`)", d.JobFile)
+	}
+	if !d.At.IsZero() {
+		fmt.Fprintf(&sb, " on %s", d.At.Format("2006-01-02 15:04"))
+	}
+	sb.WriteString("._\n")
+	if d.Reason != "" {
+		fmt.Fprintf(&sb, "\n_Reason: %s_\n", d.Reason)
+	}
+	return sb.String()
+}
+
+// ClearNoteLinkWithProvenance unlinks a note from its plan AND stamps where it
+// came from, in ONE `nb internal update-frontmatter` invocation: plan_ref and
+// plan_job are cleared while demoted_from / demoted_job / demoted_at (and
+// demote_reason, when given) are set. Batching matters — demote is already
+// several nb shell-outs deep, and a per-field call would double that for every
+// job in a bulk park.
+//
+// The frontmatter record is the machine-readable half; AppendNoteBody writes
+// the human-readable trailer.
+func ClearNoteLinkWithProvenance(path string, d Demotion) error {
+	at := d.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	args := []string{
+		"internal", "update-frontmatter", "--path", path,
+		"--set", "plan_ref=",
+		"--set", "plan_job=",
+		"--set", "demoted_from=" + planRefFor(d.PlanName),
+		"--set", "demoted_at=" + at.Format(time.RFC3339),
+	}
+	if d.JobFile != "" {
+		args = append(args, "--set", "demoted_job="+d.JobFile)
+	}
+	if d.Reason != "" {
+		args = append(args, "--set", "demote_reason="+d.Reason)
+	} else {
+		// A re-demote without a reason must not inherit the previous one.
+		args = append(args, "--set", "demote_reason=")
+	}
+	_, err := runNb(args...)
+	return err
+}
+
+// AppendNoteBody appends content to a note's body through nb's own append seam
+// (`nb internal update-note`), so the daemon still sees a typed update event
+// rather than a write behind its back.
+func AppendNoteBody(path, content string) error {
+	if content == "" {
+		return nil
+	}
+	_, err := runNb("internal", "update-note", "--path", path, "--append-content", content)
+	return err
 }
 
 // FinishPlanNotes queries every note linked to the plan and moves each to

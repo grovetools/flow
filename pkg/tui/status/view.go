@@ -715,6 +715,48 @@ func (m Model) renderRenameDialog() string {
 	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
+// renderDemoteDialog previews a demote before it happens: which jobs are about
+// to be parked as inbox notes, and an optional reason recorded on each note.
+// The reason is what makes a parked note self-explanatory months later, so it
+// is asked for at the moment the user actually knows the answer.
+func (m Model) renderDemoteDialog() string {
+	if len(m.DemoteTargets) == 0 {
+		return "Error: no job selected for demotion."
+	}
+
+	var b strings.Builder
+	if len(m.DemoteTargets) == 1 {
+		b.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Demote to note: %s", m.DemoteTargets[0].Filename)))
+	} else {
+		b.WriteString(theme.DefaultTheme.Header.Render(fmt.Sprintf("Demote %d jobs to notes", len(m.DemoteTargets))))
+	}
+	b.WriteString("\n\n")
+
+	const maxListed = 8
+	for i, job := range m.DemoteTargets {
+		if i == maxListed {
+			b.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("  … and %d more\n", len(m.DemoteTargets)-maxListed)))
+			break
+		}
+		b.WriteString(theme.DefaultTheme.Muted.Render(fmt.Sprintf("  • %s (%s)\n", job.Filename, job.Status)))
+	}
+
+	b.WriteString("\nReason (optional):\n")
+	b.WriteString(m.DemoteInput.View())
+	b.WriteString("\n\n")
+	b.WriteString(theme.DefaultTheme.Muted.Render("Each job returns to the nb inbox as a note stamped with this plan, and is marked abandoned."))
+	b.WriteString("\n")
+	b.WriteString(theme.DefaultTheme.Muted.Render("Press Enter to demote, Esc to cancel"))
+
+	dialog := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.DefaultColors.Orange).
+		Padding(1, 2).
+		Render(b.String())
+
+	return lipgloss.Place(m.Width, m.Height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
 func (m Model) renderJobCreationDialog() string {
 	var jobTypeName string
 	if m.CreateJobType == "xml" {

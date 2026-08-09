@@ -43,9 +43,15 @@ func main() {
 		handleMove()
 		return
 	case "internal":
-		if len(os.Args) > 2 && os.Args[2] == "update-frontmatter" {
-			handleUpdateFrontmatter()
-			return
+		if len(os.Args) > 2 {
+			switch os.Args[2] {
+			case "update-frontmatter":
+				handleUpdateFrontmatter()
+				return
+			case "update-note":
+				handleUpdateNote()
+				return
+			}
 		}
 	}
 
@@ -430,14 +436,18 @@ func handleMove() {
 // ---------------------------------------------------------------------------
 
 // handleUpdateFrontmatter implements
-// `nb internal update-frontmatter --path <p> --field <f> --value <v>`.
+// `nb internal update-frontmatter --path <p> [--field <f> --value <v>]
+// [--set k=v ...]`.
 //
-// Both --path and --file are accepted as the target flag. An EMPTY --value
+// Both --path and --file are accepted as the target flag. An EMPTY value
 // CLEARS the field (removes the line entirely) — flow's demote path depends on
 // that clearing semantics. A non-empty value sets the field, appending it to
-// the frontmatter block when absent.
+// the frontmatter block when absent. Repeatable --set pairs are applied in
+// order after the single --field/--value pair, mirroring real nb: demote
+// stamps its whole provenance record in one invocation.
 func handleUpdateFrontmatter() {
 	var path, field, value string
+	var sets [][2]string
 	args := os.Args[3:]
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -456,11 +466,21 @@ func handleUpdateFrontmatter() {
 				value = args[i+1]
 				i++
 			}
+		case "--set":
+			if i+1 < len(args) {
+				k, v, found := strings.Cut(args[i+1], "=")
+				if !found {
+					fmt.Fprintf(os.Stderr, "[MOCK NB] update-frontmatter: invalid --set %q\n", args[i+1])
+					os.Exit(1)
+				}
+				sets = append(sets, [2]string{k, v})
+				i++
+			}
 		}
 	}
 
-	if path == "" || field == "" {
-		fmt.Fprintf(os.Stderr, "[MOCK NB] update-frontmatter requires --path and --field\n")
+	if path == "" || (field == "" && len(sets) == 0) {
+		fmt.Fprintf(os.Stderr, "[MOCK NB] update-frontmatter requires --path and --field or --set\n")
 		os.Exit(1)
 	}
 
@@ -470,22 +490,65 @@ func handleUpdateFrontmatter() {
 		os.Exit(1)
 	}
 
-	if value == "" {
-		fm.clear(field)
-	} else {
-		fm.set(field, value)
+	updates := make([][2]string, 0, len(sets)+1)
+	if field != "" {
+		updates = append(updates, [2]string{field, value})
+	}
+	updates = append(updates, sets...)
+
+	for _, u := range updates {
+		if u[1] == "" {
+			fm.clear(u[0])
+			fmt.Fprintf(os.Stderr, "[MOCK NB] Cleared %s on %s\n", u[0], path)
+			continue
+		}
+		fm.set(u[0], u[1])
+		fmt.Fprintf(os.Stderr, "[MOCK NB] Set %s=%s on %s\n", u[0], u[1], path)
 	}
 
 	if err := writeNote(path, fm, body); err != nil {
 		fmt.Fprintf(os.Stderr, "[MOCK NB] update-frontmatter: writing %s: %v\n", path, err)
 		os.Exit(1)
 	}
+}
 
-	if value == "" {
-		fmt.Fprintf(os.Stderr, "[MOCK NB] Cleared %s on %s\n", field, path)
-	} else {
-		fmt.Fprintf(os.Stderr, "[MOCK NB] Set %s=%s on %s\n", field, value, path)
+// handleUpdateNote implements
+// `nb internal update-note --path <p> --append-content <text>`: flow's seam
+// for appending the demote provenance trailer to a note body.
+func handleUpdateNote() {
+	var path, content string
+	args := os.Args[3:]
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--path", "--file":
+			if i+1 < len(args) {
+				path = args[i+1]
+				i++
+			}
+		case "--append-content":
+			if i+1 < len(args) {
+				content = args[i+1]
+				i++
+			}
+		}
 	}
+
+	if path == "" || content == "" {
+		fmt.Fprintf(os.Stderr, "[MOCK NB] update-note requires --path and --append-content\n")
+		os.Exit(1)
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // sandbox path
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[MOCK NB] update-note: opening %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		fmt.Fprintf(os.Stderr, "[MOCK NB] update-note: appending to %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "[MOCK NB] Appended %d bytes to %s\n", len(content), path)
 }
 
 // ---------------------------------------------------------------------------
