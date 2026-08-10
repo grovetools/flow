@@ -375,8 +375,10 @@ func (e *HeadlessAgentExecutor) registerSessionIntent(ctx context.Context, job *
 		Field("daemon_running", daemonClient.IsRunning()).
 		Log(ctx)
 
-	// Headless agents run as a direct child process, not inside a multiplexer pane.
-	if err := daemonClient.RegisterSessionIntent(ctx, newAgentSessionIntent(job, plan, providerName, workDir, models.MuxNone)); err != nil {
+	// Headless agents run as a direct child process, not inside a multiplexer
+	// pane — registered as headless so hosts stream the transcript rather than
+	// hunting for a terminal that was never created.
+	if err := daemonClient.RegisterSessionIntent(ctx, newHeadlessSessionIntent(job, plan, providerName, workDir)); err != nil {
 		ulog.Warn("[HEADLESS] Failed to register session intent with daemon").
 			Field("job_id", job.ID).
 			Field("provider", providerName).
