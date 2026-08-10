@@ -4,55 +4,132 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/coderoot"
 	"github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 )
 
+var defaultNotebookEnsureTimeout = 15 * time.Second
+
 // ensureDefaultNotebookFn runs nb's lazy default-notebook materialization
 // (W1.11). Package-level var so tests can stub the exec.
 var ensureDefaultNotebookFn = runNbEnsureNotebook
 
+// notebookMaterializationResult is Flow's copy of nb's stable JSON protocol.
+// Keeping every currently-defined field and rejecting unknown fields prevents
+// human logger output or a silently changed protocol from being mistaken for
+// a successful materialization.
+type notebookMaterializationResult struct {
+	NotebookName  string `json:"notebook_name"`
+	RootDir       string `json:"root_dir"`
+	Created       bool   `json:"created"`
+	MarkerCreated bool   `json:"marker_created"`
+	Recorded      bool   `json:"recorded"`
+	ConfigPath    string `json:"config_path,omitempty"`
+}
+
 // ensureDefaultNotebook materializes + records the default notebook ahead of
-// a note-writing action by delegating to `nb internal ensure-notebook` — nb
-// owns the pass (create root, record it at creation time, announce through
-// the attention log stream; no prompt). Best-effort: a missing or failing nb
-// binary leaves plan creation on the resolver's existing fallback behavior.
-func ensureDefaultNotebook() {
-	out, err := ensureDefaultNotebookFn()
+// a note-writing action by delegating to `nb internal ensure-notebook`. Any
+// execution or protocol failure is fatal: continuing would let plan lookup
+// guess a legacy location after materialization failed.
+func ensureDefaultNotebook(ctx context.Context) error {
+	stdout, stderr, err := ensureDefaultNotebookFn(ctx)
 	if err != nil {
-		return
+		detail := strings.TrimSpace(string(stderr))
+		if detail != "" {
+			return fmt.Errorf("ensure default notebook with nb: %w; stderr: %s", err, detail)
+		}
+		return fmt.Errorf("ensure default notebook with nb: %w", err)
 	}
-	// The result is the LAST line of stdout: nb's unified logger writes its
-	// pretty announcement to stdout ahead of the JSON document.
-	lines := bytes.Split(bytes.TrimSpace(out), []byte("\n"))
-	payload := bytes.TrimSpace(lines[len(lines)-1])
-	var res struct {
-		Created  bool   `json:"created"`
-		Recorded bool   `json:"recorded"`
-		RootDir  string `json:"root_dir"`
+
+	res, err := decodeNotebookMaterialization(stdout)
+	if err != nil {
+		detail := strings.TrimSpace(string(stderr))
+		if detail != "" {
+			return fmt.Errorf("invalid nb ensure-notebook protocol: %w; stderr: %s", err, detail)
+		}
+		return fmt.Errorf("invalid nb ensure-notebook protocol: %w", err)
 	}
-	if json.Unmarshal(payload, &res) != nil {
-		return
+
+	if res != nil {
+		if !res.Created && !res.MarkerCreated && !res.Recorded {
+			return errors.New("invalid nb ensure-notebook protocol: non-null result reports no materialization action")
+		}
+		if strings.TrimSpace(res.RootDir) == "" {
+			return errors.New("invalid nb ensure-notebook protocol: materialization result has an empty root_dir")
+		}
 	}
-	if res.Created || res.Recorded {
+
+	// nb's --json contract reserves stdout exclusively for the JSON document.
+	// Successful warning/log output remains on stderr so the parent process's
+	// log stream can retain its attention semantics.
+	if len(stderr) > 0 {
+		_, _ = os.Stderr.Write(stderr)
+	}
+	if res != nil {
 		// The recording changed on-disk config after this process may have
 		// already memoized a load; drop the cache so the locator resolves
 		// against the recorded root.
 		config.ResetLoadCache()
 		fmt.Fprintf(os.Stderr, "Materialized default notebook at %s\n", res.RootDir)
 	}
+	return nil
 }
 
-func runNbEnsureNotebook() ([]byte, error) {
-	return exec.Command("nb", "internal", "ensure-notebook", "--json").Output()
+func decodeNotebookMaterialization(stdout []byte) (*notebookMaterializationResult, error) {
+	if len(bytes.TrimSpace(stdout)) == 0 {
+		return nil, errors.New("empty stdout (expected one JSON document)")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(stdout))
+	decoder.DisallowUnknownFields()
+	var res *notebookMaterializationResult
+	if err := decoder.Decode(&res); err != nil {
+		return nil, fmt.Errorf("decode stdout %q: %w", strings.TrimSpace(string(stdout)), err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, fmt.Errorf("stdout contains more than one JSON document: %q", strings.TrimSpace(string(stdout)))
+		}
+		return nil, fmt.Errorf("trailing stdout after JSON document: %w", err)
+	}
+	return res, nil
+}
+
+func runNbEnsureNotebook(parent context.Context) ([]byte, []byte, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, defaultNotebookEnsureTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "nb", "internal", "ensure-notebook", "--json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if errors.Is(ctxErr, context.DeadlineExceeded) {
+			return stdout.Bytes(), stderr.Bytes(), fmt.Errorf("nb ensure-notebook timed out after %s: %w", defaultNotebookEnsureTimeout, ctxErr)
+		}
+		return stdout.Bytes(), stderr.Bytes(), fmt.Errorf("nb ensure-notebook canceled: %w", ctxErr)
+	}
+	if err != nil {
+		return stdout.Bytes(), stderr.Bytes(), fmt.Errorf("nb ensure-notebook exited unsuccessfully: %w", err)
+	}
+	return stdout.Bytes(), stderr.Bytes(), nil
 }
 
 // resolvePlanPathCtx is the context-aware front door to resolvePlanPath. When a
@@ -208,6 +285,39 @@ func resolvePlanPathWithActiveJob(planName, contextDir string) (string, error) {
 	return resolvePlanPath(planName, contextDir)
 }
 
+// loadPlanNotebookConfig reloads both the layered config and the authoritative
+// recorded notebook table. Keeping this projection here is necessary on the
+// W1.11 baseline, before core's later compatibility-view compile cutover.
+func loadPlanNotebookConfig() (*config.Config, error) {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		return nil, err
+	}
+	table, err := coderoot.Load()
+	if err != nil {
+		return nil, err
+	}
+	return applyRecordedNotebooks(cfg, table), nil
+}
+
+func applyRecordedNotebooks(cfg *config.Config, table coderoot.Table) *config.Config {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	if table.NotebooksFilePath == "" {
+		return cfg
+	}
+	definitions := make(map[string]*config.Notebook, len(table.Notebooks))
+	for _, name := range table.SortedNotebookNames() {
+		definitions[name] = &config.Notebook{RootDir: table.NotebookRoot(name)}
+	}
+	cfg.Notebooks = &config.NotebooksConfig{
+		Definitions: definitions,
+		Rules:       &config.NotebookRules{Default: table.Default},
+	}
+	return cfg
+}
+
 // resolvePlanPathInWorkspace resolves a plan path but returns an error if workspace detection fails.
 // Unlike resolvePlanPath, it does not fall back to the local directory or global search.
 func resolvePlanPathInWorkspace(planName, contextDir string) (string, error) {
@@ -222,10 +332,13 @@ func resolvePlanPathInWorkspace(planName, contextDir string) (string, error) {
 		return "", fmt.Errorf("not in a workspace (no git repository found at %s): %w", contextDir, err)
 	}
 
-	// Load config and initialize the locator.
-	coreCfg, err := config.LoadDefault()
+	// Load config and explicitly project the authoritative notebooks.toml
+	// table. The lazy-materialization baseline predates core's compatibility
+	// compile cutover, so relying on Config.LoadDefault alone could route this
+	// first write through a legacy fallback even after nb recorded the root.
+	coreCfg, err := loadPlanNotebookConfig()
 	if err != nil {
-		coreCfg = &config.Config{}
+		return "", fmt.Errorf("could not reload recorded notebook routing: %w", err)
 	}
 	locator := workspace.NewNotebookLocator(coreCfg)
 

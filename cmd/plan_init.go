@@ -138,7 +138,13 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 	// notebook first (W1.11) so the locator below resolves against a created,
 	// recorded root rather than silently inventing one. nb owns the pass;
 	// runs before resolvePlanPathInWorkspace so a recording is visible to it.
-	ensureDefaultNotebook()
+	ctx := cmd.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ensureDefaultNotebook(ctx); err != nil {
+		return "", fmt.Errorf("cannot initialize plan before default notebook is ready: %w", err)
+	}
 
 	planDirArg := cmd.Dir
 	planPath, err := resolvePlanPathInWorkspace(planDirArg, planContextDir)

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -344,6 +345,7 @@ func runPlanInit(cmd *cobra.Command, args []string) error {
 	// This is the command object built from CLI flags.
 	// It will be used for both direct CLI execution and to pre-populate the TUI.
 	cliCmd := &PlanInitCmd{
+		Context:           cmd.Context(),
 		Dir:               dir,
 		Force:             planInitForce,
 		Model:             planInitModel,
@@ -448,6 +450,7 @@ func runPlanGraph(cmd *cobra.Command, args []string) error {
 
 // PlanInitCmd holds the parameters for the init command.
 type PlanInitCmd struct {
+	Context           context.Context
 	Dir               string
 	Force             bool
 	Model             string

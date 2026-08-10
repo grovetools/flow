@@ -104,6 +104,7 @@ func requestToPlanInitCmd(req *planinit.Request, initialCmd *PlanInitCmd) *PlanI
 	// surface in its form. The wizard never clears these, so they
 	// pass through unchanged from the original CLI flags.
 	if initialCmd != nil {
+		cmd.Context = initialCmd.Context
 		if cmd.EnvProfile == "" {
 			cmd.EnvProfile = initialCmd.EnvProfile
 		}
