@@ -1919,7 +1919,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"tab", "shift+tab", "V", "i", "s", "esc":
 				// Let these be handled by the main logic below
 			default:
-				if !key.Matches(msg, m.KeyMap.CopyPath) {
+				// The artifacts tree is the one pane that owns CopyPath: with the
+				// tree focused, the path worth yanking is the artifact under the
+				// cursor, not the job note (still a ctrl+y away from the jobs pane).
+				artifactsOwnCopyPath := m.ActiveDetailPane == ArtifactsPaneDetail &&
+					m.Focus == FocusDetailPrimary
+				if artifactsOwnCopyPath || !key.Matches(msg, m.KeyMap.CopyPath) {
 					if m.Focus == FocusDetailPrimary {
 						return m.handleDetailPrimaryKey(msg)
 					}
@@ -3682,6 +3687,12 @@ var skillPaneForwardedKeys = []string{
 	"j", "k", "down", "up", "enter", "e", "esc",
 }
 
+// artifactsPaneForwardedKeys is the skill pane's claim plus the two artifact
+// actions the promoted split would otherwise swallow: `o` (open in a rail
+// editor or the browser) and ctrl+y (yank the selected path). A key the split
+// is not told to forward never reaches handleArtifactsTreeKey at all.
+var artifactsPaneForwardedKeys = append(append([]string{}, skillPaneForwardedKeys...), "o", "ctrl+y")
+
 // hostedViewportPane describes a detail pane that renders as a host BSP
 // ViewportPanel when hosted. Label is the viewport title's prefix
 // ("<label>: <job title>"); forwardKeys is empty for the read-only panes,
@@ -3704,7 +3715,7 @@ var hostedViewportPanes = map[DetailPane]hostedViewportPane{
 	TokenPaneDetail:         {label: "Token Usage"},
 	AccessedFilesPaneDetail: {label: "Accessed Files"},
 	SkillPane:               {label: "Skills", forwardKeys: skillPaneForwardedKeys, focus: true},
-	ArtifactsPaneDetail:     {label: "Artifacts", forwardKeys: skillPaneForwardedKeys, focus: true},
+	ArtifactsPaneDetail:     {label: "Artifacts", forwardKeys: artifactsPaneForwardedKeys, focus: true},
 }
 
 // isHostedViewportPane reports whether pane renders into the host's BSP
@@ -4215,7 +4226,9 @@ func (m Model) handleArtifactsViewportKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleArtifactsTreeKey handles cursor motion and actions for the artifacts
-// tree. `e`/`enter` opens the selected file in $EDITOR via the host.
+// tree. `e`/`enter` opens the selected file in $EDITOR via the host, `o` opens
+// it in a dedicated rail editor (or the browser, for .html/.pdf), and ctrl+y
+// yanks its path.
 func (m Model) handleArtifactsTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	result, idx := m.WhichKey.Sequence.Process(msg, m.KeyMap.Top, m.KeyMap.Bottom)
 	switch result {
@@ -4279,6 +4292,10 @@ func (m Model) handleArtifactsTreeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, editArtifactCmd(jobArtifactDir(m.Plan, m.ActiveLogJob), node)
+	case "o":
+		return m.openArtifact()
+	case "ctrl+y":
+		return m.copyArtifactPath()
 	}
 
 	var cmd tea.Cmd

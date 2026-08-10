@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/grovetools/core/cli"
+	"github.com/grovetools/core/config"
 	markdown "github.com/grovetools/core/tui/components/markdown"
 	"github.com/grovetools/core/tui/embed"
 	"github.com/grovetools/core/tui/theme"
@@ -197,6 +199,7 @@ func renderInteractiveArtifactsPane(plan *orchestration.Plan, job *orchestration
 	if truncated {
 		summary += fmt.Sprintf(" (listing capped at %d entries)", artifactPaneMaxNodes)
 	}
+	summary += " • e: editor • o: open (rail editor / browser) • ctrl+y: yank path"
 	tree.WriteString(t.Muted.Render(summary))
 	tree.WriteString("\n")
 
@@ -362,5 +365,88 @@ func editArtifactCmd(artifactDir string, node *ArtifactPaneNode) tea.Cmd {
 	path := filepath.Join(artifactDir, node.RelPath)
 	return func() tea.Msg {
 		return embed.EditRequestMsg{Path: path}
+	}
+}
+
+// artifactBrowserExtensions are the artifact types a terminal editor renders
+// uselessly: an agent's rendered HTML report is markup to $EDITOR and a page to
+// a browser. `o` hands these to the desktop instead of to an editor pane.
+var artifactBrowserExtensions = map[string]bool{
+	".html": true,
+	".htm":  true,
+	".pdf":  true,
+}
+
+// artifactOpensInBrowser reports whether `o` should hand this file to the
+// desktop opener rather than to an editor pane.
+func artifactOpensInBrowser(name string) bool {
+	return artifactBrowserExtensions[strings.ToLower(filepath.Ext(name))]
+}
+
+// openArtifactExternally is the desktop hand-off, indirected for tests. The
+// configured argv comes from [tui] open_command in grove.toml; empty means the
+// platform opener.
+var openArtifactExternally = cli.OpenPath
+
+// tuiOpenCommand reads [tui] open_command out of a possibly-absent config. A
+// missing config is the norm in tests and on a fresh machine, and it means the
+// same thing as an unset key: use the platform opener.
+func tuiOpenCommand(cfg *config.Config) []string {
+	if cfg == nil || cfg.TUI == nil {
+		return nil
+	}
+	return cfg.TUI.OpenCommand
+}
+
+// selectedArtifact returns the node under the artifacts-tree cursor and its
+// absolute path, or nil/"" when the tree is empty.
+func (m Model) selectedArtifact() (*ArtifactPaneNode, string) {
+	if m.artifactPaneCursor < 0 || m.artifactPaneCursor >= len(m.artifactPaneNodes) {
+		return nil, ""
+	}
+	node := m.artifactPaneNodes[m.artifactPaneCursor]
+	return node, filepath.Join(jobArtifactDir(m.Plan, m.ActiveLogJob), node.RelPath)
+}
+
+// copyArtifactPath yanks the absolute path of the artifact under the cursor.
+// This is what ctrl+y means while the artifacts pane has focus — the job note's
+// own path is still one ctrl+y away from the jobs pane.
+func (m Model) copyArtifactPath() (tea.Model, tea.Cmd) {
+	node, path := m.selectedArtifact()
+	if node == nil {
+		m.StatusSummary = theme.DefaultTheme.Muted.Render("No artifact selected")
+		return m, nil
+	}
+	if err := writeClipboard(path); err != nil {
+		m.StatusSummary = fmt.Sprintf("Error copying path: %v", err)
+	} else {
+		m.StatusSummary = fmt.Sprintf("Copied: %s", path)
+	}
+	return m, nil
+}
+
+// openArtifact implements `o`: a browser-only artifact (.html, .pdf) goes to
+// the desktop opener, anything else to a dedicated per-file editor pane —
+// Dedicated so the host pins it in the rail under its own filename instead of
+// replacing whatever the singleton editor is already showing.
+func (m Model) openArtifact() (tea.Model, tea.Cmd) {
+	node, path := m.selectedArtifact()
+	if node == nil {
+		return m, nil
+	}
+	if node.IsDir {
+		m.StatusSummary = theme.DefaultTheme.Muted.Render(node.Name + "/ is a directory")
+		return m, nil
+	}
+	if artifactOpensInBrowser(node.Name) {
+		if err := openArtifactExternally(m.openCommand, path); err != nil {
+			m.StatusSummary = fmt.Sprintf("Error opening %s: %v", node.Name, err)
+		} else {
+			m.StatusSummary = fmt.Sprintf("Opened %s externally", node.Name)
+		}
+		return m, nil
+	}
+	return m, func() tea.Msg {
+		return embed.EditRequestMsg{Path: path, Dedicated: true}
 	}
 }

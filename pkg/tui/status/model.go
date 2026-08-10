@@ -187,6 +187,10 @@ type Model struct {
 	// equivalents: one joined scroll body plus the selected row's 1-based line.
 	artifactPaneBody       string
 	artifactPaneCursorLine int
+	// openCommand is [tui] open_command from grove.toml: the argv `o` hands an
+	// artifact to when no terminal editor can render it (.html, .pdf). Empty
+	// means the platform opener.
+	openCommand []string
 
 	// Workflow inline-tree state. Per-agent transcript line buffers are
 	// fed by the transcript collector via MsgCh; the inline tree itself is
@@ -896,6 +900,7 @@ func New(cfg Config) Model {
 		skillArtifactViewport:    skillArtifactVp,
 		artifactPaneViewport:     artifactPaneVp,
 		artifactPreviewViewport:  artifactPreviewVp,
+		openCommand:              tuiOpenCommand(cliCfg),
 		workflowAgentLines:       make(map[string][]string),
 		WorkflowStates:           make(map[string]*workflowPaneState),
 		workflowMonitorCancels:   make(map[string]context.CancelFunc),

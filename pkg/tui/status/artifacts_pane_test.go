@@ -3,6 +3,7 @@ package status
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -169,6 +170,160 @@ func TestBinaryArtifactPreviewIsDescribed(t *testing.T) {
 	renderArtifactNodeDetail(&b, artifactDir, &ArtifactPaneNode{Name: "blob.bin", RelPath: "blob.bin", Size: 3})
 	if !strings.Contains(b.String(), "binary file") {
 		t.Errorf("binary preview = %q, want a binary-file note", b.String())
+	}
+}
+
+// artifactCursorOn points the artifacts cursor at a named node.
+func artifactCursorOn(t *testing.T, m Model, name string) Model {
+	t.Helper()
+	for i, n := range m.artifactPaneNodes {
+		if n.Name == name {
+			m.artifactPaneCursor = i
+			return m
+		}
+	}
+	t.Fatalf("no artifact node named %q in %d nodes", name, len(m.artifactPaneNodes))
+	return m
+}
+
+// ctrl+y in the artifacts tree yanks the selected artifact's absolute path —
+// the pane takes CopyPath over from the global job-note yank while it is
+// focused.
+func TestArtifactsPaneYankCopiesArtifactPath(t *testing.T) {
+	m, artifactDir := newArtifactJobModel(t, false)
+	m, _ = press(t, m, "vj")
+	m.Focus = FocusDetailPrimary
+	m = artifactCursorOn(t, m, "briefing.xml")
+
+	oldWriteClipboard := writeClipboard
+	defer func() { writeClipboard = oldWriteClipboard }()
+	var copied string
+	writeClipboard = func(path string) error {
+		copied = path
+		return nil
+	}
+
+	mdl, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = mdl.(Model)
+
+	want := filepath.Join(artifactDir, "briefing.xml")
+	if copied != want {
+		t.Errorf("copied = %q, want %q", copied, want)
+	}
+	if !strings.Contains(m.StatusSummary, want) {
+		t.Errorf("status summary = %q, want it to name the copied path", m.StatusSummary)
+	}
+}
+
+// With the artifacts pane open but the jobs pane focused, ctrl+y still yanks
+// the job note: the pane only claims the key while it has focus.
+func TestArtifactsPaneYankLeavesJobsPaneCopyPathAlone(t *testing.T) {
+	m, _ := newArtifactJobModel(t, false)
+	m, _ = press(t, m, "vj")
+	m.Focus = FocusJobs
+
+	oldWriteClipboard := writeClipboard
+	defer func() { writeClipboard = oldWriteClipboard }()
+	var copied string
+	writeClipboard = func(path string) error {
+		copied = path
+		return nil
+	}
+
+	mdl, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = mdl.(Model)
+
+	if want := m.Jobs[0].FilePath; copied != want {
+		t.Errorf("copied = %q, want the job note path %q", copied, want)
+	}
+}
+
+// `o` on an ordinary artifact asks the host for a DEDICATED editor pane, so the
+// file gets pinned in the rail under its own name instead of replacing whatever
+// the singleton editor is showing.
+func TestArtifactsPaneOpenAsksForDedicatedEditor(t *testing.T) {
+	m, artifactDir := newArtifactJobModel(t, false)
+	m, _ = press(t, m, "vj")
+	m.Focus = FocusDetailPrimary
+	m = artifactCursorOn(t, m, "notes.md")
+
+	m, cmd := press(t, m, "o")
+
+	var req *embed.EditRequestMsg
+	for _, msg := range collectMsgs(cmd) {
+		if r, ok := msg.(embed.EditRequestMsg); ok {
+			req = &r
+		}
+	}
+	if req == nil {
+		t.Fatalf("no EditRequestMsg emitted for o on notes.md")
+	}
+	if want := filepath.Join(artifactDir, "notes.md"); req.Path != want {
+		t.Errorf("edit path = %q, want %q", req.Path, want)
+	}
+	if !req.Dedicated {
+		t.Error("o asked for a quick open; want a dedicated per-file pane")
+	}
+}
+
+// `o` on an .html artifact hands it to the desktop opener with the configured
+// argv instead of to an editor no browser engine lives in.
+func TestArtifactsPaneOpenSendsHTMLToTheBrowser(t *testing.T) {
+	m, artifactDir := newArtifactJobModel(t, false)
+	if err := os.WriteFile(filepath.Join(artifactDir, "report.html"), []byte("<h1>hi</h1>"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	m, _ = press(t, m, "vj")
+	m.Focus = FocusDetailPrimary
+	m.openCommand = []string{"open", "-a", "Firefox"}
+	m = artifactCursorOn(t, m, "report.html")
+
+	oldOpen := openArtifactExternally
+	defer func() { openArtifactExternally = oldOpen }()
+	var gotArgv []string
+	var gotTarget string
+	openArtifactExternally = func(argv []string, target string) error {
+		gotArgv, gotTarget = argv, target
+		return nil
+	}
+
+	m, cmd := press(t, m, "o")
+
+	if want := filepath.Join(artifactDir, "report.html"); gotTarget != want {
+		t.Errorf("opened %q, want %q", gotTarget, want)
+	}
+	if strings.Join(gotArgv, " ") != "open -a Firefox" {
+		t.Errorf("opener argv = %v, want the configured open_command", gotArgv)
+	}
+	for _, msg := range collectMsgs(cmd) {
+		if _, ok := msg.(embed.EditRequestMsg); ok {
+			t.Error("html artifact also went to an editor pane")
+		}
+	}
+	if !strings.Contains(m.StatusSummary, "report.html") {
+		t.Errorf("status summary = %q, want it to name the opened file", m.StatusSummary)
+	}
+}
+
+// Promoted into the host's split, the pane must claim `o` and ctrl+y too — a
+// key the split is not told to forward never reaches the tree handler.
+func TestArtifactsPaneForwardsItsActionKeys(t *testing.T) {
+	m, _ := newArtifactJobModel(t, true)
+	_, cmd := press(t, m, "vj")
+
+	var forwarded []string
+	for _, msg := range collectMsgs(cmd) {
+		if req, ok := msg.(embed.SplitViewportRequestMsg); ok {
+			forwarded = req.ForwardKeys
+		}
+	}
+	if forwarded == nil {
+		t.Fatal("no SplitViewportRequestMsg emitted for the artifacts pane")
+	}
+	for _, want := range []string{"o", "ctrl+y", "e", "j", "k"} {
+		if !slices.Contains(forwarded, want) {
+			t.Errorf("ForwardKeys = %v, missing %q", forwarded, want)
+		}
 	}
 }
 
