@@ -134,6 +134,12 @@ func executePlanInit(cmd *PlanInitCmd) (string, error) {
 		currentNode.RootEcosystemPath != "" {
 		planContextDir = currentNode.RootEcosystemPath
 	}
+	// Plan creation is a note-writing action: lazily materialize the default
+	// notebook first (W1.11) so the locator below resolves against a created,
+	// recorded root rather than silently inventing one. nb owns the pass;
+	// runs before resolvePlanPathInWorkspace so a recording is visible to it.
+	ensureDefaultNotebook()
+
 	planDirArg := cmd.Dir
 	planPath, err := resolvePlanPathInWorkspace(planDirArg, planContextDir)
 	if err != nil {

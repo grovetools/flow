@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/grovetools/core/config"
@@ -12,6 +15,45 @@ import (
 	"github.com/grovetools/flow/pkg/orchestration"
 	"github.com/sirupsen/logrus"
 )
+
+// ensureDefaultNotebookFn runs nb's lazy default-notebook materialization
+// (W1.11). Package-level var so tests can stub the exec.
+var ensureDefaultNotebookFn = runNbEnsureNotebook
+
+// ensureDefaultNotebook materializes + records the default notebook ahead of
+// a note-writing action by delegating to `nb internal ensure-notebook` — nb
+// owns the pass (create root, record it at creation time, announce through
+// the attention log stream; no prompt). Best-effort: a missing or failing nb
+// binary leaves plan creation on the resolver's existing fallback behavior.
+func ensureDefaultNotebook() {
+	out, err := ensureDefaultNotebookFn()
+	if err != nil {
+		return
+	}
+	// The result is the LAST line of stdout: nb's unified logger writes its
+	// pretty announcement to stdout ahead of the JSON document.
+	lines := bytes.Split(bytes.TrimSpace(out), []byte("\n"))
+	payload := bytes.TrimSpace(lines[len(lines)-1])
+	var res struct {
+		Created  bool   `json:"created"`
+		Recorded bool   `json:"recorded"`
+		RootDir  string `json:"root_dir"`
+	}
+	if json.Unmarshal(payload, &res) != nil {
+		return
+	}
+	if res.Created || res.Recorded {
+		// The recording changed on-disk config after this process may have
+		// already memoized a load; drop the cache so the locator resolves
+		// against the recorded root.
+		config.ResetLoadCache()
+		fmt.Fprintf(os.Stderr, "Materialized default notebook at %s\n", res.RootDir)
+	}
+}
+
+func runNbEnsureNotebook() ([]byte, error) {
+	return exec.Command("nb", "internal", "ensure-notebook", "--json").Output()
+}
 
 // resolvePlanPathCtx is the context-aware front door to resolvePlanPath. When a
 // unified `--at` target is present on ctx it short-circuits to the target's
