@@ -153,7 +153,7 @@ func TestPortfolioLoadsPlansAcrossWorkspaces(t *testing.T) {
 		filepath.Join(plansA, "plan-a"): {PlanDir: filepath.Join(plansA, "plan-a"), PlanName: "plan-a", PlansDir: plansA, WorkspaceRoot: filepath.Join(root, "workspace-a"), Selected: true},
 		filepath.Join(plansB, "plan-b"): {PlanDir: filepath.Join(plansB, "plan-b"), PlanName: "plan-b", PlansDir: plansB, WorkspaceRoot: filepath.Join(root, "workspace-b")},
 	}
-	msg := loadPortfolioCmd(summaries, false, false)()
+	msg := loadPortfolioCmd(summaries, "", false, false)()
 	loaded := msg.(planListLoadCompleteMsg)
 	if loaded.error != nil || len(loaded.plans) != 2 {
 		t.Fatalf("portfolio load: plans=%d err=%v", len(loaded.plans), loaded.error)

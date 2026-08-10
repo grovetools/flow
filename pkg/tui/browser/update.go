@@ -264,6 +264,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.planSummaries[summary.PlanDir] = summary
 			}
 		}
+		m.noteIndexHealth(msg.indexMissesDisk)
 		m = m.replacePlanRows(msg.plans, selectedKey)
 		if msg.snapshot != nil {
 			m.armRenderProbe(msg.snapshot.ScannedAt, msg.snapshot.Revision)
@@ -405,6 +406,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.replacePlanRows(msg.plans, m.selectedPlanKey())
 		if msg.portfolio {
 			m.armRenderProbe(m.latestSnapshotAt, m.planIndexRevision)
+			m.noteIndexHealth(msg.indexMissesDisk)
 		}
 		return m, nil
 
@@ -476,7 +478,7 @@ func (m Model) reloadPlansCmd() tea.Cmd {
 		for key, summary := range m.planSummaries {
 			summaries[key] = summary
 		}
-		return loadPortfolioCmd(scopedPlanSummaries(summaries, m.plansDirectory), m.showOnHold, m.showArchived, m.planIndexRevision, m.streamGeneration)
+		return loadPortfolioCmd(scopedPlanSummaries(summaries, m.plansDirectory), m.plansDirectory, m.showOnHold, m.showArchived, m.planIndexRevision, m.streamGeneration)
 	}
 	return loadPlansListCmd(m.plansDirectory, m.cwdGitRoot, m.showOnHold, m.showArchived, m.loadGeneration)
 }
@@ -645,6 +647,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.NewRollingPlan),
 		len(m.plans) == 0 && key.Matches(msg, m.keys.ViewPlan):
 		if m.rollingPending {
+			return m, nil
+		}
+		// An empty list caused by a blind daemon index is not an empty
+		// workspace. Creating the rolling plan here would write into a
+		// directory that already holds plans, on the strength of a list the
+		// daemon got wrong.
+		if m.indexMissesDisk {
+			m.statusMessage = theme.DefaultTheme.Error.Render("Plan list unavailable: the daemon's index is not covering this directory")
 			return m, nil
 		}
 		m.rollingPending = true

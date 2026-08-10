@@ -164,6 +164,19 @@ func (m Model) View() string {
 func (m Model) renderEmptyState() string {
 	t := theme.DefaultTheme
 	var b strings.Builder
+	// The daemon is the source of plan rows, so when its index goes blind the
+	// browser reports that rather than routing around it — and rather than
+	// repeating the empty-workspace offer, which would invite the user to
+	// create a rolling plan in a directory that already has plans.
+	if m.indexMissesDisk {
+		b.WriteString(t.Error.Render(theme.IconError+" The daemon reports no plans for this directory, but plans exist on disk.") + "\n\n")
+		b.WriteString(t.Muted.Render("Its plan index is not covering "+m.plansDirectory+".") + "\n")
+		b.WriteString(t.Muted.Render("Restart or upgrade groved to rebuild the index; the list refreshes on its own once it does.") + "\n")
+		if m.statusMessage != "" {
+			b.WriteString("\n" + m.statusMessage + "\n")
+		}
+		return b.String()
+	}
 	b.WriteString("No plans found in directory.\n\n")
 	if m.rollingPending {
 		b.WriteString(t.Muted.Render("Creating the rolling plan…") + "\n")

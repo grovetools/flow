@@ -163,7 +163,12 @@ type Model struct {
 
 	// Portfolio refresh source. Daemon mode is push-driven; local fallback is
 	// explicitly labelled and uses a slow/manual refresh cadence.
-	dataSource        string
+	dataSource string
+	// indexMissesDisk is true while the daemon reports no plans for a plans
+	// directory that holds them. The browser does not route around it — the
+	// daemon owns plan rows — but it must not present the daemon's silence as
+	// an empty workspace either, so the empty state renders a diagnostic.
+	indexMissesDisk   bool
 	planIndexRevision uint64
 	planSummaries     map[string]models.PlanSummary
 	hasDaemonSnapshot bool
@@ -228,6 +233,24 @@ func (m *Model) armRenderProbe(snapshotAt time.Time, revision uint64) {
 	}
 	m.latestSnapshotAt = snapshotAt
 	m.renderProbe = &renderLatencyProbe{snapshotAt: snapshotAt, projectedAt: time.Now(), revision: revision}
+}
+
+// noteIndexHealth records the latest verdict on the daemon's plan index and
+// reports the onset of a blind one to the ecosystem log. A daemon that has lost
+// its flow watch set keeps publishing real revisions carrying zero plans, and
+// nothing else in the stack complains: the browser is where the contradiction
+// between the index and the directory is visible, so it is where the error
+// belongs. Logged on the transition only — the verdict is recomputed for every
+// projection the fault outlives.
+func (m *Model) noteIndexHealth(missesDisk bool) {
+	if missesDisk && !m.indexMissesDisk {
+		logging.NewUnifiedLogger("flow.tui.plans").Error("Daemon plan index reports no plans for a populated plans directory").
+			Field("plans_dir", m.plansDirectory).
+			Field("plan_index_revision", m.planIndexRevision).
+			Field("remedy", "the daemon's flow watcher is not covering this directory; restart or upgrade groved").
+			Log(context.Background())
+	}
+	m.indexMissesDisk = missesDisk
 }
 
 // PlanCount returns the number of plans in the browser list.

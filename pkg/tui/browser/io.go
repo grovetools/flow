@@ -47,6 +47,9 @@ type planIndexConnectedMsg struct {
 	updates    <-chan daemon.StateUpdate
 	cancel     context.CancelFunc
 	generation uint64
+	// indexMissesDisk marks a connection whose index reported nothing for this
+	// plans directory while plan directories existed on disk.
+	indexMissesDisk bool
 }
 type planIndexConnectFailedMsg struct {
 	err        error
@@ -150,8 +153,17 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, plansDi
 				summaries[summary.PlanDir] = summary
 			}
 		}
-		plans, projectionErr := loadPortfolio(scopedPlanSummaries(summaries, plansDirectory), showOnHold, showArchived)
-		return planIndexConnectedMsg{snapshot: snapshot, plans: plans, err: projectionErr, updates: updates, cancel: cancel, generation: generation}
+		scoped := scopedPlanSummaries(summaries, plansDirectory)
+		plans, projectionErr := loadPortfolio(scoped, showOnHold, showArchived)
+		var revision uint64
+		if snapshot != nil {
+			revision = snapshot.Revision
+		}
+		return planIndexConnectedMsg{
+			snapshot: snapshot, plans: plans, err: projectionErr, updates: updates,
+			cancel: cancel, generation: generation,
+			indexMissesDisk: indexMissesDisk(scoped, plansDirectory, revision),
+		}
 	}
 }
 
@@ -282,6 +294,11 @@ type planListLoadCompleteMsg struct {
 	// when its watch paths were computed, so waiting for it means waiting for
 	// a restart.
 	authoritative bool
+	// indexMissesDisk marks a portfolio message computed from an index that
+	// reported nothing for this plans directory while plan directories existed
+	// on disk. The rows stay the daemon's — this only drives the diagnostic the
+	// view shows in place of the empty-state offer.
+	indexMissesDisk bool
 }
 
 // gitLogMsg carries the result of fetching the top-level workspace git log.
@@ -432,7 +449,7 @@ func fetchRepoGitLogCmd(repoPath string) tea.Cmd {
 	}
 }
 
-func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold, showArchived bool, revisionAndGeneration ...uint64) tea.Cmd {
+func loadPortfolioCmd(summaries map[string]models.PlanSummary, plansDirectory string, showOnHold, showArchived bool, revisionAndGeneration ...uint64) tea.Cmd {
 	var rev, generation uint64
 	if len(revisionAndGeneration) > 0 {
 		rev = revisionAndGeneration[0]
@@ -442,8 +459,61 @@ func loadPortfolioCmd(summaries map[string]models.PlanSummary, showOnHold, showA
 	}
 	return func() tea.Msg {
 		plans, err := loadPortfolio(summaries, showOnHold, showArchived)
-		return planListLoadCompleteMsg{plans: plans, error: err, portfolio: true, planIndexRevision: rev, portfolioGeneration: generation}
+		return planListLoadCompleteMsg{
+			plans: plans, error: err, portfolio: true, planIndexRevision: rev,
+			portfolioGeneration: generation,
+			indexMissesDisk:     indexMissesDisk(summaries, plansDirectory, rev),
+		}
 	}
+}
+
+// indexMissesDisk reports whether the daemon's plan index has nothing to say
+// about a plans directory that demonstrably holds plans. That is not a state
+// the browser tries to paper over — the daemon is the source of plan rows and a
+// local rescan here would trade one broken surface for a slow one — but it is
+// also not something to render as "no plans found": the empty-state offer over
+// a populated workspace is what made the wedge look like a flow bug.
+//
+// The daemon reaches this state by publishing a real, non-zero revision after
+// its flow watcher has lost its watch set, so the index says "scanned, zero
+// plans" and outranks everything. A revision of zero means "not scanned yet",
+// which is neither an answer nor a fault, so it is never diagnosed here.
+//
+// The disk probe runs only when the scoped projection is empty — one ReadDir
+// and at most one stat per subdirectory, never on a portfolio that has rows —
+// so a healthy daemon path stays the pure in-memory projection it is meant to
+// be. Reporting the fault is Model.noteIndexHealth's job: this runs on every
+// projection while the fault persists, so logging here would repeat the same
+// line for every unrelated delta.
+func indexMissesDisk(summaries map[string]models.PlanSummary, plansDirectory string, revision uint64) bool {
+	if len(summaries) > 0 || plansDirectory == "" || revision == 0 {
+		return false
+	}
+	return diskHasPlans(plansDirectory)
+}
+
+// diskHasPlans reports whether plansDirectory currently holds at least one plan
+// directory, using loadPlansFromDisk's recognition rule (a `.grove-plan.yml`
+// marker or any `*.md` job file). Dot directories are skipped: `.archive` and
+// tooling directories are not rows this browser would have shown anyway.
+func diskHasPlans(plansDirectory string) bool {
+	entries, err := os.ReadDir(plansDirectory)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		planPath := filepath.Join(plansDirectory, entry.Name())
+		if _, statErr := os.Stat(filepath.Join(planPath, ".grove-plan.yml")); statErr == nil {
+			return true
+		}
+		if mdFiles, _ := filepath.Glob(filepath.Join(planPath, "*.md")); len(mdFiles) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // scopedPlanSummaries limits a daemon-wide portfolio to the notebook plans
