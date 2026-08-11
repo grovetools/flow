@@ -1,20 +1,31 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/notespace"
 )
 
 // TestBuildPlanBundle verifies the bundle includes job .md files, .grove-plan.yml
-// and rules/**, derives Workspace/PlanName from the notebook layout, and EXCLUDES
+// and rules/**, derives immutable notespace identity and PlanName, and EXCLUDES
 // .artifacts/, .grove-lease.yml, and nested non-rules files (M2 C11).
 func TestBuildPlanBundle(t *testing.T) {
 	root := t.TempDir()
-	// <root>/workspaces/myws/plans/myplan
-	planDir := filepath.Join(root, "workspaces", "myws", "plans", "myplan")
+	// <root>/notespaces/renamable/plans/myplan
+	notespaceRoot := filepath.Join(root, "notespaces", "renamable")
+	planDir := filepath.Join(notespaceRoot, "plans", "myplan")
 	mkdirs(t, planDir, filepath.Join(planDir, "rules"), filepath.Join(planDir, ".artifacts"))
+	const notespaceID = "01J00000000000000000000001"
+	if _, err := notespace.InstallNotespace(notespaceRoot, notespace.NotespaceStamp{
+		ID: notespaceID, Name: "display-name", Subject: "example.com/org/repo", Kind: "repo",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	write(t, filepath.Join(planDir, "01-job.md"), "job one")
 	write(t, filepath.Join(planDir, "02-job.md"), "job two")
@@ -24,15 +35,35 @@ func TestBuildPlanBundle(t *testing.T) {
 	write(t, filepath.Join(planDir, ".artifacts", "big-context.txt"), "huge")     // excluded
 	write(t, filepath.Join(planDir, "notes", "scratch.md"), "nested, not a rule") // excluded
 
-	bundle, err := buildPlanBundle(planDir)
+	cfg := &config.Config{Notebooks: &config.NotebooksConfig{Definitions: map[string]*config.Notebook{
+		"book": {RootDir: root},
+	}}}
+	bundle, err := buildPlanBundleWithConfig(planDir, cfg)
 	if err != nil {
 		t.Fatalf("buildPlanBundle: %v", err)
 	}
-	if bundle.Workspace != "myws" {
-		t.Errorf("Workspace = %q, want myws", bundle.Workspace)
+	if bundle.NotespaceID != notespaceID {
+		t.Errorf("NotespaceID = %q, want immutable id %q", bundle.NotespaceID, notespaceID)
+	}
+	if bundle.NotespaceName != "display-name" {
+		t.Errorf("NotespaceName = %q, want stamped display-name", bundle.NotespaceName)
 	}
 	if bundle.PlanName != "myplan" {
 		t.Errorf("PlanName = %q, want myplan", bundle.PlanName)
+	}
+	encoded, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["notespace_id"] != notespaceID || wire["notespace_name"] != "display-name" {
+		t.Fatalf("bundle JSON identity = %s", encoded)
+	}
+	if _, legacy := wire["workspace"]; legacy {
+		t.Fatalf("bundle JSON retained mutable workspace route: %s", encoded)
 	}
 
 	got := make([]string, 0, len(bundle.Files))

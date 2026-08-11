@@ -306,7 +306,7 @@ func (m Model) renderEcosystemStatusPane() string {
 
 // browserColumns is the plan table's display order. PLAN carries the row's
 // identity and is never dropped or hidden; every other column is optional.
-var browserColumns = []string{"PLAN", "STATUS", "WORKSPACE / REPOS", "WORKTREE", "BINDING", "GIT", "REVIEWED", "NOTES", "UPDATED"}
+var browserColumns = []string{"PLAN", "STATUS", "NOTESPACE / REPOS", "WORKTREE", "BINDING", "GIT", "REVIEWED", "NOTES", "UPDATED"}
 
 // browserOptionalColumns are the columns the "T" picker can toggle, in the
 // order they appear in the table.
@@ -314,7 +314,7 @@ var browserOptionalColumns = browserColumns[1:]
 
 func defaultBrowserColumnVisibility() map[string]bool {
 	return map[string]bool{
-		"STATUS": true, "WORKSPACE / REPOS": false, "WORKTREE": true, "BINDING": true,
+		"STATUS": true, "NOTESPACE / REPOS": false, "WORKTREE": true, "BINDING": true,
 		"GIT": true, "REVIEWED": true, "NOTES": true, "UPDATED": true,
 	}
 }
@@ -468,10 +468,10 @@ const minPlanCellWidth = 12
 // added to browserColumns without being ranked here can never silently become
 // undroppable.
 //
-// WORKSPACE / REPOS leads because it is both the widest and off by default;
+// NOTESPACE / REPOS leads because it is both the widest and off by default;
 // STATUS goes last because it is the reason most people open this table.
 var browserColumnDropPriority = map[string]int{
-	"WORKSPACE / REPOS": 1, "UPDATED": 2, "NOTES": 3, "REVIEWED": 4,
+	"NOTESPACE / REPOS": 1, "UPDATED": 2, "NOTES": 3, "REVIEWED": 4,
 	"WORKTREE": 5, "BINDING": 6, "GIT": 7, "STATUS": 8,
 }
 
@@ -657,7 +657,7 @@ func (m Model) renderRowCells(headers []string, plan PlanListItem) []string {
 
 	cells := map[string]string{
 		"PLAN": titleText, "STATUS": m.formatStatusCell(plan),
-		"WORKSPACE / REPOS": identityText, "WORKTREE": worktreeText,
+		"NOTESPACE / REPOS": identityText, "WORKTREE": worktreeText,
 		"BINDING": bindingText, "GIT": gitText, "REVIEWED": reviewedText,
 		"NOTES": notesText, "UPDATED": t.Muted.Render("◦ " + formatRelativeTime(plan.LastUpdated)),
 	}

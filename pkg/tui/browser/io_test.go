@@ -168,8 +168,12 @@ func TestPortfolioLoadsPlansAcrossWorkspaces(t *testing.T) {
 }
 
 func TestPlanWorkspaceDisplayNamePrefersCentralizedNotebookScope(t *testing.T) {
+	plansDir := filepath.Join(t.TempDir(), "notespaces", "grovetools", "plans")
+	if err := os.MkdirAll(plansDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	summary := models.PlanSummary{
-		PlansDir:      "/Users/solair/notebooks/grovetools/workspaces/grovetools/plans",
+		PlansDir:      plansDir,
 		WorkspaceRoot: "/Users/solair/.local/share/grove/worktrees/grovetools-0bd46c64/Users",
 	}
 	if got := planWorkspaceDisplayName(summary); got != "grovetools" {

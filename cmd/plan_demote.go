@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -389,7 +391,10 @@ func demoteViaNbNew(job *orchestration.Job, jobFilePath string, demotion orchest
 		return "", err
 	}
 	if targetWorkspaceDir == "" {
-		targetWorkspaceDir = resolveTargetWorkspace(jobFilePath, job.NoteRef)
+		targetWorkspaceDir, err = resolveTargetNotespace(jobFilePath)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	// Build the nb new command
@@ -482,64 +487,57 @@ func emitDemoteJSON(outcomes []demoteOutcome) error {
 	return enc.Encode(outcomes)
 }
 
-// resolveWorkspaceOverride returns the absolute workspace directory requested
-// via --workspace, or "" when the flag was not set. It is the single reader of
-// demoteWorkspaceFlag: BOTH demote routes (the resolved-note move and the
-// nb new fallback) call it, so the flag cannot regress into being honored on
-// one path and silently dropped on the other.
+// resolveWorkspaceOverride resolves the code-plane --workspace path through
+// the recorded primary mapping. The resulting notespace root, not the code
+// workspace path or its basename, is the nb working directory.
 func resolveWorkspaceOverride() (string, error) {
 	if demoteWorkspaceFlag == "" {
 		return "", nil
 	}
-	abs, err := filepath.Abs(demoteWorkspaceFlag)
+	cfg, machine, err := loadNotespaceRouting()
 	if err != nil {
-		return "", fmt.Errorf("resolving workspace path: %w", err)
+		return "", err
 	}
-	return abs, nil
+	return resolveWorkspaceOverrideWithRouting(demoteWorkspaceFlag, cfg, machine)
 }
 
-// resolveTargetWorkspace determines the workspace directory for note creation.
-// If noteRef is set and points to a path containing /workspaces/<name>/,
-// use that workspace. Otherwise, derive from the plan's location.
-func resolveTargetWorkspace(jobFilePath, noteRef string) string {
-	if noteRef != "" {
-		wsDir := extractWorkspaceDir(noteRef)
-		if wsDir != "" {
-			return wsDir
-		}
+func resolveWorkspaceOverrideWithRouting(path string, cfg *config.Config, machine *config.MachineConfig) (string, error) {
+	resolution, err := workspace.ResolveNotespace(path, cfg, machine)
+	if err != nil {
+		return "", fmt.Errorf("resolving --workspace notespace: %w", err)
 	}
-
-	// Fall back: the plan directory is jobFilePath's parent's parent
-	// e.g., /notebooks/ws/plans/my-plan/01-job.md → /notebooks/ws
-	planDir := filepath.Dir(jobFilePath)
-	return extractWorkspaceDir(planDir)
+	return resolution.Root, nil
 }
 
-// extractWorkspaceDir finds the workspace root from an absolute path.
-// It looks for /workspaces/<name>/ in the path and returns everything
-// up to and including the workspace name directory.
-func extractWorkspaceDir(absPath string) string {
-	// Look for /workspaces/ in the path
-	parts := strings.Split(absPath, string(filepath.Separator))
-	for i, part := range parts {
-		if part == "workspaces" && i+1 < len(parts) {
-			// Return the path up to and including the workspace name
-			wsPath := string(filepath.Separator) + filepath.Join(parts[1:i+2]...)
-			return wsPath
-		}
+// resolveTargetNotespace derives note creation's destination from the plan's
+// own notes-plane location. There is deliberately no note_ref or positional
+// fallback: stale provenance must never redirect a write into a sibling root.
+func resolveTargetNotespace(jobFilePath string) (string, error) {
+	cfg, _, err := loadNotespaceRouting()
+	if err != nil {
+		return "", err
 	}
-	// Fallback: try parent directories looking for plans/ or inbox/
-	// If path contains /plans/, go up two levels
-	dir := absPath
-	for dir != "/" && dir != "." {
-		base := filepath.Base(dir)
-		if base == "plans" || base == "inbox" {
-			return filepath.Dir(dir)
-		}
-		dir = filepath.Dir(dir)
+	return resolveTargetNotespaceWithConfig(jobFilePath, cfg)
+}
+
+func resolveTargetNotespaceWithConfig(jobFilePath string, cfg *config.Config) (string, error) {
+	_, _, root, err := notespaceAtNotesPath(jobFilePath, cfg)
+	if err != nil {
+		return "", fmt.Errorf("resolve demote target notespace: %w", err)
 	}
-	// Last resort: use the plan directory's parent
-	return filepath.Dir(filepath.Dir(absPath))
+	return root, nil
+}
+
+func loadNotespaceRouting() (*config.Config, *config.MachineConfig, error) {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		return nil, nil, fmt.Errorf("load notespace configuration: %w", err)
+	}
+	machine, err := config.LoadMachineConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("load machine notespace routing: %w", err)
+	}
+	return cfg, machine, nil
 }
 
 // parseNotePathFromOutput extracts the note file path from nb new output.

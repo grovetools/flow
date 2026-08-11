@@ -10,6 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/grovetools/core/config"
+	"github.com/grovetools/core/pkg/notespace"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -121,6 +123,73 @@ func TestResolveDemoteTargets_PlanDirSelectsByStatus(t *testing.T) {
 	}
 	if _, err := resolveDemoteTargets([]string{filepath.Join(planDir, "no-such-job.md")}); err == nil {
 		t.Error("expected a missing path to be refused")
+	}
+}
+
+func TestResolveTargetNotespaceNeverFallsBackToPositionalParent(t *testing.T) {
+	notebookRoot := t.TempDir()
+	correct := filepath.Join(notebookRoot, "notespaces", "correct")
+	wrong := filepath.Join(t.TempDir(), "wrong")
+	if err := os.MkdirAll(correct, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notespace.InstallNotespace(correct, notespace.NotespaceStamp{
+		ID: "01J00000000000000000000001", Name: "correct", Subject: "example.com/org/repo", Kind: "repo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Notebooks: &config.NotebooksConfig{Definitions: map[string]*config.Notebook{
+		"book": {RootDir: notebookRoot},
+	}}}
+
+	jobPath := filepath.Join(correct, "plans", "plan", "01-job.md")
+	got, err := resolveTargetNotespaceWithConfig(jobPath, cfg)
+	if err != nil || got != correct {
+		t.Fatalf("target = %q, err = %v, want %q", got, err, correct)
+	}
+
+	// The removed implementation climbed from any path containing a plans/
+	// component (and finally guessed two parents). That could direct nb new to
+	// an unrelated writable directory. Such a path now fails closed.
+	positionalTrap := filepath.Join(wrong, "plans", "plan", "01-job.md")
+	if got, err := resolveTargetNotespaceWithConfig(positionalTrap, cfg); err == nil {
+		t.Fatalf("positional trap resolved to %q; want fail-closed error", got)
+	}
+}
+
+func TestWorkspaceOverrideRoutesByRecordedNotespaceID(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "same-name")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	firstBook, secondBook := t.TempDir(), t.TempDir()
+	firstRoot := filepath.Join(firstBook, "notespaces", "same-name")
+	secondRoot := filepath.Join(secondBook, "notespaces", "same-name")
+	for i, fixture := range []struct {
+		root, id, subject string
+	}{
+		{firstRoot, "01J00000000000000000000001", "example.com/other/repo"},
+		{secondRoot, "01J00000000000000000000002", "example.com/target/repo"},
+	} {
+		if err := os.MkdirAll(fixture.root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := notespace.InstallNotespace(fixture.root, notespace.NotespaceStamp{
+			ID: fixture.id, Name: "same-name", Subject: fixture.subject, Kind: "repo",
+		}); err != nil {
+			t.Fatalf("install stamp %d: %v", i, err)
+		}
+	}
+	cfg := &config.Config{Notebooks: &config.NotebooksConfig{Definitions: map[string]*config.Notebook{
+		"first": {RootDir: firstBook}, "second": {RootDir: secondBook},
+	}}}
+	machine := &config.MachineConfig{
+		Subjects:  map[string]string{repo: "example.com/target/repo"},
+		Primaries: map[string]string{"example.com/target/repo": "01J00000000000000000000002"},
+	}
+	got, err := resolveWorkspaceOverrideWithRouting(repo, cfg, machine)
+	if err != nil || got != secondRoot {
+		t.Fatalf("override route = %q, err = %v, want ID-selected root %q", got, err, secondRoot)
 	}
 }
 

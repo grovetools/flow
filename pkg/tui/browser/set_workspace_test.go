@@ -22,7 +22,7 @@ func newSwitchTargetWorkspace(t *testing.T) (wsDir, plansDir string) {
 
 	wsDir = filepath.Join(root, "eco")
 	notebook := filepath.Join(root, "nb")
-	plansDir = filepath.Join(notebook, "workspaces", "eco", "plans")
+	plansDir = filepath.Join(notebook, "notespaces", "eco", "plans")
 	for _, dir := range []string{wsDir, plansDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)

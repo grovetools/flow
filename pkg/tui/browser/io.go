@@ -609,15 +609,20 @@ func loadPortfolio(summaries map[string]models.PlanSummary, showOnHold, showArch
 	return all, nil
 }
 
-// planWorkspaceDisplayName prefers the notebook workspace encoded by a
-// centralized PlansDir (.../workspaces/<name>/plans). Daemon rows retain their
-// qualified WorkspaceRoot for actions, but display must not inherit a stale or
-// arbitrary worktree representative (for example the synthetic "Users" node).
+// planWorkspaceDisplayName prefers the notespace encoded by a centralized
+// PlansDir. The field name remains code-plane compatible, but the browser's
+// notes-plane column uses core's notespace parser rather than recognizing the
+// removed workspaces/<name> layout itself. WorkspaceRoot remains untouched for
+// code-plane actions and binding.
 func planWorkspaceDisplayName(summary models.PlanSummary) string {
 	plansDir := filepath.Clean(summary.PlansDir)
-	workspaceDir := filepath.Dir(plansDir)
-	if filepath.Base(filepath.Dir(workspaceDir)) == "workspaces" {
-		return filepath.Base(workspaceDir)
+	// A plans dir is <notebook>/notespaces/<name>/plans. Supplying the
+	// notebook candidate to ParseNotespaceRoot delegates validation and segment
+	// extraction to the canonical parser; a malformed shape falls back to the
+	// code-plane workspace label below.
+	notebookRoot := filepath.Dir(filepath.Dir(filepath.Dir(plansDir)))
+	if name, _, local, err := workspace.ParseNotespaceRoot(notebookRoot, plansDir); err == nil && !local {
+		return name
 	}
 	return filepath.Base(summary.WorkspaceRoot)
 }

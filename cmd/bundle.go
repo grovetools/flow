@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/pkg/models"
 	"github.com/grovetools/core/pkg/plan"
 )
@@ -17,16 +18,27 @@ import (
 // EXCLUDES `.artifacts/` (large chat context; C11) and `.grove-lease.yml` (the
 // Record plane carries the lease; shipping it is pointless).
 //
-// Workspace and PlanName are derived from the centralized notebook layout
-// (<root>/workspaces/<workspace>/plans/<plan>), symmetric with how the
-// satellite's NotebookLocator renders the replica plans dir.
+// Notespace identity is read from the stamped root selected by the centralized
+// notespace parser. Directory positions and mutable display names are never
+// used as routing identity.
 func buildPlanBundle(planDir string) (*models.PlanBundle, error) {
+	cfg, err := config.LoadDefault()
+	if err != nil {
+		return nil, fmt.Errorf("load notespace configuration: %w", err)
+	}
+	return buildPlanBundleWithConfig(planDir, cfg)
+}
+
+func buildPlanBundleWithConfig(planDir string, cfg *config.Config) (*models.PlanBundle, error) {
 	absPlanDir, err := filepath.Abs(planDir)
 	if err != nil {
 		return nil, err
 	}
 	planName := filepath.Base(absPlanDir)
-	workspaceName := filepath.Base(filepath.Dir(filepath.Dir(absPlanDir)))
+	notespaceID, notespaceName, _, err := notespaceAtNotesPath(absPlanDir, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve plan notespace: %w", err)
+	}
 
 	files := map[string][]byte{}
 	walkErr := filepath.WalkDir(absPlanDir, func(path string, d fs.DirEntry, err error) error {
@@ -61,9 +73,10 @@ func buildPlanBundle(planDir string) (*models.PlanBundle, error) {
 	}
 
 	return &models.PlanBundle{
-		Workspace: workspaceName,
-		PlanName:  planName,
-		Files:     files,
+		NotespaceID:   notespaceID,
+		NotespaceName: notespaceName,
+		PlanName:      planName,
+		Files:         files,
 	}, nil
 }
 
