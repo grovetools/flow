@@ -15,6 +15,7 @@ func retirementItems() []*finish.Item {
 	return []*finish.Item{
 		// Order mirrors the factory: archive is emitted BEFORE prune.
 		{ID: plan_finish.ItemEnvTeardown, Name: "Tear down environment", IsAvailable: true},
+		{ID: plan_finish.ItemPruneBuildCaches, Name: "Evict per-worktree build caches", IsAvailable: true},
 		{ID: plan_finish.ItemArchiveWorktree, Name: "Archive git worktree", IsAvailable: true},
 		{ID: plan_finish.ItemPruneWorktree, Name: "Prune git worktree", IsAvailable: true},
 		{ID: plan_finish.ItemClearNavBindings, Name: "Clear sessionizer keymap entries", IsAvailable: true},

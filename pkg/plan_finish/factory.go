@@ -215,6 +215,7 @@ const (
 	ItemLedgerNote              = "ledger_note"
 	ItemReviewCheckpoint        = "review_checkpoint"
 	ItemTombstoneRegistry       = "tombstone_registry"
+	ItemPruneBuildCaches        = "prune_build_caches"
 	ItemArchiveWorktree         = "archive_worktree"
 	ItemPruneWorktree           = "prune_worktree"
 	ItemCleanDevLinks           = "clean_dev_links"
@@ -1058,6 +1059,72 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 		ledgerNoteItem,
 		reviewCheckpointItem,
 		tombstoneItem,
+		{
+			// MUST run before archive_worktree and prune_worktree, which is
+			// why it sits here rather than next to the other machine-state
+			// cleanups (clean_dev_links) further down: eviction shells out to
+			// a make target INSIDE the container, and both retirements make
+			// that impossible — prune deletes the container, archive moves it
+			// out from under its owner repos. Both hosts run actions in this
+			// slice's order (cmd.executeFinishActions and the view's
+			// runEmbeddedFinishActions each range over the same slice), so
+			// list position IS execution order.
+			//
+			// Why it must run at all: per-worktree build caches under
+			// ~/.cache/grove are keyed by the worktree's ABSOLUTE PATH and
+			// nothing else ever revisits that key. Once the container is gone
+			// (pruned) or elsewhere (archived), the entries are unnameable and
+			// stranded forever — ~400MB per retired worktree, invisible short
+			// of `df`. This finish is the last moment the system both knows
+			// the worktree is being retired and still knows its path.
+			ID:   ItemPruneBuildCaches,
+			Name: "Evict per-worktree build caches",
+			Check: func() (string, error) {
+				if worktreeName == "" || gitRoot == "" {
+					return "N/A", nil
+				}
+				// Same shape as clean_dev_links' grove lookup: a missing
+				// toolchain is "nothing to do", not an error.
+				if _, err := exec.LookPath("make"); err != nil {
+					return "N/A (make not found)", nil
+				}
+				containerDir, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
+				if !ok {
+					return "N/A", nil
+				}
+				n := len(cacheEvictDirs(containerDir, planRepos(plan)))
+				if n == 0 {
+					return "N/A (no cache-evict targets)", nil
+				}
+				return color.YellowString("%d repo(s) with build caches", n), nil
+			},
+			Action: func() error {
+				if worktreeName == "" || gitRoot == "" {
+					return nil
+				}
+				if _, err := exec.LookPath("make"); err != nil {
+					return nil
+				}
+				containerDir, ok := resolveContainerWorktreePath(gitRoot, worktreeName, provider)
+				if !ok {
+					return nil
+				}
+				// Re-probed rather than captured from Check: the hosted wizard
+				// builds items once and may run the actions much later.
+				for _, dir := range cacheEvictDirs(containerDir, planRepos(plan)) {
+					fmt.Fprintf(out, "    Evicting build cache for %s...\n", dir)
+					// Never an error return. A repo's Makefile being broken is
+					// not a reason to leave a worktree un-retired: a hard error
+					// here would become the run's firstErr and skip
+					// mark_finished / archive_plan, i.e. a stale cache entry
+					// would strand the whole plan.
+					if err := executor.Execute("make", "-C", dir, cacheEvictTarget, "WORKTREE="+dir); err != nil {
+						fmt.Fprintf(out, "    Warning: cache eviction failed for %s: %v\n", dir, err)
+					}
+				}
+				return nil
+			},
+		},
 		{
 			// Archive runs BEFORE prune_worktree (and before the
 			// branch-deletion items) so the per-repo git bundles it
@@ -2122,6 +2189,81 @@ func deleteLocalBranch(repoPath, branchName string, force bool) error {
 	default:
 		return fmt.Errorf("%s", strings.TrimSpace(outStr))
 	}
+}
+
+// cacheEvictTarget is the make target a repo opts into to have its
+// per-worktree build caches evicted when a worktree is retired. Repos that do
+// not define it are silently skipped — most repos have no such cache.
+const cacheEvictTarget = "cache-evict"
+
+// cacheEvictProbeTimeout bounds the dry-run existence probe. The probe runs at
+// BuildItems time for EVERY finish (including the hosted wizard's checklist
+// build), so a pathological Makefile must not be able to hang the UI. The
+// eviction itself is left unbounded, matching every other subprocess this
+// factory runs: by then the user has explicitly selected the action.
+const cacheEvictProbeTimeout = 15 * time.Second
+
+// cacheEvictCandidateDirs lists the directories inside containerDir that could
+// own a per-worktree build cache, in the plan's repo order.
+//
+// Ecosystem plans (every worktree created since repos: became mandatory) get
+// one directory per repo, resolved the same way dirtyEcosystemRepos resolves
+// them. Legacy single-repo plans carry no Repos at all; for those the
+// container IS the checkout, so it is probed directly rather than reported N/A
+// — the cache key is the worktree path either way, and prune_worktree's own
+// legacy branch treats the container as the repo in exactly this fashion.
+// Directories that are absent are skipped.
+func cacheEvictCandidateDirs(containerDir string, repos []string) []string {
+	var dirs []string
+	if containerDir == "" {
+		return nil
+	}
+	if len(repos) == 0 {
+		if _, err := os.Stat(containerDir); err == nil {
+			dirs = append(dirs, containerDir)
+		}
+		return dirs
+	}
+	for _, repo := range repos {
+		dir := filepath.Join(containerDir, repo)
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+	return dirs
+}
+
+// hasCacheEvictTarget reports whether the build system in dir defines the
+// cache-evict target. Detection is by dry run rather than by a hardcoded list
+// of repos: `make -n <target>` resolves the target without running any recipe
+// and exits non-zero ("No rule to make target") when it is absent, so a repo
+// adding or dropping the target needs no change here.
+//
+// Caveat inherited from make itself: under -n, recipe lines that mention
+// $(MAKE) or are prefixed with '+' still EXECUTE. A cache-evict recipe written
+// that way would be run by this probe on every finish, so implementations
+// should keep the recipe a plain command.
+func hasCacheEvictTarget(dir string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), cacheEvictProbeTimeout)
+	defer cancel()
+	// WORKTREE is passed to the probe too so a Makefile that references it
+	// cannot fail the dry run over an undefined variable.
+	cmd := exec.CommandContext(ctx, "make", "-C", dir, "-n", cacheEvictTarget, "WORKTREE="+dir) //nolint:gosec // dir is a resolved container path
+	return cmd.Run() == nil
+}
+
+// cacheEvictDirs narrows cacheEvictCandidateDirs to those that actually expose
+// the target. Shared by the item's Check (to report an honest count) and its
+// Action (to decide what to invoke).
+func cacheEvictDirs(containerDir string, repos []string) []string {
+	var dirs []string
+	for _, dir := range cacheEvictCandidateDirs(containerDir, repos) {
+		if hasCacheEvictTarget(dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
 }
 
 // dirtyEcosystemRepos returns the names of the container's per-repo worktrees

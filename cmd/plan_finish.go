@@ -174,6 +174,11 @@ func applyFinishSelection(items []*finish.Item, opts plan_finish.Options) {
 	// owner repos into the worktree archive. Both leave every keymap entry
 	// pointing at a path that no longer exists.
 	enable(plan_finish.ItemClearNavBindings, opts.PruneWorktree || opts.ArchiveWorktree)
+	// Per-worktree build caches are keyed by the container's absolute path, so
+	// EITHER retirement strands them: prune deletes the path, archive moves the
+	// container and changes it. Enabled on both for the same reason the nav
+	// bindings above are.
+	enable(plan_finish.ItemPruneBuildCaches, opts.PruneWorktree || opts.ArchiveWorktree)
 	enable(plan_finish.ItemCleanDevLinks, opts.CleanDevLinks)
 	enable(plan_finish.ItemDeleteSubmoduleBranches, opts.DeleteBranch)
 	enable(plan_finish.ItemDeleteLocalBranch, opts.DeleteBranch)
