@@ -62,12 +62,12 @@ func TestPiOraclePlanningRecipeBootstrapsPlanningCoordinator(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"responder: pi-session",    // the oracle is a chat job, not a subjob child
-		"--parent-job-id",          // …carrying the vertical lineage anyway
-		"flow plan say",            // turn delivery through the sanctioned writer
-		"flow_subjob",              // the verifier really is a subjob child
-		"not gateable",             // the verification pass is mandatory
-		"pending and unlaunched",   // decomposition is reviewed before it runs
+		"responder: pi-session",  // the oracle is a chat job, not a subjob child
+		"--parent-job-id",        // …carrying the vertical lineage anyway
+		"flow plan say",          // turn delivery through the sanctioned writer
+		"flow_subjob",            // the verifier really is a subjob child
+		"not gateable",           // the verification pass is mandatory
+		"pending and unlaunched", // decomposition is reviewed before it runs
 		"references/executor.md", // the successor seat is declared in the handoff spec
 	} {
 		if !strings.Contains(body, want) {
