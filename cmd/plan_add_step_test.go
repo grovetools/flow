@@ -225,7 +225,7 @@ func TestRunPlanAddStep(t *testing.T) {
 			},
 			cmd: &PlanAddStepCmd{
 				Type: "interactive_agent", Title: "Unknown Provider Child", ParentJobID: "parent-id",
-				Provider: "not-a-provider",
+				Provider:   "not-a-provider",
 				PromptFile: createTempFile(t, "Do child work"),
 			},
 			wantErr: true,
@@ -645,6 +645,56 @@ func TestRunPlanAddStep(t *testing.T) {
 					t.Error("Expected additional prompt content in prompt body")
 				}
 			},
+		},
+		{
+			// A self-contained oneshot in a caller-owned plan directory: with
+			// --no-context nothing stamps a rules_file, so nothing can send the
+			// run into the unauthored-rules funnel at execution time.
+			name: "no-context oneshot stamps no rules file",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan"}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:      "oneshot",
+				Title:     "Self Contained",
+				NoContext: true,
+				Prompt:    "Summarize this sealed work block.",
+			},
+			wantErr: false,
+			checkJob: func(t *testing.T, dir string) {
+				job := findJobByTitle(t, dir, "Self Contained")
+				if job.RulesFile != "" {
+					t.Errorf("RulesFile = %q, want empty for a no_context job", job.RulesFile)
+				}
+				if !job.NoContext {
+					t.Error("NoContext = false; want the flag persisted to frontmatter")
+				}
+				if _, err := os.Stat(filepath.Join(dir, "rules")); !os.IsNotExist(err) {
+					t.Errorf("rules dir stat = %v; want absent for a no_context job", err)
+				}
+			},
+		},
+		{
+			// The two flags contradict each other; one would have to be
+			// silently dropped at run time, so the add is refused instead.
+			name: "no-context with an explicit rules file errors",
+			setupPlan: func(t *testing.T, dir string) {
+				plan := &orchestration.Plan{Name: "test-plan"}
+				if err := orchestration.SavePlan(dir, plan); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cmd: &PlanAddStepCmd{
+				Type:      "oneshot",
+				Title:     "Contradiction",
+				NoContext: true,
+				RulesFile: "custom.rules",
+				Prompt:    "Do the thing.",
+			},
+			wantErr: true,
 		},
 	}
 

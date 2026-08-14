@@ -48,6 +48,7 @@ This section describes the schema for Grove Flow jobs. These properties are typi
 | `id` | (string, optional) <br> A unique identifier for the job. Used for dependency resolution and referencing. |
 | `include` | (array of strings, optional) <br> A list of file paths to include as context for this job. |
 | `model` | (string, optional) <br> The LLM model to use for this specific job, overriding any global or plan-level defaults. |
+| `no_context` | (boolean, optional) <br> If `true`, the job is answered from its prompt alone: no `rules_file` is stamped when the job is created (`flow add --no-context`) and the executors skip context assembly entirely, including the project-default `.grove/rules` generation. Use it for self-contained jobs dispatched into a plan directory the caller owns. Mutually exclusive with `rules_file`. |
 | `note_ref` | (string, optional) <br> A reference to a specific note (e.g., in a PKM system) associated with this job. |
 | `on_complete_status` | (string, optional) <br> Defines a status to set or an action to take when the job completes. |
 | `prepend_dependencies` | **Deprecated** (boolean, optional) <br> Formerly used to inline dependency outputs. Please use the `inline` object with `Categories: ["dependencies"]` instead. |

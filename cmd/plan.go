@@ -173,6 +173,7 @@ var (
 	planAddEffort              string
 	planAddProvider            string
 	planAddRulesFile           string
+	planAddNoContext           bool
 	planAddGitChanges          bool
 	planAddSkill               string
 	planAddSkillSequence       []string
@@ -268,6 +269,7 @@ func NewPlanCmd() *cobra.Command {
 	planAddCmd.Flags().StringVar(&planAddEffort, "effort", "", "Effort level for claude agent jobs (passed to the claude CLI as --effort)")
 	planAddCmd.Flags().StringVar(&planAddProvider, "provider", "", "Agent CLI provider for agent jobs (claude/codex/opencode; defaults to flow.interactive_provider)")
 	planAddCmd.Flags().StringVar(&planAddRulesFile, "rules-file", "", "Path to a custom rules file for this job")
+	planAddCmd.Flags().BoolVar(&planAddNoContext, "no-context", false, noContextFlagHelp)
 	planAddCmd.Flags().BoolVar(&planAddGitChanges, "git-changes", false, "Include git changes (staged and unstaged) as context for this job")
 	registerHandoffAddFlags(planAddCmd.Flags())
 	planAddCmd.Flags().StringVar(&planAddSkill, "skill", "", "Skill name to inject into the agent context")
@@ -418,6 +420,7 @@ func runPlanAdd(cmd *cobra.Command, args []string) error {
 		Effort:              planAddEffort,
 		Provider:            planAddProvider,
 		RulesFile:           planAddRulesFile,
+		NoContext:           planAddNoContext,
 		GitChanges:          planAddGitChanges,
 		Skill:               planAddSkill,
 		SkillSequence:       planAddSkillSequence,

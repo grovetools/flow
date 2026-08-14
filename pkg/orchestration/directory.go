@@ -185,8 +185,16 @@ func AddJob(plan *Plan, job *Job) (string, error) {
 
 	filename := GenerateJobFilename(nextNum, job.Title)
 
+	// A no_context job is answered from its prompt alone, so it gets no rules
+	// file at all — stamping one would name a file nobody writes and send the
+	// run into the unauthored-rules funnel. Declaring both is a contradiction:
+	// refuse it here rather than silently picking a winner.
+	if job.NoContext && job.RulesFile != "" {
+		return "", fmt.Errorf("job %q sets both no_context and rules_file %q: a job either declares rules or declares none", job.ID, job.RulesFile)
+	}
+
 	// Auto-create per-job rules file if one isn't already set
-	if job.RulesFile == "" {
+	if job.RulesFile == "" && !job.NoContext {
 		rulesRelPath := filepath.Join("rules", filename+".rules")
 		rulesAbsPath := filepath.Join(plan.Directory, rulesRelPath)
 

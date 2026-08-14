@@ -288,6 +288,10 @@
       "type": "string",
       "description": "Archived rules file used during last execution"
     },
+    "no_context": {
+      "type": "boolean",
+      "description": "Skip repository context assembly entirely: no rules file is stamped at creation and the job is answered from its prompt alone. Mutually exclusive with rules_file"
+    },
     "note_ref": {
       "type": "string",
       "description": "Reference to a notebook entry for context"

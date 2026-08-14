@@ -781,6 +781,11 @@ func (e *OneShotExecutor) buildPrompt(job *Job, plan *Plan, worktreePath string,
 // context dir is always included when present.
 func (e *OneShotExecutor) collectContextFiles(job *Job, plan *Plan, worktreePath string, jobCtx *jobContextPaths) []string {
 	var contextFiles []string
+	// no_context means exactly that: not the generated bundle, and not the
+	// ambient CLAUDE.md either. The prompt is the whole payload.
+	if job != nil && job.NoContext {
+		return nil
+	}
 	// Scope to sub-project if job.Repository is set (for ecosystem worktrees)
 	contextDir := ScopeToSubProject(worktreePath, job)
 
@@ -1109,6 +1114,23 @@ func (j *jobContextPaths) uploadFiles() []string {
 // otherwise — callers then fall back to the shared plan-level lookup).
 func (e *OneShotExecutor) regenerateContextInWorktree(ctx context.Context, worktreePath, jobType string, job *Job, plan *Plan) (string, *jobContextPaths, error) {
 	writer := grovelogging.GetWriter(ctx)
+
+	// no_context: the job carries its own context in its prompt. Return before
+	// any resolution or generation — not even the project-default `.grove/rules`
+	// path, which would assemble repository context the job explicitly declined
+	// (and, in a caller-owned plan directory outside any repo, would try to
+	// author a rules file there). The returned jobContextPaths is non-nil and
+	// empty so collectContextFiles keeps treating job-scoped context as
+	// authoritative and never substitutes the shared plan-level context.
+	if job != nil && job.NoContext {
+		ulog.Info("Skipping context assembly (no_context)").
+			Field("job_type", jobType).
+			Field("job_id", job.ID).
+			Pretty("no_context: answering from the prompt alone, no repository context").
+			Log(ctx)
+		return "", &jobContextPaths{}, nil
+	}
+
 	ulog.Info("Checking context in worktree").
 		Field("job_type", jobType).
 		Icon(theme.IconFolder).

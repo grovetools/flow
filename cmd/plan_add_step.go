@@ -42,6 +42,7 @@ type PlanAddStepCmd struct {
 	RecipeVars          []string `flag:"" help:"Variables for the recipe templates (e.g., key=value)"`
 	SourceFile          string   `flag:"" help:"Origin file path for tracking job provenance (e.g., Claude plan file)"`
 	RulesFile           string   `flag:"" help:"Path to a custom rules file for this job"`
+	NoContext           bool     `flag:"" help:"Create the job with no repository context: no rules file is stamped and the job is answered from its prompt alone"`
 	GitChanges          bool     `flag:"" help:"Include git changes as context for this job"`
 	CoordMode           string   `flag:"" help:"Coordinator autonomy for agent jobs: manual (default) or autonomous (hand off to a successor job when context nears the threshold)"`
 	HandoffFrom         string   `flag:"" help:"Predecessor Flow job ID this job continues from (coordinator handoff lineage)"`
@@ -65,6 +66,10 @@ type PlanAddStepCmd struct {
 func (c *PlanAddStepCmd) Run() error {
 	return RunPlanAddStep(c)
 }
+
+// noContextFlagHelp is the one wording for --no-context across `flow plan add`,
+// `flow add`, and `flow job add`.
+const noContextFlagHelp = "Create the job with no repository context: no rules file is stamped and the job is answered from its prompt alone (mutually exclusive with --rules-file)"
 
 // parseInlineFlag converts CLI --inline flag values to an InlineConfig.
 func parseInlineFlag(values []string) orchestration.InlineConfig {
@@ -162,6 +167,13 @@ func inheritSkillSequence(job *orchestration.Job, workDir string) {
 }
 
 func RunPlanAddStep(cmd *PlanAddStepCmd) error {
+	// --no-context declares a job with no repository context at all; --rules-file
+	// names the context it wants. Asking for both is a contradiction, and one of
+	// them would have to be silently dropped at run time.
+	if cmd.NoContext && cmd.RulesFile != "" {
+		return fmt.Errorf("--no-context and --rules-file are mutually exclusive: --no-context means the job is answered from its prompt alone")
+	}
+
 	// Capture CWD early before any directory changes (needed for skill resolution)
 	startingDir, _ := os.Getwd()
 
@@ -539,6 +551,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 			PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 			SourceFile:          cmd.SourceFile,
 			RulesFile:           cmd.RulesFile,
+			NoContext:           cmd.NoContext,
 			GitChanges:          cmd.GitChanges,
 			Skill:               cmd.Skill,
 			SkillSequence:       cmd.SkillSequence,
@@ -662,6 +675,7 @@ func collectJobDetails(cmd *PlanAddStepCmd, plan *orchestration.Plan, worktreeTo
 		PrependDependencies: cmd.PrependDependencies, // Keep for backwards compat
 		SourceFile:          cmd.SourceFile,
 		RulesFile:           cmd.RulesFile,
+		NoContext:           cmd.NoContext,
 		GitChanges:          cmd.GitChanges,
 		Skill:               cmd.Skill,
 		SkillSequence:       cmd.SkillSequence,
@@ -722,6 +736,7 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 		Status:     orchestration.JobStatusPending,
 		SourceFile: cmd.SourceFile,
 		RulesFile:  cmd.RulesFile,
+		NoContext:  cmd.NoContext,
 		GitChanges: cmd.GitChanges,
 	}
 
@@ -762,7 +777,12 @@ func collectJobDetailsFromTemplate(cmd *PlanAddStepCmd, plan *orchestration.Plan
 	if prependDeps, ok := template.Frontmatter["prepend_dependencies"].(bool); ok {
 		job.PrependDependencies = prependDeps
 	}
-	if rulesFile, ok := template.Frontmatter["rules_file"].(string); ok && job.RulesFile == "" {
+	if noContext, ok := template.Frontmatter["no_context"].(bool); ok && !job.NoContext {
+		job.NoContext = noContext
+	}
+	// An explicit --no-context beats a template's default rules file: the flag
+	// is the caller saying this job carries its own context.
+	if rulesFile, ok := template.Frontmatter["rules_file"].(string); ok && job.RulesFile == "" && !job.NoContext {
 		job.RulesFile = rulesFile
 	}
 	if gitChanges, ok := template.Frontmatter["git_changes"].(bool); ok && !job.GitChanges {

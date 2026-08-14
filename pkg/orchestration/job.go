@@ -243,7 +243,17 @@ type Job struct {
 	GatherConceptPlans bool   `yaml:"gather_concept_plans,omitempty" json:"gather_concept_plans,omitempty" jsonschema:"description=Include related concept plans in context"`
 	RulesFile          string `yaml:"rules_file,omitempty" json:"rules_file,omitempty" jsonschema:"description=Path to rules file for agent behavior"`
 	UsedRulesFile      string `yaml:"used_rules_file,omitempty" json:"used_rules_file,omitempty" jsonschema:"description=Archived rules file used during last execution"`
-	NoteRef            string `yaml:"note_ref,omitempty" json:"note_ref,omitempty" jsonschema:"description=Reference to a notebook entry for context"`
+	// NoContext declares a job that carries its own context in its prompt and
+	// wants no repository context at all. Creation stamps no rules_file for it
+	// (see AddJob), and the executors skip context assembly entirely rather
+	// than falling back to the plan/project-default `.grove/rules` generation.
+	// This is what a self-contained oneshot dispatched into a caller-owned plan
+	// directory needs: without it, AddJob stamps a rules file nobody writes and
+	// the run dies in the unauthored-rules funnel before any provider call.
+	// Mutually exclusive with rules_file — a job that names rules wants
+	// context, and that naming is still hard-failed when the file is absent.
+	NoContext bool   `yaml:"no_context,omitempty" json:"no_context,omitempty" jsonschema:"description=Skip repository context assembly entirely: no rules file is stamped at creation and the job is answered from its prompt alone. Mutually exclusive with rules_file"`
+	NoteRef   string `yaml:"note_ref,omitempty" json:"note_ref,omitempty" jsonschema:"description=Reference to a notebook entry for context"`
 
 	// Coordinator handoff (see job_handoff.go). A long-running coordinator
 	// agent cannot outlive its context window; these fields let it end its own
