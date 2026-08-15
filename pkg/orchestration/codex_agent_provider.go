@@ -169,7 +169,11 @@ func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan 
 	// Wrap the agent command with deterministic PID capture (pidfile), then
 	// prefix inline env so everything runs as one shell invocation — the same
 	// shape the claude provider uses.
-	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
+	supervisedCommand, err := buildSupervisedInteractiveCommand(job, plan, agentCommand)
+	if err != nil {
+		return err
+	}
+	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
 	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
@@ -283,9 +287,6 @@ func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pla
 		}
 	} else {
 		logger.WithField("pid", codexPID).Debug("Discovered codex PID via pidfile")
-		if err := agentstream.CleanupPIDFile(job.ID, codexPID); err != nil {
-			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
-		}
 	}
 
 	// Discover the transcript via agentstream. The AfterTime filter scopes the

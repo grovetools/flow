@@ -234,6 +234,11 @@ func (e *IsolatedAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 
 // launchIsolatedAgent starts the agent in an isolated tmux server using a custom socket.
 func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Job, plan *Plan, workDir string, spec *AgentProviderSpec, agentArgs []string, agentEnv map[string]string, briefingFilePath string) error {
+	if spec.Name == "claude" {
+		if err := enforceClaudeFolderTrust(ctx, job, plan, workDir); err != nil {
+			return err
+		}
+	}
 	// Update job status to running
 	job.Status = JobStatusRunning
 	job.StartTime = time.Now()
@@ -307,7 +312,11 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 
 	// Wrap agent command with deterministic PID capture, then prefix
 	// inline env so everything runs as one shell invocation.
-	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
+	supervisedCommand, err := buildSupervisedInteractiveCommand(job, plan, agentCommand)
+	if err != nil {
+		return err
+	}
+	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
 	// Send the agent command to the isolated pane
 	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 		e.log.WithError(err).Error("Failed to send agent command")
@@ -371,7 +380,6 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 		}
 	} else {
 		logger.WithField("pid", agentPID).Debug("Discovered agent PID via pidfile")
-		_ = agentstream.CleanupPIDFile(job.ID, agentPID)
 	}
 
 	// Update lock file with actual PID

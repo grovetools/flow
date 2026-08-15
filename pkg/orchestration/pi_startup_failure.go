@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -97,6 +98,11 @@ func handlePiStartupFailure(job *Job, plan *Plan, ev piStartupEvidence) (bool, e
 	}
 	if err := RemoveLockFile(job.FilePath); err != nil && !os.IsNotExist(err) {
 		persistenceErrs = append(persistenceErrs, fmt.Errorf("removing Pi startup lock: %w", err))
+	}
+	client := terminalSessionClientForJob(job, plan)
+	defer client.Close()
+	if _, err := recordInteractiveTerminalOnce(context.Background(), job, plan, 1, "failed", client); err != nil {
+		persistenceErrs = append(persistenceErrs, fmt.Errorf("ending Pi startup session: %w", err))
 	}
 	return true, errors.Join(persistenceErrs...)
 }

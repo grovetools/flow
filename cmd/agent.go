@@ -67,6 +67,7 @@ hash-suffixed (e.g. "coord-9a146245") still resolves from plan+job.`,
 	cmd.AddCommand(newAgentDetachCmd())
 	cmd.AddCommand(newAgentAttachCmd())
 	cmd.AddCommand(newAgentKillCmd())
+	cmd.AddCommand(newAgentExitedCmd())
 
 	return cmd
 }

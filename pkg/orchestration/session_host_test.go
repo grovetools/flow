@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/grovetools/agentlogs/pkg/agentstream"
+	"github.com/grovetools/core/pkg/claudetrust"
 	"github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/core/pkg/paths"
+	"github.com/grovetools/core/util/pathutil"
 )
 
 // stubDaemon is a unix-socket HTTP server standing in for a groved. Two of
@@ -163,6 +165,13 @@ func newHostedLaunchFixture(t *testing.T) *hostedLaunchFixture {
 	gitInit.Dir = f.workDir
 	if out, err := gitInit.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
+	}
+	canonicalWorkDir, err := pathutil.CanonicalPath(f.workDir)
+	if err != nil {
+		t.Fatalf("canonical workdir: %v", err)
+	}
+	if err := claudetrust.SeedTrust(canonicalWorkDir); err != nil {
+		t.Fatalf("seed fixture Claude trust: %v", err)
 	}
 
 	scope := resolveJobScope(f.workDir)

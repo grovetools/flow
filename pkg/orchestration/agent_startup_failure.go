@@ -1,15 +1,17 @@
 package orchestration
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/pkg/claudetrust"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
+	"github.com/grovetools/core/util/pathutil"
 )
 
 const (
@@ -52,6 +54,42 @@ func appendAgentStartupBreadcrumb(job *Job, plan *Plan, provider string, ev agen
 		return false, fmt.Errorf("writing %s startup breadcrumb: %w", provider, err)
 	}
 	return true, nil
+}
+
+// handleAgentStartupFailure is the Phase 1 behavior layered over the Phase 0
+// breadcrumb: positive pre-hook death also retires the daemon intent and makes
+// the on-disk running job failed. The shared terminal receipt prevents the
+// supervisor reporter from emitting a second terminal line/event.
+func handleAgentStartupFailure(job *Job, plan *Plan, provider string, ev agentStartupEvidence) (bool, error) {
+	handled, breadcrumbErr := appendAgentStartupBreadcrumb(job, plan, provider, ev)
+	if !handled {
+		return false, breadcrumbErr
+	}
+	client := terminalSessionClientForJob(job, plan)
+	defer client.Close()
+	_, terminalErr := recordInteractiveTerminalOnce(context.Background(), job, plan, 1, "failed", client)
+
+	diskJob, loadErr := LoadJob(job.FilePath)
+	if loadErr != nil {
+		return true, errors.Join(breadcrumbErr, terminalErr, loadErr)
+	}
+	if diskJob.Status != JobStatusRunning {
+		return true, errors.Join(breadcrumbErr, terminalErr)
+	}
+	diskJob.FilePath = job.FilePath
+	diskJob.Metadata.LastError = claudeStartupFailureReason
+	persister := NewStatePersister()
+	var stateErrs []error
+	if err := persister.UpdateJobMetadata(diskJob, diskJob.Metadata); err != nil {
+		stateErrs = append(stateErrs, err)
+	}
+	if err := persister.UpdateJobStatus(diskJob, JobStatusFailed); err != nil {
+		stateErrs = append(stateErrs, err)
+	}
+	if err := RemoveLockFile(diskJob.FilePath); err != nil && !os.IsNotExist(err) {
+		stateErrs = append(stateErrs, err)
+	}
+	return true, errors.Join(append([]error{breadcrumbErr, terminalErr}, stateErrs...)...)
 }
 
 // persistAgentStartupLog is the shared durable launch-path writer used by all
@@ -108,28 +146,53 @@ func warnIfClaudeFolderUntrusted(job *Job, plan *Plan, workDir string) error {
 }
 
 func claudeFolderTrusted(workDir string) (bool, error) {
-	canonical, err := filepath.Abs(workDir)
+	canonical, err := pathutil.CanonicalPath(workDir)
 	if err != nil {
 		return false, err
 	}
-	if resolved, resolveErr := filepath.EvalSymlinks(canonical); resolveErr == nil {
-		canonical = resolved
-	}
-	home, err := os.UserHomeDir()
+	return claudetrust.IsTrusted(canonical)
+}
+
+// enforceClaudeFolderTrust prevents Claude from entering an interactive trust
+// dialog before hooks can identify the session. It must run before status,
+// intent, pane, lock, or process side effects.
+func enforceClaudeFolderTrust(ctx context.Context, job *Job, plan *Plan, workDir string) error {
+	canonical, err := pathutil.CanonicalPath(workDir)
 	if err != nil {
-		return false, err
+		return refuseClaudeTrust(job, plan, workDir, fmt.Errorf("canonicalize cwd: %w", err))
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".claude.json"))
-	if err != nil {
-		return false, err
+	trusted, checkErr := claudetrust.IsTrusted(canonical)
+	if checkErr == nil && trusted {
+		return nil
 	}
-	var root struct {
-		Projects map[string]map[string]any `json:"projects"`
+	if !workspace.WorktreeManagesTrust(canonical, nil) {
+		if checkErr != nil {
+			return refuseClaudeTrust(job, plan, canonical, fmt.Errorf("verify trust: %w", checkErr))
+		}
+		return refuseClaudeTrust(job, plan, canonical, nil)
 	}
-	if err := json.Unmarshal(data, &root); err != nil {
-		return false, err
+
+	seedErr := claudetrust.SeedTrust(canonical)
+	if seedErr != nil {
+		// Sandboxed launchers may not write ~/.claude.json directly. Delegate to
+		// the existing managed daemon path rather than adding another writer.
+		seedErr = NewTrustSeedFallback(plan.Directory)(ctx, canonical)
 	}
-	entry := root.Projects[canonical]
-	accepted, _ := entry["hasTrustDialogAccepted"].(bool)
-	return accepted, nil
+	trusted, checkErr = claudetrust.IsTrusted(canonical)
+	if seedErr != nil || checkErr != nil || !trusted {
+		return refuseClaudeTrust(job, plan, canonical, errors.Join(seedErr, checkErr, fmt.Errorf("managed trust seed did not establish the exact cwd key")))
+	}
+	return nil
+}
+
+func refuseClaudeTrust(job *Job, plan *Plan, workDir string, cause error) error {
+	fix := "accept Claude folder trust manually, or enable [claude] manageTrust = true in a trusted grove.toml"
+	message := fmt.Sprintf("refusing Claude launch: folder trust is missing for %s; fix: %s", workDir, fix)
+	if cause != nil {
+		message += "; error: " + cause.Error()
+	}
+	if logErr := persistAgentStartupLog(plan, job, "ERROR", message); logErr != nil {
+		return errors.Join(errors.New(message), logErr)
+	}
+	return errors.New(message)
 }

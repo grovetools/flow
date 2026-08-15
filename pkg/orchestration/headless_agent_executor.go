@@ -78,6 +78,16 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		return fmt.Errorf("model validation: %w", err)
 	}
 
+	if spec.Name == "claude" {
+		trustDir, trustErr := DetermineWorkingDirectory(plan, job)
+		if trustErr != nil {
+			return refuseClaudeTrust(job, plan, plan.Directory, trustErr)
+		}
+		if err := enforceClaudeFolderTrust(ctx, job, plan, trustDir); err != nil {
+			return err
+		}
+	}
+
 	ulog.Debug("[HEADLESS] Starting execution").
 		Field("job_id", job.ID).
 		Field("job_title", job.Title).

@@ -55,10 +55,8 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 // LaunchPrepared owns the complete Claude interactive lifecycle for a command
 // whose provider-specific bytes have already been constructed.
 func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, agentCommand, expectedNativeID string) error {
-	// Observability-only trust preflight: Phase 0 never blocks or mutates Claude
-	// trust state, but records the likely prompt before the provider can die.
-	if err := warnIfClaudeFolderUntrusted(job, plan, workDir); err != nil {
-		p.log.WithError(err).WithField("job_id", job.ID).Warn("Claude folder-trust preflight could not be recorded")
+	if err := enforceClaudeFolderTrust(ctx, job, plan, workDir); err != nil {
+		return err
 	}
 
 	// Normal launches enter running here. Resume supplies its known native ID
@@ -236,7 +234,12 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 
 		// Wrap agent command with deterministic PID capture, then prefix
 		// inline env so everything runs as one shell invocation.
-		wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
+		supervisedCommand, err := buildSupervisedInteractiveCommand(job, plan, agentCommand)
+		if err != nil {
+			_, _ = paneWatcher.stop()
+			return err
+		}
+		wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
 		// Send the agent command to the new window
 		if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to send agent command")
@@ -411,7 +414,12 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 
 	// Wrap agent command with deterministic PID capture, then prefix
 	// inline env so everything runs as one shell invocation.
-	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
+	supervisedCommand, err := buildSupervisedInteractiveCommand(job, plan, agentCommand)
+	if err != nil {
+		_, _ = paneWatcher.stop()
+		return err
+	}
+	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
 	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)
@@ -664,9 +672,6 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		}
 	} else {
 		logger.WithField("pid", claudePID).Debug("Discovered Claude Code PID via pidfile")
-		if err := agentstream.CleanupPIDFile(job.ID, claudePID); err != nil {
-			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
-		}
 	}
 	paneWatcher.observePID(claudePID)
 
@@ -699,7 +704,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	// ever appeared, persist a breadcrumb without changing job/session state.
 	paneOutput, captureErr := paneWatcher.stop()
 	if transcriptPath == "" {
-		if _, breadcrumbErr := appendAgentStartupBreadcrumb(job, plan, "claude", agentStartupEvidence{
+		if _, breadcrumbErr := handleAgentStartupFailure(job, plan, "claude", agentStartupEvidence{
 			pid: claudePID, paneOutput: paneOutput, captureErr: captureErr, discoveryErr: err,
 		}); breadcrumbErr != nil {
 			logger.WithError(breadcrumbErr).WithField("job_id", job.ID).Warn("Failed to persist Claude startup breadcrumb")

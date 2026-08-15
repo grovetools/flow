@@ -209,7 +209,11 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 	// Wrap the agent command with deterministic PID capture (pidfile), then
 	// prefix inline env so everything runs as one shell invocation — the same
 	// shape the claude/codex providers use.
-	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
+	supervisedCommand, err := buildSupervisedInteractiveCommand(job, plan, agentCommand)
+	if err != nil {
+		return err
+	}
+	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
 	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
@@ -336,9 +340,6 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		}
 	} else {
 		logger.WithField("pid", piPID).Debug("Discovered pi PID via pidfile")
-		if err := agentstream.CleanupPIDFile(job.ID, piPID); err != nil {
-			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
-		}
 	}
 	// Once the PID is known the watcher can capture the instant pi dies,
 	// instead of waiting for the next backoff tick to find an empty pane.

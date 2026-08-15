@@ -74,8 +74,8 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 // provider command bytes.
 func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, rawCommand, expectedNativeID string) error {
 	if p.spec.Name == "claude" {
-		if err := warnIfClaudeFolderUntrusted(job, plan, workDir); err != nil {
-			p.log.WithError(err).WithField("job_id", job.ID).Warn("Claude folder-trust preflight could not be recorded")
+		if err := enforceClaudeFolderTrust(ctx, job, plan, workDir); err != nil {
+			return err
 		}
 	}
 
@@ -116,7 +116,10 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 	}
 
 	// Wrap with agentstream to capture PID via deterministic pidfile.
-	wrappedCommand := agentstream.BuildAgentCommand(job.ID, rawCommand)
+	wrappedCommand, err := buildSupervisedInteractiveCommand(job, plan, rawCommand)
+	if err != nil {
+		return err
+	}
 
 	// Build environment variables for the agent pane. GROVE_SCOPE is the
 	// job's workspace identity (inherited from the executor when it has one,
@@ -259,7 +262,6 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		pid = 0
 	} else {
 		logger.WithField("pid", pid).Debug("Discovered agent PID via pidfile")
-		_ = agentstream.CleanupPIDFile(job.ID, pid)
 	}
 	// Hand the PID to the watcher so it captures the instant Pi dies rather
 	// than on the next backoff tick, while the pane still has contents.
@@ -328,7 +330,7 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 			"pid":    pid,
 		}).Warn("Pi produced no transcript but shows no evidence of failure; leaving job status unchanged")
 	} else if transcriptPath == "" {
-		if _, breadcrumbErr := appendAgentStartupBreadcrumb(job, plan, p.spec.Name, agentStartupEvidence{
+		if _, breadcrumbErr := handleAgentStartupFailure(job, plan, p.spec.Name, agentStartupEvidence{
 			pid: pid, paneOutput: paneOutput, captureErr: captureErr, discoveryErr: err,
 		}); breadcrumbErr != nil {
 			logger.WithError(breadcrumbErr).WithField("job_id", job.ID).Warn("Failed to persist provider startup breadcrumb")

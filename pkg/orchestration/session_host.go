@@ -108,6 +108,19 @@ func sessionHostClientForJob(job *Job, plan *Plan) daemon.Client {
 	return sessionHostClient(workDir)
 }
 
+// terminalSessionClientForJob routes terminal best-effort writes to an already
+// running host daemon without starting a new daemon merely to retire a dead
+// process.
+func terminalSessionClientForJob(job *Job, plan *Plan) daemon.Client {
+	workDir, err := DetermineWorkingDirectory(plan, job)
+	if err != nil || workDir == "" {
+		if plan != nil {
+			workDir = plan.Directory
+		}
+	}
+	return sessionHostClientConnectOnly(workDir)
+}
+
 // hostTransportSocket returns the socket of the daemon owning the interactive
 // host UI that will display workDir's session, or "" when no host is
 // declared. It resolves exactly like sessionHostClient (env, then registry),

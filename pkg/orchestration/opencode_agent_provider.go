@@ -161,7 +161,11 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	}
 	envPrefix += playbookEnvInline(job, plan)
 
-	if err := engine.SendKeys(ctx, targetPane, envPrefix+agentCommand, "C-m"); err != nil {
+	supervisedCommand, err := buildSupervisedInteractiveCommand(job, plan, agentCommand)
+	if err != nil {
+		return err
+	}
+	if err := engine.SendKeys(ctx, targetPane, withInlineSupervisorEnv(envPrefix, supervisedCommand), "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)

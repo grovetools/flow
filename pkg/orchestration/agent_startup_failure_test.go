@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -47,6 +48,30 @@ func TestAppendAgentStartupBreadcrumbRequiresExitEvidence(t *testing.T) {
 	}
 	if handled {
 		t.Fatal("live provider must not be diagnosed as exited")
+	}
+}
+
+func TestEnforceClaudeFolderTrustRefusesBeforeStateMutation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GROVE_PRESEED_CLAUDE_TRUST", "false")
+	job, plan := newPiStartupJob(t)
+	before, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = enforceClaudeFolderTrust(context.Background(), job, plan, plan.Directory)
+	if err == nil || !strings.Contains(err.Error(), "refusing Claude launch") || !strings.Contains(err.Error(), plan.Directory) {
+		t.Fatalf("error = %v", err)
+	}
+	after, _ := os.ReadFile(job.FilePath)
+	if string(after) != string(before) {
+		t.Fatal("trust refusal mutated job frontmatter")
+	}
+	logPath, _ := GetJobLogPath(plan, job)
+	logData, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(logData), "ERROR refusing Claude launch") || !strings.Contains(string(logData), "manageTrust") {
+		t.Fatalf("job.log = %s", logData)
 	}
 }
 
