@@ -58,7 +58,7 @@ func TestNoFlatPrefixKeys(t *testing.T) {
 	}
 }
 
-// TestNamespaceMembership asserts the View namespace has 11 members and Change
+// TestNamespaceMembership asserts the View namespace has 12 members and Change
 // has 15 (the four original set-family members plus the schema-driven field
 // editor's model/provider/effort/responder/cache_ttl/cache_layout enums, the
 // memory/auto_complete toggles, the migrated rename/edit_deps mutators, and the
@@ -70,8 +70,8 @@ func TestNamespaceMembership(t *testing.T) {
 	if len(ns) != 2 {
 		t.Fatalf("expected 2 namespaces, got %d", len(ns))
 	}
-	if ns[0].Prefix != "v" || len(ns[0].Bindings) != 11 {
-		t.Errorf("View namespace: prefix=%q members=%d, want v/11", ns[0].Prefix, len(ns[0].Bindings))
+	if ns[0].Prefix != "v" || len(ns[0].Bindings) != 12 {
+		t.Errorf("View namespace: prefix=%q members=%d, want v/12", ns[0].Prefix, len(ns[0].Bindings))
 	}
 	if ns[1].Prefix != "c" || len(ns[1].Bindings) != 15 {
 		t.Errorf("Change namespace: prefix=%q members=%d, want c/15", ns[1].Prefix, len(ns[1].Bindings))

@@ -196,6 +196,12 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		}
 	}
 
+	// Persist the transcript outline (toc.ansi / toc.txt) into the artifact
+	// dir. After the transcript block so the archived transcript is on disk as
+	// a fallback source. Attached for every job type: jobs without a
+	// resolvable transcript (oneshots, plain chats) skip silently inside.
+	writeTranscriptTocQuietly(job, plan)
+
 	// Move this job's linked note to completed/. The note is resolved by
 	// QUERYING nb (plan_ref + plan_job), never by reading job.NoteRef — which is
 	// now a non-load-bearing provenance hint. A non-empty note_ref is used only

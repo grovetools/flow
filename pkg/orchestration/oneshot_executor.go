@@ -570,6 +570,7 @@ func (e *OneShotExecutor) Execute(ctx context.Context, job *Job, plan *Plan) err
 	WriteTokenUsageSection(plan, job)
 
 	writeMetricsRecordQuietly(job, plan)
+	writeTranscriptTocQuietly(job, plan)
 
 	return nil
 }
@@ -2746,6 +2747,12 @@ func (e *OneShotExecutor) executeChatJob(ctx context.Context, job *Job, plan *Pl
 		WriteTokenUsageSection(plan, job)
 		writeMetricsRecordQuietly(job, plan)
 	}
+
+	// Refresh the transcript outline artifacts on every finished turn — a
+	// pending_user chat is turn-complete, and the atomic write means readers
+	// only ever see whole outlines as the chat grows. Chats without a session
+	// transcript (plain API responders) skip silently inside.
+	writeTranscriptTocQuietly(job, plan)
 
 	return nil
 }

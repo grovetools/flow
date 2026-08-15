@@ -375,6 +375,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case OutlineLoadedMsg:
+		// Guard on the bound job: a slow load for a previous cursor row must
+		// not land in the pane after the cursor moved on.
+		if m.ActiveDetailPane == OutlinePaneDetail && m.ActiveLogJob != nil && msg.JobID == m.ActiveLogJob.ID {
+			m.updateLayoutDimensions()
+			m.outlineViewport.Width = m.LogViewerWidth
+			m.outlineViewport.Height = m.LogViewerHeight - logHeaderHeight
+			content := renderOutlinePaneContent(msg.Content, msg.Err)
+			m.outlineRawContent = content
+			m.outlineRenderedWidth = msg.Width
+
+			// Forward to BSP viewport if hosted + viewport active.
+			if m.Hosted && m.viewportActive {
+				return m, func() tea.Msg {
+					return embed.UpdateViewportContentMsg{Content: content, Append: false}
+				}
+			}
+
+			// Pre-rendered ANSI at the pane's exact width — set unwrapped.
+			// SetContent clamps rather than resets YOffset, so a live
+			// refresh keeps the user's scroll position.
+			m.outlineViewport.SetContent(content)
+		}
+		return m, nil
+
 	case EditContentLoadedMsg:
 		if m.ActiveDetailPane == EditPane {
 			if msg.Err != nil {
@@ -1321,6 +1346,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// refreshed job statuses (no-op while the daemon source is active),
 		// and kick off archived-run fallback loads for completed jobs.
 		var wfCmds []tea.Cmd
+		// Auto-refresh the outline pane on the same 2s tick: while its job is
+		// still running (the transcript grows as we watch), or when the last
+		// render's width no longer matches the pane (layout toggle). Look the
+		// job up in the reloaded plan — m.ActiveLogJob points into the
+		// previous load and its Status can be stale.
+		if m.ActiveDetailPane == OutlinePaneDetail && m.ActiveLogJob != nil {
+			for _, job := range m.Jobs {
+				if job.ID != m.ActiveLogJob.ID {
+					continue
+				}
+				running := job.Status == orchestration.JobStatusRunning || job.Status == orchestration.JobStatusIdle
+				staleWidth := m.outlineRawContent != "" && m.outlineRenderedWidth != m.outlineRenderWidth()
+				if running || staleWidth {
+					wfCmds = append(wfCmds, loadOutlineCmd(m.Plan, job, m.outlineRenderWidth()))
+				}
+				break
+			}
+		}
 		wfCmds = append(wfCmds, m.syncWorkflowMonitors()...)
 		wfCmds = append(wfCmds, m.syncArchivedWorkflowLoads()...)
 		if len(wfCmds) > 0 {
@@ -1383,6 +1426,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.briefingViewport.Height = logHeight
 		m.editViewport.Width = m.LogViewerWidth
 		m.editViewport.Height = logHeight
+		m.outlineViewport.Width = m.LogViewerWidth
+		m.outlineViewport.Height = logHeight
 		m.updateSkillViewportSizes()
 		m.updateArtifactViewportSizes()
 		if m.ActiveDetailPane == ArtifactsPaneDetail {
@@ -1431,6 +1476,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 		if cmd != nil {
 			cmds = append(cmds, cmd)
+		}
+		// The outline is rendered at an exact width, not wrapped — a resize
+		// re-renders it rather than re-wrapping stale content.
+		if m.ActiveDetailPane == OutlinePaneDetail && m.ActiveLogJob != nil {
+			cmds = append(cmds, loadOutlineCmd(m.Plan, m.ActiveLogJob, m.outlineRenderWidth()))
 		}
 		// Update log viewer size if active
 		if m.ShowLogs {
@@ -2422,6 +2472,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.openHostedViewportPane(ArtifactsPaneDetail)
 
+		case key.Matches(msg, m.KeyMap.ViewOutline):
+			if m.ActiveDetailPane == OutlinePaneDetail {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			return m.openHostedViewportPane(OutlinePaneDetail)
+
 		case key.Matches(msg, m.KeyMap.ViewContext):
 			if !m.Hosted {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Context panel requires groveterm host")
@@ -3276,6 +3333,8 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.tokenViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading token usage for %s...", job.Title)))
 	case AccessedFilesPaneDetail:
 		m.accessedFilesViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading accessed files for %s...", job.Title)))
+	case OutlinePaneDetail:
+		m.outlineViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading outline for %s...", job.Title)))
 	case EditPane:
 		m.editViewport.SetContent(theme.DefaultTheme.Muted.Render(fmt.Sprintf("Loading file content for %s...", job.Title)))
 	case SkillPane:
@@ -3313,6 +3372,10 @@ func (m Model) reloadActiveDetailPane() (Model, tea.Cmd) {
 		m.accessedFiles = nil
 		m.accessedFilesDisplay = nil
 		loadCmd = loadAccessedFilesCmd(m.Plan, job)
+	case OutlinePaneDetail:
+		m.outlineRawContent = ""
+		m.outlineRenderedWidth = 0
+		loadCmd = loadOutlineCmd(m.Plan, job, m.outlineRenderWidth())
 	case EditPane:
 		loadCmd = loadJobFileContentCmd(job)
 	case EditorPaneDetail:
@@ -3566,6 +3629,10 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 				m.accessedFiles = nil
 				m.accessedFilesDisplay = nil
 				cmds = append(cmds, loadAccessedFilesCmd(m.Plan, job))
+			case OutlinePaneDetail:
+				m.outlineRawContent = ""
+				m.outlineRenderedWidth = 0
+				cmds = append(cmds, loadOutlineCmd(m.Plan, job, m.outlineRenderWidth()))
 			case SkillPane:
 				// Rendered synchronously rather than by a loader. No push
 				// here: the caller hands the body to the split request, so
@@ -3624,6 +3691,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.tokenViewport.Height = logHeight
 	m.accessedFilesViewport.Width = m.LogViewerWidth
 	m.accessedFilesViewport.Height = logHeight
+	m.outlineViewport.Width = m.LogViewerWidth
+	m.outlineViewport.Height = logHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
@@ -3657,6 +3726,12 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.accessedFilesDisplay = nil
 		m.accessedFilesViewport.SetContent(wrapContentForViewport(theme.DefaultTheme.Muted.Render("Loading accessed files…"), m.accessedFilesViewport.Width-1))
 		cmds = append(cmds, loadAccessedFilesCmd(m.Plan, job))
+	case OutlinePaneDetail:
+		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading outline for %s...", job.Title))
+		m.outlineRawContent = ""
+		m.outlineRenderedWidth = 0
+		m.outlineViewport.SetContent(theme.DefaultTheme.Muted.Render("Loading outline…"))
+		cmds = append(cmds, loadOutlineCmd(m.Plan, job, m.outlineRenderWidth()))
 	case EditPane:
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading file content for %s...", job.Title))
 		cmds = append(cmds, loadJobFileContentCmd(job))
@@ -3714,6 +3789,7 @@ var hostedViewportPanes = map[DetailPane]hostedViewportPane{
 	BriefingPane:            {label: "Briefing"},
 	TokenPaneDetail:         {label: "Token Usage"},
 	AccessedFilesPaneDetail: {label: "Accessed Files"},
+	OutlinePaneDetail:       {label: "Outline"},
 	SkillPane:               {label: "Skills", forwardKeys: skillPaneForwardedKeys, focus: true},
 	ArtifactsPaneDetail:     {label: "Artifacts", forwardKeys: artifactsPaneForwardedKeys, focus: true},
 }

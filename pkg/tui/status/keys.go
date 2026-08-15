@@ -52,6 +52,7 @@ type KeyMap struct {
 	ViewSkillPane     key.Binding
 	ViewAccessedFiles key.Binding
 	ViewArtifacts     key.Binding
+	ViewOutline       key.Binding
 	CloseDetailPane   key.Binding
 	SwitchFocus       key.Binding
 	FocusLeft         key.Binding // Spatial navigation: focus left pane (jobs)
@@ -241,6 +242,12 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("vj"),
 			key.WithHelp("vj", "job artifacts"),
 		),
+		// "vo" — transcript outline: the toc-rendered table of contents of the
+		// selected job's agent transcript.
+		ViewOutline: key.NewBinding(
+			key.WithKeys("vo"),
+			key.WithHelp("vo", "view outline"),
+		),
 		CloseDetailPane: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "close detail pane"),
@@ -366,7 +373,7 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 		{Prefix: "v", Label: "View", Bindings: []key.Binding{
 			k.ViewLogs, k.ViewFrontmatter, k.ViewBriefing, k.ViewEdit,
 			k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane,
-			k.ViewAccessedFiles, k.ViewArtifacts,
+			k.ViewAccessedFiles, k.ViewArtifacts, k.ViewOutline,
 		}},
 		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
 			k.SetStatus, k.SetType, k.SetTemplate, k.SetCompleted,

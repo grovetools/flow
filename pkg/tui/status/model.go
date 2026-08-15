@@ -77,6 +77,7 @@ const (
 	TokenPaneDetail         // Per-job token usage + cost breakdown
 	AccessedFilesPaneDetail // Per-job accessed-files trace (context transfer)
 	ArtifactsPaneDetail     // Per-job artifact directory browser (tree + preview)
+	OutlinePaneDetail       // Per-job transcript outline (table of contents)
 )
 
 // Model represents the state of the TUI
@@ -187,6 +188,14 @@ type Model struct {
 	// equivalents: one joined scroll body plus the selected row's 1-based line.
 	artifactPaneBody       string
 	artifactPaneCursorLine int
+	// Outline pane: the job transcript's rendered table of contents. The
+	// content is pre-rendered ANSI at the pane's exact width (never re-wrapped);
+	// outlineRenderedWidth remembers that width so the refresh tick can detect
+	// a stale render after a layout change and re-render instead of re-wrap.
+	outlineViewport      viewport.Model
+	outlineRawContent    string
+	outlineRenderedWidth int
+
 	// openCommand is [tui] open_command from grove.toml: the argv `o` hands an
 	// artifact to when no terminal editor can render it (.html, .pdf). Empty
 	// means the platform opener.
@@ -553,6 +562,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Accessed Files"
 	case ArtifactsPaneDetail:
 		paneTitle = "Artifacts"
+	case OutlinePaneDetail:
+		paneTitle = "Outline"
 	}
 
 	jobIcon := getJobIcon(currentJob)
@@ -603,6 +614,8 @@ func (m Model) renderDetailContent() string {
 		return addScrollbarToViewport(&m.tokenViewport)
 	case AccessedFilesPaneDetail:
 		return addScrollbarToViewport(&m.accessedFilesViewport)
+	case OutlinePaneDetail:
+		return addScrollbarToViewport(&m.outlineViewport)
 	case EditPane:
 		return addScrollbarToViewport(&m.editViewport)
 	case SkillPane:
@@ -654,6 +667,8 @@ func (m *Model) resizeAllDetailViewports() {
 	m.tokenViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.accessedFilesViewport.Width = m.LogViewerWidth
 	m.accessedFilesViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.outlineViewport.Width = m.LogViewerWidth
+	m.outlineViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.updateSkillViewportSizes()
@@ -681,6 +696,12 @@ func (m *Model) resizeAllDetailViewports() {
 	if m.accessedFilesRawContent != "" {
 		wrappedContent := wrapContentForViewport(m.accessedFilesRawContent, m.accessedFilesViewport.Width-1)
 		m.accessedFilesViewport.SetContent(wrappedContent)
+	}
+	if m.outlineRawContent != "" {
+		// Pre-rendered ANSI at an exact width — keep it unwrapped. A
+		// width-stale render is replaced by the refresh tick (or the
+		// window-resize reload), which re-renders at the new width.
+		m.outlineViewport.SetContent(m.outlineRawContent)
 	}
 	if m.editRawContent != "" {
 		styledContent := renderStyledMarkdown(m.editRawContent)
@@ -741,6 +762,7 @@ func New(cfg Config) Model {
 	briefingVp := viewport.New(80, 20)
 	tokenVp := viewport.New(80, 20)
 	accessedFilesVp := viewport.New(80, 20)
+	outlineVp := viewport.New(80, 20)
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
 	skillArtifactVp := viewport.New(80, 10)
@@ -888,6 +910,7 @@ func New(cfg Config) Model {
 		briefingViewport:         briefingVp,
 		tokenViewport:            tokenVp,
 		accessedFilesViewport:    accessedFilesVp,
+		outlineViewport:          outlineVp,
 		editViewport:             editVp,
 		tokenColumnCache:         make(map[string]string),
 		modelColumnCache:         make(map[string]string),
