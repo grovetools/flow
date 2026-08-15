@@ -1901,6 +1901,18 @@ func (m Model) View() string {
 	return content
 }
 
+// OutlineOffer implements embed.OutlineOfferer by forwarding to the status
+// sub-model — but only while the Jobs tab is what the user is looking at. On
+// any other tab the cursor the offer would describe is not on screen, and a
+// pin chord should read as "nothing here to pin" rather than pinning a job
+// the user cannot see.
+func (m Model) OutlineOffer() (embed.OutlineOffer, bool) {
+	if m.mode != modeStatus || m.s.statusModel == nil || m.pager.ActiveIndex() != tabJobs {
+		return embed.OutlineOffer{}, false
+	}
+	return m.s.statusModel.OutlineOffer()
+}
+
 // Close tears down any live sub-models. The browser's Close is a no-op
 // today but is called for symmetry; the status model owns daemon SSE
 // subscription goroutines that must be drained on shutdown.

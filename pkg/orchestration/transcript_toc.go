@@ -72,6 +72,14 @@ func NormalizeTranscriptFile(path, provider string) ([]transcript.UnifiedEntry, 
 	return entries, scanner.Err()
 }
 
+// ResolveTranscriptForOutline is resolveTocTranscript for callers outside the
+// package: the status TUI's outline offer hands treemux the same transcript
+// this package would build a TOC from, so the pinned outline and the toc.ansi
+// artifact can never disagree about which file describes a job.
+func ResolveTranscriptForOutline(job *Job, plan *Plan) (path string, metadata *coresessions.SessionMetadata, ok bool) {
+	return resolveTocTranscript(job, plan)
+}
+
 // resolveTocTranscript finds the transcript the TOC will be built from,
 // together with whatever session metadata describes it. Order mirrors the rest
 // of completion: the verified registry binding / live artifact transcript
