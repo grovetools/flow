@@ -78,6 +78,7 @@ const (
 	AccessedFilesPaneDetail // Per-job accessed-files trace (context transfer)
 	ArtifactsPaneDetail     // Per-job artifact directory browser (tree + preview)
 	OutlinePaneDetail       // Per-job transcript outline (table of contents)
+	ActionErrorPaneDetail   // Full text of the last action error
 )
 
 // Model represents the state of the TUI
@@ -110,6 +111,10 @@ type Model struct {
 	// in forty places and displayed in none, which is why actions like demote
 	// looked like they had done nothing at all.
 	StatusSummary string
+	// LastActionError retains the unabridged (possibly multi-line) action
+	// failure after StatusSummary has been compacted to the one-line footer.
+	// The ve detail pane renders this exact text.
+	LastActionError string
 	// StatusSummaryAt stamps when StatusSummary was set, for expiry. A zero
 	// value on a non-empty summary means "just set" — the tick handler stamps
 	// it — so direct assignments (the forty existing ones) get the same
@@ -195,6 +200,7 @@ type Model struct {
 	outlineViewport      viewport.Model
 	outlineRawContent    string
 	outlineRenderedWidth int
+	actionErrorViewport  viewport.Model
 
 	// openCommand is [tui] open_command from grove.toml: the argv `o` hands an
 	// artifact to when no terminal editor can render it (.html, .pdf). Empty
@@ -610,6 +616,8 @@ func (m Model) renderDetailHeader() string {
 		paneTitle = "Artifacts"
 	case OutlinePaneDetail:
 		paneTitle = "Outline"
+	case ActionErrorPaneDetail:
+		paneTitle = "Error Details"
 	}
 
 	jobIcon := getJobIcon(currentJob)
@@ -662,6 +670,8 @@ func (m Model) renderDetailContent() string {
 		return addScrollbarToViewport(&m.accessedFilesViewport)
 	case OutlinePaneDetail:
 		return addScrollbarToViewport(&m.outlineViewport)
+	case ActionErrorPaneDetail:
+		return addScrollbarToViewport(&m.actionErrorViewport)
 	case EditPane:
 		return addScrollbarToViewport(&m.editViewport)
 	case SkillPane:
@@ -715,6 +725,8 @@ func (m *Model) resizeAllDetailViewports() {
 	m.accessedFilesViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.outlineViewport.Width = m.LogViewerWidth
 	m.outlineViewport.Height = m.LogViewerHeight - logHeaderHeight
+	m.actionErrorViewport.Width = m.LogViewerWidth
+	m.actionErrorViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = m.LogViewerHeight - logHeaderHeight
 	m.updateSkillViewportSizes()
@@ -748,6 +760,9 @@ func (m *Model) resizeAllDetailViewports() {
 		// width-stale render is replaced by the refresh tick (or the
 		// window-resize reload), which re-renders at the new width.
 		m.outlineViewport.SetContent(m.outlineRawContent)
+	}
+	if m.LastActionError != "" {
+		m.actionErrorViewport.SetContent(wrapContentForViewport(m.LastActionError, m.actionErrorViewport.Width-1))
 	}
 	if m.editRawContent != "" {
 		styledContent := renderStyledMarkdown(m.editRawContent)
@@ -809,6 +824,7 @@ func New(cfg Config) Model {
 	tokenVp := viewport.New(80, 20)
 	accessedFilesVp := viewport.New(80, 20)
 	outlineVp := viewport.New(80, 20)
+	actionErrorVp := viewport.New(80, 20)
 	editVp := viewport.New(80, 20)
 	skillPaneVp := viewport.New(80, 20)
 	skillArtifactVp := viewport.New(80, 10)
@@ -957,6 +973,7 @@ func New(cfg Config) Model {
 		tokenViewport:            tokenVp,
 		accessedFilesViewport:    accessedFilesVp,
 		outlineViewport:          outlineVp,
+		actionErrorViewport:      actionErrorVp,
 		editViewport:             editVp,
 		tokenColumnCache:         make(map[string]string),
 		modelColumnCache:         make(map[string]string),

@@ -67,6 +67,21 @@ func failingRefreshJob(err error) string {
 		}
 	}
 	return ""
+// compactActionError keeps action feedback to one footer row while making the
+// loss of detail explicit. The complete text remains in LastActionError and is
+// available through the ve detail pane.
+func compactActionError(full string) string {
+	first, _, multiline := strings.Cut(strings.TrimSpace(full), "\n")
+	const maxRunes = 72
+	runes := []rune(first)
+	truncated := multiline || len(runes) > maxRunes
+	if len(runes) > maxRunes {
+		first = string(runes[:maxRunes])
+	}
+	if truncated {
+		first += "…"
+	}
+	return first + " (ve details)"
 }
 
 // Update dispatches msg, then re-asserts the hosted-mode invariant that the
@@ -793,9 +808,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshPlan(m.PlanDir)
 
 	case JobCompletedMsg:
-		// Job completion finished (from 'c' key)
+		// Completion evidence rejections are deliberately multi-line. Preserve
+		// them verbatim for the details pane; only the footer is compacted.
 		if msg.Err != nil {
-			m.StatusSummary = theme.DefaultTheme.Error.Render(fmt.Sprintf("Error completing job: %v", msg.Err))
+			m.LastActionError = fmt.Sprintf("Error completing job: %v", msg.Err)
+			m.actionErrorViewport.SetContent(wrapContentForViewport(m.LastActionError, m.actionErrorViewport.Width-1))
+			m.StatusSummary = theme.DefaultTheme.Error.Render(compactActionError(m.LastActionError))
 		} else {
 			m.StatusSummary = theme.DefaultTheme.Success.Render(theme.IconSuccess + " Job marked as completed.")
 		}
@@ -2544,6 +2562,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.openHostedViewportPane(OutlinePaneDetail)
 
+		case key.Matches(msg, m.KeyMap.ViewActionError):
+			if m.LastActionError == "" {
+				m.StatusSummary = theme.DefaultTheme.Muted.Render("No action error recorded.")
+				return m, nil
+			}
+			if m.ActiveDetailPane == ActionErrorPaneDetail {
+				cmd := m.closeCurrentDetail()
+				return m, cmd
+			}
+			return m.openHostedViewportPane(ActionErrorPaneDetail)
+
 		case key.Matches(msg, m.KeyMap.ViewContext):
 			if !m.Hosted {
 				m.StatusSummary = theme.DefaultTheme.Warning.Render("Context panel requires groveterm host")
@@ -3777,6 +3806,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	m.accessedFilesViewport.Height = logHeight
 	m.outlineViewport.Width = m.LogViewerWidth
 	m.outlineViewport.Height = logHeight
+	m.actionErrorViewport.Width = m.LogViewerWidth
+	m.actionErrorViewport.Height = logHeight
 	m.editViewport.Width = m.LogViewerWidth
 	m.editViewport.Height = logHeight
 	m.updateSkillViewportSizes()
@@ -3832,6 +3863,8 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		m.StatusSummary = theme.DefaultTheme.Info.Render(fmt.Sprintf("Loading artifacts for %s...", job.Title))
 		m.artifactPaneCursor = 0
 		m.refreshArtifactsPane()
+	case ActionErrorPaneDetail:
+		m.actionErrorViewport.SetContent(wrapContentForViewport(m.LastActionError, m.actionErrorViewport.Width-1))
 	}
 
 	return m, tea.Batch(cmds...)
@@ -3874,6 +3907,7 @@ var hostedViewportPanes = map[DetailPane]hostedViewportPane{
 	TokenPaneDetail:         {label: "Token Usage"},
 	AccessedFilesPaneDetail: {label: "Accessed Files"},
 	OutlinePaneDetail:       {label: "Outline"},
+	ActionErrorPaneDetail:   {label: "Error Details"},
 	SkillPane:               {label: "Skills", forwardKeys: skillPaneForwardedKeys, focus: true},
 	ArtifactsPaneDetail:     {label: "Artifacts", forwardKeys: artifactsPaneForwardedKeys, focus: true},
 }
@@ -3945,6 +3979,8 @@ func (m Model) openHostedViewportPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		body = m.skillPaneBody
 	case ArtifactsPaneDetail:
 		body = m.artifactPaneBody
+	case ActionErrorPaneDetail:
+		body = m.LastActionError
 	}
 	req := m.hostedViewportRequest(pane, job, body)
 
@@ -4126,6 +4162,12 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 			} else {
 				m.accessedFilesViewport.GotoBottom()
 			}
+		case ActionErrorPaneDetail:
+			if idx == 0 {
+				m.actionErrorViewport.GotoTop()
+			} else {
+				m.actionErrorViewport.GotoBottom()
+			}
 		case EditPane:
 			if idx == 0 {
 				m.editViewport.GotoTop()
@@ -4168,6 +4210,8 @@ func (m Model) handleViewportKey(msg tea.KeyMsg, pane DetailPane) (tea.Model, te
 		m.tokenViewport, cmd = m.tokenViewport.Update(msg)
 	case AccessedFilesPaneDetail:
 		m.accessedFilesViewport, cmd = m.accessedFilesViewport.Update(msg)
+	case ActionErrorPaneDetail:
+		m.actionErrorViewport, cmd = m.actionErrorViewport.Update(msg)
 	case EditPane:
 		m.editViewport, cmd = m.editViewport.Update(msg)
 	case SkillPane:

@@ -53,6 +53,7 @@ type KeyMap struct {
 	ViewAccessedFiles key.Binding
 	ViewArtifacts     key.Binding
 	ViewOutline       key.Binding
+	ViewActionError   key.Binding
 	CloseDetailPane   key.Binding
 	SwitchFocus       key.Binding
 	FocusLeft         key.Binding // Spatial navigation: focus left pane (jobs)
@@ -248,6 +249,10 @@ func NewKeyMap(cfg *config.Config) KeyMap {
 			key.WithKeys("vo"),
 			key.WithHelp("vo", "view outline"),
 		),
+		ViewActionError: key.NewBinding(
+			key.WithKeys("ve"),
+			key.WithHelp("ve", "view last error"),
+		),
 		CloseDetailPane: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "close detail pane"),
@@ -373,7 +378,7 @@ func (k KeyMap) Namespaces() []keymap.Namespace {
 		{Prefix: "v", Label: "View", Bindings: []key.Binding{
 			k.ViewLogs, k.ViewFrontmatter, k.ViewBriefing, k.ViewEdit,
 			k.ViewTokens, k.ViewContext, k.ViewMemory, k.ViewNativeAgent, k.ViewSkillPane,
-			k.ViewAccessedFiles, k.ViewArtifacts, k.ViewOutline,
+			k.ViewAccessedFiles, k.ViewArtifacts, k.ViewOutline, k.ViewActionError,
 		}},
 		{Prefix: "c", Label: "Change", Bindings: []key.Binding{
 			k.SetStatus, k.SetType, k.SetTemplate, k.SetCompleted,

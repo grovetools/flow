@@ -549,6 +549,29 @@ func sendToMsgChBlocking(ctx context.Context, ch chan<- tea.Msg, msg tea.Msg) {
 // to this job (see issue: wrong-session-logs-bound-to-headless-tuimux-jobs).
 const unverifiedBindingNotice = "session binding unverified — transcript not streamed"
 
+// unverifiedJobLogTail keeps the launch breadcrumb visible without allowing a
+// long-lived job.log to swamp the viewport while the native-session binding is
+// still unavailable. It is diagnostic output only: it never becomes a
+// transcript source and therefore does not weaken the verified-binding rule.
+func unverifiedJobLogTail(content []byte) string {
+	const maxBytes = 64 * 1024
+	if len(content) > maxBytes {
+		content = content[len(content)-maxBytes:]
+		if newline := bytes.IndexByte(content, '\n'); newline >= 0 {
+			content = content[newline+1:]
+		}
+	}
+	return strings.TrimSpace(string(content))
+}
+
+func unverifiedBindingContent(content []byte) string {
+	tail := unverifiedJobLogTail(content)
+	if tail == "" {
+		return unverifiedBindingNotice
+	}
+	return unverifiedBindingNotice + "\n\njob.log tail:\n" + tail
+}
+
 // retryLoadAgentLogsAfterDelay creates a command that waits and then triggers a retry
 func retryLoadAgentLogsAfterDelay() tea.Cmd {
 	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
@@ -756,7 +779,7 @@ func loadAndStreamAgentLogsCmd(plan *orchestration.Plan, job *orchestration.Job)
 							// plan/job-name spec. Retry: the registry entry
 							// may appear once the session registers.
 							return LogContentLoadedMsg{
-								Content:     contentStr + "\n" + unverifiedBindingNotice,
+								Content:     unverifiedBindingContent(content),
 								ShouldRetry: true,
 								JobID:       job.ID,
 							}
