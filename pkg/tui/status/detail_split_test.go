@@ -354,3 +354,117 @@ func TestSkillPaneUnhostedStaysInline(t *testing.T) {
 		t.Error("the internal skill pane should be visible")
 	}
 }
+
+// TestHostedNeverRendersInternalDetailPane: hosted, the built-in lipgloss
+// detail pane must never become visible. Any leak that unhides it — this test
+// forces one directly, standing in for whatever path found it in the wild —
+// is cleaned up on the next message rather than left on screen.
+func TestHostedNeverRendersInternalDetailPane(t *testing.T) {
+	m := newAgentJobModel(t, true)
+	m.Manager, _ = m.Manager.SetHidden("detail", false)
+	m.ShowLogs = true
+
+	mdl, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = mdl.(Model)
+
+	if !m.Manager.IsHidden("detail") {
+		t.Error("internal detail pane left visible while hosted")
+	}
+	if m.ShowLogs {
+		t.Error("ShowLogs left true while hosted")
+	}
+}
+
+// TestHostedDemoteDoesNotStrandInlineSplit: closing a promoted pane demotes
+// it, and Demote only clears Promoted — it leaves Hidden alone. When the slot
+// had been unhidden earlier the demote handed the user an empty, title-less
+// inline pane that closeCurrentDetail then refused to touch, because
+// ActiveDetailPane was already NoPane. The close must hide the slot too.
+func TestHostedDemoteDoesNotStrandInlineSplit(t *testing.T) {
+	m := newAgentJobModel(t, true)
+	m.Manager, _ = m.Manager.SetHidden("detail", false)
+
+	m, _ = press(t, m, "vf")
+	if !m.Manager.IsPromoted("detail") {
+		t.Fatalf("precondition: frontmatter did not promote")
+	}
+
+	mdl, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mdl.(Model)
+
+	if m.ActiveDetailPane != NoPane {
+		t.Errorf("ActiveDetailPane = %d, want NoPane", m.ActiveDetailPane)
+	}
+	if !m.Manager.IsHidden("detail") {
+		t.Error("demote left the internal detail pane visible — the stranded inline split")
+	}
+}
+
+// TestUnhostedDemoteStillCloses: the same close path unhosted, where the
+// internal pane is the only detail surface there is.
+func TestUnhostedDemoteStillCloses(t *testing.T) {
+	m := newAgentJobModel(t, false)
+	m, _ = press(t, m, "vt")
+	if !m.ShowLogs {
+		t.Fatalf("precondition: token pane did not open inline")
+	}
+
+	mdl, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mdl.(Model)
+
+	if m.ActiveDetailPane != NoPane || m.ShowLogs || !m.Manager.IsHidden("detail") {
+		t.Errorf("esc left pane=%d ShowLogs=%v hidden=%v", m.ActiveDetailPane, m.ShowLogs, m.Manager.IsHidden("detail"))
+	}
+}
+
+// TestHostedSendInputOpensSplitNotInlinePane: "i" on an agent job used to
+// unhide the internal slot outright. Hosted it must open the logs as a BSP
+// split, while the chat box — which renders below the Manager's layout, not
+// inside the detail pane — still gets its height.
+func TestHostedSendInputOpensSplitNotInlinePane(t *testing.T) {
+	job := &orchestration.Job{
+		ID:       "j1",
+		Filename: "j1.md",
+		Title:    "job one",
+		Type:     orchestration.JobTypeInteractiveAgent,
+		Status:   orchestration.JobStatusRunning,
+	}
+	plan := &orchestration.Plan{
+		Name:     "t",
+		Jobs:     []*orchestration.Job{job},
+		JobsByID: map[string]*orchestration.Job{job.ID: job},
+	}
+	graph, err := orchestration.BuildDependencyGraph(plan)
+	if err != nil {
+		t.Fatalf("BuildDependencyGraph: %v", err)
+	}
+	m := New(Config{Plan: plan, Graph: graph, Hosted: true})
+	mdl, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = mdl.(Model)
+
+	// "i" only claims the chat key once a detail pane has put a job in view
+	// (it keys off ActiveLogJob). Open a non-logs pane first, so pressing "i"
+	// exercises the branch that has to switch the detail slot over to logs.
+	m, _ = press(t, m, "vf")
+	if m.ActiveLogJob == nil {
+		t.Fatalf("precondition: frontmatter pane did not set ActiveLogJob")
+	}
+
+	m, _ = press(t, m, "i")
+
+	if !m.IsolatedAgentInputActive {
+		t.Fatal("i did not activate the chat input")
+	}
+	if m.ActiveDetailPane != LogsPaneDetail {
+		t.Errorf("ActiveDetailPane = %d, want LogsPaneDetail", m.ActiveDetailPane)
+	}
+	if !m.Manager.IsHidden("detail") {
+		t.Error("i unhid the internal detail pane while hosted")
+	}
+	if !m.Manager.IsPromoted("detail") {
+		t.Error("i did not open the logs as a BSP split")
+	}
+	if m.calculateChatInputHeight() == 0 {
+		t.Error("chat box has no height — the input would be focused but invisible")
+	}
+}

@@ -32,8 +32,22 @@ import (
 
 var writeClipboard = clipboard.WriteAll
 
-// Update handles messages and updates the model
+// Update dispatches msg, then re-asserts the hosted-mode invariant that the
+// built-in (non-BSP) detail pane stays hidden. The dispatch itself has too
+// many exits to guard one at a time, and a single leaked unhide strands the
+// user in an inline split they cannot close — so the check lands here, once,
+// on the way out.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mdl, cmd := m.update(msg)
+	sm, ok := mdl.(Model)
+	if !ok {
+		return mdl, cmd
+	}
+	sm.hideInternalDetailWhenHosted()
+	return sm, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -2110,8 +2124,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshTreeDetailPane()
 				}
 			} else if m.ActiveDetailPane == NoPane {
-				// No detail pane open — open logs
-				return m.openDetailPane(LogsPaneDetail)
+				// No detail pane open — open logs. Hosted that means a BSP
+				// split: openDetailPane alone would mark the pane active
+				// without asking the host for anything, leaving nothing on
+				// screen and the model claiming logs were open.
+				return m.openHostedViewportPane(LogsPaneDetail)
 			}
 			return m, nil
 
@@ -2159,9 +2176,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the pane is closed. Remains a toggle (fullscreen → restore).
 			var openCmd tea.Cmd
 			if !m.ShowLogs {
-				mdl, c := m.openDetailPane(LogsPaneDetail)
-				m = mdl.(Model)
-				openCmd = c
+				// Hosted the logs live in a BSP split, so ShowLogs is never
+				// true there: open the split (unless it already is), and
+				// leave the zoom below to the host.
+				alreadySplit := m.Hosted && m.ActiveDetailPane == LogsPaneDetail && m.Manager.IsPromoted("detail")
+				if !alreadySplit {
+					mdl, c := m.openHostedViewportPane(LogsPaneDetail)
+					m = mdl.(Model)
+					openCmd = c
+				}
 			}
 			if m.ShowLogs {
 				// Let the Manager toggle fullscreen
@@ -2667,19 +2690,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			}
 			if isAgentWithInput {
-				// Ensure logs pane is open and focused
+				// Ensure the logs view is open. Hosted it opens as a BSP
+				// split like every other detail pane — unhiding the internal
+				// slot here is what used to strand an inline split under the
+				// job table. The chat box itself renders below the Manager's
+				// layout either way.
+				var openCmd tea.Cmd
 				if m.ActiveDetailPane != LogsPaneDetail {
-					// Switch to logs pane
-					m.ActiveDetailPane = LogsPaneDetail
-					m.ShowLogs = true
-					m.Manager, _ = m.Manager.SetHidden("detail", false)
+					if m.Hosted {
+						mdl, c := m.openHostedViewportPane(LogsPaneDetail)
+						m = mdl.(Model)
+						openCmd = c
+					} else {
+						m.ActiveDetailPane = LogsPaneDetail
+						m.ShowLogs = true
+						m.Manager, _ = m.Manager.SetHidden("detail", false)
+					}
 				}
 				// Focus the input
 				m.IsolatedAgentInputActive = true
 				m.IsolatedAgentInput.Focus()
 				m.Focus = FocusInput
 				m.StatusSummary = theme.DefaultTheme.Muted.Render("Type input for agent (Enter to send, Esc to cancel)")
-				return m, nil
+				return m, openCmd
 			}
 			// Not an agent job that supports input - show helpful message
 			m.StatusSummary = theme.DefaultTheme.Warning.Render("Send input only works for isolated_agent and interactive_agent jobs")
@@ -3650,7 +3683,22 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
-	// Internal lipgloss pane: ensure it's visible.
+	// Defensively close any orphaned BSP splits before falling back to an
+	// internal pane in hosted mode (host handlers no-op when there's no
+	// sibling).
+	if !isCurrentlyPromoted && m.Hosted {
+		cmds = append(cmds, tea.Batch(closeAgentSplitCmd(), closeEditorSplitCmd(), closeViewportSplitCmd()))
+	}
+
+	// Internal lipgloss pane: ensure it's visible. Hosted there is no such
+	// thing — a pane with no promoted form simply does not open, rather than
+	// dropping an inline split under the job table that the host's BSP keys
+	// have no handle on.
+	if m.Hosted {
+		m.ActiveDetailPane = NoPane
+		return m, tea.Batch(cmds...)
+	}
+
 	m.ShowLogs = true
 	m.Manager, _ = m.Manager.SetHidden("detail", false)
 
@@ -3659,12 +3707,6 @@ func (m Model) openDetailPane(pane DetailPane) (tea.Model, tea.Cmd) {
 	// cursor in the job list so the user can continue browsing.
 	if pane == EditPane || pane == NativeAgentPaneDetail {
 		m.Focus = FocusDetailPrimary
-	}
-
-	// Defensively close any orphaned BSP splits when opening an internal
-	// pane in hosted mode (host handlers no-op when there's no sibling).
-	if !isCurrentlyPromoted && m.Hosted {
-		cmds = append(cmds, tea.Batch(closeAgentSplitCmd(), closeEditorSplitCmd(), closeViewportSplitCmd()))
 	}
 
 	job := m.CurrentJob()

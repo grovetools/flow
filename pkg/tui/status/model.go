@@ -421,7 +421,10 @@ func (m Model) IsChordPending() bool {
 // appropriate BSP close message when leaving a host-managed split (agent or
 // editor), or nil for internal lipgloss panes.
 func (m *Model) closeCurrentDetail() tea.Cmd {
-	if m.ActiveDetailPane == NoPane {
+	// NoPane with the internal slot still visible is the stranded state this
+	// close path has to be able to clear, so only the fully-closed case is a
+	// no-op here.
+	if m.ActiveDetailPane == NoPane && m.Manager.IsHidden("detail") {
 		return nil
 	}
 
@@ -430,6 +433,12 @@ func (m *Model) closeCurrentDetail() tea.Cmd {
 	if m.Manager.IsPromoted("detail") {
 		var demoteCmd tea.Cmd
 		m.Manager, demoteCmd = m.Manager.Demote("detail")
+		// Demote only clears Promoted; it leaves Hidden alone. If anything
+		// had unhidden the internal slot before the promotion, demoting
+		// would hand the user an empty inline pane with no title — and
+		// closeCurrentDetail could not close it, because ActiveDetailPane
+		// is NoPane by then. Hide it as part of the same close.
+		m.Manager, _ = m.Manager.SetHidden("detail", true)
 		m.ActiveDetailPane = NoPane
 		m.ShowLogs = false
 		m.Focus = FocusJobs
@@ -465,6 +474,32 @@ func (m *Model) closeCurrentDetail() tea.Cmd {
 	m.IsolatedAgentInputActive = false
 	m.IsolatedAgentInput.Blur()
 	return nil
+}
+
+// hideInternalDetailWhenHosted enforces the hosted-mode invariant that the
+// built-in lipgloss detail pane never renders. Hosted, every detail view is a
+// host BSP split, so the internal pane can only ever appear through a leak: a
+// path that unhides it without checking Hosted, or a Demote that clears
+// Promoted while Hidden is still false. What the user sees when that happens
+// is an empty split wedged under the job table — no pane title, no content,
+// and no obvious key to close it. Rather than chase every producer, the
+// invariant is re-asserted after every message (see Update).
+//
+// Unhosted there is no host to split into, so the internal pane is the only
+// detail surface there is and this is a no-op.
+func (m *Model) hideInternalDetailWhenHosted() {
+	// Tests build Models without going through New, so the Manager may have
+	// no panes at all; IsHidden reports false for a slot that does not exist.
+	if len(m.Manager.Panes) < 2 {
+		return
+	}
+	if !m.Hosted || m.Manager.IsHidden("detail") || m.Manager.IsPromoted("detail") {
+		return
+	}
+	m.ShowLogs = false
+	m.Manager, _ = m.Manager.SetHidden("detail", true)
+	m.syncFocusFromManager()
+	m.syncLayoutFromManager()
 }
 
 // syncLayoutFromManager reads the pane dimensions from the Manager into the
@@ -519,7 +554,13 @@ func (m Model) calculateChatInputHeight() int {
 		(m.ActiveLogJob.Type == orchestration.JobTypeIsolatedAgent ||
 			m.ActiveLogJob.Type == orchestration.JobTypeInteractiveAgent)
 	jobIsCompleted := m.ActiveLogJob != nil && m.ActiveLogJob.Status == orchestration.JobStatusCompleted
-	showChatInput := isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail && !jobIsCompleted && m.ShowLogs
+	// The chat box renders below the Manager's layout, not inside the detail
+	// pane, so what gates it is the logs view being open at all — not the
+	// internal pane being visible. Hosted the logs open as a BSP split and
+	// ShowLogs stays false, which would otherwise leave "i" focusing an input
+	// box that never draws.
+	logsOpen := m.ShowLogs || m.Manager.IsPromoted("detail")
+	showChatInput := isAgentWithInput && m.ActiveDetailPane == LogsPaneDetail && !jobIsCompleted && logsOpen
 	if !showChatInput {
 		return 0
 	}
