@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/grovetools/core/pkg/process"
 )
@@ -74,17 +73,12 @@ func handlePiStartupFailure(job *Job, plan *Plan, ev piStartupEvidence) (bool, e
 	}
 
 	var persistenceErrs []error
-	logPath, err := GetJobLogPath(plan, job)
-	if err != nil {
-		persistenceErrs = append(persistenceErrs, err)
-	} else {
-		logLine := fmt.Sprintf("%s ERROR %s\n", time.Now().Format(time.RFC3339), summary)
-		if paneOutput != "" {
-			logLine += "Pi startup terminal output:\n" + paneOutput + "\n"
-		}
-		if err := appendFile(logPath, logLine); err != nil {
-			persistenceErrs = append(persistenceErrs, fmt.Errorf("writing Pi startup failure log: %w", err))
-		}
+	var logDetails []string
+	if paneOutput != "" {
+		logDetails = append(logDetails, "Pi startup terminal output:\n"+paneOutput)
+	}
+	if err := persistAgentStartupLog(plan, job, "ERROR", summary, logDetails...); err != nil {
+		persistenceErrs = append(persistenceErrs, fmt.Errorf("writing Pi startup failure log: %w", err))
 	}
 
 	// Each surface is best-effort, but none may prevent the terminal status

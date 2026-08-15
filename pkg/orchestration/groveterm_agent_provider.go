@@ -73,6 +73,12 @@ func (p *GrovetermAgentProvider) Launch(ctx context.Context, job *Job, plan *Pla
 // LaunchPrepared owns the complete native/tuimux lifecycle for prepared
 // provider command bytes.
 func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, rawCommand, expectedNativeID string) error {
+	if p.spec.Name == "claude" {
+		if err := warnIfClaudeFolderUntrusted(job, plan, workDir); err != nil {
+			p.log.WithError(err).WithField("job_id", job.ID).Warn("Claude folder-trust preflight could not be recorded")
+		}
+	}
+
 	// Normal launches enter running here. Resume supplies its known native ID
 	// after an atomic completed-to-running transition and must retain that
 	// attempt time rather than rewriting it through the legacy status path.
@@ -102,6 +108,11 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {
 		p.log.Info("Session intent registered successfully")
+		p.ulog.Info("session.lifecycle.intent").
+			Field("job_id", job.ID).
+			Field("provider", p.spec.Name).
+			Field("reason", "launch_registered").
+			StructuredOnly().Log(ctx)
 	}
 
 	// Wrap with agentstream to capture PID via deterministic pidfile.
@@ -232,15 +243,14 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	// its PTY with it, so a single capture after those waits sees nothing at
 	// all. The watcher keeps the last useful snapshot and is stopped the moment
 	// discovery settles, so a healthy launch pays only a couple of captures.
-	var paneWatcher *piPaneWatcher
-	if p.spec.PiRuntime != nil {
-		captureClient := sessionHostClient(workDir)
-		defer captureClient.Close()
-		paneWatcher = startPiPaneWatcher(ctx, func(captureCtx context.Context) (string, error) {
-			return captureClient.CaptureAgentPane(captureCtx, job.ID)
-		})
-		defer func() { _, _ = paneWatcher.stop() }()
-	}
+	// Capture every provider, not only Pi: Claude can exit before its first
+	// hook and take the native PTY (and its only useful diagnosis) with it.
+	captureClient := sessionHostClient(workDir)
+	defer captureClient.Close()
+	paneWatcher := startPiPaneWatcher(ctx, func(captureCtx context.Context) (string, error) {
+		return captureClient.CaptureAgentPane(captureCtx, job.ID)
+	})
+	defer func() { _, _ = paneWatcher.stop() }()
 
 	// Wait for PID via deterministic pidfile (written by BuildAgentCommand wrapper)
 	pid, err := agentstream.WaitForPID(ctx, job.ID)
@@ -317,6 +327,12 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 			"job_id": job.ID,
 			"pid":    pid,
 		}).Warn("Pi produced no transcript but shows no evidence of failure; leaving job status unchanged")
+	} else if transcriptPath == "" {
+		if _, breadcrumbErr := appendAgentStartupBreadcrumb(job, plan, p.spec.Name, agentStartupEvidence{
+			pid: pid, paneOutput: paneOutput, captureErr: captureErr, discoveryErr: err,
+		}); breadcrumbErr != nil {
+			logger.WithError(breadcrumbErr).WithField("job_id", job.ID).Warn("Failed to persist provider startup breadcrumb")
+		}
 	}
 
 	// Extract native session ID from transcript path. Codex rollout filenames
@@ -399,6 +415,12 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 		"pid":             pid,
 		"transcript_path": transcriptPath,
 	}).Info("Confirmed groveterm agent session")
+	p.ulog.Info("session.lifecycle.confirmed").
+		Field("job_id", job.ID).
+		Field("native_id", nativeID).
+		Field("provider", p.spec.Name).
+		Field("reason", "pid_discovered").
+		StructuredOnly().Log(ctx)
 
 	return nil
 }

@@ -55,6 +55,12 @@ func (p *ClaudeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, 
 // LaunchPrepared owns the complete Claude interactive lifecycle for a command
 // whose provider-specific bytes have already been constructed.
 func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan *Plan, workDir, agentCommand, expectedNativeID string) error {
+	// Observability-only trust preflight: Phase 0 never blocks or mutates Claude
+	// trust state, but records the likely prompt before the provider can die.
+	if err := warnIfClaudeFolderUntrusted(job, plan, workDir); err != nil {
+		p.log.WithError(err).WithField("job_id", job.ID).Warn("Claude folder-trust preflight could not be recorded")
+	}
+
 	// Normal launches enter running here. Resume supplies its known native ID
 	// after an atomic completed-to-running transition and must retain that
 	// attempt time rather than rewriting it through the legacy status path.
@@ -101,6 +107,11 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {
 		p.log.Info("Session intent registered successfully")
+		p.ulog.Info("session.lifecycle.intent").
+			Field("job_id", job.ID).
+			Field("provider", "claude").
+			Field("reason", "launch_registered").
+			StructuredOnly().Log(ctx)
 	}
 
 	engine, err := mux.GetEngine(agentTarget)
@@ -217,6 +228,12 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		}
 		envPrefix += playbookEnvInline(job, plan)
 
+		// Start capturing before spawn: a provider can print its only useful
+		// diagnosis and disappear while PID/transcript discovery is still waiting.
+		paneWatcher := startPiPaneWatcher(context.Background(), func(captureCtx context.Context) (string, error) {
+			return engine.CapturePane(captureCtx, targetPane)
+		})
+
 		// Wrap agent command with deterministic PID capture, then prefix
 		// inline env so everything runs as one shell invocation.
 		wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
@@ -225,14 +242,23 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 			p.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
+			_, _ = paneWatcher.stop()
 			return fmt.Errorf("failed to send agent command: %w", err)
 		}
+
+		// Give the deterministic pidfile a small synchronous observation window.
+		// This is bounded so the CLI path cannot hang, but lets the watcher bind
+		// liveness before an instant pre-hook exit tears the pane down.
+		pidCtx, cancelPIDWait := context.WithTimeout(ctx, 3*time.Second)
+		initialPID, _ := agentstream.WaitForPID(pidCtx, job.ID)
+		cancelPIDWait()
+		paneWatcher.observePID(initialPID)
 
 		// Discover the PID and confirm the session in the background so the TUI
 		// is not blocked while an interactive agent launches. The handle lets a
 		// caller that is about to exit wait for it — see awaitSessionConfirmation.
 		p.confirmation = startSessionConfirmation(func() error {
-			if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
+			if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID, paneWatcher, initialPID); err != nil {
 				p.log.WithError(err).Error("Failed to register session with valid PID")
 				// Continue anyway - the agent is running, just tracking may be impaired
 				return err
@@ -378,6 +404,11 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 	}
 	envPrefix += playbookEnvInline(job, plan)
 
+	// Capture from before spawn so pre-hook exits leave a pane snapshot.
+	paneWatcher := startPiPaneWatcher(context.Background(), func(captureCtx context.Context) (string, error) {
+		return engine.CapturePane(captureCtx, targetPane)
+	})
+
 	// Wrap agent command with deterministic PID capture, then prefix
 	// inline env so everything runs as one shell invocation.
 	wrappedCommand := envPrefix + agentstream.BuildAgentCommand(job.ID, agentCommand)
@@ -385,16 +416,23 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		Field("pane", targetPane).
 		Log(ctx)
 	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
+		_, _ = paneWatcher.stop()
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command to pane '%s': %w", targetPane, err)
 	}
 
-	// Discover the PID and confirm the session in the background so the TUI is
-	// not blocked while an interactive agent launches. The handle lets a caller
-	// that is about to exit wait for it — see awaitSessionConfirmation.
+	// Bounded synchronous PID observation catches instant pre-hook exits on the
+	// exiting CLI path; full transcript discovery remains asynchronous.
+	pidCtx, cancelPIDWait := context.WithTimeout(ctx, 3*time.Second)
+	initialPID, _ := agentstream.WaitForPID(pidCtx, job.ID)
+	cancelPIDWait()
+	paneWatcher.observePID(initialPID)
+
+	// Discover and confirm in the background, retaining a handle so an exiting
+	// caller can wait for session confirmation.
 	p.confirmation = startSessionConfirmation(func() error {
-		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID); err != nil {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, expectedNativeID, paneWatcher, initialPID); err != nil {
 			p.log.WithError(err).Error("Failed to register session with valid PID")
 			// Continue anyway - the agent is running, just tracking may be impaired
 			return err
@@ -583,7 +621,7 @@ func (p *ClaudeAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFi
 // This function is designed to be called from a goroutine - it blocks internally but
 // does not block the caller. It uses agentstream for deterministic PID capture via pidfile.
 // The session intent should already be registered via RegisterSessionIntent() before this is called.
-func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane, expectedNativeID string) error {
+func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane, expectedNativeID string, paneWatcher *piPaneWatcher, initialPID int) error {
 	logger := grovelogging.NewLogger("flow-claude-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
@@ -599,9 +637,15 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 	}
 
 	ctx := context.Background()
+	defer func() { _, _ = paneWatcher.stop() }()
 
-	// Wait for PID via deterministic pidfile (written by BuildAgentCommand)
-	claudePID, err := agentstream.WaitForPID(ctx, job.ID)
+	// Wait for PID via deterministic pidfile (written by BuildAgentCommand),
+	// unless LaunchPrepared already found it in its bounded observation window.
+	claudePID := initialPID
+	var err error
+	if claudePID == 0 {
+		claudePID, err = agentstream.WaitForPID(ctx, job.ID)
+	}
 	if err != nil {
 		// Fallback to legacy process tree traversal
 		logger.WithError(err).Warn("Pidfile-based PID discovery failed, falling back to process tree traversal")
@@ -624,6 +668,7 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 			logger.WithError(err).WithField("job_id", job.ID).Warn("Failed to clean up PID file")
 		}
 	}
+	paneWatcher.observePID(claudePID)
 
 	// Discover transcript path using agentstream
 	transcriptPath, err := agentstream.DiscoverTranscript(agentstream.DiscoverOptions{
@@ -647,6 +692,17 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		}
 		if err != nil {
 			logger.WithError(err).Warn("Transcript path discovery failed, continuing without it")
+		}
+	}
+
+	// Discovery has settled. If the provider is already gone and no transcript
+	// ever appeared, persist a breadcrumb without changing job/session state.
+	paneOutput, captureErr := paneWatcher.stop()
+	if transcriptPath == "" {
+		if _, breadcrumbErr := appendAgentStartupBreadcrumb(job, plan, "claude", agentStartupEvidence{
+			pid: claudePID, paneOutput: paneOutput, captureErr: captureErr, discoveryErr: err,
+		}); breadcrumbErr != nil {
+			logger.WithError(breadcrumbErr).WithField("job_id", job.ID).Warn("Failed to persist Claude startup breadcrumb")
 		}
 	}
 
@@ -715,6 +771,12 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 		"session_id": job.ID,
 		"pid":        claudePID,
 	}).Info("Confirmed Claude session")
+	p.ulog.Info("session.lifecycle.confirmed").
+		Field("job_id", job.ID).
+		Field("native_id", claudeSessionID).
+		Field("provider", "claude").
+		Field("reason", "pid_discovered").
+		StructuredOnly().Log(ctx)
 
 	return nil
 }
