@@ -24,6 +24,20 @@ func (e *recordingSessionEnder) EndSession(_ context.Context, jobID, attemptID, 
 	return nil
 }
 
+func TestInteractiveExitReporterCommandUsesCanonicalTargetFlag(t *testing.T) {
+	job := &Job{ID: "job with spaces", AttemptID: "attempt-1"}
+	plan := &Plan{Directory: "/tmp/plan with spaces"}
+
+	got := InteractiveExitReporterCommand(job, plan)
+	want := "flow agent exited --job 'job with spaces' --at '/tmp/plan with spaces' --attempt 'attempt-1' --exit-code"
+	if got != want {
+		t.Fatalf("InteractiveExitReporterCommand() = %q, want %q", got, want)
+	}
+	if strings.Contains(got, " --plan ") {
+		t.Fatalf("reporter command uses deprecated --plan flag: %s", got)
+	}
+}
+
 func TestReportInteractiveAgentExitStartupDeathAndDuplicate(t *testing.T) {
 	t.Setenv("GROVE_HOME", t.TempDir())
 	job, plan := newPiStartupJob(t)

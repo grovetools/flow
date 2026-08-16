@@ -266,7 +266,7 @@ func withInlineSupervisorEnv(envPrefix, command string) string {
 
 func InteractiveExitReporterCommand(job *Job, plan *Plan) string {
 	command := "flow agent exited --job " + shellSingleQuote(job.ID) +
-		" --plan " + shellSingleQuote(plan.Directory)
+		" --at " + shellSingleQuote(plan.Directory)
 	if job.AttemptID != "" {
 		command += " --attempt " + shellSingleQuote(job.AttemptID)
 	}

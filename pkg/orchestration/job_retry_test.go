@@ -30,6 +30,15 @@ duration: 5m30s
 `
 	}
 
+	// A running job can retain stale terminal fields after a disrupted launch.
+	if status == string(JobStatusRunning) {
+		frontmatter += `attempt_id: 01890f5d-e4b8-7cc3-98c4-dc0c0c07398f
+last_error: stale launch error
+completed_at: 2026-01-02T00:00:00Z
+duration: 5m30s
+`
+	}
+
 	// Add completed_at if status is completed
 	if status == string(JobStatusCompleted) {
 		frontmatter += `completed_at: 2026-01-02T00:00:00Z
@@ -58,7 +67,7 @@ This is a test job file.
 		Status:   JobStatus(status),
 		Template: "generic",
 	}
-	if status == string(JobStatusFailed) {
+	if status == string(JobStatusFailed) || status == string(JobStatusRunning) {
 		job.AttemptID = "01890f5d-e4b8-7cc3-98c4-dc0c0c07398f"
 	}
 
@@ -169,6 +178,17 @@ func TestRetryJob_FromRunning_WithForce(t *testing.T) {
 	contentStr := string(content)
 	if !strings.Contains(contentStr, "status: pending") {
 		t.Errorf("expected status: pending in file, got: %s", contentStr)
+	}
+	if strings.Contains(contentStr, "<nil>") {
+		t.Fatalf("force retry serialized a nil as <nil>:\n%s", contentStr)
+	}
+	for _, key := range []string{"attempt_id", "last_error", "completed_at", "duration"} {
+		if strings.Contains(contentStr, key+":") {
+			t.Errorf("force retry retained %s:\n%s", key, contentStr)
+		}
+	}
+	if job.AttemptID != "" || !job.CompletedAt.IsZero() || job.Duration != 0 || !job.EndTime.IsZero() || job.Metadata.LastError != "" {
+		t.Errorf("force retry retained in-memory terminal state: %+v", job)
 	}
 }
 

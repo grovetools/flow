@@ -77,7 +77,10 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.WithField("sessions_dir", sessionsDir).Warn("Sessions directory does not exist")
+			// A fresh installation or a provider that has not registered hooks yet
+			// legitimately has no sessions directory. Preserve the lookup error for
+			// callers while keeping this expected negative probe out of warnings.
+			log.WithField("sessions_dir", sessionsDir).Debug("Sessions directory does not exist")
 			return 0, "", fmt.Errorf("sessions directory not found: %s", sessionsDir)
 		}
 		log.WithError(err).WithField("sessions_dir", sessionsDir).Error("Failed to read sessions directory")
@@ -177,11 +180,14 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 		}
 	}
 
+	// Absence is an expected result for liveness probes before hook
+	// registration and after session cleanup; callers decide whether it is
+	// actionable. Keep the diagnostic without emitting routine warning noise.
 	log.WithFields(logrus.Fields{
 		"job_id":          jobID,
 		"sessions_dir":    sessionsDir,
 		"entries_checked": len(entries),
-	}).Warn("No session found for job ID after checking all entries")
+	}).Debug("No session found for job ID after checking all entries")
 
 	return 0, "", fmt.Errorf("no session found for job ID: %s", jobID)
 }

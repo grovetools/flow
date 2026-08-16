@@ -172,9 +172,12 @@ func retryRunningJobWithForce(job *Job, plan *Plan, autoRun bool) error {
 
 	// Create updates map to reset to pending
 	updates := map[string]interface{}{
-		"status":     string(JobStatusPending),
-		"attempt_id": nil,
-		"updated_at": time.Now().Format(time.RFC3339),
+		"status":       string(JobStatusPending),
+		"attempt_id":   nil,
+		"last_error":   nil,
+		"completed_at": nil,
+		"duration":     nil,
+		"updated_at":   time.Now().Format(time.RFC3339),
 	}
 
 	// Use StatePersister to update the job file
@@ -197,6 +200,10 @@ func retryRunningJobWithForce(job *Job, plan *Plan, autoRun bool) error {
 	// Update in-memory job state
 	job.Status = JobStatusPending
 	job.AttemptID = ""
+	job.CompletedAt = time.Time{}
+	job.Duration = 0
+	job.EndTime = time.Time{}
+	job.Metadata.LastError = ""
 
 	// Print success message
 	fmt.Printf("%s Job reset to pending (forced): %s\n", color.GreenString("*"), job.Filename)
