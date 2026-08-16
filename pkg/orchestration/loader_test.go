@@ -718,3 +718,135 @@ func TestLoadJobMetaRejectsNonJob(t *testing.T) {
 		t.Fatalf("metadata load of a bodyless markdown file: got %v, want ErrNotAJob", err)
 	}
 }
+
+// Corrupted job frontmatter shape produced by the historical nil-stringifying
+// writers (fmt.Sprint of a nil pointer → literal "<nil>"). Mirrors a real
+// corrupted file. Loading must succeed with these fields treated as unset,
+// and the surrounding plan must load wholesale.
+const nilLiteralJobContent = `---
+id: all-agents-crashed-42355510
+aliases: []
+tags: []
+model: claude-fable-5
+status: running
+title: all-agents-crashed
+type: interactive_agent
+updated_at: "2026-08-16T11:24:59Z"
+completed_at: <nil>
+duration: <nil>
+last_error: <nil>
+attempt_id: 01a00a51-5d06-7157-8acc-d7b5b8989647
+started_at: "2026-08-16T11:24:59Z"
+---
+
+we just experienced all agents becoming interrupted across our system; any idea how?
+`
+
+func TestLoadJobToleratesNilLiterals(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "136-all-agents-crashed.md")
+	if err := os.WriteFile(path, []byte(nilLiteralJobContent), 0o600); err != nil {
+		t.Fatalf("write test job: %v", err)
+	}
+
+	job, err := LoadJob(path)
+	if err != nil {
+		t.Fatalf("LoadJob() on <nil>-corrupted file: %v", err)
+	}
+	if !job.CompletedAt.IsZero() {
+		t.Errorf("CompletedAt = %v, want zero", job.CompletedAt)
+	}
+	if job.Duration != 0 {
+		t.Errorf("Duration = %v, want 0", job.Duration)
+	}
+	if job.Metadata.LastError != "" {
+		t.Errorf("LastError = %q, want empty", job.Metadata.LastError)
+	}
+	if job.ID != "all-agents-crashed-42355510" || job.Status != JobStatusRunning {
+		t.Errorf("healthy fields damaged: id=%q status=%q", job.ID, job.Status)
+	}
+
+	// The metadata-only path shares the tolerance.
+	if _, err := LoadJobMeta(path); err != nil {
+		t.Errorf("LoadJobMeta() on <nil>-corrupted file: %v", err)
+	}
+}
+
+func TestLoadPlanToleratesNilLiteralJob(t *testing.T) {
+	tmpDir := t.TempDir()
+	good := `---
+id: good-job-123
+title: good-job
+status: pending
+type: oneshot
+---
+Do a thing.
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "01-good.md"), []byte(good), 0o600); err != nil {
+		t.Fatalf("write good job: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "136-all-agents-crashed.md"), []byte(nilLiteralJobContent), 0o600); err != nil {
+		t.Fatalf("write corrupted job: %v", err)
+	}
+
+	plan, err := LoadPlan(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadPlan() with a <nil>-corrupted job must not fail wholesale: %v", err)
+	}
+	if len(plan.Jobs) != 2 {
+		t.Errorf("plan has %d jobs, want 2", len(plan.Jobs))
+	}
+}
+
+// updateJobFile's entering-running transition clears completed_at/duration/
+// last_error with nil update values; this is the exact path that used to
+// stringify them as "<nil>" and corrupt the file.
+func TestUpdateJobFileEnteringRunningWritesNoNilLiterals(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "01-job.md")
+	content := `---
+id: job-123
+title: job
+status: failed
+type: interactive_agent
+completed_at: "2026-08-16T10:00:00Z"
+duration: 5m0s
+last_error: boom
+---
+Body.
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write job: %v", err)
+	}
+	job, err := LoadJob(path)
+	if err != nil {
+		t.Fatalf("LoadJob: %v", err)
+	}
+	job.FilePath = path
+	job.Status = JobStatusRunning
+	if err := updateJobFile(job); err != nil {
+		t.Fatalf("updateJobFile: %v", err)
+	}
+
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	s := string(out)
+	if strings.Contains(s, "<nil>") {
+		t.Errorf("job file contains literal <nil>:\n%s", s)
+	}
+	for _, key := range []string{"completed_at", "duration", "last_error"} {
+		if strings.Contains(s, key) {
+			t.Errorf("stale key %q survived the running transition:\n%s", key, s)
+		}
+	}
+
+	reloaded, err := LoadJob(path)
+	if err != nil {
+		t.Fatalf("reload after transition: %v", err)
+	}
+	if reloaded.Status != JobStatusRunning || reloaded.AttemptID == "" {
+		t.Errorf("transition incomplete: status=%q attempt=%q", reloaded.Status, reloaded.AttemptID)
+	}
+}

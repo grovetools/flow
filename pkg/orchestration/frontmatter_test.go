@@ -365,3 +365,121 @@ Test body.`
 		<-done
 	}
 }
+
+// Nil update values (including typed nils) must remove keys, never be
+// stringified as "<nil>" — that corrupts job files (time fields become
+// unparseable on load). Regression test for the completed_at/duration/
+// last_error corruption.
+func TestUpdateFrontmatterNilRemovesKey(t *testing.T) {
+	content := []byte(`---
+id: test-123
+status: completed
+completed_at: "2026-08-16T11:24:59Z"
+duration: 5m0s
+last_error: something failed
+---
+Body content
+`)
+
+	var nilTime *string // stand-in for any typed nil pointer
+	updates := map[string]interface{}{
+		"status":       "running",
+		"completed_at": nil,
+		"duration":     nilTime, // typed nil must behave like untyped nil
+		"last_error":   nil,
+	}
+
+	result, err := UpdateFrontmatter(content, updates)
+	if err != nil {
+		t.Fatalf("UpdateFrontmatter: %v", err)
+	}
+	out := string(result)
+
+	if strings.Contains(out, "<nil>") {
+		t.Errorf("output contains literal <nil>:\n%s", out)
+	}
+	for _, key := range []string{"completed_at", "duration", "last_error"} {
+		if strings.Contains(out, key) {
+			t.Errorf("key %q should have been removed:\n%s", key, out)
+		}
+	}
+	if !strings.Contains(out, "status: running") {
+		t.Errorf("status update missing:\n%s", out)
+	}
+	if !strings.Contains(out, "Body content") {
+		t.Errorf("body lost:\n%s", out)
+	}
+}
+
+// Nil values for keys that don't exist yet must not add the key at all —
+// neither in existing frontmatter nor when creating frontmatter from scratch.
+func TestUpdateFrontmatterNilDoesNotAddKey(t *testing.T) {
+	withFM := []byte("---\nid: test-123\n---\nBody\n")
+	result, err := UpdateFrontmatter(withFM, map[string]interface{}{
+		"completed_at": nil,
+		"status":       "running",
+	})
+	if err != nil {
+		t.Fatalf("UpdateFrontmatter: %v", err)
+	}
+	if strings.Contains(string(result), "completed_at") || strings.Contains(string(result), "<nil>") {
+		t.Errorf("nil value added a key:\n%s", result)
+	}
+
+	noFM := []byte("Just a body\n")
+	result, err = UpdateFrontmatter(noFM, map[string]interface{}{
+		"completed_at": nil,
+		"status":       "running",
+	})
+	if err != nil {
+		t.Fatalf("UpdateFrontmatter (no frontmatter): %v", err)
+	}
+	if strings.Contains(string(result), "completed_at") || strings.Contains(string(result), "<nil>") {
+		t.Errorf("nil value added a key to new frontmatter:\n%s", result)
+	}
+}
+
+// ParseFrontmatter must treat historically corrupted literal "<nil>" values
+// as unset, so parse→rebuild cycles scrub the corruption.
+func TestParseFrontmatterScrubsNilLiterals(t *testing.T) {
+	content := []byte(`---
+id: test-123
+status: running
+completed_at: <nil>
+duration: <nil>
+last_error: <nil>
+---
+Body
+`)
+	fm, _, err := ParseFrontmatter(content)
+	if err != nil {
+		t.Fatalf("ParseFrontmatter: %v", err)
+	}
+	for _, key := range []string{"completed_at", "duration", "last_error"} {
+		if v, ok := fm[key]; ok {
+			t.Errorf("key %q should have been scrubbed, got %v", key, v)
+		}
+	}
+	if fm["id"] != "test-123" || fm["status"] != "running" {
+		t.Errorf("healthy keys damaged: %v", fm)
+	}
+}
+
+// RebuildMarkdownWithFrontmatter must drop nil-valued keys instead of
+// serializing them.
+func TestRebuildMarkdownWithFrontmatterDropsNil(t *testing.T) {
+	var nilTime *string
+	fm := map[string]interface{}{
+		"id":           "test-123",
+		"completed_at": nil,
+		"duration":     nilTime,
+	}
+	out, err := RebuildMarkdownWithFrontmatter(fm, []byte("Body\n"))
+	if err != nil {
+		t.Fatalf("RebuildMarkdownWithFrontmatter: %v", err)
+	}
+	s := string(out)
+	if strings.Contains(s, "<nil>") || strings.Contains(s, "completed_at") || strings.Contains(s, "duration") {
+		t.Errorf("nil keys serialized:\n%s", s)
+	}
+}

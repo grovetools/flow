@@ -341,6 +341,29 @@ func readFrontmatterHead(path string) (string, error) {
 	return yamlStr, nil
 }
 
+// dropNilScalarLines removes frontmatter lines whose scalar value is the
+// literal string "<nil>" (optionally quoted). These were produced by writers
+// that formatted nil pointers with fmt.Sprint; the intended semantic was
+// always "unset", so dropping the line restores it. Lines that merely contain
+// "<nil>" inside a longer value are left alone.
+func dropNilScalarLines(yamlStr string) string {
+	if !strings.Contains(yamlStr, "<nil>") {
+		return yamlStr
+	}
+	lines := strings.Split(yamlStr, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if _, value, found := strings.Cut(line, ":"); found {
+			switch strings.TrimSpace(value) {
+			case "<nil>", `"<nil>"`, "'<nil>'":
+				continue
+			}
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
 func loadJob(filepath string, withBody bool) (*Job, error) {
 	var yamlStr string
 	var promptBody string
@@ -370,6 +393,12 @@ func loadJob(filepath string, withBody bool) (*Job, error) {
 	if strings.TrimSpace(yamlStr) == "" {
 		return nil, ErrNotAJob{Reason: "no frontmatter"}
 	}
+
+	// Tolerate historical corruption: buggy writers stringified nil
+	// pointers, leaving literal "<nil>" values (completed_at: <nil>,
+	// duration: <nil>, last_error: <nil>) that fail typed unmarshaling and
+	// would otherwise make the whole plan unloadable. Treat them as unset.
+	yamlStr = dropNilScalarLines(yamlStr)
 
 	job := &Job{
 		PromptBody: promptBody,

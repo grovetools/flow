@@ -903,9 +903,10 @@ func (sp *StatePersister) updateFrontmatter(content []byte, updates map[string]i
 		return nil, err
 	}
 
-	// Apply updates
+	// Apply updates. isNilValue also catches typed nils (e.g. a nil
+	// *time.Time) which must remove the key, never be stringified.
 	for key, value := range updates {
-		if value == nil || value == "" || value == 0 {
+		if isNilValue(value) || value == "" || value == 0 {
 			delete(frontmatter, key)
 		} else {
 			frontmatter[key] = value
