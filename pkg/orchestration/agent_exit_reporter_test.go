@@ -26,7 +26,7 @@ func TestReportInteractiveAgentExitStartupDeathAndDuplicate(t *testing.T) {
 	t.Setenv("GROVE_HOME", t.TempDir())
 	job, plan := newPiStartupJob(t)
 	ender := &recordingSessionEnder{}
-	if err := reportInteractiveAgentExit(context.Background(), job, plan, 7, ender); err != nil {
+	if err := reportInteractiveAgentExit(context.Background(), job, plan, "", 7, ender); err != nil {
 		t.Fatal(err)
 	}
 	if ender.calls != 1 || ender.outcome != "interrupted" {
@@ -42,7 +42,7 @@ func TestReportInteractiveAgentExitStartupDeathAndDuplicate(t *testing.T) {
 	if _, err := os.Stat(job.FilePath + ".lock"); !os.IsNotExist(err) {
 		t.Fatalf("lock remains: %v", err)
 	}
-	if err := reportInteractiveAgentExit(context.Background(), job, plan, 7, ender); err != nil {
+	if err := reportInteractiveAgentExit(context.Background(), job, plan, "", 7, ender); err != nil {
 		t.Fatal(err)
 	}
 	if ender.calls != 1 {
@@ -54,11 +54,36 @@ func TestReportInteractiveAgentExitStartupDeathAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestReportInteractiveAgentExitStaleAttemptCannotEndRetry(t *testing.T) {
+	t.Setenv("GROVE_HOME", t.TempDir())
+	job, plan := newPiStartupJob(t)
+	job.AttemptID = "01890f5d-e4b8-7cc4-98c4-dc0c0c07398f"
+	ender := &recordingSessionEnder{}
+
+	if err := reportInteractiveAgentExit(context.Background(), job, plan,
+		"01890f5d-e4b8-7cc3-98c4-dc0c0c07398f", 9, ender); err != nil {
+		t.Fatal(err)
+	}
+	if ender.calls != 0 {
+		t.Fatalf("stale reporter ended current attempt: %d calls", ender.calls)
+	}
+	if _, err := os.Stat(filepath.Join(plan.Directory, ".artifacts", job.ID, supervisedExitReceiptName)); !os.IsNotExist(err) {
+		t.Fatalf("stale reporter claimed current attempt receipt: %v", err)
+	}
+	reloaded, err := LoadJob(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Status != JobStatusRunning {
+		t.Fatalf("stale reporter changed frontmatter to %q", reloaded.Status)
+	}
+}
+
 func TestReportInteractiveAgentExitZeroOnlyEndsSession(t *testing.T) {
 	t.Setenv("GROVE_HOME", t.TempDir())
 	job, plan := newPiStartupJob(t)
 	ender := &recordingSessionEnder{}
-	if err := reportInteractiveAgentExit(context.Background(), job, plan, 0, ender); err != nil {
+	if err := reportInteractiveAgentExit(context.Background(), job, plan, "", 0, ender); err != nil {
 		t.Fatal(err)
 	}
 	if ender.outcome != "exited" {
@@ -88,7 +113,7 @@ func TestReportInteractiveAgentExitEnrichedDoesNotFailFrontmatter(t *testing.T) 
 		t.Fatal(err)
 	}
 	ender := &recordingSessionEnder{}
-	if err := reportInteractiveAgentExit(context.Background(), job, plan, 9, ender); err != nil {
+	if err := reportInteractiveAgentExit(context.Background(), job, plan, "", 9, ender); err != nil {
 		t.Fatal(err)
 	}
 	reloaded, _ := LoadJob(job.FilePath)

@@ -22,7 +22,7 @@ type sessionEnder interface {
 // ReportInteractiveAgentExit owns the terminal handoff for an interactive
 // provider supervised by agentstream. A zero provider exit only retires the
 // daemon session row; it never completes job frontmatter.
-func ReportInteractiveAgentExit(ctx context.Context, planDir, jobID string, exitCode int) error {
+func ReportInteractiveAgentExit(ctx context.Context, planDir, jobID, expectedAttemptID string, exitCode int) error {
 	plan, err := LoadPlan(planDir)
 	if err != nil {
 		return fmt.Errorf("load plan: %w", err)
@@ -33,10 +33,18 @@ func ReportInteractiveAgentExit(ctx context.Context, planDir, jobID string, exit
 	}
 	client := terminalSessionClientForJob(job, plan)
 	defer client.Close()
-	return reportInteractiveAgentExit(ctx, job, plan, exitCode, client)
+	return reportInteractiveAgentExit(ctx, job, plan, expectedAttemptID, exitCode, client)
 }
 
-func reportInteractiveAgentExit(ctx context.Context, job *Job, plan *Plan, exitCode int, ender sessionEnder) error {
+func reportInteractiveAgentExit(ctx context.Context, job *Job, plan *Plan, expectedAttemptID string, exitCode int, ender sessionEnder) error {
+	// The reporter may run after a retry has already started. Its command was
+	// constructed for the provider's original attempt, so it must never load a
+	// reused job ID and terminate the newer attempt. Empty remains legacy-only
+	// compatibility for supervisors launched before attempt propagation landed.
+	if expectedAttemptID != "" && job.AttemptID != expectedAttemptID {
+		return nil
+	}
+
 	outcome := "exited"
 	if exitCode != 0 {
 		outcome = "interrupted"
@@ -199,6 +207,10 @@ func withInlineSupervisorEnv(envPrefix, command string) string {
 }
 
 func InteractiveExitReporterCommand(job *Job, plan *Plan) string {
-	return "flow agent exited --job " + shellSingleQuote(job.ID) +
-		" --plan " + shellSingleQuote(plan.Directory) + " --exit-code"
+	command := "flow agent exited --job " + shellSingleQuote(job.ID) +
+		" --plan " + shellSingleQuote(plan.Directory)
+	if job.AttemptID != "" {
+		command += " --attempt " + shellSingleQuote(job.AttemptID)
+	}
+	return command + " --exit-code"
 }
