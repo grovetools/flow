@@ -254,6 +254,10 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 		return err
 	}
 	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
+	transcriptLaunch, err := capturePiTranscriptLaunch(job, plan.Directory, "")
+	if err != nil {
+		return err
+	}
 	targetPane, err = sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, targetPane, wrappedCommand, "C-m")
 	if err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
@@ -270,7 +274,7 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 	// Asynchronously discover PID + transcript and confirm the session with
 	// the daemon (intent was registered above).
 	go func() {
-		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane); err != nil {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, targetPane, transcriptLaunch); err != nil {
 			p.log.WithError(err).Error("Failed to confirm pi session")
 			// Continue anyway - the agent is running, just tracking may be impaired
 		}
@@ -322,7 +326,7 @@ func (p *PiAgentProvider) buildAgentCommand(job *Job, plan *Plan, briefingFilePa
 // Launch). Designed to run in a goroutine. If the daemon is unreachable it
 // falls back to the filesystem session registry, matching the claude/codex
 // providers' degradation path.
-func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane string) error {
+func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, targetPane string, transcriptLaunch piTranscriptLaunch) error {
 	logger := grovelogging.NewLogger("flow-pi-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
@@ -330,11 +334,6 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 		"plan":        plan.Name,
 		"target_pane": targetPane,
 	}).Debug("Starting async pi PID discovery and confirmation")
-
-	jobStartTime := job.StartTime
-	if jobStartTime.IsZero() {
-		jobStartTime = time.Now()
-	}
 
 	ctx := context.Background()
 
@@ -391,25 +390,15 @@ func (p *PiAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, 
 	// instead of waiting for the next backoff tick to find an empty pane.
 	paneWatcher.observePID(piPID)
 
-	// Discover the transcript via agentstream. The AfterTime filter scopes the
-	// match to sessions started after this launch, so concurrent pi sessions
-	// don't race each other for "newest file" — except when this launch OPENS a
-	// pre-existing transcript (a resume, or a seeded `responder: pi-session`
-	// chat), whose header timestamp necessarily predates the launch. See
-	// piDiscoveryAfterTime.
-	launchSpec, _ := LookupAgentProvider(p.providerName)
-	discovery := agentstream.DiscoverOptions{
-		Provider:   "pi",
-		WorkDir:    workDir,
-		AfterTime:  piDiscoveryAfterTime(launchSpec, plan.Directory, job.ID, false, jobStartTime),
-		SessionDir: piJobSessionDir(plan.Directory, job.ID),
-	}
-	transcriptPath, err := agentstream.DiscoverTranscript(discovery)
+	// Bind discovery to the pre-spawn baseline captured by Launch. A retry's
+	// prior transcript remains in this job-scoped directory and must not be
+	// paired with the new process while Pi is still creating its current file.
+	transcriptPath, err := discoverPiTranscriptForLaunch(plan.Directory, job.ID, transcriptLaunch)
 	if err != nil {
 		logger.WithError(err).Warn("Failed to discover pi transcript, retrying...")
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
-			transcriptPath, err = agentstream.DiscoverTranscript(discovery)
+			transcriptPath, err = discoverPiTranscriptForLaunch(plan.Directory, job.ID, transcriptLaunch)
 			if err == nil {
 				break
 			}

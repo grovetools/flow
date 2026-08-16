@@ -282,7 +282,7 @@ func TestNativeConfirmRoutesThroughPublishedHostDaemon(t *testing.T) {
 	p := NewGrovetermAgentProvider(spec, false, "native")
 	f.job.StartTime = time.Now().Add(-time.Minute)
 
-	if err := p.discoverAndRegisterSessionAsync(f.job, f.plan, f.workDir, ""); err != nil {
+	if err := p.discoverAndRegisterSessionAsync(f.job, f.plan, f.workDir, "", piTranscriptLaunch{}); err != nil {
 		t.Fatalf("discoverAndRegisterSessionAsync: %v", err)
 	}
 

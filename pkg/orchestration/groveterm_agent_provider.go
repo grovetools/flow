@@ -160,6 +160,14 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 		envVars[k] = v
 	}
 
+	var transcriptLaunch piTranscriptLaunch
+	if p.spec.PiRuntime != nil {
+		transcriptLaunch, err = capturePiTranscriptLaunch(job, plan.Directory, expectedNativeID)
+		if err != nil {
+			return err
+		}
+	}
+
 	p.ulog.Info("Spawning native agent pane in groveterm").
 		Field("job_id", job.ID).
 		Field("provider", p.spec.Name).
@@ -197,7 +205,7 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 	// The handle is what makes that safe for a caller that is about to exit —
 	// see awaitSessionConfirmation.
 	p.confirmation = startSessionConfirmation(func() error {
-		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, expectedNativeID); err != nil {
+		if err := p.discoverAndRegisterSessionAsync(job, plan, workDir, expectedNativeID, transcriptLaunch); err != nil {
 			p.log.WithError(err).Error("Failed to discover and register groveterm session")
 			return err
 		}
@@ -224,7 +232,7 @@ func (p *GrovetermAgentProvider) awaitSessionConfirmation(ctx context.Context) e
 // discoverAndRegisterSessionAsync discovers the agent PID and transcript path,
 // then confirms the session with the daemon so log streaming works.
 // Adapted from ClaudeAgentProvider.discoverAndRegisterSessionAsync.
-func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, expectedNativeID string) error {
+func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Plan, workDir, expectedNativeID string, transcriptLaunch piTranscriptLaunch) error {
 	logger := grovelogging.NewLogger("flow-groveterm-session-discovery")
 
 	logger.WithFields(map[string]interface{}{
@@ -267,31 +275,29 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 	// than on the next backoff tick, while the pane still has contents.
 	paneWatcher.observePID(pid)
 
-	// Discover transcript path using the product descriptor. Rebranded Pi
-	// providers emit Pi v3 files but keep their provider identity in records.
+	// Pi-family discovery is launch-bound: ordinary retries may only claim a
+	// file absent from their pre-spawn baseline. Other providers retain their
+	// timestamp-scoped agentstream discovery.
 	discovery := agentstream.DiscoverOptions{
 		Provider:  p.spec.Name,
 		WorkDir:   workDir,
 		AfterTime: jobStartTime,
 	}
-	if p.spec.PiRuntime != nil {
-		discovery.Provider = "pi"
-		discovery.SessionDir = piJobSessionDir(plan.Directory, job.ID)
-		// Resume continues the job's existing transcript in place, and a
-		// seeded `responder: pi-session` chat opens a transcript Flow
-		// synthesized moments earlier; either way the header timestamp predates
-		// this attempt and an AfterTime filter would never match it. The
-		// session dir is job-scoped, so the newest transcript there is the
-		// right one. See piDiscoveryAfterTime.
-		discovery.AfterTime = piDiscoveryAfterTime(p.spec, plan.Directory, job.ID, expectedNativeID != "", jobStartTime)
-	}
 	var transcriptPath string
-	transcriptPath, err = agentstream.DiscoverTranscript(discovery)
+	if p.spec.PiRuntime != nil {
+		transcriptPath, err = discoverPiTranscriptForLaunch(plan.Directory, job.ID, transcriptLaunch)
+	} else {
+		transcriptPath, err = agentstream.DiscoverTranscript(discovery)
+	}
 	if err != nil {
 		logger.WithError(err).Warn("Failed to discover transcript via agentstream, retrying...")
 		for i := 0; i < 10; i++ {
 			time.Sleep(1 * time.Second)
-			transcriptPath, err = agentstream.DiscoverTranscript(discovery)
+			if p.spec.PiRuntime != nil {
+				transcriptPath, err = discoverPiTranscriptForLaunch(plan.Directory, job.ID, transcriptLaunch)
+			} else {
+				transcriptPath, err = agentstream.DiscoverTranscript(discovery)
+			}
 			if err == nil {
 				break
 			}

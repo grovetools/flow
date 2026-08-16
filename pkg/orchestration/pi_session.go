@@ -124,45 +124,96 @@ func isTruthyEnv(value string) bool {
 	return false
 }
 
-// piDiscoveryAfterTime resolves the AfterTime filter for a Pi-family launch's
-// transcript discovery.
-//
-// The filter exists so concurrent launches don't race for "newest file", and it
-// compares against the session header's OWN timestamp. That is correct for a
-// launch that creates its transcript, and wrong for any launch that opens a
-// PRE-EXISTING one: a resumed session, or a `responder: pi-session` chat whose
-// seed was synthesized moments before the process started. In both cases the
-// header timestamp necessarily predates job.StartTime, so an AfterTime filter
-// matches nothing, discovery fails, and the session never gets confirmed with
-// the daemon — leaving a perfectly healthy agent invisible to liveness checks,
-// live-token collection, and `flow plan complete`.
-//
-// The filter is safe to drop in exactly those cases because the session
-// directory is job-scoped: there is no other session in it to race against.
-func piDiscoveryAfterTime(spec *AgentProviderSpec, planDir, jobID string, resuming bool, jobStartTime time.Time) time.Time {
-	if spec == nil || spec.PiRuntime == nil {
-		return jobStartTime
-	}
-	if resuming || piJobHasExistingSession(planDir, jobID) {
-		return time.Time{}
-	}
-	return jobStartTime
+// piTranscriptLaunch binds transcript discovery to one process launch. Fresh
+// launches may only claim files absent before spawn; an explicit resume (or a
+// seeded pi-session chat) names the pre-existing transcript it intentionally
+// opens.
+type piTranscriptLaunch struct {
+	baseline         map[string]struct{}
+	existingPath     string
+	expectedNativeID string
 }
 
-// piJobHasExistingSession reports whether the job's Flow-owned session
-// directory already holds a transcript — i.e. this launch is opening one rather
-// than creating one.
-func piJobHasExistingSession(planDir, jobID string) bool {
-	entries, err := os.ReadDir(piJobSessionDir(planDir, jobID))
-	if err != nil {
-		return false
+// capturePiTranscriptLaunch must run before the agent process is spawned. A
+// job-scoped session directory survives retries, so "newest file" alone can
+// otherwise confirm a new PID against a prior attempt's transcript while Pi is
+// still starting and has not created the current attempt's file yet.
+func capturePiTranscriptLaunch(job *Job, planDir, expectedNativeID string) (piTranscriptLaunch, error) {
+	launch := piTranscriptLaunch{
+		baseline:         make(map[string]struct{}),
+		expectedNativeID: strings.TrimSpace(expectedNativeID),
+	}
+	dir := piJobSessionDir(planDir, job.ID)
+	entries, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return launch, fmt.Errorf("capturing Pi transcript baseline: %w", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
-			return true
+			launch.baseline[entry.Name()] = struct{}{}
 		}
 	}
-	return false
+
+	if job.IsPiSessionResponded() {
+		desc, descErr := ReadPiSessionDescriptor(planDir, job.ID)
+		if descErr != nil {
+			return launch, fmt.Errorf("reading Pi session descriptor for transcript discovery: %w", descErr)
+		}
+		if desc != nil {
+			launch.existingPath = desc.SessionFile
+		}
+	}
+	return launch, nil
+}
+
+// discoverPiTranscriptForLaunch returns only the transcript owned by launch.
+// The explicit-existing branches preserve resume semantics; ordinary retries
+// wait until a filename absent from their pre-spawn baseline appears.
+func discoverPiTranscriptForLaunch(planDir, jobID string, launch piTranscriptLaunch) (string, error) {
+	dir := piJobSessionDir(planDir, jobID)
+	if launch.existingPath != "" {
+		if _, err := os.Stat(launch.existingPath); err != nil {
+			return "", fmt.Errorf("explicit Pi session transcript %s: %w", launch.existingPath, err)
+		}
+		return launch.existingPath, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("reading Pi session directory: %w", err)
+	}
+	var latestPath string
+	var latestModTime time.Time
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if launch.expectedNativeID != "" {
+			if piNativeSessionID(path) == launch.expectedNativeID {
+				return path, nil
+			}
+			continue
+		}
+		if _, existed := launch.baseline[entry.Name()]; existed {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		if latestPath == "" || info.ModTime().After(latestModTime) {
+			latestPath = path
+			latestModTime = info.ModTime()
+		}
+	}
+	if launch.expectedNativeID != "" {
+		return "", fmt.Errorf("Pi session %s not found in %s", launch.expectedNativeID, dir)
+	}
+	if latestPath == "" {
+		return "", fmt.Errorf("no new Pi session files found in %s", dir)
+	}
+	return latestPath, nil
 }
 
 // requirePiTranscriptPath prevents a Pi-family session from becoming live in

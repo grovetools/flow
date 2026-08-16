@@ -4,55 +4,97 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
-// TestPiDiscoveryAfterTime covers the filter that decides whether transcript
-// discovery may reject a session for being "too old".
-//
-// The failure this guards is subtle and total: a seeded pi-session chat opens a
-// transcript whose header timestamp is necessarily EARLIER than job.StartTime
-// (Flow writes the seed, then launches). With the filter left on, discovery
-// matches nothing, the session is never confirmed with the daemon, and a
-// perfectly healthy agent becomes invisible to liveness checks, live-token
-// collection, and `flow plan complete`.
-func TestPiDiscoveryAfterTime(t *testing.T) {
-	spec, _ := LookupAgentProvider("pi")
-	start := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+// TestPiTranscriptDiscoveryIsBoundToLaunch is the multi-attempt regression for
+// retry discovery. Each attempt inherits the same job-scoped session directory,
+// but it must wait for a transcript filename that was absent before its own
+// spawn rather than immediately binding the new PID to the prior attempt.
+func TestPiTranscriptDiscoveryIsBoundToLaunch(t *testing.T) {
+	planDir := t.TempDir()
+	job := &Job{ID: "job-1", Type: JobTypeInteractiveAgent}
+	sessionDir := piJobSessionDir(planDir, job.ID)
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("fresh launch keeps the filter", func(t *testing.T) {
-		planDir := t.TempDir()
-		if got := piDiscoveryAfterTime(spec, planDir, "job-1", false, start); !got.Equal(start) {
-			t.Errorf("AfterTime = %v, want the job start time — a launch that CREATES its transcript still needs the race guard", got)
-		}
-	})
+	attempt1 := filepath.Join(sessionDir, "2026-08-16T15-52-26-630Z_attempt-1.jsonl")
+	if err := os.WriteFile(attempt1, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("resume drops the filter", func(t *testing.T) {
-		planDir := t.TempDir()
-		if got := piDiscoveryAfterTime(spec, planDir, "job-1", true, start); !got.IsZero() {
-			t.Errorf("AfterTime = %v, want zero for a resume", got)
-		}
-	})
+	attempt2Launch, err := capturePiTranscriptLaunch(job, planDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := discoverPiTranscriptForLaunch(planDir, job.ID, attempt2Launch); err == nil {
+		t.Fatalf("attempt 2 discovered %q before its transcript existed; prior attempt must be ignored", got)
+	}
+	attempt2 := filepath.Join(sessionDir, "2026-08-16T16-47-25-184Z_attempt-2.jsonl")
+	if err := os.WriteFile(attempt2, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := discoverPiTranscriptForLaunch(planDir, job.ID, attempt2Launch); err != nil || got != attempt2 {
+		t.Fatalf("attempt 2 discovery = (%q, %v), want %q", got, err, attempt2)
+	}
 
-	t.Run("pre-existing seeded session drops the filter", func(t *testing.T) {
+	attempt3Launch, err := capturePiTranscriptLaunch(job, planDir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := discoverPiTranscriptForLaunch(planDir, job.ID, attempt3Launch); err == nil {
+		t.Fatalf("attempt 3 discovered %q before its transcript existed; both prior attempts must be ignored", got)
+	}
+	attempt3 := filepath.Join(sessionDir, "2026-08-16T17-02-00-000Z_attempt-3.jsonl")
+	if err := os.WriteFile(attempt3, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := discoverPiTranscriptForLaunch(planDir, job.ID, attempt3Launch); err != nil || got != attempt3 {
+		t.Fatalf("attempt 3 discovery = (%q, %v), want %q", got, err, attempt3)
+	}
+}
+
+func TestPiTranscriptDiscoveryPreservesExplicitExistingSession(t *testing.T) {
+	t.Run("resume native id", func(t *testing.T) {
 		planDir := t.TempDir()
-		sessionDir := filepath.Join(planDir, ".artifacts", "job-1", "sessions")
-		if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		job := &Job{ID: "job-1", Type: JobTypeInteractiveAgent}
+		dir := piJobSessionDir(planDir, job.ID)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(sessionDir, "seed.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		path := filepath.Join(dir, "2026-08-16T15-52-26-630Z_resume-id.jsonl")
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if got := piDiscoveryAfterTime(spec, planDir, "job-1", false, start); !got.IsZero() {
-			t.Errorf("AfterTime = %v, want zero when the job's session dir already holds a transcript", got)
+		launch, err := capturePiTranscriptLaunch(job, planDir, "resume-id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := discoverPiTranscriptForLaunch(planDir, job.ID, launch); err != nil || got != path {
+			t.Fatalf("resume discovery = (%q, %v), want %q", got, err, path)
 		}
 	})
 
-	t.Run("non-pi provider is untouched", func(t *testing.T) {
-		claude, _ := LookupAgentProvider("claude")
+	t.Run("seeded pi-session path", func(t *testing.T) {
 		planDir := t.TempDir()
-		if got := piDiscoveryAfterTime(claude, planDir, "job-1", true, start); !got.Equal(start) {
-			t.Errorf("AfterTime = %v, want the job start time for a non-Pi provider", got)
+		job := &Job{ID: "pi-chat", Type: JobTypeChat, Responder: ResponderPiSession}
+		dir := piJobSessionDir(planDir, job.ID)
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		seed := filepath.Join(dir, "seed.jsonl")
+		if err := os.WriteFile(seed, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := WritePiSessionDescriptor(planDir, PiSessionDescriptor{JobID: job.ID, SessionFile: seed}); err != nil {
+			t.Fatal(err)
+		}
+		launch, err := capturePiTranscriptLaunch(job, planDir, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := discoverPiTranscriptForLaunch(planDir, job.ID, launch); err != nil || got != seed {
+			t.Fatalf("seeded session discovery = (%q, %v), want %q", got, err, seed)
 		}
 	})
 }
