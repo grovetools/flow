@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/grovetools/agentlogs/pkg/agentstream"
 	"github.com/grovetools/core/pkg/paths"
 )
@@ -88,10 +90,12 @@ func reportInteractiveAgentExit(ctx context.Context, job *Job, plan *Plan, expec
 	return errors.Join(append([]error{terminalErr}, errs...)...)
 }
 
-// recordInteractiveTerminalOnce shares one attempt-scoped receipt between the
-// supervisor reporter and startup-failure handlers. The daemon independently
-// makes repeated EndSession calls harmless; this receipt additionally keeps
-// job.log to one supervised terminal line.
+// recordInteractiveTerminalOnce shares one attempt-scoped completion receipt
+// between the supervisor reporter and startup-failure handlers. A separate OS
+// lock serializes reporters, but the durable receipt is published only after
+// the breadcrumb and EndSession effects succeed. The breadcrumb write is
+// itself idempotent so a failed EndSession remains retryable without duplicating
+// user-facing output. Daemon terminal mutation remains independently idempotent.
 func recordInteractiveTerminalOnce(ctx context.Context, job *Job, plan *Plan, exitCode int, outcome string, ender sessionEnder) (bool, error) {
 	if job == nil || plan == nil {
 		return false, fmt.Errorf("terminal report requires job and plan")
@@ -100,49 +104,103 @@ func recordInteractiveTerminalOnce(ctx context.Context, job *Job, plan *Plan, ex
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return false, err
 	}
+
+	fileLock := flock.New(filepath.Join(dir, supervisedExitReceiptName+".lock"))
+	locked, err := fileLock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil {
+		_ = fileLock.Close()
+		return false, fmt.Errorf("claim supervised exit: %w", err)
+	}
+	if !locked {
+		_ = fileLock.Close()
+		return false, fmt.Errorf("claim supervised exit: context ended before lock acquired")
+	}
+	defer func() {
+		_ = fileLock.Unlock()
+		_ = fileLock.Close()
+	}()
+
 	receiptPath := filepath.Join(dir, supervisedExitReceiptName)
+	if _, err := os.Stat(receiptPath); err == nil {
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+
+	breadcrumb := fmt.Sprintf("provider exited, code %d, supervised", exitCode)
+	logPath, err := GetJobLogPath(plan, job)
+	if err != nil {
+		return false, err
+	}
+	logData, readErr := os.ReadFile(logPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return false, readErr
+	}
+	if !strings.Contains(string(logData), breadcrumb) {
+		if err := persistAgentStartupLog(plan, job, "INFO", breadcrumb); err != nil {
+			return false, err
+		}
+	}
+
+	if ender != nil {
+		endCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := ender.EndSession(endCtx, job.ID, job.AttemptID, outcome)
+		cancel()
+		if err != nil {
+			return false, fmt.Errorf("end daemon session: %w", err)
+		}
+	}
+
 	receipt := struct {
 		JobID     string    `json:"job_id"`
+		AttemptID string    `json:"attempt_id,omitempty"`
 		ExitCode  int       `json:"exit_code"`
 		Outcome   string    `json:"outcome"`
 		CreatedAt time.Time `json:"created_at"`
-	}{job.ID, exitCode, outcome, time.Now().UTC()}
-	data, _ := json.Marshal(receipt)
-	f, err := os.OpenFile(receiptPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if os.IsExist(err) {
-		return false, nil
-	}
+	}{job.ID, job.AttemptID, exitCode, outcome, time.Now().UTC()}
+	data, err := json.Marshal(receipt)
 	if err != nil {
 		return false, err
 	}
-	if _, err = f.Write(append(data, '\n')); err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		_ = os.Remove(receiptPath)
+	if err := writeSupervisedExitReceipt(receiptPath, append(data, '\n')); err != nil {
 		return false, err
-	}
-	if closeErr != nil {
-		_ = os.Remove(receiptPath)
-		return false, closeErr
 	}
 
-	var errs []error
-	if err := persistAgentStartupLog(plan, job, "INFO", fmt.Sprintf("provider exited, code %d, supervised", exitCode)); err != nil {
-		errs = append(errs, err)
+	// Do not unlink the provider PID receipt here. agentstream removes
+	// acknowledged receipts after reporting and retains unacknowledged fast-exit
+	// receipts until discovery or the next attempt's PreparePIDFile.
+	return true, nil
+}
+
+func writeSupervisedExitReceipt(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".supervised-exit-*.tmp")
+	if err != nil {
+		return err
 	}
-	if ender != nil {
-		endCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		if err := ender.EndSession(endCtx, job.ID, job.AttemptID, outcome); err != nil {
-			errs = append(errs, fmt.Errorf("end daemon session: %w", err))
-		}
-		cancel()
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
 	}
-	// Do not unlink the PID receipt here. agentstream removes acknowledged
-	// receipts after reporting and deliberately retains an unacknowledged
-	// fast-exit receipt until discovery or the next attempt's PreparePIDFile.
-	return true, errors.Join(errs...)
+	if _, err := tmp.Write(data); err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
+	return nil
 }
 
 // currentAttemptHookEnriched distinguishes a positively empty registry from an

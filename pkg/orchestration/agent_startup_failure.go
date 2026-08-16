@@ -67,7 +67,14 @@ func handleAgentStartupFailure(job *Job, plan *Plan, provider string, ev agentSt
 	}
 	client := terminalSessionClientForJob(job, plan)
 	defer client.Close()
-	_, terminalErr := recordInteractiveTerminalOnce(context.Background(), job, plan, 1, "failed", client)
+	completed, terminalErr := recordInteractiveTerminalOnce(context.Background(), job, plan, 1, "failed", client)
+	// A transient reporting failure must remain a pure retry: do not publish
+	// terminal frontmatter before the required daemon effect has succeeded.
+	// completed=false with no error means another reporter already completed the
+	// effects, so the idempotent frontmatter convergence below is still safe.
+	if !completed && terminalErr != nil {
+		return true, errors.Join(breadcrumbErr, terminalErr)
+	}
 
 	diskJob, loadErr := LoadJob(job.FilePath)
 	if loadErr != nil {

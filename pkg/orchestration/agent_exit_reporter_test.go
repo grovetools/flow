@@ -2,9 +2,11 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -119,6 +121,102 @@ func TestReportInteractiveAgentExitEnrichedDoesNotFailFrontmatter(t *testing.T) 
 	reloaded, _ := LoadJob(job.FilePath)
 	if reloaded.Status != JobStatusRunning {
 		t.Fatalf("enriched exit changed status=%q", reloaded.Status)
+	}
+}
+
+type transientSessionEnder struct {
+	mu        sync.Mutex
+	calls     int
+	failFirst bool
+}
+
+func (e *transientSessionEnder) EndSession(context.Context, string, string, string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.calls++
+	if e.failFirst && e.calls == 1 {
+		return errors.New("temporary daemon outage")
+	}
+	return nil
+}
+
+func (e *transientSessionEnder) callCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.calls
+}
+
+func TestReportInteractiveAgentExitTransientFailureRetriesWithoutDuplicateBreadcrumb(t *testing.T) {
+	t.Setenv("GROVE_HOME", t.TempDir())
+	job, plan := newPiStartupJob(t)
+	ender := &transientSessionEnder{failFirst: true}
+
+	if err := reportInteractiveAgentExit(context.Background(), job, plan, "", 9, ender); err == nil {
+		t.Fatal("first report succeeded despite transient EndSession failure")
+	}
+	failedAttempt, err := LoadJob(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failedAttempt.Status != JobStatusRunning {
+		t.Fatalf("transient report failure changed frontmatter to %q", failedAttempt.Status)
+	}
+	receipt := filepath.Join(plan.Directory, ".artifacts", job.ID, supervisedExitReceiptName)
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("failed effects published completion receipt: %v", err)
+	}
+	if err := reportInteractiveAgentExit(context.Background(), job, plan, "", 9, ender); err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	if ender.callCount() != 2 {
+		t.Fatalf("EndSession calls=%d, want failure plus retry", ender.callCount())
+	}
+	if _, err := os.Stat(receipt); err != nil {
+		t.Fatalf("successful retry did not publish receipt: %v", err)
+	}
+	retried, err := LoadJob(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.Status != JobStatusFailed || !strings.Contains(retried.Metadata.LastError, "code 9") {
+		t.Fatalf("retry frontmatter status=%q last_error=%q", retried.Status, retried.Metadata.LastError)
+	}
+	logData, _ := os.ReadFile(filepath.Join(plan.Directory, ".artifacts", job.ID, "job.log"))
+	if got := strings.Count(string(logData), "provider exited, code 9, supervised"); got != 1 {
+		t.Fatalf("terminal breadcrumb count=%d log=%s", got, logData)
+	}
+}
+
+func TestReportInteractiveAgentExitConcurrentReportersApplyEffectsOnce(t *testing.T) {
+	t.Setenv("GROVE_HOME", t.TempDir())
+	job, plan := newPiStartupJob(t)
+	ender := &transientSessionEnder{}
+	const reporters = 8
+	start := make(chan struct{})
+	errs := make(chan error, reporters)
+	var wg sync.WaitGroup
+	for i := 0; i < reporters; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- reportInteractiveAgentExit(context.Background(), job, plan, "", 0, ender)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent reporter failed: %v", err)
+		}
+	}
+	if ender.callCount() != 1 {
+		t.Fatalf("EndSession calls=%d, want exactly one", ender.callCount())
+	}
+	logData, _ := os.ReadFile(filepath.Join(plan.Directory, ".artifacts", job.ID, "job.log"))
+	if got := strings.Count(string(logData), "provider exited, code 0, supervised"); got != 1 {
+		t.Fatalf("terminal breadcrumb count=%d log=%s", got, logData)
 	}
 }
 
