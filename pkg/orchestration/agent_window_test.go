@@ -20,7 +20,9 @@ type fakeAgentWindowEngine struct {
 	sendCalls          int
 	disappearOnSend    bool
 	includeOtherWindow bool
+	duplicateWindows   int
 	sent               [][]string
+	sendTargets        []string
 }
 
 // PaneExists models tmux display-message's misleading behavior for a missing
@@ -37,10 +39,13 @@ func (f *fakeAgentWindowEngine) ListWindows(context.Context, string) ([]mux.Wind
 	}
 	var windows []mux.WindowInfo
 	if f.includeOtherWindow {
-		windows = append(windows, mux.WindowInfo{Name: "shell"})
+		windows = append(windows, mux.WindowInfo{ID: "@0", Index: 0, Name: "shell"})
 	}
 	if f.exists {
-		windows = append(windows, mux.WindowInfo{Name: "job-a"})
+		windows = append(windows, mux.WindowInfo{ID: "@1", Index: 1, Name: "job-a"})
+	}
+	for i := 0; i < f.duplicateWindows; i++ {
+		windows = append(windows, mux.WindowInfo{ID: "@" + string(rune('2'+i)), Index: 2 + i, Name: "job-a"})
 	}
 	return windows, nil
 }
@@ -57,8 +62,9 @@ func (f *fakeAgentWindowEngine) NewWindow(context.Context, string, string, strin
 	return nil
 }
 
-func (f *fakeAgentWindowEngine) SendKeys(_ context.Context, _ string, keys ...string) error {
+func (f *fakeAgentWindowEngine) SendKeys(_ context.Context, target string, keys ...string) error {
 	f.sendCalls++
+	f.sendTargets = append(f.sendTargets, target)
 	f.sent = append(f.sent, append([]string(nil), keys...))
 	if f.disappearOnSend && f.sendCalls == 1 {
 		f.exists = false
@@ -107,6 +113,19 @@ func TestEnsureAgentWindowIgnoresPaneProbeSessionFallback(t *testing.T) {
 	}
 }
 
+func TestSendAgentCommandToWindowTargetsNewestDuplicateByUniqueID(t *testing.T) {
+	engine := &fakeAgentWindowEngine{exists: true, duplicateWindows: 2}
+	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+		t.Fatal(err)
+	}
+	if engine.newWindowCalls != 0 || engine.sendCalls != 1 {
+		t.Fatalf("calls = new-window %d, send %d; want 0, 1", engine.newWindowCalls, engine.sendCalls)
+	}
+	if got := engine.sendTargets[0]; got != "@3" {
+		t.Fatalf("SendKeys target = %q, want newest unique window ID @3", got)
+	}
+}
+
 func TestSendAgentCommandToWindowRecreatesPaneClosedBeforeSend(t *testing.T) {
 	engine := &fakeAgentWindowEngine{exists: true, disappearOnSend: true}
 	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
@@ -144,8 +163,9 @@ type livePaneSendErrorEngine struct {
 	sendErr error
 }
 
-func (e *livePaneSendErrorEngine) SendKeys(_ context.Context, _ string, keys ...string) error {
+func (e *livePaneSendErrorEngine) SendKeys(_ context.Context, target string, keys ...string) error {
 	e.sendCalls++
+	e.sendTargets = append(e.sendTargets, target)
 	e.sent = append(e.sent, append([]string(nil), keys...))
 	return e.sendErr
 }

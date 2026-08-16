@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/grovetools/core/pkg/mux"
 )
@@ -15,75 +16,97 @@ type agentWindowEngine interface {
 	SendKeys(ctx context.Context, target string, keys ...string) error
 }
 
-// agentWindowExists checks the session's window list rather than probing the
-// target as a pane. tmux display-message accepts a missing window target by
-// falling back to the session's current pane, which makes PaneExists unsuitable
-// for deciding whether an exact job window exists.
-func agentWindowExists(ctx context.Context, engine agentWindowEngine, sessionName, windowName string) (bool, error) {
+// findAgentWindow checks the session's exact window list. It returns a unique
+// mux identity rather than a session:name target: tmux permits duplicate window
+// names, and a name target becomes unresolvable once duplicates exist.
+func findAgentWindow(ctx context.Context, engine agentWindowEngine, sessionName, windowName string) (mux.WindowInfo, bool, error) {
 	windows, err := engine.ListWindows(ctx, sessionName)
 	if err != nil {
-		return false, err
+		return mux.WindowInfo{}, false, err
 	}
+	var found mux.WindowInfo
+	ok := false
 	for _, window := range windows {
-		if window.Name == windowName {
-			return true, nil
+		if window.Name != windowName {
+			continue
+		}
+		// Prefer the newest/highest-index match. This deterministically avoids
+		// older empty windows left by interrupted retries.
+		if !ok || window.Index > found.Index || (window.Index == found.Index && window.ID > found.ID) {
+			found, ok = window, true
 		}
 	}
-	return false, nil
+	return found, ok, nil
 }
 
-// ensureAgentWindow returns the job pane, creating it only when it is missing.
-// A failed create is re-probed because another launcher may have won the race.
+func agentWindowTarget(sessionName, windowName string, window mux.WindowInfo) string {
+	if strings.TrimSpace(window.ID) != "" {
+		return window.ID
+	}
+	// Non-tmux engines may not expose a separate window ID. Their names are
+	// unique by contract, so retain the portable target form as a fallback.
+	return fmt.Sprintf("%s:%s", sessionName, windowName)
+}
+
+// ensureAgentWindow returns an unambiguous job-window identity, creating a
+// window only when no exact-name match exists. A failed create is re-probed
+// because another launcher may have won the race.
 func ensureAgentWindow(ctx context.Context, engine agentWindowEngine, sessionName, windowName, workDir string) (string, error) {
-	target := fmt.Sprintf("%s:%s", sessionName, windowName)
-	exists, err := agentWindowExists(ctx, engine, sessionName, windowName)
+	fallback := fmt.Sprintf("%s:%s", sessionName, windowName)
+	window, exists, err := findAgentWindow(ctx, engine, sessionName, windowName)
 	if err != nil {
-		return target, fmt.Errorf("checking agent window %s: %w", target, err)
+		return fallback, fmt.Errorf("checking agent window %s: %w", fallback, err)
 	}
 	if exists {
-		return target, nil
+		return agentWindowTarget(sessionName, windowName, window), nil
 	}
 
 	if createErr := engine.NewWindow(ctx, sessionName, windowName, workDir, true); createErr != nil {
-		// Treat a concurrent creator as success, but never swallow a create
-		// failure merely because it might have been a duplicate.
-		exists, probeErr := agentWindowExists(ctx, engine, sessionName, windowName)
+		window, exists, probeErr := findAgentWindow(ctx, engine, sessionName, windowName)
 		if probeErr == nil && exists {
-			return target, nil
+			return agentWindowTarget(sessionName, windowName, window), nil
 		}
-		return target, fmt.Errorf("creating agent window %s: %w", target, createErr)
+		return fallback, fmt.Errorf("creating agent window %s: %w", fallback, createErr)
 	}
 
-	exists, err = agentWindowExists(ctx, engine, sessionName, windowName)
+	window, exists, err = findAgentWindow(ctx, engine, sessionName, windowName)
 	if err != nil {
-		return target, fmt.Errorf("verifying agent window %s: %w", target, err)
+		return fallback, fmt.Errorf("verifying agent window %s: %w", fallback, err)
 	}
 	if !exists {
-		return target, fmt.Errorf("agent window %s was created but is missing from the session", target)
+		return fallback, fmt.Errorf("agent window %s was created but is missing from the session", fallback)
 	}
-	return target, nil
+	return agentWindowTarget(sessionName, windowName, window), nil
 }
 
-// sendAgentCommandToWindow closes the kill/retry race: completion cleanup can
-// remove the old attempt's window after a retry has first checked it. If the
-// first send finds that the pane disappeared, recreate the window and retry
-// exactly once. An error against a still-live pane is returned without retrying
-// so a command is never delivered twice to an existing agent.
+// sendAgentCommandToWindow closes the kill/retry race. If the selected unique
+// window disappears before delivery, select (or create) the current exact-name
+// window and retry exactly once. An error against the same still-live identity
+// is returned without retrying, so a command is never delivered twice.
 func sendAgentCommandToWindow(ctx context.Context, engine agentWindowEngine, sessionName, windowName, workDir string, keys ...string) error {
 	target, err := ensureAgentWindow(ctx, engine, sessionName, windowName, workDir)
 	if err != nil {
 		return err
 	}
 	if err := engine.SendKeys(ctx, target, keys...); err != nil {
-		exists, probeErr := agentWindowExists(ctx, engine, sessionName, windowName)
-		if probeErr != nil || exists {
+		window, exists, probeErr := findAgentWindow(ctx, engine, sessionName, windowName)
+		if probeErr != nil {
 			return err
 		}
-		if _, ensureErr := ensureAgentWindow(ctx, engine, sessionName, windowName, workDir); ensureErr != nil {
-			return fmt.Errorf("agent pane %s disappeared before send (%v); recreating it failed: %w", target, err, ensureErr)
+		if exists {
+			replacement := agentWindowTarget(sessionName, windowName, window)
+			if replacement == target {
+				return err
+			}
+			target = replacement
+		} else {
+			target, probeErr = ensureAgentWindow(ctx, engine, sessionName, windowName, workDir)
+			if probeErr != nil {
+				return fmt.Errorf("agent window disappeared before send (%v); recreating it failed: %w", err, probeErr)
+			}
 		}
 		if retryErr := engine.SendKeys(ctx, target, keys...); retryErr != nil {
-			return fmt.Errorf("sending agent command after recreating %s: %w", target, retryErr)
+			return fmt.Errorf("sending agent command after selecting %s: %w", target, retryErr)
 		}
 	}
 	return nil
