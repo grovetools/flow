@@ -27,10 +27,12 @@ func preparePiJobSessionDir(planDir, jobID string) (string, error) {
 }
 
 // appendPiJobSessionArgs gives every Pi-family launch path the same Flow-owned
-// transcript directory and the same startup-network policy. Keeping this in one
-// helper prevents less-common paths (notably isolated tmux) from silently
-// falling back to Pi's global session directory, where groved would have to
-// resolve the transcript by scanning.
+// transcript directory, startup-network policy, and session-scoped project
+// trust decision. A Flow dispatch is already an explicit request to run the
+// agent in this worktree; --approve prevents that unattended launch from
+// stalling at Pi's in-pane trust dialog without mutating the user's persistent
+// trust.json. Keeping this in one helper prevents less-common paths (notably
+// isolated tmux) from drifting.
 func appendPiJobSessionArgs(spec *AgentProviderSpec, planDir, jobID string, args []string) ([]string, error) {
 	if spec == nil || spec.PiRuntime == nil {
 		return args, nil
@@ -40,8 +42,23 @@ func appendPiJobSessionArgs(spec *AgentProviderSpec, planDir, jobID string, args
 		return nil, err
 	}
 	out := append([]string{}, args...)
+	out = appendPiProjectTrustArg(out)
 	out = append(out, "--session-dir", dir)
 	return appendPiOfflineStartupArg(out), nil
+}
+
+// piProjectTrustArg is Pi's documented session-scoped project trust override.
+// Respect an explicit user choice in provider args, including the short forms.
+const piProjectTrustArg = "--approve"
+
+func appendPiProjectTrustArg(args []string) []string {
+	for _, arg := range args {
+		switch arg {
+		case "--approve", "-a", "--no-approve", "-na":
+			return args
+		}
+	}
+	return append(args, piProjectTrustArg)
 }
 
 // piOfflineStartupArg is Pi's documented switch for "disable startup network

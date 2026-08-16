@@ -75,6 +75,43 @@ func TestEnforceClaudeFolderTrustRefusesBeforeStateMutation(t *testing.T) {
 	}
 }
 
+func TestEnforceClaudeFolderTrustSeedsBriefingReadPermission(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workDir := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	job, plan := newPiStartupJob(t)
+
+	canonical, err := filepath.Abs(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(canonical); resolveErr == nil {
+		canonical = resolved
+	}
+	trust := map[string]any{"projects": map[string]any{
+		canonical: map[string]any{"hasTrustDialogAccepted": true},
+	}}
+	encoded, _ := json.Marshal(trust)
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := enforceClaudeFolderTrust(context.Background(), job, plan, workDir); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := os.ReadFile(filepath.Join(workDir, ".claude", "settings.local.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Read(//" + strings.TrimPrefix(filepath.ToSlash(plan.Directory), "/") + "/**)"
+	if !strings.Contains(string(settings), want) {
+		t.Fatalf("settings missing briefing read permission %q:\n%s", want, settings)
+	}
+}
+
 func TestClaudeFolderTrustPreflight(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

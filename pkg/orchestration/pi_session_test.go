@@ -43,8 +43,8 @@ func TestAppendPiJobSessionArgsCoversEveryPiFamilyProvider(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := filepath.Join(plan, ".artifacts", "job-a", "sessions")
-		if len(args) != 4 || args[1] != "--session-dir" || args[2] != want || args[3] != piOfflineStartupArg {
-			t.Fatalf("%s args = %#v, want Flow-owned session dir %q then %s", provider, args, want, piOfflineStartupArg)
+		if len(args) != 5 || args[1] != piProjectTrustArg || args[2] != "--session-dir" || args[3] != want || args[4] != piOfflineStartupArg {
+			t.Fatalf("%s args = %#v, want session trust, Flow-owned session dir %q, then %s", provider, args, want, piOfflineStartupArg)
 		}
 		if len(configured) != 1 || configured[0] != "--verbose" {
 			t.Fatalf("%s mutated configured args: %#v", provider, configured)
@@ -91,6 +91,29 @@ func TestAppendPiJobSessionArgsDisablesPiStartupNetwork(t *testing.T) {
 	}
 	if slices.Contains(args, piOfflineStartupArg) {
 		t.Fatalf("claude args = %#v, want no Pi startup flag", args)
+	}
+}
+
+func TestAppendPiJobSessionArgsSeedsSessionScopedProjectTrust(t *testing.T) {
+	plan := t.TempDir()
+	spec, _ := LookupAgentProvider("pi")
+
+	args, err := appendPiJobSessionArgs(spec, plan, "job-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(args, piProjectTrustArg) {
+		t.Fatalf("args = %#v, want %s", args, piProjectTrustArg)
+	}
+
+	for _, explicit := range []string{"--approve", "-a", "--no-approve", "-na"} {
+		args, err = appendPiJobSessionArgs(spec, plan, "job-a", []string{explicit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(args, piProjectTrustArg) != (explicit == piProjectTrustArg) {
+			t.Fatalf("explicit %s was overridden: %#v", explicit, args)
+		}
 	}
 }
 

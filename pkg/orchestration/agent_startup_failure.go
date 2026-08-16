@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grovetools/core/pkg/claudenotebook"
 	"github.com/grovetools/core/pkg/claudetrust"
 	"github.com/grovetools/core/pkg/process"
 	"github.com/grovetools/core/pkg/workspace"
@@ -164,6 +165,14 @@ func claudeFolderTrusted(workDir string) (bool, error) {
 // dialog before hooks can identify the session. It must run before status,
 // intent, pane, lock, or process side effects.
 func enforceClaudeFolderTrust(ctx context.Context, job *Job, plan *Plan, workDir string) error {
+	// The briefing is deliberately stored in the notespace plan, which is often
+	// outside the agent cwd. Seed the exact plan directory before launch so
+	// Claude can read its own briefing without an unattended in-pane permission
+	// prompt. The merge is additive and preserves user settings.
+	if err := claudenotebook.SeedNotebookDirs(workDir, []string{plan.Directory}); err != nil {
+		return refuseClaudeTrust(job, plan, workDir, fmt.Errorf("seed briefing access: %w", err))
+	}
+
 	canonical, err := pathutil.CanonicalPath(workDir)
 	if err != nil {
 		return refuseClaudeTrust(job, plan, workDir, fmt.Errorf("canonicalize cwd: %w", err))
