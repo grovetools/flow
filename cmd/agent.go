@@ -862,7 +862,11 @@ where '<slug> <job>' fails with "could not resolve plan").`,
 			// daemon's session id. This is the orphan escape hatch — it works
 			// even after the plan has been finished/archived.
 			if sessionID != "" {
-				if err := client.KillSession(ctx, sessionID); err != nil {
+				attemptID := ""
+				if session, lookupErr := client.GetSession(ctx, sessionID); lookupErr == nil && session != nil {
+					attemptID = session.AttemptID
+				}
+				if err := client.KillSession(ctx, sessionID, attemptID); err != nil {
 					return fmt.Errorf("kill agent %q: %w", sessionID, err)
 				}
 				fmt.Printf("Agent session %q killed.\n", sessionID)
@@ -874,7 +878,7 @@ where '<slug> <job>' fails with "could not resolve plan").`,
 				return err
 			}
 
-			if err := client.KillSession(ctx, job.ID); err != nil {
+			if err := client.KillSession(ctx, job.ID, job.AttemptID); err != nil {
 				return fmt.Errorf("kill agent: %w", err)
 			}
 

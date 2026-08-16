@@ -1016,7 +1016,7 @@ func BuildItems(bctx BuildContext, opts Options) (*Result, error) {
 				planBaseName := filepath.Base(planPath)
 				for _, s := range sessions {
 					if s.PlanName == planBaseName && (s.Status == "running" || s.Status == "idle" || s.Status == "pending_user") {
-						if killErr := client.KillSession(ctx, s.ID); killErr != nil {
+						if killErr := client.KillSession(ctx, s.ID, s.AttemptID); killErr != nil {
 							fmt.Fprintf(out, "    Note: could not kill session %s (%s): %v\n", s.JobTitle, s.ID, killErr)
 						}
 					}
