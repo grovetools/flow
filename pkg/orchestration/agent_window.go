@@ -3,23 +3,42 @@ package orchestration
 import (
 	"context"
 	"fmt"
+
+	"github.com/grovetools/core/pkg/mux"
 )
 
 // agentWindowEngine is the narrow part of mux.MuxEngine needed to launch an
 // interactive agent into its job window.
 type agentWindowEngine interface {
-	PaneExists(ctx context.Context, target string) (bool, error)
+	ListWindows(ctx context.Context, sessionName string) ([]mux.WindowInfo, error)
 	NewWindow(ctx context.Context, sessionName, windowName, workDir string, detached bool) error
 	SendKeys(ctx context.Context, target string, keys ...string) error
+}
+
+// agentWindowExists checks the session's window list rather than probing the
+// target as a pane. tmux display-message accepts a missing window target by
+// falling back to the session's current pane, which makes PaneExists unsuitable
+// for deciding whether an exact job window exists.
+func agentWindowExists(ctx context.Context, engine agentWindowEngine, sessionName, windowName string) (bool, error) {
+	windows, err := engine.ListWindows(ctx, sessionName)
+	if err != nil {
+		return false, err
+	}
+	for _, window := range windows {
+		if window.Name == windowName {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ensureAgentWindow returns the job pane, creating it only when it is missing.
 // A failed create is re-probed because another launcher may have won the race.
 func ensureAgentWindow(ctx context.Context, engine agentWindowEngine, sessionName, windowName, workDir string) (string, error) {
 	target := fmt.Sprintf("%s:%s", sessionName, windowName)
-	exists, err := engine.PaneExists(ctx, target)
+	exists, err := agentWindowExists(ctx, engine, sessionName, windowName)
 	if err != nil {
-		return target, fmt.Errorf("checking agent pane %s: %w", target, err)
+		return target, fmt.Errorf("checking agent window %s: %w", target, err)
 	}
 	if exists {
 		return target, nil
@@ -28,19 +47,19 @@ func ensureAgentWindow(ctx context.Context, engine agentWindowEngine, sessionNam
 	if createErr := engine.NewWindow(ctx, sessionName, windowName, workDir, true); createErr != nil {
 		// Treat a concurrent creator as success, but never swallow a create
 		// failure merely because it might have been a duplicate.
-		exists, probeErr := engine.PaneExists(ctx, target)
+		exists, probeErr := agentWindowExists(ctx, engine, sessionName, windowName)
 		if probeErr == nil && exists {
 			return target, nil
 		}
 		return target, fmt.Errorf("creating agent window %s: %w", target, createErr)
 	}
 
-	exists, err = engine.PaneExists(ctx, target)
+	exists, err = agentWindowExists(ctx, engine, sessionName, windowName)
 	if err != nil {
-		return target, fmt.Errorf("verifying agent pane %s: %w", target, err)
+		return target, fmt.Errorf("verifying agent window %s: %w", target, err)
 	}
 	if !exists {
-		return target, fmt.Errorf("agent window %s was created but its pane is missing", target)
+		return target, fmt.Errorf("agent window %s was created but is missing from the session", target)
 	}
 	return target, nil
 }
@@ -56,7 +75,7 @@ func sendAgentCommandToWindow(ctx context.Context, engine agentWindowEngine, ses
 		return err
 	}
 	if err := engine.SendKeys(ctx, target, keys...); err != nil {
-		exists, probeErr := engine.PaneExists(ctx, target)
+		exists, probeErr := agentWindowExists(ctx, engine, sessionName, windowName)
 		if probeErr != nil || exists {
 			return err
 		}

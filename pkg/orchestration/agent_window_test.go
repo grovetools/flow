@@ -5,21 +5,44 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/grovetools/core/pkg/mux"
 )
 
 type fakeAgentWindowEngine struct {
-	exists          bool
-	paneErr         error
-	createErr       error
-	createdOnError  bool
-	newWindowCalls  int
-	sendCalls       int
-	disappearOnSend bool
-	sent            [][]string
+	exists             bool
+	paneFallback       bool
+	paneErr            error
+	createErr          error
+	createdOnError     bool
+	newWindowCalls     int
+	paneExistsCalls    int
+	sendCalls          int
+	disappearOnSend    bool
+	includeOtherWindow bool
+	sent               [][]string
 }
 
+// PaneExists models tmux display-message's misleading behavior for a missing
+// window. It is intentionally not part of agentWindowEngine; the regression
+// below proves the launch path never consults it.
 func (f *fakeAgentWindowEngine) PaneExists(context.Context, string) (bool, error) {
-	return f.exists, f.paneErr
+	f.paneExistsCalls++
+	return f.exists || f.paneFallback, f.paneErr
+}
+
+func (f *fakeAgentWindowEngine) ListWindows(context.Context, string) ([]mux.WindowInfo, error) {
+	if f.paneErr != nil {
+		return nil, f.paneErr
+	}
+	var windows []mux.WindowInfo
+	if f.includeOtherWindow {
+		windows = append(windows, mux.WindowInfo{Name: "shell"})
+	}
+	if f.exists {
+		windows = append(windows, mux.WindowInfo{Name: "job-a"})
+	}
+	return windows, nil
 }
 
 func (f *fakeAgentWindowEngine) NewWindow(context.Context, string, string, string, bool) error {
@@ -64,6 +87,23 @@ func TestSendAgentCommandToWindowCreatesMissingPane(t *testing.T) {
 	}
 	if engine.newWindowCalls != 1 || engine.sendCalls != 1 {
 		t.Fatalf("calls = new-window %d, send %d; want 1, 1", engine.newWindowCalls, engine.sendCalls)
+	}
+}
+
+func TestEnsureAgentWindowIgnoresPaneProbeSessionFallback(t *testing.T) {
+	engine := &fakeAgentWindowEngine{
+		paneFallback:       true,
+		includeOtherWindow: true,
+	}
+
+	if _, err := ensureAgentWindow(context.Background(), engine, "wt", "job-a", "/work"); err != nil {
+		t.Fatal(err)
+	}
+	if engine.newWindowCalls != 1 {
+		t.Fatalf("NewWindow called %d times, want 1 for missing exact window", engine.newWindowCalls)
+	}
+	if engine.paneExistsCalls != 0 {
+		t.Fatalf("PaneExists called %d times; fallback-prone probe must not be used", engine.paneExistsCalls)
 	}
 }
 
