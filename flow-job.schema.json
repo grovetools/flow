@@ -237,6 +237,10 @@
       "type": "integer",
       "description": "Number of retries for transient failures (default 1)"
     },
+    "attempt_id": {
+      "type": "string",
+      "description": "Opaque UUIDv7 identity for the current execution attempt"
+    },
     "created_at": {
       "type": "string",
       "format": "date-time",
