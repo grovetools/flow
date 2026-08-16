@@ -306,8 +306,8 @@ func (e *IsolatedAgentExecutor) launchIsolatedAgent(ctx context.Context, job *Jo
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	configPath := strings.ReplaceAll(AgentConfigArtifactPath(plan.Directory, job.ID), "'", "'\\''")
-	envPrefix := agentEnvInline(agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' GROVE_CONFIG_FILE='%s' ",
-		job.ID, job.FilePath, plan.Name, escapedTitle, configPath)
+	envPrefix := agentEnvInline(agentEnv) + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_ATTEMPT_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s GROVE_FLOW_ISOLATED='true' GROVE_CONFIG_FILE='%s' ",
+		job.ID, job.AttemptID, job.FilePath, plan.Name, escapedTitle, configPath)
 	envPrefix += playbookEnvInline(job, plan)
 
 	// Wrap agent command with deterministic PID capture, then prefix
@@ -421,39 +421,14 @@ func (e *IsolatedAgentExecutor) discoverAndRegisterSession(job *Job, plan *Plan,
 		defer daemonClient.Close()
 		confirmed = daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
 			JobID:          job.ID,
+			AttemptID:      job.AttemptID,
 			NativeID:       nativeID,
 			PID:            agentPID,
 			TranscriptPath: transcriptPath,
 		}) == nil
 	}
 
-	// Get user info
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "unknown"
-	}
-
-	// Get git info
-	repo, branch := getGitInfo(workDir)
-
-	// Create metadata
-	metadata := sessions.SessionMetadata{
-		SessionID:        job.ID,
-		ParentJobID:      job.ParentJobID,
-		ClaudeSessionID:  "", // Will be discovered later if needed
-		Provider:         providerName,
-		PID:              agentPID,
-		WorkingDirectory: workDir,
-		User:             user,
-		Repo:             repo,
-		Branch:           branch,
-		StartedAt:        time.Now(),
-		JobTitle:         job.Title,
-		PlanName:         plan.Name,
-		JobFilePath:      job.FilePath,
-		Type:             "isolated_agent",
-		TranscriptPath:   transcriptPath,
-	}
+	metadata := newFallbackSessionMetadata(job, plan, workDir, providerName, "", "isolated_agent", transcriptPath, agentPID)
 	if confirmed {
 		logger.WithFields(logrus.Fields{
 			"session_id":      job.ID,

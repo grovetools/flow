@@ -16,6 +16,7 @@ import (
 func newAgentSessionIntent(job *Job, plan *Plan, provider, workDir, muxType string) daemon.SessionIntent {
 	return daemon.SessionIntent{
 		JobID:        job.ID,
+		AttemptID:    job.AttemptID,
 		ParentJobID:  job.ParentJobID,
 		Provider:     provider,
 		JobFilePath:  job.FilePath,

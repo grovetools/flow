@@ -1,16 +1,18 @@
 package scenarios
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/grovetools/agentlogs/pkg/transcript"
 	"github.com/grovetools/core/config"
+	coredaemon "github.com/grovetools/core/pkg/daemon"
 	"github.com/grovetools/tend/pkg/assert"
 	"github.com/grovetools/tend/pkg/fs"
 	"github.com/grovetools/tend/pkg/git"
@@ -45,19 +47,22 @@ func hooksSessionsDir(ctx *harness.Context) string {
 	return filepath.Join(ctx.StateDir(), "grove", "hooks", "sessions")
 }
 
-// jobIDFromFile extracts the `id:` frontmatter value from a job file.
-func jobIDFromFile(jobPath string) (string, error) {
+// jobFrontmatterString extracts one scalar frontmatter value from a job file.
+func jobFrontmatterString(jobPath, field string) (string, error) {
 	content, err := fs.ReadString(jobPath)
 	if err != nil {
 		return "", fmt.Errorf("reading job file: %w", err)
 	}
+	prefix := field + ": "
 	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "id: ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "id:")), nil
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix)), nil
 		}
 	}
-	return "", fmt.Errorf("could not find job ID in %s", jobPath)
+	return "", fmt.Errorf("could not find %s in %s", field, jobPath)
 }
+
+func jobIDFromFile(jobPath string) (string, error) { return jobFrontmatterString(jobPath, "id") }
 
 // readSessionMetadata parses a session dir's metadata.json into a generic map.
 func readSessionMetadata(sessionDir string) (map[string]interface{}, error) {
@@ -72,66 +77,57 @@ func readSessionMetadata(sessionDir string) (map[string]interface{}, error) {
 	return m, nil
 }
 
-// writeSessionMetadata writes a metadata map back to a session dir.
-func writeSessionMetadata(sessionDir string, m map[string]interface{}) error {
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
+var localClientEnvMu sync.Mutex
+
+// withSandboxLocalClient runs the real core LocalClient against this scenario's
+// XDG sandbox. Core resolves paths from process environment, so serialize the
+// brief override to keep parallel scenario sandboxes isolated.
+func withSandboxLocalClient(ctx *harness.Context, fn func(*coredaemon.LocalClient) error) error {
+	localClientEnvMu.Lock()
+	defer localClientEnvMu.Unlock()
+	type prior struct {
+		value string
+		set   bool
 	}
-	return fs.WriteString(filepath.Join(sessionDir, "metadata.json"), string(data))
+	old := map[string]prior{}
+	defer func() {
+		for key, p := range old {
+			if p.set {
+				_ = os.Setenv(key, p.value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	}()
+	for _, entry := range ctx.SandboxEnv() {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		v, set := os.LookupEnv(key)
+		old[key] = prior{v, set}
+		if err := os.Setenv(key, value); err != nil {
+			return err
+		}
+	}
+	return fn(coredaemon.NewLocalClient())
 }
 
-// promoteIntentToConfirmed performs the registry write the hooks/plugin
-// confirm step performs in the daemonless (LocalClient) path: the intent
-// record (dir keyed by job ID, PID 0) becomes a confirmed record keyed by the
-// agent's NATIVE session id, carrying a live PID and the transcript path.
-// (See LocalClient.ConfirmSession + FileSystemRegistry.Register: the dir is
-// named after ClaudeSessionID once known.) The intent dir is removed so the
-// registry holds exactly the state a confirmed session leaves behind.
-//
-// PID 1 is used as the "live agent" PID: it is always alive (signal 0 →
-// EPERM → alive per core process.IsProcessAlive), and CompleteJob's SIGTERM
-// against it fails harmlessly with a non-fatal note, so no real process is
-// ever killed by the teardown assertions.
-func promoteIntentToConfirmed(ctx *harness.Context, jobID, nativeID, transcriptPath string) error {
-	base := hooksSessionsDir(ctx)
-	intentDir := filepath.Join(base, jobID)
-
-	m, err := readSessionMetadata(intentDir)
-	if err != nil {
-		return fmt.Errorf("intent session for %s: %w", jobID, err)
-	}
-	m["claude_session_id"] = nativeID
-	m["pid"] = 1
-	if transcriptPath != "" {
-		m["transcript_path"] = transcriptPath
-	}
-
-	confirmedDir := filepath.Join(base, nativeID)
-	if err := fs.CreateDir(confirmedDir); err != nil {
-		return err
-	}
-	if err := writeSessionMetadata(confirmedDir, m); err != nil {
-		return err
-	}
-	if err := fs.WriteString(filepath.Join(confirmedDir, "pid.lock"), strconv.Itoa(1)); err != nil {
-		return err
-	}
-	return os.RemoveAll(intentDir)
+func confirmIntentInPlace(ctx *harness.Context, jobID, attemptID, nativeID, transcriptPath string) error {
+	return withSandboxLocalClient(ctx, func(client *coredaemon.LocalClient) error {
+		return client.ConfirmSession(context.Background(), coredaemon.SessionConfirmation{
+			JobID: jobID, AttemptID: attemptID, NativeID: nativeID, PID: 1, TranscriptPath: transcriptPath,
+		})
+	})
 }
 
 // simulateOutcomeEvent delivers a provider lifecycle event's effect at the
 // hooks/registry boundary: the status write `grove hooks` performs via
-// UpdateSessionStatus in the daemonless path (FileSystemRegistry.UpdateStatus
-// on the dir keyed by the native session id).
-func simulateOutcomeEvent(ctx *harness.Context, nativeID, status string) error {
-	sessionDir := filepath.Join(hooksSessionsDir(ctx), nativeID)
-	m, err := readSessionMetadata(sessionDir)
-	if err != nil {
-		return err
-	}
-	m["status"] = status
-	return writeSessionMetadata(sessionDir, m)
+// UpdateSessionStatus in the daemonless path, joined by exact job+attempt.
+func simulateOutcomeEvent(ctx *harness.Context, jobID, attemptID, status string) error {
+	return withSandboxLocalClient(ctx, func(client *coredaemon.LocalClient) error {
+		return client.UpdateSessionStatus(context.Background(), jobID, attemptID, status)
+	})
 }
 
 // agentListJSON runs `flow agent list --json` and parses the entries.
@@ -411,9 +407,14 @@ func createProviderOutcomeScenario(o providerOutcomeSpec) *harness.Scenario {
 					return err
 				}
 
-				// The provider must have registered a session intent in the
-				// filesystem registry BEFORE the launch returned.
-				intentDir := filepath.Join(hooksSessionsDir(ctx), jobID)
+				// The provider must have registered an attempt-keyed session
+				// intent before launch returned.
+				attemptID, err := jobFrontmatterString(jobPath, "attempt_id")
+				if err != nil {
+					return err
+				}
+				ctx.Set("attempt_id", attemptID)
+				intentDir := filepath.Join(hooksSessionsDir(ctx), attemptID)
 				m, err := readSessionMetadata(intentDir)
 				if err != nil {
 					return fmt.Errorf("session intent not registered: %w", err)
@@ -427,12 +428,14 @@ func createProviderOutcomeScenario(o providerOutcomeSpec) *harness.Scenario {
 				return ctx.Verify(func(v *verify.Collector) {
 					v.Equal("intent records the provider", p.Name, m["provider"])
 					v.Equal("intent records the job id", jobID, m["session_id"])
+					v.Equal("intent records the attempt id", attemptID, m["attempt_id"])
 					v.Equal("intent type is interactive_agent", "interactive_agent", m["type"])
 				})
 			}),
 
 			harness.NewStep("Simulate the agent process + hooks confirm (native id, PID, transcript)", func(ctx *harness.Context) error {
 				jobID := ctx.GetString("job_id")
+				attemptID := ctx.GetString("attempt_id")
 				workDir := ctx.GetString("agent_work_dir")
 
 				nativeID, transcriptPath, err := o.simulateAgent(ctx, workDir)
@@ -442,7 +445,18 @@ func createProviderOutcomeScenario(o providerOutcomeSpec) *harness.Scenario {
 				ctx.Set("native_id", nativeID)
 				ctx.Set("transcript_path", transcriptPath)
 
-				return promoteIntentToConfirmed(ctx, jobID, nativeID, transcriptPath)
+				if err := confirmIntentInPlace(ctx, jobID, attemptID, nativeID, transcriptPath); err != nil {
+					return err
+				}
+				if err := fs.AssertExists(filepath.Join(hooksSessionsDir(ctx), attemptID, "metadata.json")); err != nil {
+					return fmt.Errorf("attempt-keyed record missing after confirm: %w", err)
+				}
+				if nativeID != attemptID {
+					if err := fs.AssertNotExists(filepath.Join(hooksSessionsDir(ctx), nativeID)); err != nil {
+						return fmt.Errorf("confirm created duplicate native-keyed record: %w", err)
+					}
+				}
+				return nil
 			}),
 
 			harness.NewStep("Agent is visible in `flow agent list`", func(ctx *harness.Context) error {
@@ -467,8 +481,9 @@ func createProviderOutcomeScenario(o providerOutcomeSpec) *harness.Scenario {
 			}),
 
 			harness.NewStep(fmt.Sprintf("Outcome transition: %s => idle", o.eventDoc), func(ctx *harness.Context) error {
-				nativeID := ctx.GetString("native_id")
-				return simulateOutcomeEvent(ctx, nativeID, "idle")
+				jobID := ctx.GetString("job_id")
+				attemptID := ctx.GetString("attempt_id")
+				return simulateOutcomeEvent(ctx, jobID, attemptID, "idle")
 			}),
 
 			harness.NewStep("Idle must NOT complete the job, and drops it from the active agent list", func(ctx *harness.Context) error {
@@ -515,6 +530,7 @@ func createProviderOutcomeScenario(o providerOutcomeSpec) *harness.Scenario {
 				planPath := ctx.GetString("plan_path")
 				jobID := ctx.GetString("job_id")
 				nativeID := ctx.GetString("native_id")
+				attemptID := ctx.GetString("attempt_id")
 
 				artifactDir := filepath.Join(planPath, ".artifacts", jobID)
 				archivedMetadata := filepath.Join(artifactDir, "metadata.json")
@@ -540,7 +556,7 @@ func createProviderOutcomeScenario(o providerOutcomeSpec) *harness.Scenario {
 
 				// EndSession must have persisted the terminal status into the
 				// (confirmed) registry record.
-				sessionMeta, err := readSessionMetadata(filepath.Join(hooksSessionsDir(ctx), nativeID))
+				sessionMeta, err := readSessionMetadata(filepath.Join(hooksSessionsDir(ctx), attemptID))
 				if err != nil {
 					return fmt.Errorf("confirmed session record should survive completion for archival: %w", err)
 				}

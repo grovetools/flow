@@ -23,7 +23,8 @@ modified: 2026-01-01T00:00:00Z
 
 	// Add error fields if status is failed
 	if status == string(JobStatusFailed) {
-		frontmatter += `last_error: "transient API error"
+		frontmatter += `attempt_id: 01890f5d-e4b8-7cc3-98c4-dc0c0c07398f
+last_error: "transient API error"
 completed_at: 2026-01-02T00:00:00Z
 duration: 5m30s
 `
@@ -56,6 +57,9 @@ This is a test job file.
 		Type:     JobTypeInteractiveAgent,
 		Status:   JobStatus(status),
 		Template: "generic",
+	}
+	if status == string(JobStatusFailed) {
+		job.AttemptID = "01890f5d-e4b8-7cc3-98c4-dc0c0c07398f"
 	}
 
 	return job
@@ -100,6 +104,15 @@ func TestRetryJob_FromFailed(t *testing.T) {
 	}
 	if strings.Contains(contentStr, "duration") {
 		t.Errorf("expected duration to be cleared, but found it in file")
+	}
+	if strings.Contains(contentStr, "attempt_id") || job.AttemptID != "" {
+		t.Fatalf("retry-to-pending retained attempt identity: file=%s job=%q", contentStr, job.AttemptID)
+	}
+	if err := NewStatePersister().UpdateJobStatus(job, JobStatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	if job.AttemptID == "" || job.AttemptID == "01890f5d-e4b8-7cc3-98c4-dc0c0c07398f" {
+		t.Fatalf("new retry attempt id = %q", job.AttemptID)
 	}
 }
 

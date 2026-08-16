@@ -847,29 +847,63 @@ func (e *OneShotExecutor) appendToJobFile(output string, job *Job) error {
 	return nil
 }
 
-// updateJobFile updates the job file with current status.
+// updateJobFile updates the job file with current status. Some executors set
+// job.Status before calling this legacy helper, so it must inspect the persisted
+// status (not the in-memory value) to detect an execution edge. The attempt ID,
+// start timestamp, and running status are committed under one lock and atomic
+// rename just like StatePersister.UpdateJobStatus.
 func updateJobFile(job *Job) error {
-	// Read current content
+	sp := NewStatePersister()
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+
+	lock, err := sp.lockFile(job.FilePath)
+	if err != nil {
+		return fmt.Errorf("acquire lock: %w", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
 	content, err := os.ReadFile(job.FilePath)
 	if err != nil {
 		return fmt.Errorf("reading job file: %w", err)
 	}
+	frontmatter, _, err := ParseFrontmatter(content)
+	if err != nil {
+		return fmt.Errorf("parsing frontmatter: %w", err)
+	}
+	persistedStatus, _ := frontmatter["status"].(string)
 
-	// Update status in frontmatter
-	updates := map[string]interface{}{
-		"status": string(job.Status),
+	updates := map[string]interface{}{"status": string(job.Status)}
+	if job.Status == JobStatusRunning && JobStatus(persistedStatus) != JobStatusRunning {
+		attempt, err := uuid.NewV7()
+		if err != nil {
+			return fmt.Errorf("generate attempt id: %w", err)
+		}
+		now := time.Now().UTC().Truncate(time.Second)
+		job.AttemptID = attempt.String()
+		job.StartTime = now
+		updates["attempt_id"] = job.AttemptID
+		updates["started_at"] = now.Format(time.RFC3339)
+		updates["updated_at"] = now.Format(time.RFC3339)
+		updates["completed_at"] = nil
+		updates["duration"] = nil
+		updates["last_error"] = nil
+		job.EndTime = time.Time{}
+		job.CompletedAt = time.Time{}
+		job.Duration = 0
+		job.Metadata.LastError = ""
+	} else if job.Status == JobStatusPending {
+		job.AttemptID = ""
+		updates["attempt_id"] = nil
 	}
 
 	newContent, err := UpdateFrontmatter(content, updates)
 	if err != nil {
 		return fmt.Errorf("updating frontmatter: %w", err)
 	}
-
-	// Write back
-	if err := os.WriteFile(job.FilePath, newContent, 0o600); err != nil {
+	if err := sp.writeAtomic(job.FilePath, newContent); err != nil {
 		return fmt.Errorf("writing job file: %w", err)
 	}
-
 	return nil
 }
 

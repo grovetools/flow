@@ -226,6 +226,11 @@ type Job struct {
 	AutoComplete     bool   `yaml:"auto_complete,omitempty" json:"auto_complete,omitempty" jsonschema:"description=For chat jobs: transition to completed instead of pending_user (bypassing review gate)"`
 	RetryTransient   int    `yaml:"retry_transient,omitempty" json:"retry_transient,omitempty" jsonschema:"description=Number of retries for transient failures (default 1)"`
 
+	// AttemptID is minted exactly once for each transition into running. It is
+	// persisted so every session lifecycle writer can bind to this execution
+	// rather than the reusable Job.ID.
+	AttemptID string `yaml:"attempt_id,omitempty" json:"attempt_id,omitempty" jsonschema:"description=Opaque UUIDv7 identity for the current execution attempt"`
+
 	// Timestamps (auto-managed)
 	CreatedAt   time.Time     `yaml:"created_at,omitempty" json:"created_at,omitempty" jsonschema:"description=When the job was created"`
 	UpdatedAt   time.Time     `yaml:"updated_at,omitempty" json:"updated_at,omitempty" jsonschema:"description=When the job was last modified"`

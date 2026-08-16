@@ -9,7 +9,50 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+func TestStatePersisterRunningTransitionMintsUUIDv7ExactlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "job.md")
+	if err := os.WriteFile(path, []byte("---\nid: job\nstatus: pending\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := &Job{ID: "job", Status: JobStatusPending, FilePath: path}
+	sp := NewStatePersister()
+	if err := sp.UpdateJobStatus(job, JobStatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	first := job.AttemptID
+	parsed, err := uuid.Parse(first)
+	if err != nil || parsed.Version() != 7 {
+		t.Fatalf("attempt_id = %q, want UUIDv7 (parse err %v)", first, err)
+	}
+	if err := sp.UpdateJobStatus(job, JobStatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	if job.AttemptID != first {
+		t.Fatalf("redundant running write replaced attempt %q with %q", first, job.AttemptID)
+	}
+	content, _ := os.ReadFile(path)
+	fm, _, _ := ParseFrontmatter(content)
+	if fm["attempt_id"] != first {
+		t.Fatalf("persisted attempt_id = %v, want %q", fm["attempt_id"], first)
+	}
+	if err := sp.UpdateJobStatus(job, JobStatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if job.AttemptID != "" {
+		t.Fatalf("pending retained attempt %q", job.AttemptID)
+	}
+	if err := sp.UpdateJobStatus(job, JobStatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	if job.AttemptID == "" || job.AttemptID == first {
+		t.Fatalf("retry attempt = %q, want fresh id distinct from %q", job.AttemptID, first)
+	}
+}
 
 func TestStatePersister_UpdateJobStatus(t *testing.T) {
 	tests := []struct {

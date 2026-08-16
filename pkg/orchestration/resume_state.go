@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // BeginResumedAttempt atomically transitions a completed job into a fresh
@@ -35,9 +37,15 @@ func (sp *StatePersister) BeginResumedAttempt(job *Job) (func() error, error) {
 	}
 	originalJob := *job
 	attemptTime := time.Now().UTC().Truncate(time.Second)
+	attempt, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("generate attempt id: %w", err)
+	}
+	attemptID := attempt.String()
 
 	updates := map[string]interface{}{
 		"status":       string(JobStatusRunning),
+		"attempt_id":   attemptID,
 		"started_at":   attemptTime.Format(time.RFC3339),
 		"updated_at":   attemptTime.Format(time.RFC3339),
 		"completed_at": nil,
@@ -53,6 +61,7 @@ func (sp *StatePersister) BeginResumedAttempt(job *Job) (func() error, error) {
 	}
 
 	job.Status = JobStatusRunning
+	job.AttemptID = attemptID
 	job.StartTime = attemptTime
 	job.EndTime = time.Time{}
 	job.UpdatedAt = attemptTime

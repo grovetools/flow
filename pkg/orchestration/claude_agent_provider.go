@@ -218,8 +218,8 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 			scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 		}
 		escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-		envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-			job.ID, job.FilePath, plan.Name, escapedTitle)
+		envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_ATTEMPT_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+			job.ID, job.AttemptID, job.FilePath, plan.Name, escapedTitle)
 		if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 			logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
 			envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
@@ -399,8 +399,8 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := agentEnvInline(p.agentEnv) + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_ATTEMPT_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		job.ID, job.AttemptID, job.FilePath, plan.Name, escapedTitle)
 	if node, nodeErr := workspace.GetProjectByPath(workDir); nodeErr == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
 		envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
@@ -729,38 +729,14 @@ func (p *ClaudeAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pl
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
 		JobID:          job.ID,
+		AttemptID:      job.AttemptID,
 		NativeID:       claudeSessionID,
 		PID:            claudePID,
 		TranscriptPath: transcriptPath,
 	}); err != nil {
 		logger.WithError(err).Warn("Failed to confirm session with daemon, falling back to filesystem registry")
 
-		user := os.Getenv("USER")
-		if user == "" {
-			user = "unknown"
-		}
-		repo, branch := getGitInfo(workDir)
-
-		metadata := sessions.SessionMetadata{
-			SessionID:        job.ID,
-			ParentJobID:      job.ParentJobID,
-			ClaudeSessionID:  claudeSessionID,
-			Provider:         "claude",
-			PID:              claudePID,
-			WorkingDirectory: workDir,
-			User:             user,
-			Repo:             repo,
-			Branch:           branch,
-			StartedAt:        time.Now(),
-			JobTitle:         job.Title,
-			PlanName:         plan.Name,
-			JobFilePath:      job.FilePath,
-			Type:             "interactive_agent",
-			TranscriptPath:   transcriptPath,
-			// Stamp the owning scope so a scoped daemon can recover this live
-			// session after a restart (RecoverSessionsForScope filters on Scope).
-			Scope: resolveJobScope(workDir),
-		}
+		metadata := newFallbackSessionMetadata(job, plan, workDir, "claude", claudeSessionID, "interactive_agent", transcriptPath, claudePID)
 
 		registry, regErr := sessions.NewFileSystemRegistry()
 		if regErr != nil {

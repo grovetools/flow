@@ -158,8 +158,8 @@ func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan 
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='codex' " + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='codex' " + scopePrefix + hostSocketEnvInline(workDir) + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_ATTEMPT_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		job.ID, job.AttemptID, job.FilePath, plan.Name, escapedTitle)
 	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
 		envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)
@@ -329,36 +329,14 @@ func (p *CodexAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan *Pla
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
 		JobID:          job.ID,
+		AttemptID:      job.AttemptID,
 		NativeID:       nativeID,
 		PID:            codexPID,
 		TranscriptPath: transcriptPath,
 	}); err != nil {
 		logger.WithError(err).Warn("Failed to confirm session with daemon, falling back to filesystem registry")
 
-		user := os.Getenv("USER")
-		if user == "" {
-			user = "unknown"
-		}
-		repo, branch := getGitInfo(workDir)
-
-		metadata := sessions.SessionMetadata{
-			SessionID:        job.ID,
-			ParentJobID:      job.ParentJobID,
-			ClaudeSessionID:  nativeID,
-			Provider:         "codex",
-			PID:              codexPID,
-			WorkingDirectory: workDir,
-			User:             user,
-			Repo:             repo,
-			Branch:           branch,
-			StartedAt:        time.Now(),
-			JobTitle:         job.Title,
-			PlanName:         plan.Name,
-			JobFilePath:      job.FilePath,
-			Type:             "interactive_agent",
-			TranscriptPath:   transcriptPath,
-			Scope:            resolveJobScope(workDir),
-		}
+		metadata := newFallbackSessionMetadata(job, plan, workDir, "codex", nativeID, "interactive_agent", transcriptPath, codexPID)
 
 		registry, regErr := sessions.NewFileSystemRegistry()
 		if regErr != nil {

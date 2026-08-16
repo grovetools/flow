@@ -168,7 +168,7 @@ func (e *HeadlessAgentExecutor) Execute(ctx context.Context, job *Job, plan *Pla
 		if client := sessionHostClientConnectOnly(workDir); client != nil {
 			endCtx, endCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer endCancel()
-			if err := client.EndSession(endCtx, job.ID, string(JobStatusFailed)); err != nil {
+			if err := client.EndSession(endCtx, job.ID, job.AttemptID, string(JobStatusFailed)); err != nil {
 				ulog.Warn("Failed to end daemon session for failed agent").
 					Field("job", job.ID).
 					Field("error", err).
@@ -434,6 +434,7 @@ func buildHeadlessEnv(job *Job, plan *Plan, providerName, worktreePath string, a
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
 	env = append(env,
 		"GROVE_FLOW_JOB_ID="+job.ID,
+		"GROVE_FLOW_ATTEMPT_ID="+job.AttemptID,
 		"GROVE_FLOW_JOB_PATH="+job.FilePath,
 		"GROVE_FLOW_PLAN_NAME="+plan.Name,
 		"GROVE_FLOW_JOB_TITLE="+escapedTitle,
@@ -519,6 +520,7 @@ func (e *HeadlessAgentExecutor) runOnHost(ctx context.Context, worktreePath, pro
 		Field("job_id", job.ID).
 		Field("provider", providerName).
 		Field("GROVE_FLOW_JOB_ID", job.ID).
+		Field("GROVE_FLOW_ATTEMPT_ID", job.AttemptID).
 		Field("GROVE_FLOW_JOB_PATH", job.FilePath).
 		Field("GROVE_FLOW_PLAN_NAME", plan.Name).
 		Field("GROVE_FLOW_JOB_TITLE", job.Title).
@@ -703,6 +705,7 @@ func (e *HeadlessAgentExecutor) confirmSessionAsync(job *Job, plan *Plan, workDi
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
 		JobID:          job.ID,
+		AttemptID:      job.AttemptID,
 		NativeID:       nativeID,
 		PID:            pid,
 		TranscriptPath: transcriptPath,

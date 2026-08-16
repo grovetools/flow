@@ -19,8 +19,8 @@ func writeSessionBindingFixture(t *testing.T, root, dir string, job *Job, starte
 	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	metadata := fmt.Sprintf(`{"session_id":%q,"job_id":%q,"job_file_path":%q,"claude_session_id":%q,"provider":"pi","started_at":%q,"transcript_path":%q}`,
-		job.ID, job.ID, job.FilePath, dir, started.Format(time.RFC3339Nano), transcriptPath)
+	metadata := fmt.Sprintf(`{"session_id":%q,"attempt_id":%q,"job_id":%q,"job_file_path":%q,"claude_session_id":%q,"provider":"pi","status":"running","started_at":%q,"transcript_path":%q}`,
+		job.ID, job.AttemptID, job.ID, job.FilePath, dir, started.Format(time.RFC3339Nano), transcriptPath)
 	if err := os.WriteFile(filepath.Join(sessionDir, "metadata.json"), []byte(metadata), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +107,56 @@ func TestFindVerifiedJobSessionRejectsStaleRetryBinding(t *testing.T) {
 	}
 	if binding.Metadata.TranscriptPath != newPath {
 		t.Fatalf("selected %q, want current attempt %q", binding.Metadata.TranscriptPath, newPath)
+	}
+}
+
+func TestFindVerifiedJobSessionRejectsNonUUIDAttemptBeforePathLookup(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GROVE_HOME", root)
+	jobPath := filepath.Join(root, "job.md")
+	if err := os.WriteFile(jobPath, []byte("job\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := &Job{ID: "job-1", AttemptID: "../escape", FilePath: jobPath}
+	_, err := findVerifiedJobSession(job)
+	if err == nil || !strings.Contains(err.Error(), "invalid UUIDv7 attempt id") {
+		t.Fatalf("expected confined UUIDv7 rejection, got %v", err)
+	}
+}
+
+func TestFindVerifiedJobSessionPointLookupDoesNotFallBackToPriorAttempt(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GROVE_HOME", root)
+	jobPath := filepath.Join(root, "job.md")
+	if err := os.WriteFile(jobPath, []byte("job\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := &Job{ID: "job-1", AttemptID: "01890f5d-e4b8-7cc3-98c4-dc0c0c07398f", FilePath: jobPath, StartTime: time.Now()}
+	prior := *job
+	prior.AttemptID = "01890f5d-e4b8-7cc4-98c4-dc0c0c07398f"
+	writeSessionBindingFixture(t, root, prior.AttemptID, &prior, job.StartTime, "old transcript\n")
+
+	_, err := findVerifiedJobSession(job)
+	if err == nil || !strings.Contains(err.Error(), "point lookup") {
+		t.Fatalf("point miss broad-fell back or returned wrong error: %v", err)
+	}
+}
+
+func TestFindVerifiedJobSessionRejectsMismatchedAttemptAtPointPath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GROVE_HOME", root)
+	jobPath := filepath.Join(root, "job.md")
+	if err := os.WriteFile(jobPath, []byte("job\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	job := &Job{ID: "job-1", AttemptID: "01890f5d-e4b8-7cc3-98c4-dc0c0c07398f", FilePath: jobPath, StartTime: time.Now()}
+	wrong := *job
+	wrong.AttemptID = "01890f5d-e4b8-7cc4-98c4-dc0c0c07398f"
+	writeSessionBindingFixture(t, root, job.AttemptID, &wrong, job.StartTime, "wrong transcript\n")
+
+	_, err := findVerifiedJobSession(job)
+	if err == nil || !strings.Contains(err.Error(), "attempt id mismatch") {
+		t.Fatalf("expected exact attempt rejection, got %v", err)
 	}
 }
 

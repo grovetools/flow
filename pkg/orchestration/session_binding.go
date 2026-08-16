@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/grovetools/core/pkg/paths"
 	coresessions "github.com/grovetools/core/pkg/sessions"
 )
 
-// verifiedJobSession is a registry record whose job identity, job path, native
-// session id, and transcript all agree. Flow scans every registry record rather
-// than using Registry.Find: Find intentionally supports broad legacy aliases
-// and returns the first match, which is unsafe when a retried job has stale
-// records from an earlier dispatch.
+// verifiedJobSession is a registry record whose attempt identity, job identity,
+// job path, native session id, status, and transcript all agree. New-format
+// jobs use a single AttemptID-keyed point lookup. The broad registry scan is
+// retained only for frontmatter that predates attempt IDs.
 type verifiedJobSession struct {
 	Metadata     *coresessions.SessionMetadata
 	MetadataPath string
@@ -47,9 +47,29 @@ func findVerifiedJobSession(job *Job) (*verifiedJobSession, error) {
 	wantPath = filepath.Clean(wantPath)
 
 	base := filepath.Join(paths.StateDir(), "hooks", "sessions")
+	if job.AttemptID != "" {
+		attempt, parseErr := uuid.Parse(job.AttemptID)
+		if parseErr != nil || attempt.Version() != 7 || filepath.Base(job.AttemptID) != job.AttemptID {
+			return nil, fmt.Errorf("session binding unverified for job %s: invalid UUIDv7 attempt id %q", job.ID, job.AttemptID)
+		}
+		metadataPath := filepath.Join(base, job.AttemptID, "metadata.json")
+		data, readErr := os.ReadFile(metadataPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("session binding unverified for job %s attempt %s: point lookup: %w", job.ID, job.AttemptID, readErr)
+		}
+		var metadata coresessions.SessionMetadata
+		if err := json.Unmarshal(data, &metadata); err != nil {
+			return nil, fmt.Errorf("session binding unverified for job %s attempt %s: decode metadata: %w", job.ID, job.AttemptID, err)
+		}
+		if reason := rejectJobSession(job, wantPath, &metadata, true); reason != "" {
+			return nil, fmt.Errorf("session binding unverified for job %s attempt %s: %s", job.ID, job.AttemptID, reason)
+		}
+		return &verifiedJobSession{Metadata: &metadata, MetadataPath: metadataPath}, nil
+	}
+
 	entries, err := os.ReadDir(base)
 	if err != nil {
-		return nil, fmt.Errorf("session binding unverified for job %s: read registry: %w", job.ID, err)
+		return nil, fmt.Errorf("session binding unverified for legacy job %s: read registry: %w", job.ID, err)
 	}
 
 	var candidates []*verifiedJobSession
@@ -67,29 +87,8 @@ func findVerifiedJobSession(job *Job) (*verifiedJobSession, error) {
 		if json.Unmarshal(data, &metadata) != nil || (metadata.JobID != job.ID && metadata.SessionID != job.ID) {
 			continue
 		}
-		gotPath, absErr := filepath.Abs(metadata.JobFilePath)
-		if absErr != nil || metadata.JobFilePath == "" || !sameFilesystemPath(gotPath, wantPath) {
-			rejected = append(rejected, entry.Name()+": job path mismatch")
-			continue
-		}
-		if metadata.ClaudeSessionID == "" {
-			rejected = append(rejected, entry.Name()+": native session id missing")
-			continue
-		}
-		if metadata.TranscriptPath == "" {
-			rejected = append(rejected, entry.Name()+": transcript path missing")
-			continue
-		}
-		info, statErr := os.Stat(metadata.TranscriptPath)
-		if statErr != nil || !info.Mode().IsRegular() || info.Size() == 0 {
-			rejected = append(rejected, entry.Name()+": transcript missing or empty")
-			continue
-		}
-		// A retry reuses the Flow job ID. Refuse records that predate the
-		// current attempt; otherwise a successful old transcript can certify a
-		// zero-turn provider failure as successful.
-		if !job.StartTime.IsZero() && !metadata.StartedAt.IsZero() && metadata.StartedAt.Before(job.StartTime.Add(-2*time.Second)) {
-			rejected = append(rejected, entry.Name()+": session predates current attempt")
+		if reason := rejectJobSession(job, wantPath, &metadata, false); reason != "" {
+			rejected = append(rejected, entry.Name()+": "+reason)
 			continue
 		}
 		candidates = append(candidates, &verifiedJobSession{Metadata: &metadata, MetadataPath: metadataPath})
@@ -106,6 +105,37 @@ func findVerifiedJobSession(job *Job) (*verifiedJobSession, error) {
 		return candidates[i].Metadata.StartedAt.After(candidates[j].Metadata.StartedAt)
 	})
 	return candidates[0], nil
+}
+
+func rejectJobSession(job *Job, wantPath string, metadata *coresessions.SessionMetadata, exactAttempt bool) string {
+	if exactAttempt && metadata.AttemptID != job.AttemptID {
+		return "attempt id mismatch"
+	}
+	if metadata.JobID != job.ID && metadata.SessionID != job.ID {
+		return "job id mismatch"
+	}
+	gotPath, err := filepath.Abs(metadata.JobFilePath)
+	if err != nil || metadata.JobFilePath == "" || !sameFilesystemPath(gotPath, wantPath) {
+		return "job path mismatch"
+	}
+	if exactAttempt && metadata.Status == "" {
+		return "status missing"
+	}
+	if metadata.ClaudeSessionID == "" {
+		return "native session id missing"
+	}
+	if metadata.TranscriptPath == "" {
+		return "transcript path missing"
+	}
+	info, err := os.Stat(metadata.TranscriptPath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return "transcript missing or empty"
+	}
+	// Keep freshness as legacy armor and defense in depth for exact records.
+	if !job.StartTime.IsZero() && !metadata.StartedAt.IsZero() && metadata.StartedAt.Before(job.StartTime.Add(-2*time.Second)) {
+		return "session predates current attempt"
+	}
+	return ""
 }
 
 func isAgentJobType(t JobType) bool {
@@ -228,6 +258,7 @@ func resolveJobTranscript(job *Job, plan *Plan) (*jobTranscriptSource, error) {
 		TranscriptPath: transcript,
 		Metadata: &coresessions.SessionMetadata{
 			SessionID:       job.ID,
+			AttemptID:       job.AttemptID,
 			JobID:           job.ID,
 			ClaudeSessionID: nativeSessionIDFromTranscript(transcript),
 			Provider:        provider,
@@ -356,6 +387,9 @@ func archivedSessionMatchesAttempt(job *Job, artifactDir string) bool {
 	}
 	var metadata coresessions.SessionMetadata
 	if json.Unmarshal(data, &metadata) != nil || (metadata.JobID != job.ID && metadata.SessionID != job.ID) {
+		return false
+	}
+	if job.AttemptID != "" && metadata.AttemptID != job.AttemptID {
 		return false
 	}
 	if !job.StartTime.IsZero() && !metadata.StartedAt.IsZero() && metadata.StartedAt.Before(job.StartTime.Add(-2*time.Second)) {

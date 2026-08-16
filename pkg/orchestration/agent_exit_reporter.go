@@ -16,7 +16,7 @@ import (
 const supervisedExitReceiptName = "supervised-exit.json"
 
 type sessionEnder interface {
-	EndSession(context.Context, string, string) error
+	EndSession(context.Context, string, string, string) error
 }
 
 // ReportInteractiveAgentExit owns the terminal handoff for an interactive
@@ -126,7 +126,7 @@ func recordInteractiveTerminalOnce(ctx context.Context, job *Job, plan *Plan, ex
 	}
 	if ender != nil {
 		endCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		if err := ender.EndSession(endCtx, job.ID, outcome); err != nil {
+		if err := ender.EndSession(endCtx, job.ID, job.AttemptID, outcome); err != nil {
 			errs = append(errs, fmt.Errorf("end daemon session: %w", err))
 		}
 		cancel()

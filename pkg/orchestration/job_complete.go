@@ -110,7 +110,7 @@ func CompleteJob(job *Job, plan *Plan, silent bool) error {
 		// record sits on the host's, so the rail keeps rendering a finished
 		// agent as running.
 		daemonClient := sessionHostClientForJob(job, plan)
-		if err := daemonClient.EndSession(context.Background(), job.ID, "completed"); err != nil {
+		if err := daemonClient.EndSession(context.Background(), job.ID, job.AttemptID, "completed"); err != nil {
 			logger.WithError(err).Debug("Failed to notify daemon of session end")
 		}
 		daemonClient.Close()

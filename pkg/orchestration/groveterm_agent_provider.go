@@ -3,7 +3,6 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -135,6 +134,7 @@ func (p *GrovetermAgentProvider) LaunchPrepared(ctx context.Context, job *Job, p
 		envVars[k] = v
 	}
 	envVars["GROVE_FLOW_JOB_ID"] = job.ID
+	envVars["GROVE_FLOW_ATTEMPT_ID"] = job.AttemptID
 	envVars["GROVE_FLOW_JOB_PATH"] = job.FilePath
 	envVars["GROVE_FLOW_PLAN_NAME"] = plan.Name
 	envVars["GROVE_FLOW_JOB_TITLE"] = job.Title
@@ -371,36 +371,14 @@ func (p *GrovetermAgentProvider) discoverAndRegisterSessionAsync(job *Job, plan 
 
 	if err := daemonClient.ConfirmSession(ctx, daemon.SessionConfirmation{
 		JobID:          job.ID,
+		AttemptID:      job.AttemptID,
 		NativeID:       nativeID,
 		PID:            pid,
 		TranscriptPath: transcriptPath,
 	}); err != nil {
 		logger.WithError(err).Warn("Failed to confirm session with daemon, falling back to filesystem registry")
 
-		user := os.Getenv("USER")
-		if user == "" {
-			user = "unknown"
-		}
-		repo, branch := getGitInfo(workDir)
-
-		metadata := sessions.SessionMetadata{
-			SessionID:        job.ID,
-			ParentJobID:      job.ParentJobID,
-			ClaudeSessionID:  nativeID,
-			Provider:         p.spec.Name,
-			PID:              pid,
-			WorkingDirectory: workDir,
-			User:             user,
-			Repo:             repo,
-			Branch:           branch,
-			StartedAt:        time.Now(),
-			JobTitle:         job.Title,
-			PlanName:         plan.Name,
-			JobFilePath:      job.FilePath,
-			Type:             "interactive_agent",
-			TranscriptPath:   transcriptPath,
-			Scope:            resolveJobScope(workDir),
-		}
+		metadata := newFallbackSessionMetadata(job, plan, workDir, p.spec.Name, nativeID, "interactive_agent", transcriptPath, pid)
 
 		registry, regErr := sessions.NewFileSystemRegistry()
 		if regErr != nil {

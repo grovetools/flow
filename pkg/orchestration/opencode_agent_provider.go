@@ -48,28 +48,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	if err != nil {
 		p.log.WithError(err).Error("Failed to create session registry")
 	} else {
-		user := os.Getenv("USER")
-		if user == "" {
-			user = "unknown"
-		}
-		repo, branch := getGitInfo(workDir)
-
-		metadata := sessions.SessionMetadata{
-			SessionID:        job.ID,
-			ParentJobID:      job.ParentJobID,
-			ClaudeSessionID:  "", // Empty - plugin will fill this with native opencode session ID
-			Provider:         "opencode",
-			PID:              0, // Will be updated by plugin
-			WorkingDirectory: workDir,
-			User:             user,
-			Repo:             repo,
-			Branch:           branch,
-			StartedAt:        time.Now(),
-			JobTitle:         job.Title,
-			PlanName:         plan.Name,
-			JobFilePath:      job.FilePath,
-			Type:             "interactive_agent",
-		}
+		metadata := newFallbackSessionMetadata(job, plan, workDir, "opencode", "", "interactive_agent", "", 0)
 
 		p.log.WithFields(logrus.Fields{
 			"session_id": job.ID,
@@ -153,8 +132,8 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		scopePrefix = fmt.Sprintf("GROVE_SCOPE='%s' ", scope)
 	}
 	escapedTitle := "'" + strings.ReplaceAll(job.Title, "'", "'\\''") + "'"
-	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='opencode' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
-		job.ID, job.FilePath, plan.Name, escapedTitle)
+	envPrefix := agentEnvInline(p.agentEnv) + "GROVE_AGENT_PROVIDER='opencode' " + scopePrefix + fmt.Sprintf("GROVE_FLOW_JOB_ID='%s' GROVE_FLOW_ATTEMPT_ID='%s' GROVE_FLOW_JOB_PATH='%s' GROVE_FLOW_PLAN_NAME='%s' GROVE_FLOW_JOB_TITLE=%s ",
+		job.ID, job.AttemptID, job.FilePath, plan.Name, escapedTitle)
 	if node, err := workspace.GetProjectByPath(workDir); err == nil && node != nil {
 		logDir := filepath.Join(paths.StateDir(), "logs", "workspaces", node.Identifier("/"))
 		envPrefix += fmt.Sprintf("GROVE_LOG_DIR='%s' ", logDir)

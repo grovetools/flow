@@ -102,6 +102,7 @@ func resetJobToPending(job *Job, plan *Plan, from JobStatus, autoRun bool) error
 	// Create updates map to clear error fields
 	updates := map[string]interface{}{
 		"status":       string(JobStatusPending),
+		"attempt_id":   nil,
 		"last_error":   nil, // Deletes the field
 		"completed_at": nil, // Deletes the field
 		"duration":     nil, // Deletes the field
@@ -130,6 +131,7 @@ func resetJobToPending(job *Job, plan *Plan, from JobStatus, autoRun bool) error
 
 	// Update in-memory job state
 	job.Status = JobStatusPending
+	job.AttemptID = ""
 	job.EndTime = time.Time{}
 
 	// Print success message
@@ -171,6 +173,7 @@ func retryRunningJobWithForce(job *Job, plan *Plan, autoRun bool) error {
 	// Create updates map to reset to pending
 	updates := map[string]interface{}{
 		"status":     string(JobStatusPending),
+		"attempt_id": nil,
 		"updated_at": time.Now().Format(time.RFC3339),
 	}
 
@@ -193,6 +196,7 @@ func retryRunningJobWithForce(job *Job, plan *Plan, autoRun bool) error {
 
 	// Update in-memory job state
 	job.Status = JobStatusPending
+	job.AttemptID = ""
 
 	// Print success message
 	fmt.Printf("%s Job reset to pending (forced): %s\n", color.GreenString("*"), job.Filename)

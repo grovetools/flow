@@ -179,7 +179,7 @@ func finalizeHeadlessFailure(ctx context.Context, job *Job, lastError string) er
 	daemonClient := sessionHostClientConnectOnly("")
 	endCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := daemonClient.EndSession(endCtx, job.ID, string(JobStatusFailed)); err != nil {
+	if err := daemonClient.EndSession(endCtx, job.ID, job.AttemptID, string(JobStatusFailed)); err != nil {
 		ulog.Debug("[HEADLESS] Finalize: failed to end daemon session").
 			Field("job_id", job.ID).
 			Err(err).

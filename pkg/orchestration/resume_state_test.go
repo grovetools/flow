@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestStatePersister_BeginResumedAttemptStartsFreshAttempt(t *testing.T) {
@@ -64,6 +66,11 @@ last_error: stale failure
 	if got := frontmatter["status"]; got != string(JobStatusRunning) {
 		t.Errorf("status = %v, want running", got)
 	}
+	attemptID, _ := frontmatter["attempt_id"].(string)
+	parsed, parseErr := uuid.Parse(attemptID)
+	if parseErr != nil || parsed.Version() != 7 || job.AttemptID != attemptID {
+		t.Fatalf("attempt_id = %q (job %q), want persisted UUIDv7: %v", attemptID, job.AttemptID, parseErr)
+	}
 	for _, key := range []string{"completed_at", "duration", "last_error"} {
 		if _, ok := frontmatter[key]; ok {
 			t.Errorf("stale terminal field %q was not cleared", key)
@@ -103,6 +110,7 @@ func TestStatePersister_BeginResumedAttemptRollbackRestoresExactState(t *testing
 	oldStart := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
 	job := &Job{
 		ID:          "resume-job",
+		AttemptID:   "prior-attempt",
 		Status:      JobStatusCompleted,
 		FilePath:    path,
 		StartTime:   oldStart,
@@ -121,6 +129,9 @@ func TestStatePersister_BeginResumedAttemptRollbackRestoresExactState(t *testing
 	rollback, err := NewStatePersister().BeginResumedAttempt(job)
 	if err != nil {
 		t.Fatalf("BeginResumedAttempt() error = %v", err)
+	}
+	if job.AttemptID == "prior-attempt" || job.AttemptID == "" {
+		t.Fatalf("resume did not mint a fresh attempt: %q", job.AttemptID)
 	}
 	if err := rollback(); err != nil {
 		t.Fatalf("rollback() error = %v", err)

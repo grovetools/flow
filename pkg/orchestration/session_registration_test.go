@@ -9,6 +9,7 @@ import (
 func TestNewAgentSessionIntentCarriesParentJobID(t *testing.T) {
 	job := &Job{
 		ID:           "child-job",
+		AttemptID:    "01890f5d-e4b8-7cc3-98c4-dc0c0c07398f",
 		ParentJobID:  "parent-job",
 		FilePath:     "/plan/02-child.md",
 		Title:        "Child",
@@ -20,6 +21,9 @@ func TestNewAgentSessionIntentCarriesParentJobID(t *testing.T) {
 	got := newAgentSessionIntent(job, plan, "pi", "/worktree", models.MuxNone)
 	if got.ParentJobID != job.ParentJobID {
 		t.Errorf("ParentJobID = %q, want %q", got.ParentJobID, job.ParentJobID)
+	}
+	if got.AttemptID != job.AttemptID {
+		t.Errorf("AttemptID = %q, want %q", got.AttemptID, job.AttemptID)
 	}
 	if got.JobID != job.ID || got.Provider != "pi" || got.PlanName != plan.Name || got.Mux != models.MuxNone {
 		t.Errorf("unexpected session intent: %+v", got)

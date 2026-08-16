@@ -10,14 +10,15 @@ import (
 )
 
 type recordingSessionEnder struct {
-	calls   int
-	jobID   string
-	outcome string
+	calls     int
+	jobID     string
+	attemptID string
+	outcome   string
 }
 
-func (e *recordingSessionEnder) EndSession(_ context.Context, jobID, outcome string) error {
+func (e *recordingSessionEnder) EndSession(_ context.Context, jobID, attemptID, outcome string) error {
 	e.calls++
-	e.jobID, e.outcome = jobID, outcome
+	e.jobID, e.attemptID, e.outcome = jobID, attemptID, outcome
 	return nil
 }
 
@@ -82,7 +83,7 @@ func TestReportInteractiveAgentExitEnrichedDoesNotFailFrontmatter(t *testing.T) 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	metadata := `{"session_id":"pi-job","job_id":"pi-job","claude_session_id":"native","job_file_path":` + quoteJSON(job.FilePath) + `,"transcript_path":` + quoteJSON(transcript) + `,"started_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}`
+	metadata := `{"session_id":"pi-job","job_id":"pi-job","status":"running","claude_session_id":"native","job_file_path":` + quoteJSON(job.FilePath) + `,"transcript_path":` + quoteJSON(transcript) + `,"started_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}`
 	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(metadata), 0o600); err != nil {
 		t.Fatal(err)
 	}

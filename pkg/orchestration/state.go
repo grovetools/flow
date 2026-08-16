@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/grovetools/core/pkg/process"
 	"gopkg.in/yaml.v3"
 )
@@ -76,6 +77,26 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 		return fmt.Errorf("read job file: %w", err)
 	}
 
+	// Read the persisted status under the file lock. In-memory callers can be
+	// stale or can pre-set job.Status before asking us to write; the disk edge is
+	// the authority for whether this is a new execution attempt.
+	frontmatter, _, err := sp.frontmatterParser.ParseFrontmatter(content)
+	if err != nil {
+		return fmt.Errorf("parsing frontmatter: %w", err)
+	}
+	persistedStatus, _ := frontmatter["status"].(string)
+	enteringRunning := newStatus == JobStatusRunning && JobStatus(persistedStatus) != JobStatusRunning
+	var attemptID string
+	var transitionTime time.Time
+	if enteringRunning {
+		attempt, err := uuid.NewV7()
+		if err != nil {
+			return fmt.Errorf("generate attempt id: %w", err)
+		}
+		attemptID = attempt.String()
+		transitionTime = time.Now().UTC().Truncate(time.Second)
+	}
+
 	// For abandoned status, we need to parse frontmatter and add a note
 	if newStatus == JobStatusAbandoned {
 		frontmatter, body, err := sp.frontmatterParser.ParseFrontmatter(content)
@@ -110,9 +131,22 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 			"updated_at": time.Now().Format(time.RFC3339),
 		}
 
-		// Add started_at for running status
-		if newStatus == JobStatusRunning && job.StartTime.IsZero() {
-			updates["started_at"] = time.Now().Format(time.RFC3339)
+		// A transition into running atomically carries its fresh attempt identity
+		// and timestamps in the same frontmatter write. A redundant running write
+		// preserves the existing attempt.
+		if enteringRunning {
+			updates["attempt_id"] = attemptID
+			updates["started_at"] = transitionTime.Format(time.RFC3339)
+			updates["updated_at"] = transitionTime.Format(time.RFC3339)
+			updates["completed_at"] = nil
+			updates["duration"] = nil
+			updates["last_error"] = nil
+		}
+
+		// Pending is the between-attempt state. It must not retain the identity of
+		// the attempt that was just failed/reset.
+		if newStatus == JobStatusPending {
+			updates["attempt_id"] = nil
 		}
 
 		// Add completed_at for terminal states
@@ -153,8 +187,15 @@ func (sp *StatePersister) UpdateJobStatus(job *Job, newStatus JobStatus) error {
 		// any later UpdateJobMetadata call don't resurrect the stale error.
 		job.Metadata.LastError = ""
 	}
-	if newStatus == JobStatusRunning && job.StartTime.IsZero() {
-		job.StartTime = time.Now()
+	if enteringRunning {
+		job.AttemptID = attemptID
+		job.StartTime = transitionTime
+		job.EndTime = time.Time{}
+		job.CompletedAt = time.Time{}
+		job.Duration = 0
+		job.Metadata.LastError = ""
+	} else if newStatus == JobStatusPending {
+		job.AttemptID = ""
 	}
 	if newStatus == JobStatusCompleted || newStatus == JobStatusFailed || newStatus == JobStatusAbandoned {
 		job.EndTime = time.Now()
