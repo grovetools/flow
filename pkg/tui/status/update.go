@@ -67,6 +67,8 @@ func failingRefreshJob(err error) string {
 		}
 	}
 	return ""
+}
+
 // compactActionError keeps action feedback to one footer row while making the
 // loss of detail explicit. The complete text remains in LastActionError and is
 // available through the ve detail pane.
