@@ -1,6 +1,7 @@
 package status
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/grovetools/core/logging"
 	"github.com/grovetools/core/pkg/daemon"
 
 	"github.com/grovetools/flow/pkg/orchestration"
@@ -154,6 +156,18 @@ title: [
 	dir := writePlan(t, map[string]string{"07-broken.md": malformed})
 	m := Model{PlanDir: dir}
 
+	// NewLogger returns the component's singleton logrus entry. Capture its
+	// logger output so the regression proves log frequency, not merely that the
+	// handler happens to return early.
+	logger := logging.NewLogger("flow-tui").Logger
+	previousOutput := logger.Out
+	var logOutput bytes.Buffer
+	logger.SetOutput(&logOutput)
+	t.Cleanup(func() { logger.SetOutput(previousOutput) })
+	logCount := func() int {
+		return bytes.Count(logOutput.Bytes(), []byte("Failed to reload plan during refresh"))
+	}
+
 	updated, _ := m.Update(RefreshMsg{})
 	m = updated.(Model)
 	if m.Err == nil {
@@ -162,6 +176,9 @@ title: [
 	if m.planFingerprint == "" || m.failedPlanFingerprint != m.planFingerprint {
 		t.Fatalf("failed fingerprint not memoized: plan=%q failed=%q",
 			m.planFingerprint, m.failedPlanFingerprint)
+	}
+	if got := logCount(); got != 1 {
+		t.Fatalf("first failed snapshot logged %d times, want 1", got)
 	}
 	fields := refreshErrorFields(dir, m.Err)
 	if fields["plan_dir"] != dir || fields["job"] != "07-broken.md" {
@@ -180,6 +197,9 @@ title: [
 			t.Fatalf("unchanged failed snapshot retried on refresh %d: %v", i+1, m.Err)
 		}
 	}
+	if got := logCount(); got != 1 {
+		t.Fatalf("unchanged failed snapshot logged %d times, want 1", got)
+	}
 
 	time.Sleep(10 * time.Millisecond)
 	if err := os.WriteFile(filepath.Join(dir, "07-broken.md"),
@@ -194,6 +214,9 @@ title: [
 	}
 	if m.failedPlanFingerprint == oldFingerprint {
 		t.Fatal("changed malformed job retained the old failed fingerprint")
+	}
+	if got := logCount(); got != 2 {
+		t.Fatalf("changed failed snapshot brought total log count to %d, want 2", got)
 	}
 }
 
