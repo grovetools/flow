@@ -148,11 +148,19 @@ func findAgentSessionInfo(jobID string) (pid int, sessionDir string, err error) 
 			pidFile := filepath.Join(currentSessionDir, "pid.lock")
 			pidBytes, err := os.ReadFile(pidFile)
 			if err != nil {
-				log.WithFields(logrus.Fields{
+				entry := log.WithFields(logrus.Fields{
 					"job_id":   jobID,
 					"pid_file": pidFile,
 					"error":    err.Error(),
-				}).Error("Failed to read PID file for found session")
+				})
+				if os.IsNotExist(err) {
+					// Registry GC intentionally removes pid.lock while preserving
+					// metadata.json. A liveness lookup racing or following that GC
+					// is an expected negative probe, not an operational error.
+					entry.Debug("PID file already cleared for found session")
+				} else {
+					entry.Error("Failed to read PID file for found session")
+				}
 				return 0, "", fmt.Errorf("read pid file for session %s: %w", jobID, err)
 			}
 

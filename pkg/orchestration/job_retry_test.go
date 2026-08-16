@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,6 +190,45 @@ func TestRetryJob_FromRunning_WithForce(t *testing.T) {
 	}
 	if job.AttemptID != "" || !job.CompletedAt.IsZero() || job.Duration != 0 || !job.EndTime.IsZero() || job.Metadata.LastError != "" {
 		t.Errorf("force retry retained in-memory terminal state: %+v", job)
+	}
+}
+
+// A legacy interactive attempt can leave a lock naming a long-lived mux or
+// daemon parent after the actual agent is gone. Retry must remove that lock
+// before --run hands the job to a different daemon process; otherwise its first
+// pending -> running write fails with "file is locked".
+func TestRetryJob_ForceClearsExecutorLockForAutoRunHandoff(t *testing.T) {
+	dir := t.TempDir()
+	job := createTestJobFile(t, dir, "test-job.md", string(JobStatusRunning))
+	plan := &Plan{Directory: dir}
+
+	// The parent PID is alive and differs from the test/CLI PID, matching the
+	// stale tmux-server lock that StatePersister cannot classify as dead.
+	if err := os.WriteFile(job.FilePath+".lock", []byte(fmt.Sprint(os.Getppid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RetryJob(job, plan, true, false); err != nil {
+		t.Fatalf("force retry: %v", err)
+	}
+	if _, err := os.Stat(job.FilePath + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("retry retained stale executor lock: %v", err)
+	}
+
+	// A fresh persister stands in for the daemon executor consuming the
+	// auto-run submission. This also preserves the no-<nil> serialization gate.
+	if err := NewStatePersister().UpdateJobStatus(job, JobStatusRunning); err != nil {
+		t.Fatalf("auto-run handoff could not enter running: %v", err)
+	}
+	content, err := os.ReadFile(job.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "<nil>") {
+		t.Fatalf("auto-run handoff serialized <nil>:\n%s", content)
+	}
+	if !strings.Contains(string(content), "status: running") || job.AttemptID == "" {
+		t.Fatalf("auto-run handoff did not create a running attempt: attempt=%q\n%s", job.AttemptID, content)
 	}
 }
 

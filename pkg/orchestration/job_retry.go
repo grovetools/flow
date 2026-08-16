@@ -129,6 +129,14 @@ func resetJobToPending(job *Job, plan *Plan, from JobStatus, autoRun bool) error
 		return fmt.Errorf("write job file: %w", err)
 	}
 
+	// Interactive executors leave this liveness lock in place for the lifetime
+	// of an attempt. This retry path has accepted that attempt as resettable;
+	// clear its lock before --run hands the job to the daemon, otherwise the new
+	// executor immediately fails its pending -> running transition as locked.
+	if err := RemoveLockFile(job.FilePath); err != nil {
+		return fmt.Errorf("remove stale execution lock: %w", err)
+	}
+
 	// Update in-memory job state
 	job.Status = JobStatusPending
 	job.AttemptID = ""
@@ -195,6 +203,14 @@ func retryRunningJobWithForce(job *Job, plan *Plan, autoRun bool) error {
 	// Write atomically
 	if err := persister.writeAtomic(job.FilePath, newContent); err != nil {
 		return fmt.Errorf("write job file: %w", err)
+	}
+
+	// A forced retry is specifically recovery from a stale running attempt.
+	// Its executor lock may name a still-alive mux/daemon parent even though no
+	// agent is alive, so StatePersister cannot age it out. Remove it only after
+	// the liveness veto and durable reset, before an auto-run can be consumed.
+	if err := RemoveLockFile(job.FilePath); err != nil {
+		return fmt.Errorf("remove stale execution lock: %w", err)
 	}
 
 	// Update in-memory job state
