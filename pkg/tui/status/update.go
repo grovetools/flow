@@ -1903,7 +1903,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if job := m.CurrentJob(); job != nil {
 					return m, func() tea.Msg { return ArchiveConfirmedMsg{Job: job} }
 				}
-			case "n", "N", "ctrl+c", "q":
+			case "n", "N", "esc", "ctrl+c", "q":
 				m.ConfirmArchive = false
 			}
 			return m, nil

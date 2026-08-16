@@ -1414,12 +1414,15 @@ func (m Model) View() string {
 
 	var footer string
 	if m.ConfirmArchive {
+		// Exactly one row: the frame budgets footerHeight for this line, so a
+		// leading blank line pushed the prompt past the terminal height and
+		// the host clipped it — pressing X read as a no-op.
 		if len(m.Selected) > 0 {
-			footer = "\n" + theme.DefaultTheme.Warning.
+			footer = theme.DefaultTheme.Warning.
 				Bold(true).
 				Render(fmt.Sprintf("Archive %d selected job(s)? (y/n)", len(m.Selected)))
 		} else if job := m.CurrentJob(); job != nil {
-			footer = "\n" + theme.DefaultTheme.Warning.
+			footer = theme.DefaultTheme.Warning.
 				Bold(true).
 				Render(fmt.Sprintf("Archive '%s'? (y/n)", job.Filename))
 		}

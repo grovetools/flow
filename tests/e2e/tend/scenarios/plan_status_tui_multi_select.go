@@ -478,6 +478,13 @@ func archiveSelectedJobs(ctx *harness.Context) error {
 	}
 	time.Sleep(500 * time.Millisecond)
 
+	// The prompt must be ON SCREEN, not merely in the model: it rides the one
+	// footer row the frame budgets, and an over-tall footer gets clipped by the
+	// host, leaving 'X' looking like a no-op.
+	if err := session.WaitForText("Archive 2 selected job(s)? (y/n)", 5*time.Second); err != nil {
+		return fmt.Errorf("archive confirmation prompt not visible: %w", err)
+	}
+
 	// Confirm the archive action with 'y'
 	if err := session.SendKeys("y"); err != nil {
 		return fmt.Errorf("failed to confirm archive: %w", err)
@@ -771,6 +778,12 @@ func archiveCursorJob(ctx *harness.Context) error {
 		return fmt.Errorf("failed to send 'X' key: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
+
+	// Same as the batch path: assert the prompt actually reached the screen
+	// before answering it.
+	if err := session.WaitForText("? (y/n)", 5*time.Second); err != nil {
+		return fmt.Errorf("archive confirmation prompt not visible: %w", err)
+	}
 
 	// Confirm the archive action with 'y' (not Enter)
 	if err := session.SendKeys("y"); err != nil {
