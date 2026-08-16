@@ -299,10 +299,11 @@ func demoteOneJob(jobFilePath string, idx *planNoteIndex) demoteOutcome {
 	}
 
 	demotion := orchestration.Demotion{
-		PlanName: planName,
-		JobFile:  job.Filename,
-		At:       time.Now(),
-		Reason:   demoteReasonFlag,
+		PlanName:       planName,
+		JobFile:        job.Filename,
+		OriginalNoteID: job.NoteRef,
+		At:             time.Now(),
+		Reason:         demoteReasonFlag,
 	}
 
 	if demoteDryRunFlag {
@@ -397,8 +398,10 @@ func demoteViaNbNew(job *orchestration.Job, jobFilePath string, demotion orchest
 		}
 	}
 
-	// Build the nb new command
-	nbArgs := []string{"new", job.Title, "--type", "inbox", "--no-edit"}
+	// Preserve the original note's date-prefixed filename when note_ref carries
+	// nb's stable note id. A legacy/path-shaped reference cannot safely recover
+	// a filename, so it keeps nb's generated-name fallback.
+	nbArgs := demoteNbNewArgs(job.Title, demotion)
 	nbCmd := exec.Command("nb", nbArgs...)
 	nbCmd.Dir = targetWorkspaceDir
 
@@ -434,6 +437,14 @@ func demoteViaNbNew(job *orchestration.Job, jobFilePath string, demotion orchest
 	}
 
 	return notePath, nil
+}
+
+func demoteNbNewArgs(title string, demotion orchestration.Demotion) []string {
+	args := []string{"new", title, "--type", "inbox", "--no-edit"}
+	if filename := demotion.OriginalNoteFilename(); filename != "" {
+		args = append(args, "--filename", filename)
+	}
+	return args
 }
 
 // reportDemoteOutcomes writes the human report: note paths on stdout (one per

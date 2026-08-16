@@ -206,6 +206,9 @@ const (
 	// the worktree/disk I/O
 	// never runs inside the bubbletea event loop.
 	modeInitWizard
+	// modeNotes routes the sixth pager tab to the notes list rather than
+	// silently falling back to browser mode.
+	modeNotes
 )
 
 // Config carries the dependencies the meta-panel needs to build its
@@ -377,6 +380,7 @@ func New(cfg Config) Model {
 		&plansPage{s: vs},
 		&addPlanPage{s: vs},
 		&finishPlanPage{s: vs},
+		&notesPage{s: vs},
 	}
 	startTab := tabPlans
 	if m.mode == modeStatus {
@@ -1582,6 +1586,8 @@ func modeForTab(idx int) mode {
 		return modeInitWizard
 	case tabFinishPlan:
 		return modeFinishWizard
+	case tabNotes:
+		return modeNotes
 	default:
 		return modeBrowser
 	}
@@ -1663,6 +1669,17 @@ func (m Model) switchToTab(idx int) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startInitWizardBuild()
+
+	case modeNotes:
+		// Notes can operate with or without a selected plan. Plan-only actions
+		// explain their requirement in-page; notespace and global scopes remain
+		// useful from the portfolio view.
+		m.mode = modeNotes
+		m.pager, _ = m.pager.Update(embed.SwitchTabMsg{TabIndex: tabNotes})
+		// Numeric pager jumps intentionally discard the page Focus command while
+		// synchronising the host mode. Re-arm the notes loader and poll here so
+		// the sixth tab never opens as a permanently empty one-shot page.
+		return m, tea.Batch(notesLoadCmd(m.s), notesPollCmd())
 
 	case modeFinishWizard:
 		if m.s.statusModel == nil {
@@ -1957,9 +1974,20 @@ func (m Model) TestState() map[string]interface{} {
 		state["mode"] = "finish_wizard"
 	case modeInitWizard:
 		state["mode"] = "init_wizard"
+	case modeNotes:
+		state["mode"] = "notes"
 	}
 
 	state["plan_count"] = m.s.browserModel.PlanCount()
+	if p, ok := m.pager.Active().(*notesPage); ok {
+		state["note_scope"] = p.scope.String()
+		state["note_count"] = len(p.visible)
+		state["note_preview"] = p.preview
+		state["selected_note_index"] = p.cursor
+		if note := p.selected(); note != nil {
+			state["selected_note_title"] = note.Title
+		}
+	}
 
 	if m.s.statusModel != nil {
 		state["job_count"] = len(m.s.statusModel.Jobs)

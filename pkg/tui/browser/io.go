@@ -136,11 +136,10 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, plansDi
 			}
 		}
 
-		// Attach notebook notes whose tag values mention a plan/worktree. This is
-		// read from the daemon's already-parsed note index, not by scanning the
-		// notebook on the TUI path.
+		// Attach notes linked by exact plan_ref. This is read from the daemon's
+		// already-parsed note index, not by scanning the notebook on the TUI path.
 		if snapshot != nil {
-			attachTaggedPlanNotes(client, plansDirectory, snapshot.Plans)
+			attachLinkedPlanNotes(client, plansDirectory, snapshot.Plans)
 		}
 
 		// Hydrate the complete snapshot before reporting a live connection. This
@@ -167,7 +166,7 @@ func connectPlanIndexCmd(factory DaemonClientFactory, generation uint64, plansDi
 	}
 }
 
-func attachTaggedPlanNotes(client daemon.Client, plansDirectory string, summaries []models.PlanSummary) {
+func attachLinkedPlanNotes(client daemon.Client, plansDirectory string, summaries []models.PlanSummary) {
 	if client == nil || len(summaries) == 0 {
 		return
 	}
@@ -190,22 +189,12 @@ func attachTaggedPlanNotes(client daemon.Client, plansDirectory string, summarie
 			if note == nil || note.ContentDir == "plans" {
 				continue
 			}
-			matched := false
-			for _, tag := range note.Tags {
-				if strings.Contains(tag, summaries[i].PlanName) ||
-					(summaries[i].Worktree != "" && strings.Contains(tag, summaries[i].Worktree)) {
-					matched = true
-					break
-				}
-			}
-			if matched {
+			if orchestration.NoteLinkedToPlan(note.PlanRef, summaries[i].PlanName) {
 				matchCount++
 			}
 		}
+		// PlanSummary.Notes is plan prose, not a linked note.
 		summaries[i].NoteCount = matchCount
-		if summaries[i].Notes != "" {
-			summaries[i].NoteCount++
-		}
 	}
 }
 

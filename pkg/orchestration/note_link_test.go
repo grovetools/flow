@@ -37,6 +37,9 @@ case "$1" in
     echo "Moved $base"
     echo "To: $wsroot/$group/$base"
     ;;
+  new)
+    echo "Created: /nb/ws/inbox/new-note.md"
+    ;;
 esac
 exit 0
 `
@@ -139,6 +142,37 @@ func TestFinishPlanNotes_MovesAllAndReportsAlreadyCompleted(t *testing.T) {
 // TestJobNote_ResolvesByPlanJob verifies the query-based resolution used by job
 // complete: JobNote picks the note whose plan_job matches THIS job, not by
 // reading job.NoteRef.
+func TestCreatePlanNoteDelegatesToNbAndAddsJobLink(t *testing.T) {
+	recordPath, _ := writeNbStub(t)
+
+	note, err := CreatePlanNote("Found a bug", "misc-fixes", "12-fix.md")
+	if err != nil {
+		t.Fatalf("CreatePlanNote: %v", err)
+	}
+	if note.Path != "/nb/ws/inbox/new-note.md" || note.PlanRef != "plans/misc-fixes" || note.PlanJob != "12-fix.md" {
+		t.Fatalf("unexpected created note: %+v", note)
+	}
+	lines := readRecordLines(t, recordPath)
+	for _, want := range []string{
+		"new Found a bug --type inbox --no-edit --plan misc-fixes",
+		"update-frontmatter --path /nb/ws/inbox/new-note.md --field plan_ref --value plans/misc-fixes",
+		"update-frontmatter --path /nb/ws/inbox/new-note.md --field plan_job --value 12-fix.md",
+	} {
+		if countContaining(lines, want) != 1 {
+			t.Errorf("missing invocation %q in %v", want, lines)
+		}
+	}
+}
+
+func TestNoteLinkedToPlanUsesExactPlanRefOnly(t *testing.T) {
+	if !NoteLinkedToPlan("plans/feature", "feature") {
+		t.Fatal("exact plan_ref should match")
+	}
+	if NoteLinkedToPlan("plans/feature-extra", "feature") || NoteLinkedToPlan("feature", "feature") {
+		t.Fatal("substring or unqualified values must not match")
+	}
+}
+
 func TestJobNote_ResolvesByPlanJob(t *testing.T) {
 	_, setList := writeNbStub(t)
 	setList(`[
@@ -194,6 +228,23 @@ func TestJobComplete_MoveNoteToGroupOutcomes(t *testing.T) {
 // note carries: which plan and job it came from, and the reason when one was
 // given. This block is the answer to "where did this note come from?" when the
 // note surfaces in the inbox weeks later.
+func TestDemotionOriginalNoteFilename(t *testing.T) {
+	tests := []struct {
+		id, want string
+	}{
+		{"20260703-142501-fix-foo", "20260703-fix-foo.md"},
+		{"20260703-142501-fix-foo-2", "20260703-fix-foo-2.md"},
+		{"task-1", ""},
+		{"/notes/20260703-fix-foo.md", ""},
+		{"20260703-abcdef-fix-foo", ""},
+	}
+	for _, tt := range tests {
+		if got := (Demotion{OriginalNoteID: tt.id}).OriginalNoteFilename(); got != tt.want {
+			t.Errorf("OriginalNoteFilename(%q) = %q, want %q", tt.id, got, tt.want)
+		}
+	}
+}
+
 func TestDemotionTrailer(t *testing.T) {
 	at := time.Date(2026, 8, 9, 14, 30, 0, 0, time.UTC)
 	trailer := Demotion{PlanName: "misc-fixes", JobFile: "140-test.md", At: at, Reason: "waiting on upstream"}.Trailer()

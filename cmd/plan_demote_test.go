@@ -52,6 +52,19 @@ func writeDemoteFixturePlan(t *testing.T, planDir string, statuses map[string]or
 // TestParseDemoteStatuses pins what --status selects: the unstarted work by
 // default, an explicit list when given, and "all" as everything unfinished —
 // never a running or already-finished job.
+func TestDemoteNbNewArgsPreservesOriginalFilename(t *testing.T) {
+	args := demoteNbNewArgs("Fix Foo", orchestration.Demotion{OriginalNoteID: "20260703-142501-fix-foo"})
+	got := strings.Join(args, " ")
+	if !strings.Contains(got, "--filename 20260703-fix-foo.md") {
+		t.Fatalf("demote args did not preserve original filename: %s", got)
+	}
+
+	legacy := strings.Join(demoteNbNewArgs("Fix Foo", orchestration.Demotion{OriginalNoteID: "/old/note.md"}), " ")
+	if strings.Contains(legacy, "--filename") {
+		t.Fatalf("legacy path-shaped note_ref must keep generated-name fallback: %s", legacy)
+	}
+}
+
 func TestParseDemoteStatuses(t *testing.T) {
 	defaults, err := parseDemoteStatuses("")
 	if err != nil {

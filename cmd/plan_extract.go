@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	coreslug "github.com/grovetools/core/pkg/slug"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
 
@@ -219,35 +220,12 @@ func runJobsExtract(ctx context.Context, title, file string, blockIDs, dependsOn
 	return nil
 }
 
-// sanitizeForFilename converts a string into a safe filename
+// sanitizeForFilename delegates to Grove's canonical note/job identity slugger.
 func sanitizeForFilename(s string) string {
-	// Convert to lowercase and replace spaces with hyphens
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, " ", "-")
-
-	// Remove any characters that aren't alphanumeric, hyphens, or underscores
-	var result strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			result.WriteRune(r)
-		}
+	if cleaned := coreslug.Canonical(s); cleaned != "" {
+		return cleaned
 	}
-
-	// Ensure we don't have multiple consecutive hyphens
-	cleaned := result.String()
-	for strings.Contains(cleaned, "--") {
-		cleaned = strings.ReplaceAll(cleaned, "--", "-")
-	}
-
-	// Trim hyphens from start and end
-	cleaned = strings.Trim(cleaned, "-")
-
-	// If empty, use a default
-	if cleaned == "" {
-		cleaned = "extracted-chat"
-	}
-
-	return cleaned
+	return "extracted-chat"
 }
 
 // runJobsExtractList lists available block IDs in a chat file

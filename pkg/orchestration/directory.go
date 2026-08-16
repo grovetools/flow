@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -17,6 +16,7 @@ import (
 	"github.com/grovetools/core/config"
 	"github.com/grovetools/core/git"
 	grovelogging "github.com/grovetools/core/logging"
+	coreslug "github.com/grovetools/core/pkg/slug"
 	"github.com/grovetools/core/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -25,22 +25,8 @@ import (
 // mutations. StructuredOnly: audit record, not user-facing CLI output.
 var directoryUlog = grovelogging.NewUnifiedLogger("grove-flow")
 
-// sanitizeForFilename sanitizes a string for use in a filename (kebab-case).
-func sanitizeForFilename(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, " ", "-")
-	// Remove non-alphanumeric characters, except hyphens
-	s = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(s, "")
-	// Collapse multiple hyphens
-	s = regexp.MustCompile(`-+`).ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if len(s) > 50 { // Truncate long names
-		s = s[:50]
-		// Remove trailing dash after truncation
-		s = strings.TrimRight(s, "-")
-	}
-	return s
-}
+// sanitizeForFilename delegates to Grove's canonical note/job identity slugger.
+func sanitizeForFilename(s string) string { return coreslug.Canonical(s) }
 
 // GenerateUniqueJobID creates a globally unique job ID from a title string.
 // This is the single source of truth for job ID generation across grove-flow.

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	coreplan "github.com/grovetools/core/pkg/plan"
 	"github.com/grovetools/core/pkg/workspace"
 	"github.com/grovetools/flow/pkg/orchestration"
 )
@@ -38,6 +40,9 @@ case "$1" in
     wsroot=$(dirname "$(dirname "$path")")
     echo "Moved $base"
     echo "To: $wsroot/$group/$base"
+    ;;
+  new)
+    echo "Created: /nb/ws/inbox/new-note.md"
     ;;
 esac
 exit 0
@@ -83,6 +88,70 @@ func countLines(lines []string, substr string) int {
 		}
 	}
 	return n
+}
+
+func TestResolveNotePlanUsesCWDPlanResolver(t *testing.T) {
+	old := noteActivePlanForPath
+	t.Cleanup(func() { noteActivePlanForPath = old })
+	var gotPath string
+	noteActivePlanForPath = func(path string) string {
+		gotPath = path
+		return ""
+	}
+
+	cmd := &cobra.Command{}
+	if _, _, err := resolveNotePlan(cmd, ""); err == nil {
+		t.Fatal("expected no-plan error")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != cwd {
+		t.Fatalf("ActivePlanForPath called with %q, want CWD %q", gotPath, cwd)
+	}
+}
+
+func TestFlowNoteListPlanFlagIsNotTreatedAsLegacyTarget(t *testing.T) {
+	cmd := NewNoteCmd()
+	listCmd, _, err := cmd.Find([]string{"list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := listCmd.Flags().Set("plan", "demo-plan"); err != nil {
+		t.Fatal(err)
+	}
+	if got := legacyTargetRef(listCmd); got != "" {
+		t.Fatalf("semantic note-list --plan was treated as target alias: %q", got)
+	}
+}
+
+func TestFlowNoteCreateUsesPlanSeamAndValidatesJob(t *testing.T) {
+	recordPath, _ := installNbStub(t)
+	planDir := filepath.Join(t.TempDir(), "plans", "demo-plan")
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "01-task.md"), []byte("---\nid: task\ntitle: Task\ntype: chat\nstatus: pending\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewNoteCmd()
+	cmd.SetContext(context.WithValue(context.Background(), TargetContextKey, &coreplan.ResolvedTarget{PlanDir: planDir}))
+	cmd.SetArgs([]string{"--job", "01-task.md", "Found a bug"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("flow note create: %v", err)
+	}
+	lines := stubRecordLines(t, recordPath)
+	for _, want := range []string{
+		"new Found a bug --type inbox --no-edit --plan demo-plan",
+		"--field plan_ref --value plans/demo-plan",
+		"--field plan_job --value 01-task.md",
+	} {
+		if countLines(lines, want) != 1 {
+			t.Errorf("missing %q in %v", want, lines)
+		}
+	}
 }
 
 // TestPlanInit_RosterLinksEveryNote verifies that a 3-note --from-note roster

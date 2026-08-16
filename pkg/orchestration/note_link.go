@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	coremodels "github.com/grovetools/core/pkg/models"
+	coreslug "github.com/grovetools/core/pkg/slug"
 )
 
 // This file is flow's single seam for the inverted note↔plan linkage. NOTE
@@ -73,6 +76,12 @@ func planRefFor(planName string) string {
 	return "plans/" + planName
 }
 
+// NoteLinkedToPlan is the shared association predicate for flow readers.
+// Tags and worktree names are deliberately ignored: plan_ref is the sole link.
+func NoteLinkedToPlan(notePlanRef, planName string) bool {
+	return coremodels.NoteLinkedToPlan(notePlanRef, planName)
+}
+
 // runNb shells the `nb` binary (resolved via PATH) with the given args,
 // returning stdout. stderr is folded into the returned error for diagnostics.
 func runNb(args ...string) (string, error) {
@@ -99,6 +108,36 @@ func PlanNotes(planName string) ([]PlanNote, error) {
 		return nil, err
 	}
 	return parsePlanNotes(out)
+}
+
+// CreatePlanNote delegates note creation and plan resolution/validation to nb.
+// When jobFile is non-empty, flow adds the per-job link through the same
+// frontmatter seam used by promotion and demotion.
+func CreatePlanNote(title, planName, jobFile string) (*PlanNote, error) {
+	out, err := runNb("new", title, "--type", "inbox", "--no-edit", "--plan", planName)
+	if err != nil {
+		return nil, err
+	}
+	path := parseCreatedNotePath(out)
+	if path == "" {
+		return nil, fmt.Errorf("nb created the note but did not report its path")
+	}
+	if jobFile != "" {
+		if err := SetNoteLink(path, planName, jobFile); err != nil {
+			return nil, fmt.Errorf("linking created note to job %s: %w", jobFile, err)
+		}
+	}
+	return &PlanNote{Path: path, PlanRef: planRefFor(planName), PlanJob: jobFile}, nil
+}
+
+func parseCreatedNotePath(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "Created:"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }
 
 // parsePlanNotes decodes the JSON array `nb list --json` prints. An empty list
@@ -256,10 +295,41 @@ func ClearNoteLink(path string) error {
 // that comes back to the inbox with no trace of where it was is exactly the
 // complaint this record answers — "which plan was this from again?".
 type Demotion struct {
-	PlanName string
-	JobFile  string
-	At       time.Time
-	Reason   string
+	PlanName       string
+	JobFile        string
+	OriginalNoteID string
+	At             time.Time
+	Reason         string
+}
+
+// OriginalNoteFilename reconstructs nb's original date-prefixed filename from
+// the stable note id stored as job provenance. IDs have the form
+// YYYYMMDD-HHMMSS-<slug>; note filenames use YYYYMMDD-<slug>. Invalid or
+// legacy path-shaped references return an empty string.
+func (d Demotion) OriginalNoteFilename() string {
+	id := d.OriginalNoteID
+	if len(id) < 17 || id[8] != '-' || id[15] != '-' {
+		return ""
+	}
+	for i := 0; i < 8; i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return ""
+		}
+	}
+	for i := 9; i < 15; i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return ""
+		}
+	}
+	rawSlug := strings.TrimSpace(id[16:])
+	if rawSlug == "" || filepath.Base(rawSlug) != rawSlug {
+		return ""
+	}
+	slug := coreslug.Canonical(rawSlug)
+	if slug == "" {
+		return ""
+	}
+	return id[:8] + "-" + slug + ".md"
 }
 
 // Trailer renders the human-readable provenance block appended to the note

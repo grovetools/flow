@@ -20,13 +20,14 @@ import (
 	planinit "github.com/grovetools/flow/pkg/tui/wizards/init"
 )
 
-// Tab indices for the 5 flow pages.
+// Tab indices for the 6 flow pages.
 const (
 	tabJobs       = 0
 	tabAddJob     = 1
 	tabPlans      = 2
 	tabAddPlan    = 3
 	tabFinishPlan = 4
+	tabNotes      = 5
 )
 
 // ---------- statusPage (tab 0: Jobs) ----------

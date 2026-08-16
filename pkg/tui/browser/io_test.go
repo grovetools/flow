@@ -127,19 +127,20 @@ func (c noteIndexClient) GetNoteIndex(context.Context, string) ([]*models.NoteIn
 	return c.notes, nil
 }
 
-func TestTaggedNotebookNotesAreAttachedToPlans(t *testing.T) {
-	summaries := []models.PlanSummary{{PlanName: "feature-plan", Worktree: "feature-worktree"}}
+func TestLinkedNotebookNotesAreAttachedToPlans(t *testing.T) {
+	summaries := []models.PlanSummary{{PlanName: "feature-plan", Worktree: "feature-worktree", Notes: "plan prose"}}
 	client := noteIndexClient{notes: []*models.NoteIndexEntry{
-		{Title: "Relevant note", Tags: []string{"plan:feature-plan"}, ContentDir: "notes"},
-		{Title: "Worktree note", Tags: []string{"worktree:feature-worktree"}, ContentDir: "notes"},
-		{Title: "Unrelated", Tags: []string{"other"}, ContentDir: "notes"},
+		{Title: "Linked note", PlanRef: "plans/feature-plan", ContentDir: "notes"},
+		{Title: "Substring only", PlanRef: "plans/feature-plan-extra", ContentDir: "notes"},
+		{Title: "Legacy tag", Tags: []string{"feature-plan", "feature-worktree"}, ContentDir: "notes"},
+		{Title: "Plan document", PlanRef: "plans/feature-plan", ContentDir: "plans"},
 	}}
-	attachTaggedPlanNotes(client, "/notebooks/grovetools/plans", summaries)
-	if got := summaries[0].NoteCount; got != 2 {
-		t.Fatalf("tagged note count = %d, want 2", got)
+	attachLinkedPlanNotes(client, "/notebooks/grovetools/plans", summaries)
+	if got := summaries[0].NoteCount; got != 1 {
+		t.Fatalf("linked note count = %d, want 1", got)
 	}
-	if summaries[0].Notes != "" {
-		t.Fatalf("tagged note titles leaked into editable plan notes: %q", summaries[0].Notes)
+	if summaries[0].Notes != "plan prose" {
+		t.Fatalf("plan prose was changed: %q", summaries[0].Notes)
 	}
 }
 

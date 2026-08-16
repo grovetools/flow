@@ -42,6 +42,7 @@ func main() {
 	rootCmd.AddCommand(cmd.NewReviewCmd())
 	rootCmd.AddCommand(cmd.NewFinishCmd())
 	rootCmd.AddCommand(cmd.NewActionCmd())
+	rootCmd.AddCommand(cmd.NewNoteCmd())
 
 	// Add the plan command (with all subcommands for backward compatibility)
 	rootCmd.AddCommand(cmd.NewPlanCmd())

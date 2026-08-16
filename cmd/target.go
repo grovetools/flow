@@ -128,6 +128,12 @@ func SetupTargetFlag(rootCmd *cobra.Command) {
 // best-effort: a flag that the leaf command does not define is simply skipped.
 func legacyTargetRef(cmd *cobra.Command) string {
 	for _, name := range []string{"dir", "plan", "workspace"} {
+		// Some commands use --plan as domain data rather than as the deprecated
+		// target alias (for example `flow note list --plan X`). Those commands
+		// resolve the value themselves and opt out explicitly.
+		if name == "plan" && cmd.Annotations[semanticPlanFlagAnnotation] == "true" {
+			continue
+		}
 		f := cmd.Flags().Lookup(name)
 		if f == nil || !f.Changed {
 			continue
