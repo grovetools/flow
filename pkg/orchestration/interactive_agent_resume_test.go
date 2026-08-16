@@ -122,7 +122,7 @@ func TestPrepareInteractiveAgentResumePiUsesFlowOwnedSessionDir(t *testing.T) {
 	if !ok || gp.agentTarget != "native" || gp.spec.Name != "pi" {
 		t.Fatalf("provider = %#v, want pi groveterm provider", prepared.provider)
 	}
-	want := "pi --session-dir " + piJobSessionDir(home, "job-1") + " " + piOfflineStartupArg + " --session 019c6073-cf17-7492"
+	want := "pi " + piProjectTrustArg + " --session-dir " + piJobSessionDir(home, "job-1") + " " + piOfflineStartupArg + " --session 019c6073-cf17-7492"
 	if prepared.shellCommand != want {
 		t.Fatalf("shellCommand = %q, want %q", prepared.shellCommand, want)
 	}
