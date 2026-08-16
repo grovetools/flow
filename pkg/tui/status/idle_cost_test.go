@@ -1,6 +1,7 @@
 package status
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -137,6 +138,70 @@ func TestPlanReloadRedundantOnlyWhenNothingElseNeedsIt(t *testing.T) {
 	gone.PlanDir = filepath.Join(dir, "does-not-exist")
 	if _, redundant := gone.planReloadRedundant(); redundant {
 		t.Error("an unreadable plan directory was treated as redundant")
+	}
+}
+
+// TestRefreshFailureMemoizedUntilPlanChanges is the regression for the TUI's
+// two-second error loop. The first malformed snapshot is recorded; repeated
+// refresh messages cannot retry/log it, including without a daemon. Rewriting
+// the bad job produces a new fingerprint and one new attempt.
+func TestRefreshFailureMemoizedUntilPlanChanges(t *testing.T) {
+	const malformed = `---
+id: broken
+title: [
+---
+`
+	dir := writePlan(t, map[string]string{"07-broken.md": malformed})
+	m := Model{PlanDir: dir}
+
+	updated, _ := m.Update(RefreshMsg{})
+	m = updated.(Model)
+	if m.Err == nil {
+		t.Fatal("malformed job unexpectedly loaded")
+	}
+	if m.planFingerprint == "" || m.failedPlanFingerprint != m.planFingerprint {
+		t.Fatalf("failed fingerprint not memoized: plan=%q failed=%q",
+			m.planFingerprint, m.failedPlanFingerprint)
+	}
+	fields := refreshErrorFields(dir, m.Err)
+	if fields["plan_dir"] != dir || fields["job"] != "07-broken.md" {
+		t.Fatalf("refresh error fields = %#v, want plan_dir and failing job", fields)
+	}
+
+	// A sentinel proves the unchanged attempts return before LoadPlan and its
+	// error assignment. Exercise the handler directly because a daemon-less
+	// tick must still dispatch refreshes for process-liveness verification.
+	sentinel := errors.New("unchanged failure was retried")
+	m.Err = sentinel
+	for i := 0; i < 3; i++ {
+		updated, _ = m.Update(RefreshMsg{})
+		m = updated.(Model)
+		if m.Err != sentinel {
+			t.Fatalf("unchanged failed snapshot retried on refresh %d: %v", i+1, m.Err)
+		}
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(filepath.Join(dir, "07-broken.md"),
+		[]byte("---\nid: broken\ntitle: ]\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldFingerprint := m.failedPlanFingerprint
+	updated, _ = m.Update(RefreshMsg{})
+	m = updated.(Model)
+	if m.Err == sentinel {
+		t.Fatal("changed malformed job did not trigger a new load attempt")
+	}
+	if m.failedPlanFingerprint == oldFingerprint {
+		t.Fatal("changed malformed job retained the old failed fingerprint")
+	}
+}
+
+func TestRefreshErrorFieldsIncludeGraphJobWhenAvailable(t *testing.T) {
+	err := errors.New("unknown dependency 'parent' in job 'child'")
+	fields := refreshErrorFields("/plans/example", err)
+	if fields["plan_dir"] != "/plans/example" || fields["job"] != "child" || fields["error"] != err {
+		t.Fatalf("graph refresh fields = %#v", fields)
 	}
 }
 

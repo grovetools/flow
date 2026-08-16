@@ -222,11 +222,16 @@ type Model struct {
 	// transcript is routed into the already-open log viewport while the
 	// cursor rests on its row. Empty when the cursor is not on an agent
 	// row (the viewport shows the job log as usual).
-	// planFingerprint is orchestration.PlanFingerprint as of the last plan
-	// reload. The refresh handler compares against it so a poll that finds
+	// planFingerprint is orchestration.PlanFingerprint as of the last attempted
+	// plan reload. The refresh handler compares against it so a poll that finds
 	// the plan directory untouched costs a stat sweep instead of re-reading
 	// and re-parsing every job file.
 	planFingerprint string
+	// failedPlanFingerprint separately remembers a failed load/graph attempt.
+	// Unlike the ordinary redundancy gate, this suppresses the same permanent
+	// parse failure even when no daemon is connected and refreshes must continue
+	// to verify process liveness.
+	failedPlanFingerprint string
 
 	workflowSelectedAgentID string
 	// workflowDirtyJobs marks jobs whose workflow state changed since the

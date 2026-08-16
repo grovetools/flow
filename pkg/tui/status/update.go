@@ -32,6 +32,43 @@ import (
 
 var writeClipboard = clipboard.WriteAll
 
+// refreshErrorFields keeps timer-path errors actionable: every entry names the
+// plan, and the stable LoadPlan/BuildDependencyGraph messages contribute the
+// failing job when they identify one.
+func refreshErrorFields(planDir string, err error) map[string]interface{} {
+	fields := map[string]interface{}{
+		"error":    err,
+		"plan_dir": planDir,
+	}
+	if job := failingRefreshJob(err); job != "" {
+		fields["job"] = job
+	}
+	return fields
+}
+
+func failingRefreshJob(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	if rest, ok := strings.CutPrefix(message, "loading job "); ok {
+		if job, _, found := strings.Cut(rest, ": "); found {
+			return job
+		}
+	}
+	if _, rest, found := strings.Cut(message, " in job '"); found {
+		if job, _, closed := strings.Cut(rest, "'"); closed {
+			return job
+		}
+	}
+	if rest, ok := strings.CutPrefix(message, "job '"); ok {
+		if job, _, closed := strings.Cut(rest, "'"); closed {
+			return job
+		}
+	}
+	return ""
+}
+
 // Update dispatches msg, then re-asserts the hosted-mode invariant that the
 // built-in (non-BSP) detail pane stays hidden. The dispatch itself has too
 // many exits to guard one at a time, and a single leaked unhide strands the
@@ -1135,9 +1172,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Nothing LoadPlan reads has changed since the last refresh? Then the
 		// reload would rebuild identical state out of tens of megabytes of
-		// markdown — on this goroutine, on a 2s tick, forever.
+		// markdown — on this goroutine, on a 2s tick, forever. A failed load is
+		// gated separately: unlike the normal fast path, it remains redundant
+		// when no daemon is connected and process-liveness checks must continue.
 		fingerprint, unchanged := m.planReloadRedundant()
-		if unchanged {
+		if unchanged || (fingerprint != "" && fingerprint == m.failedPlanFingerprint) {
 			return m, nil
 		}
 
@@ -1148,9 +1187,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload the plan
 		plan, err := orchestration.LoadPlan(m.PlanDir)
 		if err != nil {
-			logger.WithFields(map[string]interface{}{
-				"error": err,
-			}).Error("Failed to reload plan during refresh")
+			// Record failed attempts too. A permanently malformed job should be
+			// one actionable error, not the same error every two-second tick.
+			m.planFingerprint = fingerprint
+			m.failedPlanFingerprint = fingerprint
+			logger.WithFields(refreshErrorFields(m.PlanDir, err)).Error("Failed to reload plan during refresh")
 			m.Err = err
 			return m, nil
 		}
@@ -1179,12 +1220,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		graph, err := orchestration.BuildDependencyGraph(plan)
 		if err != nil {
-			logger.WithFields(map[string]interface{}{
-				"error": err,
-			}).Error("Failed to build dependency graph during refresh")
+			m.planFingerprint = fingerprint
+			m.failedPlanFingerprint = fingerprint
+			logger.WithFields(refreshErrorFields(m.PlanDir, err)).Error("Failed to build dependency graph during refresh")
 			m.Err = err
 			return m, nil
 		}
+		m.failedPlanFingerprint = ""
 
 		// Recreate orchestrator with the refreshed plan
 		orchConfig := &orchestration.OrchestratorConfig{
