@@ -176,11 +176,15 @@ func (p *CodexAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan 
 		return err
 	}
 	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
-	if err := sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, wrappedCommand, "C-m"); err != nil {
+	targetPane, err = sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, targetPane, wrappedCommand, "C-m")
+	if err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)
+	}
+	if err := daemonClient.UpdateSessionTmuxTarget(ctx, job.ID, targetPane); err != nil {
+		p.log.WithError(err).Warn("Failed to update final tmux target on daemon")
 	}
 
 	// Asynchronously discover PID + transcript and confirm the session with

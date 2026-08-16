@@ -243,13 +243,17 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 			return err
 		}
 		wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
-		// Send the agent command to the new window
-		if err := sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, wrappedCommand, "C-m"); err != nil {
+		// Send the agent command to the selected unique window.
+		targetPane, err = sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, targetPane, wrappedCommand, "C-m")
+		if err != nil {
 			p.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
 			_, _ = paneWatcher.stop()
 			return fmt.Errorf("failed to send agent command: %w", err)
+		}
+		if err := daemonClient.UpdateSessionTmuxTarget(ctx, job.ID, targetPane); err != nil {
+			p.log.WithError(err).Warn("Failed to update final tmux target on daemon")
 		}
 
 		// Give the deterministic pidfile a small synchronous observation window.
@@ -405,7 +409,8 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)
-	if err := sendAgentCommandToWindow(ctx, engine, sessionName, windowName, workDir, wrappedCommand, "C-m"); err != nil {
+	targetPane, err = sendAgentCommandToWindow(ctx, engine, sessionName, windowName, workDir, targetPane, wrappedCommand, "C-m")
+	if err != nil {
 		_, _ = paneWatcher.stop()
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()

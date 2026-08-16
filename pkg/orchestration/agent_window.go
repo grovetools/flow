@@ -3,7 +3,6 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/grovetools/core/pkg/mux"
 )
@@ -39,13 +38,14 @@ func findAgentWindow(ctx context.Context, engine agentWindowEngine, sessionName,
 	return found, ok, nil
 }
 
-func agentWindowTarget(sessionName, windowName string, window mux.WindowInfo) string {
-	if strings.TrimSpace(window.ID) != "" {
+func agentWindowTarget(sessionName string, window mux.WindowInfo) string {
+	if window.ID != "" {
 		return window.ID
 	}
-	// Non-tmux engines may not expose a separate window ID. Their names are
-	// unique by contract, so retain the portable target form as a fallback.
-	return fmt.Sprintf("%s:%s", sessionName, windowName)
+	// ListWindows always supplies an index even when an engine has no opaque
+	// window ID. Unlike a name, session:index remains unambiguous when names are
+	// duplicated.
+	return fmt.Sprintf("%s:%d", sessionName, window.Index)
 }
 
 // ensureAgentWindow returns an unambiguous job-window identity, creating a
@@ -58,13 +58,13 @@ func ensureAgentWindow(ctx context.Context, engine agentWindowEngine, sessionNam
 		return fallback, fmt.Errorf("checking agent window %s: %w", fallback, err)
 	}
 	if exists {
-		return agentWindowTarget(sessionName, windowName, window), nil
+		return agentWindowTarget(sessionName, window), nil
 	}
 
 	if createErr := engine.NewWindow(ctx, sessionName, windowName, workDir, true); createErr != nil {
 		window, exists, probeErr := findAgentWindow(ctx, engine, sessionName, windowName)
 		if probeErr == nil && exists {
-			return agentWindowTarget(sessionName, windowName, window), nil
+			return agentWindowTarget(sessionName, window), nil
 		}
 		return fallback, fmt.Errorf("creating agent window %s: %w", fallback, createErr)
 	}
@@ -76,38 +76,36 @@ func ensureAgentWindow(ctx context.Context, engine agentWindowEngine, sessionNam
 	if !exists {
 		return fallback, fmt.Errorf("agent window %s was created but is missing from the session", fallback)
 	}
-	return agentWindowTarget(sessionName, windowName, window), nil
+	return agentWindowTarget(sessionName, window), nil
 }
 
-// sendAgentCommandToWindow closes the kill/retry race. If the selected unique
-// window disappears before delivery, select (or create) the current exact-name
-// window and retry exactly once. An error against the same still-live identity
-// is returned without retrying, so a command is never delivered twice.
-func sendAgentCommandToWindow(ctx context.Context, engine agentWindowEngine, sessionName, windowName, workDir string, keys ...string) error {
-	target, err := ensureAgentWindow(ctx, engine, sessionName, windowName, workDir)
-	if err != nil {
-		return err
-	}
+// sendAgentCommandToWindow closes the create/send and kill/retry races. target
+// is the exact identity returned by ensureAgentWindow; returning the identity
+// actually used lets the caller stamp that same value into the daemon record.
+// If target disappears before delivery, select (or create) the current
+// exact-name window and retry exactly once. An error against the same still-live
+// identity is returned without retrying, so a command is never delivered twice.
+func sendAgentCommandToWindow(ctx context.Context, engine agentWindowEngine, sessionName, windowName, workDir, target string, keys ...string) (string, error) {
 	if err := engine.SendKeys(ctx, target, keys...); err != nil {
 		window, exists, probeErr := findAgentWindow(ctx, engine, sessionName, windowName)
 		if probeErr != nil {
-			return err
+			return target, err
 		}
 		if exists {
-			replacement := agentWindowTarget(sessionName, windowName, window)
+			replacement := agentWindowTarget(sessionName, window)
 			if replacement == target {
-				return err
+				return target, err
 			}
 			target = replacement
 		} else {
 			target, probeErr = ensureAgentWindow(ctx, engine, sessionName, windowName, workDir)
 			if probeErr != nil {
-				return fmt.Errorf("agent window disappeared before send (%v); recreating it failed: %w", err, probeErr)
+				return target, fmt.Errorf("agent window disappeared before send (%v); recreating it failed: %w", err, probeErr)
 			}
 		}
 		if retryErr := engine.SendKeys(ctx, target, keys...); retryErr != nil {
-			return fmt.Errorf("sending agent command after selecting %s: %w", target, retryErr)
+			return target, fmt.Errorf("sending agent command after selecting %s: %w", target, retryErr)
 		}
 	}
-	return nil
+	return target, nil
 }

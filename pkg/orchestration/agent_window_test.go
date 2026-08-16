@@ -19,8 +19,10 @@ type fakeAgentWindowEngine struct {
 	paneExistsCalls    int
 	sendCalls          int
 	disappearOnSend    bool
+	replacementOnSend  bool
 	includeOtherWindow bool
 	duplicateWindows   int
+	failNameTarget     bool
 	sent               [][]string
 	sendTargets        []string
 }
@@ -66,16 +68,31 @@ func (f *fakeAgentWindowEngine) SendKeys(_ context.Context, target string, keys 
 	f.sendCalls++
 	f.sendTargets = append(f.sendTargets, target)
 	f.sent = append(f.sent, append([]string(nil), keys...))
+	if f.failNameTarget && strings.Contains(target, ":job-a") {
+		return errors.New("can't find window")
+	}
 	if f.disappearOnSend && f.sendCalls == 1 {
 		f.exists = false
+		if f.replacementOnSend {
+			f.duplicateWindows = 1
+		}
 		return errors.New("can't find window")
 	}
 	return nil
 }
 
+func ensureAndSendForTest(t *testing.T, engine agentWindowEngine, sessionName, windowName, workDir string, keys ...string) (string, error) {
+	t.Helper()
+	target, err := ensureAgentWindow(context.Background(), engine, sessionName, windowName, workDir)
+	if err != nil {
+		return target, err
+	}
+	return sendAgentCommandToWindow(context.Background(), engine, sessionName, windowName, workDir, target, keys...)
+}
+
 func TestSendAgentCommandToWindowReusesExistingPane(t *testing.T) {
 	engine := &fakeAgentWindowEngine{exists: true}
-	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+	if _, err := ensureAndSendForTest(t, engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
 		t.Fatal(err)
 	}
 	if engine.newWindowCalls != 0 {
@@ -88,7 +105,7 @@ func TestSendAgentCommandToWindowReusesExistingPane(t *testing.T) {
 
 func TestSendAgentCommandToWindowCreatesMissingPane(t *testing.T) {
 	engine := &fakeAgentWindowEngine{}
-	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+	if _, err := ensureAndSendForTest(t, engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
 		t.Fatal(err)
 	}
 	if engine.newWindowCalls != 1 || engine.sendCalls != 1 {
@@ -115,7 +132,7 @@ func TestEnsureAgentWindowIgnoresPaneProbeSessionFallback(t *testing.T) {
 
 func TestSendAgentCommandToWindowTargetsNewestDuplicateByUniqueID(t *testing.T) {
 	engine := &fakeAgentWindowEngine{exists: true, duplicateWindows: 2}
-	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+	if _, err := ensureAndSendForTest(t, engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
 		t.Fatal(err)
 	}
 	if engine.newWindowCalls != 0 || engine.sendCalls != 1 {
@@ -128,7 +145,7 @@ func TestSendAgentCommandToWindowTargetsNewestDuplicateByUniqueID(t *testing.T) 
 
 func TestSendAgentCommandToWindowRecreatesPaneClosedBeforeSend(t *testing.T) {
 	engine := &fakeAgentWindowEngine{exists: true, disappearOnSend: true}
-	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+	if _, err := ensureAndSendForTest(t, engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
 		t.Fatal(err)
 	}
 	if engine.newWindowCalls != 1 {
@@ -142,6 +159,25 @@ func TestSendAgentCommandToWindowRecreatesPaneClosedBeforeSend(t *testing.T) {
 	}
 }
 
+func TestSendAgentCommandToWindowReturnsReplacementIdentityAfterSendRace(t *testing.T) {
+	engine := &fakeAgentWindowEngine{
+		exists:            true,
+		disappearOnSend:   true,
+		replacementOnSend: true,
+	}
+
+	target, err := ensureAndSendForTest(t, engine, "wt", "job-a", "/work", "agent", "C-m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "@2" {
+		t.Fatalf("returned target = %q, want replacement identity @2 for daemon routing", target)
+	}
+	if got := strings.Join(engine.sendTargets, ","); got != "@1,@2" {
+		t.Fatalf("send targets = %q, want initial and replacement unique IDs", got)
+	}
+}
+
 func TestSendAgentCommandToWindowDoesNotRetryAgainstLivePane(t *testing.T) {
 	engine := &fakeAgentWindowEngine{exists: true}
 	// Model a delivery error where the pane remains live: unlike the kill race,
@@ -149,7 +185,7 @@ func TestSendAgentCommandToWindowDoesNotRetryAgainstLivePane(t *testing.T) {
 	engineSendError := errors.New("tmux rejected keys")
 	engineWithError := &livePaneSendErrorEngine{fakeAgentWindowEngine: engine, sendErr: engineSendError}
 
-	err := sendAgentCommandToWindow(context.Background(), engineWithError, "wt", "job-a", "/work", "agent", "C-m")
+	_, err := ensureAndSendForTest(t, engineWithError, "wt", "job-a", "/work", "agent", "C-m")
 	if !errors.Is(err, engineSendError) {
 		t.Fatalf("error = %v, want original send error", err)
 	}
@@ -168,6 +204,25 @@ func (e *livePaneSendErrorEngine) SendKeys(_ context.Context, target string, key
 	e.sendTargets = append(e.sendTargets, target)
 	e.sent = append(e.sent, append([]string(nil), keys...))
 	return e.sendErr
+}
+
+func TestAgentWindowUsesNewestUniqueIDWhenNamesAreDuplicated(t *testing.T) {
+	engine := &fakeAgentWindowEngine{
+		exists:           true,
+		duplicateWindows: 2,
+		failNameTarget:   true,
+	}
+
+	target, err := ensureAndSendForTest(t, engine, "wt", "job-a", "/work", "agent", "C-m")
+	if err != nil {
+		t.Fatalf("ID-target send failed: %v", err)
+	}
+	if target != "@3" {
+		t.Fatalf("target = %q, want newest duplicate window ID @3", target)
+	}
+	if len(engine.sendTargets) != 1 || engine.sendTargets[0] != "@3" {
+		t.Fatalf("send targets = %v, want [@3] (name target would fail)", engine.sendTargets)
+	}
 }
 
 func TestEnsureAgentWindowAcceptsConcurrentCreator(t *testing.T) {

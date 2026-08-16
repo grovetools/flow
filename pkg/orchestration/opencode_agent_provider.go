@@ -145,7 +145,8 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	if err != nil {
 		return err
 	}
-	if err := sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, withInlineSupervisorEnv(envPrefix, supervisedCommand), "C-m"); err != nil {
+	targetPane, err = sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, targetPane, withInlineSupervisorEnv(envPrefix, supervisedCommand), "C-m")
+	if err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)

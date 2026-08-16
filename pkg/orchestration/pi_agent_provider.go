@@ -57,7 +57,21 @@ func newPiAgentProvider(runtime PiRuntimeDescriptor) *PiAgentProvider {
 	}
 }
 
-func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) error {
+type launchSessionEnder interface {
+	EndSession(ctx context.Context, jobID, attemptID, outcome string) error
+}
+
+// endFailedPiLaunchAttempt retires only the intent created by this launch.
+// Empty attempt identity intentionally degrades to no-op: ending by the broad
+// job alias could terminate a previous or newly-current retry.
+func endFailedPiLaunchAttempt(ctx context.Context, ender launchSessionEnder, job *Job, intentRegistered bool) error {
+	if !intentRegistered || job == nil || job.AttemptID == "" {
+		return nil
+	}
+	return ender.EndSession(ctx, job.ID, job.AttemptID, string(JobStatusFailed))
+}
+
+func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, workDir string, agentArgs []string, briefingFilePath string) (launchErr error) {
 	if p.runtime.ManagedCodexAuth {
 		if err := requireManagedPiCodexAuth(); err != nil {
 			return err
@@ -90,6 +104,30 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 	// daemon whose stream feeds the host's rail and Agents drawer.
 	daemonClient := sessionHostClient(workDir)
 	defer daemonClient.Close()
+	intentRegistered := false
+	// RegisterSessionIntent precedes all process creation. If any later launch
+	// step fails, retire this exact attempt and persist the terminal frontmatter
+	// before returning. Attempt-scoped EndSession is deliberately skipped when
+	// identity is absent: a broad job-id end could terminate an older attempt.
+	defer func() {
+		if launchErr == nil {
+			return
+		}
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		job.Metadata.LastError = launchErr.Error()
+		if err := updateJobFile(job); err != nil {
+			p.log.WithError(err).Error("Failed to persist pi launch failure")
+		}
+		if !intentRegistered || job.AttemptID == "" {
+			return
+		}
+		endCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := endFailedPiLaunchAttempt(endCtx, daemonClient, job, intentRegistered); err != nil {
+			p.log.WithError(err).Warn("Failed to end unsuccessful pi launch attempt")
+		}
+	}()
 
 	p.log.WithFields(logrus.Fields{
 		"job_id":         job.ID,
@@ -99,6 +137,7 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 	if err := daemonClient.RegisterSessionIntent(ctx, newAgentSessionIntent(job, plan, p.providerName, workDir, muxType)); err != nil {
 		p.log.WithError(err).Warn("Failed to register session intent with daemon")
 	} else {
+		intentRegistered = true
 		p.log.Info("Session intent registered successfully")
 	}
 
@@ -215,11 +254,17 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 		return err
 	}
 	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
-	if err := sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, wrappedCommand, "C-m"); err != nil {
+	targetPane, err = sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, targetPane, wrappedCommand, "C-m")
+	if err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)
+	}
+	// A create/send race may have selected a replacement window. Keep daemon
+	// routing pinned to the exact unique identity that received the command.
+	if err := daemonClient.UpdateSessionTmuxTarget(ctx, job.ID, targetPane); err != nil {
+		p.log.WithError(err).Warn("Failed to update final tmux target on daemon")
 	}
 
 	// Asynchronously discover PID + transcript and confirm the session with
