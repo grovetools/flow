@@ -173,11 +173,12 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 		Log(ctx)
 
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-	if err := engine.NewWindow(ctx, sessionName, agentWindowName, workDir, true); err != nil {
-		p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
+	targetPane, err := ensureAgentWindow(ctx, engine, sessionName, agentWindowName, workDir)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return err
 	}
-
-	targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 
 	// Update the daemon with the tmux target so channels/pinger can route to this session
 	if err := daemonClient.UpdateSessionTmuxTarget(ctx, job.ID, targetPane); err != nil {
@@ -214,7 +215,7 @@ func (p *PiAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan, work
 		return err
 	}
 	wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
-	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
+	if err := sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, wrappedCommand, "C-m"); err != nil {
 		p.log.WithError(err).Error("Failed to send agent command")
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()

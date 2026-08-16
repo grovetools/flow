@@ -118,11 +118,12 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 		Log(ctx)
 
 	isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
-	if err := engine.NewWindow(ctx, sessionName, agentWindowName, workDir, true); err != nil {
-		p.log.WithError(err).Warn("Failed to create agent window, may already exist.")
+	targetPane, err := ensureAgentWindow(ctx, engine, sessionName, agentWindowName, workDir)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return err
 	}
-
-	targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 	// Inline env vars on the agent command so they scope only to the agent
 	// process; typing `export` into the pane would leak into the user's
 	// interactive shell after the agent exits. GROVE_SCOPE is inherited
@@ -144,7 +145,7 @@ func (p *OpencodeAgentProvider) Launch(ctx context.Context, job *Job, plan *Plan
 	if err != nil {
 		return err
 	}
-	if err := engine.SendKeys(ctx, targetPane, withInlineSupervisorEnv(envPrefix, supervisedCommand), "C-m"); err != nil {
+	if err := sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, withInlineSupervisorEnv(envPrefix, supervisedCommand), "C-m"); err != nil {
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
 		return fmt.Errorf("failed to send agent command: %w", err)

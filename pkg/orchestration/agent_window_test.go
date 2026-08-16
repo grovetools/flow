@@ -1,0 +1,132 @@
+package orchestration
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+type fakeAgentWindowEngine struct {
+	exists          bool
+	paneErr         error
+	createErr       error
+	createdOnError  bool
+	newWindowCalls  int
+	sendCalls       int
+	disappearOnSend bool
+	sent            [][]string
+}
+
+func (f *fakeAgentWindowEngine) PaneExists(context.Context, string) (bool, error) {
+	return f.exists, f.paneErr
+}
+
+func (f *fakeAgentWindowEngine) NewWindow(context.Context, string, string, string, bool) error {
+	f.newWindowCalls++
+	if f.createErr != nil {
+		if f.createdOnError {
+			f.exists = true
+		}
+		return f.createErr
+	}
+	f.exists = true
+	return nil
+}
+
+func (f *fakeAgentWindowEngine) SendKeys(_ context.Context, _ string, keys ...string) error {
+	f.sendCalls++
+	f.sent = append(f.sent, append([]string(nil), keys...))
+	if f.disappearOnSend && f.sendCalls == 1 {
+		f.exists = false
+		return errors.New("can't find window")
+	}
+	return nil
+}
+
+func TestSendAgentCommandToWindowReusesExistingPane(t *testing.T) {
+	engine := &fakeAgentWindowEngine{exists: true}
+	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+		t.Fatal(err)
+	}
+	if engine.newWindowCalls != 0 {
+		t.Fatalf("NewWindow called %d times for a live pane, want 0", engine.newWindowCalls)
+	}
+	if engine.sendCalls != 1 {
+		t.Fatalf("SendKeys called %d times, want 1", engine.sendCalls)
+	}
+}
+
+func TestSendAgentCommandToWindowCreatesMissingPane(t *testing.T) {
+	engine := &fakeAgentWindowEngine{}
+	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+		t.Fatal(err)
+	}
+	if engine.newWindowCalls != 1 || engine.sendCalls != 1 {
+		t.Fatalf("calls = new-window %d, send %d; want 1, 1", engine.newWindowCalls, engine.sendCalls)
+	}
+}
+
+func TestSendAgentCommandToWindowRecreatesPaneClosedBeforeSend(t *testing.T) {
+	engine := &fakeAgentWindowEngine{exists: true, disappearOnSend: true}
+	if err := sendAgentCommandToWindow(context.Background(), engine, "wt", "job-a", "/work", "agent", "C-m"); err != nil {
+		t.Fatal(err)
+	}
+	if engine.newWindowCalls != 1 {
+		t.Fatalf("NewWindow called %d times, want one recreation", engine.newWindowCalls)
+	}
+	if engine.sendCalls != 2 {
+		t.Fatalf("SendKeys called %d times, want initial attempt plus retry", engine.sendCalls)
+	}
+	if got := strings.Join(engine.sent[1], " "); got != "agent C-m" {
+		t.Fatalf("retried keys = %q, want the original command", got)
+	}
+}
+
+func TestSendAgentCommandToWindowDoesNotRetryAgainstLivePane(t *testing.T) {
+	engine := &fakeAgentWindowEngine{exists: true}
+	// Model a delivery error where the pane remains live: unlike the kill race,
+	// this must not create a second pane or risk sending the command twice.
+	engineSendError := errors.New("tmux rejected keys")
+	engineWithError := &livePaneSendErrorEngine{fakeAgentWindowEngine: engine, sendErr: engineSendError}
+
+	err := sendAgentCommandToWindow(context.Background(), engineWithError, "wt", "job-a", "/work", "agent", "C-m")
+	if !errors.Is(err, engineSendError) {
+		t.Fatalf("error = %v, want original send error", err)
+	}
+	if engine.newWindowCalls != 0 || engine.sendCalls != 1 {
+		t.Fatalf("calls = new-window %d, send %d; want 0, 1", engine.newWindowCalls, engine.sendCalls)
+	}
+}
+
+type livePaneSendErrorEngine struct {
+	*fakeAgentWindowEngine
+	sendErr error
+}
+
+func (e *livePaneSendErrorEngine) SendKeys(_ context.Context, _ string, keys ...string) error {
+	e.sendCalls++
+	e.sent = append(e.sent, append([]string(nil), keys...))
+	return e.sendErr
+}
+
+func TestEnsureAgentWindowAcceptsConcurrentCreator(t *testing.T) {
+	engine := &fakeAgentWindowEngine{
+		createErr:      errors.New("duplicate window"),
+		createdOnError: true,
+	}
+	if _, err := ensureAgentWindow(context.Background(), engine, "wt", "job-a", "/work"); err != nil {
+		t.Fatalf("ensureAgentWindow rejected a pane created concurrently: %v", err)
+	}
+	if engine.newWindowCalls != 1 {
+		t.Fatalf("NewWindow called %d times, want 1", engine.newWindowCalls)
+	}
+}
+
+func TestEnsureAgentWindowDoesNotHideCreateFailure(t *testing.T) {
+	engine := &fakeAgentWindowEngine{createErr: errors.New("tmux server unavailable")}
+	_, err := ensureAgentWindow(context.Background(), engine, "wt", "job-a", "/work")
+	if err == nil || !strings.Contains(err.Error(), "tmux server unavailable") {
+		t.Fatalf("ensureAgentWindow error = %v, want create failure", err)
+	}
+}

@@ -186,14 +186,17 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 
 		isTUIMode := os.Getenv("GROVE_FLOW_TUI_MODE") == "true"
 
-		// Create new window - always use Detached to avoid stealing focus.
-		if err := engine.NewWindow(ctx, sessionName, agentWindowName, workDir, true); err != nil {
-			alog.Info("NewWindow FAILED").Field("error", err.Error()).StructuredOnly().Log(ctx)
-			p.log.WithError(err).Warn("Failed to create agent window, may already exist. Will attempt to use it.")
+		// Reuse a live job pane; retries recreate it only when completion cleanup
+		// removed the prior attempt's window.
+		targetPane, err := ensureAgentWindow(ctx, engine, sessionName, agentWindowName, workDir)
+		if err != nil {
+			alog.Info("ensureAgentWindow FAILED").Field("error", err.Error()).StructuredOnly().Log(ctx)
+			job.Status = JobStatusFailed
+			job.EndTime = time.Now()
+			return err
 		}
 
 		// Set environment variables in the window's shell
-		targetPane := fmt.Sprintf("%s:%s", sessionName, agentWindowName)
 
 		// Update the daemon with the tmux target so channels/pinger can route to this session
 		if err := daemonClient.UpdateSessionTmuxTarget(ctx, job.ID, targetPane); err != nil {
@@ -241,7 +244,7 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		}
 		wrappedCommand := withInlineSupervisorEnv(envPrefix, supervisedCommand)
 		// Send the agent command to the new window
-		if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
+		if err := sendAgentCommandToWindow(ctx, engine, sessionName, agentWindowName, workDir, wrappedCommand, "C-m"); err != nil {
 			p.log.WithError(err).Error("Failed to send agent command")
 			job.Status = JobStatusFailed
 			job.EndTime = time.Now()
@@ -358,36 +361,15 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 		Pretty(theme.IconRepo + " Launching agent in project session").
 		Log(ctx)
 
-	windowTarget := fmt.Sprintf("%s:%s", sessionName, windowName)
-	if err := engine.NewWindow(ctx, sessionName, windowName, workDir, true); err != nil {
-		if strings.Contains(err.Error(), "duplicate window") {
-			p.ulog.Info("Window already exists, attempting to kill it first").
-				Field("window", windowName).
-				Log(ctx)
-			if err := engine.KillWindow(ctx, windowTarget); err != nil {
-				p.ulog.Warn("Failed to kill existing window").
-					Field("window", windowTarget).
-					Err(err).
-					Log(ctx)
-			}
-			time.Sleep(100 * time.Millisecond)
-
-			if err := engine.NewWindow(ctx, sessionName, windowName, workDir, true); err != nil {
-				job.Status = JobStatusFailed
-				job.EndTime = time.Now()
-				return fmt.Errorf("failed to create new window after killing existing: %w", err)
-			}
-		} else {
-			job.Status = JobStatusFailed
-			job.EndTime = time.Now()
-			return fmt.Errorf("failed to create new window: %w", err)
-		}
+	targetPane, err := ensureAgentWindow(ctx, engine, sessionName, windowName, workDir)
+	if err != nil {
+		job.Status = JobStatusFailed
+		job.EndTime = time.Now()
+		return err
 	}
 
 	// Send the prepared command.
 	time.Sleep(300 * time.Millisecond)
-
-	targetPane := windowTarget
 
 	// Inline env vars on the agent command itself (see the matching site
 	// above for rationale). Scoping env to the agent process avoids
@@ -423,7 +405,7 @@ func (p *ClaudeAgentProvider) LaunchPrepared(ctx context.Context, job *Job, plan
 	p.ulog.Debug("Sending command to tmux pane").
 		Field("pane", targetPane).
 		Log(ctx)
-	if err := engine.SendKeys(ctx, targetPane, wrappedCommand, "C-m"); err != nil {
+	if err := sendAgentCommandToWindow(ctx, engine, sessionName, windowName, workDir, wrappedCommand, "C-m"); err != nil {
 		_, _ = paneWatcher.stop()
 		job.Status = JobStatusFailed
 		job.EndTime = time.Now()
